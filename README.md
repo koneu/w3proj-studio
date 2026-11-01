@@ -69,6 +69,7 @@ app/             Tauri desktop app
   src/workbench/ VS Code-like shell: activity bar, views, tabs, palette, status bar, output
   src/extensions/api.ts   the public extension API
   src/builtin/   built-in extensions (explorer, text editor, object editor, texture viewer, map project, …)
+    model-viewer/          MDX parser (v800–v1800) and WebGL2 renderer (GPU skinning)
     image-viewer/decode/   dependency-free BLP1/BLP2, DDS (BC1–5) and TGA decoders, incl. a
                            baseline + progressive JPEG decoder for BLP1's 4-channel JPEGs
 ```
@@ -119,6 +120,15 @@ The app reads the game's files straight from the CASC storage in `Data/`:
   game does: locale → art layer (`game.graphicsMode`: `hd`/`sd`/`de`) → base, with
   `FileAliases.json` and `.blp`→`.dds` fallback.
 - Settings: `game.installDir`, `game.graphicsMode`.
+
+### Model viewer
+
+`.mdx` files (game data or imported into a map) open in a 3D viewer: animations with
+speed and scrubbing, team colour, wireframe, per-geoset visibility, and the list of
+textures with load status. It reads MDX v800 (classic) through v1800 (Reforged), including
+HD skin weights and LODs (LOD 1–3 start hidden) and the HD team-colour mask. Textures are
+looked up in the map first, then in the model's own game layer (`.blp`/`.tif` → `.dds`).
+Particles, ribbons, lights, cameras and PBR lighting aren't drawn yet.
 
 ### Map properties
 

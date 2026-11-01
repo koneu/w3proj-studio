@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "description": "Read-only hex view for binary map files.",
   "contributes": {
-    "editors": [{ "id": "w3.hexViewer", "title": "Binary Viewer", "patterns": ["*.w3e", "*.w3i", "*.doo", "*.wpm", "*.shd", "*.mmp", "*.w3r", "*.w3c", "*.w3s", "*.wtg", "*.wct", "*.imp", "*.bin", "*.mdx", "*.wav", "*.mp3"] }]
+    "editors": [{ "id": "w3.hexViewer", "title": "Binary Viewer", "patterns": ["*.w3e", "*.w3i", "*.doo", "*.wpm", "*.shd", "*.mmp", "*.w3r", "*.w3c", "*.w3s", "*.wtg", "*.wct", "*.imp", "*.bin", "*.wav", "*.mp3"] }]
   }
 }

@@ -1,0 +1,540 @@
+// WebGL2 renderer for parsed MDX models: GPU skinning (bone matrices in a
+// float texture), keyframe animation, Warcraft blend modes, team colour.
+// Particles, ribbons and texture animations are not drawn.
+
+import type { Extent, Model, Track } from "./mdx";
+
+export type Vec3 = [number, number, number];
+type Mat4 = Float32Array;
+
+// ------------------------------------------------------------------ math
+
+const mat4 = {
+  identity(): Mat4 { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
+  mul(a: Mat4, b: Mat4, out: Mat4 = new Float32Array(16)): Mat4 {
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+      out[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    }
+    return out;
+  },
+  perspective(fovy: number, aspect: number, near: number, far: number): Mat4 {
+    const f = 1 / Math.tan(fovy / 2), m = new Float32Array(16);
+    m[0] = f / aspect; m[5] = f; m[10] = (far + near) / (near - far); m[11] = -1; m[14] = (2 * far * near) / (near - far);
+    return m;
+  },
+  lookAt(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
+    const z = norm(sub(eye, target)), x = norm(cross(up, z)), y = cross(z, x), m = mat4.identity();
+    m[0] = x[0]; m[4] = x[1]; m[8] = x[2];
+    m[1] = y[0]; m[5] = y[1]; m[9] = y[2];
+    m[2] = z[0]; m[6] = z[1]; m[10] = z[2];
+    m[12] = -dot(x, eye); m[13] = -dot(y, eye); m[14] = -dot(z, eye);
+    return m;
+  },
+  /** T(pivot) · T(t) · R(q) · S(s) · T(-pivot) */
+  node(pivot: Vec3, t: Vec3, q: number[], s: Vec3): Mat4 {
+    const [x, y, z, w] = q, m = new Float32Array(16);
+    const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+    const r = [1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy)];
+    for (let c = 0; c < 3; c++) for (let rr = 0; rr < 3; rr++) m[c * 4 + rr] = r[c * 3 + rr] * s[c];
+    m[15] = 1;
+    // translation = pivot + t - (R·S)·pivot
+    for (let rr = 0; rr < 3; rr++) {
+      m[12 + rr] = pivot[rr] + t[rr] - (m[rr] * pivot[0] + m[4 + rr] * pivot[1] + m[8 + rr] * pivot[2]);
+    }
+    return m;
+  },
+};
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+
+function slerp(a: number[], b: number[], t: number): number[] {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const bb = d < 0 ? b.map((v) => -v) : b;
+  d = Math.abs(d);
+  if (d > 0.9995) {
+    const r = a.map((v, i) => v + (bb[i] - v) * t), l = Math.hypot(...r);
+    return r.map((v) => v / l);
+  }
+  const th = Math.acos(d), s = Math.sin(th), wa = Math.sin((1 - t) * th) / s, wb = Math.sin(t * th) / s;
+  return a.map((v, i) => v * wa + bb[i] * wb);
+}
+
+// ------------------------------------------------------------------ animation
+
+export interface Clock {
+  /** Current frame within the sequence interval. */
+  frame: number;
+  seqStart: number;
+  seqEnd: number;
+  /** Milliseconds since start, for global sequences. */
+  time: number;
+}
+
+/** Samples a track; `fallback` when it has no key inside the interval. */
+function sample(track: Track | undefined, clock: Clock, globalSeqs: number[], fallback: number[]): number[] {
+  if (!track || track.times.length === 0) return fallback;
+  let t = clock.frame, start = clock.seqStart, end = clock.seqEnd;
+  if (track.globalSeq >= 0) {
+    const dur = globalSeqs[track.globalSeq] ?? 0;
+    start = 0; end = dur; t = dur > 0 ? clock.time % dur : 0;
+  }
+  const { times, values, size } = track;
+  let first = -1, last = -1;
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] < start || times[i] > end) continue;
+    if (first < 0) first = i;
+    last = i;
+  }
+  const key = (i: number) => Array.from(values.subarray(i * size, i * size + size));
+  if (first < 0) return fallback;
+  if (t <= times[first] || first === last) return key(first);
+  if (t >= times[last]) return key(last);
+  let i = first;
+  while (i < last && times[i + 1] <= t) i++;
+  const a = i, b = i + 1, u = (t - times[a]) / (times[b] - times[a]);
+  const va = key(a), vb = key(b);
+  if (track.interp === 0) return va;
+  if (size === 4) return slerp(va, vb, u); // quaternions: slerp for all interpolation types
+  if (track.interp === 1 || !track.inTan || !track.outTan) return va.map((v, k) => v + (vb[k] - v) * u);
+  const ot = Array.from(track.outTan.subarray(a * size, a * size + size)), it = Array.from(track.inTan.subarray(b * size, b * size + size));
+  if (track.interp === 2) {
+    // Hermite
+    const u2 = u * u, u3 = u2 * u;
+    const h1 = 2 * u3 - 3 * u2 + 1, h2 = -2 * u3 + 3 * u2, h3 = u3 - 2 * u2 + u, h4 = u3 - u2;
+    return va.map((v, k) => h1 * v + h2 * vb[k] + h3 * ot[k] + h4 * it[k]);
+  }
+  // Bezier
+  const iu = 1 - u;
+  return va.map((v, k) => iu * iu * iu * v + 3 * iu * iu * u * ot[k] + 3 * iu * u * u * it[k] + u * u * u * vb[k]);
+}
+
+// ------------------------------------------------------------------ team colours
+
+export const TEAM_COLORS: [string, Vec3][] = [
+  ["Red", [255, 3, 3]], ["Blue", [0, 66, 255]], ["Teal", [28, 230, 185]], ["Purple", [84, 0, 129]],
+  ["Yellow", [255, 252, 1]], ["Orange", [254, 138, 14]], ["Green", [32, 192, 0]], ["Pink", [229, 91, 176]],
+  ["Gray", [149, 150, 151]], ["Light Blue", [126, 191, 241]], ["Dark Green", [16, 98, 70]], ["Brown", [78, 42, 4]],
+];
+
+/** Textures for replaceable ids other than team colour/glow. */
+const REPLACEABLE: Record<number, string> = {
+  11: "ReplaceableTextures\\Cliff\\Cliff0.blp",
+  31: "ReplaceableTextures\\LordaeronTree\\LordaeronSummerTree.blp",
+  32: "ReplaceableTextures\\AshenvaleTree\\AshenTree.blp",
+  33: "ReplaceableTextures\\BarrensTree\\BarrensTree.blp",
+  34: "ReplaceableTextures\\NorthrendTree\\NorthTree.blp",
+  35: "ReplaceableTextures\\Mushroom\\MushroomTree.blp",
+  36: "ReplaceableTextures\\RuinsTree\\RuinsTree.blp",
+  37: "ReplaceableTextures\\OutlandMushroomTree\\MushroomTree.blp",
+};
+
+// ------------------------------------------------------------------ shaders
+
+const VS = `#version 300 es
+precision highp float;
+in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec4 aBones; in vec4 aWeights;
+uniform mat4 uViewProj;
+uniform highp sampler2D uBones;
+out vec3 vNormal; out vec2 vUV;
+mat4 bone(float id) {
+  int i = int(id) * 4;
+  return mat4(texelFetch(uBones, ivec2(i % 1024, i / 1024), 0), texelFetch(uBones, ivec2((i + 1) % 1024, (i + 1) / 1024), 0),
+              texelFetch(uBones, ivec2((i + 2) % 1024, (i + 2) / 1024), 0), texelFetch(uBones, ivec2((i + 3) % 1024, (i + 3) / 1024), 0));
+}
+void main() {
+  mat4 m = aWeights.x * bone(aBones.x) + aWeights.y * bone(aBones.y) + aWeights.z * bone(aBones.z) + aWeights.w * bone(aBones.w);
+  if (aWeights.x + aWeights.y + aWeights.z + aWeights.w < 0.001) m = mat4(1.0);
+  vNormal = mat3(m) * aNormal;
+  vUV = aUV;
+  gl_Position = uViewProj * m * vec4(aPos, 1.0);
+}`;
+
+const FS = `#version 300 es
+precision mediump float;
+in vec3 vNormal; in vec2 vUV;
+uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform float uUnshaded;
+// HD materials: the ORM texture's alpha masks where team colour goes.
+uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam;
+out vec4 outColor;
+void main() {
+  vec4 c = texture(uTex, vUV);
+  if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
+  c *= uColor;
+  if (c.a < uAlphaTest) discard;
+  float light = uUnshaded > 0.5 ? 1.0 : 0.45 + 0.7 * max(dot(normalize(vNormal), normalize(vec3(0.4, -0.3, 0.85))), 0.0);
+  outColor = vec4(c.rgb * light, c.a);
+}`;
+
+const LINE_VS = `#version 300 es
+in vec3 aPos; uniform mat4 uViewProj;
+void main() { gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+const LINE_FS = `#version 300 es
+precision mediump float; uniform vec4 uColor; out vec4 outColor;
+void main() { outColor = uColor; }`;
+
+function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
+  const shader = (type: number, src: string) => {
+    const s = gl.createShader(type)!;
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader error");
+    return s;
+  };
+  const p = gl.createProgram()!;
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? "link error");
+  return p;
+}
+
+// ------------------------------------------------------------------ renderer
+
+export interface DecodedTexture {
+  width: number;
+  height: number;
+  rgba: Uint8ClampedArray;
+}
+
+interface GpuGeoset {
+  vao: WebGLVertexArrayObject;
+  indexCount: number;
+  wireVao: WebGLVertexArrayObject;
+  wireCount: number;
+  materialId: number;
+  geosetId: number;
+}
+
+export interface Stats {
+  vertices: number;
+  triangles: number;
+  geosets: number;
+  nodes: number;
+  textures: number;
+}
+
+/** The model's stored extent, or (when it's empty, as in many HD models)
+ *  the bind-pose box of the full-detail geosets. */
+function bounds(model: Model): Pick<Extent, "min" | "max"> {
+  const e = model.extent;
+  if (e.max.some((v, i) => v > e.min[i])) return e;
+  const min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const g of model.geosets) {
+    if (g.lod > 0) continue;
+    for (let i = 0; i < g.positions.length; i++) {
+      const v = g.positions[i]!, k = i % 3;
+      if (v < min[k]!) min[k] = v;
+      if (v > max[k]!) max[k] = v;
+    }
+  }
+  return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
+}
+
+export class ModelRenderer {
+  readonly gl: WebGL2RenderingContext;
+  private prog: WebGLProgram;
+  private lineProg: WebGLProgram;
+  private geosets: GpuGeoset[] = [];
+  private textures: (WebGLTexture | null)[] = [];
+  private white: WebGLTexture;
+  private teamColor: WebGLTexture;
+  private teamGlow: WebGLTexture;
+  private teamRgb: Vec3 = [...TEAM_COLORS[0][1]];
+  private boneTex: WebGLTexture;
+  private boneData: Float32Array;
+  private nodeOrder: number[];
+  private grid: { vao: WebGLVertexArrayObject; count: number };
+  /** Hidden geosets (by index) and options. */
+  hidden = new Set<number>();
+  wireframe = false;
+  showGrid = true;
+  /** Camera orbit around `target`. */
+  yaw = -Math.PI / 2;
+  pitch = 0.35;
+  distance: number;
+  target: Vec3;
+  readonly stats: Stats;
+
+  constructor(readonly canvas: HTMLCanvasElement, readonly model: Model) {
+    const gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: false });
+    if (!gl) throw new Error("WebGL2 is not available");
+    this.gl = gl;
+    this.prog = compile(gl, VS, FS);
+    this.lineProg = compile(gl, LINE_VS, LINE_FS);
+    this.white = this.solidTexture([255, 255, 255, 255]);
+    this.teamColor = this.solidTexture([...TEAM_COLORS[0][1], 255]);
+    this.teamGlow = this.glowTexture(TEAM_COLORS[0][1]);
+    this.textures = model.textures.map(() => null);
+
+    const maxId = Math.max(0, ...model.nodes.map((n, i) => (n ? i : 0)));
+    const texels = (maxId + 1) * 4;
+    this.boneData = new Float32Array(1024 * Math.ceil(texels / 1024) * 4);
+    this.boneTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1024, Math.ceil(texels / 1024), 0, gl.RGBA, gl.FLOAT, this.boneData);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    // Parents before children.
+    const depth = (id: number, guard = 0): number => {
+      const n = model.nodes[id];
+      return !n || n.parentId < 0 || guard > 256 ? 0 : 1 + depth(n.parentId, guard + 1);
+    };
+    this.nodeOrder = model.nodes.map((n, i) => (n ? i : -1)).filter((i) => i >= 0).sort((a, b) => depth(a) - depth(b));
+
+    let vertices = 0, triangles = 0;
+    model.geosets.forEach((g, gi) => {
+      this.geosets.push(this.upload(g, gi));
+      vertices += g.positions.length / 3;
+      triangles += g.faces.length / 3;
+    });
+    this.grid = this.makeGrid();
+
+    // Lower-detail copies (HD LOD 1-3) start hidden.
+    model.geosets.forEach((g, gi) => { if (g.lod > 0) this.hidden.add(gi); });
+
+    const e = bounds(model);
+    this.target = [(e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, (e.min[2] + e.max[2]) / 2];
+    this.distance = Math.max(80, Math.hypot(e.max[0] - e.min[0], e.max[1] - e.min[1], e.max[2] - e.min[2]) * 1.4);
+    this.stats = { vertices, triangles, geosets: model.geosets.length, nodes: this.nodeOrder.length, textures: model.textures.length };
+  }
+
+  private solidTexture(rgba: number[]): WebGLTexture {
+    const gl = this.gl, t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(rgba));
+    return t;
+  }
+
+  private glowTexture(rgb: Vec3, t = this.gl.createTexture()!): WebGLTexture {
+    const gl = this.gl, n = 64, data = new Uint8Array(n * n * 4);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const d = Math.hypot(x - n / 2 + 0.5, y - n / 2 + 0.5) / (n / 2), a = Math.max(0, 1 - d) ** 2;
+      data.set([rgb[0], rgb[1], rgb[2], Math.round(a * 255)], (y * n + x) * 4);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    return t;
+  }
+
+  setTeamColor(index: number) {
+    const rgb = TEAM_COLORS[index][1], gl = this.gl;
+    this.teamRgb = [...rgb];
+    gl.bindTexture(gl.TEXTURE_2D, this.teamColor);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([...rgb, 255]));
+    this.glowTexture(rgb, this.teamGlow);
+  }
+
+  /** Paths to load for the model's textures (replaceables resolved). */
+  texturePaths(): (string | null)[] {
+    return this.model.textures.map((t) => (t.replaceableId === 0 ? t.path : REPLACEABLE[t.replaceableId] ?? null));
+  }
+
+  setTexture(i: number, img: DecodedTexture) {
+    const gl = this.gl, t = gl.createTexture()!, flags = this.model.textures[i].flags;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, flags & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, flags & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+    this.textures[i] = t;
+  }
+
+  private upload(g: Model["geosets"][number], geosetId: number): GpuGeoset {
+    const gl = this.gl, n = g.positions.length / 3;
+    const bones = new Float32Array(n * 4), weights = new Float32Array(n * 4);
+    for (let v = 0; v < n; v++) {
+      if (g.skin) {
+        for (let k = 0; k < 4; k++) {
+          bones[v * 4 + k] = g.groups[g.skin[v * 8 + k]]?.[0] ?? 0;
+          weights[v * 4 + k] = g.skin[v * 8 + 4 + k] / 255;
+        }
+      } else {
+        const group = g.groups[g.vertexGroups[v]] ?? [];
+        const used = group.slice(0, 4);
+        used.forEach((id, k) => { bones[v * 4 + k] = id; weights[v * 4 + k] = 1 / used.length; });
+      }
+    }
+    const prog = this.prog;
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const attr = (name: string, data: Float32Array, size: number) => {
+      const loc = gl.getAttribLocation(prog, name);
+      if (loc < 0) return;
+      const b = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+    };
+    attr("aPos", g.positions, 3);
+    attr("aNormal", g.normals, 3);
+    attr("aUV", g.uvs.length ? g.uvs : new Float32Array(n * 2), 2);
+    attr("aBones", bones, 4);
+    attr("aWeights", weights, 4);
+    const ib = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, g.faces, gl.STATIC_DRAW);
+
+    // Wireframe: same attributes, line indices.
+    const lines = new Uint16Array(g.faces.length * 2);
+    for (let i = 0; i < g.faces.length; i += 3) {
+      const [a, b, c] = [g.faces[i], g.faces[i + 1], g.faces[i + 2]];
+      lines.set([a, b, b, c, c, a], i * 2);
+    }
+    const wireVao = gl.createVertexArray()!;
+    gl.bindVertexArray(wireVao);
+    attr("aPos", g.positions, 3);
+    attr("aNormal", g.normals, 3);
+    attr("aUV", g.uvs.length ? g.uvs : new Float32Array(n * 2), 2);
+    attr("aBones", bones, 4);
+    attr("aWeights", weights, 4);
+    const lb = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lb);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lines, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    return { vao, indexCount: g.faces.length, wireVao, wireCount: lines.length, materialId: g.materialId, geosetId };
+  }
+
+  private makeGrid() {
+    const gl = this.gl, lines: number[] = [], size = 512, step = 64;
+    for (let i = -size; i <= size; i += step) lines.push(i, -size, 0, i, size, 0, -size, i, 0, size, i, 0);
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(this.lineProg, "aPos");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    return { vao, count: lines.length / 3 };
+  }
+
+  /** World matrices of all nodes for a moment in an animation. */
+  private updateBones(clock: Clock) {
+    const m = this.model, world: Mat4[] = [];
+    for (const id of this.nodeOrder) {
+      const n = m.nodes[id];
+      const pivot: Vec3 = [m.pivots[id * 3] ?? 0, m.pivots[id * 3 + 1] ?? 0, m.pivots[id * 3 + 2] ?? 0];
+      const t = sample(n.translation, clock, m.globalSequences, [0, 0, 0]) as Vec3;
+      const r = sample(n.rotation, clock, m.globalSequences, [0, 0, 0, 1]);
+      const s = sample(n.scaling, clock, m.globalSequences, [1, 1, 1]) as Vec3;
+      const local = mat4.node(pivot, t, r, s);
+      world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
+    }
+    for (const id of this.nodeOrder) this.boneData.set(world[id], id * 16);
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 1024, this.boneData.length / 4096, gl.RGBA, gl.FLOAT, this.boneData);
+  }
+
+  render(clock: Clock) {
+    const gl = this.gl, m = this.model;
+    const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
+    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    gl.viewport(0, 0, w, h);
+    // Multi-layer materials draw several layers at the same depth.
+    gl.depthFunc(gl.LEQUAL);
+    gl.clearColor(0.11, 0.12, 0.14, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const eye: Vec3 = [
+      this.target[0] + this.distance * Math.cos(this.pitch) * Math.cos(this.yaw),
+      this.target[1] + this.distance * Math.cos(this.pitch) * Math.sin(this.yaw),
+      this.target[2] + this.distance * Math.sin(this.pitch),
+    ];
+    const viewProj = mat4.mul(mat4.perspective(Math.PI / 4, w / Math.max(1, h), this.distance / 100, this.distance * 20), mat4.lookAt(eye, this.target, [0, 0, 1]));
+
+    if (this.showGrid) {
+      gl.useProgram(this.lineProg);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.uniformMatrix4fv(gl.getUniformLocation(this.lineProg, "uViewProj"), false, viewProj);
+      gl.uniform4f(gl.getUniformLocation(this.lineProg, "uColor"), 0.3, 0.32, 0.36, 1);
+      gl.bindVertexArray(this.grid.vao);
+      gl.drawArrays(gl.LINES, 0, this.grid.count);
+    }
+
+    this.updateBones(clock);
+    gl.useProgram(this.prog);
+    const u = (name: string) => gl.getUniformLocation(this.prog, name);
+    gl.uniformMatrix4fv(u("uViewProj"), false, viewProj);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
+    gl.uniform1i(u("uBones"), 1);
+    gl.uniform1i(u("uOrm"), 2);
+    gl.uniform3f(u("uTeam"), this.teamRgb[0] / 255, this.teamRgb[1] / 255, this.teamRgb[2] / 255);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(u("uTex"), 0);
+
+    // Geoset animation alpha/colour.
+    const geoAlpha = new Map<number, number>(), geoColor = new Map<number, number[]>();
+    for (const ga of m.geosetAnims) {
+      geoAlpha.set(ga.geosetId, sample(ga.alphaTrack, clock, m.globalSequences, [ga.alpha])[0]);
+      geoColor.set(ga.geosetId, sample(ga.colorTrack, clock, m.globalSequences, ga.color));
+    }
+
+    // Opaque layers first, then blended ones (sorted by priority plane).
+    const draws: { g: GpuGeoset; layer: Model["materials"][number]["layers"][number]; prio: number; blended: boolean }[] = [];
+    for (const g of this.geosets) {
+      if (this.hidden.has(g.geosetId)) continue;
+      const mat = m.materials[g.materialId];
+      if (!mat) continue;
+      for (const layer of mat.layers) draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2 });
+    }
+    draws.sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
+
+    for (const { g, layer } of draws) {
+      const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (geoAlpha.get(g.geosetId) ?? 1);
+      if (alpha <= 0.01) continue;
+      const color = geoColor.get(g.geosetId) ?? [1, 1, 1];
+      // Geoset animation colours are stored as BGR.
+      gl.uniform4f(u("uColor"), color[2], color[1], color[0], alpha);
+
+      const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
+      const tex = m.textures[texIndex];
+      gl.bindTexture(gl.TEXTURE_2D, tex?.replaceableId === 1 ? this.teamColor : tex?.replaceableId === 2 ? this.teamGlow : this.textures[texIndex] ?? this.white);
+      // HD layers list [diffuse, normal, ORM, emissive, team colour, environment].
+      const orm = layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
+      gl.uniform1f(u("uHd"), orm ? 1 : 0);
+      if (orm) {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, orm);
+        gl.activeTexture(gl.TEXTURE0);
+      }
+
+      const sf = layer.shadingFlags;
+      gl.uniform1f(u("uUnshaded"), sf & 0x1 ? 1 : 0);
+      if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
+      if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
+      gl.uniform1f(u("uAlphaTest"), layer.filterMode === 1 ? 0.75 : 0.01);
+      switch (layer.filterMode) {
+        case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
+        case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;
+        case 3: case 4: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.depthMask(false); break;
+        case 5: gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.depthMask(false); break;
+        default: gl.enable(gl.BLEND); gl.blendFunc(gl.DST_COLOR, gl.SRC_COLOR); gl.depthMask(false);
+      }
+      if (sf & 0x80) gl.depthMask(false);
+      if (this.wireframe) {
+        gl.bindVertexArray(g.wireVao);
+        gl.drawElements(gl.LINES, g.wireCount, gl.UNSIGNED_SHORT, 0);
+      } else {
+        gl.bindVertexArray(g.vao);
+        gl.drawElements(gl.TRIANGLES, g.indexCount, gl.UNSIGNED_SHORT, 0);
+      }
+    }
+    gl.bindVertexArray(null);
+    gl.depthMask(true);
+  }
+
+  dispose() {
+    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
