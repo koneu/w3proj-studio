@@ -2,8 +2,8 @@
 //! pack it back as a release step.
 
 pub mod codec;
+pub mod format;
 pub mod header;
-pub mod mapinfo;
 pub mod names;
 pub mod objdata;
 pub mod paths;

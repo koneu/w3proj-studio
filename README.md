@@ -16,7 +16,8 @@ MPQ archive. The archive holds files like:
 | `war3map.w3u/.w3t/.w3a/.w3b/.w3d/.w3h/.w3q` | object data: unit/item/ability/… modifications | **JSON** (`*.json`) |
 | `war3map.wts` | trigger strings (`TRIGSTR_xxx`) | text, as-is |
 | `war3map.w3i` | map info: name, players, forces, options, fog, … (format v25–v39) | **JSON** (`war3map.w3i.json`) |
-| `war3map.w3e`, `.wpm`, `.shd`, `.doo`, `war3mapUnits.doo` | terrain, pathing, shadows, doodads, placed units | binary |
+| `war3map.doo`, `war3mapUnits.doo` | placed doodads/destructables; units, items, start locations (v8, v12, v13) | **JSON** |
+| `war3map.w3e`, `.wpm`, `.shd` | terrain, pathing, shadows | binary |
 | `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | binary |
 | `war3map.wtg/.wct` | GUI triggers / custom script text | binary |
 | `war3map.imp`, `war3mapImported\*` | imports | as-is |
@@ -25,6 +26,24 @@ Every codec is checked on unpack: a file is stored as JSON only if
 `encode(decode(file))` gives back the original bytes; otherwise it is kept raw.
 So **pack is always lossless**. Verified against 676 local maps: 0 mismatches.
 The object-data codec round-trips every file in that set.
+
+## Format definitions
+
+Blizzard's binary layouts are not hard-coded: they are **format definitions** (JSON with
+`//` comments) interpreted by one engine (`crates/w3proj/src/format`). The built-ins live in
+[crates/w3proj/formats/](crates/w3proj/formats/) — `w3i`, `doodads`, `units` — and are compiled
+into the CLI and the app. A definition lists fields with types, counts, `if` conditions
+(`version >= 39`), plausibility `check`s and **variants** for layouts that differ without a
+version bump (e.g. v39 player HUD skins, v8 doodads without skin ids): the engine tries each
+reading and keeps the one that reproduces the file byte-exactly and passes the checks; ambiguous
+choices are reported in the unpack output.
+
+To adapt a format (a new patch, an unknown field): copy the definition into the project —
+*Extensions → Formats → Customize*, or `w3proj formats --show w3i > .w3proj/formats/w3i.json` —
+edit it, and re-sync. Definitions in `.w3proj/formats` (project), the app's user `formats`
+folder or `W3PROJ_FORMATS` (CLI) replace built-ins with the same `name`. `w3proj formats`
+lists what is active. Every file is still checked round-trip on unpack, so a wrong definition
+makes files fall back to raw — it cannot corrupt a map.
 
 ## Project layout
 
@@ -76,6 +95,7 @@ w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.
 w3proj verify *.w3x                 # unpack→pack in memory, compare every file
 w3proj ls MyMap.w3x                 # sizes, stored sizes, flags, table sizes
 w3proj cat MyMap.w3x war3map.j
+w3proj formats [--project MyMap/] [--show w3i]   # format definitions in use
 
 # the installed game's own data (default install: C:\Program Files (x86)\Warcraft III)
 w3proj game info                               # build, locale, layer order

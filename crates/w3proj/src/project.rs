@@ -104,6 +104,9 @@ pub struct FileEntry {
     /// Why a matching codec was not used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// What the codec noticed while decoding (e.g. which layout variant was chosen).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub info: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -222,15 +225,17 @@ pub fn extract(archive: &Archive, codecs: &Registry) -> Extracted {
             size: bytes.len(),
             codec: None,
             note: None,
+            info: Vec::new(),
         };
         let mut stored = None;
         for codec in codecs.for_archive_name(name) {
-            match codec.decode(name, &bytes) {
-                Ok(decoded) => match codec.encode(name, &decoded) {
+            match codec.decode_with_notes(name, &bytes) {
+                Ok((decoded, info)) => match codec.encode(name, &decoded) {
                     Ok(re) if re == bytes => {
                         entry.project_path = format!("{base_path}{}", codec.suffix());
                         entry.codec = Some(codec.id().to_string());
                         entry.note = None;
+                        entry.info = info;
                         stored = Some(decoded);
                         break;
                     }

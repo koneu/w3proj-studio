@@ -1,0 +1,69 @@
+// war3mapUnits.doo — units, buildings, items and start locations placed on the map.
+// Versions 8 (Reforged 1.32+), 12 and 13 (3.0). The 3.0 additions were worked out
+// against the game's own 3.0 campaign maps (all round-trip byte-exact); their
+// meaning is not known yet, so they keep neutral names.
+// Subversion 9 (pre-1.32 layout) has no item table and no hero attributes.
+{
+  "name": "units",
+  "description": "Placed units, items and start locations: owner, stats, inventory, abilities, random units",
+  "files": ["war3mapUnits.doo"],
+  "jsonFormat": "w3proj.units/1",
+  "accept": "version == 8 || version == 12 || version == 13",
+  "fields": [
+    { "name": "magic", "type": "id", "doc": "\"W3do\"" },
+    { "name": "version", "type": "u32" },
+    { "name": "subversion", "type": "u32" },
+    // Some v8 files (older Reforged editor builds) have no skin ids; both readings are tried.
+    { "name": "skinIds", "type": "variant", "if": "version == 8", "prefer": "true" },
+    { "name": "units", "type": "struct", "count": "u32", "fields": [
+      { "name": "id", "type": "id" },
+      { "name": "variation", "type": "u32" },
+      { "name": "position", "type": "f32", "count": 3 },
+      { "name": "angle", "type": "f32", "doc": "radians" },
+      { "name": "scale", "type": "f32", "count": 3 },
+      { "name": "skinId", "type": "id", "if": "version >= 12 || (version == 8 && skinIds)" },
+      { "name": "preFlags", "type": "u32", "if": "version >= 12", "doc": "3.0; -1 in all samples" },
+      { "name": "flags", "type": "u8" },
+      { "name": "player", "type": "u32" },
+      { "name": "unknown1", "type": "u8" },
+      { "name": "unknown2", "type": "u8" },
+      { "name": "hp", "type": "i32", "doc": "-1 = default" },
+      { "name": "mana", "type": "i32", "doc": "-1 = default" },
+      { "name": "itemTable", "type": "i32", "if": "subversion >= 11", "doc": "map item table index, -1 none" },
+      { "name": "itemSets", "type": "list", "count": "u32", "item":
+        { "type": "struct", "count": "u32", "fields": [
+          { "name": "id", "type": "id" },
+          { "name": "chance", "type": "u32" }
+        ] } },
+      { "name": "gold", "type": "u32", "doc": "gold mines" },
+      { "name": "targetAcquisition", "type": "f32", "doc": "-1 normal, -2 camp" },
+      { "name": "level", "type": "u32", "doc": "heroes" },
+      { "name": "strength", "type": "u32", "if": "subversion >= 11" },
+      { "name": "agility", "type": "u32", "if": "subversion >= 11" },
+      { "name": "intelligence", "type": "u32", "if": "subversion >= 11" },
+      { "name": "inventory", "type": "struct", "count": "u32", "fields": [
+        { "name": "slot", "type": "u32" },
+        { "name": "id", "type": "id" }
+      ] },
+      { "name": "abilities", "type": "struct", "count": "u32", "fields": [
+        { "name": "id", "type": "id" },
+        { "name": "autocast", "type": "u32" },
+        { "name": "level", "type": "u32" }
+      ] },
+      { "name": "randomType", "type": "u32", "doc": "0 any by level, 1 from map group, 2 custom list" },
+      { "name": "randomLevel", "type": "bytes", "size": 3, "if": "randomType == 0" },
+      { "name": "randomClass", "type": "u8", "if": "randomType == 0" },
+      { "name": "randomGroup", "type": "u32", "if": "randomType == 1" },
+      { "name": "randomPosition", "type": "u32", "if": "randomType == 1" },
+      { "name": "randomUnits", "type": "struct", "count": "u32", "if": "randomType == 2", "fields": [
+        { "name": "id", "type": "id" },
+        { "name": "chance", "type": "u32" }
+      ] },
+      { "name": "color", "type": "i32", "doc": "-1 = owner's colour" },
+      { "name": "waygate", "type": "i32", "doc": "region editor id, -1 none" },
+      { "name": "editorId", "type": "u32" },
+      { "name": "trailer", "type": "u32", "count": 2, "if": "version >= 12", "doc": "3.0, meaning unknown" },
+      { "name": "extras", "type": "list", "count": "u32", "if": "version >= 12", "doc": "3.0; blocks of nine dwords, meaning unknown", "item": { "type": "u32", "count": 9 } }
+    ] }
+  ]
+}

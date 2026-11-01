@@ -89,10 +89,12 @@ fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
 
 /// Imports a map into `dir` (new project) or re-syncs an existing one.
 #[tauri::command]
-async fn project_unpack(map: String, dir: String, allow_incomplete: bool) -> CmdResult<Value> {
+async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomplete: bool) -> CmdResult<Value> {
+    let user_formats = user_format_dirs(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let opts = UnpackOptions { allow_incomplete };
-        match w3proj::unpack(Path::new(&map), Path::new(&dir), &Registry::default(), &opts) {
+        let codecs = Registry::for_project(Path::new(&dir), &user_formats).map_err(err)?;
+        match w3proj::unpack(Path::new(&map), Path::new(&dir), &codecs, &opts) {
             Ok(report) => serde_json::to_value(&report).map_err(err),
             Err(w3proj::Error::Incomplete(r)) => Err(format!(
                 "INCOMPLETE: {} unnamed and {} unreadable files (protected map?)",
@@ -107,12 +109,14 @@ async fn project_unpack(map: String, dir: String, allow_incomplete: bool) -> Cmd
 }
 
 #[tauri::command]
-async fn project_pack(root: String, output: Option<String>) -> CmdResult<Value> {
+async fn project_pack(app: AppHandle, root: String, output: Option<String>) -> CmdResult<Value> {
+    let user_formats = user_format_dirs(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let codecs = Registry::for_project(Path::new(&root), &user_formats).map_err(err)?;
         let r = w3proj::pack(
             Path::new(&root),
             output.as_deref().map(Path::new),
-            &Registry::default(),
+            &codecs,
         )
         .map_err(err)?;
         serde_json::to_value(&r).map_err(err)
@@ -135,9 +139,9 @@ fn objects_canonicalize(name: String, text: String) -> CmdResult<String> {
 /// Validates a codec-backed project file (e.g. `map/war3map.w3i.json`) by
 /// encoding it to the archive format, and returns it in canonical form.
 #[tauri::command]
-fn codec_canonicalize(path: String, text: String) -> CmdResult<String> {
+fn codec_canonicalize(app: AppHandle, root: String, path: String, text: String) -> CmdResult<String> {
     let rel = path.strip_prefix("map/").unwrap_or(&path);
-    let registry = Registry::default();
+    let registry = Registry::for_project(Path::new(&root), &user_format_dirs(&app)?).map_err(err)?;
     let (stem, codec) = registry
         .for_project_path(rel)
         .ok_or_else(|| format!("{path} is not a codec-backed file"))?;
@@ -145,6 +149,58 @@ fn codec_canonicalize(path: String, text: String) -> CmdResult<String> {
     let bin = codec.encode(&name, text.as_bytes()).map_err(err)?;
     let canonical = codec.decode(&name, &bin).map_err(err)?;
     String::from_utf8(canonical).map_err(err)
+}
+
+/// The app's user format folder: `<config>/formats`.
+fn user_format_dirs(app: &AppHandle) -> CmdResult<Vec<PathBuf>> {
+    Ok(vec![config_dir(app)?.join("formats")])
+}
+
+#[derive(Serialize)]
+struct FormatInfo {
+    name: String,
+    description: String,
+    files: Vec<String>,
+    /// "builtin", or the definition file's path.
+    source: String,
+    builtin: bool,
+}
+
+/// Format definitions in effect for a project (or without one).
+#[tauri::command]
+fn formats_list(app: AppHandle, root: Option<String>) -> CmdResult<Vec<FormatInfo>> {
+    let user = user_format_dirs(&app)?;
+    let registry = match root {
+        Some(r) => Registry::for_project(Path::new(&r), &user),
+        None => Registry::with_formats(&user),
+    }
+    .map_err(err)?;
+    Ok(registry
+        .formats()
+        .into_iter()
+        .map(|f| {
+            let d = &f.def;
+            let (source, builtin) = match &d.source {
+                w3proj::format::Source::Builtin => ("builtin".to_string(), true),
+                w3proj::format::Source::File(p) => (p.to_string_lossy().into_owned(), false),
+            };
+            FormatInfo { name: d.name.clone(), description: d.description.clone(), files: d.files.clone(), source, builtin }
+        })
+        .collect())
+}
+
+/// Copies a built-in definition into `<project>/.w3proj/formats/<name>.json`
+/// so it can be edited; returns the new file's path.
+#[tauri::command]
+fn format_customize(root: String, name: String) -> CmdResult<String> {
+    let text = w3proj::format::builtin_text(&name).ok_or_else(|| format!("no built-in format {name:?}"))?;
+    let dir = w3proj::format::project_dir(Path::new(&root));
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let path = dir.join(format!("{name}.json"));
+    if !path.exists() {
+        std::fs::write(&path, text).map_err(err)?;
+    }
+    Ok(path.to_string_lossy().into_owned())
 }
 
 // ---------------------------------------------------------------- files
@@ -406,6 +462,8 @@ pub fn run() {
             project_pack,
             objects_canonicalize,
             codec_canonicalize,
+            formats_list,
+            format_customize,
             fs_read_text,
             fs_write_text,
             fs_read_bytes,

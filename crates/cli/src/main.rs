@@ -43,6 +43,15 @@ enum Cmd {
     Ls { map: PathBuf },
     /// Print one file from a map to stdout.
     Cat { map: PathBuf, file: String },
+    /// List the format definitions in use (built-in, W3PROJ_FORMATS, project).
+    Formats {
+        /// Include the project's .w3proj/formats overrides.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Print the definition with this name instead of the list.
+        #[arg(long)]
+        show: Option<String>,
+    },
     /// Read the game's own data (CASC storage of the installed game).
     Game {
         #[command(subcommand)]
@@ -79,8 +88,15 @@ fn main() -> ExitCode {
     }
 }
 
+/// Extra format definition folders from W3PROJ_FORMATS (separated by ';').
+fn extra_format_dirs() -> Vec<PathBuf> {
+    std::env::var("W3PROJ_FORMATS")
+        .map(|v| v.split(';').filter(|s| !s.is_empty()).map(PathBuf::from).collect())
+        .unwrap_or_default()
+}
+
 fn run(cli: Cli) -> Result<ExitCode> {
-    let codecs = Registry::default();
+    let extra = extra_format_dirs();
     match cli.cmd {
         Cmd::Unpack {
             map,
@@ -88,6 +104,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             allow_incomplete,
         } => {
             let opts = UnpackOptions { allow_incomplete };
+            let codecs = Registry::for_project(&project, &extra)?;
             let report = match w3proj::unpack(&map, &project, &codecs, &opts) {
                 Err(w3proj::Error::Incomplete(r)) => {
                     for (f, e) in &r.errors {
@@ -106,6 +123,11 @@ fn run(cli: Cli) -> Result<ExitCode> {
             for f in report.files.iter().filter(|f| f.note.is_some()) {
                 println!("  raw {} ({})", f.archive_name, f.note.as_deref().unwrap());
             }
+            for f in &report.files {
+                for i in &f.info {
+                    println!("  note {}: {i}", f.archive_name);
+                }
+            }
             println!(
                 "{} files ({} via codecs): {} written, {} unchanged, {} deleted",
                 report.files.len(),
@@ -123,11 +145,13 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Cmd::Pack { project, output } => {
+            let codecs = Registry::for_project(&project, &extra)?;
             let r = w3proj::pack(&project, output.as_deref(), &codecs)
                 .with_context(|| format!("packing {}", project.display()))?;
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
         Cmd::Verify { maps, quiet } => {
+            let codecs = Registry::with_formats(&extra)?;
             let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
             for map in &maps {
                 match w3proj::verify(map, &codecs) {
@@ -232,6 +256,27 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     Some(full) => println!("{full}"),
                     None => anyhow::bail!("{path} not found in {mode:?} layers"),
                 },
+            }
+        }
+        Cmd::Formats { project, show } => {
+            let codecs = match &project {
+                Some(p) => Registry::for_project(p, &extra)?,
+                None => Registry::with_formats(&extra)?,
+            };
+            for f in codecs.formats() {
+                let def = &f.def;
+                let source = match &def.source {
+                    w3proj::format::Source::Builtin => "built-in".to_string(),
+                    w3proj::format::Source::File(p) => p.display().to_string(),
+                };
+                match &show {
+                    Some(name) if name == &def.name => match &def.source {
+                        w3proj::format::Source::File(p) => print!("{}", std::fs::read_to_string(p)?),
+                        w3proj::format::Source::Builtin => print!("{}", w3proj::format::builtin_text(&def.name).unwrap_or_default()),
+                    },
+                    Some(_) => {}
+                    None => println!("{:<8} {:<28} {}  ({source})", def.name, def.files.join(", "), def.description),
+                }
             }
         }
         Cmd::Cat { map, file } => {

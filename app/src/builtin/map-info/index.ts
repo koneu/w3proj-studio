@@ -361,7 +361,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         return {
           async save() {
-            const text = await w3.backend.invoke<string>("codec_canonicalize", { path: doc.path, text: JSON.stringify(info) });
+            const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(info) });
             await doc.writeText(text);
             if (strings?.dirty) {
               await w3.workspace.writeText("map/war3map.wts", strings.serialize());

@@ -1,0 +1,45 @@
+// war3map.doo — doodads and destructables placed on the map.
+// Versions 8 (Reforged 1.32+), 12 and 13 (3.0). The 3.0 additions were worked out
+// against the game's own 3.0 campaign maps (all round-trip byte-exact); their
+// meaning is not known yet, so they keep neutral names.
+{
+  "name": "doodads",
+  "description": "Placed doodads and destructables: type, position, rotation, scale, life, item drops",
+  "files": ["war3map.doo"],
+  "jsonFormat": "w3proj.doodads/1",
+  "accept": "version == 8 || version == 12 || version == 13",
+  "fields": [
+    { "name": "magic", "type": "id", "doc": "\"W3do\"" },
+    { "name": "version", "type": "u32" },
+    { "name": "subversion", "type": "u32" },
+    // Some v8 files (older Reforged editor builds) have no skin ids; both readings are tried.
+    { "name": "skinIds", "type": "variant", "if": "version == 8", "prefer": "true" },
+    { "name": "doodads", "type": "struct", "count": "u32", "fields": [
+      { "name": "id", "type": "id" },
+      { "name": "variation", "type": "u32" },
+      { "name": "position", "type": "f32", "count": 3 },
+      { "name": "angle", "type": "f32", "doc": "radians" },
+      { "name": "scale", "type": "f32", "count": 3 },
+      { "name": "skinId", "type": "id", "if": "version >= 12 || (version == 8 && skinIds)" },
+      { "name": "preFlags", "type": "u32", "if": "version >= 12", "doc": "3.0; -1 in all samples" },
+      { "name": "flags", "type": "u8", "doc": "bit 0 invisible, bit 1 visible, bit 2 fixed z" },
+      { "name": "life", "type": "u8", "doc": "percent" },
+      { "name": "itemTable", "type": "i32", "if": "version >= 8", "doc": "map item table index, -1 none" },
+      { "name": "itemSets", "type": "list", "count": "u32", "if": "version >= 8", "item":
+        { "type": "struct", "count": "u32", "fields": [
+          { "name": "id", "type": "id" },
+          { "name": "chance", "type": "u32" }
+        ] } },
+      { "name": "editorId", "type": "u32" },
+      { "name": "trailer", "type": "u32", "count": "2 + (version >= 13)", "if": "version >= 12", "doc": "3.0; v13: first is a sequential placement id" },
+      { "name": "extras", "type": "list", "count": "u32", "if": "version >= 12", "doc": "3.0; blocks of nine dwords, meaning unknown", "item": { "type": "u32", "count": 9 } }
+    ] },
+    { "name": "specialVersion", "type": "u32" },
+    { "name": "specials", "type": "struct", "count": "u32", "doc": "terrain doodads (cliffs, ramps)", "fields": [
+      { "name": "id", "type": "id" },
+      { "name": "z", "type": "u32" },
+      { "name": "x", "type": "u32" },
+      { "name": "y", "type": "u32" }
+    ] }
+  ]
+}

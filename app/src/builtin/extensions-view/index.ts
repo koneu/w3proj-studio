@@ -42,6 +42,48 @@ export function activate(w3, ctx) {
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const paths = () => w3.backend.invoke<{ user_extensions: string }>("app_paths");
 
+  interface FormatInfo { name: string; description: string; files: string[]; source: string; builtin: boolean }
+
+  /** Format definitions: the data-driven layouts of Blizzard files. Listed
+   *  here because they are the "system" layer users can override. */
+  const renderFormats = () => {
+    const section = h("div.ext-formats", {}, h("div.ext-section-title", {}, "FORMATS"), h("div.view-empty", {}, "Loading…"));
+    const root = w3.workspace.project()?.root ?? null;
+    w3.backend.invoke<FormatInfo[]>("formats_list", { root }).then((formats) => {
+      section.replaceChildren(
+        h("div.ext-section-title", {}, "FORMATS"),
+        h("div.ext-desc.ext-formats-hint", {}, "How Blizzard files are read and written. A project can override a definition in .w3proj/formats; re-sync from the .w3x afterwards."),
+        ...formats.map((f) => {
+          const origin = f.builtin ? "builtin" : f.source.toLowerCase().includes("\\.w3proj\\") || f.source.toLowerCase().includes("/.w3proj/") ? "project" : "user";
+          return h("div.ext-item", {},
+            h("div.ext-title", {},
+              h("strong", {}, f.name),
+              h(`span.badge.${origin}`, {}, origin),
+            ),
+            h("div.ext-id", {}, f.files.join(", ")),
+            f.description ? h("div.ext-desc", {}, f.description) : null,
+            h("div.ext-actions", {},
+              f.builtin
+                ? h("button", {
+                    title: root ? "Copy this definition into the project to edit it" : "Open a project first",
+                    disabled: !root,
+                    onclick: async () => {
+                      const path = await w3.backend.invoke<string>("format_customize", { root, name: f.name });
+                      await w3.workspace.refresh();
+                      w3.views.refresh("w3.extensions.installed");
+                      await w3.editors.open(path, "w3.textEditor");
+                      w3.window.showInfo(`${f.name} is now a project definition (${path}). Edit it, then re-sync the project from the .w3x.`);
+                    },
+                  }, "Customize")
+                : h("button", { onclick: () => w3.editors.open(f.source, "w3.textEditor") }, "Open"),
+            ),
+          );
+        }),
+      );
+    }, (e) => section.replaceChildren(h("div.ext-section-title", {}, "FORMATS"), h("div.view-error", {}, String(e))));
+    return section;
+  };
+
   ctx.subscriptions.push(
     w3.views.register("w3.extensions.installed", {
       actions: [
@@ -87,6 +129,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }),
           ),
         );
+        el.append(renderFormats());
       },
     }),
     w3.commands.register("w3.extensions.openFolder", async () => {
