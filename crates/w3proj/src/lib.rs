@@ -3,6 +3,7 @@
 
 pub mod codec;
 pub mod header;
+pub mod mapinfo;
 pub mod names;
 pub mod objdata;
 pub mod paths;

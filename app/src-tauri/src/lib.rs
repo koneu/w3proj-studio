@@ -132,6 +132,21 @@ fn objects_canonicalize(name: String, text: String) -> CmdResult<String> {
     String::from_utf8(json).map_err(err)
 }
 
+/// Validates a codec-backed project file (e.g. `map/war3map.w3i.json`) by
+/// encoding it to the archive format, and returns it in canonical form.
+#[tauri::command]
+fn codec_canonicalize(path: String, text: String) -> CmdResult<String> {
+    let rel = path.strip_prefix("map/").unwrap_or(&path);
+    let registry = Registry::default();
+    let (stem, codec) = registry
+        .for_project_path(rel)
+        .ok_or_else(|| format!("{path} is not a codec-backed file"))?;
+    let name = w3proj::paths::to_archive_name(&stem);
+    let bin = codec.encode(&name, text.as_bytes()).map_err(err)?;
+    let canonical = codec.decode(&name, &bin).map_err(err)?;
+    String::from_utf8(canonical).map_err(err)
+}
+
 // ---------------------------------------------------------------- files
 
 #[tauri::command]
@@ -390,6 +405,7 @@ pub fn run() {
             project_unpack,
             project_pack,
             objects_canonicalize,
+            codec_canonicalize,
             fs_read_text,
             fs_write_text,
             fs_read_bytes,

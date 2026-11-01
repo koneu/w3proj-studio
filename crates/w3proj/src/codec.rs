@@ -4,7 +4,7 @@
 //! file is stored raw. That check runs on every unpack, so packing a project
 //! is always lossless no matter how incomplete a codec is.
 
-use crate::{objdata, Result};
+use crate::{mapinfo, objdata, Result};
 
 pub trait Codec: Send + Sync {
     /// Stable identifier, e.g. `objdata-json`.
@@ -38,6 +38,27 @@ impl Codec for ObjectDataJson {
     }
 }
 
+/// `war3map.w3i` (map info) as JSON.
+pub struct MapInfoJson;
+
+impl Codec for MapInfoJson {
+    fn id(&self) -> &'static str {
+        "mapinfo-json"
+    }
+    fn suffix(&self) -> &'static str {
+        ".json"
+    }
+    fn matches(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("war3map.w3i")
+    }
+    fn decode(&self, _name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        mapinfo::to_json(bytes)
+    }
+    fn encode(&self, _name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        mapinfo::from_json(bytes)
+    }
+}
+
 pub struct Registry {
     codecs: Vec<Box<dyn Codec>>,
 }
@@ -45,7 +66,7 @@ pub struct Registry {
 impl Default for Registry {
     fn default() -> Self {
         Registry {
-            codecs: vec![Box::new(ObjectDataJson)],
+            codecs: vec![Box::new(ObjectDataJson), Box::new(MapInfoJson)],
         }
     }
 }

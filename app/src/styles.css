@@ -35,7 +35,7 @@ button {
 }
 button:hover { background: var(--bg-hover); }
 button.primary { background: var(--accent-2); border-color: var(--accent-2); color: white; display: block; width: 100%; margin: 6px 0; }
-input, select {
+input, select, textarea {
   font: inherit;
   color: var(--fg);
   background: var(--bg);
@@ -44,7 +44,7 @@ input, select {
   padding: 3px 6px;
   user-select: text;
 }
-input:focus, select:focus { outline: 1px solid var(--accent-2); border-color: var(--accent-2); }
+input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent-2); border-color: var(--accent-2); }
 code { font-family: var(--mono); font-size: 12px; }
 .muted { color: var(--fg-muted); }
 .icon-button { background: none; border: none; padding: 0 5px; color: var(--fg-muted); }
@@ -275,3 +275,36 @@ button.primary-inline { background: var(--accent-2); border-color: var(--accent-
 .obj-multi-title { cursor: pointer; user-select: none; display: flex; align-items: baseline; gap: 6px; }
 .obj-multi-title:hover { color: var(--accent); }
 .obj-multi-title .twistie { width: 14px; color: var(--fg-muted); }
+
+/* Map properties */
+.map-info { display: flex; height: 100%; }
+.form-nav { width: 190px; border-right: 1px solid var(--border); padding: 10px 0; display: flex; flex-direction: column; flex-shrink: 0; }
+.form-nav-item { text-align: left; background: none; border: none; border-left: 2px solid transparent; border-radius: 0; padding: 6px 16px; color: var(--fg-muted); }
+.form-nav-item:hover { color: var(--fg); background: var(--bg-hover); }
+.form-nav-item.active { color: var(--fg); border-left-color: var(--accent); background: var(--bg-2); }
+.form-body { flex: 1; overflow: auto; padding: 14px 24px 40px; }
+.form-body > h2 { margin: 0 0 10px; font-weight: 400; }
+.form-section { margin-bottom: 18px; max-width: 980px; }
+.form-section h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); margin: 0 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.form-row { display: flex; gap: 14px; align-items: flex-start; padding: 4px 0; }
+.form-label { width: 180px; flex-shrink: 0; padding-top: 4px; }
+.form-control { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.form-input { width: 100%; max-width: 640px; }
+textarea.form-input { resize: vertical; font: inherit; user-select: text; }
+.form-num { max-width: 160px; }
+.form-stack { display: flex; flex-direction: column; gap: 2px; }
+.form-inline { display: flex; gap: 8px; align-items: center; }
+.form-inline .form-num { width: 80px; }
+.form-checks { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 4px 0; }
+.form-check { display: inline-flex; align-items: center; gap: 2px; cursor: pointer; }
+.form-table { border-collapse: collapse; width: 100%; }
+.form-table th { text-align: left; font-size: 11px; color: var(--fg-muted); font-weight: 600; padding: 4px 6px; }
+.form-table td { padding: 2px 6px; }
+.form-table .form-num { width: 100px; }
+.force { border-top: 1px solid #2a2c30; padding: 6px 0; }
+input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var(--bg); }
+.ext-item.is-disabled { opacity: 0.55; }
+.ext-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.ext-actions button { padding: 1px 10px; font-size: 12px; }
+.state.disabled { color: var(--warning); }
+.ext-pending { margin: 4px 14px 8px; padding: 6px 8px; border: 1px solid var(--warning); border-radius: 4px; font-size: 12px; display: flex; gap: 8px; align-items: center; }

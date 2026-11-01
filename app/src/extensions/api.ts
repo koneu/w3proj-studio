@@ -195,7 +195,7 @@ export interface W3Api {
     listen<T = unknown>(event: string, handler: (payload: T) => void): Promise<Disposable>;
   };
   extensions: {
-    all(): { manifest: ExtensionManifest; source: string; active: boolean; error?: string }[];
+    all(): { manifest: ExtensionManifest; source: string; active: boolean; disabled: boolean; error?: string }[];
   };
 }
 

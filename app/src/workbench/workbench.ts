@@ -63,7 +63,9 @@ export class Workbench {
     this.quickInput = new QuickInput(root);
 
     this.api = this.createApi();
-    this.host = new ExtensionHost(this.api, (rec) => this.applyContributions(rec), (l) => this.log.append(l));
+    this.host = new ExtensionHost(this.api, (rec) => this.applyContributions(rec), (l) => this.log.append(l),
+      (id) => this.settings.get<string[]>("extensions.disabled", []).includes(id));
+    this.editors.associations = () => this.settings.get<Record<string, string>>("editorAssociations", {});
     const fire = (event: string) => this.host.fire(event);
     this.commands.activate = fire;
     this.views.activate = fire;
@@ -178,7 +180,7 @@ export class Workbench {
       },
       backend: { invoke, listen },
       extensions: {
-        all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, error: e.error })),
+        all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, disabled: e.disabled, error: e.error })),
       },
     };
   }
@@ -221,6 +223,33 @@ export class Workbench {
       }
       const pick = await this.quickInput.pick(options.map((o) => ({ label: o.title, description: o.extensionId, value: o.id })), { placeholder: `Open ${path} with…` });
       if (pick) await this.editors.open(path, pick.value!);
+    }, { category: "File" });
+    c("workbench.configureEditorAssociation", "Configure Default Editor for This File Type…", async () => {
+      const path = this.editors.activePath();
+      if (!path || path.startsWith("w3:")) throw new Error("Open a file first.");
+      // "*.w3u.json" for "map/war3map.w3u.json": everything from the first dot of the name.
+      const name = path.split(/[/:]/).pop()!;
+      const glob = name.includes(".") ? `*${name.slice(name.indexOf("."))}` : name;
+      const options = [...this.editors.candidates(path)];
+      for (const id of ["w3.textEditor", "w3.hexViewer"]) {
+        const contrib = this.editors.allContributions().find((e) => e.id === id);
+        if (contrib && !options.includes(contrib)) options.push(contrib);
+      }
+      const current = this.editors.associated(path);
+      const pick = await this.quickInput.pick(
+        [
+          ...options.map((o) => ({ label: o.title, description: `${o.id}${o.id === current ? " · current default" : ""}`, value: o.id })),
+          ...(current ? [{ label: "Remove association", description: `back to the extensions' default for ${glob}`, value: "" }] : []),
+        ],
+        { placeholder: `Default editor for ${glob}` },
+      );
+      if (!pick) return;
+      const assoc = { ...this.settings.get<Record<string, string>>("editorAssociations", {}) };
+      if (pick.value) assoc[glob] = pick.value;
+      else delete assoc[glob];
+      await this.settings.set("editorAssociations", assoc);
+      if (pick.value) await this.editors.open(path, pick.value);
+      this.notifications.show("info", pick.value ? `${glob} now opens with ${pick.label}.` : `Removed the default editor for ${glob}.`);
     }, { category: "File" });
     c("workbench.openSettings", "Open Settings (JSON)", async () => {
       const p = this.settings.settingsPath();

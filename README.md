@@ -15,7 +15,7 @@ MPQ archive. The archive holds files like:
 | `war3map.j` / `.lua` | map script (triggers compile to this) | text, as-is |
 | `war3map.w3u/.w3t/.w3a/.w3b/.w3d/.w3h/.w3q` | object data: unit/item/ability/… modifications | **JSON** (`*.json`) |
 | `war3map.wts` | trigger strings (`TRIGSTR_xxx`) | text, as-is |
-| `war3map.w3i` | map info | binary |
+| `war3map.w3i` | map info: name, players, forces, options, fog, … (format v25–v39) | **JSON** (`war3map.w3i.json`) |
 | `war3map.w3e`, `.wpm`, `.shd`, `.doo`, `war3mapUnits.doo` | terrain, pathing, shadows, doodads, placed units | binary |
 | `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | binary |
 | `war3map.wtg/.wct` | GUI triggers / custom script text | binary |
@@ -100,6 +100,14 @@ The app reads the game's files straight from the CASC storage in `Data/`:
   `FileAliases.json` and `.blp`→`.dds` fallback.
 - Settings: `game.installDir`, `game.graphicsMode`.
 
+### Map properties
+
+The **Scenario** sidebar (or F7) opens `war3map.w3i.json` as a form: description, loading and
+prologue screens, map options, environment (weather, fog, water, camera zoom), players and
+forces. Texts that live in the string table (`TRIGSTR_…`) are edited in `war3map.wts` directly,
+changing only that string. Formats v25 (TFT) through v39 (3.0) are supported; v32–v39 follow
+War3Net / wc3libs and are verified byte-exact against the game's own 3.0 campaign maps.
+
 ## Workflow with the World Editor
 
 1. **Import .w3x as New Project…**, then commit the folder.
@@ -141,6 +149,13 @@ export function activate(w3, ctx) {
   ctx.subscriptions.push(w3.commands.register("me.stats.run", () => w3.window.showInfo("hi")));
 }
 ```
+
+**Replacing built-ins.** Every built-in can be turned off: `"extensions.disabled": ["w3.objectEditor"]`
+in settings (or the Disable button in the Extensions view; applies after a reload). To make a
+different editor the default for some files without disabling anything, map a glob to an editor
+id: `"editorAssociations": { "*.w3u.json": "my.objectEditor" }`, or use *Configure Default Editor
+for This File Type…*. Extensions with an id that is already taken are skipped (see the Extension
+Host log), so a replacement uses its own id plus one of these two settings.
 
 Extensions activate lazily: a contributed command, view or editor activates
 its extension on first use. `"activationEvents": ["onStartup"]` loads it

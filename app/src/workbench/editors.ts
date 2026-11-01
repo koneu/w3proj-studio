@@ -31,6 +31,8 @@ export class EditorService {
   private active: Tab | null = null;
   readonly onDidChangeActive = new Emitter<string | null>();
   activate: (event: string) => Promise<void> = async () => {};
+  /** "editorAssociations" setting: glob → editor id; checked before manifest defaults. */
+  associations: () => Record<string, string> = () => ({});
   /** Fallback when no contribution matches: decides text vs binary. */
   fallback: (path: string) => Promise<string> = async () => "w3.textEditor";
   confirm: (message: string, ...actions: string[]) => Promise<string | undefined> = async () => undefined;
@@ -56,6 +58,14 @@ export class EditorService {
       .sort((a, b) => (a.priority === "option" ? 1 : 0) - (b.priority === "option" ? 1 : 0));
   }
 
+  /** Editor chosen for a path by the "editorAssociations" setting, if it exists. */
+  associated(path: string): string | undefined {
+    for (const [glob, id] of Object.entries(this.associations())) {
+      if (globMatch(glob, path) && this.contributions.some((c) => c.id === id)) return id;
+    }
+    return undefined;
+  }
+
   allContributions() {
     return this.contributions;
   }
@@ -70,11 +80,11 @@ export class EditorService {
     const sameFile = this.tabs.find((t) => t.path === path);
     if (sameFile && providerId) await this.close(sameFile);
 
-    let id = providerId ?? this.candidates(path).find((c) => c.priority !== "option")?.id;
+    let id = providerId ?? this.associated(path) ?? this.candidates(path).find((c) => c.priority !== "option")?.id;
     id ??= await this.fallback(path);
     if (!this.providers.has(id)) await this.activate(`onEditor:${id}`);
     const provider = this.providers.get(id);
-    if (!provider) throw new Error(`no editor provider ${id}`);
+    if (!provider) throw new Error(`no editor provider ${id} — is its extension disabled ("extensions.disabled") or failed to load?`);
 
     const el = h("div.editor-pane");
     const title = path.startsWith("w3:")

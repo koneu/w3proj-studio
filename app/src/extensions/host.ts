@@ -7,6 +7,8 @@ export interface ExtensionRecord {
   dir: string | null;
   load: () => Promise<ExtensionModule>;
   active: boolean;
+  /** Listed in "extensions.disabled": contributes nothing and never activates. */
+  disabled: boolean;
   activating?: Promise<void>;
   error?: string;
   ctx?: ExtensionContext;
@@ -28,6 +30,7 @@ export class ExtensionHost {
     private api: W3Api,
     private contribute: (rec: ExtensionRecord) => void,
     private log: (line: string) => void,
+    private isDisabled: (id: string) => boolean = () => false,
   ) {}
 
   addBuiltins() {
@@ -35,7 +38,7 @@ export class ExtensionHost {
     const modules = import.meta.glob<ExtensionModule>("../builtin/*/index.ts");
     for (const [path, manifest] of Object.entries(manifests)) {
       const load = modules[path.replace("extension.json", "index.ts")];
-      this.add({ manifest, source: "builtin", dir: null, load: load ?? (async () => ({ activate() {} })), active: false });
+      this.add({ manifest, source: "builtin", dir: null, load: load ?? (async () => ({ activate() {} })), active: false, disabled: false });
     }
   }
 
@@ -56,17 +59,19 @@ export class ExtensionHost {
           URL.revokeObjectURL(url);
         }
       };
-      this.add({ manifest: ext.manifest, source: ext.source, dir: ext.dir, load, active: false });
+      this.add({ manifest: ext.manifest, source: ext.source, dir: ext.dir, load, active: false, disabled: false });
     }
   }
 
   private add(rec: ExtensionRecord) {
+    rec.disabled = this.isDisabled(rec.manifest.id);
     this.extensions.push(rec);
-    this.contribute(rec);
+    if (rec.disabled) this.log(`${rec.manifest.id} is disabled (setting "extensions.disabled")`);
+    else this.contribute(rec);
   }
 
   async fire(event: string) {
-    const matching = this.extensions.filter((e) => !e.active && !e.error && this.handles(e, event));
+    const matching = this.extensions.filter((e) => !e.active && !e.disabled && !e.error && this.handles(e, event));
     await Promise.all(matching.map((e) => this.activate(e)));
   }
 

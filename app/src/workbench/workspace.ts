@@ -69,6 +69,10 @@ export class SettingsService implements Settings {
     /** Art set for resolving game paths: "sd", "hd" or "de". */
     "game.graphicsMode": "hd",
     "recentProjects": [],
+    /** Extension ids that are not loaded (built-ins included). Reload to apply. */
+    "extensions.disabled": [],
+    /** File glob → editor id, e.g. { "*.w3u.json": "w3.textEditor" }. */
+    "editorAssociations": {},
   };
 
   async load(path: string) {

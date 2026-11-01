@@ -147,6 +147,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const markDirty = () => doc.setDirty(serialize() !== saved);
 
         const listEl = h("div.obj-list");
+        // Created once and re-attached on every render, so typing keeps focus
+        // and caret (a fresh input per render lost both after each key).
+        const fieldSearch = h("input.obj-field-search", { placeholder: "Filter fields…" });
+        fieldSearch.addEventListener("input", () => { fieldFilter = fieldSearch.value; renderDetail(); });
         const detailEl = h("div.obj-detail");
         const status = h("div.obj-status");
         const search = h("input.obj-search", { placeholder: "Filter by id or name…", oninput: () => { filter = search.value.toLowerCase(); renderList(); } });
@@ -348,6 +352,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const renderDetail = () => {
+          const focused = document.activeElement === fieldSearch;
+          const caret = [fieldSearch.selectionStart, fieldSearch.selectionEnd] as const;
+          renderDetailInner();
+          if (focused) {
+            fieldSearch.focus();
+            fieldSearch.setSelectionRange(caret[0], caret[1]);
+          }
+        };
+        const renderDetailInner = () => {
           // Edits can change names and the clean-up count in the list too.
           renderList();
           const scroll = detailEl.scrollTop;
@@ -393,10 +406,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const other = modLists(o).flatMap((l) => l.mods).filter((m) => !known.has(m));
           sections.push(rawTable(o, other, kd ? "Other modifications" : "Modifications"));
 
-          const fieldSearch = h("input.obj-field-search", {
-            placeholder: "Filter fields…", value: fieldFilter,
-            oninput: () => { fieldFilter = fieldSearch.value; renderDetail(); fieldSearch.focus(); },
-          });
           const parts: (HTMLElement | null)[] = [
             h("div.obj-detail-header", {},
               h("h2", {}, nameOf(o) || "(unnamed)"),
@@ -472,10 +481,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 h("h3", {}, cat),
                 h("table.obj-table", {}, h("tbody", {}, ...rows)))) : [h("div.muted", {}, "None.")]));
           };
-          const fieldSearch = h("input.obj-field-search", {
-            placeholder: "Filter fields…", value: fieldFilter,
-            oninput: () => { fieldFilter = fieldSearch.value; renderDetail(); fieldSearch.focus(); },
-          });
           detailEl.replaceChildren(
             header,
             h("div.obj-detail-toolbar", {},
