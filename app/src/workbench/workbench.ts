@@ -1,0 +1,247 @@
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import type { W3Api } from "../extensions/api";
+import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
+import { invoke, listen, NotUtf8Error } from "./backend";
+import { CommandService } from "./commands";
+import { h } from "./dom";
+import { EditorService } from "./editors";
+import { GAME_SCHEME, GameService } from "./game";
+import { Notifications, Progress } from "./notifications";
+import { OutputPanel } from "./output";
+import { QuickInput } from "./quickinput";
+import { StatusBar } from "./statusbar";
+import { ViewService } from "./views";
+import { SettingsService, WorkspaceService } from "./workspace";
+
+const TEXT_EXT = /\.(j|lua|ai|txt|wts|json|toml|fdf|toc|slk|md|csv|ini|xml|html|css|js|ts|gitignore|gitattributes)$/i;
+
+export class Workbench {
+  readonly commands = new CommandService();
+  readonly views = new ViewService();
+  readonly settings = new SettingsService();
+  readonly workspace = new WorkspaceService(this.settings);
+  readonly output = new OutputPanel();
+  readonly game = new GameService(this.settings);
+  readonly editors: EditorService;
+  readonly statusBar: StatusBar;
+  readonly notifications: Notifications;
+  readonly quickInput: QuickInput;
+  readonly progress: Progress;
+  readonly host: ExtensionHost;
+  readonly api: W3Api;
+  private log = this.output.channel("Extension Host");
+
+  constructor(root: HTMLElement) {
+    const isGame = (p: string) => p.startsWith(GAME_SCHEME);
+    const gamePath = (p: string) => p.slice(GAME_SCHEME.length);
+    this.editors = new EditorService({
+      resolve: (p) => (p.startsWith("w3:") || isGame(p) ? null : this.workspace.resolve(p)),
+      readOnly: isGame,
+      readText: async (p) => {
+        if (!isGame(p)) return this.workspace.readText(p);
+        try {
+          return new TextDecoder("utf-8", { fatal: true }).decode(await this.game.read(gamePath(p)));
+        } catch (e) {
+          if (e instanceof TypeError) throw new NotUtf8Error(p);
+          throw e;
+        }
+      },
+      readBytes: (p) => (isGame(p) ? this.game.read(gamePath(p)) : this.workspace.readBytes(p)),
+      writeText: async (p, t) => {
+        if (isGame(p)) throw new Error("game files are read-only");
+        await this.workspace.writeText(p, t);
+        // Settings edited as JSON take effect on save.
+        if (p === this.settings.settingsPath()) await this.settings.load(p);
+      },
+    });
+    this.statusBar = new StatusBar((c) => this.run(c));
+    this.progress = new Progress(this.statusBar.progress);
+
+    const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
+    root.append(main, this.statusBar.root);
+    this.notifications = new Notifications(root);
+    this.quickInput = new QuickInput(root);
+
+    this.api = this.createApi();
+    this.host = new ExtensionHost(this.api, (rec) => this.applyContributions(rec), (l) => this.log.append(l));
+    const fire = (event: string) => this.host.fire(event);
+    this.commands.activate = fire;
+    this.views.activate = fire;
+    this.editors.activate = fire;
+    this.views.run = (c) => this.run(c);
+    this.editors.confirm = (m, ...a) => this.notifications.show("warning", m, a);
+    this.editors.fallback = async (path) => {
+      if (path.startsWith("w3:")) throw new Error(`unknown virtual document ${path}`);
+      if (TEXT_EXT.test(path)) return "w3.textEditor";
+      const read = isGame(path) ? this.game.read(gamePath(path)) : this.workspace.readBytes(path);
+      const bytes = await read.catch(() => new Uint8Array());
+      const sample = bytes.subarray(0, 4096);
+      return sample.includes(0) ? "w3.hexViewer" : "w3.textEditor";
+    };
+    this.registerCoreCommands();
+    this.registerKeybindings();
+  }
+
+  async start() {
+    const paths = await invoke<{ settings: string; user_extensions: string }>("app_paths");
+    await this.settings.load(paths.settings);
+    this.host.addBuiltins();
+    try {
+      this.host.addExternal(await invoke("extensions_scan", { projectRoot: null }));
+    } catch (e) {
+      this.log.append(`could not scan user extensions: ${e}`);
+    }
+    await this.host.fire("onStartup");
+    await this.host.fire("*");
+    await this.views.showContainer("explorer");
+
+    // Projects can ship their own extensions in .w3proj/extensions.
+    let scannedRoot: string | null = null;
+    this.workspace.onDidChange.on(async () => {
+      const root = this.workspace.project()?.root ?? null;
+      if (!root || root === scannedRoot) return;
+      scannedRoot = root;
+      try {
+        this.host.addExternal(await invoke("extensions_scan", { projectRoot: root }));
+        await this.host.fire("onStartup");
+        await this.host.fire("*");
+      } catch (e) {
+        this.log.append(`could not scan project extensions: ${e}`);
+      }
+    });
+  }
+
+  run(command: string, ...args: unknown[]) {
+    this.commands.execute(command, ...args).catch((e) => {
+      this.notifications.show("error", `${this.commands.info(command)?.title ?? command}: ${e?.message ?? e}`);
+    });
+  }
+
+  private applyContributions(rec: ExtensionRecord) {
+    const c = rec.manifest.contributes ?? {};
+    for (const cmd of c.commands ?? []) this.commands.contribute(rec.manifest.id, cmd);
+    for (const vc of c.viewContainers ?? []) this.views.contributeContainer(vc);
+    for (const v of c.views ?? []) this.views.contributeView(v);
+    for (const e of c.editors ?? []) this.editors.contribute(rec.manifest.id, e);
+  }
+
+  private createApi(): W3Api {
+    const wb = this;
+    return {
+      version: "0.1.0",
+      commands: {
+        register: (id, handler) => wb.commands.register(id, handler),
+        execute: (id, ...args) => wb.commands.execute(id, ...args),
+      },
+      views: {
+        register: (id, provider) => wb.views.register(id, provider),
+        refresh: (id) => wb.views.refresh(id),
+      },
+      editors: {
+        registerProvider: (id, provider) => wb.editors.registerProvider(id, provider),
+        open: (path, providerId) => wb.editors.open(path, providerId),
+        activePath: () => wb.editors.activePath(),
+        closeAll: () => wb.editors.closeAll(),
+      },
+      window: {
+        showInfo: (m, ...a) => wb.notifications.show("info", m, a),
+        showWarning: (m, ...a) => wb.notifications.show("warning", m, a),
+        showError: (m, ...a) => wb.notifications.show("error", m, a),
+        quickPick: (items, opts) => wb.quickInput.pick(items, opts),
+        inputBox: (opts) => wb.quickInput.ask(opts),
+        pickFile: async (opts) => (await openDialog({ title: opts?.title, filters: opts?.filters, multiple: false, directory: false })) as string | null,
+        pickFolder: async (opts) => (await openDialog({ title: opts?.title, directory: true, multiple: false })) as string | null,
+        pickSaveFile: async (opts) => (await saveDialog({ title: opts?.title, defaultPath: opts?.defaultPath, filters: opts?.filters })) ?? null,
+        withProgress: (title, task) => wb.progress.run(title, task),
+      },
+      statusBar: { add: (opts) => wb.statusBar.add(opts) },
+      output: { channel: (name) => wb.output.channel(name) },
+      workspace: {
+        project: () => wb.workspace.project(),
+        open: (p) => wb.workspace.open(p),
+        close: () => wb.workspace.close(),
+        files: () => wb.workspace.files(),
+        refresh: () => wb.workspace.refresh(),
+        resolve: (p) => wb.workspace.resolve(p),
+        readText: (p) => wb.workspace.readText(p),
+        writeText: (p, t) => wb.workspace.writeText(p, t),
+        readBytes: (p) => wb.workspace.readBytes(p),
+        onDidChange: (l) => wb.workspace.onDidChange.on(l),
+      },
+      settings: wb.settings,
+      game: {
+        info: () => wb.game.info(),
+        list: () => wb.game.list(),
+        resolve: (p) => wb.game.resolve(p),
+        read: (p) => wb.game.read(p),
+        readText: (p) => wb.game.readText(p),
+      },
+      backend: { invoke, listen },
+      extensions: {
+        all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, error: e.error })),
+      },
+    };
+  }
+
+  private registerCoreCommands() {
+    const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: { keybinding?: string; category?: string; hidden?: boolean } = {}) => {
+      this.commands.contribute("core", { id, title, category: extra.category ?? "View", ...extra });
+      this.commands.register(id, run);
+    };
+    c("workbench.commandPalette", "Show All Commands", async () => {
+      const items = this.commands.all().map((cmd) => ({
+        label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title,
+        description: cmd.keybinding?.toUpperCase(),
+        value: cmd.id,
+      }));
+      items.sort((a, b) => a.label.localeCompare(b.label));
+      const pick = await this.quickInput.pick(items, { placeholder: "Type a command" });
+      if (pick) this.run(pick.value!);
+    }, { keybinding: "ctrl+shift+p" });
+    c("workbench.quickOpen", "Go to File…", async () => {
+      const files = this.workspace.files();
+      if (!files.length) return;
+      const pick = await this.quickInput.pick(
+        files.map((f) => ({ label: f.path.split("/").pop()!, description: f.path, value: f.path })),
+        { placeholder: "Search files by name" },
+      );
+      if (pick) await this.editors.open(pick.value!);
+    }, { keybinding: "ctrl+p", category: "Go" });
+    c("workbench.toggleSidebar", "Toggle Side Bar", () => this.views.toggleSidebar(), { keybinding: "ctrl+b" });
+    c("workbench.togglePanel", "Toggle Output Panel", () => this.output.toggle(), { keybinding: "ctrl+j" });
+    c("workbench.save", "Save", () => this.editors.save(), { keybinding: "ctrl+s", category: "File" });
+    c("workbench.closeEditor", "Close Editor", () => this.editors.closeActive(), { keybinding: "ctrl+w", category: "File" });
+    c("workbench.reopenWith", "Reopen Editor With…", async () => {
+      const path = this.editors.activePath();
+      if (!path) return;
+      const options = [...this.editors.candidates(path)];
+      for (const id of ["w3.textEditor", "w3.hexViewer"]) {
+        const contrib = this.editors.allContributions().find((e) => e.id === id);
+        if (contrib && !options.includes(contrib)) options.push(contrib);
+      }
+      const pick = await this.quickInput.pick(options.map((o) => ({ label: o.title, description: o.extensionId, value: o.id })), { placeholder: `Open ${path} with…` });
+      if (pick) await this.editors.open(path, pick.value!);
+    }, { category: "File" });
+    c("workbench.openSettings", "Open Settings (JSON)", async () => {
+      const p = this.settings.settingsPath();
+      if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("worldEditor.path", this.settings.get("worldEditor.path"));
+      await this.editors.open(p, "w3.textEditor");
+    }, { category: "Preferences" });
+    c("workbench.reload", "Reload Window", () => location.reload(), { category: "Developer", keybinding: "ctrl+r" });
+    c("workbench.showLog", "Show Extension Host Log", () => this.log.show(), { category: "Developer" });
+  }
+
+  private registerKeybindings() {
+    window.addEventListener("keydown", (e) => {
+      const chord = CommandService.chord(e);
+      const cmd = this.commands.forChord(chord);
+      if (cmd) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.run(cmd.id);
+      }
+    }, true);
+  }
+}
+
+export { NotUtf8Error };

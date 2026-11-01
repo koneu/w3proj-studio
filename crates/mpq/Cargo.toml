@@ -1,0 +1,12 @@
+[package]
+name = "mpq"
+description = "MPQ v1 archive reader/writer for Warcraft III maps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+flate2.workspace = true
+bzip2.workspace = true
+explode.workspace = true

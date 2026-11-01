@@ -1,0 +1,15 @@
+{
+  "id": "w3.gameData",
+  "name": "Game Data",
+  "version": "0.1.0",
+  "description": "Browse and open the installed game's files (models, textures, SLKs, scripts) read-only.",
+  "contributes": {
+    "viewContainers": [{ "id": "game", "title": "Game Data", "icon": "⛁", "order": 10 }],
+    "views": [{ "id": "w3.game.files", "title": "Stored Files", "container": "game" }],
+    "commands": [
+      { "id": "w3.game.openPath", "title": "Open Game File…", "category": "Game Data" },
+      { "id": "w3.game.info", "title": "Show Storage Info", "category": "Game Data" },
+      { "id": "w3.game.setMode", "title": "Set Graphics Mode (SD/HD/DE)…", "category": "Game Data" }
+    ]
+  }
+}

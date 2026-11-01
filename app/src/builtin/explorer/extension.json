@@ -1,0 +1,16 @@
+{
+  "id": "w3.explorer",
+  "name": "Explorer",
+  "version": "0.1.0",
+  "description": "File tree of the open map project.",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "viewContainers": [{ "id": "explorer", "title": "Explorer", "icon": "▤", "order": 0 }],
+    "views": [{ "id": "w3.explorer.files", "title": "Project", "container": "explorer" }],
+    "commands": [
+      { "id": "w3.explorer.refresh", "title": "Refresh Explorer", "category": "Explorer" },
+      { "id": "w3.explorer.collapseAll", "title": "Collapse All", "category": "Explorer" },
+      { "id": "w3.explorer.focus", "title": "Show Explorer", "category": "View", "keybinding": "ctrl+shift+e" }
+    ]
+  }
+}

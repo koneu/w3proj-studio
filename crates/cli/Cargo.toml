@@ -1,0 +1,17 @@
+[package]
+name = "w3proj-cli"
+description = "Command line for unpacking and packing Warcraft III map projects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "w3proj"
+path = "src/main.rs"
+
+[dependencies]
+mpq.workspace = true
+casc.workspace = true
+w3proj.workspace = true
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }

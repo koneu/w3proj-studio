@@ -1,0 +1,13 @@
+[package]
+name = "w3proj"
+description = "Unpacked, git-friendly Warcraft III map projects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mpq.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true

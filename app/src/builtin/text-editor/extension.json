@@ -1,0 +1,15 @@
+{
+  "id": "w3.textEditor",
+  "name": "Text Editor",
+  "version": "0.1.0",
+  "description": "CodeMirror editor with JASS, Lua and JSON highlighting.",
+  "contributes": {
+    "editors": [
+      {
+        "id": "w3.textEditor",
+        "title": "Text Editor",
+        "patterns": ["*.j", "*.lua", "*.ai", "*.txt", "*.wts", "*.json", "*.toml", "*.fdf", "*.toc", "*.slk", "*.md", ".gitignore", ".gitattributes"]
+      }
+    ]
+  }
+}

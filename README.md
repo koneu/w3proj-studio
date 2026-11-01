@@ -1,0 +1,157 @@
+# W3Proj Studio
+
+A modular editor for Warcraft III maps. Maps live as **unpacked, git-friendly
+project folders**, and packing to `.w3x` is a release step. Binary map data
+(terrain, doodads, regions…) is still edited in Blizzard's World Editor, which
+this tool launches and syncs back from.
+
+## How the World Editor stores a map (and what we do with it)
+
+A `.w3x` is a 512-byte `HM3W` header (name, flags, max players) followed by an
+MPQ archive. The archive holds files like:
+
+| file | content | in the project |
+|---|---|---|
+| `war3map.j` / `.lua` | map script (triggers compile to this) | text, as-is |
+| `war3map.w3u/.w3t/.w3a/.w3b/.w3d/.w3h/.w3q` | object data: unit/item/ability/… modifications | **JSON** (`*.json`) |
+| `war3map.wts` | trigger strings (`TRIGSTR_xxx`) | text, as-is |
+| `war3map.w3i` | map info | binary |
+| `war3map.w3e`, `.wpm`, `.shd`, `.doo`, `war3mapUnits.doo` | terrain, pathing, shadows, doodads, placed units | binary |
+| `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | binary |
+| `war3map.wtg/.wct` | GUI triggers / custom script text | binary |
+| `war3map.imp`, `war3mapImported\*` | imports | as-is |
+
+Every codec is checked on unpack: a file is stored as JSON only if
+`encode(decode(file))` gives back the original bytes; otherwise it is kept raw.
+So **pack is always lossless**. Verified against 676 local maps: 0 mismatches.
+The object-data codec round-trips every file in that set.
+
+## Project layout
+
+```
+MyMap/
+  w3proj.toml       map header + archive/pack settings
+  map/              one file per archive file (object data as *.json)
+  unnamed/          files of protected maps whose names can't be recovered (not packed)
+  build/            pack output (git-ignored)
+  .w3proj/extensions/   optional project-local extensions
+```
+
+## Repository layout
+
+```
+crates/mpq       MPQ v1 reader/writer (zlib/bzip2/pkware, encrypted tables, deterministic output)
+crates/casc      read-only CASC reader for the installed game (index, BLTE, encoding, text root,
+                 mod layering SD/HD/DE + locale + FileAliases + .blp→.dds fallback)
+crates/w3proj    project format, codecs, unpack/sync/pack/verify
+crates/cli       `w3proj` command line
+app/             Tauri desktop app
+  src-tauri/     Rust backend (thin: exposes the core, files, launching WE/game)
+  src/workbench/ VS Code-like shell: activity bar, views, tabs, palette, status bar, output
+  src/extensions/api.ts   the public extension API
+  src/builtin/   built-in extensions (explorer, text editor, object editor, texture viewer, map project, …)
+    image-viewer/decode/   dependency-free BLP1/BLP2, DDS (BC1–5) and TGA decoders, incl. a
+                           baseline + progressive JPEG decoder for BLP1's 4-channel JPEGs
+```
+
+## Build & run
+
+Requires Rust (the toolchain version is pinned in `rust-toolchain.toml`), Node 20+, and WebView2.
+
+```sh
+cargo test --workspace
+cargo build --release -p w3proj-cli        # → target/release/w3proj.exe
+
+cd app
+npm install
+npx tauri dev                              # run the editor
+npx tauri build                            # installer in target/release/bundle
+```
+
+### CLI
+
+```sh
+w3proj unpack MyMap.w3x MyMap/      # create or re-sync a project
+w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x)
+w3proj verify *.w3x                 # unpack→pack in memory, compare every file
+w3proj ls MyMap.w3x                 # sizes, stored sizes, flags, table sizes
+w3proj cat MyMap.w3x war3map.j
+
+# the installed game's own data (default install: C:\Program Files (x86)\Warcraft III)
+w3proj game info                               # build, locale, layer order
+w3proj game ls footman                         # stored files containing "footman"
+w3proj game --mode hd resolve Units/Human/Footman/Footman.mdx
+w3proj game cat Units/UnitMetaData.slk
+```
+
+### Game data
+
+The app reads the game's files straight from the CASC storage in `Data/`:
+
+- The **Game Data** sidebar lets you browse and search all ~94k stored files and open them
+  read-only, so textures open in the Texture Viewer and SLKs and scripts in the text editor.
+- The object editor shows every field that applies to an object, with World Editor labels
+  (`uhpm` → "Hit Points Maximum (Base)") and the inherited value from the game tables;
+  editing an inherited value creates the modification, ↺ resets it. Abilities and upgrades
+  show one row per level. **+ New** picks the base object by name and suggests the next
+  free id (`hfoo` → `h000`); **Open Object Editor…** (F6) creates missing object files.
+- Extensions use `w3.game.read("Units\\UnitData.slk")` etc. Plain paths resolve like the
+  game does: locale → art layer (`game.graphicsMode`: `hd`/`sd`/`de`) → base, with
+  `FileAliases.json` and `.blp`→`.dds` fallback.
+- Settings: `game.installDir`, `game.graphicsMode`.
+
+## Workflow with the World Editor
+
+1. **Import .w3x as New Project…**, then commit the folder.
+2. Edit scripts and object data in the app, or press **F5 — Open in World
+   Editor**. That packs `build/<name>.edit.w3x`, starts
+   `World Editor.exe -launch -loadfile <map>`, and watches the file. Each save
+   in the World Editor syncs back into `map/`. The `project.syncOnWorldEditorSave`
+   setting takes `ask`, `always` or `never`.
+3. **Ctrl+Shift+B — Pack Release .w3x**. **Ctrl+F5** packs and starts the game
+   with the map.
+
+The editor and game paths are in *Preferences: Open Settings (JSON)*. They default
+to `_retail_\x86_64`.
+
+## Extensions
+
+Everything beyond the shell is an extension. Built-ins and user extensions use
+the same API (`app/src/extensions/api.ts`):
+
+```
+%APPDATA%\dev.w3proj.studio\extensions\<name>\extension.json + main.js
+<project>\.w3proj\extensions\<name>\…
+```
+
+```json
+{
+  "id": "me.stats", "name": "Stats", "version": "0.1.0", "main": "main.js",
+  "contributes": {
+    "commands": [{ "id": "me.stats.run", "title": "Run Stats", "keybinding": "ctrl+alt+s" }],
+    "viewContainers": [{ "id": "stats", "title": "Stats", "icon": "∑" }],
+    "views": [{ "id": "me.stats.view", "title": "Stats", "container": "stats" }],
+    "editors": [{ "id": "me.stats.editor", "title": "Stats Editor", "patterns": ["*.w3i"] }]
+  }
+}
+```
+
+```js
+export function activate(w3, ctx) {
+  ctx.subscriptions.push(w3.commands.register("me.stats.run", () => w3.window.showInfo("hi")));
+}
+```
+
+Extensions activate lazily: a contributed command, view or editor activates
+its extension on first use. `"activationEvents": ["onStartup"]` loads it
+immediately. *Extensions: Create Sample Extension* writes a working example.
+
+## Known limits / next steps
+
+- Binary formats (`w3e`, `doo`, `w3i`, `wtg`, …) are stored raw. New codecs
+  plug into `crates/w3proj/src/codec.rs` and are verified automatically.
+- Game data is read-only, and only files stored locally can be read (other
+  locales aren't downloaded). Encrypted CASC entries aren't supported; none
+  are present in 3.0.1.
+- Files of protected maps whose names were stripped can't be repacked.
+- Archive names that aren't UTF-8 (rare, old Asian-locale maps) are not recovered.

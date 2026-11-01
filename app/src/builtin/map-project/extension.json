@@ -1,0 +1,21 @@
+{
+  "id": "w3.mapProject",
+  "name": "Map Project",
+  "version": "0.1.0",
+  "description": "Import, sync and pack .w3x maps; round-trip with the World Editor and the game.",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "commands": [
+      { "id": "w3.project.open", "title": "Open Project Folder…", "category": "Project", "keybinding": "ctrl+o" },
+      { "id": "w3.project.importMap", "title": "Import .w3x as New Project…", "category": "Project" },
+      { "id": "w3.project.syncFromMap", "title": "Sync Project from .w3x…", "category": "Project" },
+      { "id": "w3.project.pack", "title": "Pack Release .w3x", "category": "Project", "keybinding": "ctrl+shift+b" },
+      { "id": "w3.project.packAs", "title": "Pack Release .w3x As…", "category": "Project" },
+      { "id": "w3.project.openInWorldEditor", "title": "Open in World Editor", "category": "Project", "keybinding": "f5" },
+      { "id": "w3.project.testMap", "title": "Test Map in Warcraft III", "category": "Project", "keybinding": "ctrl+f5" },
+      { "id": "w3.project.reveal", "title": "Reveal Project in File Explorer", "category": "Project" },
+      { "id": "w3.project.showManifest", "title": "Open Project Manifest", "category": "Project" },
+      { "id": "w3.project.close", "title": "Close Project", "category": "Project" }
+    ]
+  }
+}

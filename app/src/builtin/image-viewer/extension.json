@@ -1,0 +1,9 @@
+{
+  "id": "w3.imageViewer",
+  "name": "Texture Viewer",
+  "version": "0.1.0",
+  "description": "Views BLP1/BLP2, DDS (BC1–BC5) and TGA textures with mip levels and channel isolation.",
+  "contributes": {
+    "editors": [{ "id": "w3.imageViewer", "title": "Texture Viewer", "patterns": ["*.blp", "*.dds", "*.tga"] }]
+  }
+}

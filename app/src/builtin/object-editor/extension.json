@@ -1,0 +1,46 @@
+{
+  "id": "w3.objectEditor",
+  "name": "Object Editor",
+  "version": "0.1.0",
+  "description": "Table editor for unit, item, ability, buff, doodad, destructable and upgrade data.",
+  "contributes": {
+    "editors": [
+      {
+        "id": "w3.objectEditor",
+        "title": "Object Editor",
+        "patterns": [
+          "*.w3u.json",
+          "*.w3t.json",
+          "*.w3a.json",
+          "*.w3b.json",
+          "*.w3d.json",
+          "*.w3h.json",
+          "*.w3q.json"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "id": "w3.objectEditor.open",
+        "title": "Open Object Editor…",
+        "category": "Object Editor",
+        "keybinding": "f6"
+      }
+    ],
+    "viewContainers": [
+      {
+        "id": "objects",
+        "title": "Object Editor",
+        "icon": "♞",
+        "order": 5
+      }
+    ],
+    "views": [
+      {
+        "id": "w3.objects.kinds",
+        "title": "Object Data",
+        "container": "objects"
+      }
+    ]
+  }
+}

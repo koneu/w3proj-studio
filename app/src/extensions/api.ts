@@ -1,0 +1,212 @@
+// The public extension API. Built-in and user extensions get the same object;
+// nothing else in the workbench is reachable from an extension.
+
+export interface Disposable {
+  dispose(): void;
+}
+
+export interface CommandContribution {
+  id: string;
+  title: string;
+  category?: string;
+  /** e.g. "ctrl+shift+b", "f5" */
+  keybinding?: string;
+  /** Hide from the command palette. */
+  hidden?: boolean;
+}
+
+export interface ViewContainerContribution {
+  id: string;
+  title: string;
+  /** A short glyph shown in the activity bar. */
+  icon: string;
+  order?: number;
+}
+
+export interface ViewContribution {
+  id: string;
+  title: string;
+  container: string;
+}
+
+export interface EditorContribution {
+  id: string;
+  title: string;
+  /** Globs matched against the file's project path, e.g. "*.w3u.json", "map/**". */
+  patterns: string[];
+  /** "default" editors open on click; "option" ones only via "Reopen With…". */
+  priority?: "default" | "option";
+}
+
+export interface ExtensionManifest {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  main?: string;
+  /** "*" | "onStartup" | "onCommand:<id>" | "onView:<id>" | "onEditor:<id>" */
+  activationEvents?: string[];
+  contributes?: {
+    commands?: CommandContribution[];
+    viewContainers?: ViewContainerContribution[];
+    views?: ViewContribution[];
+    editors?: EditorContribution[];
+  };
+}
+
+export interface ViewProvider {
+  render(container: HTMLElement): void | Disposable;
+  /** Buttons in the view header. */
+  actions?: { icon: string; title: string; command: string }[];
+}
+
+export interface EditorDocument {
+  /** Project-relative path ("map/war3map.j") or a virtual uri ("w3:welcome"). */
+  readonly path: string;
+  /** Absolute path on disk, or null for virtual documents. */
+  readonly absolutePath: string | null;
+  /** Game files ("game:…") cannot be written. */
+  readonly readOnly: boolean;
+  readText(): Promise<string>;
+  readBytes(): Promise<Uint8Array>;
+  writeText(text: string): Promise<void>;
+  setDirty(dirty: boolean): void;
+}
+
+export interface EditorInstance {
+  save?(): Promise<void>;
+  focus?(): void;
+  dispose?(): void;
+}
+
+export interface EditorProvider {
+  resolve(container: HTMLElement, doc: EditorDocument): EditorInstance | Promise<EditorInstance>;
+}
+
+export interface QuickPickItem<T = unknown> {
+  label: string;
+  description?: string;
+  detail?: string;
+  value?: T;
+}
+
+export interface StatusBarItem extends Disposable {
+  text: string;
+  tooltip: string;
+  command?: string;
+}
+
+export interface OutputChannel {
+  append(line: string): void;
+  clear(): void;
+  show(): void;
+}
+
+export interface ProjectInfo {
+  root: string;
+  name: string;
+  manifest: any;
+  default_output: string;
+}
+
+export interface FileInfo {
+  path: string;
+  size: number;
+}
+
+export interface GameInfo {
+  version: string;
+  /** Installed text locale, e.g. "dede". */
+  locale: string;
+  entries: number;
+  stored: number;
+}
+
+export interface Settings {
+  get<T = unknown>(key: string, fallback?: T): T;
+  set(key: string, value: unknown): Promise<void>;
+  onDidChange(listener: (key: string) => void): Disposable;
+}
+
+export interface W3Api {
+  readonly version: string;
+  commands: {
+    register(id: string, handler: (...args: any[]) => unknown): Disposable;
+    execute<T = unknown>(id: string, ...args: any[]): Promise<T>;
+  };
+  views: {
+    register(id: string, provider: ViewProvider): Disposable;
+    /** Re-render a view (e.g. after its data changed). */
+    refresh(id: string): void;
+  };
+  editors: {
+    registerProvider(id: string, provider: EditorProvider): Disposable;
+    open(path: string, providerId?: string): Promise<void>;
+    activePath(): string | null;
+    /** Closes every editor without asking (used when files change on disk). */
+    closeAll(): Promise<void>;
+  };
+  window: {
+    showInfo(message: string, ...actions: string[]): Promise<string | undefined>;
+    showWarning(message: string, ...actions: string[]): Promise<string | undefined>;
+    showError(message: string, ...actions: string[]): Promise<string | undefined>;
+    quickPick<T>(items: QuickPickItem<T>[], opts?: { placeholder?: string }): Promise<QuickPickItem<T> | undefined>;
+    inputBox(opts?: { prompt?: string; value?: string; placeholder?: string }): Promise<string | undefined>;
+    pickFile(opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
+    pickFolder(opts?: { title?: string }): Promise<string | null>;
+    pickSaveFile(opts?: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
+    withProgress<T>(title: string, task: () => Promise<T>): Promise<T>;
+  };
+  statusBar: {
+    add(opts: { id: string; text: string; tooltip?: string; command?: string; align?: "left" | "right"; priority?: number }): StatusBarItem;
+  };
+  output: {
+    channel(name: string): OutputChannel;
+  };
+  workspace: {
+    /** The open project, or null. */
+    project(): ProjectInfo | null;
+    open(path: string): Promise<void>;
+    close(): void;
+    files(): FileInfo[];
+    refresh(): Promise<void>;
+    resolve(projectPath: string): string;
+    readText(projectPath: string): Promise<string>;
+    writeText(projectPath: string, text: string): Promise<void>;
+    readBytes(projectPath: string): Promise<Uint8Array>;
+    onDidChange(listener: () => void): Disposable;
+  };
+  settings: Settings;
+  /** The installed game's own files (CASC storage), read-only. Plain paths
+   *  like "Units\\UnitData.slk" resolve through the game's mod layers for
+   *  the configured graphics mode; full paths ("War3.w3mod:…") are exact. */
+  game: {
+    info(): Promise<GameInfo>;
+    /** Full paths of all stored files. */
+    list(): Promise<string[]>;
+    resolve(path: string): Promise<string | null>;
+    read(path: string): Promise<Uint8Array>;
+    /** UTF-8 text with any byte-order mark removed. */
+    readText(path: string): Promise<string>;
+  };
+  /** Escape hatch to the Rust backend commands. */
+  backend: {
+    invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
+    listen<T = unknown>(event: string, handler: (payload: T) => void): Promise<Disposable>;
+  };
+  extensions: {
+    all(): { manifest: ExtensionManifest; source: string; active: boolean; error?: string }[];
+  };
+}
+
+export interface ExtensionContext {
+  readonly extensionId: string;
+  /** Folder of a user/project extension; null for built-ins. */
+  readonly extensionPath: string | null;
+  readonly subscriptions: Disposable[];
+}
+
+export interface ExtensionModule {
+  activate(w3: W3Api, ctx: ExtensionContext): void | Promise<void>;
+  deactivate?(): void | Promise<void>;
+}

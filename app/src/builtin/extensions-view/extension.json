@@ -1,0 +1,14 @@
+{
+  "id": "w3.extensionsView",
+  "name": "Extensions View",
+  "version": "0.1.0",
+  "description": "Lists installed extensions and where user extensions live.",
+  "contributes": {
+    "viewContainers": [{ "id": "extensions", "title": "Extensions", "icon": "⧉", "order": 90 }],
+    "views": [{ "id": "w3.extensions.installed", "title": "Installed", "container": "extensions" }],
+    "commands": [
+      { "id": "w3.extensions.openFolder", "title": "Open User Extensions Folder", "category": "Extensions" },
+      { "id": "w3.extensions.createSample", "title": "Create Sample Extension", "category": "Extensions" }
+    ]
+  }
+}
