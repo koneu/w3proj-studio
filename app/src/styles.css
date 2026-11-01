@@ -333,3 +333,6 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .model-dot.pending { color: var(--fg-muted); }
 .model-dot.ok { color: #98c379; }
 .model-dot.missing { color: var(--error); }
+
+/* terrain viewer */
+.terrain-facts { padding: 8px 14px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }

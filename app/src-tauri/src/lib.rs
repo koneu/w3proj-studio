@@ -151,6 +151,24 @@ fn codec_canonicalize(app: AppHandle, root: String, path: String, text: String) 
     String::from_utf8(canonical).map_err(err)
 }
 
+/// Decodes a raw project file (e.g. `map/war3map.doo`) to JSON with the
+/// format definitions in effect, for viewers that read either form.
+#[tauri::command]
+fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<String> {
+    let rel = path.strip_prefix("map/").unwrap_or(&path);
+    let registry = Registry::for_project(Path::new(&root), &user_format_dirs(&app)?).map_err(err)?;
+    let name = w3proj::paths::to_archive_name(rel);
+    let bytes = std::fs::read(Path::new(&root).join(&path)).map_err(err)?;
+    let mut last = format!("no format definition reads {name}");
+    for codec in registry.for_archive_name(&name) {
+        match codec.decode(&name, &bytes) {
+            Ok(json) => return String::from_utf8(json).map_err(err),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(last)
+}
+
 /// The app's user format folder: `<config>/formats`.
 fn user_format_dirs(app: &AppHandle) -> CmdResult<Vec<PathBuf>> {
     Ok(vec![config_dir(app)?.join("formats")])
@@ -462,6 +480,7 @@ pub fn run() {
             project_pack,
             objects_canonicalize,
             codec_canonicalize,
+            codec_decode,
             formats_list,
             format_customize,
             fs_read_text,

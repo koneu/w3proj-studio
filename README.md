@@ -70,6 +70,7 @@ app/             Tauri desktop app
   src/extensions/api.ts   the public extension API
   src/builtin/   built-in extensions (explorer, text editor, object editor, texture viewer, map project, …)
     model-viewer/          MDX parser (v800–v1800) and WebGL2 renderer (GPU skinning)
+    terrain-viewer/        w3e parser, ground/water renderer, cliff and object placement
     image-viewer/decode/   dependency-free BLP1/BLP2, DDS (BC1–5) and TGA decoders, incl. a
                            baseline + progressive JPEG decoder for BLP1's 4-channel JPEGs
 ```
@@ -129,6 +130,16 @@ textures with load status. It reads MDX v800 (classic) through v1800 (Reforged),
 HD skin weights and LODs (LOD 1–3 start hidden) and the HD team-colour mask. Textures are
 looked up in the map first, then in the model's own game layer (`.blp`/`.tif` → `.dds`).
 Particles, ribbons, lights, cameras and PBR lighting aren't drawn yet.
+
+### Terrain viewer
+
+**F3** (or opening `war3map.w3e`) shows the map in 3D: ground textures blended the way the
+game does (corner-mask tile atlas with variations), cliff models, water, and placed doodads,
+destructables, units and items as models (from the game's skin tables; player colours for
+units). Drag or arrow keys pan, right-drag rotates, the wheel zooms. Reads `w3e` v11 (classic)
+and v12 (2.0). Raw `war3map.doo` / `war3mapUnits.doo` are decoded through the format engine
+(`codec_decode`) when the project doesn't have them as JSON. See OPEN_POINTS for what's
+approximated.
 
 ### Map properties
 

@@ -1,15 +1,15 @@
-// WebGL2 renderer for parsed MDX models: GPU skinning (bone matrices in a
+// WebGL2 rendering of parsed MDX models: GPU skinning (bone matrices in a
 // float texture), keyframe animation, Warcraft blend modes, team colour.
 // Particles, ribbons and texture animations are not drawn.
 
 import type { Extent, Model, Track } from "./mdx";
 
 export type Vec3 = [number, number, number];
-type Mat4 = Float32Array;
+export type Mat4 = Float32Array;
 
 // ------------------------------------------------------------------ math
 
-const mat4 = {
+export const mat4 = {
   identity(): Mat4 { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
   mul(a: Mat4, b: Mat4, out: Mat4 = new Float32Array(16)): Mat4 {
     for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
@@ -116,6 +116,9 @@ export const TEAM_COLORS: [string, Vec3][] = [
   ["Red", [255, 3, 3]], ["Blue", [0, 66, 255]], ["Teal", [28, 230, 185]], ["Purple", [84, 0, 129]],
   ["Yellow", [255, 252, 1]], ["Orange", [254, 138, 14]], ["Green", [32, 192, 0]], ["Pink", [229, 91, 176]],
   ["Gray", [149, 150, 151]], ["Light Blue", [126, 191, 241]], ["Dark Green", [16, 98, 70]], ["Brown", [78, 42, 4]],
+  ["Maroon", [155, 0, 0]], ["Navy", [0, 0, 195]], ["Turquoise", [0, 234, 255]], ["Violet", [190, 0, 254]],
+  ["Wheat", [235, 205, 135]], ["Peach", [248, 164, 139]], ["Mint", [191, 255, 128]], ["Lavender", [220, 185, 235]],
+  ["Coal", [40, 40, 40]], ["Snow", [235, 240, 255]], ["Emerald", [0, 120, 30]], ["Peanut", [164, 111, 51]],
 ];
 
 /** Textures for replaceable ids other than team colour/glow. */
@@ -135,9 +138,20 @@ const REPLACEABLE: Record<number, string> = {
 const VS = `#version 300 es
 precision highp float;
 in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec4 aBones; in vec4 aWeights;
-uniform mat4 uViewProj;
+uniform mat4 uViewProj; uniform mat4 uWorld;
 uniform highp sampler2D uBones;
+// Optional ground height map (R32F, one texel per terrain corner): cliff models
+// follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
+uniform highp sampler2D uHeight; uniform float uUseHeight; uniform vec4 uHeightRect;
 out vec3 vNormal; out vec2 vUV;
+float groundAt(vec2 p) {
+  vec2 g = clamp((p - uHeightRect.xy) / 128.0, vec2(0.0), uHeightRect.zw - 1.0);
+  ivec2 i0 = ivec2(floor(g)), i1 = min(i0 + 1, ivec2(uHeightRect.zw) - 1);
+  vec2 f = g - vec2(i0);
+  float a = mix(texelFetch(uHeight, i0, 0).r, texelFetch(uHeight, ivec2(i1.x, i0.y), 0).r, f.x);
+  float b = mix(texelFetch(uHeight, ivec2(i0.x, i1.y), 0).r, texelFetch(uHeight, i1, 0).r, f.x);
+  return mix(a, b, f.y);
+}
 mat4 bone(float id) {
   int i = int(id) * 4;
   return mat4(texelFetch(uBones, ivec2(i % 1024, i / 1024), 0), texelFetch(uBones, ivec2((i + 1) % 1024, (i + 1) / 1024), 0),
@@ -146,9 +160,11 @@ mat4 bone(float id) {
 void main() {
   mat4 m = aWeights.x * bone(aBones.x) + aWeights.y * bone(aBones.y) + aWeights.z * bone(aBones.z) + aWeights.w * bone(aBones.w);
   if (aWeights.x + aWeights.y + aWeights.z + aWeights.w < 0.001) m = mat4(1.0);
-  vNormal = mat3(m) * aNormal;
+  vNormal = mat3(uWorld) * mat3(m) * aNormal;
   vUV = aUV;
-  gl_Position = uViewProj * m * vec4(aPos, 1.0);
+  vec4 world = uWorld * m * vec4(aPos, 1.0);
+  if (uUseHeight > 0.5) world.z += groundAt(world.xy);
+  gl_Position = uViewProj * world;
 }`;
 
 const FS = `#version 300 es
@@ -174,7 +190,7 @@ const LINE_FS = `#version 300 es
 precision mediump float; uniform vec4 uColor; out vec4 outColor;
 void main() { outColor = uColor; }`;
 
-function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
+export function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
   const shader = (type: number, src: string) => {
     const s = gl.createShader(type)!;
     gl.shaderSource(s, src);
@@ -190,7 +206,7 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgr
   return p;
 }
 
-// ------------------------------------------------------------------ renderer
+// ------------------------------------------------------------------ GPU model
 
 export interface DecodedTexture {
   width: number;
@@ -217,7 +233,7 @@ export interface Stats {
 
 /** The model's stored extent, or (when it's empty, as in many HD models)
  *  the bind-pose box of the full-detail geosets. */
-function bounds(model: Model): Pick<Extent, "min" | "max"> {
+export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   const e = model.extent;
   if (e.max.some((v, i) => v > e.min[i])) return e;
   const min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
@@ -232,40 +248,109 @@ function bounds(model: Model): Pick<Extent, "min" | "max"> {
   return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
 }
 
-export class ModelRenderer {
-  readonly gl: WebGL2RenderingContext;
-  private prog: WebGLProgram;
-  private lineProg: WebGLProgram;
+const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect"] as const;
+
+/** Resources shared by every model drawn into one context. */
+interface Shared {
+  prog: WebGLProgram;
+  u: Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
+  white: WebGLTexture;
+  /** 1×1 team colour and generated team glow, per player colour. */
+  team: WebGLTexture[];
+  glow: WebGLTexture[];
+}
+const sharedByContext = new WeakMap<WebGL2RenderingContext, Shared>();
+
+function shared(gl: WebGL2RenderingContext): Shared {
+  let s = sharedByContext.get(gl);
+  if (!s) {
+    const solid = (rgba: number[]) => {
+      const t = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(rgba));
+      return t;
+    };
+    const glow = (rgb: Vec3) => {
+      const n = 64, data = new Uint8Array(n * n * 4), t = gl.createTexture()!;
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+        const d = Math.hypot(x - n / 2 + 0.5, y - n / 2 + 0.5) / (n / 2), a = Math.max(0, 1 - d) ** 2;
+        data.set([rgb[0], rgb[1], rgb[2], Math.round(a * 255)], (y * n + x) * 4);
+      }
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      return t;
+    };
+    const prog = compile(gl, VS, FS);
+    s = {
+      prog,
+      u: Object.fromEntries(UNIFORMS.map((n) => [n, gl.getUniformLocation(prog, n)])) as Shared["u"],
+      white: solid([255, 255, 255, 255]),
+      team: TEAM_COLORS.map(([, c]) => solid([...c, 255])),
+      glow: TEAM_COLORS.map(([, c]) => glow(c)),
+    };
+    sharedByContext.set(gl, s);
+  }
+  return s;
+}
+
+/** Uploads a decoded image with mipmaps. `flags` is the MDX texture's: bit 0
+ *  wraps width, bit 1 wraps height. */
+export function uploadTexture(gl: WebGL2RenderingContext, img: DecodedTexture, flags: number): WebGLTexture {
+  const t = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, flags & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, flags & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+  return t;
+}
+
+export type DrawPass = "opaque" | "blended" | "all";
+
+export interface DrawOptions {
+  /** Player colour index (TEAM_COLORS). */
+  team?: number;
+  wireframe?: boolean;
+  /** Opaque layers, blended layers, or both (opaque first). */
+  pass?: DrawPass;
+  /** Raise vertices by a terrain height map (R32F texture, one texel per corner). */
+  heightMap?: HeightMap;
+}
+
+export interface HeightMap {
+  texture: WebGLTexture;
+  /** World position of corner (0, 0). */
+  x: number;
+  y: number;
+  /** Corners per row / column. */
+  width: number;
+  height: number;
+}
+
+type Layer = Model["materials"][number]["layers"][number];
+
+/** One model's GPU resources in a WebGL2 context: pose it for a moment of an
+ *  animation, then draw it any number of times. */
+export class ModelGpu {
+  /** GPU texture per model texture; null until loaded. */
+  readonly textures: (WebGLTexture | null)[];
+  /** Hidden geosets (by index); HD lower-detail copies start hidden. */
+  readonly hidden = new Set<number>();
+  readonly stats: Stats;
+  private sh: Shared;
   private geosets: GpuGeoset[] = [];
-  private textures: (WebGLTexture | null)[] = [];
-  private white: WebGLTexture;
-  private teamColor: WebGLTexture;
-  private teamGlow: WebGLTexture;
-  private teamRgb: Vec3 = [...TEAM_COLORS[0][1]];
   private boneTex: WebGLTexture;
   private boneData: Float32Array;
   private nodeOrder: number[];
-  private grid: { vao: WebGLVertexArrayObject; count: number };
-  /** Hidden geosets (by index) and options. */
-  hidden = new Set<number>();
-  wireframe = false;
-  showGrid = true;
-  /** Camera orbit around `target`. */
-  yaw = -Math.PI / 2;
-  pitch = 0.35;
-  distance: number;
-  target: Vec3;
-  readonly stats: Stats;
+  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean }[] = [];
+  private geoAlpha = new Map<number, number>();
+  private geoColor = new Map<number, number[]>();
+  private clock: Clock = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
 
-  constructor(readonly canvas: HTMLCanvasElement, readonly model: Model) {
-    const gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: false });
-    if (!gl) throw new Error("WebGL2 is not available");
-    this.gl = gl;
-    this.prog = compile(gl, VS, FS);
-    this.lineProg = compile(gl, LINE_VS, LINE_FS);
-    this.white = this.solidTexture([255, 255, 255, 255]);
-    this.teamColor = this.solidTexture([...TEAM_COLORS[0][1], 255]);
-    this.teamGlow = this.glowTexture(TEAM_COLORS[0][1]);
+  constructor(readonly gl: WebGL2RenderingContext, readonly model: Model) {
+    this.sh = shared(gl);
     this.textures = model.textures.map(() => null);
 
     const maxId = Math.max(0, ...model.nodes.map((n, i) => (n ? i : 0)));
@@ -289,59 +374,25 @@ export class ModelRenderer {
       this.geosets.push(this.upload(g, gi));
       vertices += g.positions.length / 3;
       triangles += g.faces.length / 3;
+      if (g.lod > 0) this.hidden.add(gi);
     });
-    this.grid = this.makeGrid();
-
-    // Lower-detail copies (HD LOD 1-3) start hidden.
-    model.geosets.forEach((g, gi) => { if (g.lod > 0) this.hidden.add(gi); });
-
-    const e = bounds(model);
-    this.target = [(e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, (e.min[2] + e.max[2]) / 2];
-    this.distance = Math.max(80, Math.hypot(e.max[0] - e.min[0], e.max[1] - e.min[1], e.max[2] - e.min[2]) * 1.4);
     this.stats = { vertices, triangles, geosets: model.geosets.length, nodes: this.nodeOrder.length, textures: model.textures.length };
   }
 
-  private solidTexture(rgba: number[]): WebGLTexture {
-    const gl = this.gl, t = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(rgba));
-    return t;
-  }
-
-  private glowTexture(rgb: Vec3, t = this.gl.createTexture()!): WebGLTexture {
-    const gl = this.gl, n = 64, data = new Uint8Array(n * n * 4);
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      const d = Math.hypot(x - n / 2 + 0.5, y - n / 2 + 0.5) / (n / 2), a = Math.max(0, 1 - d) ** 2;
-      data.set([rgb[0], rgb[1], rgb[2], Math.round(a * 255)], (y * n + x) * 4);
+  /** Paths to load for the model's textures; replaceable ids resolve through
+   *  `replaceable` first (e.g. a destructable's own tree texture). */
+  texturePaths(replaceable: Record<number, string> = {}): (string | null)[] {
+    // In HD layers a replaceable texture names a set: X_Diffuse, X_Normal, X_ORM.
+    const slot = new Map<number, string>();
+    for (const mat of this.model.materials) for (const l of mat.layers) {
+      if (l.textureIds.length >= 3) ["_Diffuse", "_Normal", "_ORM"].forEach((s, k) => slot.set(l.textureIds[k], s));
     }
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    return t;
-  }
-
-  setTeamColor(index: number) {
-    const rgb = TEAM_COLORS[index][1], gl = this.gl;
-    this.teamRgb = [...rgb];
-    gl.bindTexture(gl.TEXTURE_2D, this.teamColor);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([...rgb, 255]));
-    this.glowTexture(rgb, this.teamGlow);
-  }
-
-  /** Paths to load for the model's textures (replaceables resolved). */
-  texturePaths(): (string | null)[] {
-    return this.model.textures.map((t) => (t.replaceableId === 0 ? t.path : REPLACEABLE[t.replaceableId] ?? null));
-  }
-
-  setTexture(i: number, img: DecodedTexture) {
-    const gl = this.gl, t = gl.createTexture()!, flags = this.model.textures[i].flags;
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, flags & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, flags & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-    this.textures[i] = t;
+    return this.model.textures.map((t, i) => {
+      if (t.replaceableId === 0) return t.path;
+      const p = replaceable[t.replaceableId] ?? REPLACEABLE[t.replaceableId];
+      const s = slot.get(i);
+      return p && s ? p.replace(/\.blp$/i, `${s}.blp`) : p ?? null;
+    });
   }
 
   private upload(g: Model["geosets"][number], geosetId: number): GpuGeoset {
@@ -359,28 +410,38 @@ export class ModelRenderer {
         used.forEach((id, k) => { bones[v * 4 + k] = id; weights[v * 4 + k] = 1 / used.length; });
       }
     }
-    const prog = this.prog;
-    const vao = gl.createVertexArray()!;
-    gl.bindVertexArray(vao);
+    const prog = this.sh.prog;
+    const buffers = new Map<string, WebGLBuffer>();
     const attr = (name: string, data: Float32Array, size: number) => {
       const loc = gl.getAttribLocation(prog, name);
       if (loc < 0) return;
-      const b = gl.createBuffer();
+      let b = buffers.get(name);
+      if (!b) {
+        b = gl.createBuffer()!;
+        gl.bindBuffer(gl.ARRAY_BUFFER, b);
+        gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        buffers.set(name, b);
+      }
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
-      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
     };
-    attr("aPos", g.positions, 3);
-    attr("aNormal", g.normals, 3);
-    attr("aUV", g.uvs.length ? g.uvs : new Float32Array(n * 2), 2);
-    attr("aBones", bones, 4);
-    attr("aWeights", weights, 4);
+    const uvs = g.uvs.length ? g.uvs : new Float32Array(n * 2);
+    const attributes = () => {
+      attr("aPos", g.positions, 3);
+      attr("aNormal", g.normals, 3);
+      attr("aUV", uvs, 2);
+      attr("aBones", bones, 4);
+      attr("aWeights", weights, 4);
+    };
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    attributes();
     const ib = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, g.faces, gl.STATIC_DRAW);
 
-    // Wireframe: same attributes, line indices.
+    // Wireframe: same vertex buffers, line indices.
     const lines = new Uint16Array(g.faces.length * 2);
     for (let i = 0; i < g.faces.length; i += 3) {
       const [a, b, c] = [g.faces[i], g.faces[i + 1], g.faces[i + 2]];
@@ -388,16 +449,164 @@ export class ModelRenderer {
     }
     const wireVao = gl.createVertexArray()!;
     gl.bindVertexArray(wireVao);
-    attr("aPos", g.positions, 3);
-    attr("aNormal", g.normals, 3);
-    attr("aUV", g.uvs.length ? g.uvs : new Float32Array(n * 2), 2);
-    attr("aBones", bones, 4);
-    attr("aWeights", weights, 4);
+    attributes();
     const lb = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lb);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lines, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
     return { vao, indexCount: g.faces.length, wireVao, wireCount: lines.length, materialId: g.materialId, geosetId };
+  }
+
+  /** Bone matrices and geoset animation state for a moment of an animation. */
+  pose(clock: Clock) {
+    const m = this.model, world: Mat4[] = [];
+    this.clock = clock;
+    for (const id of this.nodeOrder) {
+      const n = m.nodes[id];
+      const pivot: Vec3 = [m.pivots[id * 3] ?? 0, m.pivots[id * 3 + 1] ?? 0, m.pivots[id * 3 + 2] ?? 0];
+      const t = sample(n.translation, clock, m.globalSequences, [0, 0, 0]) as Vec3;
+      const r = sample(n.rotation, clock, m.globalSequences, [0, 0, 0, 1]);
+      const s = sample(n.scaling, clock, m.globalSequences, [1, 1, 1]) as Vec3;
+      const local = mat4.node(pivot, t, r, s);
+      world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
+    }
+    for (const id of this.nodeOrder) this.boneData.set(world[id], id * 16);
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 1024, this.boneData.length / 4096, gl.RGBA, gl.FLOAT, this.boneData);
+
+    this.geoAlpha.clear();
+    this.geoColor.clear();
+    for (const ga of m.geosetAnims) {
+      this.geoAlpha.set(ga.geosetId, sample(ga.alphaTrack, clock, m.globalSequences, [ga.alpha])[0]);
+      this.geoColor.set(ga.geosetId, sample(ga.colorTrack, clock, m.globalSequences, ga.color));
+    }
+
+    // Opaque layers first, then blended ones (by priority plane).
+    this.draws = [];
+    for (const g of this.geosets) {
+      if (this.hidden.has(g.geosetId) || (this.geoAlpha.get(g.geosetId) ?? 1) <= 0.01) continue;
+      const mat = m.materials[g.materialId];
+      if (!mat) continue;
+      for (const layer of mat.layers) this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2 });
+    }
+    this.draws.sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
+  }
+
+  /** Draws the posed model with a world transform. */
+  draw(viewProj: Mat4, world: Mat4, opts: DrawOptions = {}) {
+    const gl = this.gl, m = this.model, sh = this.sh, u = sh.u, clock = this.clock;
+    const team = opts.team ?? 0, pass = opts.pass ?? "all";
+    const rgb = TEAM_COLORS[team]?.[1] ?? TEAM_COLORS[0][1];
+    gl.useProgram(sh.prog);
+    gl.uniformMatrix4fv(u.uViewProj, false, viewProj);
+    gl.uniformMatrix4fv(u.uWorld, false, world);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
+    gl.uniform1i(u.uBones, 1);
+    gl.uniform1i(u.uOrm, 2);
+    const hm = opts.heightMap;
+    gl.uniform1f(u.uUseHeight, hm ? 1 : 0);
+    if (hm) {
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, hm.texture);
+      gl.uniform1i(u.uHeight, 3);
+      gl.uniform4f(u.uHeightRect, hm.x, hm.y, hm.width, hm.height);
+    }
+    gl.uniform3f(u.uTeam, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(u.uTex, 0);
+
+    for (const { g, layer, blended } of this.draws) {
+      if ((pass === "opaque" && blended) || (pass === "blended" && !blended)) continue;
+      const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1);
+      if (alpha <= 0.01) continue;
+      const color = this.geoColor.get(g.geosetId) ?? [1, 1, 1];
+      // Geoset animation colours are stored as BGR.
+      gl.uniform4f(u.uColor, color[2], color[1], color[0], alpha);
+
+      const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
+      const tex = m.textures[texIndex];
+      gl.bindTexture(gl.TEXTURE_2D, tex?.replaceableId === 1 ? sh.team[team] ?? sh.white : tex?.replaceableId === 2 ? sh.glow[team] ?? sh.white : this.textures[texIndex] ?? sh.white);
+      // HD layers list [diffuse, normal, ORM, emissive, team colour, environment].
+      const orm = layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
+      gl.uniform1f(u.uHd, orm ? 1 : 0);
+      if (orm) {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, orm);
+        gl.activeTexture(gl.TEXTURE0);
+      }
+
+      const sf = layer.shadingFlags;
+      gl.uniform1f(u.uUnshaded, sf & 0x1 ? 1 : 0);
+      if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
+      if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
+      gl.uniform1f(u.uAlphaTest, layer.filterMode === 1 ? 0.75 : 0.01);
+      switch (layer.filterMode) {
+        case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
+        case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;
+        case 3: case 4: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.depthMask(false); break;
+        case 5: gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.depthMask(false); break;
+        default: gl.enable(gl.BLEND); gl.blendFunc(gl.DST_COLOR, gl.SRC_COLOR); gl.depthMask(false);
+      }
+      if (sf & 0x80) gl.depthMask(false);
+      if (opts.wireframe) {
+        gl.bindVertexArray(g.wireVao);
+        gl.drawElements(gl.LINES, g.wireCount, gl.UNSIGNED_SHORT, 0);
+      } else {
+        gl.bindVertexArray(g.vao);
+        gl.drawElements(gl.TRIANGLES, g.indexCount, gl.UNSIGNED_SHORT, 0);
+      }
+    }
+    gl.bindVertexArray(null);
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
+  }
+}
+
+// ------------------------------------------------------------------ viewer
+
+/** A single model on its own canvas, with an orbit camera and a ground grid. */
+export class ModelRenderer {
+  readonly gl: WebGL2RenderingContext;
+  readonly gpu: ModelGpu;
+  private lineProg: WebGLProgram;
+  private grid: { vao: WebGLVertexArrayObject; count: number };
+  private team = 0;
+  wireframe = false;
+  showGrid = true;
+  /** Camera orbit around `target`. */
+  yaw = -Math.PI / 2;
+  pitch = 0.35;
+  distance: number;
+  target: Vec3;
+
+  constructor(readonly canvas: HTMLCanvasElement, readonly model: Model) {
+    const gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: false });
+    if (!gl) throw new Error("WebGL2 is not available");
+    this.gl = gl;
+    this.gpu = new ModelGpu(gl, model);
+    this.lineProg = compile(gl, LINE_VS, LINE_FS);
+    this.grid = this.makeGrid();
+    const e = bounds(model);
+    this.target = [(e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, (e.min[2] + e.max[2]) / 2];
+    this.distance = Math.max(80, Math.hypot(e.max[0] - e.min[0], e.max[1] - e.min[1], e.max[2] - e.min[2]) * 1.4);
+  }
+
+  get hidden() { return this.gpu.hidden; }
+  get stats() { return this.gpu.stats; }
+
+  setTeamColor(index: number) {
+    this.team = index;
+  }
+
+  /** Paths to load for the model's textures (replaceables resolved). */
+  texturePaths(): (string | null)[] {
+    return this.gpu.texturePaths();
+  }
+
+  setTexture(i: number, img: DecodedTexture) {
+    this.gpu.textures[i] = uploadTexture(this.gl, img, this.model.textures[i].flags);
   }
 
   private makeGrid() {
@@ -415,26 +624,8 @@ export class ModelRenderer {
     return { vao, count: lines.length / 3 };
   }
 
-  /** World matrices of all nodes for a moment in an animation. */
-  private updateBones(clock: Clock) {
-    const m = this.model, world: Mat4[] = [];
-    for (const id of this.nodeOrder) {
-      const n = m.nodes[id];
-      const pivot: Vec3 = [m.pivots[id * 3] ?? 0, m.pivots[id * 3 + 1] ?? 0, m.pivots[id * 3 + 2] ?? 0];
-      const t = sample(n.translation, clock, m.globalSequences, [0, 0, 0]) as Vec3;
-      const r = sample(n.rotation, clock, m.globalSequences, [0, 0, 0, 1]);
-      const s = sample(n.scaling, clock, m.globalSequences, [1, 1, 1]) as Vec3;
-      const local = mat4.node(pivot, t, r, s);
-      world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
-    }
-    for (const id of this.nodeOrder) this.boneData.set(world[id], id * 16);
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 1024, this.boneData.length / 4096, gl.RGBA, gl.FLOAT, this.boneData);
-  }
-
   render(clock: Clock) {
-    const gl = this.gl, m = this.model;
+    const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);
@@ -461,77 +652,8 @@ export class ModelRenderer {
       gl.drawArrays(gl.LINES, 0, this.grid.count);
     }
 
-    this.updateBones(clock);
-    gl.useProgram(this.prog);
-    const u = (name: string) => gl.getUniformLocation(this.prog, name);
-    gl.uniformMatrix4fv(u("uViewProj"), false, viewProj);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
-    gl.uniform1i(u("uBones"), 1);
-    gl.uniform1i(u("uOrm"), 2);
-    gl.uniform3f(u("uTeam"), this.teamRgb[0] / 255, this.teamRgb[1] / 255, this.teamRgb[2] / 255);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.uniform1i(u("uTex"), 0);
-
-    // Geoset animation alpha/colour.
-    const geoAlpha = new Map<number, number>(), geoColor = new Map<number, number[]>();
-    for (const ga of m.geosetAnims) {
-      geoAlpha.set(ga.geosetId, sample(ga.alphaTrack, clock, m.globalSequences, [ga.alpha])[0]);
-      geoColor.set(ga.geosetId, sample(ga.colorTrack, clock, m.globalSequences, ga.color));
-    }
-
-    // Opaque layers first, then blended ones (sorted by priority plane).
-    const draws: { g: GpuGeoset; layer: Model["materials"][number]["layers"][number]; prio: number; blended: boolean }[] = [];
-    for (const g of this.geosets) {
-      if (this.hidden.has(g.geosetId)) continue;
-      const mat = m.materials[g.materialId];
-      if (!mat) continue;
-      for (const layer of mat.layers) draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2 });
-    }
-    draws.sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
-
-    for (const { g, layer } of draws) {
-      const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (geoAlpha.get(g.geosetId) ?? 1);
-      if (alpha <= 0.01) continue;
-      const color = geoColor.get(g.geosetId) ?? [1, 1, 1];
-      // Geoset animation colours are stored as BGR.
-      gl.uniform4f(u("uColor"), color[2], color[1], color[0], alpha);
-
-      const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
-      const tex = m.textures[texIndex];
-      gl.bindTexture(gl.TEXTURE_2D, tex?.replaceableId === 1 ? this.teamColor : tex?.replaceableId === 2 ? this.teamGlow : this.textures[texIndex] ?? this.white);
-      // HD layers list [diffuse, normal, ORM, emissive, team colour, environment].
-      const orm = layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
-      gl.uniform1f(u("uHd"), orm ? 1 : 0);
-      if (orm) {
-        gl.activeTexture(gl.TEXTURE2);
-        gl.bindTexture(gl.TEXTURE_2D, orm);
-        gl.activeTexture(gl.TEXTURE0);
-      }
-
-      const sf = layer.shadingFlags;
-      gl.uniform1f(u("uUnshaded"), sf & 0x1 ? 1 : 0);
-      if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
-      if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
-      gl.uniform1f(u("uAlphaTest"), layer.filterMode === 1 ? 0.75 : 0.01);
-      switch (layer.filterMode) {
-        case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
-        case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;
-        case 3: case 4: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.depthMask(false); break;
-        case 5: gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.depthMask(false); break;
-        default: gl.enable(gl.BLEND); gl.blendFunc(gl.DST_COLOR, gl.SRC_COLOR); gl.depthMask(false);
-      }
-      if (sf & 0x80) gl.depthMask(false);
-      if (this.wireframe) {
-        gl.bindVertexArray(g.wireVao);
-        gl.drawElements(gl.LINES, g.wireCount, gl.UNSIGNED_SHORT, 0);
-      } else {
-        gl.bindVertexArray(g.vao);
-        gl.drawElements(gl.TRIANGLES, g.indexCount, gl.UNSIGNED_SHORT, 0);
-      }
-    }
-    gl.bindVertexArray(null);
-    gl.depthMask(true);
+    this.gpu.pose(clock);
+    this.gpu.draw(viewProj, mat4.identity(), { team: this.team, wireframe: this.wireframe });
   }
 
   dispose() {

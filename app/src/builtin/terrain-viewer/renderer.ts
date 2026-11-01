@@ -1,0 +1,359 @@
+// WebGL2 terrain: textured ground (Warcraft's corner-mask tile atlas), water,
+// placed doodads/units as models, and point markers for objects without one.
+// Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
+
+import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../model-viewer/renderer";
+import type { Terrain } from "./w3e";
+
+// Ground tile textures are 4×4 cells of corner-transition shapes (a cell's
+// index is a bitmask of the tile corners the texture covers); "extended"
+// textures are twice as wide and add 16 full-tile variations. Negative cells
+// stand for a variation and are resolved once the texture's size is known.
+const GROUND_VS = `#version 300 es
+in vec3 aPos; in vec3 aNormal; in vec2 aLocal; in float aCell; in float aShade;
+uniform mat4 uViewProj; uniform float uExtended;
+out vec2 vUV; out vec3 vNormal; out float vShade;
+void main() {
+  int cell = int(aCell);
+  bool ext = uExtended > 0.5;
+  if (cell < 0) {
+    int v = -cell - 1;
+    cell = ext ? (v < 16 ? 16 + v : (v == 16 ? 15 : 0)) : (v == 0 ? 0 : 15);
+  }
+  int c = cell % 16;
+  vec2 cr = vec2(float(c % 4) + (cell >= 16 ? 4.0 : 0.0), float(c / 4));
+  // Stay clear of the neighbouring cells when filtering.
+  vec2 local = mix(vec2(0.02), vec2(0.98), aLocal);
+  vUV = (cr + local) / vec2(ext ? 8.0 : 4.0, 4.0);
+  vNormal = aNormal; vShade = aShade;
+  gl_Position = uViewProj * vec4(aPos, 1.0);
+}`;
+const GROUND_FS = `#version 300 es
+precision mediump float;
+in vec2 vUV; in vec3 vNormal; in float vShade;
+uniform sampler2D uTex;
+out vec4 outColor;
+void main() {
+  vec4 c = texture(uTex, vUV);
+  float light = 0.45 + 0.65 * max(dot(normalize(vNormal), normalize(vec3(-0.3, -0.4, 0.85))), 0.0);
+  outColor = vec4(c.rgb * light * vShade, c.a);
+}`;
+
+const COLOR_VS = `#version 300 es
+in vec3 aPos; in vec4 aColor;
+uniform mat4 uViewProj; uniform float uPointSize;
+out vec4 vColor;
+void main() { vColor = aColor; gl_Position = uViewProj * vec4(aPos, 1.0); gl_PointSize = uPointSize / gl_Position.w; }`;
+const COLOR_FS = `#version 300 es
+precision mediump float; in vec4 vColor; out vec4 outColor;
+void main() { outColor = vColor; }`;
+
+export interface Marker {
+  x: number;
+  y: number;
+  z: number;
+  rgb: Vec3;
+}
+
+/** One model placed any number of times; `group` is a toggle name (e.g. "doodads"). */
+export interface ObjectBatch {
+  group: string;
+  gpu: ModelGpu;
+  instances: { world: Mat4; team: number }[];
+  /** Bend the model onto the ground height map (cliffs). */
+  followGround?: boolean;
+}
+
+interface Mesh {
+  vao: WebGLVertexArrayObject;
+  count: number;
+}
+
+export class TerrainRenderer {
+  readonly gl: WebGL2RenderingContext;
+  private groundProg: WebGLProgram;
+  private colorProg: WebGLProgram;
+  private ground: WebGLVertexArrayObject;
+  /** Index range per ground texture, in draw order. */
+  private ranges: { texture: number; offset: number; count: number }[] = [];
+  private textures: ({ tex: WebGLTexture; extended: boolean } | null)[];
+  private placeholder: WebGLTexture;
+  private water: Mesh;
+  private wire: Mesh;
+  private markers = new Map<string, Mesh>();
+  showWater = true;
+  wireframe = false;
+  /** Object groups (models and markers) that aren't drawn. */
+  hiddenGroups = new Set<string>();
+  readonly batches: ObjectBatch[] = [];
+  /** Camera: looks at `target` from `distance` away. */
+  yaw = -Math.PI / 2;
+  pitch = 0.95;
+  distance: number;
+  target: Vec3;
+  readonly center: Vec3;
+  /** Ground heights without cliff layers, for models that follow the terrain. */
+  private heightMap: HeightMap;
+
+  constructor(readonly canvas: HTMLCanvasElement, readonly terrain: Terrain) {
+    const gl = canvas.getContext("webgl2", { antialias: true });
+    if (!gl) throw new Error("WebGL2 is not available");
+    this.gl = gl;
+    this.groundProg = compile(gl, GROUND_VS, GROUND_FS);
+    this.colorProg = compile(gl, COLOR_VS, COLOR_FS);
+    this.textures = terrain.groundTiles.map(() => null);
+    this.placeholder = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.placeholder);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([110, 110, 100, 255]));
+    this.ground = this.buildGround();
+    this.water = this.buildWater();
+    this.wire = this.buildWire();
+    this.heightMap = this.buildHeightMap();
+
+    const t = terrain, w = (t.width - 1) * 128, h = (t.height - 1) * 128;
+    this.center = [t.offsetX + w / 2, t.offsetY + h / 2, 0];
+    this.target = [...this.center];
+    this.distance = Math.max(w, h) * 0.9;
+  }
+
+  private corner(x: number, y: number) {
+    return this.terrain.corners[y * this.terrain.width + x];
+  }
+
+  /** Normal at a corner from its neighbours' heights. */
+  private normal(x: number, y: number): Vec3 {
+    const t = this.terrain;
+    const hz = (cx: number, cy: number) => this.corner(Math.min(t.width - 1, Math.max(0, cx)), Math.min(t.height - 1, Math.max(0, cy))).height;
+    const dx = hz(x + 1, y) - hz(x - 1, y), dy = hz(x, y + 1) - hz(x, y - 1);
+    const n: Vec3 = [-dx, -dy, 256];
+    const l = Math.hypot(...n);
+    return [n[0] / l, n[1] / l, n[2] / l];
+  }
+
+  /** Rebuilds the ground without the tiles that cliff models cover, with
+   *  ground textures replaced at some corners (corner index → texture). */
+  setCliffTiles(tiles: Set<number>, overrides = new Map<number, number>()) {
+    this.gl.deleteVertexArray(this.ground);
+    this.ranges = [];
+    this.ground = this.buildGround(tiles, overrides);
+  }
+
+  private buildGround(skip = new Set<number>(), overrides = new Map<number, number>()): WebGLVertexArrayObject {
+    const t = this.terrain, gl = this.gl;
+    // Quads per texture so each texture is one draw call.
+    const perTexture: number[][] = t.groundTiles.map(() => []);
+    const normals: Vec3[] = [];
+    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) normals.push(this.normal(x, y));
+
+    for (let y = 0; y < t.height - 1; y++) {
+      for (let x = 0; x < t.width - 1; x++) {
+        if (skip.has(y * (t.width - 1) + x)) continue;
+        const bl = this.corner(x, y), br = this.corner(x + 1, y), tl = this.corner(x, y + 1), tr = this.corner(x + 1, y + 1);
+        const tex = (cx: number, cy: number) => overrides.get(cy * t.width + cx) ?? this.corner(cx, cy).texture;
+        const [tBl, tBr, tTl, tTr] = [tex(x, y), tex(x + 1, y), tex(x, y + 1), tex(x + 1, y + 1)];
+        const used = [...new Set([tBl, tBr, tTl, tTr])].sort((a, b) => a - b);
+        // Tiles at the camera boundary are shown darkened, like the editor does.
+        const shade = bl.boundary || br.boundary || tl.boundary || tr.boundary ? 0.35 : 1;
+        used.forEach((id, i) => {
+          const cell = i === 0
+            ? -1 - bl.variation
+            : (tTl === id ? 8 : 0) | (tTr === id ? 4 : 0) | (tBl === id ? 2 : 0) | (tBr === id ? 1 : 0);
+          const quad = perTexture[id] ?? (perTexture[id] = []);
+          const push = (cx: number, cy: number, u: number, v: number) => {
+            const c = this.corner(cx, cy), n = normals[cy * t.width + cx];
+            quad.push(t.offsetX + cx * 128, t.offsetY + cy * 128, c.height, n[0], n[1], n[2], u, v, cell, shade);
+          };
+          // Image rows run top-down: the tile's north edge is v = 0.
+          push(x, y, 0, 1); push(x + 1, y, 1, 1); push(x + 1, y + 1, 1, 0); push(x, y + 1, 0, 0);
+        });
+      }
+    }
+
+    const floats = perTexture.reduce((n, q) => n + q.length, 0);
+    const data = new Float32Array(floats);
+    const quads = floats / 40;
+    const index = new Uint32Array(quads * 6);
+    let fo = 0, qo = 0;
+    perTexture.forEach((q, texture) => {
+      if (!q.length) return;
+      data.set(q, fo);
+      const n = q.length / 40;
+      this.ranges.push({ texture, offset: qo * 6, count: n * 6 });
+      for (let i = 0; i < n; i++) {
+        const b = (qo + i) * 4;
+        index.set([b, b + 1, b + 2, b, b + 2, b + 3], (qo + i) * 6);
+      }
+      fo += q.length;
+      qo += n;
+    });
+
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    const attr = (name: string, size: number, offset: number) => {
+      const loc = gl.getAttribLocation(this.groundProg, name);
+      if (loc < 0) return;
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 40, offset * 4);
+    };
+    attr("aPos", 3, 0); attr("aNormal", 3, 3); attr("aLocal", 2, 6); attr("aCell", 1, 8); attr("aShade", 1, 9);
+    const ib = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, index, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    return vao;
+  }
+
+  private buildHeightMap(): HeightMap {
+    const t = this.terrain, gl = this.gl;
+    const data = new Float32Array(t.corners.map((c) => c.height - (c.layer - 2) * 128));
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, t.width, t.height, 0, gl.RED, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return { texture, x: t.offsetX, y: t.offsetY, width: t.width, height: t.height };
+  }
+
+  private colorMesh(data: number[]): Mesh {
+    const gl = this.gl, vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    const pos = gl.getAttribLocation(this.colorProg, "aPos"), col = gl.getAttribLocation(this.colorProg, "aColor");
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 3, gl.FLOAT, false, 28, 0);
+    gl.enableVertexAttribArray(col);
+    gl.vertexAttribPointer(col, 4, gl.FLOAT, false, 28, 12);
+    gl.bindVertexArray(null);
+    return { vao, count: data.length / 7 };
+  }
+
+  private buildWater(): Mesh {
+    const t = this.terrain, out: number[] = [];
+    for (let y = 0; y < t.height - 1; y++) {
+      for (let x = 0; x < t.width - 1; x++) {
+        const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
+        if (!cs.some((c) => c.hasWater) || cs.every((c) => c.water <= c.height)) continue;
+        const v = cs.map((c, i) => {
+          const cx = x + (i === 1 || i === 2 ? 1 : 0), cy = y + (i >= 2 ? 1 : 0);
+          const depth = c.water - c.height;
+          const a = Math.min(0.85, Math.max(0.25, 0.25 + depth / 160));
+          return [t.offsetX + cx * 128, t.offsetY + cy * 128, c.water, 0.12, 0.32, 0.5, a];
+        });
+        out.push(...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]);
+      }
+    }
+    return this.colorMesh(out);
+  }
+
+  private buildWire(): Mesh {
+    const t = this.terrain, out: number[] = [];
+    const p = (x: number, y: number) => [t.offsetX + x * 128, t.offsetY + y * 128, this.corner(x, y).height + 1, 0, 0, 0, 0.35];
+    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+      if (x + 1 < t.width) out.push(...p(x, y), ...p(x + 1, y));
+      if (y + 1 < t.height) out.push(...p(x, y), ...p(x, y + 1));
+    }
+    return this.colorMesh(out);
+  }
+
+  /** Replaces a named group of point markers (e.g. "doodads", "units"). */
+  setMarkers(name: string, markers: Marker[]) {
+    this.markers.set(name, this.colorMesh(markers.flatMap((m) => [m.x, m.y, m.z + 8, m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255, 1])));
+  }
+
+  setGroundTexture(i: number, img: DecodedTexture) {
+    const gl = this.gl, tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
+    gl.generateMipmap(gl.TEXTURE_2D);
+    // Deeper mip levels would blend neighbouring cells together.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, Math.max(0, Math.log2(img.height / 4) - 3));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.textures[i] = { tex, extended: img.width > img.height };
+  }
+
+  /** Camera position. */
+  eye(): Vec3 {
+    return [
+      this.target[0] + this.distance * Math.cos(this.pitch) * Math.cos(this.yaw),
+      this.target[1] + this.distance * Math.cos(this.pitch) * Math.sin(this.yaw),
+      this.target[2] + this.distance * Math.sin(this.pitch),
+    ];
+  }
+
+  render() {
+    const gl = this.gl;
+    const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
+    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0.11, 0.12, 0.14, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.CULL_FACE);
+
+    const viewProj = mat4.mul(
+      mat4.perspective(Math.PI / 4, w / Math.max(1, h), Math.max(10, this.distance / 50), this.distance * 10),
+      mat4.lookAt(this.eye(), this.target, [0, 0, 1]),
+    );
+
+    // Ground: lowest texture first, the others blend over it.
+    gl.useProgram(this.groundProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(this.groundProg, "uViewProj"), false, viewProj);
+    gl.uniform1i(gl.getUniformLocation(this.groundProg, "uTex"), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindVertexArray(this.ground);
+    for (const r of this.ranges) {
+      const t = this.textures[r.texture];
+      gl.bindTexture(gl.TEXTURE_2D, t?.tex ?? this.placeholder);
+      gl.uniform1f(gl.getUniformLocation(this.groundProg, "uExtended"), t?.extended ? 1 : 0);
+      gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.offset * 4);
+    }
+
+    // Placed objects: every opaque layer, then every blended one.
+    for (const pass of ["opaque", "blended"] as const) {
+      for (const b of this.batches) {
+        if (this.hiddenGroups.has(b.group)) continue;
+        for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined });
+      }
+    }
+    gl.enable(gl.CULL_FACE);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.useProgram(this.colorProg);
+    gl.uniformMatrix4fv(gl.getUniformLocation(this.colorProg, "uViewProj"), false, viewProj);
+    gl.uniform1f(gl.getUniformLocation(this.colorProg, "uPointSize"), 5000);
+    if (this.wireframe) {
+      gl.bindVertexArray(this.wire.vao);
+      gl.drawArrays(gl.LINES, 0, this.wire.count);
+    }
+    gl.disable(gl.BLEND);
+    for (const [name, m] of this.markers) {
+      if (this.hiddenGroups.has(name)) continue;
+      gl.bindVertexArray(m.vao);
+      gl.drawArrays(gl.POINTS, 0, m.count);
+    }
+    if (this.showWater) {
+      gl.enable(gl.BLEND);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      gl.bindVertexArray(this.water.vao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.water.count);
+      gl.depthMask(true);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  dispose() {
+    this.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
