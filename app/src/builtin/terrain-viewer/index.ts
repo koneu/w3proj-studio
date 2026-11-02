@@ -1011,6 +1011,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           focus: () => canvas.focus(),
           lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
+          view: () => ({ target: [...renderer.target], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov }),
+          setView: (v) => {
+            if (v.target) renderer.target = [...v.target];
+            Object.assign(renderer, Object.fromEntries((["yaw", "pitch", "distance", "fov"] as const).filter((k) => v[k] !== undefined).map((k) => [k, v[k]])));
+            redraw();
+          },
         };
         const tabsEl = h("div.terrain-tabs");
         const builtinBar = selectBar();
@@ -1073,7 +1079,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           side));
 
         // ---- camera ------------------------------------------------------------------
-        const initial = { yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance };
+        const initial = { yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov };
         const resetCamera = () => { Object.assign(renderer, initial, { target: [...renderer.center] }); redraw(); };
         /** Moves the target over the ground by screen pixels, in the camera's facing. */
         const pan = (dx: number, dy: number) => {

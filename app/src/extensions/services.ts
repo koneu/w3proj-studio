@@ -70,6 +70,14 @@ export interface TerrainPointer {
   down: boolean;
 }
 
+export interface TerrainView {
+  target: [number, number, number];
+  yaw: number;
+  pitch: number;
+  distance: number;
+  fov: number;
+}
+
 export interface TerrainEditorHandle {
   /** The terrain being edited (live; see lib/terrain/w3e). */
   readonly terrain: import("../lib/terrain/w3e").Terrain;
@@ -88,6 +96,11 @@ export interface TerrainEditorHandle {
   focus(): void;
   /** Moves the camera to look at a world point. */
   lookAt(x: number, y: number): void;
+  /** The view camera: it looks at `target` from `distance` away, `yaw` (radians)
+   *  points from the target to the eye, `pitch` lifts the eye, `fov` is vertical. */
+  view(): TerrainView;
+  /** Changes the given parts of the view camera. */
+  setView(v: Partial<TerrainView>): void;
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore

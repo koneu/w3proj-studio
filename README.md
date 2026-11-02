@@ -18,7 +18,8 @@ MPQ archive. The archive holds files like:
 | `war3map.w3i` | map info: name, players, forces, options, fog, … (format v25–v39) | **JSON** (`war3map.w3i.json`) |
 | `war3map.doo`, `war3mapUnits.doo` | placed doodads/destructables; units, items, start locations (v8, v12, v13) | **JSON** |
 | `war3map.w3e`, `.wpm`, `.shd` | terrain, pathing, shadows | binary |
-| `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | binary |
+| `war3map.w3r`, `.w3c` | regions, cameras | **JSON** |
+| `war3map.w3s` | sounds | binary |
 | `war3map.wtg/.wct` | GUI triggers / custom script text | binary |
 | `war3map.imp`, `war3mapImported\*` | imports | as-is |
 
@@ -31,7 +32,7 @@ The object-data codec round-trips every file in that set.
 
 Blizzard's binary layouts are not hard-coded: they are **format definitions** (JSON with
 `//` comments) interpreted by one engine (`crates/w3proj/src/format`). The built-ins live in
-[crates/w3proj/formats/](crates/w3proj/formats/) — `w3i`, `doodads`, `units` — and are compiled
+[crates/w3proj/formats/](crates/w3proj/formats/) — `w3i`, `doodads`, `units`, `regions`, `cameras` — and are compiled
 into the CLI and the app. A definition lists fields with types, counts, `if` conditions
 (`version >= 39`), plausibility `check`s and **variants** for layouts that differ without a
 version bump (e.g. v39 player HUD skins, v8 doodads without skin ids): the engine tries each

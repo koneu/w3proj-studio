@@ -1,0 +1,8 @@
+{
+  "id": "w3.terrainCameras",
+  "name": "Camera Editor",
+  "version": "0.1.0",
+  "description": "Cameras (war3map.w3c) in the terrain editor: create from the view, preview, move, aim, edit their values.",
+  "activationEvents": ["onEditor:w3.terrainViewer"],
+  "extensionDependencies": ["w3.terrainViewer"]
+}

@@ -142,6 +142,8 @@ export class TerrainRenderer {
   /** Camera: looks at `target` from `distance` away. */
   yaw = -Math.PI / 2;
   pitch = 0.95;
+  /** Vertical field of view (radians). */
+  fov = Math.PI / 4;
   distance: number;
   target: Vec3;
   readonly center: Vec3;
@@ -425,7 +427,7 @@ export class TerrainRenderer {
     const f = norm([this.target[0] - eye[0], this.target[1] - eye[1], this.target[2] - eye[2]]);
     const r = norm([f[1], -f[0], 0]);
     const u: Vec3 = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
-    const t = Math.tan(Math.PI / 8), nx = ((px / w) * 2 - 1) * t * (w / h), ny = (1 - (py / h) * 2) * t;
+    const t = Math.tan(this.fov / 2), nx = ((px / w) * 2 - 1) * t * (w / h), ny = (1 - (py / h) * 2) * t;
     return { origin: eye, dir: norm([f[0] + r[0] * nx + u[0] * ny, f[1] + r[1] * nx + u[1] * ny, f[2] + r[2] * nx + u[2] * ny]) };
   }
 
@@ -514,7 +516,7 @@ export class TerrainRenderer {
     const d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
     const z = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
     if (z <= 0) return null;
-    const t = Math.tan(Math.PI / 8);
+    const t = Math.tan(this.fov / 2);
     const nx = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / z / (t * (w / h)), ny = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / z / t;
     return [((nx + 1) / 2) * w, ((1 - ny) / 2) * h];
   }
@@ -546,7 +548,7 @@ export class TerrainRenderer {
     gl.enable(gl.CULL_FACE);
 
     const viewProj = mat4.mul(
-      mat4.perspective(Math.PI / 4, w / Math.max(1, h), Math.max(10, this.distance / 50), this.distance * 10),
+      mat4.perspective(this.fov, w / Math.max(1, h), Math.max(10, this.distance / 50), this.distance * 10),
       mat4.lookAt(this.eye(), this.target, [0, 0, 1]),
     );
 
