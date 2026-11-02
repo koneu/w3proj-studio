@@ -6,7 +6,7 @@ import { loadKind, parseSlk } from "../object-editor/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, type Placed } from "./objects";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { applyHeight, paintTexture, Stroke, type HeightTool } from "./tools";
+import { applyHeight, applyLayer, paintTexture, Stroke, type HeightTool, type LayerTool } from "./tools";
 import { groundHeight, parseW3e, writeW3e, type Terrain } from "./w3e";
 
 const PATH = "map/war3map.w3e";
@@ -136,13 +136,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const redraw = () => { dirty = true; };
 
         // ---- editing ------------------------------------------------------------------
-        type Tool = "select" | HeightTool | "paint";
+        type Tool = "select" | HeightTool | LayerTool | "paint";
+        const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffDown", "shallow", "deep", "dry"];
+        const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
         const editable = !doc.readOnly;
         let tool: Tool = "select", size = 2, strength = 16, paintTex = 0;
         /** Undo history; `at` strokes are applied, `savedAt` matches the file. */
         const history: Stroke[] = [];
         let at = 0, savedAt = 0;
         const changed = () => {
+          replanCliffs();
           renderer.terrainChanged();
           doc.setDirty(at !== savedAt);
           redraw();
@@ -156,6 +159,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const brush = { x: p[0], y: p[1], radius: size };
           const did = tool === "paint"
             ? paintTexture(terrain, brush, paintTex, stroke.s)
+            : isLayerTool(tool)
+            ? applyLayer(terrain, brush, tool, stroke.target, stroke.s)
             : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
           if (did) {
             renderer.terrainChanged();
@@ -171,7 +176,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const p = groundAt(e);
           if (!p) return;
           const c = terrain.corners[Math.round((p[1] - terrain.offsetY) / 128) * terrain.width + Math.round((p[0] - terrain.offsetX) / 128)];
-          stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, last: performance.now() };
+          const target = !c ? 0 : tool === "cliffUp" ? c.layer + 1 : tool === "cliffDown" ? c.layer - 1 : groundHeight(c);
+          stroke = { s: new Stroke(tool), target, last: performance.now() };
           applyAt(p);
         };
         const endStroke = () => {
@@ -180,11 +186,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             history.length = at;
             history.push(stroke.s);
             at = history.length;
+            if (isLayerTool(stroke.s.label as Tool)) { replanCliffs(); renderer.terrainChanged(); redraw(); }
           }
           doc.setDirty(at !== savedAt);
           stroke = null;
         };
-        const BRUSH_COLORS: Record<Tool, Vec3> = { select: [0, 0, 0], raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140] };
+        const BRUSH_COLORS: Record<Tool, Vec3> = {
+          select: [0, 0, 0], raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
+          cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
+        };
         const showBrush = (e: MouseEvent | null) => {
           const p = e && tool !== "select" ? groundAt(e) : null;
           renderer.setBrush(p ? { x: p[0], y: p[1], r: size * 128, rgb: BRUSH_COLORS[tool] } : null);
@@ -232,19 +242,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           texInfo.title = list.join("\n");
         });
         const cliffInfo = h("div.muted", {}, "Loading cliffs…");
+        /** Cliff types and the game's file list, once loaded. */
+        let cliffData: { types: Map<string, CliffType>; exists: (p: string) => boolean } | null = null;
+        /** Bumped per re-plan so a slow older one can't overwrite a newer one. */
+        let cliffGen = 0;
+        /** Places cliff models for the current layers (initially and after edits). */
+        async function replanCliffs() {
+          if (!cliffData) return;
+          const gen = ++cliffGen;
+          const { requests, groundOverrides } = planCliffs(terrain, cliffData.types, cliffData.exists);
+          const { batches, failed } = await loader.loadModels("cliffs", requests);
+          if (gen !== cliffGen) return;
+          const broken = new Set(failed.map((f) => f.index));
+          const others = renderer.batches.filter((b) => b.group !== "cliffs");
+          renderer.batches.length = 0;
+          renderer.batches.push(...others, ...batches.map((b) => ({ ...b, followGround: true })));
+          renderer.setCliffTiles(new Set(requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles))), groundOverrides);
+          const tiles = requests.reduce((n, r) => n + r.tiles.length, 0);
+          cliffInfo.textContent = `${tiles.toLocaleString()} cliff tiles · ${requests.length} cliff models${failed.length ? ` · ${failed.length} failed` : ""}`;
+          cliffInfo.title = failed.map((f) => f.error).join("\n");
+          redraw();
+        }
         Promise.all([w3.game.readText("TerrainArt\\CliffTypes.slk"), w3.game.list()]).then(async ([slk, list]) => {
           const types = new Map(parseSlk(slk).filter((r) => r.cliffID).map((r) => [r.cliffID, r as unknown as CliffType]));
           // Stored paths look like "War3.w3mod:_HD.w3mod:Doodads/…"; any layer will do.
           const files = new Set(list.map((p) => p.slice(p.lastIndexOf(":") + 1).toLowerCase()));
-          const { requests, groundOverrides } = planCliffs(terrain, types, (p) => files.has(p.replace(/\\/g, "/").toLowerCase()));
-          const { batches, failed } = await loader.loadModels("cliffs", requests);
-          const broken = new Set(failed.map((f) => f.index));
-          renderer.batches.push(...batches.map((b) => ({ ...b, followGround: true })));
-          renderer.setCliffTiles(new Set(requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles))), groundOverrides);
-          const tiles = requests.reduce((n, r) => n + r.tiles.length, 0);
-          cliffInfo.textContent = `${tiles.toLocaleString()} cliff tiles · ${requests.length} cliff models${failed.length ? ` · ${failed.length} failed` : ""}`;
-          if (failed.length) cliffInfo.title = failed.map((f) => f.error).join("\n");
-          redraw();
+          cliffData = { types, exists: (p) => files.has(p.replace(/\\/g, "/").toLowerCase()) };
+          await replanCliffs();
         }).catch((e) => { cliffInfo.textContent = `Cliffs: ${(e as Error).message ?? e}`; });
 
         if (!doc.path.startsWith("game:") && w3.workspace.project()) {
@@ -348,6 +372,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const tools: [Tool, string, string][] = [
             ["select", "Select", "Select units and doodads"], ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
             ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"], ["paint", "Paint", "Paint a ground texture"],
+            ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
+            ["shallow", "Shallow water", "Shallow water (one level below ground)"], ["deep", "Deep water", "Deep water (two levels below ground)"],
+            ["dry", "Dry", "Remove water and return to ground level"],
           ];
           const bar = h("div.model-toolbar.terrain-tools", {},
             ...tools.map(([t, label, title]) => {

@@ -1,9 +1,14 @@
 // Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
 // painting, applied to the corners inside a circular brush, with undo.
 
-import { groundHeight, setGroundHeight, type Corner, type Terrain } from "./w3e";
+import { groundHeight, setGroundHeight, setLayer, type Corner, type Terrain } from "./w3e";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
+/** Cliff layer up/down; water: shallow (one layer down), deep (two), dry. */
+export type LayerTool = "cliffUp" | "cliffDown" | "shallow" | "deep" | "dry";
+
+/** The normal ground layer; water tools work relative to it. */
+const GROUND_LAYER = 2;
 
 export interface Brush {
   /** World position of the brush centre. */
@@ -45,7 +50,8 @@ export class Stroke {
     for (const i of this.before.keys()) this.after.set(i, { ...t.corners[i] });
     for (const [i, b] of this.before) {
       const a = this.after.get(i)!;
-      if (a.rawHeight !== b.rawHeight || a.texture !== b.texture || a.variation !== b.variation) return true;
+      if (a.rawHeight !== b.rawHeight || a.texture !== b.texture || a.variation !== b.variation
+        || a.layer !== b.layer || a.hasWater !== b.hasWater) return true;
     }
     return false;
   }
@@ -88,6 +94,25 @@ export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: numb
     setGroundHeight(c, h);
   });
   return true;
+}
+
+/** One application of a cliff or water brush. Cliff tools set the corners
+ *  under the brush to `target` (the layer where the stroke started, ±1);
+ *  water tools use fixed layers below normal ground. Returns whether
+ *  anything changed. */
+export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: number, stroke: Stroke): boolean {
+  const layer = tool === "shallow" ? GROUND_LAYER - 1 : tool === "deep" ? GROUND_LAYER - 2 : tool === "dry" ? GROUND_LAYER : target;
+  const water = tool === "shallow" || tool === "deep" ? true : tool === "dry" ? false : null;
+  let changed = false;
+  for (const { i } of cornersIn(t, b)) {
+    const c = t.corners[i];
+    if (c.layer === layer && (water === null || c.hasWater === water)) continue;
+    stroke.touch(t, i);
+    setLayer(c, layer);
+    if (water !== null) c.hasWater = water;
+    changed = true;
+  }
+  return changed;
 }
 
 /** Paints ground texture `tex` (index into terrain.groundTiles) under the brush. */

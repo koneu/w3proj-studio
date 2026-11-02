@@ -125,6 +125,13 @@ export function setGroundHeight(c: Corner, ground: number) {
   c.height = (c.rawHeight - 0x2000) / 4 + (c.layer - 2) * 128;
 }
 
+/** Moves a corner to another cliff layer (0–15), keeping its ground height. */
+export function setLayer(c: Corner, layer: number) {
+  const ground = groundHeight(c);
+  c.layer = Math.max(0, Math.min(15, layer));
+  c.height = ground + (c.layer - 2) * 128;
+}
+
 /** Ground height of a corner without its cliff layer. */
 export function groundHeight(c: Corner): number {
   return (c.rawHeight - 0x2000) / 4;

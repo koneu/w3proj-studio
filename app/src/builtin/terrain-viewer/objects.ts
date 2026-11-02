@@ -125,11 +125,15 @@ export class ObjectLoader {
     return t;
   }
 
-  /** Loads each requested model; failed ones are reported by index. */
-  async loadModels(group: string, requests: ModelRequest[]): Promise<{ batches: ObjectBatch[]; failed: { index: number; error: string }[] }> {
-    const batches: ObjectBatch[] = [], failed: { index: number; error: string }[] = [];
-    await Promise.all(requests.map(async (req, index) => {
-      try {
+  /** GPU models by path + replaceable textures, so re-planning (e.g. cliffs
+   *  after an edit) doesn't load them again. */
+  private models = new Map<string, Promise<ModelGpu>>();
+
+  private model(req: ModelRequest): Promise<ModelGpu> {
+    const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}`;
+    let m = this.models.get(key);
+    if (!m) {
+      m = (async () => {
         const model = parseMdx(await this.readFile(req.path));
         const gpu = new ModelGpu(this.gl, model);
         // Stand still at the start of the first "Stand" animation.
@@ -138,6 +142,20 @@ export class ObjectLoader {
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
           if (p) this.texture(req.retexture?.(p) ?? p, model.textures[i].flags).then((t) => { gpu.textures[i] = t; });
         });
+        return gpu;
+      })();
+      this.models.set(key, m);
+    }
+    return m;
+  }
+
+  /** Loads each requested model; failed ones are reported by index. */
+  async loadModels(group: string, requests: ModelRequest[]): Promise<{ batches: ObjectBatch[]; failed: { index: number; error: string }[] }> {
+    const batches: ObjectBatch[] = [], failed: { index: number; error: string }[] = [];
+    await Promise.all(requests.map(async (req, index) => {
+      try {
+        const gpu = await this.model(req);
+        const model = gpu.model;
         // Bounding sphere per instance, for picking.
         const b = bounds(model);
         const c = [0, 1, 2].map((k) => (b.min[k] + b.max[k]) / 2);
