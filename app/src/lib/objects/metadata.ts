@@ -252,7 +252,10 @@ async function buildKind(w3: W3Api, kind: string): Promise<KindData> {
     },
     defaultValue(baseId, f, level) {
       if (f.slk === "Profile") {
-        const raw = profile.get(baseId)?.get(f.field.toLowerCase());
+        // Reforged skin files split some fields per art set ("Art:sd", "Art:hd").
+        const kv = profile.get(baseId), key = f.field.toLowerCase();
+        const mode = w3.settings.get<string>("game.graphicsMode") ?? "hd";
+        const raw = kv?.get(`${key}:${mode}`) ?? kv?.get(key) ?? kv?.get(`${key}:sd`);
         if (raw === undefined) return undefined;
         if (f.repeat > 0) return listItem(raw, Math.max(0, level - 1)) ?? undefined;
         return f.index > 0 ? listItem(raw, f.index) : unquote(raw);

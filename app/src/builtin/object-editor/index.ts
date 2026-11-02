@@ -3,7 +3,7 @@ import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
-import { objectsService, parseWts, stripColors } from "./service";
+import { iconLoader, objectsService, parseWts, stripColors } from "./service";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -41,6 +41,7 @@ function parseValue(type: ValueType, text: string): number | string | null {
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  const icons = iconLoader(w3);
   /** Open editors by document path: show an object (filter the list to it and select it). */
   const focusers = new Map<string, (id: string) => void>();
   /** Object to show once an editor that is being opened has loaded. */
@@ -530,7 +531,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pickBase = async (placeholder: string): Promise<string | undefined> => {
           if (!kd) return w3.window.inputBox({ prompt: "Base object id (e.g. hfoo)" });
           const pinned = selected && kd.baseIds.includes(selected.base) ? selected.base : undefined;
-          return pickBaseObject(el, kd, { title: placeholder, pinned });
+          const k = kd;
+          return pickBaseObject(el, kd, { title: placeholder, pinned, iconOf: (id) => icons(k, kind, id) });
         };
 
         const newObject = async () => {

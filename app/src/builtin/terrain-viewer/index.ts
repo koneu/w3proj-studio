@@ -10,6 +10,7 @@ import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import type { Rgb } from "./minimap";
 import { buildMinimap } from "./minimapgen";
 import { Occupancy } from "./occupancy";
+import { toolIcon } from "./toolicons";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
@@ -292,6 +293,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }).catch(() => { /* blight shows as the placeholder colour */ });
         tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
+        const thumbCache = new Map<string, Promise<string | null>>();
+        /** Data URL of a ground texture's first cell (the plain tile). */
+        const tileThumb = (path: string) => {
+          let p = thumbCache.get(path);
+          if (!p) {
+            p = readGroundTexture(w3, doc, path).then(({ buf, name }) => {
+              const mip = decodeImage(buf, name).mip(0), cell = mip.height / 4;
+              const full = document.createElement("canvas");
+              full.width = mip.width; full.height = mip.height;
+              full.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(mip.rgba), mip.width, mip.height), 0, 0);
+              const out = document.createElement("canvas");
+              out.width = out.height = 32;
+              out.getContext("2d")!.drawImage(full, 0, 0, cell, cell, 0, 0, 32, 32);
+              return out.toDataURL();
+            }).catch(() => null);
+            thumbCache.set(path, p);
+          }
+          return p;
+        };
         /** Index of a ground tile type, adding it to the map's list if needed
          *  (null when the list is full). */
         const ensureTile = async (id: string): Promise<number | null> => {
@@ -741,17 +761,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const setTool = (t: Tool) => setToolRef(t);
         function toolBar() {
           const buttons = new Map<Tool, HTMLButtonElement>();
-          const texSelect = h("select", { title: "Ground texture to paint (other tiles are added to the map)", onchange: () => { paintTile = texSelect.value; } });
+          // This map's tiles as thumbnails; the dropdown adds tiles from any tileset.
+          const thumbs = h("span.terrain-tex-thumbs");
+          const texSelect = h("select", { title: "Paint with a tile this map doesn't use yet (it's added on the first stroke)", onchange: () => {
+            if (texSelect.value) paintTile = texSelect.value;
+            void fillPalette();
+          } });
           const fillPalette = async () => {
             const catalog = await tileCatalog(w3).catch(() => new Map<string, { path: string; name: string }>());
             const opt = (id: string) => h("option", { value: id, selected: id === paintTile }, `${catalog.get(id)?.name ?? id} (${id})`);
+            thumbs.replaceChildren(...terrain.groundTiles.map((id) => {
+              const img = h("img", { alt: id });
+              const path = catalog.get(id)?.path;
+              if (path) void tileThumb(path).then((src) => { if (src) img.src = src; });
+              return h(`button.terrain-tex-thumb${id === paintTile ? ".on" : ""}`, {
+                title: `${catalog.get(id)?.name ?? id} (${id})`,
+                onclick: () => { paintTile = id; void fillPalette(); canvas.focus(); },
+              }, img);
+            }));
             const inMap = new Set(terrain.groundTiles);
             const byTileset = new Map<string, string[]>();
             for (const id of catalog.keys()) if (!inMap.has(id)) byTileset.set(id[0], [...(byTileset.get(id[0]) ?? []), id]);
             const own = byTileset.get(terrain.tileset) ?? [];
             byTileset.delete(terrain.tileset);
             texSelect.replaceChildren(
-              h("optgroup", { label: `This map (${terrain.groundTiles.length}/${MAX_GROUND_TILES})` }, ...terrain.groundTiles.map(opt)),
+              h("option", { value: "", selected: inMap.has(paintTile) }, `Add tile… (${terrain.groundTiles.length}/${MAX_GROUND_TILES})`),
               ...(own.length ? [h("optgroup", { label: `${TILESETS[terrain.tileset] ?? terrain.tileset}: adds to the map` }, ...own.map(opt))] : []),
               ...[...byTileset].sort(([x], [y]) => (TILESETS[x] ?? x).localeCompare(TILESETS[y] ?? y))
                 .map(([ts, ids]) => h("optgroup", { label: `${TILESETS[ts] ?? ts}: adds to the map` }, ...ids.map(opt))),
@@ -759,7 +793,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           };
           void fillPalette();
           refreshPalette = () => void fillPalette();
-          const texWrap = h("span.terrain-tool-opt", {}, texSelect);
+          const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect);
           const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
             h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
           const setTool = (t: Tool) => {
@@ -781,7 +815,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ];
           const bar = h("div.model-toolbar.terrain-tools", {},
             ...tools.map(([t, label, title]) => {
-              const b = h("button", { title, onclick: () => setTool(t) }, label);
+              const b = h("button.tool-button", { title, onclick: () => setTool(t) }, toolIcon(t), label);
               buttons.set(t, b);
               return b;
             }),

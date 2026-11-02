@@ -67,7 +67,7 @@ function compare(actual: string | undefined, op: Op, expected: string): boolean 
 export function pickBaseObject(
   host: HTMLElement,
   kd: KindData,
-  opts: { title: string; pinned?: string },
+  opts: { title: string; pinned?: string; iconOf?: PickOptions["iconOf"] },
 ): Promise<string | undefined> {
   return pickObject(host, kd, opts).then((r) => (r && "id" in r ? r.id : undefined));
 }
@@ -83,6 +83,8 @@ export interface PickOptions {
   tabs?: { labels: string[]; active: number };
   /** Initial search text. */
   query?: string;
+  /** Icon (data URL) of an entry, loaded as rows are shown. */
+  iconOf?: (id: string, base?: string) => Promise<string | null>;
 }
 
 export type PickResult = { id: string } | { tab: number; query: string } | undefined;
@@ -238,6 +240,12 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       }));
     };
 
+    const icon = (e: Entry) => {
+      const img = h("img.picker-icon", { alt: "" });
+      void opts.iconOf!(e.id, e.base).then((src) => { if (src) img.src = src; else img.classList.add("none"); });
+      return img;
+    };
+
     const renderRows = () => {
       const shownFields = filters.filter((f) => f.field).map((f) => f.field!);
       rowsEl.replaceChildren(...shown.slice(0, MAX_ROWS).map((e, i) =>
@@ -249,6 +257,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
           onclick: () => finish(e.id),
           onmouseenter: () => { active = i; for (const [j, r] of [...rowsEl.children].entries()) r.classList.toggle("active", j === i); },
         },
+          opts.iconOf ? icon(e) : null,
           h("span.picker-name", {}, e.name),
           h("code", {}, e.id),
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,
