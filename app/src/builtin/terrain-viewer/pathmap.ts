@@ -11,7 +11,7 @@ import type { Terrain } from "./w3e";
 
 /** A map file as the format engine's JSON: `map/<name>.json` if the project
  *  keeps it that way, else decoded from the raw file. */
-async function readMapJson<T>(w3: W3Api, name: string): Promise<T | null> {
+export async function readMapJson<T>(w3: W3Api, name: string): Promise<T | null> {
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   const path = `map/${name}`;
   if (files.has(`${path}.json`.toLowerCase())) return JSON.parse(await w3.workspace.readText(`${path}.json`)) as T;
@@ -31,7 +31,7 @@ interface ObjectEntry {
 }
 
 /** Object id → base id and the pathing texture the map sets for it. */
-async function pathOverrides(w3: W3Api, name: string, field: string): Promise<Map<string, { base: string; pathTex?: string }>> {
+export async function pathOverrides(w3: W3Api, name: string, field: string): Promise<Map<string, { base: string; pathTex?: string }>> {
   const out = new Map<string, { base: string; pathTex?: string }>();
   const file = await readMapJson<ObjectFile>(w3, name).catch(() => null);
   for (const o of [...(file?.original ?? []), ...(file?.custom ?? [])]) {

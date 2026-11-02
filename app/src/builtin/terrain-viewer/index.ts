@@ -7,6 +7,7 @@ import { parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
+import { buildMinimap } from "./minimapgen";
 import { buildPathingMap } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
@@ -16,8 +17,6 @@ import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type Heigh
 import { groundHeight, parseW3e, writeW3e, type Terrain } from "./w3e";
 
 const PATH = "map/war3map.w3e";
-/** The note about derived files (pathing, shadows) is shown once per session. */
-let warnedDerived = false;
 /** TEAM_COLORS index used for neutral players. */
 const NEUTRAL = 20;
 
@@ -143,7 +142,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Undo history; `at` edits are applied, `savedAt` matches the files. */
         const history: Edit[] = [];
         let at = 0, savedAt = 0;
+        /** Set by every edit; the minimap is redrawn on the next save. */
+        let minimapStale = false;
         const changed = (e: Edit) => {
+          minimapStale = true;
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
@@ -152,6 +154,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } };
         const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } };
         const pushEdit = (e: Edit) => {
+          minimapStale = true;
           history.length = at;
           history.push(e);
           at = history.length;
@@ -728,12 +731,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             } catch (e) {
               w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
             }
+            // The minimap is redrawn only when something changed since the last save.
+            if (minimapStale) {
+              try {
+                await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf));
+                minimapStale = false;
+              } catch (e) {
+                w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
+              }
+            }
             savedW3e = w3e;
             savedDoodads = structuredClone(doodads);
-            if (!warnedDerived) {
-              warnedDerived = true;
-              w3.window.showWarning("Saved the terrain, pathing map and shadows. The minimap (war3mapMap.blp) isn't regenerated yet; open and save the map in the World Editor before you release it.");
-            }
           } : undefined,
           focus: () => canvas.focus(),
           dispose: () => {
