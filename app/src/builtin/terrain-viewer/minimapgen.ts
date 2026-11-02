@@ -13,6 +13,21 @@ import type { Terrain } from "../../lib/terrain/w3e";
 /** Average colour of the first texture cell, by tile id (textures are shared). */
 const tileColors = new Map<string, Promise<Rgb>>();
 
+/** The minimap parameters from the settings (terrain.minimap.*). */
+export function minimapSettings(w3: W3Api): Partial<MinimapParams> {
+  const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.minimap.${key}`);
+  return {
+    groundBrightness: cfg<number>("groundBrightness"),
+    waterShallowColor: cfg<Rgb>("waterShallowColor"),
+    waterDeepColor: cfg<Rgb>("waterDeepColor"),
+    waterOpacityShallow: cfg<number>("waterOpacityShallow"),
+    waterOpacityDeep: cfg<number>("waterOpacityDeep"),
+    waterFullDepth: cfg<number>("waterFullDepth"),
+    objectRadius: cfg<number>("objectRadius"),
+    blurPasses: cfg<number>("blurPasses"),
+  };
+}
+
 export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[],
   readFile: (path: string) => Promise<Uint8Array>, params?: Partial<MinimapParams>, quality = 80): Promise<Uint8Array> {
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);

@@ -420,3 +420,12 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-region-panel input[type="color"] { width: 32px; height: 24px; padding: 0; border: none; background: none; }
 .terrain-camera-field { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-muted); }
 .terrain-camera-value { width: 80px; }
+.newmap-overlay { position: fixed; z-index: 50; }
+.newmap-dialog { width: min(560px, 94%); gap: 10px; }
+.newmap-row { display: flex; align-items: center; gap: 8px; }
+.newmap-label { width: 90px; flex-shrink: 0; color: var(--fg-muted); }
+.newmap-input { flex: 1; }
+textarea.newmap-input { resize: vertical; font: inherit; }
+.newmap-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.newmap-error { color: var(--error); min-height: 1em; }
+.newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }

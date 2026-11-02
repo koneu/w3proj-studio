@@ -16,6 +16,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("div.welcome-columns", {},
                 h("section", {},
                   h("h2", {}, "Start"),
+                  action("New Map…", "w3.map.new", "an empty map as a new project folder (Ctrl+N)"),
                   action("Import .w3x Map…", "w3.project.importMap", "unpack a map into a new project folder"),
                   action("Open Project Folder…", "w3.project.open", "a folder containing w3proj.toml"),
                   action("Open Settings", "workbench.openSettings", "World Editor and game paths"),

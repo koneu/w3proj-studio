@@ -9,8 +9,8 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
-import type { Rgb } from "./minimap";
-import { buildMinimap } from "./minimapgen";
+import { buildMinimap, minimapSettings } from "./minimapgen";
+import { askNewMap, createMap } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
@@ -83,6 +83,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) throw new Error("This project has no war3map.w3e.");
       await w3.editors.open(PATH, "w3.terrainViewer");
+    }),
+    w3.commands.register("w3.map.new", async () => {
+      const o = await askNewMap(w3);
+      if (o) await w3.window.withProgress(`Creating ${o.name}…`, () => createMap(w3, o));
     }),
 
     // Activity bar entry (like the World Editor's terrain palette): map facts and
@@ -1283,17 +1287,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const minimapMode = cfg<string>("minimap.regenerate");
             if (minimapMode === "always" || (minimapMode !== "never" && minimapStale)) {
               try {
-                const params = {
-                  groundBrightness: cfg<number>("minimap.groundBrightness"),
-                  waterShallowColor: cfg<Rgb>("minimap.waterShallowColor"),
-                  waterDeepColor: cfg<Rgb>("minimap.waterDeepColor"),
-                  waterOpacityShallow: cfg<number>("minimap.waterOpacityShallow"),
-                  waterOpacityDeep: cfg<number>("minimap.waterOpacityDeep"),
-                  waterFullDepth: cfg<number>("minimap.waterFullDepth"),
-                  objectRadius: cfg<number>("minimap.objectRadius"),
-                  blurPasses: cfg<number>("minimap.blurPasses"),
-                };
-                await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, params, cfg<number>("minimap.jpegQuality")));
+                await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
                 minimapStale = false;
               } catch (e) {
                 w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);

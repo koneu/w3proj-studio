@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
 // painting, applied to the corners inside a circular brush, with undo.
 
-import { groundHeight, setGroundHeight, setLayer, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, randomVariation, setGroundHeight, setLayer, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
 /** Cliff layer up/down; water: shallow (one layer down), deep (two), dry. */
@@ -153,16 +153,6 @@ export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke):
     changed = true;
   }
   return changed;
-}
-
-/** Ground variation for freshly painted corners: mostly the plain full tiles
- *  (16, 17+), sometimes one of the extended variations (0–15). Textures that
- *  have no extended part show plain tiles for all of these. */
-function randomVariation(): number {
-  const r = Math.random();
-  if (r < 0.6) return 16;
-  if (r < 0.85) return 17;
-  return Math.floor(Math.random() * 16);
 }
 
 /** Ramp tool, one click at world (wx, wy): on a one-layer cliff tile the

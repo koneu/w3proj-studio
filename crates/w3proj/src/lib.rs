@@ -11,7 +11,7 @@ pub mod project;
 
 pub use codec::{Codec, Registry};
 pub use project::{
-    pack, unpack, verify, Manifest, PackReport, UnpackOptions, UnpackReport, VerifyReport,
+    create, pack, unpack, verify, Manifest, PackReport, UnpackOptions, UnpackReport, VerifyReport,
 };
 
 #[derive(Debug, thiserror::Error)]

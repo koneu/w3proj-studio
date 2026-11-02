@@ -108,6 +108,13 @@ async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomple
     .map_err(err)?
 }
 
+/// Creates an empty project for a new map (see `w3proj::create`).
+#[tauri::command]
+fn project_create(dir: String, name: String, flags: u32, max_players: u32) -> CmdResult<()> {
+    let header = w3proj::header::MapHeader { name, flags, max_players, unknown: 0 };
+    w3proj::create(Path::new(&dir), header).map_err(err)
+}
+
 #[tauri::command]
 async fn project_pack(app: AppHandle, root: String, output: Option<String>) -> CmdResult<Value> {
     let user_formats = user_format_dirs(&app)?;
@@ -531,6 +538,7 @@ pub fn run() {
             project_open,
             project_files,
             project_unpack,
+            project_create,
             project_pack,
             objects_canonicalize,
             codec_canonicalize,

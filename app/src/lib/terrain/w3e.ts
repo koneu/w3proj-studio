@@ -119,6 +119,16 @@ export function parseW3e(buf: Uint8Array): Terrain {
   return { version, tileset, customTilesets, customTilesetsRaw, groundTiles, cliffTiles, width, height, offsetX, offsetY, corners, trailer };
 }
 
+/** Ground variation for freshly painted (or new) corners: mostly the plain full tiles
+ *  (16, 17+), sometimes one of the extended variations (0–15). Textures that
+ *  have no extended part show plain tiles for all of these. */
+export function randomVariation(): number {
+  const r = Math.random();
+  if (r < 0.6) return 16;
+  if (r < 0.85) return 17;
+  return Math.floor(Math.random() * 16);
+}
+
 /** Sets a corner's ground height (world units, without the cliff layer). */
 export function setGroundHeight(c: Corner, ground: number) {
   c.rawHeight = Math.max(-0x8000, Math.min(0x7fff, Math.round(ground * 4 + 0x2000)));

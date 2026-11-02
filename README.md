@@ -159,7 +159,7 @@ War3Net / wc3libs and are verified byte-exact against the game's own 3.0 campaig
 
 ## Workflow with the World Editor
 
-1. **Import .w3x as New Project…**, then commit the folder.
+1. **Import .w3x as New Project…** (or **New Map…**, Ctrl+N, for an empty map), then commit the folder.
 2. Edit scripts and object data in the app, or press **F5 — Open in World
    Editor**. That packs `build/<name>.edit.w3x`, starts
    `World Editor.exe -launch -loadfile <map>`, and watches the file. Each save

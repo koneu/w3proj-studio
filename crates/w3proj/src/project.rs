@@ -418,6 +418,27 @@ pub fn unpack(map: &Path, project: &Path, codecs: &Registry, opts: &UnpackOption
     write_files(project, ex)
 }
 
+/// Starts an empty project for a new map: manifest (with the map header),
+/// git files and an empty `map/` folder. The map files are written by the
+/// caller. Fails if the directory exists and isn't empty.
+pub fn create(project: &Path, header: MapHeader) -> Result<()> {
+    if project.exists() && fs::read_dir(project)?.next().is_some() {
+        return Err(Error::Project(format!("{} is not empty", project.display())));
+    }
+    fs::create_dir_all(project.join(MAP_DIR))?;
+    let manifest = Manifest {
+        format: FORMAT_VERSION,
+        map: Some(header),
+        archive: ArchiveSettings::default(),
+        pack: PackSettings::default(),
+    };
+    manifest.save(project)?;
+    for (name, text) in [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)] {
+        fs::write(project.join(name), text)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 pub struct PackReport {
     pub output: PathBuf,

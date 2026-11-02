@@ -8,7 +8,10 @@
     "viewContainers": [{ "id": "terrain", "title": "Terrain", "icon": "⛰", "order": 3 }],
     "views": [{ "id": "w3.terrain.overview", "title": "Terrain", "container": "terrain" }],
     "editors": [{ "id": "w3.terrainViewer", "title": "Terrain Viewer", "patterns": ["*.w3e"] }],
-    "commands": [{ "id": "w3.terrain.open", "title": "Open Terrain", "category": "Terrain", "keybinding": "f3" }],
+    "commands": [
+      { "id": "w3.terrain.open", "title": "Open Terrain", "category": "Terrain", "keybinding": "f3" },
+      { "id": "w3.map.new", "title": "New Map…", "category": "Project", "keybinding": "ctrl+n" }
+    ],
     "services": [{ "id": "w3.terrain", "description": "Tool groups (tabs) in the terrain editor: registerToolGroup." }],
     "configuration": {
       "title": "Terrain",
