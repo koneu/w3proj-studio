@@ -8,6 +8,9 @@ const W = await import(pathToFileURL(L + "/triggers/wtg.ts").href);
 const J = await import(pathToFileURL(L + "/script/jass.ts").href);
 const { StringTable } = await import(pathToFileURL(L + "/formats/wts.ts").href);
 const T = await import(pathToFileURL(L + "/terrain/w3e.ts").href);
+const { parseIni } = await import(pathToFileURL(L + "/formats/text.ts").href);
+const wed = parseIni(readFileSync("WorldEditData.txt", "utf8"));
+const light = (sec: string, t: string, kind: string) => wed.get(sec)?.get(t.toLowerCase()) ?? `Environment\DNC\DNCLordaeron\DNCLordaeron${kind}\DNCLordaeron${kind}.mdl`;
 const data = parseTriggerData(readFileSync("TriggerData.txt", "utf8"));
 const { parseSlk } = await import(pathToFileURL(L + "/formats/text.ts").href);
 const labels = new Map<string, { channel?: number }>();
@@ -28,7 +31,8 @@ for (const m of readdirSync("ws")) {
   const info = json(d, "war3map.w3i");
   if (!info) continue;
   const terrain = existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
-  const input = { info, data, groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined, triggers, custom, units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads, regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras,
+  const lt = (info.lightEnvironment || info.tileset) as string;
+  const input = { info, data, lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") }, groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined, triggers, custom, units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads, regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras,
     sounds: json(d, "war3map.w3s")?.sounds, soundDuration: () => 0, string: (v: string) => wts?.resolve(v) ?? v };
   const gen = J.generateSections(input), orig = J.splitSections(script);
   for (const [k, v] of gen) {

@@ -8,6 +8,7 @@
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { triggersSection } from "./triggers";
+import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
 
 // ---- inputs (the format engine's JSON) ----------------------------------------------
 
@@ -47,6 +48,8 @@ export interface ScriptInput {
   sounds?: SoundJson[];
   /** "TRIGSTR_n" → text, for the header. */
   string?: (value: string) => string;
+  /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
+  lights?: { terrain: string; unit: string };
   /** Ground height at a point (for region ambient sounds). */
   groundHeight?: (x: number, y: number) => number;
   /** Length of a sound file in milliseconds (SetSoundDuration), if known. */
@@ -288,7 +291,27 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Regions", regions(i)],
     ["Cameras", cameras(i)],
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom }) : ""],
+    ...setupSections(i),
   ]);
+}
+
+function setupSections(i: ScriptInput): [string, string][] {
+  const info = i.info as unknown as SetupInput["info"];
+  const items = i.triggers?.items ?? [];
+  const setup: SetupInput = {
+    info, lights: i.lights ?? { terrain: "", unit: "" },
+    has: {
+      sounds: !!i.sounds?.length, regions: !!i.regions?.length, cameras: !!i.cameras?.length,
+      upgrades: !!(info.upgrades as unknown[] | undefined)?.length, techs: !!(info.techs as unknown[] | undefined)?.length,
+      destructables: false, items: false, units: !!i.units?.length,
+      initTriggers: items.some((t) => "ecas" in t && t.enabled && !t.isComment && (t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === 0 && e.name === "MapInitializationEvent"))),
+    },
+  };
+  return [
+    ["Players", banner("Players") + playersSection(setup)],
+    ["Main Initialization", banner("Main Initialization") + mainSection(setup)],
+    ["Map Configuration", banner("Map Configuration") + configSection(setup)],
+  ];
 }
 
 /** Splits a World Editor script at its section banners (same keys as generateSections). */
