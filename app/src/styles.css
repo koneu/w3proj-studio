@@ -345,3 +345,6 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-tools button.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
 .terrain-tool-opt { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-muted); }
 .terrain-tool-opt input[type=range] { width: 90px; }
+.terrain-sel-actions { display: flex; gap: 6px; margin-top: 6px; }
+.terrain-sel-actions button { margin-top: 0; }
+.terrain-place-hint { color: var(--accent); font-size: 12px; }

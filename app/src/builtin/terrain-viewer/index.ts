@@ -4,7 +4,8 @@ import { decodeImage } from "../image-viewer/decode/index.ts";
 import { TEAM_COLORS, type Vec3 } from "../model-viewer/renderer";
 import { loadKind, parseSlk } from "../object-editor/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
-import { loadSkins, ObjectLoader, type Placed } from "./objects";
+import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
+import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 import { groundHeight, parseW3e, writeW3e, type Terrain } from "./w3e";
@@ -20,18 +21,6 @@ const TILESETS: Record<string, string> = {
   I: "Icecrown Glacier", J: "Dalaran Ruins", K: "Black Citadel", L: "Lordaeron Summer", N: "Northrend",
   O: "Outland", Q: "Village Fall", V: "Village", W: "Lordaeron Winter", X: "Dalaran", Y: "Cityscape", Z: "Sunken Ruins",
 };
-
-/** A placed-objects file (war3map.doo / war3mapUnits.doo) as JSON: the
- *  unpacked `.json` form if the project has it, else decoded on the fly. */
-async function readPlaced(w3: W3Api, name: string, key: "doodads" | "units"): Promise<Placed[]> {
-  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
-  const path = `map/${name}`;
-  let text: string;
-  if (files.has(`${path}.json`.toLowerCase())) text = await w3.workspace.readText(`${path}.json`);
-  else if (files.has(path.toLowerCase())) text = await w3.backend.invoke<string>("codec_decode", { root: w3.workspace.project()!.root, path });
-  else return [];
-  return (JSON.parse(text)[key] ?? []) as Placed[];
-}
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
 
@@ -141,17 +130,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
         const editable = !doc.readOnly;
         let tool: Tool = "select", size = 2, strength = 16, paintTex = 0;
-        /** Undo history; `at` strokes are applied, `savedAt` matches the file. */
-        const history: Stroke[] = [];
+        /** One undoable change: a terrain stroke or an object edit. */
+        interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
+        /** Undo history; `at` edits are applied, `savedAt` matches the files. */
+        const history: Edit[] = [];
         let at = 0, savedAt = 0;
-        const changed = () => {
-          replanCliffs();
-          renderer.terrainChanged();
+        const changed = (e: Edit) => {
+          if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
+          if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
           redraw();
         };
-        const undo = () => { if (at > 0) { history[--at].undo(terrain); changed(); } };
-        const redo = () => { if (at < history.length) { history[at++].redo(terrain); changed(); } };
+        const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } };
+        const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } };
+        const pushEdit = (e: Edit) => {
+          history.length = at;
+          history.push(e);
+          at = history.length;
+          doc.setDirty(at !== savedAt);
+        };
         let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
         /** One brush application at a ground point. */
         const applyAt = (p: Vec3) => {
@@ -187,11 +184,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const endStroke = () => {
           if (!stroke) return;
-          if (stroke.s.finish(terrain)) {
-            history.length = at;
-            history.push(stroke.s);
-            at = history.length;
-            if (isLayerTool(stroke.s.label as Tool)) { replanCliffs(); renderer.terrainChanged(); redraw(); }
+          const s = stroke.s;
+          if (s.finish(terrain)) {
+            pushEdit({ undo: () => s.undo(terrain), redo: () => s.redo(terrain), terrain: true, objects: false });
+            if (isLayerTool(s.label as Tool)) { replanCliffs(); renderer.terrainChanged(); redraw(); }
           }
           doc.setDirty(at !== savedAt);
           stroke = null;
@@ -276,35 +272,141 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await replanCliffs();
         }).catch((e) => { cliffInfo.textContent = `Cliffs: ${(e as Error).message ?? e}`; });
 
+        // ---- placed objects -----------------------------------------------------------
+        let dooFile: PlacedFile | null = null, unitsFile: PlacedFile | null = null;
+        let objCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
+        /** Set once an object was edited: the placement files are saved too. */
+        let objectsTouched = false;
+        const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: p.position[2], rgb });
+        // Units take their player's colour; neutral players (24+) show as Coal.
+        const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
+        const findInstance = (entry: Placed): ObjectInstance | null => {
+          for (const b of renderer.batches) for (const inst of b.instances) if (inst.pick?.placed === entry) return inst;
+          return null;
+        };
+        /** Models for the current entries (initially and after object edits). */
+        async function rebuildObjects() {
+          if (!objCtx) return;
+          const { skins, bases } = objCtx;
+          const doodads = dooFile?.list ?? [], units = unitsFile?.list ?? [];
+          markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
+          const baseOf = (id: string) => bases.get(id);
+          const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf), loader.load("units", units, skins, team, baseOf)]);
+          const others = renderer.batches.filter((b) => b.group !== "doodads" && b.group !== "units");
+          renderer.batches.length = 0;
+          renderer.batches.push(...others, ...d.batches, ...u.batches);
+          // Objects without a model (start locations, unknown ids) stay markers.
+          renderer.setMarkers("doodads", d.unresolved.map((p) => marker(p, [90, 200, 90])));
+          renderer.setMarkers("units", u.unresolved.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
+          const errors = [...d.errors, ...u.errors];
+          problems.replaceChildren(...errors.slice(0, 20).map((e) => h("div.model-warn", { title: e }, e)),
+            ...(errors.length > 20 ? [h("div.muted", {}, `… ${errors.length - 20} more`)] : []));
+          // Keep the selection on the same entry.
+          const entry = selected?.pick?.placed;
+          const again = entry ? findInstance(entry) : null;
+          if (again) selectObject(again); else if (selected) clearSelection();
+          redraw();
+        }
         if (!doc.path.startsWith("game:") && w3.workspace.project()) {
           Promise.all([
-            readPlaced(w3, "war3map.doo", "doodads").catch(() => [] as Placed[]),
-            readPlaced(w3, "war3mapUnits.doo", "units").catch(() => [] as Placed[]),
+            loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null),
+            loadPlacedFile(w3, "war3mapUnits.doo", "units").catch(() => null),
             loadSkins(w3),
             customBases(w3),
-          ]).then(async ([doodads, units, skins, bases]) => {
-            markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
-            const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: p.position[2], rgb });
-            // Units take their player's colour; neutral players (24+) show as Coal.
-            const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
-            const baseOf = (id: string) => bases.get(id);
-            const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf), loader.load("units", units, skins, team, baseOf)]);
-            renderer.batches.push(...d.batches, ...u.batches);
-            // Objects without a model (start locations, unknown ids) stay markers.
-            renderer.setMarkers("doodads", d.unresolved.map((p) => marker(p, [90, 200, 90])));
-            renderer.setMarkers("units", u.unresolved.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
-            const errors = [...d.errors, ...u.errors];
-            problems.replaceChildren(...errors.slice(0, 20).map((e) => h("div.model-warn", { title: e }, e)),
-              ...(errors.length > 20 ? [h("div.muted", {}, `… ${errors.length - 20} more`)] : []));
-            redraw();
+          ]).then(async ([df, uf, skins, bases]) => {
+            dooFile = df;
+            unitsFile = uf;
+            objCtx = { skins, bases };
+            await rebuildObjects();
           });
         }
+        const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
+        /** Moves/turns an entry and its model in place (no rebuild). */
+        const setPlacement = (entry: Placed, position: [number, number, number], angle: number) => {
+          const inst = findInstance(entry);
+          const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1], dz = position[2] - entry.position[2];
+          entry.position = position;
+          entry.angle = angle;
+          objectsTouched = true;
+          if (inst?.pick) {
+            inst.world = placement(entry, inst.pick.extraScale);
+            if (inst.sphere) inst.sphere = [inst.sphere[0] + dx, inst.sphere[1] + dy, inst.sphere[2] + dz, inst.sphere[3]];
+            if (inst === selected) selectObject(inst);
+          }
+          redraw();
+        };
+        const moveEdit = (entry: Placed, before: { position: [number, number, number]; angle: number }) => {
+          const after = { position: [...entry.position] as [number, number, number], angle: entry.angle };
+          pushEdit({
+            undo: () => setPlacement(entry, [...before.position], before.angle),
+            redo: () => setPlacement(entry, [...after.position], after.angle),
+            terrain: false, objects: false,
+          });
+        };
+        const deleteSelected = () => {
+          const entry = selected?.pick?.placed;
+          const f = entry ? fileOf(entry) : null;
+          if (!entry || !f) return;
+          const i = f.list.indexOf(entry);
+          const doIt = () => { f.list.splice(f.list.indexOf(entry), 1); };
+          doIt();
+          clearSelection();
+          pushEdit({ undo: () => { f.list.splice(i, 0, entry); }, redo: doIt, terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+        };
+        const rotateSelected = (deg: number) => {
+          const entry = selected?.pick?.placed;
+          if (!entry) return;
+          const before = { position: [...entry.position] as [number, number, number], angle: entry.angle };
+          setPlacement(entry, [...entry.position], entry.angle + (deg * Math.PI) / 180);
+          moveEdit(entry, before);
+        };
+        /** Type chosen with "Place…"; each click on the ground places one. */
+        let placing: { kind: string; id: string; name: string } | null = null;
+        const placeHint = h("span.terrain-place-hint");
+        const setPlacing = (p: typeof placing) => {
+          placing = p;
+          placeHint.textContent = p ? `Placing ${p.name} (${p.id}): click the ground · Esc to stop` : "";
+        };
+        const placeAt = (pos: Vec3) => {
+          if (!placing) return;
+          const f = placing.kind === "w3u" || placing.kind === "w3t" ? unitsFile : dooFile;
+          if (!f) { w3.window.showError(`This project has no ${placing.kind === "w3u" || placing.kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
+          const entry = newEntry(f, placing.id, [pos[0], pos[1], pos[2]], placing.kind === "w3u" ? 0 : undefined);
+          if (!entry) { w3.window.showError(`${f.name} has no entries to take the layout from yet.`); return; }
+          f.list.push(entry);
+          pushEdit({ undo: () => { f.list.splice(f.list.indexOf(entry), 1); }, redo: () => { f.list.push(entry); }, terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+        };
+        const choosePlacement = async () => {
+          const kinds: [string, string][] = [["w3u", "Unit"], ["w3t", "Item"], ["w3b", "Destructable"], ["w3d", "Doodad"]];
+          const items: { label: string; description: string; value: { kind: string; id: string; name: string } }[] = [];
+          for (const [kind, label] of kinds) {
+            const k = await loadKind(w3, kind).catch(() => null);
+            if (!k) continue;
+            for (const id of k.baseIds) {
+              const name = k.names.get(id) ?? id;
+              items.push({ label: name, description: `${id} · ${label}`, value: { kind, id, name } });
+            }
+            for (const [id, base] of objCtx?.bases ?? []) {
+              if (!k.names.has(base)) continue;
+              const name = `${k.names.get(base)} (custom)`;
+              items.push({ label: name, description: `${id} · ${label}`, value: { kind, id, name } });
+            }
+          }
+          const pick = await w3.window.quickPick(items, { placeholder: "What to place (name or id)…" });
+          if (pick?.value) { setTool("select"); setPlacing(pick.value); canvas.focus(); }
+        };
 
         // ---- selection --------------------------------------------------------------
         const selInfo = h("div.terrain-selection.muted", {}, "Click a unit, item, doodad or destructable.");
         const row = (label: string, value: string) => h("div.terrain-sel-row", {}, h("span.muted", {}, label), h("span", {}, value));
         const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
+        let selected: ObjectInstance | null = null;
         const selectObject = (inst: ObjectInstance) => {
+          selected = inst;
           const p = inst.pick!, pl = p.placed;
           const nameEl = h("div.terrain-sel-name", {}, p.id);
           loadKind(w3, p.kind).then((k) => {
@@ -322,13 +424,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             row("Scale", pl.scale.map(fmt).join(", ")),
             row("Variation", String(pl.variation)),
             row("Model", p.model),
-            h("button", { onclick: () => w3.commands.execute("w3.objectEditor.open", p.kind, p.id).catch((e) => w3.window.showError(String(e))) }, "Open in Object Editor"),
+            h("div.terrain-sel-actions", {},
+              h("button", { onclick: () => w3.commands.execute("w3.objectEditor.open", p.kind, p.id).catch((e) => w3.window.showError(String(e))) }, "Open in Object Editor"),
+              ...(editable ? [h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete")] : [])),
+            ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · Del to delete")] : []),
           );
           const [x, y, , r] = inst.sphere!;
           renderer.setSelection({ x, y, r: Math.min(400, Math.max(40, r * 0.8)), rgb: pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120] });
           redraw();
         };
         const clearSelection = () => {
+          selected = null;
           selInfo.className = "terrain-selection muted";
           selInfo.replaceChildren("Click a unit, item, doodad or destructable.");
           renderer.setSelection(null);
@@ -355,6 +461,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("h4", {}, "Placed objects"), markerList, problems,
         );
 
+        let setToolRef: (t: Tool) => void = () => {};
+        const setTool = (t: Tool) => setToolRef(t);
         function toolBar() {
           const buttons = new Map<Tool, HTMLButtonElement>();
           const texSelect = h("select", { title: "Ground texture to paint", onchange: () => { paintTex = Number(texSelect.value); } },
@@ -369,6 +477,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
           const setTool = (t: Tool) => {
             tool = t;
+            setPlacing(null);
             for (const [k, b] of buttons) b.classList.toggle("active", k === t);
             texWrap.hidden = t !== "paint";
             strengthWrap.hidden = t !== "raise" && t !== "lower";
@@ -390,10 +499,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
               h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
             strengthWrap, texWrap,
+            h("button", { title: "Place units, items, doodads or destructables", onclick: () => { void choosePlacement(); } }, "Place…"),
             h("button", { title: "Undo (Ctrl+Z)", onclick: undo }, "↶"),
             h("button", { title: "Redo (Ctrl+Y)", onclick: redo }, "↷"),
           );
+          setToolRef = setTool;
           setTool("select");
+          bar.append(placeHint);
           return bar;
         }
 
@@ -426,6 +538,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         let drag: { x: number; y: number; button: number } | null = null;
+        /** An object being dragged to a new place. */
+        let objDrag: { entry: Placed; before: { position: [number, number, number]; angle: number }; moved: boolean } | null = null;
         canvas.tabIndex = 0;
         canvas.addEventListener("contextmenu", (e) => e.preventDefault());
         /** Where the left button went down; a release close by is a click (select). */
@@ -437,11 +551,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             startStroke(e);
             return;
           }
+          if (e.button === 0 && placing) {
+            const p = groundAt(e);
+            if (p) placeAt(p);
+            return;
+          }
+          if (e.button === 0 && editable) {
+            const rect = canvas.getBoundingClientRect();
+            const inst = renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top));
+            // Only the selected object moves, so drags over forests still pan.
+            if (inst?.pick && inst === selected) {
+              const entry = inst.pick.placed;
+              objDrag = { entry, before: { position: [...entry.position] as [number, number, number], angle: entry.angle }, moved: false };
+              return;
+            }
+          }
           if (e.button === 1) e.preventDefault();
           drag = { x: e.clientX, y: e.clientY, button: e.button };
           press = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
         });
         canvas.addEventListener("mousemove", (e) => {
+          if (objDrag) {
+            const p = groundAt(e);
+            if (p) {
+              objDrag.moved = true;
+              setPlacement(objDrag.entry, [p[0], p[1], renderer.groundHeight(p[0], p[1])], objDrag.entry.angle);
+            }
+            return;
+          }
           if (drag) return;
           const p = showBrush(e);
           // Re-apply while held, a few times per second.
@@ -458,7 +595,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
           const step = canvas.clientHeight / 6;
-          if (e.key === "Escape") return clearSelection();
+          if (e.key === "Escape") { if (placing) setPlacing(null); else clearSelection(); return; }
+          if (editable && selected && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
+          if (editable && selected && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
           if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
           if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
           const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
@@ -478,7 +617,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           redraw();
         };
-        const onUp = () => { drag = null; endStroke(); };
+        const onUp = () => {
+          drag = null;
+          endStroke();
+          if (objDrag?.moved) moveEdit(objDrag.entry, objDrag.before);
+          objDrag = null;
+        };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
         canvas.addEventListener("wheel", (e) => {
@@ -503,6 +647,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           save: editable ? async () => {
             await doc.writeBytes(writeW3e(terrain));
+            if (objectsTouched) {
+              for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
+            }
             savedAt = at;
             doc.setDirty(false);
             if (!warnedDerived) {

@@ -169,6 +169,23 @@ fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<String>
     Err(last)
 }
 
+/// Encodes JSON (as produced by `codec_decode`) back to the archive format
+/// and writes it to a raw project file (e.g. `map/war3map.doo`).
+#[tauri::command]
+fn codec_write(app: AppHandle, root: String, path: String, text: String) -> CmdResult<()> {
+    let rel = path.strip_prefix("map/").unwrap_or(&path);
+    let registry = Registry::for_project(Path::new(&root), &user_format_dirs(&app)?).map_err(err)?;
+    let name = w3proj::paths::to_archive_name(rel);
+    let mut last = format!("no format definition writes {name}");
+    for codec in registry.for_archive_name(&name) {
+        match codec.encode(&name, text.as_bytes()) {
+            Ok(bin) => return std::fs::write(Path::new(&root).join(&path), bin).map_err(err),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(last)
+}
+
 /// The app's user format folder: `<config>/formats`.
 fn user_format_dirs(app: &AppHandle) -> CmdResult<Vec<PathBuf>> {
     Ok(vec![config_dir(app)?.join("formats")])
@@ -518,6 +535,7 @@ pub fn run() {
             objects_canonicalize,
             codec_canonicalize,
             codec_decode,
+            codec_write,
             formats_list,
             format_customize,
             fs_read_text,

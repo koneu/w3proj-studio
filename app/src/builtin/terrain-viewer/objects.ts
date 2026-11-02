@@ -67,7 +67,7 @@ function modelPath(skin: Skin, variation: number): string {
 }
 
 /** World matrix: translate · rotate about z · scale (column-major). */
-function placement(p: Placed, extraScale: number): Mat4 {
+export function placement(p: Placed, extraScale: number): Mat4 {
   const c = Math.cos(p.angle), s = Math.sin(p.angle);
   const [sx, sy, sz] = p.scale.map((v) => v * extraScale);
   const [x, y, z] = p.position;
@@ -198,7 +198,7 @@ export class ObjectLoader {
       entry.items.push(p);
       entry.req.instances.push({
         world: placement(p, skin.modelScale), team: teamOf(p),
-        pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path },
+        pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path, extraScale: skin.modelScale },
       });
     }
     const entries = [...byModel.values()];

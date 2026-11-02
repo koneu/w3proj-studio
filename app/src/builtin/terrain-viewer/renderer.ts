@@ -77,6 +77,8 @@ export interface PickInfo {
   index: number;
   placed: Placed;
   model: string;
+  /** Model scale on top of the placement's own (units' skin scale). */
+  extraScale: number;
 }
 
 export interface ObjectInstance {
