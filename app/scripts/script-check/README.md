@@ -16,3 +16,6 @@ Run from that folder:
 
 `sections.mts` prints identical sections per banner title; `functions.mts` compares the
 trigger functions one by one and lists the most common first differences.
+
+Also needed in that folder for `sections.mts`: `WorldEditData.txt`, `UnitBalance.slk`,
+`ItemData.slk` (from `UI\` and `Units\`) and `abil/*.txt` (the `Units\*AbilityFunc.txt` files).

@@ -9,6 +9,7 @@ import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
+import { unitsSection, type UnitJson } from "./units";
 
 // ---- inputs (the format engine's JSON) ----------------------------------------------
 
@@ -48,6 +49,10 @@ export interface ScriptInput {
   sounds?: SoundJson[];
   /** "TRIGSTR_n" → text, for the header. */
   string?: (value: string) => string;
+  /** What an object id is (custom ids by their base and the map's changes). */
+  kindOf?: (id: string) => "building" | "unit" | "item" | "sloc" | undefined;
+  /** The orders that turn an ability's autocast on and off. */
+  autocastOrders?: (ability: string) => { on: string; off: string } | undefined;
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
   lights?: { terrain: string; unit: string };
   /** Ground height at a point (for region ambient sounds). */
@@ -290,9 +295,20 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Sound Assets", sounds(i)],
     ["Regions", regions(i)],
     ["Cameras", cameras(i)],
+    ["Unit Creation", unitCreation(i)],
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom }) : ""],
     ...setupSections(i),
   ]);
+}
+
+function unitCreation(i: ScriptInput): string {
+  if (!i.kindOf || !i.units?.length) return "";
+  const regions = i.regions ?? [];
+  const body = unitsSection({
+    units: i.units as unknown as UnitJson[], kindOf: i.kindOf, referenced: referencedGlobals(i), autocastOrders: i.autocastOrders,
+    regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
+  });
+  return body ? banner("Unit Creation") + body : "";
 }
 
 function setupSections(i: ScriptInput): [string, string][] {

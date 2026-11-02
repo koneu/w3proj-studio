@@ -1,48 +1,81 @@
+// Section-by-section comparison of lib/script output with the World Editor's war3map.j.
+// Run from a folder with ws/<n>/map (unpacked maps) and the game tables (see README.md).
+// Args: <path to app/src/lib> [section to show diffs for] [number of diffs]
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const L = process.argv[2];
-const only = process.argv[3];      // section to show diffs for
+const only = process.argv[3] ?? "";
 const showN = Number(process.argv[4] ?? 1);
-const { parseTriggerData } = await import(pathToFileURL(L + "/triggers/triggerdata.ts").href);
-const W = await import(pathToFileURL(L + "/triggers/wtg.ts").href);
-const J = await import(pathToFileURL(L + "/script/jass.ts").href);
-const { StringTable } = await import(pathToFileURL(L + "/formats/wts.ts").href);
-const T = await import(pathToFileURL(L + "/terrain/w3e.ts").href);
-const { parseIni } = await import(pathToFileURL(L + "/formats/text.ts").href);
-const wed = parseIni(readFileSync("WorldEditData.txt", "utf8"));
-const light = (sec: string, t: string, kind: string) => wed.get(sec)?.get(t.toLowerCase()) ?? `Environment\DNC\DNCLordaeron\DNCLordaeron${kind}\DNCLordaeron${kind}.mdl`;
-const data = parseTriggerData(readFileSync("TriggerData.txt", "utf8"));
-const { parseSlk } = await import(pathToFileURL(L + "/formats/text.ts").href);
-const labels = new Map<string, { channel?: number }>();
-for (const f of readdirSync("soundinfo")) for (const r of parseSlk(readFileSync("soundinfo/" + f, "utf8"))) if (r.SoundName && !labels.has(r.SoundName)) labels.set(r.SoundName, { channel: r.Channel === undefined || r.Channel === "" ? undefined : Number(r.Channel) });
+const mod = (p: string) => import(pathToFileURL(L + p).href);
+const { parseTriggerData } = await mod("/triggers/triggerdata.ts");
+const W = await mod("/triggers/wtg.ts");
+const J = await mod("/script/jass.ts");
+const { StringTable } = await mod("/formats/wts.ts");
+const T = await mod("/terrain/w3e.ts");
+const { parseIni, parseSlk } = await mod("/formats/text.ts");
+
+const read = (f: string) => readFileSync(f, "utf8");
+const data = parseTriggerData(read("TriggerData.txt"));
+const wed = parseIni(read("WorldEditData.txt"));
+const light = (sec: string, t: string, kind: string) =>
+  wed.get(sec)?.get(t.toLowerCase()) ?? `Environment\\DNC\\DNCLordaeron\\DNCLordaeron${kind}\\DNCLordaeron${kind}.mdl`;
+const balance = parseSlk(read("UnitBalance.slk"));
+const buildings = new Set(balance.filter((r: any) => r.isbldg === "1").map((r: any) => r.unitBalanceID));
+const unitIds = new Set(balance.map((r: any) => r.unitBalanceID));
+const itemIds = new Set(parseSlk(read("ItemData.slk")).map((r: any) => r.itemID));
+const orders = new Map<string, { on: string; off: string }>();
+for (const f of readdirSync("abil")) for (const [id, sec] of parseIni(read("abil/" + f))) { const on = sec.get("orderon"), off = sec.get("orderoff"); if (on && off && !orders.has(id)) orders.set(id, { on, off }); }
+
 const stats: Record<string, [number, number]> = {};
 let shown = 0;
-const json = (d: string, n: string) => existsSync(`${d}/${n}.json`) ? JSON.parse(readFileSync(`${d}/${n}.json`, "utf8")) : null;
+const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
+const norm = (x: string) => x.replace(/SetSoundDuration\( (\w+), \d+ \)/g, "SetSoundDuration( $1, 0 )").replace(/\s+$/g, "");
+
 for (const m of readdirSync("ws")) {
   const d = `ws/${m}/map`;
   if (!existsSync(`${d}/war3map.j`) || !existsSync(`${d}/war3map.wtg`)) continue;
-  const script = readFileSync(`${d}/war3map.j`, "utf8");
+  const info = json(d, "war3map.w3i");
+  if (!info) continue;
   let triggers, custom;
   try {
     triggers = W.parseWtg(new Uint8Array(readFileSync(`${d}/war3map.wtg`)), data);
     custom = existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
   } catch { continue; }
-  const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(readFileSync(`${d}/war3map.wts`, "utf8")) : null;
-  const info = json(d, "war3map.w3i");
-  if (!info) continue;
+  const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
+  // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
+  const customUnits = new Map<string, { base: string; bldg?: boolean }>();
+  for (const f of ["war3map.w3u", "war3mapSkin.w3u"]) {
+    for (const o of json(d, f)?.custom ?? []) {
+      const b = o.mods?.find((x: any) => x.field === "ubdg");
+      customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
+    }
+  }
+  const customItems = new Set<string>((json(d, "war3map.w3t")?.custom ?? []).map((o: any) => o.id));
+  const kindOf = (id: string): any => {
+    if (id === "sloc") return "sloc";
+    if (itemIds.has(id) || customItems.has(id)) return "item";
+    const c = customUnits.get(id);
+    if (c) return (c.bldg ?? buildings.has(c.base)) ? "building" : "unit";
+    return buildings.has(id) ? "building" : "unit";
+  };
   const lt = (info.lightEnvironment || info.tileset) as string;
-  const input = { info, data, lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") }, groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined, triggers, custom, units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads, regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras,
-    sounds: json(d, "war3map.w3s")?.sounds, soundDuration: () => 0, string: (v: string) => wts?.resolve(v) ?? v };
-  const gen = J.generateSections(input), orig = J.splitSections(script);
+  const input = {
+    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a),
+    lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") },
+    groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,
+    units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
+    regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras, sounds: json(d, "war3map.w3s")?.sounds,
+    soundDuration: () => 0, string: (v: string) => wts?.resolve(v) ?? v,
+  };
+  const gen = J.generateSections(input), orig = J.splitSections(read(`${d}/war3map.j`));
   for (const [k, v] of gen) {
     const o = orig.get(k) ?? "";
-    const norm = (x: string) => x.replace(/SetSoundDuration\( (\w+), \d+ \)/g, 'SetSoundDuration( $1, 0 )').replace(/\s+$/g, "");
     const same = norm(v) === norm(o);
     const s = (stats[k] ??= [0, 0]); s[1]++; if (same) s[0]++;
     if (!same && k === only && shown < showN) {
       shown++;
-      const a = v.split(/\r?\n/), b = o.split(/\r?\n/);
+      const a = norm(v).split(/\r?\n/), b = norm(o).split(/\r?\n/);
       const i = a.findIndex((l: string, j: number) => l !== b[j]);
       console.log(`--- ${m} line ${i}\n gen: ${JSON.stringify(a.slice(i, i + 3))}\n orig: ${JSON.stringify(b.slice(i, i + 3))}`);
     }
