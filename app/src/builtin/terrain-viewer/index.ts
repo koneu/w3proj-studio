@@ -14,7 +14,7 @@ import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintTexture, Stroke, toggleRamp, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 import { groundHeight, heightAt, parseW3e, writeW3e, type Terrain } from "./w3e";
 
 const PATH = "map/war3map.w3e";
@@ -141,7 +141,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const redraw = () => { dirty = true; };
 
         // ---- editing ------------------------------------------------------------------
-        type Tool = "select" | HeightTool | LayerTool | "paint";
+        type Tool = "select" | HeightTool | LayerTool | "paint" | "ramp";
         const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffDown", "shallow", "deep", "dry"];
         const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
         const editable = !doc.readOnly;
@@ -195,6 +195,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const startStroke = async (e: MouseEvent) => {
           const p = groundAt(e);
           if (!p) return;
+          if (tool === "ramp") {
+            const s = new Stroke("ramp");
+            const problem = toggleRamp(terrain, p[0], p[1], size, s);
+            if (problem) { w3.window.showWarning(problem); return; }
+            stroke = { s, target: 0, layer: { layer: 2 }, last: performance.now() };
+            endStroke();
+            return;
+          }
           if (tool === "paint") {
             const i = await ensureTile(paintTile);
             if (i === null) return;
@@ -227,14 +235,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               terrain: true, objects: moved,
             });
             if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); }
-            if (isLayerTool(s.label as Tool)) { replanCliffs(); renderer.terrainChanged(); redraw(); }
+            if (isLayerTool(s.label as Tool) || s.label === "ramp") { replanCliffs(); renderer.terrainChanged(); redraw(); }
           }
           doc.setDirty(at !== savedAt);
           stroke = null;
         };
         const BRUSH_COLORS: Record<Tool, Vec3> = {
           select: [0, 0, 0], raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
-          cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
+          cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150], ramp: [255, 170, 220],
         };
         const showBrush = (e: MouseEvent | null) => {
           const p = e && tool !== "select" ? groundAt(e) : null;
@@ -632,6 +640,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
             ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
             ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
+            ["ramp", "Ramp", "Click a one-level cliff edge to build a ramp (Size sets its width); click a ramp to remove it"],
           ];
           const bar = h("div.model-toolbar.terrain-tools", {},
             ...tools.map(([t, label, title]) => {

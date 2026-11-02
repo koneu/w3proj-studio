@@ -4,7 +4,7 @@
 
 import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Placed } from "./objects";
-import type { Terrain } from "./w3e";
+import { heightAt, rampLift, type Terrain } from "./w3e";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -163,7 +163,10 @@ export class TerrainRenderer {
   /** Normal at a corner from its neighbours' heights. */
   private normal(x: number, y: number): Vec3 {
     const t = this.terrain;
-    const hz = (cx: number, cy: number) => this.corner(Math.min(t.width - 1, Math.max(0, cx)), Math.min(t.height - 1, Math.max(0, cy))).height;
+    const hz = (cx: number, cy: number) => {
+      const qx = Math.min(t.width - 1, Math.max(0, cx)), qy = Math.min(t.height - 1, Math.max(0, cy));
+      return this.corner(qx, qy).height + rampLift(t, qx, qy);
+    };
     const dx = hz(x + 1, y) - hz(x - 1, y), dy = hz(x, y + 1) - hz(x, y - 1);
     const n: Vec3 = [-dx, -dy, 256];
     const l = Math.hypot(...n);
@@ -218,7 +221,7 @@ export class TerrainRenderer {
           const quad = perTexture[id] ?? (perTexture[id] = []);
           const push = (cx: number, cy: number, u: number, v: number) => {
             const c = this.corner(cx, cy), n = normals[cy * t.width + cx];
-            quad.push(t.offsetX + cx * 128, t.offsetY + cy * 128, c.height, n[0], n[1], n[2], u, v, cell, shade);
+            quad.push(t.offsetX + cx * 128, t.offsetY + cy * 128, c.height + rampLift(t, cx, cy), n[0], n[1], n[2], u, v, cell, shade);
           };
           // Image rows run top-down: the tile's north edge is v = 0.
           push(x, y, 0, 1); push(x + 1, y, 1, 1); push(x + 1, y + 1, 1, 0); push(x, y + 1, 0, 0);
@@ -355,16 +358,9 @@ export class TerrainRenderer {
     return { origin: eye, dir: norm([f[0] + r[0] * nx + u[0] * ny, f[1] + r[1] * nx + u[1] * ny, f[2] + r[2] * nx + u[2] * ny]) };
   }
 
-  /** Ground height (layers included) at a world point, bilinear between corners. */
+  /** Ground height (layers and ramps included) at a world point, bilinear between corners. */
   groundHeight(x: number, y: number): number {
-    const t = this.terrain;
-    const gx = Math.min(t.width - 1.001, Math.max(0, (x - t.offsetX) / 128));
-    const gy = Math.min(t.height - 1.001, Math.max(0, (y - t.offsetY) / 128));
-    const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0;
-    const hz = (cx: number, cy: number) => this.corner(cx, cy).height;
-    const a = hz(x0, y0) + (hz(x0 + 1, y0) - hz(x0, y0)) * fx;
-    const b = hz(x0, y0 + 1) + (hz(x0 + 1, y0 + 1) - hz(x0, y0 + 1)) * fx;
-    return a + (b - a) * fy;
+    return heightAt(this.terrain, x, y);
   }
 
   /** The nearest placed object (with a model) hit by a ray. */

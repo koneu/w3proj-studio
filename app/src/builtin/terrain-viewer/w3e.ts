@@ -137,14 +137,30 @@ export function groundHeight(c: Corner): number {
   return (c.rawHeight - 0x2000) / 4;
 }
 
+/** Extra height of a ramp's middle corner: a ramp climbs one layer over two
+ *  tiles, so the ramp corner between its high and low end (on the lower
+ *  layer) sits half a layer up. 0 for every other corner. */
+export function rampLift(t: Terrain, x: number, y: number): number {
+  const c = t.corners[y * t.width + x];
+  if (!c.ramp) return 0;
+  const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : null);
+  for (const [dx, dy] of [[1, 0], [0, 1]]) {
+    for (const s of [1, -1]) {
+      const up = at(x + dx * s, y + dy * s), down = at(x - dx * s, y - dy * s);
+      if (up?.ramp && down?.ramp && up.layer === c.layer + 1 && down.layer === c.layer) return 64;
+    }
+  }
+  return 0;
+}
+
 /** Height of the ground at a world position: bilinear over the tile's
- *  corners (layers included). Doodads without a fixed height sit exactly
- *  there in World Editor maps (97% within half a unit). */
+ *  corners (layers and ramps included). Doodads without a fixed height sit
+ *  exactly there in World Editor maps (97% within half a unit). */
 export function heightAt(t: Terrain, wx: number, wy: number): number {
   const fx = Math.min(Math.max((wx - t.offsetX) / 128, 0), t.width - 1.000001);
   const fy = Math.min(Math.max((wy - t.offsetY) / 128, 0), t.height - 1.000001);
   const x = Math.floor(fx), y = Math.floor(fy), u = fx - x, v = fy - y;
-  const c = (i: number, j: number) => t.corners[(y + j) * t.width + x + i].height;
+  const c = (i: number, j: number) => t.corners[(y + j) * t.width + x + i].height + rampLift(t, x + i, y + j);
   return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
 }
 
