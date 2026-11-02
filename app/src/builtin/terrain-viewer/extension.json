@@ -13,6 +13,7 @@
       "title": "Terrain",
       "properties": {
         "terrain.placement.respectPathing": { "type": "boolean", "default": true, "description": "Place objects only where their footprint is free: no cliffs, deep water, unwalkable ground or other objects." },
+        "terrain.placement.scatterDensity": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 1, "description": "How closely Scatter packs objects: 1 = as close as their footprints allow; 0.5 = half as many per area." },
         "terrain.pathing.regenerate": { "type": "boolean", "default": true, "description": "Rewrite the pathing map (war3map.wpm) from terrain and doodads on every save." },
         "terrain.pathing.deepWater": { "type": "number", "default": 52, "minimum": 0, "maximum": 1000, "description": "Water deeper than this (world units, at a cell's nearest corner) can't be walked. 52 matches the World Editor." },
         "terrain.shadows.update": { "type": "boolean", "default": true, "description": "Update the shadow map (war3map.shd) on save. Only cells whose predicted shadow changed since the last save are rewritten." },

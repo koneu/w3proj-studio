@@ -30,6 +30,18 @@ interface ObjectEntry {
   sets?: { mods: { field: string; value: unknown }[] }[];
 }
 
+/** Object id → base id and all fields the map sets for it (first value per field). */
+export async function objectMods(w3: W3Api, name: string): Promise<Map<string, { base: string; mods: Map<string, unknown> }>> {
+  const out = new Map<string, { base: string; mods: Map<string, unknown> }>();
+  const file = await readMapJson<ObjectFile>(w3, name).catch(() => null);
+  for (const o of [...(file?.original ?? []), ...(file?.custom ?? [])]) {
+    const mods = new Map<string, unknown>();
+    for (const m of [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)]) if (!mods.has(m.field)) mods.set(m.field, m.value);
+    out.set(o.id ?? o.base, { base: o.base, mods });
+  }
+  return out;
+}
+
 /** Object id → base id and the pathing texture the map sets for it. */
 export async function pathOverrides(w3: W3Api, name: string, field: string): Promise<Map<string, { base: string; pathTex?: string }>> {
   const out = new Map<string, { base: string; pathTex?: string }>();
@@ -74,6 +86,7 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
   const unitBalance = new Map(parseSlk(await w3.game.readText("Units\\UnitBalance.slk").catch(() => "")).map((r) => [r.unitBalanceID, r]));
   const doodadMods = await pathOverrides(w3, "war3map.w3d", "dptx");
   const destMods = await pathOverrides(w3, "war3map.w3b", "bptx");
+  const unitMods = await objectMods(w3, "war3map.w3u");
 
   const textures = new Map<string, Promise<PathImage | null>>();
   const missing = new Set<string>();
@@ -105,10 +118,14 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
       return { path: usable(path) ? path : undefined, dest: false, walkable: false };
     },
     unitShape(id) {
-      const key = unitRows.has(id) ? id : unitBase(id) ?? id;
+      // The map's own values (collision ucol, pathing texture upat) win over the base unit's.
+      const mod = unitMods.get(id);
+      const key = unitRows.has(id) ? id : mod?.base ?? unitBase(id) ?? id;
       const row = unitRows.get(key), bal = unitBalance.get(key);
-      if (!row && !bal) return null;
-      return { path: usable(row?.pathTex) ? row!.pathTex : undefined, collision: Number(bal?.collision ?? 16) || 16 };
+      if (!row && !bal && !mod) return null;
+      const path = typeof mod?.mods.get("upat") === "string" ? (mod.mods.get("upat") as string) : row?.pathTex;
+      const collision = typeof mod?.mods.get("ucol") === "number" ? (mod.mods.get("ucol") as number) : Number(bal?.collision ?? 16);
+      return { path: usable(path) ? path : undefined, collision: collision || 16 };
     },
   };
 }

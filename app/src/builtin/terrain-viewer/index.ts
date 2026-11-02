@@ -506,8 +506,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return h("label.terrain-place-opt", { title }, box, ` ${label}`);
           };
           placeHint.replaceChildren(`Placing ${p.name} (${p.id}): click the ground · Esc to stop`, ...(p.kind === "w3u" ? [" · for ", owner] : []),
-            toggle("Scatter", "Each click fills the brush (Size) with this object, spaced by its footprint, with random variation, facing and scale",
+            toggle("Scatter", "Click or drag to fill the brush (Size) with this object, spaced by its footprint, with random variation, facing and scale",
               () => scatter, (v) => { scatter = v; }),
+            h("label.terrain-place-opt", { title: "Scatter density: 100% packs objects as close as their footprints allow (setting terrain.placement.scatterDensity)" }, "Density ",
+              h("input", { type: "range", min: "10", max: "100", value: String(Math.round((w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1) * 100)),
+                onchange: (e: Event) => { void w3.settings.set("terrain.placement.scatterDensity", Number((e.target as HTMLInputElement).value) / 100); canvas.focus(); } })),
             toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
               () => w3.settings.get<boolean>("terrain.placement.respectPathing"), (v) => void w3.settings.set("terrain.placement.respectPathing", v)));
         };
@@ -529,7 +532,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return occupancyPromise;
         };
 
-        const placeAt = async (pos: Vec3) => {
+        /** A scatter drag in progress: everything it placed becomes one undo step. */
+        let scatterStroke: { f: PlacedFile; entries: Placed[]; last: Vec3; queue: Promise<void> } | null = null;
+        const startScatter = (pos: Vec3) => {
+          if (!placing) return;
+          const f = placing.kind === "w3u" || placing.kind === "w3t" ? unitsFile : dooFile;
+          if (!f) { w3.window.showError(`This project has no ${placing.kind === "w3u" || placing.kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
+          scatterStroke = { f, entries: [], last: pos, queue: Promise.resolve() };
+          scatterStroke.queue = placeAt(pos, scatterStroke);
+        };
+        /** Fills again once the mouse moved half a brush radius. */
+        const continueScatter = (pos: Vec3) => {
+          const s = scatterStroke;
+          if (!s || Math.hypot(pos[0] - s.last[0], pos[1] - s.last[1]) < size * 64) return;
+          s.last = pos;
+          s.queue = s.queue.then(() => placeAt(pos, s));
+        };
+        const endScatter = () => {
+          const s = scatterStroke;
+          if (!s) return;
+          scatterStroke = null;
+          void s.queue.then(() => {
+            if (!s.entries.length) { if (placing) w3.window.showWarning(`No free room for ${placing.name} under the brush.`); return; }
+            const { f, entries } = s;
+            pushEdit({ undo: () => { for (const e of entries) f.list.splice(f.list.indexOf(e), 1); }, redo: () => { f.list.push(...entries); }, terrain: false, objects: true });
+          });
+        };
+
+        /** Places the chosen object at `pos`, or (scatter, with `stroke`) fills the brush there. */
+        const placeAt = async (pos: Vec3, stroke?: { entries: Placed[] }) => {
           if (!placing) return;
           const { kind, id } = placing;
           const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
@@ -542,7 +573,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const facing = () => (skin?.fixedRot != null ? deg(skin.fixedRot) : scatter ? Math.random() * Math.PI * 2 : deg(270));
 
           const spots: { x: number; y: number; angle: number }[] = [];
-          if (!scatter) {
+          if (!stroke) {
             const angle = facing();
             if (respect && fp && !occ!.fits(fp, pos[0], pos[1], angle)) {
               w3.window.showWarning(`No room for ${placing.name} here (its footprint overlaps blocked ground or another object). Turn off "Respect pathing" to place it anyway.`);
@@ -550,8 +581,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             spots.push({ x: pos[0], y: pos[1], angle });
           } else {
-            // A jittered grid over the brush, spaced by the footprint.
-            const spacing = Math.max(64, fp ? Math.max(fp.width, fp.height) * 32 : 128);
+            // A jittered grid over the brush, spaced by the footprint (wider at lower density).
+            const density = Math.min(1, Math.max(0.05, w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1));
+            const spacing = Math.max(64, fp ? Math.max(fp.width, fp.height) * 32 : 128) / Math.sqrt(density);
             const radius = size * 128;
             const candidates: [number, number][] = [];
             for (let gy = -radius; gy <= radius; gy += spacing) {
@@ -567,12 +599,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (fp) {
                 if (respect && !occ!.fits(fp, sx, sy, angle)) continue;
                 // Without "respect pathing" new objects still don't overlap each other.
-                if (!respect && spots.some((s) => Math.hypot(s.x - sx, s.y - sy) < spacing * 0.75)) continue;
+                if (!respect && [...spots, ...stroke.entries.map((e) => ({ x: e.position[0], y: e.position[1] }))]
+                  .some((s) => Math.hypot(s.x - sx, s.y - sy) < spacing * 0.75)) continue;
                 if (respect) occ!.mark(fp, sx, sy, angle);
               }
               spots.push({ x: sx, y: sy, angle });
             }
-            if (!spots.length) { w3.window.showWarning(`No free room for ${placing.name} under the brush.`); return; }
+            if (!spots.length) return;
           }
 
           const entries: Placed[] = [];
@@ -580,7 +613,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const entry = newEntry(f, id, [s.x, s.y, heightAt(terrain, s.x, s.y)], kind === "w3u" ? placeOwner : undefined);
             if (!entry) { w3.window.showError(`${f.name} has no entries to take the layout from yet.`); return; }
             entry.angle = s.angle;
-            if (scatter) {
+            if (stroke) {
               if ((skin?.numVar ?? 1) > 1) entry.variation = Math.floor(Math.random() * skin!.numVar);
               if (skin?.randScale && skin.maxScale > skin.minScale) {
                 const k = skin.minScale + Math.random() * (skin.maxScale - skin.minScale);
@@ -590,9 +623,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             entries.push(entry);
             f.list.push(entry);
           }
-          const remove = () => { for (const e of entries) f.list.splice(f.list.indexOf(e), 1); };
-          pushEdit({ undo: remove, redo: () => { f.list.push(...entries); }, terrain: false, objects: true });
           objectsTouched = true;
+          if (stroke) {
+            // The drag's undo step is pushed when it ends (endScatter).
+            stroke.entries.push(...entries);
+          } else {
+            const remove = () => { for (const e of entries) f.list.splice(f.list.indexOf(e), 1); };
+            pushEdit({ undo: remove, redo: () => { f.list.push(...entries); }, terrain: false, objects: true });
+          }
           void rebuildObjects();
         };
         /** The Object Editor's object browser (service "w3.objects"). */
@@ -804,7 +842,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (e.button === 0 && placing) {
             const p = groundAt(e);
-            if (p) placeAt(p);
+            // Scatter paints while the button is held; otherwise one object per click.
+            if (p) { if (scatter) startScatter(p); else void placeAt(p); }
             return;
           }
           if (e.button === 0 && editable) {
@@ -832,6 +871,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (drag) return;
           const p = showBrush(e);
+          if (scatterStroke && p) continueScatter(p);
           // Re-apply while held, a few times per second.
           if (stroke && p && performance.now() - stroke.last > 40) {
             stroke.last = performance.now();
@@ -871,6 +911,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const onUp = () => {
           drag = null;
           endStroke();
+          endScatter();
           if (objDrag?.moved) moveEdit(objDrag.entry, objDrag.before);
           objDrag = null;
         };
