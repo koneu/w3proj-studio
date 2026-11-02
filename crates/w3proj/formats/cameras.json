@@ -1,7 +1,7 @@
 // war3map.w3c — camera objects ("gg_cam_<name>" in triggers).
-// Version 0 (classic, ten floats) and 3 (Reforged: local rotation, three more
-// floats and a u32 after the name). Worked out from 46 maps; the extra floats
-// are zero except one 0.01, the trailer is zero in all samples.
+// Version 0 (classic) and 3 (Reforged: three more floats and a u32 after the
+// name). Worked out from the game's maps and 46 others; the extra floats are
+// zero except one 0.01, the trailer is zero in all samples.
 {
   "name": "cameras",
   "description": "Cameras: target, rotation, distance, field of view, clipping, name",
@@ -21,9 +21,9 @@
       { "name": "fieldOfView", "type": "f32", "doc": "degrees" },
       { "name": "farZ", "type": "f32" },
       { "name": "nearZ", "type": "f32" },
-      { "name": "localPitch", "type": "f32", "if": "version >= 3" },
-      { "name": "localYaw", "type": "f32", "if": "version >= 3" },
-      { "name": "localRoll", "type": "f32", "if": "version >= 3" },
+      { "name": "localPitch", "type": "f32" },
+      { "name": "localYaw", "type": "f32" },
+      { "name": "localRoll", "type": "f32" },
       { "name": "unknown", "type": "f32", "count": 3, "if": "version >= 3", "doc": "zero in nearly all samples" },
       { "name": "name", "type": "cstring" },
       { "name": "trailer", "type": "u32", "if": "version >= 3", "doc": "zero in all samples" }

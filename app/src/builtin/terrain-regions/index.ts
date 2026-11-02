@@ -62,6 +62,17 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.regions ??= [];
   })().catch((e) => w3.window.showError(`Regions: ${(e as Error).message ?? e}`));
+  /** The map's sounds (war3map.w3s), offered for the ambient sound. */
+  const soundList = h("datalist", { id: `terrain-region-sounds-${Math.random().toString(36).slice(2)}` });
+  void (async () => {
+    const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+    const root = w3.workspace.project()?.root;
+    const sounds = "map/war3map.w3s";
+    const text = files.has(`${sounds}.json`) ? await w3.workspace.readText(`${sounds}.json`)
+      : files.has(sounds) && root ? await w3.backend.invoke<string>("codec_decode", { root, path: sounds }) : null;
+    const names: string[] = text ? (JSON.parse(text).sounds ?? []).map((x: { name: string }) => x.name) : [];
+    soundList.replaceChildren(...names.sort().map((n) => h("option", { value: n })));
+  })().catch(() => {});
 
   // ---- overlay -----------------------------------------------------------------------
   const cellRange = (r: Region) => [
@@ -145,7 +156,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     } });
     const weather = h("select", { title: "Weather effect", onchange: () => update(r, { weather: weather.value }) }, h("option", { value: NO_WEATHER }, "No weather"));
     void weatherList(w3).then((list) => weather.append(...list.map(([id, label]) => h("option", { value: id, selected: id === r.weather }, `${label} (${id})`))));
-    const sound = h("input.terrain-region-sound", { type: "text", value: r.sound, placeholder: "ambient sound (variable)", title: "Ambient sound: a sound variable name, empty for none", onchange: () => update(r, { sound: sound.value.trim() }) });
+    const sound = h("input.terrain-region-sound", { type: "text", value: r.sound, placeholder: "ambient sound (variable)", list: soundList.id, title: "Ambient sound: a sound variable name (from the map's sounds), empty for none", onchange: () => update(r, { sound: sound.value.trim() }) });
     const size = `${Math.round(r.right - r.left)} × ${Math.round(r.top - r.bottom)} at (${Math.round(r.left)}, ${Math.round(r.bottom)})`;
     panel.replaceChildren(name, color, weather, sound, h("span.muted", {}, size),
       h("button", { title: "Delete this region (Del)", onclick: () => deleteSelected() }, "Delete"));
@@ -155,7 +166,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (!r) return;
     commit(doc.regions, doc.regions.filter((x) => x !== r), null);
   };
-  const toolbar = h("div.terrain-group-tools", {}, jump, count, hover, panel);
+  const toolbar = h("div.terrain-group-tools", {}, jump, count, hover, panel, soundList);
 
   return {
     toolbar,

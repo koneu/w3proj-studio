@@ -1,0 +1,47 @@
+// war3map.w3s — sounds defined in the Sound Editor ("gg_snd_<name>" in triggers).
+// Version 1 (classic), 2 (asset label and file again) and 3 (Reforged: dialogue
+// text, speaker, facial animation). Worked out from 20 maps (888 sounds), all v3;
+// v1/v2 follow the classic documentation. Unset floats are 4294967296.
+{
+  "name": "sounds",
+  "description": "Sounds: file, effect, flags, volume, pitch, 3D distances and cone, dialogue",
+  "files": ["war3map.w3s"],
+  "jsonFormat": "w3proj.sounds/1",
+  "accept": "version >= 1 && version <= 3",
+  "fields": [
+    { "name": "version", "type": "u32" },
+    { "name": "sounds", "type": "struct", "count": "u32", "fields": [
+      { "name": "name", "type": "cstring", "doc": "variable name, gg_snd_<name>" },
+      { "name": "file", "type": "cstring" },
+      { "name": "eaxEffect", "type": "cstring", "doc": "e.g. DefaultEAXON, CombatSoundsEAX, HeroAcksEAX" },
+      { "name": "flags", "type": "u32", "doc": "1 looping, 2 3D sound, 4 stop when out of range, 8 music, 16 imported" },
+      { "name": "fadeInRate", "type": "u32" },
+      { "name": "fadeOutRate", "type": "u32" },
+      { "name": "volume", "type": "i32", "doc": "0..127, -1 for the default" },
+      { "name": "pitch", "type": "f32" },
+      { "name": "pitchVariance", "type": "f32" },
+      { "name": "priority", "type": "i32" },
+      { "name": "channel", "type": "i32", "doc": "-1 for the default" },
+      { "name": "minDistance", "type": "f32" },
+      { "name": "maxDistance", "type": "f32" },
+      { "name": "distanceCutoff", "type": "f32" },
+      { "name": "coneInside", "type": "f32" },
+      { "name": "coneOutside", "type": "f32" },
+      { "name": "coneOutsideVolume", "type": "i32" },
+      { "name": "coneOrientation", "type": "f32", "count": 3 },
+      { "name": "variableName", "type": "cstring", "if": "version >= 2", "doc": "same as name in all samples" },
+      { "name": "assetLabel", "type": "cstring", "if": "version >= 2", "doc": "sound label (SLK entry), empty for a plain file" },
+      { "name": "assetFile", "type": "cstring", "if": "version >= 2", "doc": "same as file in all samples" },
+      { "name": "dialogueTextKey", "type": "i32", "if": "version >= 3", "doc": "TRIGSTR id of the subtitle, -1 for none" },
+      { "name": "dialogueText", "type": "cstring", "if": "version >= 3", "doc": "empty in all samples" },
+      { "name": "speakerNameKey", "type": "i32", "if": "version >= 3", "doc": "TRIGSTR id of the speaker's name, -1 for none" },
+      { "name": "speakerName", "type": "cstring", "if": "version >= 3" },
+      { "name": "unknown1", "type": "u32", "if": "version >= 3", "doc": "0 or 1" },
+      { "name": "speakerUnitType", "type": "cstring", "if": "version >= 3", "doc": "unit type id (Hkal) or a script expression" },
+      { "name": "facialAnimationLabel", "type": "cstring", "if": "version >= 3" },
+      { "name": "facialAnimationGroupLabel", "type": "cstring", "if": "version >= 3" },
+      { "name": "facialAnimationSetFile", "type": "cstring", "if": "version >= 3" },
+      { "name": "unknown2", "type": "u32", "if": "version >= 3", "doc": "0 or 1" }
+    ] }
+  ]
+}
