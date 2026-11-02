@@ -1,10 +1,13 @@
 {
   "id": "w3.triggerEditor",
   "name": "Trigger Editor",
-  "version": "0.1.0",
-  "description": "GUI triggers (war3map.wtg) and custom script (war3map.wct): categories, triggers, variables and the events, conditions and actions as the World Editor shows them. Read-only for now.",
+  "version": "0.2.0",
+  "description": "GUI triggers (war3map.wtg) and custom script (war3map.wct): the tree of categories, triggers and variables, names, flags, comments, undo and saving. What a trigger contains is shown by trigger kinds from other extensions (service w3.triggers).",
   "contributes": {
+    "viewContainers": [{ "id": "triggers", "title": "Triggers", "icon": "ϟ", "order": 5 }],
+    "views": [{ "id": "w3.triggers.overview", "title": "Triggers", "container": "triggers" }],
     "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "patterns": ["war3map.wtg"] }],
-    "commands": [{ "id": "w3.triggers.open", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" }]
+    "commands": [{ "id": "w3.triggers.open", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" }],
+    "services": [{ "id": "w3.triggers", "description": "Trigger kinds (GUI, custom script, …) shown in the trigger editor: registerKind." }]
   }
 }

@@ -16,6 +16,8 @@ export function h<K extends keyof HTMLElementTagNameMap>(
     if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
     else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
     else if (k === "class") el.className += (el.className ? " " : "") + v;
+    // A textarea's text has no attribute; it is the value property.
+    else if (k === "value" && el instanceof HTMLTextAreaElement) el.value = String(v);
     else if (k in el && typeof v !== "string") (el as any)[k] = v;
     else el.setAttribute(k, v === true ? "" : String(v));
   }

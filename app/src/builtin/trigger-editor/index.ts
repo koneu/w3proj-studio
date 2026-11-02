@@ -1,44 +1,98 @@
-// Trigger Editor: war3map.wtg / war3map.wct as the World Editor's trigger
-// module shows them. Left: the map (header script), variables, and the
-// categories with their triggers, comments and variables. Right: the selected
-// trigger's comment and its events, conditions and actions as text (or its
-// custom script). Read-only for now; the files round-trip byte-exactly through
-// lib/triggers, so editing can build on the same model.
+// Trigger Editor (host): war3map.wtg / war3map.wct as the World Editor's
+// trigger module. It owns the tree (map header, variables, categories with
+// triggers, comments and variables), the trigger's name, flags and comment,
+// undo and saving. What a trigger contains is shown by trigger kinds that
+// other extensions register through the "w3.triggers" service (GUI triggers,
+// custom script, …). The files round-trip byte-exactly through lib/triggers.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { OBJECTS_SERVICE, TRIGGERS_SERVICE, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggersService } from "../../extensions/services";
 import { StringTable } from "../../lib/formats/wts";
-import { decodeImage } from "../../lib/image/index.ts";
-import { branchLabels, ecaText, type DisplayContext } from "../../lib/triggers/display";
-import { ACTION, CONDITION, EVENT, parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { parseWct, parseWtg, textTriggers, type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable } from "../../lib/triggers/wtg";
 import { parseIni } from "../../lib/formats/text";
+import { decodeImage } from "../../lib/image/index.ts";
+import type { DisplayContext } from "../../lib/triggers/display";
+import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
+import {
+  parseWct, parseWtg, textTriggers, writeWct, writeWtg,
+  type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
+} from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 
 const WTG = "map/war3map.wtg", WCT = "map/war3map.wct";
+/** Item type → index in the per-type counts (and the high byte of its ids). */
+const TYPE_INDEX: Record<number, number> = { 1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6 };
+
+class KindRegistry implements TriggersService {
+  private kinds: TriggerKind[] = [];
+  private listeners = new Set<() => void>();
+  registerKind(kind: TriggerKind) {
+    this.kinds.push(kind);
+    this.listeners.forEach((l) => l());
+    return { dispose: () => { this.kinds = this.kinds.filter((k) => k !== kind); this.listeners.forEach((l) => l()); } };
+  }
+  all() { return [...this.kinds].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); }
+  onChange(l: () => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
+}
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  const kinds = new KindRegistry();
+  const open = () => w3.commands.execute("w3.triggers.open").catch((e) => w3.window.showError(String(e)));
   ctx.subscriptions.push(
+    w3.services.provide(TRIGGERS_SERVICE, kinds),
     w3.commands.register("w3.triggers.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) throw new Error("This project has no war3map.wtg.");
       await w3.editors.open(WTG, "w3.triggerEditor");
     }),
+    // Activity bar entry: a way in and what the map has.
+    w3.views.register("w3.triggers.overview", {
+      render(el) {
+        if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its triggers.")); return; }
+        if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) { el.append(h("div.view-empty", {}, "This project has no war3map.wtg.")); return; }
+        const facts = h("div.terrain-facts.muted", {}, "Reading triggers…");
+        el.append(h("div.tree", {}, h("div.tree-row.obj-kind", { onclick: open, title: "F4" },
+          h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open Trigger Editor"))), facts);
+        void (async () => {
+          const file = parseWtg(await w3.workspace.readBytes(WTG), await triggerData(w3));
+          const n = (t: number) => file.items.filter((i) => i.type === t).length;
+          facts.replaceChildren(
+            h("div", {}, `${n(8) + n(32)} triggers · ${n(4)} categories`),
+            h("div", {}, `${file.variables.length} variables${n(16) ? ` · ${n(16)} comments` : ""}`));
+        })().catch((e) => { facts.textContent = String((e as Error).message ?? e); });
+      },
+    }),
+    w3.workspace.onDidChange(() => w3.views.refresh("w3.triggers.overview")),
     w3.editors.registerProvider("w3.triggerEditor", {
       async resolve(el, doc) {
         el.classList.add("trig-editor");
         el.append(h("div.muted.trig-loading", {}, "Reading triggers…"));
         const data = await triggerData(w3);
-        const file = parseWtg(await doc.readBytes(), data);
-        const wctBytes = doc.path.startsWith("game:") ? null : await w3.workspace.readBytes(WCT).catch(() => null);
+        let file: TriggerFile;
+        try {
+          file = parseWtg(await doc.readBytes(), data);
+        } catch (e) {
+          el.replaceChildren(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
+            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          return {};
+        }
+        const game = doc.path.startsWith("game:");
+        const wctBytes = game ? null : await w3.workspace.readBytes(WCT).catch(() => null);
         const custom = wctBytes ? parseWct(wctBytes, textTriggers(file).length) : null;
-        const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        const wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
         const strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
         const display: DisplayContext = { data, string: (v) => strings?.resolve(v) ?? v, objectName: (id) => names.get(id) };
+        const lua = await w3.workspace.readText("map/war3map.w3i.json").then((t) => JSON.parse(t).scriptType === 1).catch(() => false);
         el.replaceChildren();
-        new TriggerView(w3, el, file, custom, data, display);
-        return {};
+        const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d));
+        return {
+          save: async () => {
+            await doc.writeBytes(writeWtg(view.file));
+            await w3.workspace.writeBytes(WCT, writeWct(view.customFile()));
+            view.markSaved();
+          },
+          dispose: () => view.dispose(),
+        };
       },
     }),
   );
@@ -80,7 +134,7 @@ async function objectNames(w3: W3Api, file: TriggerFile): Promise<Map<string, st
   return out;
 }
 
-/** Icons of the trigger categories (ReplaceableTextures\WorldEditUI\Actions-*.blp) as data URLs. */
+/** Game images (category icons) as data URLs. */
 const iconCache = new Map<string, Promise<string | null>>();
 function icon(w3: W3Api, path: string): Promise<string | null> {
   if (!path) return Promise.resolve(null);
@@ -100,69 +154,233 @@ function icon(w3: W3Api, path: string): Promise<string | null> {
   return p;
 }
 
-type Selection = { kind: "header" } | { kind: "variables" } | { kind: "item"; item: Item };
+type Selection = { kind: "header" } | { kind: "variables" } | { kind: "item"; type: number; id: number };
+interface Snapshot { file: TriggerFile; texts: (string | null)[]; header: string | null }
 
 class TriggerView {
-  private tree = h("div.trig-tree");
+  private tree = h("div.trig-tree-rows");
   private detail = h("div.trig-detail");
   private selected: Selection = { kind: "header" };
   private collapsed = new Set<number>();
-  private children = new Map<number, Item[]>();
+  /** Custom text per trigger (war3map.wct is stored in trigger order). */
+  private texts = new Map<TriggerItem, string | null>();
+  private header: string | null;
+  private undo: { label: string; before: Snapshot; after: Snapshot }[] = [];
+  private at = 0;
+  private savedAt = 0;
+  private body: { dispose?(): void } | void = undefined;
+  private handle: TriggerEditorHandle;
+  private unsubscribe: () => void;
+  private keydown = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+    if (e.key === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) { e.preventDefault(); this.step(-1); }
+    else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); this.step(1); }
+  };
 
-  constructor(private w3: W3Api, el: HTMLElement, private file: TriggerFile, private custom: CustomTextFile | null,
-    private data: TriggerData, private ctx: DisplayContext) {
-    for (const it of file.items) {
-      // Categories start as the file left them (expanded or not).
-      if ((it.type === 2 || it.type === 4) && !it.expanded) this.collapsed.add(it.id);
-      if (it.type === 1) continue;
-      const list = this.children.get(it.parent) ?? [];
-      list.push(it);
-      this.children.set(it.parent, list);
-    }
-    el.append(this.tree, this.detail);
+  constructor(private w3: W3Api, private el: HTMLElement, private kinds: KindRegistry, public file: TriggerFile,
+    private custom: CustomTextFile | null, data: TriggerData, display: DisplayContext, editable: boolean,
+    language: "jass" | "lua", private setDirty: (dirty: boolean) => void) {
+    const tt = textTriggers(file);
+    tt.forEach((t, i) => this.texts.set(t, custom?.texts[i] ?? null));
+    this.header = custom?.header ?? null;
+    for (const it of file.items) if ((it.type === 2 || it.type === 4) && !it.expanded) this.collapsed.add(it.id);
+    const view = this;
+    this.handle = {
+      get file() { return view.file; }, data, display, editable, language,
+      customText: (t) => this.texts.get(t) ?? null,
+      setCustomText: (t, text) => { this.texts.set(t, text); },
+      edit: (label, change) => this.edit(label, change),
+      icon: (path) => icon(w3, path),
+    };
+    el.tabIndex = -1;
+    el.addEventListener("keydown", this.keydown);
+    el.append(h("div.trig-tree", {}, editable ? this.toolbar() : null, this.tree), this.detail);
+    this.unsubscribe = kinds.onChange(() => this.renderDetail());
     this.renderTree();
     this.renderDetail();
   }
 
-  private customText(t: TriggerItem): string | null {
-    const i = textTriggers(this.file).indexOf(t);
-    return i >= 0 ? this.custom?.texts[i] ?? null : null;
+  dispose() { this.body?.dispose?.(); this.unsubscribe(); this.el.removeEventListener("keydown", this.keydown); }
+
+  customFile(): CustomTextFile {
+    const texts = textTriggers(this.file).map((t) => this.texts.get(t) ?? null);
+    return this.custom
+      ? { ...this.custom, header: this.header, texts }
+      : { reforged: this.file.reforged, version: 1, comment: "", header: this.header, texts };
   }
 
-  private row(label: string, cls: string, depth: number, sel: Selection, opts: { toggle?: number; title?: string } = {}) {
-    const active = this.selected.kind === sel.kind && (sel.kind !== "item" || (this.selected.kind === "item" && this.selected.item === sel.item));
+  markSaved() { this.savedAt = this.at; this.setDirty(false); }
+
+  // ---- undo -------------------------------------------------------------------------
+  private snapshot(): Snapshot {
+    return { file: structuredClone(this.file), texts: textTriggers(this.file).map((t) => this.texts.get(t) ?? null), header: this.header };
+  }
+  private restore(s: Snapshot) {
+    this.file = structuredClone(s.file);
+    this.texts = new Map(textTriggers(this.file).map((t, i) => [t, s.texts[i]]));
+    this.header = s.header;
+    this.renderTree();
+    this.renderDetail();
+  }
+  private edit(label: string, change: () => void) {
+    const before = this.snapshot();
+    change();
+    this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot() });
+    this.at = this.undo.length;
+    this.setDirty(this.at !== this.savedAt);
+    this.renderTree();
+    this.renderDetail();
+  }
+  private step(dir: -1 | 1) {
+    if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
+    else if (dir > 0 && this.at < this.undo.length) this.restore(this.undo[this.at++].after);
+    else return;
+    this.setDirty(this.at !== this.savedAt);
+  }
+
+  // ---- items ------------------------------------------------------------------------
+  private find(sel: Selection): Item | undefined {
+    return sel.kind === "item" ? this.file.items.find((i) => i.type === sel.type && i.id === sel.id) : undefined;
+  }
+  private root(): number {
+    const r = this.file.items.find((i) => i.type === 1);
+    return r ? r.id : -1;
+  }
+  /** A new id for an item of `type` (Reforged: type index in the high byte, counted per type). */
+  private allocId(type: number): number {
+    if (this.file.reforged) {
+      const idx = TYPE_INDEX[type], c = this.file.counts[idx];
+      const id = (idx << 24) | c.count;
+      c.count++;
+      return id;
+    }
+    return 1 + Math.max(-1, ...this.file.items.filter((i) => (type === 4 ? i.type === 4 : i.type !== 4)).map((i) => i.id));
+  }
+  /** Where a new item goes: into the selected category, or after the selected item. */
+  private insertionPoint(category: boolean): { parent: number; index: number } {
+    const sel = this.find(this.selected);
+    const items = this.file.items;
+    if (sel && (sel.type === 4 || sel.type === 2) && !category) {
+      const last = items.reduce((at, it, i) => (it.parent === sel.id ? i : at), items.indexOf(sel));
+      return { parent: sel.id, index: last + 1 };
+    }
+    if (sel && sel.type !== 1 && !(category && sel.type !== 4)) return { parent: sel.parent, index: items.indexOf(sel) + 1 };
+    if (!category) {
+      const cat = items.find((i) => i.type === 4);
+      if (cat) return { parent: cat.id, index: items.reduce((at, it, i) => (it.parent === cat.id ? i : at), items.indexOf(cat)) + 1 };
+    }
+    return { parent: this.root(), index: items.length };
+  }
+  private uniqueName(base: string): string {
+    const taken = new Set(this.file.items.map((i) => i.name));
+    for (let n = 1; ; n++) { const name = `${base} ${String(n).padStart(3, "0")}`; if (!taken.has(name)) return name; }
+  }
+
+  private newCategory() {
+    this.edit("New category", () => {
+      const { parent, index } = this.insertionPoint(true);
+      const it: Item = { type: 4, id: this.allocId(4), name: this.uniqueName("Untitled Category"), isComment: 0, expanded: 1, parent };
+      this.file.items.splice(index, 0, it);
+      this.collapsed.delete(parent);
+      this.selected = { kind: "item", type: 4, id: it.id };
+    });
+  }
+  private newTrigger(kind: TriggerKind | null) {
+    this.edit(kind ? `New ${kind.title}` : "New comment", () => {
+      const { parent, index } = this.insertionPoint(false);
+      const type = kind ? 8 : 16;
+      const t: TriggerItem = {
+        type, name: this.uniqueName(kind ? "Untitled Trigger" : "Untitled Comment"), description: "", isComment: kind ? 0 : 1, id: this.allocId(type),
+        enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent, ecas: [],
+      };
+      this.file.items.splice(index, 0, t);
+      this.collapsed.delete(parent);
+      if (kind) { this.texts.set(t, null); kind.init?.(t, this.handle); }
+      this.selected = { kind: "item", type, id: t.id };
+    });
+  }
+  private deleteSelected() {
+    const sel = this.find(this.selected);
+    if (!sel || sel.type === 1) return;
+    this.edit(`Delete ${sel.name}`, () => {
+      const gone = new Set<Item>();
+      const collect = (it: Item) => { gone.add(it); for (const c of this.file.items) if (c.parent === it.id && (it.type === 2 || it.type === 4) && c !== it) collect(c); };
+      collect(sel);
+      for (const it of gone) {
+        if (this.file.reforged) this.file.counts[TYPE_INDEX[it.type]]?.deleted.push(it.id);
+        if (it.type === 64) this.file.variables = this.file.variables.filter((v) => v.id !== it.id);
+      }
+      this.file.items = this.file.items.filter((i) => !gone.has(i));
+      this.selected = { kind: "header" };
+    });
+  }
+  private move(dir: -1 | 1) {
+    const sel = this.find(this.selected);
+    if (!sel || sel.type === 1) return;
+    const items = this.file.items;
+    const siblings = items.filter((i) => i.parent === sel.parent && i.type !== 1);
+    const other = siblings[siblings.indexOf(sel) + dir];
+    if (!other) return;
+    this.edit(`Move ${sel.name}`, () => {
+      const a = items.indexOf(sel), b = items.indexOf(other);
+      [items[a], items[b]] = [items[b], items[a]];
+    });
+  }
+
+  private toolbar(): HTMLElement {
+    const newMenu = h("select.trig-new", { title: "Add to the selected category", onchange: () => {
+      const v = newMenu.value;
+      newMenu.value = "";
+      if (v === "category") this.newCategory();
+      else if (v === "comment") this.newTrigger(null);
+      else { const k = this.kinds.all().find((x) => x.id === v); if (k) this.newTrigger(k); }
+    } });
+    const fill = () => newMenu.replaceChildren(h("option", { value: "" }, "New…"), h("option", { value: "category" }, "Category"),
+      ...this.kinds.all().filter((k) => k.init).map((k) => h("option", { value: k.id }, k.title)), h("option", { value: "comment" }, "Comment"));
+    fill();
+    this.kinds.onChange(fill);
+    return h("div.trig-toolbar", {}, newMenu,
+      h("button", { title: "Move up", onclick: () => this.move(-1) }, "↑"),
+      h("button", { title: "Move down", onclick: () => this.move(1) }, "↓"),
+      h("button", { title: "Delete (Del)", onclick: () => this.deleteSelected() }, "Delete"));
+  }
+
+  // ---- tree -------------------------------------------------------------------------
+  private row(label: string, cls: string, depth: number, sel: Selection, opts: { toggle?: number; title?: string; off?: boolean } = {}) {
+    const s = this.selected;
+    const active = s.kind === sel.kind && (sel.kind !== "item" || (s.kind === "item" && s.type === sel.type && s.id === sel.id));
     const caret = opts.toggle !== undefined
       ? h("span.trig-caret", { onclick: (e: Event) => { e.stopPropagation(); this.toggle(opts.toggle!); } }, this.collapsed.has(opts.toggle) ? "▸" : "▾")
       : h("span.trig-caret");
-    return h(`div.trig-row.${cls}${active ? ".active" : ""}`, {
+    return h(`div.trig-row.${cls}${active ? ".active" : ""}${opts.off ? ".off" : ""}`, {
       style: { paddingLeft: `${6 + depth * 14}px` }, title: opts.title ?? "",
-      onclick: () => { this.selected = sel; this.renderTree(); this.renderDetail(); },
+      onclick: () => { this.selected = sel; this.renderTree(); this.renderDetail(); this.el.focus(); },
       ondblclick: () => { if (opts.toggle !== undefined) this.toggle(opts.toggle); },
     }, caret, h("span.trig-label", {}, label));
   }
-
   private toggle(id: number) {
     if (this.collapsed.has(id)) this.collapsed.delete(id); else this.collapsed.add(id);
     this.renderTree();
   }
-
   private renderTree() {
     const rows: HTMLElement[] = [];
     const root = this.file.items.find((i) => i.type === 1);
     rows.push(this.row(root?.name || this.w3.workspace.project()?.name || "Map", "trig-map", 0, { kind: "header" }, { title: "Map header: custom script code" }));
     rows.push(this.row(`Variables (${this.file.variables.length})`, "trig-vars", 0, { kind: "variables" }));
+    const children = new Map<number, Item[]>();
+    for (const it of this.file.items) if (it.type !== 1) children.set(it.parent, [...(children.get(it.parent) ?? []), it]);
     const walk = (parent: number, depth: number) => {
-      for (const it of this.children.get(parent) ?? []) {
+      for (const it of children.get(parent) ?? []) {
+        const sel: Selection = { kind: "item", type: it.type, id: it.id };
         if (it.type === 2 || it.type === 4) {
-          rows.push(this.row(it.name, it.type === 4 ? "trig-cat" : "trig-lib", depth, { kind: "item", item: it }, { toggle: it.id }));
+          rows.push(this.row(it.name, it.type === 4 ? "trig-cat" : "trig-lib", depth, sel, { toggle: it.id }));
           if (!this.collapsed.has(it.id)) walk(it.id, depth + 1);
-        } else if (it.type === 64) {
-          rows.push(this.row(it.name, "trig-var", depth, { kind: "item", item: it }));
-        } else if ("ecas" in it) {
-          const cls = it.type === 16 ? "trig-comment" : it.isCustom ? "trig-custom" : "trig-gui";
-          const r = this.row(it.name, cls, depth, { kind: "item", item: it });
-          if (!it.enabled) r.classList.add("off");
-          rows.push(r);
+        } else if (it.type === 64) rows.push(this.row(it.name, "trig-var", depth, sel));
+        else if ("ecas" in it) {
+          rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel, { off: !it.enabled }));
         }
       }
     };
@@ -170,66 +388,65 @@ class TriggerView {
     this.tree.replaceChildren(...rows);
   }
 
+  // ---- detail -----------------------------------------------------------------------
   private renderDetail() {
+    this.body?.dispose?.();
+    this.body = undefined;
     const s = this.selected;
+    const editable = this.handle.editable;
     if (s.kind === "header") {
-      const header = this.custom?.header;
-      this.detail.replaceChildren(
-        h("h2", {}, "Map script header"),
-        ...(this.custom?.comment ? [h("p.trig-desc", {}, this.custom.comment)] : []),
-        header ? h("pre.trig-code", {}, header) : h("p.muted", {}, "No custom script code."));
+      const area = h("textarea.trig-code-edit", {
+        spellcheck: false, readOnly: !editable, rows: 16, value: this.header ?? "",
+        placeholder: `Map-specific ${this.handle.language === "lua" ? "Lua" : "JASS"} code, placed in the map script before the triggers.`,
+        onchange: () => this.edit("Edit map script", () => { this.header = area.value || (this.header === null ? null : ""); }),
+      });
+      this.detail.replaceChildren(h("h2", {}, "Map script header"),
+        ...(this.custom?.comment ? [h("p.trig-desc", {}, this.custom.comment)] : []), area);
       return;
     }
     if (s.kind === "variables") { this.detail.replaceChildren(h("h2", {}, "Variables"), this.variablesTable(this.file.variables)); return; }
-    const it = s.item;
+    const it = this.find(s);
+    if (!it) { this.detail.replaceChildren(h("p.muted", {}, "Nothing selected.")); return; }
+    const name = h("input.trig-name", { type: "text", value: it.name, readOnly: !editable, onchange: () => {
+      const v = name.value.trim();
+      if (v && v !== it.name) this.edit("Rename", () => { it.name = v; });
+      else name.value = it.name;
+    } });
     if (it.type === 64) {
       const v = this.file.variables.find((x) => x.id === it.id);
       this.detail.replaceChildren(h("h2", {}, it.name), v ? this.variablesTable([v]) : h("p.muted", {}, "Variable not found."));
       return;
     }
     if (!("ecas" in it)) {
-      const n = (this.children.get(it.id) ?? []).length;
-      this.detail.replaceChildren(h("h2", {}, it.name), h("p.muted", {}, `Category · ${n} item${n === 1 ? "" : "s"}`));
+      const n = this.file.items.filter((i) => i.parent === it.id).length;
+      this.detail.replaceChildren(h("div.trig-head", {}, name), h("p.muted", {}, `Category · ${n} item${n === 1 ? "" : "s"}`));
       return;
     }
-    const badges = [
-      !it.enabled && "Disabled", it.initiallyOff && "Initially off", it.isCustom && "Custom text", it.runOnInit && "Run on map initialization",
-      it.type === 16 && "Comment",
-    ].filter(Boolean) as string[];
-    const parts: (HTMLElement | null)[] = [
-      h("h2", {}, it.name, ...badges.map((b) => h("span.trig-badge", {}, b))),
-      it.description ? h("p.trig-desc", {}, it.description) : null,
-    ];
-    if (it.type === 16) { this.detail.replaceChildren(...parts.filter((x): x is HTMLElement => !!x)); return; }
-    if (it.isCustom) {
-      const text = this.customText(it);
-      parts.push(text ? h("pre.trig-code", {}, text) : h("p.muted", {}, "No custom text stored for this trigger."));
-    } else {
-      for (const [kind, label] of [[EVENT, "Events"], [CONDITION, "Conditions"], [ACTION, "Actions"]] as const) {
-        const list = it.ecas.filter((e) => e.kind === kind);
-        parts.push(h("div.trig-section", {}, label), h("div.trig-ecas", {}, ...list.map((e) => this.ecaNode(e))));
-      }
-    }
-    this.detail.replaceChildren(...parts.filter((x): x is HTMLElement => !!x));
-  }
-
-  private ecaNode(e: Eca): HTMLElement {
-    const img = h("img.trig-icon", { alt: "" });
-    const f = this.data.find(e.kind, e.name);
-    const cat = f ? this.data.categories.get(f.category) : undefined;
-    void icon(this.w3, cat?.icon ?? "").then((url) => { if (url) img.src = url; else img.classList.add("none"); });
-    const line = h(`div.trig-eca${e.enabled ? "" : ".off"}`, { title: e.name }, img, h("span", {}, ecaText(e, this.ctx)));
-    if (!e.children.length) return line;
-    const labels = branchLabels(e.name);
-    const groups = [...new Set(e.children.map((c) => c.group ?? 0))].sort((a, b) => a - b);
-    return h("div.trig-block", {}, line, ...groups.map((g) => h("div.trig-branch", {},
-      h("div.trig-branch-label", {}, labels[g] ?? "Actions"),
-      ...e.children.filter((c) => (c.group ?? 0) === g).map((c) => this.ecaNode(c)))));
+    const flag = (label: string, get: () => boolean, set: (v: boolean) => void) => {
+      const box = h("input", { type: "checkbox", checked: get(), disabled: !editable, onchange: () => this.edit(label, () => set(box.checked)) });
+      return h("label.trig-flag", {}, box, label);
+    };
+    const desc = h("textarea.trig-desc-edit", {
+      rows: 2, value: it.description, readOnly: !editable, placeholder: it.type === 16 ? "Comment" : "Trigger comment",
+      onchange: () => this.edit("Edit comment", () => { it.description = desc.value; }),
+    });
+    const head = h("div.trig-head", {}, name,
+      ...(it.type === 16 ? [] : [
+        flag("Enabled", () => it.enabled, (v) => { it.enabled = v; }),
+        flag("Initially on", () => !it.initiallyOff, (v) => { it.initiallyOff = !v; }),
+      ]));
+    if (it.type === 16) { this.detail.replaceChildren(head, desc); return; }
+    const kind = this.kinds.all().find((k) => k.matches(it, this.handle));
+    const body = h("div.trig-body");
+    this.detail.replaceChildren(head, desc, body);
+    if (!kind) { body.append(h("p.muted", {}, "No installed extension shows this kind of trigger.")); return; }
+    this.body = kind.render(body, it, this.handle);
   }
 
   private variablesTable(vars: Variable[]): HTMLElement {
     if (!vars.length) return h("p.muted", {}, "No variables.");
-    const typeName = (t: string) => this.data.types.get(t)?.name ?? t;
+    const data = this.handle.data;
+    const typeName = (t: string) => data.types.get(t)?.name ?? t;
     return h("table.trig-vars-table", {},
       h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Type"), h("th", {}, "Array"), h("th", {}, "Initial value"))),
       h("tbody", {}, ...vars.map((v) => h("tr", {},
@@ -237,7 +454,7 @@ class TriggerView {
         h("td", {}, typeName(v.type)),
         h("td", {}, v.isArray ? `[${v.arraySize}]` : ""),
         h("td", {}, v.initialized
-          ? this.data.presets.get(v.initialValue)?.name ?? this.ctx.string?.(v.initialValue) ?? v.initialValue
+          ? data.presets.get(v.initialValue)?.name ?? this.handle.display.string?.(v.initialValue) ?? v.initialValue
           : h("span.muted", {}, "default"))))));
   }
 }

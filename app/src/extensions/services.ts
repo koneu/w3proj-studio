@@ -165,3 +165,44 @@ export interface TerrainOccupancy {
   /** Marks the footprint as taken (for several placements in one go). */
   mark(kind: string, id: string, x: number, y: number, angle: number): Promise<void>;
 }
+
+/** "w3.triggers", provided by the Trigger Editor: kinds of triggers that
+ *  other extensions show and edit (GUI events/conditions/actions, custom
+ *  script, …). The host owns the tree, selection, undo and saving. */
+export interface TriggersService {
+  /** Adds a trigger kind to every trigger editor (open now or later). */
+  registerKind(kind: TriggerKind): { dispose(): void };
+}
+
+export const TRIGGERS_SERVICE = "w3.triggers";
+
+type TriggerItem = import("../lib/triggers/wtg").TriggerItem;
+
+export interface TriggerKind {
+  id: string;
+  /** Shown in "New …" ("GUI Trigger", "Custom Script"). */
+  title: string;
+  /** Several kinds may match a trigger; the highest priority shows it. */
+  priority?: number;
+  matches(trigger: TriggerItem, editor: TriggerEditorHandle): boolean;
+  /** Fills `el` with the trigger's body (below the host's name, flags and comment). */
+  render(el: HTMLElement, trigger: TriggerItem, editor: TriggerEditorHandle): { dispose?(): void } | void;
+  /** Sets up a new trigger of this kind (flags, ECAs, custom text). Omitted: can't be created. */
+  init?(trigger: TriggerItem, editor: TriggerEditorHandle): void;
+}
+
+export interface TriggerEditorHandle {
+  readonly file: import("../lib/triggers/wtg").TriggerFile;
+  readonly data: import("../lib/triggers/triggerdata").TriggerData;
+  readonly display: import("../lib/triggers/display").DisplayContext;
+  readonly editable: boolean;
+  /** The map's script language (war3map.w3i scriptType). */
+  readonly language: "jass" | "lua";
+  /** The trigger's custom script text (war3map.wct), or null. */
+  customText(trigger: TriggerItem): string | null;
+  setCustomText(trigger: TriggerItem, text: string | null): void;
+  /** Runs `change` on the trigger data as one undo step (snapshot before and after) and redraws. */
+  edit(label: string, change: () => void): void;
+  /** Icon of a trigger category path (ReplaceableTextures\WorldEditUI\…) as a data URL. */
+  icon(path: string): Promise<string | null>;
+}

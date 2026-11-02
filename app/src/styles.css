@@ -431,7 +431,17 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }
 .trig-editor { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; height: 100%; overflow: hidden; }
 .trig-loading { padding: 16px; }
-.trig-tree { overflow: auto; border-right: 1px solid var(--border); padding: 4px 0; user-select: none; }
+.trig-tree { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); user-select: none; }
+.trig-tree-rows { flex: 1; overflow: auto; padding: 4px 0; }
+.trig-toolbar { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); }
+.trig-toolbar .trig-new { flex: 1; }
+.trig-editor:focus { outline: none; }
+.trig-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.trig-name { font-size: 15px; font-weight: 600; min-width: 260px; }
+.trig-flag { display: inline-flex; gap: 4px; align-items: center; color: var(--fg-muted); }
+.trig-desc-edit { width: 100%; resize: vertical; font: inherit; margin-bottom: 6px; box-sizing: border-box; }
+.trig-code-edit { width: 100%; box-sizing: border-box; resize: vertical; font-family: var(--mono); font-size: 12px; white-space: pre; tab-size: 4; }
+.trig-hint { font-size: 11px; }
 .trig-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; cursor: pointer; white-space: nowrap; }
 .trig-row:hover { background: var(--bg-hover); }
 .trig-row.active { background: #37414f; }
