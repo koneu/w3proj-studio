@@ -673,6 +673,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const w = v.getUint32(8, true), hgt = v.getUint32(12, true);
           for (const g of groupInsts.values()) g.filterPathing?.(wpm.subarray(16), w, hgt);
         };
+        /** Latest ghost request (older model loads are dropped). */
+        let ghostReq = 0;
         /** File each created entry goes to (set by objects.create). */
         const entryFile = new WeakMap<Placed, PlacedFile>();
         const handle: TerrainEditorHandle = {
@@ -707,6 +709,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const e of entries) { const f = entryFile.get(e as Placed) ?? fileOf(e as Placed); const i = f?.list.indexOf(e as Placed) ?? -1; if (i >= 0) f!.list.splice(i, 1); }
               objectsTouched = true;
               void rebuildObjects();
+            },
+            setGhost: (g) => {
+              ghostReq++;
+              if (!g) { renderer.ghost = null; redraw(); return; }
+              const skin = objCtx?.skins.get(g.id) ?? objCtx?.skins.get(objCtx.bases.get(g.id) ?? "");
+              if (!skin) { renderer.ghost = null; redraw(); return; }
+              const req = ghostReq;
+              const entry = { id: g.id, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
+              void loader.modelFor(skin, entry.variation).then((gpu) => {
+                if (req !== ghostReq) return;
+                renderer.ghost = { gpu, world: placement(entry, skin.modelScale), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
+                redraw();
+              }).catch(() => { renderer.ghost = null; redraw(); });
             },
             occupancy: async () => {
               const occ = await occupancy();

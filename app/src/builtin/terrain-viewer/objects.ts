@@ -71,7 +71,7 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
 }
 
 /** Model path of one placed object: variations are numbered files. */
-function modelPath(skin: Skin, variation: number): string {
+export function modelPath(skin: Skin, variation: number): string {
   const base = skin.file.replace(/\.(mdl|mdx)$/i, "");
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
@@ -157,6 +157,12 @@ export class ObjectLoader {
       this.models.set(key, m);
     }
     return m;
+  }
+
+  /** The GPU model for a placed type (shared with the batches; for previews). */
+  modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
+    const replaceable = skin.texId > 0 && skin.texFile ? { [skin.texId]: `${skin.texFile}.blp` } : {};
+    return this.model({ path: modelPath(skin, variation), replaceable, instances: [] });
   }
 
   /** Loads each requested model; failed ones are reported by index. */

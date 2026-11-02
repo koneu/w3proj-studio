@@ -27,6 +27,23 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const respect = () => w3.settings.get<boolean>("terrain.placement.respectPathing");
   const deg = (d: number) => (d * Math.PI) / 180;
 
+  /** Ghost preview at the pointer: the latest request wins (fit checks are async). */
+  let ghostSeq = 0;
+  const showGhost = async (g: [number, number, number] | null) => {
+    const seq = ++ghostSeq;
+    if (!g || !placing || scatter) { ed.objects.setGhost(null); return; }
+    const { kind, id } = placing;
+    const type = ed.objects.type(id);
+    const angle = type?.fixedRot != null ? deg(type.fixedRot) : deg(270);
+    let ok = true;
+    if (respect()) {
+      const occ = await ed.objects.occupancy();
+      ok = await occ.fits(kind, id, g[0], g[1], angle);
+    }
+    if (seq !== ghostSeq) return;
+    ed.objects.setGhost({ id, x: g[0], y: g[1], angle, player: kind === "w3u" ? owner : undefined, ok });
+  };
+
   /** A scatter drag: everything it places is one undo step. */
   let drag: { entries: PlacedEntry[]; last: [number, number, number]; queue: Promise<void> } | null = null;
 
@@ -124,7 +141,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("button", { title: "Choose a unit, item, doodad or destructable", onclick: () => void choose() }, "Place…"),
     hint, ownerWrap,
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
-      () => scatter, (v) => { scatter = v; update(); }),
+      () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
     sizeWrap, densityWrap,
     toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
       () => respect(), (v) => void w3.settings.set("terrain.placement.respectPathing", v)),
@@ -134,7 +151,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   return {
     toolbar,
     activate() { if (!placing) void choose(); },
-    deactivate() { ed.setBrush(null); },
+    deactivate() { ed.setBrush(null); void showGhost(null); },
     pointerDown(p) {
       if (!ed.editable || !placing || !p.ground) return false;
       if (!scatter) { void placeAt(p.ground); return true; }
@@ -145,6 +162,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     },
     pointerMove(p) {
       ed.setBrush(scatter && placing && p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: [140, 230, 140] } : null);
+      void showGhost(p.ground);
       const d = drag;
       // Fills again once the pointer moved half a brush radius.
       if (p.down && d && p.ground && Math.hypot(p.ground[0] - d.last[0], p.ground[1] - d.last[1]) >= size * 64) {
@@ -163,9 +181,9 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
       });
     },
-    pointerLeave() { ed.setBrush(null); },
+    pointerLeave() { ed.setBrush(null); void showGhost(null); },
     keyDown(e) {
-      if (e.key === "Escape" && placing) { placing = null; update(); return true; }
+      if (e.key === "Escape" && placing) { placing = null; update(); void showGhost(null); return true; }
       return false;
     },
   };

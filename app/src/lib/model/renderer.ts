@@ -172,7 +172,7 @@ precision mediump float;
 in vec3 vNormal; in vec2 vUV;
 uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform float uUnshaded;
 // HD materials: the ORM texture's alpha masks where team colour goes.
-uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam;
+uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix;
 out vec4 outColor;
 void main() {
   vec4 c = texture(uTex, vUV);
@@ -180,7 +180,7 @@ void main() {
   c *= uColor;
   if (c.a < uAlphaTest) discard;
   float light = uUnshaded > 0.5 ? 1.0 : 0.45 + 0.7 * max(dot(normalize(vNormal), normalize(vec3(0.4, -0.3, 0.85))), 0.0);
-  outColor = vec4(c.rgb * light, c.a);
+  outColor = vec4(mix(c.rgb * light, uMix.rgb, uMix.a), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -248,7 +248,7 @@ export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
 }
 
-const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect"] as const;
+const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -317,6 +317,12 @@ export interface DrawOptions {
   pass?: DrawPass;
   /** Raise vertices by a terrain height map (R32F texture, one texel per corner). */
   heightMap?: HeightMap;
+  /** Multiplies colour and opacity (r, g, b, a in 0–1); every layer is then blended (ghost previews). */
+  tint?: [number, number, number, number];
+  /** Blends the shaded colour toward rgb by amount (r, g, b, amount in 0–1), e.g. red for "can't place". */
+  mix?: [number, number, number, number];
+  /** Draw over everything (no depth test), e.g. a preview that must stay visible. */
+  onTop?: boolean;
 }
 
 export interface HeightMap {
@@ -514,6 +520,8 @@ export class ModelGpu {
       gl.uniform4f(u.uHeightRect, hm.x, hm.y, hm.width, hm.height);
     }
     gl.uniform3f(u.uTeam, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+    const mx = opts.mix ?? [0, 0, 0, 0];
+    gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);
 
@@ -523,7 +531,8 @@ export class ModelGpu {
       if (alpha <= 0.01) continue;
       const color = this.geoColor.get(g.geosetId) ?? [1, 1, 1];
       // Geoset animation colours are stored as BGR.
-      gl.uniform4f(u.uColor, color[2], color[1], color[0], alpha);
+      const tint = opts.tint ?? [1, 1, 1, 1];
+      gl.uniform4f(u.uColor, color[2] * tint[0], color[1] * tint[1], color[0] * tint[2], alpha * tint[3]);
 
       const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
       const tex = m.textures[texIndex];
@@ -541,7 +550,7 @@ export class ModelGpu {
       gl.uniform1f(u.uUnshaded, sf & 0x1 ? 1 : 0);
       if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
       if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
-      gl.uniform1f(u.uAlphaTest, layer.filterMode === 1 ? 0.75 : 0.01);
+      gl.uniform1f(u.uAlphaTest, (layer.filterMode === 1 ? 0.75 : 0.01) * (opts.tint?.[3] ?? 1));
       switch (layer.filterMode) {
         case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
         case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;
@@ -550,6 +559,8 @@ export class ModelGpu {
         default: gl.enable(gl.BLEND); gl.blendFunc(gl.DST_COLOR, gl.SRC_COLOR); gl.depthMask(false);
       }
       if (sf & 0x80) gl.depthMask(false);
+      if (opts.onTop) gl.disable(gl.DEPTH_TEST);
+      if (opts.tint && layer.filterMode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
       if (opts.wireframe) {
         gl.bindVertexArray(g.wireVao);
         gl.drawElements(gl.LINES, g.wireCount, gl.UNSIGNED_SHORT, 0);

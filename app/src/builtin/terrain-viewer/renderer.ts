@@ -136,6 +136,8 @@ export class TerrainRenderer {
   wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
   hiddenGroups = new Set<string>();
+  /** A model previewing a placement (drawn see-through; red when `ok` is false). */
+  ghost: { gpu: ModelGpu; world: Mat4; team: number; ok: boolean } | null = null;
   readonly batches: ObjectBatch[] = [];
   /** Camera: looks at `target` from `distance` away. */
   yaw = -Math.PI / 2;
@@ -560,6 +562,11 @@ export class TerrainRenderer {
         if (this.hiddenGroups.has(b.group)) continue;
         for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined });
       }
+    }
+    // Placement preview: see-through, red where the object doesn't fit.
+    if (this.ghost) {
+      const g = this.ghost;
+      g.gpu.draw(viewProj, g.world, { team: g.team, pass: "all", tint: [1, 1, 1, 0.75], mix: g.ok ? undefined : [1, 0.1, 0.1, 0.65], onTop: true });
     }
     gl.enable(gl.CULL_FACE);
     gl.enable(gl.BLEND);
