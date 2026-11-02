@@ -118,7 +118,7 @@ export class TerrainRenderer {
   private water: Mesh;
   private wire: Mesh;
   private markers = new Map<string, Mesh>();
-  private selection: Mesh | null = null;
+  private selection: Mesh[] = [];
   showWater = true;
   wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
@@ -405,10 +405,26 @@ export class TerrainRenderer {
     return null;
   }
 
-  /** Marks a spot with a ring that follows the ground; null clears it. */
-  setSelection(sel: Ring | null) {
-    if (this.selection) this.gl.deleteVertexArray(this.selection.vao);
-    this.selection = sel ? this.ring(sel) : null;
+  /** Marks spots with rings that follow the ground; null or [] clears them. */
+  setSelection(sel: Ring | Ring[] | null) {
+    for (const m of this.selection) this.gl.deleteVertexArray(m.vao);
+    const rings = sel === null ? [] : Array.isArray(sel) ? sel : [sel];
+    this.selection = rings.map((r) => this.ring(r, rings.length > 50 ? 16 : 64));
+  }
+
+  /** Canvas point (CSS pixels) of a world point, or null behind the camera. Inverse of ray(). */
+  project(p: Vec3): [number, number] | null {
+    const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight);
+    const eye = this.eye();
+    const f = norm([this.target[0] - eye[0], this.target[1] - eye[1], this.target[2] - eye[2]]);
+    const r = norm([f[1], -f[0], 0]);
+    const u: Vec3 = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+    const d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
+    const z = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+    if (z <= 0) return null;
+    const t = Math.tan(Math.PI / 8);
+    const nx = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / z / (t * (w / h)), ny = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / z / t;
+    return [((nx + 1) / 2) * w, ((1 - ny) / 2) * h];
   }
 
   /** The brush outline (editing tools); null hides it. */
@@ -417,10 +433,10 @@ export class TerrainRenderer {
     this.brush = b ? this.ring(b) : null;
   }
 
-  private ring(r: Ring): Mesh {
+  private ring(r: Ring, segments = 64): Mesh {
     const data: number[] = [];
-    for (let i = 0; i < 64; i++) {
-      const a = (i / 64) * Math.PI * 2, x = r.x + Math.cos(a) * r.r, y = r.y + Math.sin(a) * r.r;
+    for (let i = 0; i < segments; i++) {
+      const a = (i / segments) * Math.PI * 2, x = r.x + Math.cos(a) * r.r, y = r.y + Math.sin(a) * r.r;
       data.push(x, y, this.groundHeight(x, y) + 4, r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255, 1);
     }
     return this.colorMesh(data);
@@ -491,7 +507,7 @@ export class TerrainRenderer {
     }
     // Rings stay visible through trees and water.
     gl.disable(gl.DEPTH_TEST);
-    for (const ring of [this.selection, this.brush]) {
+    for (const ring of [...this.selection, this.brush]) {
       if (!ring) continue;
       gl.bindVertexArray(ring.vao);
       gl.drawArrays(gl.LINE_LOOP, 0, ring.count);

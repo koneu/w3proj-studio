@@ -418,10 +418,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const errors = [...d.errors, ...u.errors];
           problems.replaceChildren(...errors.slice(0, 20).map((e) => h("div.model-warn", { title: e }, e)),
             ...(errors.length > 20 ? [h("div.muted", {}, `… ${errors.length - 20} more`)] : []));
-          // Keep the selection on the same entry.
-          const entry = selected?.pick?.placed;
-          const again = entry ? findInstance(entry) : null;
-          if (again) selectObject(again); else if (selected) clearSelection();
+          // Keep the selection on the same entries.
+          if (group.length) selectEntries(group.filter((p) => fileOf(p)));
+          else {
+            const entry = selected?.pick?.placed;
+            const again = entry ? findInstance(entry) : null;
+            if (again) selectObject(again); else if (selected) clearSelection();
+          }
           redraw();
         }
         if (!doc.path.startsWith("game:") && w3.workspace.project()) {
@@ -467,25 +470,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (inst.sphere) inst.sphere = [inst.sphere[0] + dx, inst.sphere[1] + dy, inst.sphere[2] + dz, inst.sphere[3]];
             if (inst === selected) selectObject(inst);
           }
+          if (group.includes(entry)) groupRingsStale = true;
           redraw();
         };
-        const moveEdit = (entry: Placed, before: { position: [number, number, number]; angle: number }) => {
-          const after = { position: [...entry.position] as [number, number, number], angle: entry.angle };
-          pushEdit({
-            undo: () => setPlacement(entry, [...before.position], before.angle),
-            redo: () => setPlacement(entry, [...after.position], after.angle),
-            terrain: false, objects: false,
-          });
+        /** Group rings are rebuilt once per frame batch of moves, not per object. */
+        let groupRingsStale = false;
+        const refreshGroupRings = () => {
+          if (!groupRingsStale) return;
+          groupRingsStale = false;
+          renderer.setSelection(group.map(findInstance).filter((i): i is ObjectInstance => !!i?.pick).map(ringOf));
+        };
+        type Pose = { position: [number, number, number]; angle: number };
+        const poseOf = (p: Placed): Pose => ({ position: [...p.position] as [number, number, number], angle: p.angle });
+        /** One undo step for moving/turning several entries. */
+        const moveEdits = (entries: Placed[], before: Pose[]) => {
+          const after = entries.map(poseOf);
+          const apply = (poses: Pose[]) => { entries.forEach((e, i) => setPlacement(e, [...poses[i].position], poses[i].angle)); refreshGroupRings(); };
+          pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });
         };
         const deleteSelected = () => {
-          const entry = selected?.pick?.placed;
-          const f = entry ? fileOf(entry) : null;
-          if (!entry || !f) return;
-          const i = f.list.indexOf(entry);
-          const doIt = () => { f.list.splice(f.list.indexOf(entry), 1); };
+          // Each entry with its file and index, so undo restores the order.
+          const items = selectedEntries().map((entry) => ({ entry, f: fileOf(entry)! })).filter((x) => x.f)
+            .map((x) => ({ ...x, i: x.f.list.indexOf(x.entry) })).sort((a, b) => a.i - b.i);
+          if (!items.length) return;
+          const doIt = () => { for (const { entry, f } of items) f.list.splice(f.list.indexOf(entry), 1); };
           doIt();
           clearSelection();
-          pushEdit({ undo: () => { f.list.splice(i, 0, entry); }, redo: doIt, terrain: false, objects: true });
+          pushEdit({ undo: () => { for (const { entry, f, i } of items) f.list.splice(i, 0, entry); }, redo: doIt, terrain: false, objects: true });
           objectsTouched = true;
           void rebuildObjects();
         };
@@ -503,11 +514,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void rebuildObjects();
         };
         const rotateSelected = (deg: number) => {
-          const entry = selected?.pick?.placed;
-          if (!entry) return;
-          const before = { position: [...entry.position] as [number, number, number], angle: entry.angle };
-          setPlacement(entry, [...entry.position], entry.angle + (deg * Math.PI) / 180);
-          moveEdit(entry, before);
+          const entries = selectedEntries();
+          if (!entries.length) return;
+          const before = entries.map(poseOf);
+          for (const e of entries) setPlacement(e, [...e.position], e.angle + (deg * Math.PI) / 180);
+          moveEdits(entries, before);
         };
         /** Type chosen with "Place…"; each click on the ground places one. */
         let placing: { kind: string; id: string; name: string } | null = null;
@@ -734,17 +745,105 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const clearSelection = () => {
           selected = null;
+          group = [];
           selInfo.className = "terrain-selection muted";
-          selInfo.replaceChildren("Click a unit, item, doodad or destructable.");
+          selInfo.replaceChildren("Click a unit, item, doodad or destructable, or drag a box around several.");
           renderer.setSelection(null);
           redraw();
         };
+
+        /** Several selected objects (box or Ctrl+click); `selected` is then null. */
+        let group: Placed[] = [];
+        /** Object kinds a selection box picks up. */
+        const boxKinds = new Set(["w3u", "w3t", "w3b", "w3d"]);
+        const ringOf = (inst: ObjectInstance) => {
+          const [x, y, , r] = inst.sphere!, pl = inst.pick!.placed;
+          return { x, y, r: Math.min(400, Math.max(40, r * 0.8)), rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
+        };
+        /** Selects these entries: none clears, one shows its details, more a summary. */
+        const selectEntries = (entries: Placed[]) => {
+          const insts = entries.map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
+          if (!insts.length) { clearSelection(); return; }
+          if (insts.length === 1) { group = []; selectObject(insts[0]); return; }
+          selected = null;
+          group = insts.map((i) => i.pick!.placed);
+          renderer.setSelection(insts.map(ringOf));
+          // Summary: counts per type, most common first.
+          const counts = new Map<string, { kind: string; id: string; n: number }>();
+          for (const i of insts) {
+            const key = `${i.pick!.kind}:${i.pick!.id}`;
+            const c = counts.get(key) ?? { kind: i.pick!.kind, id: i.pick!.id, n: 0 };
+            c.n++;
+            counts.set(key, c);
+          }
+          const rows = [...counts.values()].sort((a, b) => b.n - a.n);
+          const list = h("div.terrain-sel-list");
+          const shown = rows.slice(0, 12);
+          list.append(...shown.map((c) => {
+            const name = h("span", {}, c.id);
+            loadKind(w3, c.kind).then((k) => { const n = k.names.get(c.id) ?? k.names.get(objCtx?.bases.get(c.id) ?? ""); if (n) name.textContent = n; }).catch(() => { /* id */ });
+            return h("div.terrain-sel-row", {}, h("span.muted", {}, `${c.n} ×`), name);
+          }), ...(rows.length > shown.length ? [h("div.muted", {}, `… ${rows.length - shown.length} more types`)] : []));
+          // Owner for all selected units at once.
+          const units = group.filter((p) => p.player !== undefined && objCtx?.skins.get(p.id)?.kind !== "w3t");
+          const ownerSel = units.length ? (() => {
+            const first = units[0].player!, same = units.every((u) => u.player === first);
+            const sel = h("select", { onchange: () => setGroupOwner(units, Number(sel.value)) },
+              ...(same ? [] : [h("option", { value: "", selected: true }, "(mixed)")]),
+              ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: same && i === first }, ownerName(i))));
+            return sel;
+          })() : null;
+          selInfo.className = "terrain-selection";
+          selInfo.replaceChildren(
+            h("div.terrain-sel-name", {}, `${group.length} objects selected`),
+            list,
+            ...(editable && ownerSel ? [h("div.terrain-sel-row", {}, h("span.muted", {}, `Owner (${units.length})`), ownerSel)] : []),
+            ...(editable ? [
+              h("div.terrain-sel-actions", {}, h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
+              h("div.muted", {}, "Drag one to move all · [ ] to turn each · Del to delete · Ctrl+click adds/removes · Shift+box adds"),
+            ] : []),
+          );
+          redraw();
+        };
+        const setGroupOwner = (units: Placed[], player: number) => {
+          const before = units.map((u) => u.player);
+          const apply = (v: (number | undefined)[]) => units.forEach((u, i) => { u.player = v[i]; });
+          apply(units.map(() => player));
+          pushEdit({ undo: () => apply(before), redo: () => apply(units.map(() => player)), terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+        };
+        /** Entries currently selected (one or many). */
+        const selectedEntries = (): Placed[] => (group.length ? group : selected?.pick ? [selected.pick.placed] : []);
+
+        /** Objects whose position projects into the canvas rectangle (CSS pixels). */
+        const objectsInBox = (x0: number, y0: number, x1: number, y1: number): Placed[] => {
+          const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)], [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)];
+          const out: Placed[] = [];
+          for (const b of renderer.batches) {
+            if ((b.group !== "doodads" && b.group !== "units") || renderer.hiddenGroups.has(b.group)) continue;
+            for (const inst of b.instances) {
+              if (!inst.pick || !boxKinds.has(inst.pick.kind)) continue;
+              const s = renderer.project(inst.pick.placed.position);
+              if (s && s[0] >= ax && s[0] <= bx && s[1] >= ay && s[1] <= by) out.push(inst.pick.placed);
+            }
+          }
+          return out;
+        };
+
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
           const ray = renderer.ray(e.clientX - rect.left, e.clientY - rect.top);
           const inst = renderer.pickObject(ray);
+          // Ctrl+click adds or removes an object.
+          if (e.ctrlKey || e.metaKey) {
+            if (!inst?.pick) return;
+            const cur = selectedEntries(), entry = inst.pick.placed;
+            selectEntries(cur.includes(entry) ? cur.filter((p) => p !== entry) : [...cur, entry]);
+            return;
+          }
           // The ground isn't selectable; it's edited with brushes.
-          if (inst) selectObject(inst); else clearSelection();
+          if (inst) { group = []; selectObject(inst); } else clearSelection();
         };
 
         const tiles = `${terrain.width - 1} × ${terrain.height - 1}`;
@@ -797,6 +896,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void fillPalette();
           refreshPalette = () => void fillPalette();
           const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect);
+          // Which kinds a selection box picks up.
+          const boxWrap = h("span.terrain-tool-opt", { title: "Kinds of objects a selection box picks up" }, "Box selects:",
+            ...([["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"]] as const).map(([k, label]) => {
+              const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus(); } });
+              return h("label.terrain-place-opt", {}, cb, ` ${label}`);
+            }));
           const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
             h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
           const setTool = (t: Tool) => {
@@ -804,6 +909,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             setPlacing(null);
             for (const [k, b] of buttons) b.classList.toggle("active", k === t);
             texWrap.hidden = t !== "paint";
+            boxWrap.hidden = t !== "select";
             strengthWrap.hidden = t !== "raise" && t !== "lower";
             showBrush(null);
           };
@@ -824,7 +930,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }),
             h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
               h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
-            strengthWrap, texWrap,
+            strengthWrap, texWrap, boxWrap,
             h("button", { title: "Place units, items, doodads or destructables", onclick: () => { void choosePlacement(); } }, "Place…"),
             h("button", { title: "Undo (Ctrl+Z)", onclick: undo }, "↶"),
             h("button", { title: "Redo (Ctrl+Y)", onclick: redo }, "↷"),
@@ -846,7 +952,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
-              h("span.muted", {}, "Drag, middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
+              h("span.muted", {}, "Drag: select box · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [toolBar()] : []),
             h("div.model-stage", {}, canvas)),
           side));
@@ -864,8 +970,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         let drag: { x: number; y: number; button: number } | null = null;
-        /** An object being dragged to a new place. */
-        let objDrag: { entry: Placed; before: { position: [number, number, number]; angle: number }; moved: boolean } | null = null;
+        /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
+        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
+        /** A selection box being dragged (canvas CSS pixels). */
+        let box: { x0: number; y0: number; x1: number; y1: number; add: boolean; shown: boolean } | null = null;
+        const boxEl = h("div.terrain-select-box", { hidden: true });
+        el.append(boxEl);
+        const showBox = () => {
+          if (!box) { boxEl.hidden = true; return; }
+          const rect = canvas.getBoundingClientRect();
+          Object.assign(boxEl.style, {
+            left: `${rect.left + Math.min(box.x0, box.x1)}px`, top: `${rect.top + Math.min(box.y0, box.y1)}px`,
+            width: `${Math.abs(box.x1 - box.x0)}px`, height: `${Math.abs(box.y1 - box.y0)}px`,
+          });
+          boxEl.hidden = !box.shown;
+        };
         canvas.tabIndex = 0;
         canvas.addEventListener("contextmenu", (e) => e.preventDefault());
         /** Where the left button went down; a release close by is a click (select). */
@@ -883,26 +1002,37 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (p) { if (scatter) startScatter(p); else void placeAt(p); }
             return;
           }
-          if (e.button === 0 && editable) {
+          if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
-            const inst = renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top));
-            // Only the selected object moves, so drags over forests still pan.
-            if (inst?.pick && inst === selected) {
-              const entry = inst.pick.placed;
-              objDrag = { entry, before: { position: [...entry.position] as [number, number, number], angle: entry.angle }, moved: false };
+            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top)) : null;
+            // Dragging a selected object moves the whole selection.
+            const entries = selectedEntries();
+            const anchor = inst?.pick && entries.includes(inst.pick.placed) ? groundAt(e) : null;
+            if (anchor) {
+              objDrag = { entries, before: entries.map(poseOf), anchor, moved: false };
               return;
             }
+            // Otherwise a click selects, a drag draws a selection box (pan: middle button or arrow keys).
+            const x = e.clientX - rect.left, y = e.clientY - rect.top;
+            box = { x0: x, y0: y, x1: x, y1: y, add: e.shiftKey, shown: false };
+            press = { x: e.clientX, y: e.clientY };
+            return;
           }
           if (e.button === 1) e.preventDefault();
           drag = { x: e.clientX, y: e.clientY, button: e.button };
-          press = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+          press = null;
         });
         canvas.addEventListener("mousemove", (e) => {
           if (objDrag) {
             const p = groundAt(e);
             if (p) {
               objDrag.moved = true;
-              setPlacement(objDrag.entry, [p[0], p[1], renderer.groundHeight(p[0], p[1])], objDrag.entry.angle);
+              const dx = p[0] - objDrag.anchor[0], dy = p[1] - objDrag.anchor[1];
+              objDrag.entries.forEach((entry, i) => {
+                const [x, y] = objDrag!.before[i].position;
+                setPlacement(entry, [x + dx, y + dy, heightAt(terrain, x + dx, y + dy)], entry.angle);
+              });
+              refreshGroupRings();
             }
             return;
           }
@@ -917,15 +1047,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         canvas.addEventListener("mouseleave", () => { if (!stroke) showBrush(null); });
         canvas.addEventListener("mouseup", (e) => {
-          if (e.button === 0 && press && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 4) pickAt(e);
+          if (e.button === 0 && press && !box?.shown) pickAt(e);
           press = null;
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
           const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (placing) setPlacing(null); else clearSelection(); return; }
-          if (editable && selected && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
-          if (editable && selected && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
+          if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
+          if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
           if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
           if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
           const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
@@ -934,6 +1064,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pan(d[0], d[1]);
         });
         const onMove = (e: MouseEvent) => {
+          if (box) {
+            const rect = canvas.getBoundingClientRect();
+            box.x1 = e.clientX - rect.left;
+            box.y1 = e.clientY - rect.top;
+            if (Math.hypot(box.x1 - box.x0, box.y1 - box.y0) >= 4) box.shown = true;
+            showBox();
+            return;
+          }
           if (!drag) return;
           const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
           drag.x = e.clientX; drag.y = e.clientY;
@@ -949,8 +1087,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           drag = null;
           endStroke();
           endScatter();
-          if (objDrag?.moved) moveEdit(objDrag.entry, objDrag.before);
+          if (objDrag?.moved) moveEdits(objDrag.entries, objDrag.before);
           objDrag = null;
+          if (box?.shown) {
+            const found = objectsInBox(box.x0, box.y0, box.x1, box.y1);
+            const base = box.add ? selectedEntries() : [];
+            selectEntries([...base, ...found.filter((p) => !base.includes(p))]);
+          }
+          box = null;
+          showBox();
         };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);

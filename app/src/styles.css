@@ -388,3 +388,5 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .obj-icon.none { visibility: hidden; }
 .terrain-sel-title { display: flex; gap: 8px; align-items: center; }
 .terrain-sel-icon { width: 32px; height: 32px; border-radius: 3px; }
+.terrain-select-box { position: fixed; border: 1px solid var(--accent); background: rgba(217, 164, 65, 0.12); pointer-events: none; z-index: 5; }
+.terrain-sel-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
