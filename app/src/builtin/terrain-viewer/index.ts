@@ -5,6 +5,7 @@ import { TEAM_COLORS, type Vec3 } from "../model-viewer/renderer";
 import { loadKind, parseSlk } from "../object-editor/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
+import { buildPathingMap } from "./pathmap";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
@@ -703,9 +704,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             savedAt = at;
             doc.setDirty(false);
+            // The pathing map follows terrain and doodads.
+            try {
+              const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
+              const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, (p) => readFile(w3, doc, p));
+              await w3.workspace.writeBytes("map/war3map.wpm", wpm);
+              if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
+            } catch (e) {
+              w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
+            }
             if (!warnedDerived) {
               warnedDerived = true;
-              w3.window.showWarning("Saved war3map.w3e. The pathing map (war3map.wpm), shadows and minimap aren't regenerated yet; open and save the map in the World Editor before you release it.");
+              w3.window.showWarning("Saved the terrain and the pathing map. Shadows (war3map.shd) and the minimap aren't regenerated yet; open and save the map in the World Editor before you release it.");
             }
           } : undefined,
           focus: () => canvas.focus(),
