@@ -403,3 +403,8 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-tabs { align-items: flex-end; }
 .terrain-tabs-gap { flex: 1; }
 .terrain-tabs > button:not(.terrain-tab) { margin-bottom: 3px; }
+.terrain-sel-expr { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; }
+.terrain-sel-expr.invalid, .terrain-filter.invalid { outline: 1px solid var(--error); }
+.terrain-sel-sub { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; cursor: help; }
+.terrain-sel-actions.wrap { flex-wrap: wrap; }
+.terrain-filter { width: 260px; font-family: var(--mono); font-size: 12px; }

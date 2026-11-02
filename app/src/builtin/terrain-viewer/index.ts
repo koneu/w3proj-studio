@@ -11,6 +11,7 @@ import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import type { Rgb } from "./minimap";
 import { buildMinimap } from "./minimapgen";
+import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
@@ -448,6 +449,100 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objectsTouched = true;
           void rebuildObjects();
         };
+        // ---- mass edit, select by type/filter, face point ---------------------------------
+        const skinOf = (p: Placed) => objCtx?.skins.get(p.id) ?? objCtx?.skins.get(objCtx.bases.get(p.id) ?? "");
+        const DEG = 180 / Math.PI;
+        const varsOf = (p: Placed): ObjVars => ({
+          x: p.position[0], y: p.position[1], z: p.position[2],
+          facing: (((p.angle * DEG) % 360) + 360) % 360, scale: p.scale[0], variation: p.variation,
+          owner: p.player !== undefined ? p.player + 1 : 0,
+        });
+        type MassField = "x" | "y" | "z" | "facing" | "scale" | "variation" | "owner";
+        /** Applies new values to entries as one undo step (x/y moves keep objects on the ground). */
+        const applyMass = (entries: Placed[], change: (p: Placed, i: number) => Partial<Props> | null) => {
+          const before = entries.map(snapshot);
+          let n = 0;
+          entries.forEach((p, i) => { const c = change(p, i); if (c) { Object.assign(p, c); n++; } });
+          if (!n) return;
+          const after = entries.map(snapshot);
+          const set = (v: Props[]) => entries.forEach((p, i) => Object.assign(p, structuredClone(v[i])));
+          pushEdit({ undo: () => set(before), redo: () => set(after), terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+        };
+        /** Sets `field` of every entry to the expression's value; returns an error message or null. */
+        const massEdit = (entries: Placed[], field: MassField, src: string): string | null => {
+          let node;
+          try { node = compileExpr(src); } catch (e) { return (e as Error).message; }
+          const vals = entries.map((p, i) => { const v = varsOf(p); return evalFor(node, v, v[field], i, entries.length); });
+          if (vals.some((v) => !Number.isFinite(v))) return "the expression gives no number for some objects";
+          applyMass(entries, (p, i) => {
+            const v = vals[i];
+            switch (field) {
+              case "x": case "y": {
+                const x = field === "x" ? v : p.position[0], y = field === "y" ? v : p.position[1];
+                return { position: [x, y, heightAt(terrain, x, y)] };
+              }
+              case "z": return { position: [p.position[0], p.position[1], v] };
+              case "facing": return { angle: v / DEG };
+              case "scale": return v > 0 ? { scale: [v, v, v] } : null;
+              case "variation": return { variation: Math.max(0, Math.min((skinOf(p)?.numVar ?? 1) - 1, Math.round(v))) };
+              case "owner": return p.player !== undefined ? { player: Math.max(0, Math.min(27, Math.round(v) - 1)) } : null;
+            }
+          });
+          return null;
+        };
+        /** Every placed object with a model (the groups not hidden). */
+        const allPlaced = (): { p: Placed; kind: string; id: string }[] => {
+          const out: { p: Placed; kind: string; id: string }[] = [];
+          for (const b of renderer.batches) {
+            if ((b.group !== "doodads" && b.group !== "units") || renderer.hiddenGroups.has(b.group)) continue;
+            for (const inst of b.instances) if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
+          }
+          return out;
+        };
+        const selectSameTypes = () => {
+          const ids = new Set(selectedEntries().map((p) => p.id));
+          selectEntries(allPlaced().filter((o) => ids.has(o.id)).map((o) => o.p));
+        };
+        /** Selects every object matching a filter; returns an error message or null. */
+        const selectMatching = async (src: string): Promise<string | null> => {
+          let test;
+          try { test = compileFilter(src); } catch (e) { return (e as Error).message; }
+          const names = new Map<string, string>();
+          for (const k of ["w3u", "w3t", "w3b", "w3d"]) {
+            const kd = await loadKind(w3, k).catch(() => null);
+            if (kd) for (const [id, n] of kd.names) names.set(id, n);
+          }
+          const nameOf = (id: string) => names.get(id) ?? names.get(objCtx?.bases.get(id) ?? "") ?? id;
+          const found = allPlaced().filter((o) => boxKinds.has(o.kind) && test({ ...varsOf(o.p), id: o.id, kind: o.kind, name: nameOf(o.id) })).map((o) => o.p);
+          selectEntries(found);
+          if (!found.length) w3.window.showInfo("No objects match.");
+          return null;
+        };
+        /** "Face point": the selection turns toward the pointer until a click (apply) or Esc. */
+        let facing: { entries: Placed[]; before: Pose[] } | null = null;
+        const startFacing = () => {
+          const entries = selectedEntries();
+          if (!editable || !entries.length) return;
+          facing = { entries, before: entries.map(poseOf) };
+          modeHint.textContent = "Facing the pointer: click to apply · Esc to cancel";
+          canvas.focus();
+        };
+        const faceToward = (g: Vec3) => {
+          for (const p of facing!.entries) setPlacement(p, [...p.position], Math.atan2(g[1] - p.position[1], g[0] - p.position[0]));
+          refreshGroupRings();
+        };
+        const endFacing = (apply: boolean) => {
+          const f = facing;
+          if (!f) return;
+          facing = null;
+          modeHint.textContent = "";
+          if (apply) moveEdits(f.entries, f.before);
+          else { f.entries.forEach((p, i) => setPlacement(p, [...f.before[i].position], f.before[i].angle)); refreshGroupRings(); }
+        };
+        const modeHint = h("span.terrain-place-hint");
+
         const rotateSelected = (deg: number) => {
           const entries = selectedEntries();
           if (!entries.length) return;
@@ -533,7 +628,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.terrain-sel-actions", {},
               h("button", { onclick: () => w3.commands.execute("w3.objectEditor.open", p.kind, p.id).catch((e) => w3.window.showError(String(e))) }, "Open in Object Editor"),
               ...(editable ? [h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete")] : [])),
-            ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · Del to delete")] : []),
+            h("div.terrain-sel-actions.wrap", {},
+              h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
+              ...(editable ? [h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point")] : [])),
+            ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete")] : []),
           );
           const [x, y, , r] = inst.sphere!;
           renderer.setSelection({ x, y, r: Math.min(400, Math.max(40, r * 0.8)), rgb: pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120] });
@@ -589,14 +687,53 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: same && i === first }, ownerName(i))));
             return sel;
           })() : null;
+          // "Edit all": an expression per field, applied to every selected object.
+          const vars = group.map(varsOf);
+          const common = (k: MassField) => {
+            const vs = vars.map((v) => v[k]);
+            return vs.every((v) => Math.abs(v - vs[0]) < 1e-3) ? fmt(vs[0]) : "mixed";
+          };
+          const massField = (label: string, k: MassField, title: string) => {
+            const input = h("input.terrain-sel-expr", {
+              type: "text", placeholder: common(k), title,
+              onkeydown: (e: KeyboardEvent) => {
+                if (e.key !== "Enter" || !input.value.trim()) return;
+                const err = massEdit(group, k, input.value.trim());
+                input.classList.toggle("invalid", !!err);
+                input.title = err ? `${err}\n\n${title}` : title;
+                if (!err) input.value = "";
+              },
+            });
+            return h("div.terrain-sel-row", {}, h("span.muted", {}, label), input);
+          };
+          const help = "Enter a number or an expression, applied to each object: v = current value, i = index, n = count, x y z facing scale of the object; random(1..1.2), randint(0,9), round(v, 32), min, max, abs, sin/cos (degrees). Examples: x+64 · random(0..360) · i*90 · v*1.1";
+          const quick = (label: string, title: string, fn: () => void) => h("button", { title, onclick: fn }, label);
           selInfo.className = "terrain-selection";
           selInfo.replaceChildren(
             h("div.terrain-sel-name", {}, `${group.length} objects selected`),
             list,
-            ...(editable && ownerSel ? [h("div.terrain-sel-row", {}, h("span.muted", {}, `Owner (${units.length})`), ownerSel)] : []),
+            h("div.terrain-sel-actions", {}, quick("Select all of these types", "Select every object of the selected types", selectSameTypes)),
             ...(editable ? [
-              h("div.terrain-sel-actions", {}, h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
-              h("div.muted", {}, "Drag one to move all · [ ] to turn each · Del to delete · Ctrl+click adds/removes · Shift+box adds"),
+              ...(ownerSel ? [h("div.terrain-sel-row", {}, h("span.muted", {}, `Owner (${units.length})`), ownerSel)] : []),
+              h("div.terrain-sel-sub.muted", { title: help }, "Edit all (Enter applies; hover for help)"),
+              massField("X", "x", help), massField("Y", "y", help), massField("Z", "z", help),
+              massField("Facing", "facing", help), massField("Scale", "scale", help), massField("Variation", "variation", help),
+              h("div.terrain-sel-actions.wrap", {},
+                quick("Face point", "Turn every selected object toward the pointer (F); click to apply", startFacing),
+                quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
+                quick("Random variation", "A random model variation for each object", () => applyMass(group, (p) => {
+                  const n = skinOf(p)?.numVar ?? 1;
+                  return n > 1 ? { variation: Math.floor(Math.random() * n) } : null;
+                })),
+                quick("Random scale", "A random scale within each type's own range (game data)", () => applyMass(group, (p) => {
+                  const sk = skinOf(p);
+                  if (!sk || sk.maxScale <= sk.minScale) return null;
+                  const k = sk.minScale + Math.random() * (sk.maxScale - sk.minScale);
+                  return { scale: [k, k, k] };
+                })),
+                quick("Drop to ground", "Set every object's height to the ground under it", () => applyMass(group, (p) => ({ position: [p.position[0], p.position[1], heightAt(terrain, p.position[0], p.position[1])] }))),
+                h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
+              h("div.muted", {}, "Drag one to move all · [ ] turn each · F face point · Del delete · Ctrl+click adds/removes · Shift+box adds"),
             ] : []),
           );
           redraw();
@@ -663,8 +800,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus(); } });
                 return h("label.terrain-place-opt", {}, cb, ` ${label}`);
               })),
-            h("span.muted", {}, "Click to select · drag a box · Ctrl+click adds/removes · drag a selected object to move · [ ] turn · Del delete"));
+            filterInput, h("button", { title: "Select every object matching the filter", onclick: () => void runFilter() }, "Select matching"),
+            modeHint);
         }
+        const filterHelp = "Select all objects matching every condition (and the Box selects kinds): field op value, op = != < > <= >= or : (contains). Fields: id, kind (unit, item, destructable, doodad), owner (Player 1 = 1), name, x, y, z, facing, scale, variation. Examples: kind=unit owner=1 · name:tree scale>1.1 · id=LTlt";
+        const filterInput = h("input.terrain-filter", {
+          type: "text", placeholder: "Filter, e.g. kind=unit owner=1 · name:tree", title: filterHelp,
+          onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") void runFilter(); },
+        });
+        const runFilter = async () => {
+          if (!filterInput.value.trim()) return;
+          const err = await selectMatching(filterInput.value.trim());
+          filterInput.classList.toggle("invalid", !!err);
+          filterInput.title = err ? `${err}\n\n${filterHelp}` : filterHelp;
+        };
 
         // ---- tool groups of other extensions ("w3.terrain") --------------------------
         /** wpm bytes (header + cells): applies every group's pathing filter. */
@@ -844,6 +993,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             groupDrag = true;
             return;
           }
+          if (facing) {
+            e.preventDefault();
+            endFacing(e.button === 0);
+            return;
+          }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
             const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top)) : null;
@@ -867,6 +1021,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         canvas.addEventListener("mousemove", (e) => {
           activeInst()?.pointerMove?.({ ground: groundAt(e), event: e, down: groupDrag });
           if (groupDrag) return;
+          if (facing) { const g = groundAt(e); if (g) faceToward(g); return; }
           if (objDrag) {
             const p = groundAt(e);
             if (p) {
@@ -891,7 +1046,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         canvas.addEventListener("keydown", (e) => {
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
-          if (e.key === "Escape") { clearSelection(); return; }
+          if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
+          if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
           if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
