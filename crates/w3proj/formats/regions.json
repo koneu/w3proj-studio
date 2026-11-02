@@ -1,0 +1,30 @@
+// war3map.w3r — regions ("rects" in triggers).
+// Version 5 (classic / Reforged) and 7 (3.0, eight more bytes per region,
+// zero in all samples; meaning unknown). Worked out from 58 maps.
+{
+  "name": "regions",
+  "description": "Regions: rectangle, name, weather effect, ambient sound, colour",
+  "files": ["war3map.w3r"],
+  "jsonFormat": "w3proj.regions/1",
+  "accept": "version == 5 || version == 7",
+  "fields": [
+    { "name": "version", "type": "u32" },
+    { "name": "regions", "type": "struct", "count": "u32", "fields": [
+      { "name": "left", "type": "f32" },
+      { "name": "bottom", "type": "f32" },
+      { "name": "right", "type": "f32" },
+      { "name": "top", "type": "f32" },
+      { "name": "name", "type": "cstring" },
+      { "name": "index", "type": "u32", "doc": "creation number; triggers refer to gg_rct_<name>" },
+      { "name": "weather", "type": "id", "doc": "weather effect id (e.g. RAlr), 0x00000000 for none" },
+      { "name": "sound", "type": "cstring", "doc": "ambient sound (a sound variable name), empty for none" },
+      { "name": "color", "type": "struct", "fields": [
+        { "name": "blue", "type": "u8" },
+        { "name": "green", "type": "u8" },
+        { "name": "red", "type": "u8" },
+        { "name": "alpha", "type": "u8", "default": 255 }
+      ] },
+      { "name": "trailer", "type": "u32", "count": 2, "if": "version >= 7", "doc": "3.0; zero in all samples" }
+    ] }
+  ]
+}
