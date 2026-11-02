@@ -1,9 +1,10 @@
 // New Map: asks for name, size, tileset, base tile and script language, then
 // writes a project folder with a flat map in it, as the World Editor 2.0 makes
 // one: map info (w3i v33), terrain (w3e v12, centred on the origin, camera
-// margins 6/6/4/8 tiles), one player with a start location, no doodads, a
-// map script with the melee initialization, and the derived files (pathing,
-// shadows, minimap). The project is opened in the terrain editor afterwards.
+// margins 6/6/4/8 tiles), one player with a start location, no doodads, the
+// default melee trigger (wtg/wct) and the map script it compiles to, and the
+// derived files (pathing, shadows, minimap). The project is opened in the
+// terrain editor afterwards.
 
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
@@ -12,6 +13,7 @@ import { h } from "../../workbench/dom";
 import { buildMinimap, minimapSettings } from "./minimapgen";
 import { buildPathingMap } from "./pathmap";
 import { terrainShadows } from "./shadows";
+import { defaultWct, defaultWtg, MELEE_ACTIONS } from "./triggers";
 
 export interface NewMapOptions {
   /** Folder to create (must not exist or be empty). */
@@ -233,8 +235,7 @@ export function mapScript(o: NewMapOptions, t: Terrain, lights: { terrain: strin
     `${num(c.left)} + ${m("LEFT")}`, `${num(c.top)} - ${m("TOP")}`, `${num(c.right)} - ${m("RIGHT")}`, `${num(c.bottom)} + ${m("BOTTOM")}`,
   ].join(", ");
   const amb = AMBIENCE[o.tileset];
-  const melee = ["MeleeStartingVisibility", "MeleeStartingHeroLimit", "MeleeGrantHeroItems", "MeleeStartingResources",
-    "MeleeClearExcessUnits", "MeleeStartingUnits", "MeleeStartingAI", "MeleeInitVictoryDefeat"];
+  const melee = MELEE_ACTIONS;
   const mainCalls = [
     `SetCameraBounds(${bounds})`,
     `SetDayNightModels(${str(lights.terrain)}, ${str(lights.unit)})`,
@@ -305,6 +306,12 @@ export async function createMap(w3: W3Api, o: NewMapOptions & { tilesetInfo: Til
   await json("map/war3map.w3i.json", mapInfo(o, t));
   await json("map/war3map.doo.json", doodads);
   await json("map/war3mapUnits.doo.json", units);
+  // Empty regions, cameras and sounds, and the default trigger (the World Editor needs the trigger files).
+  await json("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 5, regions: [] });
+  await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 0, cameras: [] });
+  await json("map/war3map.w3s.json", { format: "w3proj.sounds/1", version: 3, sounds: [] });
+  await w3.workspace.writeBytes("map/war3map.wtg", defaultWtg());
+  await w3.workspace.writeBytes("map/war3map.wct", defaultWct());
   await w3.workspace.writeBytes("map/war3map.w3e", writeW3e(t));
   await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", mapScript(o, t, lights));
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));
