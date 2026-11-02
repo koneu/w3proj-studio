@@ -280,6 +280,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: p.position[2], rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
+        const NEUTRALS: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Extra", 26: "Neutral Victim", 27: "Neutral Passive" };
+        const ownerName = (n: number) => (n < 24 ? `Player ${n + 1} (${TEAM_COLORS[n]?.[0] ?? "?"})` : NEUTRALS[n] ?? `Player ${n + 1}`);
         const findInstance = (entry: Placed): ObjectInstance | null => {
           for (const b of renderer.batches) for (const inst of b.instances) if (inst.pick?.placed === entry) return inst;
           return null;
@@ -355,6 +357,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objectsTouched = true;
           void rebuildObjects();
         };
+        /** Fields the selection panel edits. */
+        type Props = Pick<Placed, "player" | "variation" | "scale" | "position" | "angle">;
+        const snapshot = (e: Placed): Props => structuredClone({
+          ...(e.player !== undefined ? { player: e.player } : {}), variation: e.variation, scale: e.scale, position: e.position, angle: e.angle,
+        });
+        const editProps = (entry: Placed, change: Partial<Props>) => {
+          const before = snapshot(entry);
+          Object.assign(entry, change);
+          const after = snapshot(entry);
+          pushEdit({ undo: () => Object.assign(entry, structuredClone(before)), redo: () => Object.assign(entry, structuredClone(after)), terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+        };
         const rotateSelected = (deg: number) => {
           const entry = selected?.pick?.placed;
           if (!entry) return;
@@ -364,16 +379,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Type chosen with "Place…"; each click on the ground places one. */
         let placing: { kind: string; id: string; name: string } | null = null;
+        /** Owner of placed units (kept between placements). */
+        let placeOwner = 0;
         const placeHint = h("span.terrain-place-hint");
         const setPlacing = (p: typeof placing) => {
           placing = p;
-          placeHint.textContent = p ? `Placing ${p.name} (${p.id}): click the ground · Esc to stop` : "";
+          if (!p) { placeHint.replaceChildren(); return; }
+          const owner = h("select", { title: "Owner of placed units", onchange: () => { placeOwner = Number(owner.value); canvas.focus(); } },
+            ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: i === placeOwner }, ownerName(i))));
+          placeHint.replaceChildren(`Placing ${p.name} (${p.id}): click the ground · Esc to stop`, ...(p.kind === "w3u" ? [" · for ", owner] : []));
         };
         const placeAt = (pos: Vec3) => {
           if (!placing) return;
           const f = placing.kind === "w3u" || placing.kind === "w3t" ? unitsFile : dooFile;
           if (!f) { w3.window.showError(`This project has no ${placing.kind === "w3u" || placing.kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
-          const entry = newEntry(f, placing.id, [pos[0], pos[1], pos[2]], placing.kind === "w3u" ? 0 : undefined);
+          const entry = newEntry(f, placing.id, [pos[0], pos[1], pos[2]], placing.kind === "w3u" ? placeOwner : undefined);
           if (!entry) { w3.window.showError(`${f.name} has no entries to take the layout from yet.`); return; }
           f.list.push(entry);
           pushEdit({ undo: () => { f.list.splice(f.list.indexOf(entry), 1); }, redo: () => { f.list.push(entry); }, terrain: false, objects: true });
@@ -413,16 +433,47 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const base = k.names.get(p.base ?? p.id);
             if (base) nameEl.textContent = p.base ? `${p.id} (custom, based on ${base})` : base;
           }).catch(() => { /* raw id stays */ });
-          const owner = pl.player === undefined ? null : pl.player < 24 ? `Player ${pl.player + 1} (${TEAM_COLORS[pl.player]?.[0] ?? "?"})` : "Neutral";
+          const skin = objCtx?.skins.get(p.id) ?? objCtx?.skins.get(p.base ?? "");
+          const numVar = skin?.numVar ?? 1;
+          // Editable fields commit on Enter/blur; each change is one undo step.
+          const num = (value: number, step: string, commit: (v: number) => void) =>
+            h("input.terrain-sel-num", { type: "number", step, value: fmt(value), onchange: (e: Event) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              if (Number.isFinite(v)) commit(v);
+            } });
+          const triple = (values: number[], step: string, commit: (v: [number, number, number]) => void) =>
+            h("span.terrain-sel-triple", {}, ...values.map((v, i) => num(v, step, (nv) => {
+              const next = [...values] as [number, number, number];
+              next[i] = nv;
+              commit(next);
+            })));
+          const choice = (value: number, options: [number, string][], commit: (v: number) => void) => {
+            if (!options.some(([v]) => v === value)) options.push([value, `#${value}`]);
+            const sel = h("select", { onchange: () => commit(Number(sel.value)) },
+              ...options.map(([v, label]) => h("option", { value: String(v), selected: v === value }, label)));
+            return sel;
+          };
+          const field = (label: string, el: HTMLElement) => h("div.terrain-sel-row", {}, h("span.muted", {}, label), el);
+          const ownerOptions = (): [number, string][] => Array.from({ length: 28 }, (_, i) => [i, ownerName(i)]);
           selInfo.className = "terrain-selection";
           selInfo.replaceChildren(
             nameEl,
             row("Type", `${KIND_LABELS[p.kind] ?? p.kind} · ${p.id}${p.base ? ` ← ${p.base}` : ""}`),
-            ...(owner ? [row("Owner", owner)] : []),
-            row("Position", pl.position.map(fmt).join(", ")),
-            row("Facing", `${fmt((pl.angle * 180) / Math.PI)}°`),
-            row("Scale", pl.scale.map(fmt).join(", ")),
-            row("Variation", String(pl.variation)),
+            ...(editable ? [
+              ...(pl.player !== undefined ? [field("Owner", choice(pl.player, ownerOptions(), (v) => editProps(pl, { player: v })))] : []),
+              field("Position", triple(pl.position, "16", (v) => editProps(pl, { position: v }))),
+              field("Facing", num((pl.angle * 180) / Math.PI, "15", (v) => editProps(pl, { angle: (v * Math.PI) / 180 }))),
+              field("Scale", triple(pl.scale, "0.1", (v) => editProps(pl, { scale: v }))),
+              numVar > 1
+                ? field("Variation", choice(pl.variation, Array.from({ length: numVar }, (_, i) => [i, String(i)]), (v) => editProps(pl, { variation: v })))
+                : row("Variation", String(pl.variation)),
+            ] : [
+              ...(pl.player !== undefined ? [row("Owner", ownerName(pl.player))] : []),
+              row("Position", pl.position.map(fmt).join(", ")),
+              row("Facing", `${fmt((pl.angle * 180) / Math.PI)}°`),
+              row("Scale", pl.scale.map(fmt).join(", ")),
+              row("Variation", String(pl.variation)),
+            ]),
             row("Model", p.model),
             h("div.terrain-sel-actions", {},
               h("button", { onclick: () => w3.commands.execute("w3.objectEditor.open", p.kind, p.id).catch((e) => w3.window.showError(String(e))) }, "Open in Object Editor"),

@@ -348,3 +348,7 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-sel-actions { display: flex; gap: 6px; margin-top: 6px; }
 .terrain-sel-actions button { margin-top: 0; }
 .terrain-place-hint { color: var(--accent); font-size: 12px; }
+.terrain-sel-row input, .terrain-sel-row select { min-width: 0; font-size: 12px; }
+.terrain-sel-num { width: 100%; box-sizing: border-box; }
+.terrain-sel-triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.terrain-place-hint select { font-size: 12px; }
