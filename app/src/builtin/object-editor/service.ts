@@ -6,17 +6,15 @@ import type { ObjectsService, PickedObject } from "../../extensions/services";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 import { pickObject } from "./picker";
 import { decodeImage } from "../../lib/image/index.ts";
+import { StringTable } from "../../lib/formats/wts";
 
 const KIND_LABELS: Record<string, string> = {
   w3u: "Units", w3t: "Items", w3a: "Abilities", w3h: "Buffs/Effects", w3b: "Destructables", w3d: "Doodads", w3q: "Upgrades",
 };
 
-/** war3map.wts: STRING <n> [// comment] { text } */
+/** war3map.wts as "TRIGSTR_nnn" → text. */
 export function parseWts(text: string): Map<string, string> {
-  const map = new Map<string, string>();
-  const re = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n([\s\S]*?)\r?\n\}/g;
-  for (let m; (m = re.exec(text)); ) map.set(`TRIGSTR_${m[1].padStart(3, "0")}`, m[2]);
-  return map;
+  return new Map([...new StringTable(text).entries()].map(([n, v]) => [`TRIGSTR_${String(n).padStart(3, "0")}`, v]));
 }
 
 export function stripColors(s: string) {

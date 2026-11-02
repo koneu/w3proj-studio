@@ -1,0 +1,309 @@
+// war3map.wtg (GUI triggers) and war3map.wct (custom script text).
+//
+// Reforged (marker 0x80000004, version 7) — all files of the game's 3.0 maps:
+//   "WTG!", marker, version, 8 × (count, deleted count, deleted ids…) per item
+//   type, u32 (2), variables, item count, items.
+//   Variable: name, type, u32 (1), is array, array size, initialized,
+//             initial value, id, parent id.
+//   Item: u32 type, then
+//     1 map / 2 library / 4 category: id, name, is comment, expanded, parent
+//     8 trigger / 16 comment / 32 script: name, description, is comment, id,
+//             enabled, custom text, initially off, run on init, parent, ECAs
+//     64 variable: id, name, parent
+// Classic (version 4 = Reign of Chaos, 7 = The Frozen Throne):
+//   "WTG!", version, categories (index, name[, is comment]), u32 (2),
+//   variables (name, type, u32, is array[, size], initialized, value),
+//   triggers (name, description[, is comment], enabled, custom text,
+//   initially off, run on init, category index, ECAs).
+// ECA: kind (0 event, 1 condition, 2 action)[, branch for children], name,
+//   enabled, parameters (count from TriggerData), [v7: child count, children].
+// Parameter: type (-1 invalid, 0 preset, 1 variable, 2 function, 3 string),
+//   value, has call [kind, name, has params, params, (v7) u32], has index [param].
+//
+// war3map.wct, Reforged: marker, version 1, comment, header script
+// (length + text), then length + text for each GUI trigger (no count).
+// Classic: version (0/1), [comment, header script,] count, texts.
+
+import type { TriggerData } from "./triggerdata";
+
+export interface Param {
+  type: number;
+  value: string;
+  call?: Call;
+  index?: Param;
+}
+export interface Call {
+  kind: number;
+  name: string;
+  hasParams: boolean;
+  params: Param[];
+  /** v7: a u32 after the call (0 in all samples). */
+  trailer?: number;
+}
+export interface Eca {
+  kind: number;
+  /** Children only: the branch they belong to (if/then/else: 0 if, 1 then, 2 else). */
+  group?: number;
+  name: string;
+  enabled: boolean;
+  params: Param[];
+  children: Eca[];
+}
+export interface Variable {
+  name: string;
+  type: string;
+  unknown: number;
+  isArray: boolean;
+  arraySize: number;
+  initialized: boolean;
+  initialValue: string;
+  id: number;
+  parent: number;
+}
+export type Item =
+  | { type: 1 | 2 | 4; id: number; name: string; isComment: number; expanded: number; parent: number }
+  | { type: 8 | 16 | 32; name: string; description: string; isComment: number; id: number; enabled: boolean; isCustom: boolean;
+      initiallyOff: boolean; runOnInit: boolean; parent: number; ecas: Eca[] }
+  | { type: 64; id: number; name: string; parent: number };
+export type TriggerItem = Extract<Item, { type: 8 | 16 | 32 }>;
+
+export interface TriggerFile {
+  reforged: boolean;
+  version: number;
+  /** Reforged: per item type, how many exist and which ids were deleted. */
+  counts: { count: number; deleted: number[] }[];
+  /** The u32 after the counts / categories (2 in all samples). */
+  unknown: number;
+  variables: Variable[];
+  /** Classic files are converted: categories become items (type 4, id = index), triggers point to them. */
+  items: Item[];
+}
+
+const MARKER = 0x80000004;
+const td = new TextDecoder();
+const te = new TextEncoder();
+
+class Reader {
+  o = 0;
+  private dv: DataView;
+  constructor(private b: Uint8Array) { this.dv = new DataView(b.buffer, b.byteOffset, b.byteLength); }
+  u32() { const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
+  i32() { const v = this.dv.getInt32(this.o, true); this.o += 4; return v; }
+  str() {
+    const e = this.b.indexOf(0, this.o);
+    if (e < 0) throw new Error(`unterminated string at ${this.o}`);
+    const s = td.decode(this.b.subarray(this.o, e));
+    this.o = e + 1;
+    return s;
+  }
+  bytes(n: number) { const s = this.b.subarray(this.o, this.o + n); this.o += n; return s; }
+  get done() { return this.o >= this.b.length; }
+}
+
+class Writer {
+  private parts: Uint8Array[] = [];
+  private len = 0;
+  private push(p: Uint8Array) { this.parts.push(p); this.len += p.length; }
+  u32(v: number) { const p = new Uint8Array(4); new DataView(p.buffer).setUint32(0, v >>> 0, true); this.push(p); return this; }
+  i32(v: number) { const p = new Uint8Array(4); new DataView(p.buffer).setInt32(0, v, true); this.push(p); return this; }
+  str(s: string) { this.push(te.encode(s)); this.push(new Uint8Array(1)); return this; }
+  bytes(b: Uint8Array) { this.push(b); return this; }
+  done() { const out = new Uint8Array(this.len); let o = 0; for (const p of this.parts) { out.set(p, o); o += p.length; } return out; }
+}
+
+function argCount(data: TriggerData, kind: number, name: string): number {
+  const f = data.find(kind, name);
+  if (!f) throw new Error(`unknown trigger function "${name}" (not in TriggerData.txt)`);
+  return f.args.length;
+}
+
+function readParam(r: Reader, data: TriggerData, v7: boolean): Param {
+  const p: Param = { type: r.i32(), value: r.str() };
+  if (r.u32()) {
+    const kind = r.u32(), name = r.str(), hasParams = r.u32() !== 0;
+    const params = hasParams ? Array.from({ length: argCount(data, kind, name) }, () => readParam(r, data, v7)) : [];
+    p.call = { kind, name, hasParams, params, ...(v7 ? { trailer: r.u32() } : {}) };
+  }
+  if (r.u32()) p.index = readParam(r, data, v7);
+  return p;
+}
+
+function readEca(r: Reader, data: TriggerData, v7: boolean, child: boolean): Eca {
+  const kind = r.u32();
+  const group = child ? r.u32() : undefined;
+  const name = r.str(), enabled = r.u32() !== 0;
+  const params = Array.from({ length: argCount(data, kind, name) }, () => readParam(r, data, v7));
+  const children = v7 ? Array.from({ length: r.u32() }, () => readEca(r, data, v7, true)) : [];
+  return { kind, ...(group !== undefined ? { group } : {}), name, enabled, params, children };
+}
+
+export function parseWtg(buf: Uint8Array, data: TriggerData): TriggerFile {
+  const r = new Reader(buf);
+  if (td.decode(r.bytes(4)) !== "WTG!") throw new Error("not a trigger file (missing WTG! header)");
+  const first = r.u32();
+  if (first === MARKER) {
+    const version = r.u32();
+    const counts = Array.from({ length: 8 }, () => {
+      const count = r.u32(), n = r.u32();
+      return { count, deleted: Array.from({ length: n }, () => r.u32()) };
+    });
+    const unknown = r.u32();
+    const variables = Array.from({ length: r.u32() }, (): Variable => ({
+      name: r.str(), type: r.str(), unknown: r.u32(), isArray: r.u32() !== 0, arraySize: r.u32(), initialized: r.u32() !== 0,
+      initialValue: r.str(), id: r.u32(), parent: r.i32(),
+    }));
+    const items = Array.from({ length: r.u32() }, (): Item => {
+      const type = r.u32();
+      if (type === 1 || type === 2 || type === 4) return { type, id: r.u32(), name: r.str(), isComment: r.u32(), expanded: r.u32(), parent: r.i32() };
+      if (type === 8 || type === 16 || type === 32) {
+        const name = r.str(), description = r.str(), isComment = r.u32(), id = r.u32();
+        const enabled = r.u32() !== 0, isCustom = r.u32() !== 0, initiallyOff = r.u32() !== 0, runOnInit = r.u32() !== 0, parent = r.i32();
+        const ecas = Array.from({ length: r.u32() }, () => readEca(r, data, true, false));
+        return { type, name, description, isComment, id, enabled, isCustom, initiallyOff, runOnInit, parent, ecas };
+      }
+      if (type === 64) return { type, id: r.u32(), name: r.str(), parent: r.i32() };
+      throw new Error(`unknown trigger item type ${type} at ${r.o - 4}`);
+    });
+    if (!r.done) throw new Error(`${buf.length - r.o} bytes after the trigger data`);
+    return { reforged: true, version, counts, unknown, variables, items };
+  }
+  const version = first;
+  if (version !== 4 && version !== 7) throw new Error(`unsupported trigger file version ${version}`);
+  const v7 = version === 7;
+  const items: Item[] = Array.from({ length: r.u32() }, () => {
+    const id = r.u32(), name = r.str();
+    return { type: 4 as const, id, name, isComment: v7 ? r.u32() : 0, expanded: 1, parent: -1 };
+  });
+  const unknown = r.u32();
+  const variables = Array.from({ length: r.u32() }, (_, i): Variable => {
+    const name = r.str(), type = r.str(), unknown = r.u32(), isArray = r.u32() !== 0;
+    return { name, type, unknown, isArray, arraySize: v7 ? r.u32() : 1, initialized: r.u32() !== 0, initialValue: r.str(), id: i, parent: -1 };
+  });
+  for (let n = r.u32(), i = 0; i < n; i++) {
+    const name = r.str(), description = r.str(), isComment = v7 ? r.u32() : 0;
+    const enabled = r.u32() !== 0, isCustom = r.u32() !== 0, initiallyOff = r.u32() !== 0, runOnInit = r.u32() !== 0, parent = r.i32();
+    const ecas = Array.from({ length: r.u32() }, () => readEca(r, data, v7, false));
+    items.push({ type: 8, name, description, isComment, id: i, enabled, isCustom, initiallyOff, runOnInit, parent, ecas });
+  }
+  if (!r.done) throw new Error(`${buf.length - r.o} bytes after the trigger data`);
+  return { reforged: false, version, counts: [], unknown, variables, items };
+}
+
+function writeParam(w: Writer, p: Param, v7: boolean) {
+  w.i32(p.type).str(p.value).u32(p.call ? 1 : 0);
+  if (p.call) {
+    w.u32(p.call.kind).str(p.call.name).u32(p.call.hasParams ? 1 : 0);
+    if (p.call.hasParams) for (const q of p.call.params) writeParam(w, q, v7);
+    if (v7) w.u32(p.call.trailer ?? 0);
+  }
+  w.u32(p.index ? 1 : 0);
+  if (p.index) writeParam(w, p.index, v7);
+}
+
+function writeEca(w: Writer, e: Eca, v7: boolean, child: boolean) {
+  w.u32(e.kind);
+  if (child) w.u32(e.group ?? 0);
+  w.str(e.name).u32(e.enabled ? 1 : 0);
+  for (const p of e.params) writeParam(w, p, v7);
+  if (v7) {
+    w.u32(e.children.length);
+    for (const c of e.children) writeEca(w, c, v7, true);
+  }
+}
+
+export function writeWtg(f: TriggerFile): Uint8Array {
+  const w = new Writer().bytes(te.encode("WTG!"));
+  const v7 = f.version === 7;
+  const triggers = f.items.filter((i): i is TriggerItem => i.type === 8 || i.type === 16 || i.type === 32);
+  if (f.reforged) {
+    w.u32(MARKER).u32(f.version);
+    for (const c of f.counts) { w.u32(c.count).u32(c.deleted.length); for (const d of c.deleted) w.u32(d); }
+    w.u32(f.unknown).u32(f.variables.length);
+    for (const v of f.variables) {
+      w.str(v.name).str(v.type).u32(v.unknown).u32(v.isArray ? 1 : 0).u32(v.arraySize).u32(v.initialized ? 1 : 0).str(v.initialValue).u32(v.id).i32(v.parent);
+    }
+    w.u32(f.items.length);
+    for (const it of f.items) {
+      w.u32(it.type);
+      if (it.type === 64) w.u32(it.id).str(it.name).i32(it.parent);
+      else if (!("ecas" in it)) w.u32(it.id).str(it.name).u32(it.isComment).u32(it.expanded).i32(it.parent);
+      else {
+        w.str(it.name).str(it.description).u32(it.isComment).u32(it.id).u32(it.enabled ? 1 : 0).u32(it.isCustom ? 1 : 0)
+          .u32(it.initiallyOff ? 1 : 0).u32(it.runOnInit ? 1 : 0).i32(it.parent).u32(it.ecas.length);
+        for (const e of it.ecas) writeEca(w, e, true, false);
+      }
+    }
+    return w.done();
+  }
+  const categories = f.items.filter((i) => i.type === 4) as Extract<Item, { type: 1 | 2 | 4 }>[];
+  w.u32(f.version).u32(categories.length);
+  for (const c of categories) { w.u32(c.id).str(c.name); if (v7) w.u32(c.isComment); }
+  w.u32(f.unknown).u32(f.variables.length);
+  for (const v of f.variables) {
+    w.str(v.name).str(v.type).u32(v.unknown).u32(v.isArray ? 1 : 0);
+    if (v7) w.u32(v.arraySize);
+    w.u32(v.initialized ? 1 : 0).str(v.initialValue);
+  }
+  w.u32(triggers.length);
+  for (const t of triggers) {
+    w.str(t.name).str(t.description);
+    if (v7) w.u32(t.isComment);
+    w.u32(t.enabled ? 1 : 0).u32(t.isCustom ? 1 : 0).u32(t.initiallyOff ? 1 : 0).u32(t.runOnInit ? 1 : 0).i32(t.parent).u32(t.ecas.length);
+    for (const e of t.ecas) writeEca(w, e, v7, false);
+  }
+  return w.done();
+}
+
+/** Custom script text: the map header and one text per GUI trigger (in item order). */
+export interface CustomTextFile {
+  reforged: boolean;
+  version: number;
+  comment: string;
+  /** null: no text stored (length 0); "" is stored as a lone terminating zero. */
+  header: string | null;
+  texts: (string | null)[];
+}
+
+/** Length-prefixed text; the stored length counts the terminating zero. */
+function readText(r: Reader): string | null {
+  const n = r.u32();
+  if (!n) return null;
+  const b = r.bytes(n);
+  return td.decode(b[n - 1] === 0 ? b.subarray(0, n - 1) : b);
+}
+function writeText(w: Writer, s: string | null) {
+  if (s === null) { w.u32(0); return; }
+  const b = te.encode(s);
+  w.u32(b.length + 1).bytes(b).bytes(new Uint8Array(1));
+}
+
+/** `triggers`: how many GUI triggers the wtg has (Reforged files store no count). */
+export function parseWct(buf: Uint8Array, triggers: number): CustomTextFile {
+  const r = new Reader(buf);
+  const first = r.u32();
+  if (first === MARKER) {
+    const version = r.u32(), comment = r.str(), header = readText(r);
+    const texts = Array.from({ length: triggers }, () => readText(r));
+    if (!r.done) throw new Error(`${buf.length - r.o} bytes after the custom script`);
+    return { reforged: true, version, comment, header, texts };
+  }
+  const version = first;
+  const comment = version >= 1 ? r.str() : "", header = version >= 1 ? readText(r) : null;
+  const texts = Array.from({ length: r.u32() }, () => readText(r));
+  return { reforged: false, version, comment, header, texts };
+}
+
+export function writeWct(f: CustomTextFile): Uint8Array {
+  const w = new Writer();
+  if (f.reforged) w.u32(MARKER).u32(f.version).str(f.comment);
+  else { w.u32(f.version); if (f.version >= 1) w.str(f.comment); }
+  if (f.reforged || f.version >= 1) writeText(w, f.header);
+  if (!f.reforged) w.u32(f.texts.length);
+  for (const t of f.texts) writeText(w, t);
+  return w.done();
+}
+
+/** The GUI triggers of a file, in the order their custom texts are stored. */
+export function textTriggers(f: TriggerFile): TriggerItem[] {
+  return f.items.filter((i): i is TriggerItem => i.type === 8 || i.type === 32);
+}

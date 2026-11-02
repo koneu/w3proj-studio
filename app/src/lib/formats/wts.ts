@@ -26,6 +26,16 @@ export class StringTable {
     return this.values.get(n);
   }
 
+  entries(): IterableIterator<[number, string]> {
+    return this.values.entries();
+  }
+
+  /** The text behind a "TRIGSTR_n" value; other values are returned as they are. */
+  resolve(value: string): string {
+    const n = StringTable.ref(value);
+    return n === null ? value : this.values.get(n) ?? value;
+  }
+
   set(n: number, value: string) {
     if (this.values.get(n) === value) return;
     this.values.set(n, value);
