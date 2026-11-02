@@ -435,19 +435,44 @@ export class TerrainRenderer {
   }
 
   /** The nearest placed object (with a model) hit by a ray. */
-  pickObject(ray: { origin: Vec3; dir: Vec3 }): ObjectInstance | null {
+  /** The nearest placed object a ray hits. With `radiusOf`, objects are
+   *  upright cylinders of that radius (their footprint) standing at their
+   *  position up to the top of the model; otherwise the model's bounding sphere. */
+  pickObject(ray: { origin: Vec3; dir: Vec3 }, radiusOf?: (inst: ObjectInstance) => number | undefined): ObjectInstance | null {
     const { origin: o, dir: d } = ray;
     let best: ObjectInstance | null = null, bestT = Infinity;
     for (const b of this.batches) {
       if (this.hiddenGroups.has(b.group)) continue;
       for (const inst of b.instances) {
         if (!inst.pick || !inst.sphere) continue;
-        const [cx, cy, cz, r] = inst.sphere;
-        const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
-        const p = ox * d[0] + oy * d[1] + oz * d[2], q = ox * ox + oy * oy + oz * oz - r * r;
-        const disc = p * p - q;
-        if (disc < 0) continue;
-        const t = -p - Math.sqrt(disc);
+        const [cx, cy, cz, sr] = inst.sphere;
+        const r = radiusOf?.(inst);
+        let t = Infinity;
+        if (r === undefined) {
+          const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
+          const p = ox * d[0] + oy * d[1] + oz * d[2], q = ox * ox + oy * oy + oz * oz - sr * sr;
+          const disc = p * p - q;
+          if (disc >= 0) t = -p - Math.sqrt(disc);
+        } else {
+          const [px, py, pz] = inst.pick.placed.position;
+          const bottom = pz - 16, top = Math.max(pz + 32, cz + sr * 0.8);
+          // Side of the cylinder (the xy circle), then its top cap.
+          const ox = o[0] - px, oy = o[1] - py;
+          const a = d[0] * d[0] + d[1] * d[1], bq = ox * d[0] + oy * d[1], c = ox * ox + oy * oy - r * r;
+          const disc = bq * bq - a * c;
+          if (a > 1e-9 && disc >= 0) {
+            const t0 = (-bq - Math.sqrt(disc)) / a, t1 = (-bq + Math.sqrt(disc)) / a;
+            for (const tt of [t0, t1]) {
+              const z = o[2] + d[2] * tt;
+              if (tt > 0 && z >= bottom && z <= top) { t = Math.min(t, tt); break; }
+            }
+          }
+          if (Math.abs(d[2]) > 1e-9) {
+            const tc = (top - o[2]) / d[2];
+            const hx = o[0] + d[0] * tc - px, hy = o[1] + d[1] * tc - py;
+            if (tc > 0 && hx * hx + hy * hy <= r * r) t = Math.min(t, tc);
+          }
+        }
         if (t > 0 && t < bestT) { bestT = t; best = inst; }
       }
     }

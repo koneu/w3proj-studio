@@ -739,6 +739,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Centred on the object position (model bounds can be off-centre).
           return { x: pl.position[0], y: pl.position[1], r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
         };
+        /** Click target per object: the same radius as its selection ring. */
+        const pickRadius = (inst: ObjectInstance) =>
+          radiusOf(inst.pick!.kind, inst.pick!.id) ?? Math.min(96, Math.max(24, (inst.sphere?.[3] ?? 64) * 0.4));
         /** Redraws the selection rings (after a size became known). */
         const refreshRings = () => {
           const insts = (group.length ? group : selected?.pick ? [selected.pick.placed] : []).map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
@@ -858,7 +861,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
           const ray = renderer.ray(e.clientX - rect.left, e.clientY - rect.top);
-          const inst = renderer.pickObject(ray);
+          const inst = renderer.pickObject(ray, pickRadius);
           // Ctrl+click adds or removes an object.
           if (e.ctrlKey || e.metaKey) {
             if (!inst?.pick) return;
@@ -1111,7 +1114,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
-            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top)) : null;
+            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius) : null;
             // Dragging a selected object moves the whole selection.
             const entries = selectedEntries();
             const anchor = inst?.pick && entries.includes(inst.pick.placed) ? groundAt(e) : null;
