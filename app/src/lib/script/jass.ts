@@ -5,11 +5,14 @@
 // carry both the trigger data and the script the editor made from it).
 // Work in progress: sections not generated yet are listed in OPEN_POINTS.md.
 
+import { parseSlk } from "../formats/text";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { itemsSection, unitsSection, type UnitJson } from "./units";
+import { dropSection, itemTablesSection, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
+import { destructablesSection, type DestructableJson } from "./destructables";
 import { techTreeSection, upgradesSection, type TechJson, type UpgradeJson } from "./techs";
 
 // ---- inputs (the format engine's JSON) ----------------------------------------------
@@ -60,6 +63,8 @@ export interface ScriptInput {
   groundHeight?: (x: number, y: number) => number;
   /** Length of a sound file in milliseconds (SetSoundDuration), if known. */
   soundDuration?: (file: string) => number | undefined;
+  /** A sound label's settings (UI\SoundInfo\*.slk), for labelled sounds. */
+  soundLabel?: (label: string) => SoundLabel | undefined;
 }
 
 // ---- helpers ---------------------------------------------------------------------------
@@ -223,20 +228,26 @@ export function sounds(i: ScriptInput): string {
   const lines = ["function InitSounds takes nothing returns nothing"];
   for (const s of i.sounds ?? []) {
     const n = s.name;
+    // Music is only its file path.
+    if (s.flags & 8) { lines.push(`    set ${n} = ${str(s.file)}`); continue; }
     const f = (bit: number) => ((s.flags & bit) !== 0 ? "true" : "false");
     lines.push(`    set ${n} = CreateSound( ${str(s.file)}, ${f(1)}, ${f(2)}, ${f(4)}, ${s.fadeInRate}, ${s.fadeOutRate}, ${str(s.eaxEffect)} )`);
     if (s.assetLabel && s.assetLabel !== "") lines.push(`    call SetSoundParamsFromLabel( ${n}, ${str(s.assetLabel)} )`);
-    if (s.facialAnimationLabel) lines.push(`    call SetSoundFacialAnimationLabel( ${n}, ${str(s.facialAnimationLabel)} )`);
+    // A facial animation label without its group isn't written.
+    if (s.facialAnimationLabel && s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationLabel( ${n}, ${str(s.facialAnimationLabel)} )`);
     if (s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationGroupLabel( ${n}, ${str(s.facialAnimationGroupLabel)} )`);
     if (s.facialAnimationSetFile) lines.push(`    call SetSoundFacialAnimationSetFilepath( ${n}, ${str(s.facialAnimationSetFile)} )`);
     if (s.speakerNameKey !== undefined && s.speakerNameKey >= 0) lines.push(`    call SetDialogueSpeakerNameKey( ${n}, "TRIGSTR_${s.speakerNameKey}" )`);
     if (s.dialogueTextKey !== undefined && s.dialogueTextKey >= 0) lines.push(`    call SetDialogueTextKey( ${n}, "TRIGSTR_${s.dialogueTextKey}" )`);
     const duration = i.soundDuration?.(s.file);
     if (duration !== undefined) lines.push(`    call SetSoundDuration( ${n}, ${duration} )`);
-    // Not exact yet: for labelled sounds the World Editor sometimes writes channel 0
-    // or nothing regardless of the stored value (see OPEN_POINTS.md).
+    const label = s.assetLabel ? i.soundLabel?.(s.assetLabel) : undefined;
+    if (label) {
+      labelledSoundParams(lines, s, label);
+      continue;
+    }
     if (s.channel >= 0) lines.push(`    call SetSoundChannel( ${n}, ${s.channel} )`);
-    if (s.volume >= 0) lines.push(`    call SetSoundVolume( ${n}, ${s.volume} )`);
+    lines.push(`    call SetSoundVolume( ${n}, ${s.volume} )`);
     if (!unset(s.pitch)) lines.push(`    call SetSoundPitch( ${n}, ${r1(s.pitch)} )`);
     if (s.flags & 2) {
       if (!unset(s.minDistance) || !unset(s.maxDistance)) lines.push(`    call SetSoundDistances( ${n}, ${r1(s.minDistance)}, ${r1(s.maxDistance)} )`);
@@ -247,6 +258,38 @@ export function sounds(i: ScriptInput): string {
   }
   lines.push("endfunction", "", "");
   return banner("Sound Assets") + lines.join(EOL);
+}
+
+/** A sound label's row in UI\SoundInfo (SetSoundParamsFromLabel applies it). */
+export interface SoundLabel { channel: number; pitch: number; minDistance: number; maxDistance: number; distanceCutoff: number }
+
+/** Sound labels from the UI\SoundInfo tables (first row of a name wins; "_" is NaN, so never equal). */
+export function parseSoundLabels(tables: string[]): Map<string, SoundLabel> {
+  const out = new Map<string, SoundLabel>();
+  for (const text of tables) {
+    for (const r of parseSlk(text)) {
+      if (!r.SoundName || out.has(r.SoundName)) continue;
+      out.set(r.SoundName, { channel: Number(r.Channel), pitch: Number(r.Pitch), minDistance: Number(r.MinDistance), maxDistance: Number(r.MaxDistance), distanceCutoff: Number(r.DistanceCutoff) });
+    }
+  }
+  return out;
+}
+
+/** Parameters of a labelled sound: unset values take their defaults, and only those the label
+ *  doesn't already set are written (volume always, even -1; the cone of 3D sounds unless switched off). */
+function labelledSoundParams(lines: string[], s: SoundJson, label: SoundLabel) {
+  const n = s.name, or = (v: number, d: number) => (unset(v) ? d : v);
+  const channel = s.channel >= 0 ? s.channel : 0;
+  if (channel !== label.channel) lines.push(`    call SetSoundChannel( ${n}, ${channel} )`);
+  lines.push(`    call SetSoundVolume( ${n}, ${s.volume} )`);
+  const pitch = or(s.pitch, 1);
+  if (Math.fround(pitch) !== label.pitch) lines.push(`    call SetSoundPitch( ${n}, ${r1(pitch)} )`);
+  if (!(s.flags & 2)) return;
+  const min = or(s.minDistance, 0), max = or(s.maxDistance, 10000), cutoff = or(s.distanceCutoff, 3000);
+  if (Math.fround(min) !== label.minDistance || Math.fround(max) !== label.maxDistance) lines.push(`    call SetSoundDistances( ${n}, ${r1(min)}, ${r1(max)} )`);
+  if (Math.fround(cutoff) !== label.distanceCutoff) lines.push(`    call SetSoundDistanceCutoff( ${n}, ${r1(cutoff)} )`);
+  if (s.coneOutsideVolume !== -1) lines.push(`    call SetSoundConeAngles( ${n}, ${r1(or(s.coneInside, 0))}, ${r1(or(s.coneOutside, 0))}, ${s.coneOutsideVolume} )`);
+  if (!unset(s.coneOrientation[0])) lines.push(`    call SetSoundConeOrientation( ${n}, ${s.coneOrientation.map(r1).join(", ")} )`);
 }
 
 export function regions(i: ScriptInput): string {
@@ -289,19 +332,60 @@ export function cameras(i: ScriptInput): string {
 
 /** The sections generated so far, keyed by banner title ("" = the header before the first). */
 export function generateSections(i: ScriptInput): Map<string, string> {
-  return new Map([
+  const destructables = destructableObjects(i), items = placedItems(i), groups = randomGroups(i);
+  const sections = new Map([
     ["", header(i)],
     ["Global Variables", banner("Global Variables") + globals(i) + initGlobals(i)],
     ["Custom Script Code", customScript(i)],
+    ["Random Groups", groups],
+    ["Map Item Tables", mapItemTables(i)],
+    ["Unit Item Tables", unitDrops(i)],
+    ["Destructible Item Tables", destructableDrops(i)],
     ["Sound Assets", sounds(i)],
+    ["Destructable Objects", destructables],
     ["Regions", regions(i)],
     ["Cameras", cameras(i)],
-    ["Items", placedItems(i)],
+    ["Items", items],
     ["Unit Creation", unitCreation(i)],
     ...techSections(i),
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom }) : ""],
-    ...setupSections(i),
+    ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups }),
   ]);
+  // Sections of functions end with a blank line, the drop tables with two.
+  for (const [k, v] of sections) {
+    if (!v || !/endfunction\s*$/.test(v)) continue;
+    const blanks = k.endsWith("Item Tables") ? 2 : 1;
+    sections.set(k, v.replace(/(\r\n)*$/, EOL.repeat(1 + blanks)));
+  }
+  return sections;
+}
+
+const editorVersion = (i: ScriptInput) => (i.info.editorVersion as number | undefined) ?? 0;
+
+function randomGroups(i: ScriptInput): string {
+  const body = randomGroupsSection((i.info.unitTables as RandomGroupJson[] | undefined) ?? []);
+  return body ? banner("Random Groups") + body : "";
+}
+
+function mapItemTables(i: ScriptInput): string {
+  const body = itemTablesSection((i.info.itemTables as { number: number; sets: DropItem[][] }[] | undefined) ?? [], editorVersion(i));
+  return body ? banner("Map Item Tables") + body : "";
+}
+
+function unitDrops(i: ScriptInput): string {
+  const body = dropSection("Unit", (i.units ?? []) as Dropper[], editorVersion(i));
+  return body ? banner("Unit Item Tables") + body : "";
+}
+
+function destructableDrops(i: ScriptInput): string {
+  const body = dropSection("Doodad", (i.doodads ?? []) as Dropper[], editorVersion(i));
+  return body ? banner("Destructible Item Tables") + body : "";
+}
+
+function destructableObjects(i: ScriptInput): string {
+  const body = destructablesSection({ doodads: (i.doodads ?? []) as unknown as DestructableJson[], globalName: (d) => placedName(d as unknown as PlacedJson, "dest"),
+    referenced: referencedGlobals(i), editorVersion: i.info.editorVersion as number | undefined });
+  return body ? banner("Destructable Objects") + body : "";
 }
 
 function placedItems(i: ScriptInput): string {
@@ -327,7 +411,7 @@ function techSections(i: ScriptInput): [string, string][] {
   return [["Upgrades", up ? banner("Upgrades") + up : ""], ["TechTree", tech ? banner("TechTree") + tech : ""]];
 }
 
-function setupSections(i: ScriptInput): [string, string][] {
+function setupSections(i: ScriptInput, made: { destructables: boolean; items: boolean; randomGroups: boolean }): [string, string][] {
   const info = i.info as unknown as SetupInput["info"];
   const items = i.triggers?.items ?? [];
   const setup: SetupInput = {
@@ -335,7 +419,7 @@ function setupSections(i: ScriptInput): [string, string][] {
     has: {
       sounds: !!i.sounds?.length, regions: !!i.regions?.length, cameras: !!i.cameras?.length,
       upgrades: !!(info.upgrades as unknown[] | undefined)?.length, techs: !!(info.techs as unknown[] | undefined)?.length,
-      destructables: false, items: false, units: !!i.units?.length,
+      ...made, units: !!i.units?.length,
       initTriggers: items.some((t) => "ecas" in t && t.enabled && !t.isComment && (t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === 0 && e.name === "MapInitializationEvent"))),
     },
   };
@@ -358,4 +442,15 @@ export function splitSections(script: string): Map<string, string> {
   }
   out.set(title, script.slice(last));
   return out;
+}
+
+/** Section order of a World Editor war3map.j. */
+const SECTION_ORDER = ["", "Global Variables", "Custom Script Code", "Random Groups", "Map Item Tables", "Unit Item Tables", "Destructible Item Tables",
+  "Sound Assets", "Destructable Objects", "Items", "Unit Creation", "Regions", "Cameras", "Triggers", "Upgrades", "TechTree",
+  "Players", "Main Initialization", "Map Configuration"];
+
+/** The whole war3map.j as the World Editor writes it. */
+export function generateScript(i: ScriptInput): string {
+  const sections = generateSections(i);
+  return SECTION_ORDER.map((k) => sections.get(k) ?? "").join("");
 }

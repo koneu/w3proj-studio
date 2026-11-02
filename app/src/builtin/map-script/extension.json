@@ -1,0 +1,16 @@
+{
+  "id": "w3.mapScript",
+  "name": "Map Script",
+  "version": "0.1.0",
+  "description": "Writes war3map.j from the map's data like the World Editor does on save: triggers, variables, regions, cameras, sounds, placed units and destructables, item tables, player and force setup. Runs when one of those files is saved, or on command.",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "commands": [{ "id": "w3.script.generate", "title": "Generate Map Script (war3map.j)", "category": "Project" }],
+    "configuration": {
+      "title": "Map Script",
+      "properties": {
+        "script.generateOnSave": { "type": "boolean", "default": true, "description": "Rewrite war3map.j whenever triggers, regions, cameras, sounds, placed objects or map info are saved (Lua maps are left alone)." }
+      }
+    }
+  }
+}

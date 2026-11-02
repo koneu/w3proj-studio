@@ -187,6 +187,7 @@ export class Workbench {
         readBytes: (p) => wb.workspace.readBytes(p),
         writeBytes: (p, b) => wb.workspace.writeBytes(p, b),
         onDidChange: (l) => wb.workspace.onDidChange.on(l),
+        onDidSave: (l) => wb.workspace.onDidSave.on(l),
       },
       settings: wb.settings,
       game: {

@@ -2,6 +2,8 @@
 // priorities ("Players"), main ("Main Initialization") and config ("Map
 // Configuration"), from war3map.w3i as the World Editor writes them.
 
+import { fixed } from "./units";
+
 const EOL = "\r\n";
 
 export interface PlayerJson {
@@ -14,19 +16,22 @@ export interface SetupInput {
   info: {
     version: number; name: string; description: string; flags: number; tileset: string; cameraBounds: number[];
     soundEnvironment: string; lightEnvironment: string; players: PlayerJson[]; forces: ForceJson[];
-    water?: Record<string, number>; [k: string]: unknown;
+    water?: Record<string, number>; cameraComplements?: number[]; weather?: string; waterTint?: number[];
+    fog?: { style: number; start: number; end: number; density: number; color: number[] };
+    terrainFog?: { style: number; overSky: number; linearStart: number; linearEnd: number; maxOpacity: number; height: number };
+    [k: string]: unknown;
   };
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
   lights: { terrain: string; unit: string };
   /** Which object sections the script has (main calls their functions). */
   has: { sounds: boolean; regions: boolean; cameras: boolean; upgrades: boolean; techs: boolean;
-    destructables: boolean; items: boolean; units: boolean; initTriggers: boolean };
+    destructables: boolean; items: boolean; randomGroups: boolean; units: boolean; initTriggers: boolean };
 }
 
 /** Ambient sound sets (UI\SoundInfo\AmbientMusic.slk, "<name>Day"/"<name>Night") by tileset. */
 export const AMBIENCE: Record<string, string> = {
-  A: "Ashenvale", B: "Barrens", C: "Felwood", D: "Dungeon", F: "LordaeronFall", G: "DungeonCave", I: "IceCrown",
-  J: "DalaranRuins", K: "BlackCitadel", L: "LordaeronSummer", N: "Northrend", Q: "VillageFall", V: "Village",
+  A: "Ashenvale", B: "Barrens", C: "Felwood", D: "Dungeon", F: "LordaeronFall", G: "Dungeon", I: "IceCrown",
+  J: "DalaranRuins", K: "BlackCitadel", L: "LordaeronSummer", N: "Northrend", O: "BlackCitadel", Q: "VillageFall", V: "Village",
   W: "LordaeronWinter", X: "Dalaran", Y: "CityScape", Z: "SunkenRuins",
 };
 
@@ -34,8 +39,8 @@ const r1 = (v: number) => Math.fround(v).toFixed(1);
 const str = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const RACES = ["", "HUMAN", "ORC", "UNDEAD", "NIGHTELF"];
 const CONTROLLERS = ["", "USER", "COMPUTER", "NEUTRAL", "RESCUABLE"];
-/** Map flags: "fixed player settings for custom forces", "use custom forces". */
-const FIXED_SETTINGS = 0x20, CUSTOM_FORCES = 0x40;
+/** Map flags: "fixed player settings for custom forces", "use custom forces", terrain fog, water tint. */
+const FIXED_SETTINGS = 0x20, CUSTOM_FORCES = 0x40, TERRAIN_FOG = 0x2000, WATER_TINT = 0x10000;
 /** RACE_PREF_* by its bit value (HUD skins are stored that way). */
 const RACE_PREFS: Record<number, string> = { 1: "HUMAN", 2: "ORC", 4: "UNDEAD", 8: "NIGHTELF", 16: "DEMON", 32: "RANDOM", 64: "USER_SELECTABLE" };
 /** Force flags and the alliance they set between the force's members. */
@@ -124,12 +129,31 @@ export function mainSection(i: SetupInput): string {
   // The script's bounds lie 4 tiles (x) and 2 tiles (y) outside those in war3map.w3i.
   const L = r1(b[0] - 512), B = r1(b[1] - 256), R = r1(b[2] + 512), T = r1(b[3] + 256);
   const m = (s: string) => `GetCameraMargin(CAMERA_MARGIN_${s})`;
+  // Weather covers the whole map: the bounds plus the unplayable border (complements, in tiles).
+  const weather = i.info.weather && i.info.weather !== "0x00000000" ? i.info.weather : null;
   const lines = ["//===========================================================================", "function main takes nothing returns nothing",
+    ...(weather ? ["    local weathereffect we"] : []),
     `    call SetCameraBounds( ${L} + ${m("LEFT")}, ${B} + ${m("BOTTOM")}, ${R} - ${m("RIGHT")}, ${T} - ${m("TOP")}, ${L} + ${m("LEFT")}, ${T} - ${m("TOP")}, ${R} - ${m("RIGHT")}, ${B} + ${m("BOTTOM")} )`,
     `    call SetDayNightModels( ${str(i.lights.terrain)}, ${str(i.lights.unit)} )`];
+  // Colours are stored blue, green, red, alpha.
+  const fog = i.info.fog, tf = i.info.terrainFog;
+  if (fog && i.info.flags & TERRAIN_FOG) {
+    const [fb, fg, fr] = fog.color.map((c) => fixed(c / 255, 3));
+    if (tf) {
+      lines.push(`    call SetTerrainFogExV( ${fog.style}, ${r1(fog.start)}, ${r1(fog.end)}, ${fixed(fog.density, 3)}, ${r1(tf.height)}, ${r1(tf.style)}, ${r1(tf.linearStart)}, ${r1(tf.linearEnd)}, ${fr}, ${fg}, ${fb} )`,
+        `    call BlzSetTerrainFogMaxLinearDensity( ${r1(tf.maxOpacity)} )`, `    call BlzSetTerrainFogDrawOverSky( ${tf.overSky ? "true" : "false"} )`);
+    } else lines.push(`    call SetTerrainFogEx( ${fog.style}, ${r1(fog.start)}, ${r1(fog.end)}, ${fixed(fog.density, 3)}, ${fr}, ${fg}, ${fb} )`);
+  }
+  const tint = i.info.waterTint;
+  if (tint && i.info.flags & WATER_TINT) lines.push(`    call SetWaterBaseColor( ${tint[2]}, ${tint[1]}, ${tint[0]}, ${tint[3]} )`);
   const w = i.info.water;
   if (w) {
     lines.push(`    call SetHDWaterParamsEx( 0, 0, 0, ${w.overrideColor ? "true" : "false"}, ${w.wavesVertexDisplacement}, ${w.minOpacity}, ${w.maxOpacity}, ${w.reflectivity}, ${w.emissivity}, ${w.edgeSoftness}, ${w.wavesNormalMapStrength}, ${w.environmentMapReflectivity} )`);
+  }
+  if (weather) {
+    const c = i.info.cameraComplements ?? [0, 0, 0, 0];
+    lines.push(`    set we = AddWeatherEffect( Rect(${r1(b[0] - 512 - c[0] * 128)},${r1(b[1] - 256 - c[2] * 128)},${r1(b[2] + 512 + c[1] * 128)},${r1(b[3] + 256 + c[3] * 128)}), '${weather}' )`,
+      "    call EnableWeatherEffect( we, true )");
   }
   lines.push(`    call NewSoundEnvironment( ${str(i.info.soundEnvironment || "Default")} )`);
   const amb = AMBIENCE[i.info.tileset];
@@ -143,6 +167,7 @@ export function mainSection(i: SetupInput): string {
   if (h.techs) lines.push(call("InitTechTree"));
   if (h.destructables) lines.push(call("CreateAllDestructables"));
   if (h.items) lines.push(call("CreateAllItems"));
+  if (h.randomGroups) lines.push(call("InitRandomGroups"));
   if (h.units) lines.push(call("CreateAllUnits"));
   lines.push(call("InitBlizzard"), call("InitGlobals"), call("InitCustomTriggers"));
   if (h.initTriggers) lines.push(call("RunInitializationTriggers"));

@@ -6,6 +6,8 @@ export class WorkspaceService {
   private info: ProjectInfo | null = null;
   private fileList: FileInfo[] = [];
   readonly onDidChange = new Emitter<void>();
+  /** A project file was written (its path as given, with forward slashes). */
+  readonly onDidSave = new Emitter<string>();
 
   constructor(private settings: SettingsService) {}
 
@@ -54,9 +56,11 @@ export class WorkspaceService {
   }
   async writeText(p: string, text: string) {
     await writeText(this.resolve(p), text);
+    this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
   async writeBytes(p: string, bytes: Uint8Array) {
     await writeBytes(this.resolve(p), bytes);
+    this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
 }
 

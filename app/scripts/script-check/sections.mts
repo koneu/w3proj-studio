@@ -25,6 +25,7 @@ const unitIds = new Set(balance.map((r: any) => r.unitBalanceID));
 const itemIds = new Set(parseSlk(read("ItemData.slk")).map((r: any) => r.itemID));
 const abilityIds = new Set(parseSlk(read("AbilityData.slk")).map((r: any) => r.alias));
 const orders = new Map<string, { on: string; off: string }>();
+const labels = existsSync("soundinfo") ? J.parseSoundLabels(readdirSync("soundinfo").map((f) => read("soundinfo/" + f))) : new Map();
 for (const f of readdirSync("abil")) for (const [id, sec] of parseIni(read("abil/" + f))) { const on = sec.get("orderon"), off = sec.get("orderoff"); if (on && off && !orders.has(id)) orders.set(id, { on, off }); }
 
 const stats: Record<string, [number, number]> = {};
@@ -69,9 +70,18 @@ for (const m of readdirSync("ws")) {
     groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
     regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras, sounds: json(d, "war3map.w3s")?.sounds,
-    soundDuration: () => 0, string: (v: string) => wts?.resolve(v) ?? v,
+    soundDuration: () => 0, soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
   };
   const gen = J.generateSections(input), orig = J.splitSections(read(`${d}/war3map.j`));
+  // The whole file, exactly (only sound durations are left out: they need the game's sound files).
+  const whole = J.generateScript(input), file = read(`${d}/war3map.j`);
+  const fs = (stats["(whole file)"] ??= [0, 0]); fs[1]++; if (norm(whole) === norm(file)) fs[0]++;
+  if (only === "(whole file)" && norm(whole) !== norm(file) && shown < showN) {
+    const a = norm(whole).split(/\r?\n/), b = norm(file).split(/\r?\n/);
+    const k = a.findIndex((l: string, j: number) => l !== b[j]);
+    // Only report files whose sections all match (an ordering problem then).
+    if ([...gen].every(([s, v]) => norm(v) === norm(orig.get(s) ?? ""))) { shown++; console.log(`--- ${m} line ${k}\n gen: ${JSON.stringify(a.slice(k, k + 2))}\n orig: ${JSON.stringify(b.slice(k, k + 2))}`); }
+  }
   for (const [k, v] of gen) {
     const o = orig.get(k) ?? "";
     const same = norm(v) === norm(o);

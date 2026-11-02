@@ -234,6 +234,8 @@ export interface W3Api {
     readBytes(projectPath: string): Promise<Uint8Array>;
     writeBytes(projectPath: string, bytes: Uint8Array): Promise<void>;
     onDidChange(listener: () => void): Disposable;
+    /** A project file was written through the workspace (path as written, forward slashes). */
+    onDidSave(listener: (path: string) => void): Disposable;
   };
   settings: Settings;
   /** The installed game's own files (CASC storage), read-only. Plain paths

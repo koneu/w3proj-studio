@@ -18,4 +18,9 @@ Run from that folder:
 trigger functions one by one and lists the most common first differences.
 
 Also needed in that folder for `sections.mts`: `WorldEditData.txt`, `UnitBalance.slk`,
-`ItemData.slk` (from `UI\` and `Units\`) and `abil/*.txt` (the `Units\*AbilityFunc.txt` files).
+`ItemData.slk`, `AbilityData.slk` (from `UI\` and `Units\`), `abil/*.txt` (the `Units\*AbilityFunc.txt`
+files) and `soundinfo/*.slk` (the `UI\SoundInfo\*.slk` tables, for labelled sounds).
+
+`sections.mts` also counts whole files that come out identical, `(whole file)`; pass that as the
+section to see where a file whose sections all match still differs. Sound durations are compared
+as 0 (they come from the sound files).

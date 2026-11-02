@@ -5,6 +5,8 @@
 // (resources, acquisition range, life and mana, colour, hero data, items,
 // waygates, item drops).
 
+import { dropFunctionOf } from "./drops";
+
 const EOL = "\r\n";
 const SEP = "//===========================================================================";
 
@@ -48,9 +50,6 @@ const NEUTRAL_HOSTILE = 24, NEUTRAL_PASSIVE = 27;
 const GOLD_MINES = new Set(["ngol", "ugol", "egol"]);
 const isGoldMine = (i: UnitsInput, id: string) => i.goldMine?.(id) ?? GOLD_MINES.has(id);
 
-/** Units drop items from a map item table or their own non-empty item sets. */
-export const hasDrops = (u: UnitJson) => (u.itemTable ?? -1) >= 0 || (u.itemSets ?? []).some((s) => (s as unknown[]).length > 0);
-
 export const unitGlobal = (u: UnitJson) => `gg_unit_${u.id}_${String(u.editorId).padStart(4, "0")}`;
 
 function unitLines(i: UnitsInput, u: UnitJson): string[] {
@@ -80,10 +79,11 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     if (r) lines.push(`    call WaygateSetDestination( ${v}, GetRectCenterX(${r}), GetRectCenterY(${r}) )`, `    call WaygateActivate( ${v}, true )`);
   }
   if (u.color !== -1) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${u.color}) )`);
-  if (hasDrops(u)) {
+  // Items drop from a map item table or the unit's own sets.
+  const drops = dropFunctionOf("Unit", u, i.units.indexOf(u));
+  if (drops) {
     lines.push("    set t = CreateTrigger(  )", `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_DEATH )`,
-      `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_CHANGE_OWNER )`,
-      `    call TriggerAddAction( t, function Unit${String(i.units.indexOf(u)).padStart(6, "0")}_DropItems )`);
+      `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_CHANGE_OWNER )`, `    call TriggerAddAction( t, function ${drops} )`);
   }
   return lines;
 }
