@@ -70,6 +70,13 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
   return out;
 }
 
+/** The skin's replaceable texture. Destructable skins give the extension
+ *  (ReplaceableTextures\Cliff\Cliff1.blp), doodad skins don't. */
+function skinTextures(skin: Skin): Record<number, string> {
+  if (!(skin.texId > 0 && skin.texFile)) return {};
+  return { [skin.texId]: /\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp` };
+}
+
 /** Model path of one placed object: variations are numbered files. */
 export function modelPath(skin: Skin, variation: number): string {
   const base = skin.file.replace(/\.(mdl|mdx)$/i, "");
@@ -161,7 +168,7 @@ export class ObjectLoader {
 
   /** The GPU model for a placed type (shared with the batches; for previews). */
   modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
-    const replaceable = skin.texId > 0 && skin.texFile ? { [skin.texId]: `${skin.texFile}.blp` } : {};
+    const replaceable = skinTextures(skin);
     return this.model({ path: modelPath(skin, variation), replaceable, instances: [] });
   }
 
@@ -207,7 +214,7 @@ export class ObjectLoader {
       const key = `${path}|${skin.texFile}`;
       let entry = byModel.get(key);
       if (!entry) {
-        const replaceable = skin.texId > 0 && skin.texFile ? { [skin.texId]: `${skin.texFile}.blp` } : {};
+        const replaceable = skinTextures(skin);
         entry = { req: { path, replaceable, instances: [] }, items: [] };
         byModel.set(key, entry);
       }

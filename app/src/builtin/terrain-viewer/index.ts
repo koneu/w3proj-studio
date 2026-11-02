@@ -375,8 +375,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         Promise.all([w3.game.readText("TerrainArt\\CliffTypes.slk"), w3.game.list()]).then(async ([slk, list]) => {
           const types = new Map(parseSlk(slk).filter((r) => r.cliffID).map((r) => [r.cliffID, r as unknown as CliffType]));
-          // Stored paths look like "War3.w3mod:_HD.w3mod:Doodads/…"; any layer will do.
-          const files = new Set(list.map((p) => p.slice(p.lastIndexOf(":") + 1).toLowerCase()));
+          // Stored paths look like "War3.w3mod:_HD.w3mod:Doodads/…". Only the art
+          // layers of the current graphics mode count: HD has cliff variations
+          // the classic art lacks.
+          const mode = w3.settings.get<string>("game.graphicsMode") ?? "hd";
+          const skip = mode === "sd" ? /_(hd|de)\.w3mod:/i : mode === "hd" ? /_de\.w3mod:/i : null;
+          const files = new Set(list.filter((p) => !skip?.test(p)).map((p) => p.slice(p.lastIndexOf(":") + 1).toLowerCase()));
           cliffData = { types, exists: (p) => files.has(p.replace(/\\/g, "/").toLowerCase()) };
           await replanCliffs();
         }).catch((e) => { cliffInfo.textContent = `Cliffs: ${(e as Error).message ?? e}`; });
