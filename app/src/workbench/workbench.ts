@@ -47,6 +47,10 @@ export class Workbench {
         }
       },
       readBytes: (p) => (isGame(p) ? this.game.read(gamePath(p)) : this.workspace.readBytes(p)),
+      writeBytes: async (p, b) => {
+        if (isGame(p)) throw new Error("game files are read-only");
+        await this.workspace.writeBytes(p, b);
+      },
       writeText: async (p, t) => {
         if (isGame(p)) throw new Error("game files are read-only");
         await this.workspace.writeText(p, t);
@@ -168,6 +172,7 @@ export class Workbench {
         readText: (p) => wb.workspace.readText(p),
         writeText: (p, t) => wb.workspace.writeText(p, t),
         readBytes: (p) => wb.workspace.readBytes(p),
+        writeBytes: (p, b) => wb.workspace.writeBytes(p, b),
         onDidChange: (l) => wb.workspace.onDidChange.on(l),
       },
       settings: wb.settings,

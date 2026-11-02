@@ -51,6 +51,11 @@ function parseValue(type: ValueType, text: string): number | string | null {
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** Open editors by document path: show an object (filter the list to it and select it). */
+  const focusers = new Map<string, (id: string) => void>();
+  /** Object to show once an editor that is being opened has loaded. */
+  let pendingFocus: { path: string; id: string } | null = null;
+
   ctx.subscriptions.push(
     w3.views.register("w3.objects.kinds", {
       render(el) {
@@ -79,7 +84,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.objects.kinds")),
 
-    w3.commands.register("w3.objectEditor.open", async (ext?: string) => {
+    // `focusId` (optional) shows that object, e.g. when coming from the terrain view.
+    w3.commands.register("w3.objectEditor.open", async (ext?: string, focusId?: string) => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       ext ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: k.label, description: `war3map.${k.ext}`, value: k.ext })), { placeholder: "Which object data?" }))?.value;
       if (!ext) return;
@@ -94,7 +100,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         await w3.workspace.writeText(path, text);
         await w3.workspace.refresh();
       }
-      await w3.editors.open(path, "w3.objectEditor");
+      const open = w3.workspace.files().find((f) => f.path.toLowerCase() === path.toLowerCase())?.path ?? path;
+      if (focusId) pendingFocus = { path: open, id: focusId };
+      await w3.editors.open(open, "w3.objectEditor");
+      // Already open: the editor didn't load again, so show the object now.
+      if (focusId && focusers.has(open)) {
+        pendingFocus = null;
+        focusers.get(open)!(focusId);
+      }
     }),
 
     w3.editors.registerProvider("w3.objectEditor", {
@@ -577,11 +590,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ),
         );
         saved = serialize();
+        const focusObject = (id: string) => {
+          search.value = id;
+          filter = id.toLowerCase();
+          const o = file.custom.find((c) => c.id === id) ?? file.original.find((c) => c.base === id);
+          select(o ?? null);
+          if (!o) status.textContent = `${id} has no modifications in this map — use "Edit standard" to change it.`;
+          renderList();
+          renderDetail();
+        };
+        focusers.set(doc.path, focusObject);
         renderList();
         renderDetail();
-        status.textContent = "Loading game data…";
+        if (pendingFocus?.path === doc.path) {
+          focusObject(pendingFocus.id);
+          pendingFocus = null;
+        }
+        status.textContent ||= "Loading game data…";
         loadKind(w3, kind).then(
-          (k) => { kd = k; status.textContent = ""; renderDetail(); },
+          (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderDetail(); },
           (e) => { status.textContent = `Game data unavailable — showing raw ids (${e})`; },
         );
 
@@ -596,6 +623,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             w3.views.refresh("w3.objects.kinds");
           },
           focus: () => search.focus(),
+          dispose: () => { focusers.delete(doc.path); },
         };
       },
     }),

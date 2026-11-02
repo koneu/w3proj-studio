@@ -3,7 +3,10 @@
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
 import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../model-viewer/renderer";
+import type { Placed } from "./objects";
 import type { Terrain } from "./w3e";
+
+const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
 // Ground tile textures are 4×4 cells of corner-transition shapes (a cell's
 // index is a bitmask of the tile corners the texture covers); "extended"
@@ -48,6 +51,14 @@ const COLOR_FS = `#version 300 es
 precision mediump float; in vec4 vColor; out vec4 outColor;
 void main() { outColor = vColor; }`;
 
+/** A ground-following circle (selection, brush outline). */
+export interface Ring {
+  x: number;
+  y: number;
+  r: number;
+  rgb: Vec3;
+}
+
 export interface Marker {
   x: number;
   y: number;
@@ -55,11 +66,32 @@ export interface Marker {
   rgb: Vec3;
 }
 
+/** What a placed object is, for picking. */
+export interface PickInfo {
+  /** Object data kind: w3d, w3b, w3u or w3t. */
+  kind: string;
+  id: string;
+  /** Base object of a custom id. */
+  base?: string;
+  /** Position in the placement file's list. */
+  index: number;
+  placed: Placed;
+  model: string;
+}
+
+export interface ObjectInstance {
+  world: Mat4;
+  team: number;
+  pick?: PickInfo;
+  /** World-space bounding sphere [x, y, z, r]. */
+  sphere?: [number, number, number, number];
+}
+
 /** One model placed any number of times; `group` is a toggle name (e.g. "doodads"). */
 export interface ObjectBatch {
   group: string;
   gpu: ModelGpu;
-  instances: { world: Mat4; team: number }[];
+  instances: ObjectInstance[];
   /** Bend the model onto the ground height map (cliffs). */
   followGround?: boolean;
 }
@@ -81,6 +113,7 @@ export class TerrainRenderer {
   private water: Mesh;
   private wire: Mesh;
   private markers = new Map<string, Mesh>();
+  private selection: Mesh | null = null;
   showWater = true;
   wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
@@ -94,6 +127,11 @@ export class TerrainRenderer {
   readonly center: Vec3;
   /** Ground heights without cliff layers, for models that follow the terrain. */
   private heightMap: HeightMap;
+  /** Tiles covered by cliff models and the cliff ground rim, kept for rebuilds. */
+  private cliffTiles = new Set<number>();
+  private groundOverrides = new Map<number, number>();
+  /** Brush outline under the pointer (editing tools). */
+  private brush: Mesh | null = null;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly terrain: Terrain) {
     const gl = canvas.getContext("webgl2", { antialias: true });
@@ -133,9 +171,26 @@ export class TerrainRenderer {
   /** Rebuilds the ground without the tiles that cliff models cover, with
    *  ground textures replaced at some corners (corner index → texture). */
   setCliffTiles(tiles: Set<number>, overrides = new Map<number, number>()) {
+    this.cliffTiles = tiles;
+    this.groundOverrides = overrides;
     this.gl.deleteVertexArray(this.ground);
     this.ranges = [];
     this.ground = this.buildGround(tiles, overrides);
+  }
+
+  /** Rebuilds everything derived from the corners after an edit. */
+  terrainChanged() {
+    const gl = this.gl;
+    this.setCliffTiles(this.cliffTiles, this.groundOverrides);
+    for (const m of [this.water, this.wire]) gl.deleteVertexArray(m.vao);
+    this.water = this.buildWater();
+    this.wire = this.buildWire();
+    gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
+  }
+
+  private groundHeights(): Float32Array {
+    return new Float32Array(this.terrain.corners.map((c) => c.height - (c.layer - 2) * 128));
   }
 
   private buildGround(skip = new Set<number>(), overrides = new Map<number, number>()): WebGLVertexArrayObject {
@@ -208,7 +263,7 @@ export class TerrainRenderer {
 
   private buildHeightMap(): HeightMap {
     const t = this.terrain, gl = this.gl;
-    const data = new Float32Array(t.corners.map((c) => c.height - (c.layer - 2) * 128));
+    const data = this.groundHeights();
     const texture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, t.width, t.height, 0, gl.RED, gl.FLOAT, data);
@@ -287,6 +342,88 @@ export class TerrainRenderer {
     ];
   }
 
+  /** World-space ray through a canvas point (CSS pixels). Matches render()'s camera. */
+  ray(px: number, py: number): { origin: Vec3; dir: Vec3 } {
+    const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight);
+    const eye = this.eye();
+    const f = norm([this.target[0] - eye[0], this.target[1] - eye[1], this.target[2] - eye[2]]);
+    const r = norm([f[1], -f[0], 0]);
+    const u: Vec3 = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+    const t = Math.tan(Math.PI / 8), nx = ((px / w) * 2 - 1) * t * (w / h), ny = (1 - (py / h) * 2) * t;
+    return { origin: eye, dir: norm([f[0] + r[0] * nx + u[0] * ny, f[1] + r[1] * nx + u[1] * ny, f[2] + r[2] * nx + u[2] * ny]) };
+  }
+
+  /** Ground height (layers included) at a world point, bilinear between corners. */
+  groundHeight(x: number, y: number): number {
+    const t = this.terrain;
+    const gx = Math.min(t.width - 1.001, Math.max(0, (x - t.offsetX) / 128));
+    const gy = Math.min(t.height - 1.001, Math.max(0, (y - t.offsetY) / 128));
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0;
+    const hz = (cx: number, cy: number) => this.corner(cx, cy).height;
+    const a = hz(x0, y0) + (hz(x0 + 1, y0) - hz(x0, y0)) * fx;
+    const b = hz(x0, y0 + 1) + (hz(x0 + 1, y0 + 1) - hz(x0, y0 + 1)) * fx;
+    return a + (b - a) * fy;
+  }
+
+  /** The nearest placed object (with a model) hit by a ray. */
+  pickObject(ray: { origin: Vec3; dir: Vec3 }): ObjectInstance | null {
+    const { origin: o, dir: d } = ray;
+    let best: ObjectInstance | null = null, bestT = Infinity;
+    for (const b of this.batches) {
+      if (this.hiddenGroups.has(b.group)) continue;
+      for (const inst of b.instances) {
+        if (!inst.pick || !inst.sphere) continue;
+        const [cx, cy, cz, r] = inst.sphere;
+        const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
+        const p = ox * d[0] + oy * d[1] + oz * d[2], q = ox * ox + oy * oy + oz * oz - r * r;
+        const disc = p * p - q;
+        if (disc < 0) continue;
+        const t = -p - Math.sqrt(disc);
+        if (t > 0 && t < bestT) { bestT = t; best = inst; }
+      }
+    }
+    return best;
+  }
+
+  /** Where a ray meets the ground, or null if it misses the map. */
+  pickGround(ray: { origin: Vec3; dir: Vec3 }): Vec3 | null {
+    const { origin: o, dir: d } = ray;
+    const at = (t: number): Vec3 => [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
+    const above = (t: number) => { const p = at(t); return p[2] > this.groundHeight(p[0], p[1]); };
+    const step = 32, far = this.distance * 10;
+    let lo = 0;
+    for (let t = step; t < far; t += step) {
+      if (above(t)) { lo = t; continue; }
+      let hi = t;
+      for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (above(mid)) lo = mid; else hi = mid; }
+      const p = at(hi), tt = this.terrain;
+      const inside = p[0] >= tt.offsetX && p[1] >= tt.offsetY && p[0] <= tt.offsetX + (tt.width - 1) * 128 && p[1] <= tt.offsetY + (tt.height - 1) * 128;
+      return inside ? p : null;
+    }
+    return null;
+  }
+
+  /** Marks a spot with a ring that follows the ground; null clears it. */
+  setSelection(sel: Ring | null) {
+    if (this.selection) this.gl.deleteVertexArray(this.selection.vao);
+    this.selection = sel ? this.ring(sel) : null;
+  }
+
+  /** The brush outline (editing tools); null hides it. */
+  setBrush(b: Ring | null) {
+    if (this.brush) this.gl.deleteVertexArray(this.brush.vao);
+    this.brush = b ? this.ring(b) : null;
+  }
+
+  private ring(r: Ring): Mesh {
+    const data: number[] = [];
+    for (let i = 0; i < 64; i++) {
+      const a = (i / 64) * Math.PI * 2, x = r.x + Math.cos(a) * r.r, y = r.y + Math.sin(a) * r.r;
+      data.push(x, y, this.groundHeight(x, y) + 4, r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255, 1);
+    }
+    return this.colorMesh(data);
+  }
+
   render() {
     const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
@@ -350,6 +487,14 @@ export class TerrainRenderer {
       gl.drawArrays(gl.TRIANGLES, 0, this.water.count);
       gl.depthMask(true);
     }
+    // Rings stay visible through trees and water.
+    gl.disable(gl.DEPTH_TEST);
+    for (const ring of [this.selection, this.brush]) {
+      if (!ring) continue;
+      gl.bindVertexArray(ring.vao);
+      gl.drawArrays(gl.LINE_LOOP, 0, ring.count);
+    }
+    gl.enable(gl.DEPTH_TEST);
     gl.bindVertexArray(null);
   }
 

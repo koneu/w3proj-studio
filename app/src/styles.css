@@ -336,3 +336,12 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 
 /* terrain viewer */
 .terrain-facts { padding: 8px 14px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.terrain-selection { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.terrain-selection button { align-self: flex-start; margin-top: 6px; }
+.terrain-sel-name { font-weight: 600; margin-bottom: 2px; }
+.terrain-sel-row { display: grid; grid-template-columns: 64px 1fr; gap: 6px; }
+.terrain-sel-row span:last-child { overflow-wrap: anywhere; }
+.terrain-tools { gap: 6px; }
+.terrain-tools button.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+.terrain-tool-opt { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-muted); }
+.terrain-tool-opt input[type=range] { width: 90px; }

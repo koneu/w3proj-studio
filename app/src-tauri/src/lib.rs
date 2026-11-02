@@ -237,6 +237,43 @@ fn fs_write_text(path: String, text: String) -> CmdResult<()> {
     std::fs::write(&path, text).map_err(err)
 }
 
+/// Writes the raw request body to the file named by the (URI-encoded) `path`
+/// header; binary files skip JSON encoding this way.
+#[tauri::command]
+fn fs_write_bytes(request: tauri::ipc::Request<'_>) -> CmdResult<()> {
+    let path = request
+        .headers()
+        .get("path")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("missing path header")?;
+    let path = percent_decode(path)?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected a raw byte body".into());
+    };
+    if let Some(parent) = Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    std::fs::write(&path, bytes).map_err(err)
+}
+
+/// Decodes `%XX` escapes (as produced by encodeURIComponent).
+fn percent_decode(s: &str) -> CmdResult<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = std::str::from_utf8(&b[i + 1..i + 3]).map_err(err)?;
+            out.push(u8::from_str_radix(hex, 16).map_err(err)?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(err)
+}
+
 #[tauri::command]
 fn fs_read_bytes(path: String) -> CmdResult<tauri::ipc::Response> {
     Ok(tauri::ipc::Response::new(std::fs::read(&path).map_err(err)?))
@@ -485,6 +522,7 @@ pub fn run() {
             format_customize,
             fs_read_text,
             fs_write_text,
+            fs_write_bytes,
             fs_read_bytes,
             fs_exists,
             reveal_in_explorer,

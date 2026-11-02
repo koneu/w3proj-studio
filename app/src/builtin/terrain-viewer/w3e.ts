@@ -26,12 +26,21 @@ export interface Corner {
   blight: boolean;
   hasWater: boolean;
   boundary: boolean;
+  /** Stored values, written back as they are: ground height (without layer)
+   *  and the whole water word (level + unknown high bits). `height` and
+   *  `water` above are derived from them (see setGroundHeight). */
+  rawHeight: number;
+  rawWater: number;
+  /** v12: bits 10–15 of the texture word, unused so far but kept. */
+  texExtra: number;
 }
 
 export interface Terrain {
   version: number;
   tileset: string;
   customTilesets: boolean;
+  /** The stored u32 behind customTilesets. */
+  customTilesetsRaw: number;
   groundTiles: string[];
   cliffTiles: string[];
   /** Number of corners per row / column (tiles + 1). */
@@ -41,6 +50,8 @@ export interface Terrain {
   offsetX: number;
   offsetY: number;
   corners: Corner[];
+  /** Bytes after the tile points (normally none). */
+  trailer: Uint8Array;
 }
 
 /** Water surfaces sit this far below their stored level. */
@@ -53,7 +64,8 @@ export function parseW3e(buf: Uint8Array): Terrain {
   const version = dv.getUint32(4, true);
   if (version !== 11 && version !== 12) throw new Error(`unsupported w3e version ${version}`);
   const tileset = String.fromCharCode(buf[8]);
-  const customTilesets = dv.getUint32(9, true) !== 0;
+  const customTilesetsRaw = dv.getUint32(9, true);
+  const customTilesets = customTilesetsRaw !== 0;
   let p = 13;
   const list = () => {
     const n = dv.getUint32(p, true);
@@ -73,12 +85,13 @@ export function parseW3e(buf: Uint8Array): Terrain {
   const corners: Corner[] = new Array(width * height);
   for (let i = 0; i < width * height; i++, p += per) {
     const h = dv.getInt16(p, true);
-    const w = dv.getUint16(p + 2, true) & 0x3fff;
-    let texture: number, flags: number;
+    const rawWater = dv.getUint16(p + 2, true), w = rawWater & 0x3fff;
+    let texture: number, flags: number, texExtra = 0;
     if (version === 12) {
       const t = dv.getUint16(p + 4, true);
       texture = t & 0x3f;
       flags = (t >> 6) & 0xf;
+      texExtra = t >> 10;
     } else {
       texture = buf[p + 4] & 0xf;
       flags = buf[p + 4] >> 4;
@@ -97,7 +110,58 @@ export function parseW3e(buf: Uint8Array): Terrain {
       blight: (flags & 2) !== 0,
       hasWater: (flags & 4) !== 0,
       boundary: (flags & 8) !== 0,
+      rawHeight: h,
+      rawWater,
+      texExtra,
     };
   }
-  return { version, tileset, customTilesets, groundTiles, cliffTiles, width, height, offsetX, offsetY, corners };
+  const trailer = buf.slice(p);
+  return { version, tileset, customTilesets, customTilesetsRaw, groundTiles, cliffTiles, width, height, offsetX, offsetY, corners, trailer };
+}
+
+/** Sets a corner's ground height (world units, without the cliff layer). */
+export function setGroundHeight(c: Corner, ground: number) {
+  c.rawHeight = Math.max(-0x8000, Math.min(0x7fff, Math.round(ground * 4 + 0x2000)));
+  c.height = (c.rawHeight - 0x2000) / 4 + (c.layer - 2) * 128;
+}
+
+/** Ground height of a corner without its cliff layer. */
+export function groundHeight(c: Corner): number {
+  return (c.rawHeight - 0x2000) / 4;
+}
+
+/** Serializes a terrain; an unedited one comes out byte for byte as it was read. */
+export function writeW3e(t: Terrain): Uint8Array {
+  const per = t.version === 12 ? 8 : 7;
+  const head = 13 + 4 + t.groundTiles.length * 4 + 4 + t.cliffTiles.length * 4 + 16;
+  const out = new Uint8Array(head + t.corners.length * per + t.trailer.length);
+  const dv = new DataView(out.buffer);
+  const id = (p: number, s: string) => { for (let i = 0; i < 4; i++) out[p + i] = s.charCodeAt(i); };
+  id(0, "W3E!");
+  dv.setUint32(4, t.version, true);
+  out[8] = t.tileset.charCodeAt(0);
+  dv.setUint32(9, t.customTilesetsRaw, true);
+  let p = 13;
+  for (const list of [t.groundTiles, t.cliffTiles]) {
+    dv.setUint32(p, list.length, true);
+    p += 4;
+    for (const s of list) { id(p, s); p += 4; }
+  }
+  dv.setUint32(p, t.width, true);
+  dv.setUint32(p + 4, t.height, true);
+  dv.setFloat32(p + 8, t.offsetX, true);
+  dv.setFloat32(p + 12, t.offsetY, true);
+  p += 16;
+  for (const c of t.corners) {
+    const flags = (c.ramp ? 1 : 0) | (c.blight ? 2 : 0) | (c.hasWater ? 4 : 0) | (c.boundary ? 8 : 0);
+    dv.setInt16(p, c.rawHeight, true);
+    dv.setUint16(p + 2, c.rawWater, true);
+    if (t.version === 12) dv.setUint16(p + 4, (c.texture & 0x3f) | (flags << 6) | (c.texExtra << 10), true);
+    else out[p + 4] = (c.texture & 0xf) | (flags << 4);
+    out[p + per - 2] = (c.variation & 0x1f) | (c.cliffVariation << 5);
+    out[p + per - 1] = (c.cliffTexture << 4) | (c.layer & 0xf);
+    p += per;
+  }
+  out.set(t.trailer, p);
+  return out;
 }

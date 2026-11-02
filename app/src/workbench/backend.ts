@@ -34,6 +34,11 @@ export function writeText(path: string, text: string): Promise<void> {
   return invoke("fs_write_text", { path, text });
 }
 
+/** Binary files go as the raw request body (no JSON number arrays). */
+export function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
+  return tauriInvoke("fs_write_bytes", bytes, { headers: { path: encodeURIComponent(path) } });
+}
+
 export function joinPath(root: string, rel: string): string {
   return `${root.replace(/[\\/]+$/, "")}\\${rel.replace(/\//g, "\\")}`;
 }

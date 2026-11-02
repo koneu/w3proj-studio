@@ -70,6 +70,7 @@ export interface EditorDocument {
   readText(): Promise<string>;
   readBytes(): Promise<Uint8Array>;
   writeText(text: string): Promise<void>;
+  writeBytes(bytes: Uint8Array): Promise<void>;
   setDirty(dirty: boolean): void;
 }
 
@@ -174,6 +175,7 @@ export interface W3Api {
     readText(projectPath: string): Promise<string>;
     writeText(projectPath: string, text: string): Promise<void>;
     readBytes(projectPath: string): Promise<Uint8Array>;
+    writeBytes(projectPath: string, bytes: Uint8Array): Promise<void>;
     onDidChange(listener: () => void): Disposable;
   };
   settings: Settings;

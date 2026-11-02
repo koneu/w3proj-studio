@@ -1,5 +1,5 @@
 import type { FileInfo, ProjectInfo, Settings, Disposable } from "../extensions/api";
-import { invoke, joinPath, readBytes, readText, writeText } from "./backend";
+import { invoke, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
 import { Emitter } from "./dom";
 
 export class WorkspaceService {
@@ -52,6 +52,9 @@ export class WorkspaceService {
   }
   async writeText(p: string, text: string) {
     await writeText(this.resolve(p), text);
+  }
+  async writeBytes(p: string, bytes: Uint8Array) {
+    await writeBytes(this.resolve(p), bytes);
   }
 }
 

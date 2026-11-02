@@ -16,6 +16,7 @@ export interface DocumentIO {
   readText(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
   writeText(path: string, text: string): Promise<void>;
+  writeBytes(path: string, bytes: Uint8Array): Promise<void>;
 }
 
 /** Tabbed editor area. Picks an editor provider per file from the
@@ -109,6 +110,7 @@ export class EditorService {
       readText: () => this.io.readText(path),
       readBytes: () => this.io.readBytes(path),
       writeText: (text) => this.io.writeText(path, text),
+      writeBytes: (bytes) => this.io.writeBytes(path, bytes),
       setDirty: (d) => { tab.dirty = d; tab.tabEl.classList.toggle("dirty", d); },
     };
     try {

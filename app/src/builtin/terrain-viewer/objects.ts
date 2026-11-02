@@ -5,9 +5,9 @@
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../image-viewer/decode/index.ts";
 import { parseMdx } from "../model-viewer/mdx";
-import { ModelGpu, uploadTexture, type Mat4 } from "../model-viewer/renderer";
+import { bounds, ModelGpu, uploadTexture, type Mat4 } from "../model-viewer/renderer";
 import { parseIni } from "../object-editor/metadata";
-import type { ObjectBatch } from "./renderer";
+import type { ObjectBatch, ObjectInstance } from "./renderer";
 
 export interface Placed {
   id: string;
@@ -21,6 +21,8 @@ export interface Placed {
 }
 
 interface Skin {
+  /** Object data file the type belongs to: w3d, w3b, w3u or w3t. */
+  kind: string;
   file: string;
   numVar: number;
   /** Replaceable texture this type swaps in (trees, cliffs). */
@@ -30,20 +32,23 @@ interface Skin {
   modelScale: number;
 }
 
-const SKIN_FILES = ["Doodads\\DoodadSkins.txt", "Units\\DestructableSkin.txt", "Units\\UnitSkin.txt", "Units\\ItemSkin.txt"];
+const SKIN_FILES: [string, string][] = [
+  ["Doodads\\DoodadSkins.txt", "w3d"], ["Units\\DestructableSkin.txt", "w3b"], ["Units\\UnitSkin.txt", "w3u"], ["Units\\ItemSkin.txt", "w3t"],
+];
 
 /** Model info per object id. Keys with a graphics-mode suffix ("file:hd")
  *  win over plain ones. */
 export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
   const mode = w3.settings.get<string>("game.graphicsMode") ?? "hd";
   const out = new Map<string, Skin>();
-  for (const f of SKIN_FILES) {
+  for (const [f, kind] of SKIN_FILES) {
     const text = await w3.game.readText(f).catch(() => "");
     for (const [id, sec] of parseIni(text)) {
       const get = (k: string) => sec.get(`${k}:${mode}`) ?? sec.get(k);
       const file = get("file");
       if (!file) continue;
       out.set(id, {
+        kind,
         file,
         numVar: Number(get("numvar") ?? 1) || 1,
         texId: Number(get("texid") ?? -1),
@@ -74,7 +79,7 @@ export interface ModelRequest {
   path: string;
   /** Replaceable texture id → path (e.g. a tree type's own texture). */
   replaceable: Record<number, string>;
-  instances: { world: Mat4; team: number }[];
+  instances: ObjectInstance[];
   /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders). */
   retexture?: (path: string) => string;
 }
@@ -133,6 +138,20 @@ export class ObjectLoader {
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
           if (p) this.texture(req.retexture?.(p) ?? p, model.textures[i].flags).then((t) => { gpu.textures[i] = t; });
         });
+        // Bounding sphere per instance, for picking.
+        const b = bounds(model);
+        const c = [0, 1, 2].map((k) => (b.min[k] + b.max[k]) / 2);
+        const r = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2;
+        for (const inst of req.instances) {
+          const m = inst.world;
+          const s = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
+          inst.sphere = [
+            m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12],
+            m[1] * c[0] + m[5] * c[1] + m[9] * c[2] + m[13],
+            m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14],
+            Math.max(16, r * s),
+          ];
+        }
         batches.push({ group, gpu, instances: req.instances });
       } catch (e) {
         failed.push({ index, error: `${req.path}: ${(e as Error).message ?? e}` });
@@ -141,12 +160,14 @@ export class ObjectLoader {
     return { batches, failed };
   }
 
-  /** Placed doodads/units: models from the skin tables. */
-  async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number): Promise<LoadResult> {
+  /** Placed doodads/units: models from the skin tables. Custom object ids
+   *  use their base object's model (`baseOf`, from the map's object data). */
+  async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
+    baseOf: (id: string) => string | undefined = () => undefined): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
-    for (const p of placed) {
-      const skin = skins.get(p.id);
+    for (const [index, p] of placed.entries()) {
+      const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
       if (!skin) { unresolved.push(p); continue; }
       const path = modelPath(skin, p.variation);
       const key = `${path}|${skin.texFile}`;
@@ -157,7 +178,10 @@ export class ObjectLoader {
         byModel.set(key, entry);
       }
       entry.items.push(p);
-      entry.req.instances.push({ world: placement(p, skin.modelScale), team: teamOf(p) });
+      entry.req.instances.push({
+        world: placement(p, skin.modelScale), team: teamOf(p),
+        pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path },
+      });
     }
     const entries = [...byModel.values()];
     const { batches, failed } = await this.loadModels(group, entries.map((e) => e.req));
