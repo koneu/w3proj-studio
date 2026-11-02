@@ -103,6 +103,9 @@ interface Mesh {
   count: number;
 }
 
+/** Texture slot of the tileset's blight (beyond any ground tile index). */
+export const BLIGHT_TEXTURE = 100;
+
 export class TerrainRenderer {
   readonly gl: WebGL2RenderingContext;
   private groundProg: WebGLProgram;
@@ -209,7 +212,8 @@ export class TerrainRenderer {
       for (let x = 0; x < t.width - 1; x++) {
         if (skip.has(y * (t.width - 1) + x)) continue;
         const bl = this.corner(x, y), br = this.corner(x + 1, y), tl = this.corner(x, y + 1), tr = this.corner(x + 1, y + 1);
-        const tex = (cx: number, cy: number) => overrides.get(cy * t.width + cx) ?? this.corner(cx, cy).texture;
+        // Blight covers everything, so it gets its own slot drawn last.
+        const tex = (cx: number, cy: number) => (this.corner(cx, cy).blight ? BLIGHT_TEXTURE : overrides.get(cy * t.width + cx) ?? this.corner(cx, cy).texture);
         const [tBl, tBr, tTl, tTr] = [tex(x, y), tex(x + 1, y), tex(x, y + 1), tex(x + 1, y + 1)];
         const used = [...new Set([tBl, tBr, tTl, tTr])].sort((a, b) => a - b);
         // Tiles at the camera boundary are shown darkened, like the editor does.

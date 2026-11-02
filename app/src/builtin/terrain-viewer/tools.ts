@@ -243,3 +243,16 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
     return cells;
   }
 }
+
+/** Adds (on) or removes blight under the brush. */
+export function paintBlight(t: Terrain, b: Brush, on: boolean, stroke: Stroke): boolean {
+  let changed = false;
+  for (const { i } of cornersIn(t, b)) {
+    const c = t.corners[i];
+    if (c.blight === on) continue;
+    stroke.touch(t, i);
+    c.blight = on;
+    changed = true;
+  }
+  return changed;
+}

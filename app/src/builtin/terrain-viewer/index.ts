@@ -3,7 +3,7 @@ import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services"
 import { h } from "../../workbench/dom";
 import { decodeImage } from "../../lib/image/index.ts";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
-import { parseSlk } from "../../lib/formats/text";
+import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
@@ -13,8 +13,8 @@ import { buildPathingMap } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
-import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { applyHeight, applyLayer, paintTexture, Stroke, toggleRamp, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
+import { applyHeight, applyLayer, paintBlight, paintTexture, Stroke, toggleRamp, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 import { groundHeight, heightAt, parseW3e, writeW3e, type Terrain } from "./w3e";
 
 const PATH = "map/war3map.w3e";
@@ -141,7 +141,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const redraw = () => { dirty = true; };
 
         // ---- editing ------------------------------------------------------------------
-        type Tool = "select" | HeightTool | LayerTool | "paint" | "ramp";
+        type Tool = "select" | HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
         const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffDown", "shallow", "deep", "dry"];
         const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
         const editable = !doc.readOnly;
@@ -179,6 +179,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const brush = { x: p[0], y: p[1], radius: size };
           const did = tool === "paint"
             ? paintTexture(terrain, brush, paintTex, stroke.s)
+            : tool === "blight" || tool === "unblight"
+            ? paintBlight(terrain, brush, tool === "blight", stroke.s)
             : isLayerTool(tool)
             ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
             : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
@@ -242,7 +244,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const BRUSH_COLORS: Record<Tool, Vec3> = {
           select: [0, 0, 0], raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
-          cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150], ramp: [255, 170, 220],
+          cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150], ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160],
         };
         const showBrush = (e: MouseEvent | null) => {
           const p = e && tool !== "select" ? groundAt(e) : null;
@@ -275,6 +277,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             redraw();
           }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`));
         };
+        // The tileset's blight texture (UI\WorldEditData.txt, [TileSets]: name,texture).
+        w3.game.readText("UI\\WorldEditData.txt").then(async (text) => {
+          const entry = parseIni(text).get("TileSets")?.get(terrain.tileset.toLowerCase());
+          const path = entry?.split(",")[1]?.trim();
+          if (!path) return;
+          const { buf, name } = await readGroundTexture(w3, doc, `${path}.blp`);
+          renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name).mip(0));
+          redraw();
+        }).catch(() => { /* blight shows as the placeholder colour */ });
         tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
         /** Index of a ground tile type, adding it to the map's list if needed
@@ -640,6 +651,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
             ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
             ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
+            ["blight", "Blight +", "Paint Undead blight"], ["unblight", "Blight −", "Remove blight"],
             ["ramp", "Ramp", "Click a one-level cliff edge to build a ramp (Size sets its width); click a ramp to remove it"],
           ];
           const bar = h("div.model-toolbar.terrain-tools", {},
