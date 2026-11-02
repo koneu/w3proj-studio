@@ -8,6 +8,8 @@ import { loadKind } from "../../lib/objects/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import { buildPathingMap } from "./pathmap";
+import { predictShadows } from "./shadowmap";
+import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
@@ -109,8 +111,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.editors.registerProvider("w3.terrainViewer", {
       async resolve(el, doc) {
         let terrain: Terrain;
+        /** The terrain as last saved: the baseline for updating shadows. */
+        let savedW3e: Uint8Array;
         try {
-          terrain = parseW3e(await doc.readBytes());
+          savedW3e = await doc.readBytes();
+          terrain = parseW3e(savedW3e);
         } catch (e) {
           el.append(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
             h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
@@ -277,6 +282,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         // ---- placed objects -----------------------------------------------------------
         let dooFile: PlacedFile | null = null, unitsFile: PlacedFile | null = null;
+        /** Doodads as last saved (shadow baseline, like savedW3e). */
+        let savedDoodads: Placed[] | null = null;
         let objCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
         /** Set once an object was edited: the placement files are saved too. */
         let objectsTouched = false;
@@ -320,6 +327,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             customBases(w3),
           ]).then(async ([df, uf, skins, bases]) => {
             dooFile = df;
+            savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
             objCtx = { skins, bases };
             await rebuildObjects();
@@ -692,24 +700,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         return {
           save: editable ? async () => {
-            await doc.writeBytes(writeW3e(terrain));
+            const w3e = writeW3e(terrain);
+            await doc.writeBytes(w3e);
             if (objectsTouched) {
               for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
             }
             savedAt = at;
             doc.setDirty(false);
+            const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
+            const rf = (p: string) => readFile(w3, doc, p);
             // The pathing map follows terrain and doodads.
             try {
-              const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
-              const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, (p) => readFile(w3, doc, p));
+              const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf);
               await w3.workspace.writeBytes("map/war3map.wpm", wpm);
               if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
             } catch (e) {
               w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
             }
+            // Shadows: only cells whose prediction changed since the last save.
+            try {
+              const skins = objCtx?.skins ?? new Map(), baseOf = (id: string) => objCtx?.bases.get(id);
+              const before = await predictShadows(parseW3e(savedW3e), savedDoodads ?? doodads, skins, baseOf, rf);
+              const after = await predictShadows(terrain, doodads, skins, baseOf, rf);
+              const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
+              const shd = updateShadows(stored, before, after);
+              if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
+            } catch (e) {
+              w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
+            }
+            savedW3e = w3e;
+            savedDoodads = structuredClone(doodads);
             if (!warnedDerived) {
               warnedDerived = true;
-              w3.window.showWarning("Saved the terrain and the pathing map. Shadows (war3map.shd) and the minimap aren't regenerated yet; open and save the map in the World Editor before you release it.");
+              w3.window.showWarning("Saved the terrain, pathing map and shadows. The minimap (war3mapMap.blp) isn't regenerated yet; open and save the map in the World Editor before you release it.");
             }
           } : undefined,
           focus: () => canvas.focus(),
