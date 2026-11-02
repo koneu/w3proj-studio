@@ -414,3 +414,7 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-tilemgr-name { flex: 1; }
 .terrain-tilemgr-row.removing { background: rgba(224, 108, 117, 0.12); padding: 2px 4px; border-radius: 3px; }
 .terrain-tool-opt button.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+.terrain-region-panel { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.terrain-region-name { width: 180px; }
+.terrain-region-sound { width: 150px; }
+.terrain-region-panel input[type="color"] { width: 32px; height: 24px; padding: 0; border: none; background: none; }

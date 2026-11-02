@@ -1006,6 +1006,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return { cells: wpm.slice(16), width: v.getUint32(8, true), height: v.getUint32(12, true) };
           },
           focus: () => canvas.focus(),
+          lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
         };
         const tabsEl = h("div.terrain-tabs");
         const builtinBar = selectBar();

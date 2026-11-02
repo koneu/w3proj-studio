@@ -1,0 +1,8 @@
+{
+  "id": "w3.terrainRegions",
+  "name": "Region Editor",
+  "version": "0.1.0",
+  "description": "Regions (war3map.w3r) in the terrain editor: draw, move, resize, name, weather, ambient sound, colour.",
+  "activationEvents": ["onEditor:w3.terrainViewer"],
+  "extensionDependencies": ["w3.terrainViewer"]
+}

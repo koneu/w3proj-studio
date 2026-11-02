@@ -86,6 +86,8 @@ export interface TerrainEditorHandle {
   /** The pathing map as generated from terrain and doodads; `filtered` applies the groups' filterPathing. */
   pathing(opts?: { filtered?: boolean }): Promise<{ cells: Uint8Array; width: number; height: number }>;
   focus(): void;
+  /** Moves the camera to look at a world point. */
+  lookAt(x: number, y: number): void;
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
