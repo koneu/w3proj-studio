@@ -85,7 +85,9 @@ export class EditorService {
 
     let id = providerId ?? this.associated(path) ?? this.candidates(path).find((c) => c.priority !== "option")?.id;
     id ??= await this.fallback(path);
-    if (!this.providers.has(id)) await this.activate(`onEditor:${id}`);
+    // Always fired: extensions that hook into an editor (e.g. terrain tool groups)
+    // start with it even when the editor's own extension is already running.
+    await this.activate(`onEditor:${id}`);
     const provider = this.providers.get(id);
     if (!provider) {
       const ext = this.contributions.find((c) => c.id === id)?.extensionId;
