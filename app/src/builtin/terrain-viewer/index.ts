@@ -673,6 +673,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const selectObject = (inst: ObjectInstance) => {
           selected = inst;
           const p = inst.pick!, pl = p.placed;
+          const iconEl = h("img.terrain-sel-icon", { alt: "", hidden: true });
+          void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.icon(p.kind, p.id))
+            .then((src) => { if (src) { iconEl.src = src; iconEl.hidden = false; } }).catch(() => { /* no icon */ });
           const nameEl = h("div.terrain-sel-name", {}, p.id);
           loadKind(w3, p.kind).then((k) => {
             const base = k.names.get(p.base ?? p.id);
@@ -702,7 +705,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const ownerOptions = (): [number, string][] => Array.from({ length: 28 }, (_, i) => [i, ownerName(i)]);
           selInfo.className = "terrain-selection";
           selInfo.replaceChildren(
-            nameEl,
+            h("div.terrain-sel-title", {}, iconEl, nameEl),
             row("Type", `${KIND_LABELS[p.kind] ?? p.kind} · ${p.id}${p.base ? ` ← ${p.base}` : ""}`),
             ...(editable ? [
               ...(pl.player !== undefined ? [field("Owner", choice(pl.player, ownerOptions(), (v) => editProps(pl, { player: v })))] : []),

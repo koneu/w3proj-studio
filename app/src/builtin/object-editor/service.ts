@@ -88,6 +88,12 @@ export function objectsService(w3: W3Api): ObjectsService {
   /** Tab last used per set of kinds, so the browser reopens where it was. */
   const lastTab = new Map<string, number>();
   return {
+    async icon(kind, id) {
+      if (!ICON_FIELDS[kind]) return null;
+      const kd = await loadKind(w3, kind);
+      const custom = (await customObjects(w3, kind, kd).catch(() => [])).find((c) => c.id === id);
+      return icons(kd, kind, id, custom?.base, custom?.icon);
+    },
     async pick(host, opts): Promise<PickedObject | undefined> {
       const key = opts.kinds.join(",");
       let tab = Math.min(lastTab.get(key) ?? 0, opts.kinds.length - 1), query = "";

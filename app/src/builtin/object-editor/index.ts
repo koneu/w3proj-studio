@@ -24,6 +24,8 @@ const KINDS: { ext: string; label: string; singular: string }[] = [
 const KIND_ICONS: Record<string, string> = { w3u: "♞", w3t: "✦", w3a: "✧", w3h: "◌", w3b: "▲", w3d: "♣", w3q: "⇧" };
 /** Kinds whose mods carry level and data-pointer fields. */
 const OPT_INTS = new Set(["w3a", "w3d", "w3q"]);
+/** Icon (art) field per kind. */
+const ICON_FIELD: Record<string, string> = { w3u: "uico", w3t: "iico", w3a: "aart", w3h: "fart", w3q: "gar1" };
 /** Fields that override the number of levels. */
 const LEVEL_FIELD: Record<string, string> = { w3a: "alev", w3q: "glvl" };
 
@@ -160,6 +162,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const status = h("div.obj-status");
         const search = h("input.obj-search", { placeholder: "Filter by id or name…", oninput: () => { filter = search.value.toLowerCase(); renderList(); } });
 
+        /** Icon of an object: its own art field if modified, else the base object's. */
+        const itemIcon = (o: Obj) => {
+          const img = h("img.obj-icon", { alt: "" });
+          if (kd) {
+            const own = modLists(o).flatMap((l) => l.mods).find((m) => m.field === ICON_FIELD[kind] && typeof m.value === "string")?.value as string | undefined;
+            void icons(kd, kind, o.id ?? o.base, o.base, own).then((src) => { if (src) img.src = src; else img.classList.add("none"); });
+          } else img.classList.add("none");
+          return img;
+        };
+
         const renderList = () => {
           const group = (title: string, objs: Obj[], action?: HTMLElement) => {
             const items = objs.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)}`.toLowerCase().includes(filter));
@@ -167,6 +179,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("div.obj-group", {}, h("span", {}, `${title} (${items.length})`), action ?? null),
               ...items.map((o) =>
                 h(`div.obj-item${selection.has(o) ? ".selected" : ""}`, { onclick: (e: MouseEvent) => clickItem(o, e) },
+                  ICON_FIELD[kind] ? itemIcon(o) : null,
                   h("code", {}, o.id ? `${o.id}` : o.base),
                   o.id ? h("small", { title: stripColors(baseName(o)) }, `← ${o.base}`) : null,
                   h("span", {}, nameOf(o)),
@@ -601,7 +614,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         status.textContent ||= "Loading game data…";
         loadKind(w3, kind).then(
-          (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderDetail(); },
+          (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderList(); renderDetail(); },
           (e) => { status.textContent = `Game data unavailable — showing raw ids (${e})`; },
         );
 

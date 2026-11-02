@@ -157,7 +157,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-search { margin: 0 8px 6px; }
 .obj-list { flex: 1; overflow-y: auto; }
 .obj-group { padding: 6px 10px 2px; font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.obj-item { display: flex; gap: 8px; align-items: baseline; padding: 3px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.obj-item { display: flex; gap: 8px; align-items: center; padding: 3px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; }
 .obj-item:hover { background: var(--bg-hover); }
 .obj-item.selected { background: #37414f; }
 .obj-item code { color: var(--accent); }
@@ -384,3 +384,7 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-tex-thumb.on { border-color: var(--accent); }
 .tool-button { display: inline-flex; align-items: center; gap: 5px; }
 .tool-icon { display: inline-flex; line-height: 0; opacity: 0.85; }
+.obj-icon { width: 20px; height: 20px; flex: none; border-radius: 2px; }
+.obj-icon.none { visibility: hidden; }
+.terrain-sel-title { display: flex; gap: 8px; align-items: center; }
+.terrain-sel-icon { width: 32px; height: 32px; border-radius: 3px; }
