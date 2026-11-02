@@ -20,7 +20,7 @@ export interface Placed {
   player?: number;
 }
 
-interface Skin {
+export interface Skin {
   /** Object data file the type belongs to: w3d, w3b, w3u or w3t. */
   kind: string;
   file: string;
@@ -30,6 +30,12 @@ interface Skin {
   texFile: string;
   /** Extra model scale (units). */
   modelScale: number;
+  /** Random scale range for new placements (when canPlaceRandScale). */
+  minScale: number;
+  maxScale: number;
+  randScale: boolean;
+  /** Fixed facing in degrees, or null for any. */
+  fixedRot: number | null;
 }
 
 const SKIN_FILES: [string, string][] = [
@@ -54,6 +60,10 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
         texId: Number(get("texid") ?? -1),
         texFile: get("texfile") ?? "",
         modelScale: Number(get("modelscale") ?? 1) || 1,
+        minScale: Number(get("minscale") ?? 1) || 1,
+        maxScale: Number(get("maxscale") ?? 1) || 1,
+        randScale: get("canplacerandscale") === "1",
+        fixedRot: Number(get("fixedrot") ?? -1) >= 0 ? Number(get("fixedrot")) : null,
       });
     }
   }

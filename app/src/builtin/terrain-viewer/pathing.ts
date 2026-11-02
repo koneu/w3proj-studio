@@ -100,8 +100,11 @@ export function generatePathing(input: PathingInput): Uint8Array {
   return out;
 }
 
-/** Ors a pathing texture into the cells (or clears them). */
-function stamp(cells: Uint8Array, w: number, h: number, t: Terrain, s: PathingStamp) {
+/** Visits the pathing cells a texture placed at (x, y) with `angle` covers:
+ *  `fn(cell x, cell y, pixel)` with the pixel index (rows top to bottom).
+ *  Cells outside the w × h grid are skipped. */
+export function forEachStampCell(t: Terrain, w: number, h: number,
+  s: { x: number; y: number; angle: number; width: number; height: number }, fn: (cx: number, cy: number, pixel: number) => void) {
   // Textures are drawn for the default facing (270°).
   const turns = (((Math.round(s.angle / (Math.PI / 2)) + 1) % 4) + 4) % 4;
   const sw = turns % 2 ? s.height : s.width, sh = turns % 2 ? s.width : s.height;
@@ -119,17 +122,24 @@ function stamp(cells: Uint8Array, w: number, h: number, t: Terrain, s: PathingSt
         case 2: u = s.width - 1 - i; v = s.height - 1 - j; break;
         default: u = s.width - 1 - j; v = i; break;
       }
-      const o = ((s.height - 1 - v) * s.width + u) * 4;
-      const r = s.rgba[o], g = s.rgba[o + 1], b = s.rgba[o + 2];
-      if (s.clear) {
-        if (r > 127 || g > 127 || b > 127) cells[cy * w + cx] = 0;
-        continue;
-      }
-      let f = 0;
-      if (r > 127) f |= NO_WALK | BLOCKED | NO_WATER;
-      if (g > 127) f |= NO_FLY;
-      if (b > 127) f |= NO_BUILD;
-      cells[cy * w + cx] |= f;
+      fn(cx, cy, (s.height - 1 - v) * s.width + u);
     }
   }
+}
+
+/** Ors a pathing texture into the cells (or clears them). */
+function stamp(cells: Uint8Array, w: number, h: number, t: Terrain, s: PathingStamp) {
+  forEachStampCell(t, w, h, s, (cx, cy, pixel) => {
+    const o = pixel * 4;
+    const r = s.rgba[o], g = s.rgba[o + 1], b = s.rgba[o + 2];
+    if (s.clear) {
+      if (r > 127 || g > 127 || b > 127) cells[cy * w + cx] = 0;
+      return;
+    }
+    let f = 0;
+    if (r > 127) f |= NO_WALK | BLOCKED | NO_WATER;
+    if (g > 127) f |= NO_FLY;
+    if (b > 127) f |= NO_BUILD;
+    cells[cy * w + cx] |= f;
+  });
 }

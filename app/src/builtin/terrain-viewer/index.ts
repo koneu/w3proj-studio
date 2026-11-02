@@ -9,7 +9,8 @@ import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import type { Rgb } from "./minimap";
 import { buildMinimap } from "./minimapgen";
-import { buildPathingMap } from "./pathmap";
+import { Occupancy } from "./occupancy";
+import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
@@ -158,6 +159,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let minimapStale = false;
         const changed = (e: Edit) => {
           minimapStale = true;
+          occupancyPromise = null;
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
@@ -167,6 +169,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } };
         const pushEdit = (e: Edit) => {
           minimapStale = true;
+          occupancyPromise = null;
           history.length = at;
           history.push(e);
           at = history.length;
@@ -247,8 +250,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150], ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160],
         };
         const showBrush = (e: MouseEvent | null) => {
-          const p = e && tool !== "select" ? groundAt(e) : null;
-          renderer.setBrush(p ? { x: p[0], y: p[1], r: size * 128, rgb: BRUSH_COLORS[tool] } : null);
+          const scattering = tool === "select" && placing !== null && scatter;
+          const p = e && (tool !== "select" || scattering) ? groundAt(e) : null;
+          renderer.setBrush(p ? { x: p[0], y: p[1], r: size * 128, rgb: scattering ? [140, 230, 140] : BRUSH_COLORS[tool] } : null);
           redraw();
           return p;
         };
@@ -489,22 +493,105 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let placing: { kind: string; id: string; name: string } | null = null;
         /** Owner of placed units (kept between placements). */
         let placeOwner = 0;
+        /** Scatter mode: each click fills the brush with the chosen object. */
+        let scatter = false;
         const placeHint = h("span.terrain-place-hint");
         const setPlacing = (p: typeof placing) => {
           placing = p;
-          if (!p) { placeHint.replaceChildren(); return; }
+          if (!p) { placeHint.replaceChildren(); showBrush(null); return; }
           const owner = h("select", { title: "Owner of placed units", onchange: () => { placeOwner = Number(owner.value); canvas.focus(); } },
             ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: i === placeOwner }, ownerName(i))));
-          placeHint.replaceChildren(`Placing ${p.name} (${p.id}): click the ground · Esc to stop`, ...(p.kind === "w3u" ? [" · for ", owner] : []));
+          const toggle = (label: string, title: string, get: () => boolean, set: (v: boolean) => void) => {
+            const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); canvas.focus(); } });
+            return h("label.terrain-place-opt", { title }, box, ` ${label}`);
+          };
+          placeHint.replaceChildren(`Placing ${p.name} (${p.id}): click the ground · Esc to stop`, ...(p.kind === "w3u" ? [" · for ", owner] : []),
+            toggle("Scatter", "Each click fills the brush (Size) with this object, spaced by its footprint, with random variation, facing and scale",
+              () => scatter, (v) => { scatter = v; }),
+            toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
+              () => w3.settings.get<boolean>("terrain.placement.respectPathing"), (v) => void w3.settings.set("terrain.placement.respectPathing", v)));
         };
-        const placeAt = (pos: Vec3) => {
+
+        /** Blocked ground and object footprints, built when placing needs it
+         *  and dropped after any edit. */
+        let occupancyPromise: Promise<Occupancy> | null = null;
+        let pathingData: Promise<PathingData> | null = null;
+        const occupancy = () => {
+          occupancyPromise ??= (async () => {
+            pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+            const kindOf = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind ?? "w3u";
+            const placed = [
+              ...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })),
+              ...(unitsFile?.list ?? []).map((entry) => ({ entry, kind: kindOf(entry.id) === "w3t" ? "w3t" : "w3u" })),
+            ];
+            return Occupancy.build(terrain, await pathingData, placed);
+          })();
+          return occupancyPromise;
+        };
+
+        const placeAt = async (pos: Vec3) => {
           if (!placing) return;
-          const f = placing.kind === "w3u" || placing.kind === "w3t" ? unitsFile : dooFile;
-          if (!f) { w3.window.showError(`This project has no ${placing.kind === "w3u" || placing.kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
-          const entry = newEntry(f, placing.id, [pos[0], pos[1], pos[2]], placing.kind === "w3u" ? placeOwner : undefined);
-          if (!entry) { w3.window.showError(`${f.name} has no entries to take the layout from yet.`); return; }
-          f.list.push(entry);
-          pushEdit({ undo: () => { f.list.splice(f.list.indexOf(entry), 1); }, redo: () => { f.list.push(entry); }, terrain: false, objects: true });
+          const { kind, id } = placing;
+          const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
+          if (!f) { w3.window.showError(`This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
+          const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
+          const respect = w3.settings.get<boolean>("terrain.placement.respectPathing");
+          const occ = respect || scatter ? await occupancy() : null;
+          const fp = occ ? await occ.footprint(id, kind) : null;
+          const deg = (d: number) => (d * Math.PI) / 180;
+          const facing = () => (skin?.fixedRot != null ? deg(skin.fixedRot) : scatter ? Math.random() * Math.PI * 2 : deg(270));
+
+          const spots: { x: number; y: number; angle: number }[] = [];
+          if (!scatter) {
+            const angle = facing();
+            if (respect && fp && !occ!.fits(fp, pos[0], pos[1], angle)) {
+              w3.window.showWarning(`No room for ${placing.name} here (its footprint overlaps blocked ground or another object). Turn off "Respect pathing" to place it anyway.`);
+              return;
+            }
+            spots.push({ x: pos[0], y: pos[1], angle });
+          } else {
+            // A jittered grid over the brush, spaced by the footprint.
+            const spacing = Math.max(64, fp ? Math.max(fp.width, fp.height) * 32 : 128);
+            const radius = size * 128;
+            const candidates: [number, number][] = [];
+            for (let gy = -radius; gy <= radius; gy += spacing) {
+              for (let gx = -radius; gx <= radius; gx += spacing) {
+                const x = pos[0] + gx + (Math.random() - 0.5) * spacing * 0.6, y = pos[1] + gy + (Math.random() - 0.5) * spacing * 0.6;
+                if (Math.hypot(x - pos[0], y - pos[1]) <= radius) candidates.push([x, y]);
+              }
+            }
+            for (const [x, y] of candidates) {
+              const angle = facing();
+              // Snap to the pathing grid like the World Editor (cell centres for trees).
+              const sx = Math.round(x / 32) * 32, sy = Math.round(y / 32) * 32;
+              if (fp) {
+                if (respect && !occ!.fits(fp, sx, sy, angle)) continue;
+                // Without "respect pathing" new objects still don't overlap each other.
+                if (!respect && spots.some((s) => Math.hypot(s.x - sx, s.y - sy) < spacing * 0.75)) continue;
+                if (respect) occ!.mark(fp, sx, sy, angle);
+              }
+              spots.push({ x: sx, y: sy, angle });
+            }
+            if (!spots.length) { w3.window.showWarning(`No free room for ${placing.name} under the brush.`); return; }
+          }
+
+          const entries: Placed[] = [];
+          for (const s of spots) {
+            const entry = newEntry(f, id, [s.x, s.y, heightAt(terrain, s.x, s.y)], kind === "w3u" ? placeOwner : undefined);
+            if (!entry) { w3.window.showError(`${f.name} has no entries to take the layout from yet.`); return; }
+            entry.angle = s.angle;
+            if (scatter) {
+              if ((skin?.numVar ?? 1) > 1) entry.variation = Math.floor(Math.random() * skin!.numVar);
+              if (skin?.randScale && skin.maxScale > skin.minScale) {
+                const k = skin.minScale + Math.random() * (skin.maxScale - skin.minScale);
+                entry.scale = [k, k, k];
+              }
+            }
+            entries.push(entry);
+            f.list.push(entry);
+          }
+          const remove = () => { for (const e of entries) f.list.splice(f.list.indexOf(e), 1); };
+          pushEdit({ undo: remove, redo: () => { f.list.push(...entries); }, terrain: false, objects: true });
           objectsTouched = true;
           void rebuildObjects();
         };

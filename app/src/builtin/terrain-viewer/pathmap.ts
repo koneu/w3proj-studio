@@ -42,11 +42,26 @@ export async function pathOverrides(w3: W3Api, name: string, field: string): Pro
   return out;
 }
 
-/** war3map.wpm for the terrain and placed doodads. `readFile` reads the
- *  map's imports first, then the game. Textures that can't be read are
- *  listed in `missing` (their objects leave no pathing). */
-export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number): Promise<{ wpm: Uint8Array; missing: string[] }> {
+export type PathImage = { width: number; height: number; rgba: Uint8ClampedArray };
+
+/** Pathing inputs from the game and the map: margins, tile rules, and the
+ *  pathing texture of any doodad/destructable/unit id (map overrides first). */
+export interface PathingData {
+  margins: [number, number, number, number];
+  tileRules: Map<string, TileRule>;
+  /** Doodad or destructable (`dest`, `walkable` for bridges) pathing texture. */
+  placedTex(id: string): { path?: string; dest: boolean; walkable: boolean } | null;
+  /** Units: building pathing texture or collision size (world units). */
+  unitShape(id: string): { path?: string; collision: number } | null;
+  texture(path: string): Promise<PathImage | null>;
+  /** Texture paths that couldn't be read. */
+  missing: Set<string>;
+}
+
+const usable = (p: string | undefined): p is string => !!p && p !== "_" && p !== "-" && p.toLowerCase() !== "none";
+
+export async function loadPathingData(w3: W3Api, readFile: (path: string) => Promise<Uint8Array>,
+  unitBase: (id: string) => string | undefined = () => undefined): Promise<PathingData> {
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
   const tileRules = new Map<string, TileRule>();
@@ -55,47 +70,67 @@ export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Plac
   }
   const doodadRows = new Map(parseSlk(await w3.game.readText("Doodads\\Doodads.slk")).map((r) => [r.doodID, r]));
   const destRows = new Map(parseSlk(await w3.game.readText("Units\\DestructableData.slk")).map((r) => [r.DestructableID, r]));
+  const unitRows = new Map(parseSlk(await w3.game.readText("Units\\UnitData.slk").catch(() => "")).map((r) => [r.unitID, r]));
+  const unitBalance = new Map(parseSlk(await w3.game.readText("Units\\UnitBalance.slk").catch(() => "")).map((r) => [r.unitBalanceID, r]));
   const doodadMods = await pathOverrides(w3, "war3map.w3d", "dptx");
   const destMods = await pathOverrides(w3, "war3map.w3b", "bptx");
 
-  const textures = new Map<string, Promise<{ width: number; height: number; rgba: Uint8ClampedArray } | null>>();
+  const textures = new Map<string, Promise<PathImage | null>>();
   const missing = new Set<string>();
-  const texture = (path: string) => {
-    // The SLKs write some paths with doubled backslashes.
-    const p = path.replace(/\\+/g, "\\");
-    let t = textures.get(p.toLowerCase());
-    if (!t) {
-      t = readFile(p).then((b) => decodeImage(b, p).mip(0)).catch(() => { missing.add(p); return null; });
-      textures.set(p.toLowerCase(), t);
-    }
-    return t;
+  return {
+    margins: [m[0], m[1], m[2], m[3]],
+    tileRules,
+    missing,
+    texture(path) {
+      // The SLKs write some paths with doubled backslashes.
+      const p = path.replace(/\\+/g, "\\");
+      let t = textures.get(p.toLowerCase());
+      if (!t) {
+        t = readFile(p).then((b) => decodeImage(b, p).mip(0)).catch(() => { missing.add(p); return null; });
+        textures.set(p.toLowerCase(), t);
+      }
+      return t;
+    },
+    placedTex(id) {
+      const destMod = destMods.get(id);
+      const dest = destRows.get(id) ?? (destMod && destRows.get(destMod.base));
+      if (dest) {
+        const path = destMod?.pathTex ?? dest.pathTex;
+        return { path: usable(path) ? path : undefined, dest: true, walkable: dest.walkable === "1" };
+      }
+      const mod = doodadMods.get(id);
+      const row = doodadRows.get(id) ?? (mod && doodadRows.get(mod.base));
+      if (!row) return null;
+      const path = mod?.pathTex ?? row.pathTex;
+      return { path: usable(path) ? path : undefined, dest: false, walkable: false };
+    },
+    unitShape(id) {
+      const key = unitRows.has(id) ? id : unitBase(id) ?? id;
+      const row = unitRows.get(key), bal = unitBalance.get(key);
+      if (!row && !bal) return null;
+      return { path: usable(row?.pathTex) ? row!.pathTex : undefined, collision: Number(bal?.collision ?? 16) || 16 };
+    },
   };
-  const usable = (p: string | undefined) => !!p && p !== "_" && p !== "-" && p.toLowerCase() !== "none";
+}
 
+/** war3map.wpm for the terrain and placed doodads. `readFile` reads the
+ *  map's imports first, then the game. Textures that can't be read are
+ *  listed in `missing` (their objects leave no pathing). */
+export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Placed[],
+  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number): Promise<{ wpm: Uint8Array; missing: string[] }> {
+  const data = await loadPathingData(w3, readFile);
   const stamps: PathingStamp[] = [];
   await Promise.all(doodads.map(async (d) => {
     const e = d as Placed & { flags?: number };
+    const info = data.placedTex(d.id);
+    if (!info?.path) return;
     // Destructables are added by the game at run time, except that walkable
-    // ones (bridges) clear the cells they cover.
-    const destMod = destMods.get(d.id);
-    const dest = destRows.get(d.id) ?? (destMod && destRows.get(destMod.base));
-    let path: string | undefined, clear = false;
-    if (dest) {
-      if (dest.walkable !== "1") return;
-      path = destMod?.pathTex ?? dest.pathTex;
-      clear = true;
-    } else {
-      // Only solid doodads (flag bit 1) block.
-      if (e.flags !== undefined && !(e.flags & 2)) return;
-      const mod = doodadMods.get(d.id);
-      const row = doodadRows.get(d.id) ?? (mod && doodadRows.get(mod.base));
-      if (!row) return;
-      path = mod?.pathTex ?? row.pathTex;
-    }
-    if (!usable(path)) return;
-    const t = await texture(path!);
-    if (t) stamps.push({ x: d.position[0], y: d.position[1], angle: d.angle, width: t.width, height: t.height, rgba: t.rgba, clear });
+    // ones (bridges) clear the cells they cover. Only solid doodads (flag
+    // bit 1) block.
+    if (info.dest ? !info.walkable : e.flags !== undefined && !(e.flags & 2)) return;
+    const t = await data.texture(info.path);
+    if (t) stamps.push({ x: d.position[0], y: d.position[1], angle: d.angle, width: t.width, height: t.height, rgba: t.rgba, clear: info.dest });
   }));
-  const wpm = generatePathing({ terrain, margins: [m[0], m[1], m[2], m[3]], tileRules, stamps, deepWater });
-  return { wpm, missing: [...missing] };
+  const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, stamps, deepWater });
+  return { wpm, missing: [...data.missing] };
 }

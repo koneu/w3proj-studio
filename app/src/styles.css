@@ -375,3 +375,4 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .settings-text { width: min(560px, 100%); }
 .settings-json { width: min(560px, 100%); font-family: var(--mono); font-size: 12px; }
 .settings .invalid { outline: 1px solid var(--error); }
+.terrain-place-opt { margin-left: 10px; color: var(--fg); }
