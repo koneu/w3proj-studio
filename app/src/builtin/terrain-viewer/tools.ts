@@ -1,14 +1,18 @@
 // Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
 // painting, applied to the corners inside a circular brush, with undo.
 
-import { groundHeight, setGroundHeight, setLayer, type Corner, type Terrain } from "./w3e";
+import { groundHeight, setGroundHeight, setLayer, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
 /** Cliff layer up/down; water: shallow (one layer down), deep (two), dry. */
 export type LayerTool = "cliffUp" | "cliffDown" | "shallow" | "deep" | "dry";
 
-/** The normal ground layer; water tools work relative to it. */
-const GROUND_LAYER = 2;
+/** What a layer stroke sets, decided where the stroke starts: the cliff
+ *  layer, and for new water its stored level word (low 14 bits). */
+export interface LayerTarget {
+  layer: number;
+  waterLevel?: number;
+}
 
 export interface Brush {
   /** World position of the brush centre. */
@@ -51,7 +55,7 @@ export class Stroke {
     for (const [i, b] of this.before) {
       const a = this.after.get(i)!;
       if (a.rawHeight !== b.rawHeight || a.texture !== b.texture || a.variation !== b.variation
-        || a.layer !== b.layer || a.hasWater !== b.hasWater) return true;
+        || a.layer !== b.layer || a.hasWater !== b.hasWater || a.rawWater !== b.rawWater) return true;
     }
     return false;
   }
@@ -96,23 +100,40 @@ export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: numb
   return true;
 }
 
-/** One application of a cliff or water brush. Cliff tools set the corners
- *  under the brush to `target` (the layer where the stroke started, ±1);
- *  water tools use fixed layers below normal ground. Returns whether
- *  anything changed. */
-export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: number, stroke: Stroke): boolean {
-  const layer = tool === "shallow" ? GROUND_LAYER - 1 : tool === "deep" ? GROUND_LAYER - 2 : tool === "dry" ? GROUND_LAYER : target;
-  const water = tool === "shallow" || tool === "deep" ? true : tool === "dry" ? false : null;
+/** One application of a cliff or water brush: corners under the brush move
+ *  to the target layer; water tools also set the water flag and level, dry
+ *  only clears the flag. Returns whether anything changed. */
+export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerTarget, stroke: Stroke): boolean {
   let changed = false;
   for (const { i } of cornersIn(t, b)) {
     const c = t.corners[i];
-    if (c.layer === layer && (water === null || c.hasWater === water)) continue;
+    if (tool === "dry") {
+      if (!c.hasWater) continue;
+      stroke.touch(t, i);
+      c.hasWater = false;
+      changed = true;
+      continue;
+    }
+    const water = tool === "shallow" || tool === "deep";
+    if (c.layer === target.layer && (!water || (c.hasWater && (c.rawWater & 0x3fff) === target.waterLevel))) continue;
     stroke.touch(t, i);
-    setLayer(c, layer);
-    if (water !== null) c.hasWater = water;
+    setLayer(c, target.layer);
+    if (water && target.waterLevel !== undefined) setWaterLevel(c, target.waterLevel);
     changed = true;
   }
   return changed;
+}
+
+/** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
+function setWaterLevel(c: Corner, level: number) {
+  c.hasWater = true;
+  c.rawWater = (c.rawWater & 0xc000) | (level & 0x3fff);
+  c.water = (level - 0x2000) / 4 - WATER_OFFSET;
+}
+
+/** The stored water level word that puts the surface at world height `z`. */
+export function waterLevelAt(z: number): number {
+  return Math.max(0, Math.min(0x3fff, Math.round((z + WATER_OFFSET) * 4) + 0x2000));
 }
 
 /** Paints ground texture `tex` (index into terrain.groundTiles) under the brush. */

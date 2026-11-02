@@ -6,7 +6,7 @@ import { loadKind, parseSlk } from "../object-editor/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, type Placed } from "./objects";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { applyHeight, applyLayer, paintTexture, Stroke, type HeightTool, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 import { groundHeight, parseW3e, writeW3e, type Terrain } from "./w3e";
 
 const PATH = "map/war3map.w3e";
@@ -152,7 +152,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const undo = () => { if (at > 0) { history[--at].undo(terrain); changed(); } };
         const redo = () => { if (at < history.length) { history[at++].redo(terrain); changed(); } };
-        let stroke: { s: Stroke; target: number; last: number } | null = null;
+        let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
         /** One brush application at a ground point. */
         const applyAt = (p: Vec3) => {
           if (!stroke) return;
@@ -160,7 +160,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const did = tool === "paint"
             ? paintTexture(terrain, brush, paintTex, stroke.s)
             : isLayerTool(tool)
-            ? applyLayer(terrain, brush, tool, stroke.target, stroke.s)
+            ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
             : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
           if (did) {
             renderer.terrainChanged();
@@ -176,8 +176,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const p = groundAt(e);
           if (!p) return;
           const c = terrain.corners[Math.round((p[1] - terrain.offsetY) / 128) * terrain.width + Math.round((p[0] - terrain.offsetX) / 128)];
-          const target = !c ? 0 : tool === "cliffUp" ? c.layer + 1 : tool === "cliffDown" ? c.layer - 1 : groundHeight(c);
-          stroke = { s: new Stroke(tool), target, last: performance.now() };
+          // Cliff tools step one level from the start point; water goes one or
+          // two levels below it, with the surface at its original height.
+          const step = tool === "cliffUp" ? 1 : tool === "cliffDown" ? -1 : tool === "shallow" ? -1 : tool === "deep" ? -2 : 0;
+          const layer: LayerTarget = c
+            ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - 8) }
+            : { layer: 2 };
+          stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
           applyAt(p);
         };
         const endStroke = () => {
@@ -373,8 +378,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ["select", "Select", "Select units and doodads"], ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
             ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"], ["paint", "Paint", "Paint a ground texture"],
             ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
-            ["shallow", "Shallow water", "Shallow water (one level below ground)"], ["deep", "Deep water", "Deep water (two levels below ground)"],
-            ["dry", "Dry", "Remove water and return to ground level"],
+            ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
+            ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
           ];
           const bar = h("div.model-toolbar.terrain-tools", {},
             ...tools.map(([t, label, title]) => {
