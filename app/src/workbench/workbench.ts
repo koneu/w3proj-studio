@@ -3,7 +3,7 @@ import type { W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { invoke, listen, NotUtf8Error } from "./backend";
 import { CommandService } from "./commands";
-import { h } from "./dom";
+import { h, showContextMenu } from "./dom";
 import { EditorService } from "./editors";
 import { GAME_SCHEME, GameService } from "./game";
 import { Notifications, Progress } from "./notifications";
@@ -171,6 +171,7 @@ export class Workbench {
         pickFolder: async (opts) => (await showCursor(), (await openDialog({ title: opts?.title, directory: true, multiple: false })) as string | null),
         pickSaveFile: async (opts) => (await showCursor(), (await saveDialog({ title: opts?.title, defaultPath: opts?.defaultPath, filters: opts?.filters })) ?? null),
         withProgress: (title, task) => wb.progress.run(title, task),
+        showContextMenu: (at, items) => showContextMenu(at, items),
       },
       statusBar: { add: (opts) => wb.statusBar.add(opts) },
       output: { channel: (name) => wb.output.channel(name) },

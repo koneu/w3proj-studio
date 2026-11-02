@@ -5,7 +5,7 @@
 // sentence. It provides "w3.triggers.gui" so other extensions can add editors
 // for parameter types (see trigger-gui-objects for the object pickers).
 
-import type { ExtensionContext, W3Api } from "../../extensions/api";
+import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import {
   TRIGGER_GUI_SERVICE, TRIGGERS_SERVICE,
   type TriggerEditorHandle, type TriggerGuiService, type TriggerParamEditor, type TriggersService,
@@ -50,7 +50,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       matches: (t) => !t.isCustom,
       init: () => { /* an empty trigger: no events, conditions or actions */ },
       render: (el, t, ed) => {
-        const view = new GuiView(el, t, ed, editors);
+        const view = new GuiView(w3, el, t, ed, editors);
         view.render();
         return { keyDown: (e) => view.keyDown(e) };
       },
@@ -59,7 +59,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 }
 
 class GuiView {
-  constructor(private el: HTMLElement, private t: TriggerItem, private ed: TriggerEditorHandle, private editors: ParamEditors) {}
+  constructor(private w3: W3Api, private el: HTMLElement, private t: TriggerItem, private ed: TriggerEditorHandle, private editors: ParamEditors) {}
+
+  /** Right-click: selects what was clicked, then offers what fits there. */
+  private menu(e: MouseEvent, sel: Sel) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.select(sel);
+    if (!this.ed.editable) return;
+    const items: MenuItem[] = [];
+    if ("section" in sel) items.push({ label: `New ${KIND_NAMES[sel.section]}…`, run: () => void this.add(sel.section) });
+    else if (sel.branch !== undefined) {
+      const at = this.locate(sel.path);
+      const k = at ? branchKind(at.eca, sel.branch) : ACTION;
+      items.push({ label: `New ${KIND_NAMES[k]}…`, run: () => void this.add(k) });
+    } else {
+      const at = this.locate(sel.path);
+      if (!at) return;
+      // Inside a block only the branch's own kind fits; at the top level any kind (added in its section).
+      const kinds = sel.path.length > 1 ? [at.eca.kind] : [EVENT, CONDITION, ACTION];
+      items.push(...kinds.map((k) => ({ label: `New ${KIND_NAMES[k]}…`, run: () => void this.add(k) })), "-",
+        { label: at.eca.enabled ? "Disable" : "Enable", run: () => this.toggle() },
+        { label: "Move Up", run: () => this.move(-1) },
+        { label: "Move Down", run: () => this.move(1) }, "-",
+        { label: "Delete", hint: "Del", run: () => this.remove() });
+    }
+    this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
+  }
 
   /** Del removes the selected ECA (instead of the host deleting the whole trigger). */
   keyDown(e: KeyboardEvent): boolean {
@@ -90,7 +116,9 @@ class GuiView {
     if (ed.editable) parts.push(this.toolbar());
     for (const [kind, label] of SECTIONS) {
       const active = this.sel && "section" in this.sel && this.sel.section === kind;
-      parts.push(h(`div.trig-section.trig-pick${active ? ".active" : ""}`, { onclick: () => this.select({ section: kind }) }, label));
+      parts.push(h(`div.trig-section.trig-pick${active ? ".active" : ""}`, {
+        onclick: () => this.select({ section: kind }), oncontextmenu: (e: MouseEvent) => this.menu(e, { section: kind }),
+      }, label));
       parts.push(h("div.trig-ecas", {}, ...this.t.ecas.map((e, i) => (e.kind === kind ? this.node(e, [i]) : null)).filter((x): x is HTMLElement => !!x)));
     }
     this.el.replaceChildren(...parts);
@@ -197,7 +225,7 @@ class GuiView {
     const s = this.sel;
     const active = !!s && "path" in s && s.branch === undefined && s.path.join() === path.join();
     const line = h(`div.trig-eca.trig-pick${e.enabled ? "" : ".off"}${active ? ".active" : ""}`, {
-      title: e.name, onclick: () => this.select({ path }),
+      title: e.name, onclick: () => this.select({ path }), oncontextmenu: (ev: MouseEvent) => this.menu(ev, { path }),
     }, img, h("span", {}, ...(cat && !cat.hideName ? [`${cat.name} - `] : []), ...this.sentence(e.kind, e.name, e.params)));
     if (!isBlock(e) && !e.children.length) return line;
     const labels = branchLabels(e.name);
@@ -205,7 +233,9 @@ class GuiView {
     return h("div.trig-block", {}, line, ...[...groups].sort((a, b) => a - b).map((g) => {
       const bActive = !!s && "path" in s && s.branch === g && s.path.join() === path.join();
       return h("div.trig-branch", {},
-        h(`div.trig-branch-label.trig-pick${bActive ? ".active" : ""}`, { onclick: () => this.select({ path, branch: g }) }, labels[g] ?? "Actions"),
+        h(`div.trig-branch-label.trig-pick${bActive ? ".active" : ""}`, {
+          onclick: () => this.select({ path, branch: g }), oncontextmenu: (ev: MouseEvent) => this.menu(ev, { path, branch: g }),
+        }, labels[g] ?? "Actions"),
         ...e.children.map((c, i) => ((c.group ?? 0) === g ? this.node(c, [...path, i]) : null)).filter((x): x is HTMLElement => !!x));
     }));
   }

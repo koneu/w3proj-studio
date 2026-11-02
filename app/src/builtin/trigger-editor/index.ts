@@ -5,7 +5,7 @@
 // other extensions register through the "w3.triggers" service (GUI triggers,
 // custom script, …). The files round-trip byte-exactly through lib/triggers.
 
-import type { ExtensionContext, W3Api } from "../../extensions/api";
+import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, TRIGGERS_SERVICE, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggersService } from "../../extensions/services";
 import { StringTable } from "../../lib/formats/wts";
 import { parseIni } from "../../lib/formats/text";
@@ -122,7 +122,8 @@ function triggerData(w3: W3Api): Promise<TriggerData> {
     for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
       for (const sec of parseIni(await w3.game.readText(f).catch(() => "")).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
     }
-    return parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"), strings);
+    const hints = await w3.game.readText("UI\\TriggerStrings.txt").catch(() => "");
+    return parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"), strings, hints);
   })();
   dataPromise.catch(() => { dataPromise = null; });
   return dataPromise;
@@ -379,8 +380,30 @@ class TriggerView {
       style: { paddingLeft: `${6 + depth * 14}px` }, title: opts.title ?? "",
       onclick: () => { this.selected = sel; this.renderTree(); this.renderDetail(); this.el.focus(); },
       ondblclick: () => { if (opts.toggle !== undefined) this.toggle(opts.toggle); },
+      oncontextmenu: (e: MouseEvent) => this.menu(e, sel, opts.toggle),
     }, caret, h("span.trig-label", {}, label));
   }
+  /** Right-click in the tree: selects the row, then offers new items, moving and deleting. */
+  private menu(e: MouseEvent, sel: Selection, category?: number) {
+    e.preventDefault();
+    this.selected = sel;
+    this.renderTree();
+    this.renderDetail();
+    this.el.focus();
+    const items: MenuItem[] = [];
+    if (category !== undefined) items.push({ label: this.collapsed.has(category) ? "Expand" : "Collapse", run: () => this.toggle(category) }, "-");
+    if (this.handle.editable) {
+      items.push({ label: "New Category", run: () => this.newCategory() },
+        ...this.kinds.all().filter((k) => k.init).map((k) => ({ label: `New ${k.title}`, run: () => this.newTrigger(k) })),
+        { label: "New Comment", run: () => this.newTrigger(null) });
+      if (sel.kind === "item") {
+        items.push("-", { label: "Move Up", run: () => this.move(-1) }, { label: "Move Down", run: () => this.move(1) },
+          "-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
+      }
+    }
+    if (items.length) this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
+  }
+
   private toggle(id: number) {
     if (this.collapsed.has(id)) this.collapsed.delete(id); else this.collapsed.add(id);
     this.renderTree();

@@ -27,28 +27,67 @@ function modal<T>(title: string, body: (done: (v: T | undefined) => void, hide: 
 }
 
 /** A filterable list; Enter or double-click takes the highlighted row. */
-function listPicker<T>(items: { label: string; detail?: string; value: T }[], done: (v: T) => void, placeholder = "Search"): HTMLElement[] {
-  let shown = items, active = 0;
+interface ListItem<T> { label: string; detail?: string; value: T; category?: string }
+
+/** A filterable list; Enter or double-click takes the highlighted row. With
+ *  categories, chips above the list narrow it to one; `preview` describes the
+ *  highlighted row below the list. */
+function listPicker<T>(items: ListItem<T>[], done: (v: T) => void, opts: {
+  placeholder?: string; categoryName?: (c: string) => string; preview?: (v: T) => (HTMLElement | string)[];
+} = {}): HTMLElement[] {
+  let shown = items, active = 0, category: string | null = null;
   const rows = h("div.picker-rows");
+  const preview = h("div.trig-preview");
+  const chips = h("div.game-chips.trig-chips");
+  const search = h("input.picker-search", { type: "text", placeholder: opts.placeholder ?? "Search" });
+  const filter = () => {
+    const q = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const matching = items.filter((it) => q.every((w) => `${it.label} ${it.detail ?? ""}`.toLowerCase().includes(w)));
+    shown = category === null ? matching : matching.filter((it) => it.category === category);
+    active = 0;
+    renderChips(matching);
+    render();
+  };
+  const renderChips = (matching: ListItem<T>[]) => {
+    if (!opts.categoryName) return;
+    const counts = new Map<string, number>();
+    for (const it of matching) if (it.category) counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
+    const chip = (c: string | null, label: string, n: number) => h(`button.chip${category === c ? ".on" : ""}`, {
+      onclick: () => { category = c; filter(); search.focus(); },
+    }, label, h("small", {}, String(n)));
+    chips.replaceChildren(chip(null, "All", matching.length),
+      ...[...counts].map(([c, n]) => [c, opts.categoryName!(c), n] as const).sort((a, b) => a[1].localeCompare(b[1])).map(([c, l, n]) => chip(c, l, n)));
+  };
   const render = () => {
     rows.replaceChildren(...shown.slice(0, 500).map((it, i) => h(`div.picker-row${i === active ? ".active" : ""}`, {
       onclick: () => { active = i; render(); }, ondblclick: () => done(it.value),
     }, h("span.picker-name", {}, it.label), it.detail ? h("span.picker-tags", {}, it.detail) : null)));
     rows.children[active]?.scrollIntoView({ block: "nearest" });
+    if (opts.preview) preview.replaceChildren(...(shown[active] ? opts.preview(shown[active].value) : []));
   };
-  const search = h("input.picker-search", { type: "text", placeholder, oninput: () => {
-    const q = search.value.toLowerCase().split(/\s+/).filter(Boolean);
-    shown = items.filter((it) => q.every((w) => `${it.label} ${it.detail ?? ""}`.toLowerCase().includes(w)));
-    active = 0;
-    render();
-  }, onkeydown: (e: KeyboardEvent) => {
+  search.addEventListener("input", filter);
+  search.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") { active = Math.min(shown.length - 1, active + 1); render(); e.preventDefault(); }
     else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); render(); e.preventDefault(); }
     else if (e.key === "Enter" && shown[active]) done(shown[active].value);
-  } });
-  render();
-  return [search, rows];
+  });
+  filter();
+  return [search, ...(opts.categoryName ? [chips] : []), rows, ...(opts.preview ? [preview] : [])];
 }
+
+/** The function's sentence with its arguments as placeholders, and its hint. */
+function functionPreview(ed: TriggerEditorHandle, f: TriggerFunction): (HTMLElement | string)[] {
+  const parts = f.pattern.length
+    ? f.pattern.map((p) => (typeof p === "string" ? p : h("span.trig-param.unset", {}, p.arg)))
+    : [f.displayName, ...(f.args.length ? [`(${f.args.map((a) => ed.data.types.get(a)?.name ?? a).join(", ")})`] : [])];
+  return [h("div.trig-preview-text", {}, ...parts), ...(f.hint ? [h("div.muted.trig-preview-hint", {}, f.hint)] : [])];
+}
+
+/** Function choices as list items, with their category for the chips. */
+function functionItems(ed: TriggerEditorHandle, functions: TriggerFunction[]): ListItem<TriggerFunction>[] {
+  return functions.map((f) => ({ ...functionLabel(ed, f), value: f, category: f.category || "" })).sort((a, b) => a.label.localeCompare(b.label));
+}
+const categoryName = (ed: TriggerEditorHandle) => (c: string) => ed.data.categories.get(c)?.name ?? (c || "Other");
 
 /** "Unit - Kill" style label of a function. */
 export function functionLabel(ed: TriggerEditorHandle, f: TriggerFunction): { label: string; detail: string } {
@@ -57,8 +96,9 @@ export function functionLabel(ed: TriggerEditorHandle, f: TriggerFunction): { la
 }
 
 export function pickFunction(ed: TriggerEditorHandle, title: string, functions: TriggerFunction[]): Promise<TriggerFunction | undefined> {
-  const items = functions.map((f) => ({ ...functionLabel(ed, f), value: f })).sort((a, b) => a.label.localeCompare(b.label));
-  return modal<TriggerFunction>(title, (done) => listPicker(items, done, "Search by name or category"), ".trig-dialog-wide");
+  return modal<TriggerFunction>(title, (done) => listPicker(functionItems(ed, functions), done, {
+    placeholder: "Search by name or category", categoryName: categoryName(ed), preview: (f) => functionPreview(ed, f),
+  }), ".trig-dialog-wide");
 }
 
 /** Edits one parameter of argument type `type`. */
@@ -77,9 +117,9 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
         : [h("p.muted", {}, `No ${typeName} variables in this map.`)];
     } });
     const fns = functionsFor(data, type);
-    if (fns.length) tabs.push({ label: "Function", build: () => listPicker(
-      fns.map((f) => ({ ...functionLabel(ed, f), value: f })).sort((a, b) => a.label.localeCompare(b.label)),
-      (f) => done(callParam(data, f, file))) });
+    if (fns.length) tabs.push({ label: "Function", build: () => listPicker(functionItems(ed, fns), (f) => done(callParam(data, f, file)), {
+      categoryName: categoryName(ed), preview: (f) => functionPreview(ed, f),
+    }) });
     if (takesValue(data, type)) tabs.push({ label: "Value", build: () => {
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
         onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") done({ type: VALUE, value: input.value }); } });

@@ -62,3 +62,24 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** A context menu at a screen point; closes on choice, Escape or a click elsewhere. */
+export function showContextMenu(at: { x: number; y: number }, items: import("../extensions/api").MenuItem[]) {
+  document.querySelector(".context-menu")?.remove();
+  const close = () => { menu.remove(); window.removeEventListener("mousedown", outside, true); window.removeEventListener("keydown", key, true); };
+  const outside = (e: MouseEvent) => { if (!menu.contains(e.target as Node)) close(); };
+  const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const menu = h("div.context-menu", {}, ...items.map((it) => it === "-"
+    ? h("div.context-menu-sep")
+    : h(`div.context-menu-item${it.disabled ? ".disabled" : ""}`, {
+      title: it.hint ?? "",
+      onclick: () => { if (it.disabled) return; close(); it.run(); },
+    }, it.label)));
+  document.body.append(menu);
+  // Keep it on screen.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(0, Math.min(at.x, window.innerWidth - r.width - 4))}px`;
+  menu.style.top = `${Math.max(0, Math.min(at.y, window.innerHeight - r.height - 4))}px`;
+  window.addEventListener("mousedown", outside, true);
+  window.addEventListener("keydown", key, true);
+}

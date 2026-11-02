@@ -483,3 +483,12 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-tab.active { background: #37414f; border-color: var(--accent); color: var(--fg); }
 .trig-tab-extra { margin-left: auto; }
 .trig-tab-extra ~ .trig-tab-extra { margin-left: 0; }
+.context-menu { position: fixed; z-index: 100; min-width: 180px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); padding: 4px 0; user-select: none; }
+.context-menu-item { padding: 4px 14px; cursor: pointer; white-space: nowrap; }
+.context-menu-item:hover { background: #37414f; }
+.context-menu-item.disabled { color: var(--fg-muted); cursor: default; background: none; }
+.context-menu-sep { height: 1px; margin: 4px 0; background: var(--border); }
+.trig-chips { padding: 0; max-height: 84px; overflow-y: auto; }
+.trig-preview { border-top: 1px solid var(--border); padding-top: 6px; min-height: 42px; }
+.trig-preview-text { margin-bottom: 4px; }
+.trig-preview-hint { font-size: 12px; }

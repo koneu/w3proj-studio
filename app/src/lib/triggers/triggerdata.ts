@@ -25,6 +25,8 @@ export interface TriggerFunction {
   category: string;
   /** Default per argument from _Defaults: a preset, call or value; "_" for none. */
   defaults: string[];
+  /** Explanation shown under the function list (TriggerStrings.txt: <Name>Hint=…). */
+  hint: string;
 }
 
 export interface TriggerData {
@@ -50,7 +52,8 @@ function splitList(v: string): string[] {
 /** Strips surrounding quotes (some game lines lack the closing one). */
 const unquote = (s: string) => (s.startsWith('"') ? s.slice(1, s.length > 1 && s.endsWith('"') ? -1 : undefined) : s);
 
-export function parseTriggerData(text: string, strings: Map<string, string> = new Map()): TriggerData {
+/** `hints`: UI\TriggerStrings.txt, whose <Name>Hint= entries explain functions. */
+export function parseTriggerData(text: string, strings: Map<string, string> = new Map(), hints = ""): TriggerData {
   const str = (s: string) => { const u = unquote(s); return strings.get(u.toUpperCase()) ?? u; };
   const functions = SECTIONS.map(() => new Map<string, TriggerFunction>());
   const categories = new Map<string, { name: string; icon: string; hideName: boolean }>();
@@ -79,7 +82,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       const vals = splitList(value);
       const call = si === CALL;
       const args = (call ? vals.slice(3) : vals.slice(1)).filter((a) => a && a !== "nothing");
-      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [] });
+      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [], hint: "" });
     } else if (section === "TriggerCategories") {
       const v = splitList(value);
       categories.set(key, { name: str(v[0] ?? key), icon: v[1] ?? "", hideName: v[2] === "1" });
@@ -91,8 +94,11 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       presets.set(key, { type: v[1] ?? "", script: unquote(v[2] ?? "").replace(/`/g, '"'), name: str(v[3] ?? key) });
     }
   }
+  const hintOf = new Map<string, string>();
+  for (const m of hints.matchAll(/^(\w+)Hint=(.*)$/gm)) hintOf.set(m[1], unquote(m[2].trim()));
   functions.forEach((map, si) => {
     for (const f of map.values()) {
+      f.hint = hintOf.get(f.name) ?? "";
       const e = extra[si].get(f.name);
       if (!e) continue;
       if (e.has("DisplayName")) f.displayName = str(e.get("DisplayName")!);

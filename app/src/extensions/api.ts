@@ -118,6 +118,9 @@ export interface EditorProvider {
   resolve(container: HTMLElement, doc: EditorDocument): EditorInstance | Promise<EditorInstance>;
 }
 
+/** An entry of a context menu; "-" is a separator. */
+export type MenuItem = "-" | { label: string; run: () => void; disabled?: boolean; hint?: string };
+
 export interface QuickPickItem<T = unknown> {
   label: string;
   description?: string;
@@ -208,6 +211,8 @@ export interface W3Api {
     pickFolder(opts?: { title?: string }): Promise<string | null>;
     pickSaveFile(opts?: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
     withProgress<T>(title: string, task: () => Promise<T>): Promise<T>;
+    /** A context menu at a screen point (usually a contextmenu event's clientX/Y). */
+    showContextMenu(at: { x: number; y: number }, items: MenuItem[]): void;
   };
   statusBar: {
     add(opts: { id: string; text: string; tooltip?: string; command?: string; align?: "left" | "right"; priority?: number }): StatusBarItem;
