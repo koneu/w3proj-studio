@@ -6,7 +6,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import type { loadSkins, Placed } from "./objects";
 import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, type AlphaMap, type ShadowMesh, type Sun } from "./shadows";
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
 

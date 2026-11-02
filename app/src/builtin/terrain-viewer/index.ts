@@ -1,5 +1,6 @@
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
-import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
+import { TerrainToolRegistry } from "./toolhost";
 import { h } from "../../workbench/dom";
 import { decodeImage } from "../../lib/image/index.ts";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
@@ -17,7 +18,7 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { applyHeight, applyLayer, paintBlight, paintTexture, Stroke, toggleRamp, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
-import { groundHeight, heightAt, parseW3e, writeW3e, type Terrain } from "./w3e";
+import { groundHeight, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 
 const PATH = "map/war3map.w3e";
 /** TEAM_COLORS index used for neutral players. */
@@ -80,7 +81,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  const toolGroups = new TerrainToolRegistry();
   ctx.subscriptions.push(
+    w3.services.provide(TERRAIN_SERVICE, toolGroups),
     w3.commands.register("w3.terrain.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) throw new Error("This project has no war3map.w3e.");
@@ -158,7 +161,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let at = 0, savedAt = 0;
         /** Set by every edit; the minimap is redrawn on the next save. */
         let minimapStale = false;
+        /** Tool groups of other extensions, by group id. */
+        const groupInsts = new Map<string, TerrainToolGroupInstance>();
+        const notifyGroups = (e: Edit) => { for (const g of groupInsts.values()) g.changed?.({ terrain: e.terrain, objects: e.objects }); };
         const changed = (e: Edit) => {
+          notifyGroups(e);
           minimapStale = true;
           occupancyPromise = null;
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
@@ -169,6 +176,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } };
         const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } };
         const pushEdit = (e: Edit) => {
+          notifyGroups(e);
           minimapStale = true;
           occupancyPromise = null;
           history.length = at;
@@ -941,6 +949,71 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return bar;
         }
 
+        // ---- tool groups of other extensions ("w3.terrain") --------------------------
+        /** wpm bytes (header + cells): applies every group's pathing filter. */
+        const filterPathing = (wpm: Uint8Array) => {
+          const v = new DataView(wpm.buffer, wpm.byteOffset);
+          const w = v.getUint32(8, true), hgt = v.getUint32(12, true);
+          for (const g of groupInsts.values()) g.filterPathing?.(wpm.subarray(16), w, hgt);
+        };
+        const handle: TerrainEditorHandle = {
+          terrain, editable, redraw,
+          pushEdit: (e) => pushEdit(e),
+          setBrush: (r) => { renderer.setBrush(r); redraw(); },
+          setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
+          pathing: async (opts) => {
+            const doodads = dooFile?.list ?? [];
+            const { wpm } = await buildPathingMap(w3, terrain, doodads, (p) => readFile(w3, doc, p), w3.settings.get<number>("terrain.pathing.deepWater"));
+            if (opts?.filtered !== false) filterPathing(wpm);
+            const v = new DataView(wpm.buffer, wpm.byteOffset);
+            return { cells: wpm.slice(16), width: v.getUint32(8, true), height: v.getUint32(12, true) };
+          },
+          focus: () => canvas.focus(),
+        };
+        const tabsEl = h("div.terrain-tabs");
+        const groupBar = h("div.model-toolbar.terrain-tools", { hidden: true });
+        /** The active tab: null = the built-in tools. */
+        let activeGroup: string | null = null;
+        /** A drag taken by the active group's pointerDown. */
+        let groupDrag = false;
+        const activeInst = () => (activeGroup ? groupInsts.get(activeGroup) ?? null : null);
+        const showTab = (id: string | null) => {
+          if (id === activeGroup) return;
+          activeInst()?.deactivate?.();
+          activeGroup = id;
+          const inst = activeInst();
+          const builtin = tabsEl.nextElementSibling as HTMLElement | null;
+          if (builtin) builtin.hidden = !!inst;
+          if (inst) { setTool("select"); setPlacing(null); groupBar.replaceChildren(inst.toolbar); }
+          groupBar.hidden = !inst;
+          renderer.setBrush(null);
+          inst?.activate?.();
+          renderTabs();
+          redraw();
+        };
+        const renderTabs = () => {
+          const tab = (id: string | null, title: string) =>
+            h(`button.terrain-tab${id === activeGroup ? ".on" : ""}`, { onclick: () => showTab(id) }, title);
+          tabsEl.replaceChildren(tab(null, "Terrain & objects"), ...toolGroups.all().filter((g) => groupInsts.has(g.id)).map((g) => tab(g.id, g.title)));
+          tabsEl.hidden = groupInsts.size === 0;
+        };
+        const syncGroups = () => {
+          const wanted = new Set(toolGroups.all().map((g) => g.id));
+          for (const [id, inst] of groupInsts) {
+            if (wanted.has(id)) continue;
+            if (activeGroup === id) showTab(null);
+            inst.dispose?.();
+            groupInsts.delete(id);
+          }
+          for (const g of toolGroups.all()) {
+            if (groupInsts.has(g.id)) continue;
+            try { groupInsts.set(g.id, g.create(handle)); } catch (e) { w3.window.showError(`${g.title}: ${(e as Error).message ?? e}`); }
+          }
+          renderTabs();
+        };
+        const stopGroups = toolGroups.onChange(syncGroups);
+        if (editable) queueMicrotask(syncGroups);
+
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
           const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); } });
           return h("label.model-toggle", {}, box, ` ${label}`);
@@ -953,7 +1026,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
               h("span.muted", {}, "Drag: select box · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
-            ...(editable ? [toolBar()] : []),
+            ...(editable ? [tabsEl, toolBar(), groupBar] : []),
             h("div.model-stage", {}, canvas)),
           side));
 
@@ -991,6 +1064,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let press: { x: number; y: number } | null = null;
         canvas.addEventListener("mousedown", (e) => {
           canvas.focus();
+          const gi = activeInst();
+          if (gi && e.button === 0 && gi.pointerDown?.({ ground: groundAt(e), event: e, down: false })) {
+            e.preventDefault();
+            groupDrag = true;
+            return;
+          }
           if (e.button === 0 && tool !== "select") {
             e.preventDefault();
             startStroke(e);
@@ -1023,6 +1102,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           press = null;
         });
         canvas.addEventListener("mousemove", (e) => {
+          activeInst()?.pointerMove?.({ ground: groundAt(e), event: e, down: groupDrag });
+          if (groupDrag) return;
           if (objDrag) {
             const p = groundAt(e);
             if (p) {
@@ -1045,13 +1126,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             applyAt(p);
           }
         });
-        canvas.addEventListener("mouseleave", () => { if (!stroke) showBrush(null); });
+        canvas.addEventListener("mouseleave", () => { if (!stroke) showBrush(null); if (!groupDrag) activeInst()?.pointerLeave?.(); });
         canvas.addEventListener("mouseup", (e) => {
           if (e.button === 0 && press && !box?.shown) pickAt(e);
           press = null;
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
+          if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (placing) setPlacing(null); else clearSelection(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
@@ -1083,7 +1165,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           redraw();
         };
-        const onUp = () => {
+        const onUp = (e: MouseEvent) => {
+          if (groupDrag) {
+            groupDrag = false;
+            activeInst()?.pointerUp?.({ ground: groundAt(e), event: e, down: false });
+            return;
+          }
           drag = null;
           endStroke();
           endScatter();
@@ -1133,6 +1220,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The pathing map follows terrain and doodads.
             if (cfg<boolean>("pathing.regenerate")) try {
               const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf, cfg<number>("pathing.deepWater"));
+              filterPathing(wpm);
               await w3.workspace.writeBytes("map/war3map.wpm", wpm);
               if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
             } catch (e) {
@@ -1172,9 +1260,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             savedW3e = w3e;
             savedDoodads = structuredClone(doodads);
+            for (const g of groupInsts.values()) {
+              await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
+            }
           } : undefined,
           focus: () => canvas.focus(),
           dispose: () => {
+            stopGroups();
+            for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);

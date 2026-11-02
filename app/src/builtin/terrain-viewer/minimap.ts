@@ -4,7 +4,7 @@
 // constants were fitted against 61 sample maps (mean colour error ≈ 15/255
 // per channel, against the JPEG-compressed originals).
 
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 export type Rgb = [number, number, number];
 

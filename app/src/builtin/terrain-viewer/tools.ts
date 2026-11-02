@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
 // painting, applied to the corners inside a circular brush, with undo.
 
-import { groundHeight, setGroundHeight, setLayer, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
+import { groundHeight, setGroundHeight, setLayer, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
 /** Cliff layer up/down; water: shallow (one layer down), deep (two), dry. */

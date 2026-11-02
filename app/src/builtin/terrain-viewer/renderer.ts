@@ -4,7 +4,7 @@
 
 import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Placed } from "./objects";
-import { heightAt, rampLift, type Terrain } from "./w3e";
+import { heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -50,6 +50,17 @@ void main() { vColor = aColor; gl_Position = uViewProj * vec4(aPos, 1.0); gl_Poi
 const COLOR_FS = `#version 300 es
 precision mediump float; in vec4 vColor; out vec4 outColor;
 void main() { outColor = vColor; }`;
+
+// Ground overlay: a texture spread over the map (one texel per 32×32 pathing
+// cell), e.g. the pathing editor's view.
+const OVERLAY_VS = `#version 300 es
+in vec3 aPos;
+uniform mat4 uViewProj; uniform vec4 uRect;
+out vec2 vUV;
+void main() { vUV = (aPos.xy - uRect.xy) / uRect.zw; gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+const OVERLAY_FS = `#version 300 es
+precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
+void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; }`;
 
 /** A ground-following circle (selection, brush outline). */
 export interface Ring {
@@ -116,6 +127,8 @@ export class TerrainRenderer {
   private textures: ({ tex: WebGLTexture; extended: boolean } | null)[];
   private placeholder: WebGLTexture;
   private water: Mesh;
+  private overlayProg: WebGLProgram | null = null;
+  private overlay: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
   private wire: Mesh;
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
@@ -193,6 +206,7 @@ export class TerrainRenderer {
     for (const m of [this.water, this.wire]) gl.deleteVertexArray(m.vao);
     this.water = this.buildWater();
     this.wire = this.buildWire();
+    if (this.overlay) this.overlay = { ...this.overlayMesh(), tex: this.overlay.tex };
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
   }
@@ -322,6 +336,57 @@ export class TerrainRenderer {
       if (y + 1 < t.height) out.push(...p(x, y), ...p(x, y + 1));
     }
     return this.colorMesh(out);
+  }
+
+  /** Shows an RGBA texture over the ground (`width` × `height` texels, rows from
+   *  the south, covering the whole map); null removes it. Re-calling with the
+   *  same size only re-uploads the pixels. */
+  setGroundOverlay(rgba: Uint8Array | null, width = 0, height = 0) {
+    const gl = this.gl;
+    if (!rgba) {
+      if (this.overlay) { gl.deleteVertexArray(this.overlay.vao); gl.deleteTexture(this.overlay.tex); }
+      this.overlay = null;
+      return;
+    }
+    this.overlayProg ??= compile(gl, OVERLAY_VS, OVERLAY_FS);
+    if (!this.overlay) {
+      const tex = gl.createTexture()!;
+      this.overlay = { ...this.overlayMesh(), tex };
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.overlay.tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+
+  /** Ground-hugging tile quads for the overlay (positions only). */
+  private overlayMesh(): { vao: WebGLVertexArrayObject; count: number } {
+    const t = this.terrain, gl = this.gl, prog = this.overlayProg!;
+    const pos = new Float32Array(t.width * t.height * 3);
+    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+      const o = (y * t.width + x) * 3;
+      pos[o] = t.offsetX + x * 128; pos[o + 1] = t.offsetY + y * 128; pos[o + 2] = this.corner(x, y).height + rampLift(t, x, y) + 2;
+    }
+    const idx = new Uint32Array((t.width - 1) * (t.height - 1) * 6);
+    let k = 0;
+    for (let y = 0; y < t.height - 1; y++) for (let x = 0; x < t.width - 1; x++) {
+      const a = y * t.width + x, b = a + 1, c = a + t.width, d = c + 1;
+      idx.set([a, b, d, a, d, c], k); k += 6;
+    }
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, "aPos");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 12, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    return { vao, count: idx.length };
   }
 
   /** Replaces a named group of point markers (e.g. "doodads", "units"). */
@@ -471,6 +536,22 @@ export class TerrainRenderer {
       gl.bindTexture(gl.TEXTURE_2D, t?.tex ?? this.placeholder);
       gl.uniform1f(gl.getUniformLocation(this.groundProg, "uExtended"), t?.extended ? 1 : 0);
       gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.offset * 4);
+    }
+
+    if (this.overlay && this.overlayProg) {
+      const t = this.terrain;
+      gl.useProgram(this.overlayProg);
+      gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
+      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.overlay.tex);
+      gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.bindVertexArray(this.overlay.vao);
+      gl.drawElements(gl.TRIANGLES, this.overlay.count, gl.UNSIGNED_INT, 0);
+      gl.depthMask(true);
     }
 
     // Placed objects: every opaque layer, then every blended one.

@@ -9,7 +9,7 @@
 
 import type { Mat4 } from "../../lib/model/renderer";
 import type { ModelRequest } from "./objects";
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 export interface CliffType {
   cliffID: string;

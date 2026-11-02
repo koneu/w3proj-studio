@@ -8,7 +8,7 @@ import { parseSlk } from "../../lib/formats/text";
 import { MINIMAP_SIZE, renderMinimap, type MinimapParams, type Rgb } from "./minimap";
 import type { Placed } from "./objects";
 import { pathOverrides, readMapJson } from "./pathmap";
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 /** Average colour of the first texture cell, by tile id (textures are shared). */
 const tileColors = new Map<string, Promise<Rgb>>();

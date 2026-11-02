@@ -5,9 +5,9 @@
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseSlk } from "../../lib/formats/text";
-import { generatePathing, type PathingStamp, type TileRule } from "./pathing";
+import { generatePathing, type PathingStamp, type TileRule } from "../../lib/terrain/pathing";
 import type { Placed } from "./objects";
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 /** A map file as the format engine's JSON: `map/<name>.json` if the project
  *  keeps it that way, else decoded from the raw file. */

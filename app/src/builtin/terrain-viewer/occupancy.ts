@@ -3,10 +3,10 @@
 // edge) and every placed object's footprint, the walk-blocking (red) part of
 // its pathing texture or, for units, a circle of its collision size.
 
-import { forEachStampCell, generatePathing, NO_WALK } from "./pathing";
+import { forEachStampCell, generatePathing, NO_WALK } from "../../lib/terrain/pathing";
 import type { PathImage, PathingData } from "./pathmap";
 import type { Placed } from "./objects";
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 /** Cells an object blocks, as an image (rows top to bottom), placed like a
  *  pathing texture: centred on the object, turned with its facing. */

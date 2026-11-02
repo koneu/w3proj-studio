@@ -10,7 +10,7 @@
 // (`updateShadows`), so everything the World Editor computed is kept.
 
 import type { Model } from "../../lib/model/mdx";
-import type { Terrain } from "./w3e";
+import type { Terrain } from "../../lib/terrain/w3e";
 
 /** Direction toward the sun: azimuth (degrees, counter-clockwise from +x)
  *  and elevation above the horizon. */

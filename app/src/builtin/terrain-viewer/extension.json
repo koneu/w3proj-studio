@@ -9,6 +9,7 @@
     "views": [{ "id": "w3.terrain.overview", "title": "Terrain", "container": "terrain" }],
     "editors": [{ "id": "w3.terrainViewer", "title": "Terrain Viewer", "patterns": ["*.w3e"] }],
     "commands": [{ "id": "w3.terrain.open", "title": "Open Terrain", "category": "Terrain", "keybinding": "f3" }],
+    "services": [{ "id": "w3.terrain", "description": "Tool groups (tabs) in the terrain editor: registerToolGroup." }],
     "configuration": {
       "title": "Terrain",
       "properties": {
