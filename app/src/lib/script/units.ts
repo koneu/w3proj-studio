@@ -21,6 +21,8 @@ export interface UnitsInput {
   units: UnitJson[];
   /** What an object id is (custom ids by their base and the map's changes). */
   kindOf: (id: string) => "building" | "unit" | "item" | "sloc" | undefined;
+  /** war3map.w3i editorVersion: newer editors write more (item colours). */
+  editorVersion?: number;
   /** Generated globals the triggers use (gg_unit_…). */
   referenced: Set<string>;
   /** Region global for a waygate target (region creation number). */
@@ -84,6 +86,32 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
       `    call TriggerAddAction( t, function Unit${String(i.units.indexOf(u)).padStart(6, "0")}_DropItems )`);
   }
   return lines;
+}
+
+/** The "Items" section body: items placed on the map (war3mapUnits.doo), or "". */
+export function itemsSection(i: UnitsInput): string {
+  // Items are created by type id (character codes), then by creation number (not exact for
+  // every map, see OPEN_POINTS.md).
+  const items = i.units.filter((u) => i.kindOf(u.id) === "item")
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.editorId - b.editorId));
+  if (!items.length) return "";
+  const global = (it: UnitJson) => `gg_item_${it.id}_${String(it.editorId).padStart(4, "0")}`;
+  // Editors from 7000 on colour every item (unset: 0), from 7003 with BlzSetItemColor.
+  const ev = i.editorVersion ?? 0;
+  const colorFn = ev >= 7003 ? "BlzSetItemColor" : ev >= 7000 ? "SetItemColor" : null;
+  const colorOf = (it: UnitJson) => (colorFn ? Math.max(0, it.color) : it.color);
+  // An item needs a variable when a trigger refers to it or it gets a colour; else it's a plain call.
+  const usesLocal = items.some((it) => !i.referenced.has(global(it)) && colorOf(it) !== -1);
+  const lines = ["function CreateAllItems takes nothing returns nothing", "    local integer itemID", ...(usesLocal ? ["    local item i"] : []), ""];
+  for (const it of items) {
+    const g = global(it);
+    const v = i.referenced.has(g) ? g : colorOf(it) !== -1 ? "i" : null;
+    const create = `BlzCreateItemWithSkin( '${it.id}', ${r1(it.position[0])}, ${r1(it.position[1])}, '${it.skinId ?? it.id}' )`;
+    lines.push(v ? `    set ${v} = ${create}` : `    call ${create}`);
+    if (v && colorOf(it) !== -1) lines.push(`    call ${colorFn ?? "BlzSetItemColor"}( ${v}, ConvertPlayerColor(${colorOf(it)}) )`);
+  }
+  lines.push("endfunction", "");
+  return lines.join(EOL);
 }
 
 function creator(name: string, player: string, lines: string[]): string {

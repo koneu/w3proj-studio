@@ -9,7 +9,8 @@ import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
-import { unitsSection, type UnitJson } from "./units";
+import { itemsSection, unitsSection, type UnitJson } from "./units";
+import { techTreeSection, upgradesSection, type TechJson, type UpgradeJson } from "./techs";
 
 // ---- inputs (the format engine's JSON) ----------------------------------------------
 
@@ -50,7 +51,7 @@ export interface ScriptInput {
   /** "TRIGSTR_n" → text, for the header. */
   string?: (value: string) => string;
   /** What an object id is (custom ids by their base and the map's changes). */
-  kindOf?: (id: string) => "building" | "unit" | "item" | "sloc" | undefined;
+  kindOf?: (id: string) => "building" | "unit" | "item" | "sloc" | "ability" | undefined;
   /** The orders that turn an ability's autocast on and off. */
   autocastOrders?: (ability: string) => { on: string; off: string } | undefined;
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
@@ -295,20 +296,35 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Sound Assets", sounds(i)],
     ["Regions", regions(i)],
     ["Cameras", cameras(i)],
+    ["Items", placedItems(i)],
     ["Unit Creation", unitCreation(i)],
+    ...techSections(i),
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom }) : ""],
     ...setupSections(i),
   ]);
+}
+
+function placedItems(i: ScriptInput): string {
+  if (!i.kindOf || !i.units?.length) return "";
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i) });
+  return body ? banner("Items") + body : "";
 }
 
 function unitCreation(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
   const regions = i.regions ?? [];
   const body = unitsSection({
-    units: i.units as unknown as UnitJson[], kindOf: i.kindOf, referenced: referencedGlobals(i), autocastOrders: i.autocastOrders,
+    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i), autocastOrders: i.autocastOrders,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });
   return body ? banner("Unit Creation") + body : "";
+}
+
+function techSections(i: ScriptInput): [string, string][] {
+  const ids = ((i.info.players as { id: number }[] | undefined) ?? []).map((p) => p.id).sort((a, b) => a - b);
+  const up = upgradesSection(ids, (i.info.upgrades as UpgradeJson[] | undefined) ?? []);
+  const tech = techTreeSection(ids, (i.info.techs as TechJson[] | undefined) ?? [], (id) => i.kindOf?.(id) === "ability");
+  return [["Upgrades", up ? banner("Upgrades") + up : ""], ["TechTree", tech ? banner("TechTree") + tech : ""]];
 }
 
 function setupSections(i: ScriptInput): [string, string][] {

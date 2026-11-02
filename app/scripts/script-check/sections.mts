@@ -23,6 +23,7 @@ const balance = parseSlk(read("UnitBalance.slk"));
 const buildings = new Set(balance.filter((r: any) => r.isbldg === "1").map((r: any) => r.unitBalanceID));
 const unitIds = new Set(balance.map((r: any) => r.unitBalanceID));
 const itemIds = new Set(parseSlk(read("ItemData.slk")).map((r: any) => r.itemID));
+const abilityIds = new Set(parseSlk(read("AbilityData.slk")).map((r: any) => r.alias));
 const orders = new Map<string, { on: string; off: string }>();
 for (const f of readdirSync("abil")) for (const [id, sec] of parseIni(read("abil/" + f))) { const on = sec.get("orderon"), off = sec.get("orderoff"); if (on && off && !orders.has(id)) orders.set(id, { on, off }); }
 
@@ -51,9 +52,11 @@ for (const m of readdirSync("ws")) {
       customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
     }
   }
+  const customAbilities = new Set<string>((json(d, "war3map.w3a")?.custom ?? []).map((o: any) => o.id));
   const customItems = new Set<string>((json(d, "war3map.w3t")?.custom ?? []).map((o: any) => o.id));
   const kindOf = (id: string): any => {
     if (id === "sloc") return "sloc";
+    if (abilityIds.has(id) || customAbilities.has(id)) return "ability";
     if (itemIds.has(id) || customItems.has(id)) return "item";
     const c = customUnits.get(id);
     if (c) return (c.bldg ?? buildings.has(c.base)) ? "building" : "unit";
