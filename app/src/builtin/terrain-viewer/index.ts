@@ -44,9 +44,17 @@ async function customBases(w3: W3Api): Promise<Map<string, string>> {
 
 /** Ground tile id → texture path, from TerrainArt\Terrain.slk. */
 async function tilePaths(w3: W3Api): Promise<Map<string, string>> {
-  const rows = parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"));
-  return new Map(rows.filter((r) => r.tileID).map((r) => [r.tileID, `${r.dir}\\${r.file}.blp`]));
+  return new Map([...(await tileCatalog(w3))].map(([id, t]) => [id, t.path]));
 }
+
+/** Every ground tile type the game knows: texture path and a readable name. */
+async function tileCatalog(w3: W3Api): Promise<Map<string, { path: string; name: string }>> {
+  const rows = parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"));
+  return new Map(rows.filter((r) => r.tileID).map((r) => [r.tileID, { path: `${r.dir}\\${r.file}.blp`, name: r.comment || r.file }]));
+}
+
+/** Maps hold at most this many ground tile types (World Editor limit). */
+const MAX_GROUND_TILES = 16;
 
 /** A game file, or the map's imported replacement of it. */
 async function readFile(w3: W3Api, doc: EditorDocument, path: string): Promise<Uint8Array> {
@@ -138,6 +146,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
         const editable = !doc.readOnly;
         let tool: Tool = "select", size = 2, strength = 16, paintTex = 0;
+        /** Tile type chosen for painting (may not be in the map yet). */
+        let paintTile = terrain.groundTiles[0] ?? "";
+        let refreshPalette = () => {};
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
         /** Undo history; `at` edits are applied, `savedAt` matches the files. */
@@ -181,9 +192,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rect = canvas.getBoundingClientRect();
           return renderer.pickGround(renderer.ray(e.clientX - rect.left, e.clientY - rect.top));
         };
-        const startStroke = (e: MouseEvent) => {
+        const startStroke = async (e: MouseEvent) => {
           const p = groundAt(e);
           if (!p) return;
+          if (tool === "paint") {
+            const i = await ensureTile(paintTile);
+            if (i === null) return;
+            paintTex = i;
+          }
           const c = terrain.corners[Math.round((p[1] - terrain.offsetY) / 128) * terrain.width + Math.round((p[0] - terrain.offsetX) / 128)];
           // Cliff tools step one level from the start point; water goes one or
           // two levels below it, with the surface at its original height.
@@ -234,20 +250,50 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           row.firstElementChild!.className = `model-dot ${cls}`;
           if (title) row.title = title;
         };
-        tilePaths(w3).then((paths) => {
-          texList.replaceChildren(...terrain.groundTiles.map((id, i) => {
-            const path = paths.get(id);
-            const row = h("div.model-row", { title: path ?? id }, h("span.model-dot.pending", {}, "●"), h("span", {}, `${id} `), h("small.muted", {}, path?.split("\\").pop() ?? "unknown tile"));
-            if (!path) status(row, "missing");
-            else readGroundTexture(w3, doc, path).then(({ buf, name }) => {
-              renderer.setGroundTexture(i, decodeImage(buf, name).mip(0));
-              row.title = name;
-              status(row, "ok");
-              redraw();
-            }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`));
-            return row;
-          }));
-        }).catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
+        const texHeading = h("h4", {}, `Ground textures (${terrain.groundTiles.length})`);
+        const groundFacts = h("div");
+        /** Adds tile i's row to the side list and loads its texture. */
+        const loadTile = (i: number, paths: Map<string, string>) => {
+          const id = terrain.groundTiles[i], path = paths.get(id);
+          const row = h("div.model-row", { title: path ?? id }, h("span.model-dot.pending", {}, "●"), h("span", {}, `${id} `), h("small.muted", {}, path?.split("\\").pop() ?? "unknown tile"));
+          texList.append(row);
+          texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
+          groundFacts.textContent = `${terrain.groundTiles.length} ground · ${terrain.cliffTiles.length} cliff textures`;
+          if (!path) status(row, "missing");
+          else readGroundTexture(w3, doc, path).then(({ buf, name }) => {
+            renderer.setGroundTexture(i, decodeImage(buf, name).mip(0));
+            row.title = name;
+            status(row, "ok");
+            redraw();
+          }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`));
+        };
+        tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
+          .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
+        /** Index of a ground tile type, adding it to the map's list if needed
+         *  (null when the list is full). */
+        const ensureTile = async (id: string): Promise<number | null> => {
+          const have = terrain.groundTiles.indexOf(id);
+          if (have >= 0) return have;
+          if (terrain.groundTiles.length >= MAX_GROUND_TILES) {
+            w3.window.showWarning(`This map already uses ${MAX_GROUND_TILES} ground tile types, the most a map can have.`);
+            return null;
+          }
+          terrain.groundTiles.push(id);
+          // The tile list no longer matches the tileset's default.
+          terrain.customTilesets = true;
+          terrain.customTilesetsRaw = 1;
+          // A tile with its own cliff type adds that type (cliff indices follow the tile order).
+          if (cliffData) {
+            const ct = [...cliffData.types.values()].find((c) => c.groundTile === id);
+            if (ct && !terrain.cliffTiles.includes(ct.cliffID)) terrain.cliffTiles.push(ct.cliffID);
+          }
+          const added = terrain.groundTiles.length - 1;
+          // Load in the background so the stroke starts right away.
+          void tilePaths(w3).then((paths) => loadTile(added, paths));
+          refreshPalette();
+          minimapStale = true;
+          return terrain.groundTiles.length - 1;
+        };
 
         const markerToggle = (name: string, label: string, count: number) => {
           const box = h("input", { type: "checkbox", checked: !renderer.hiddenGroups.has(name), onchange: () => {
@@ -539,10 +585,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("h3", {}, TILESETS[terrain.tileset] ?? `Tileset ${terrain.tileset}`),
           h("div.model-facts", {},
             h("div", {}, `w3e v${terrain.version} · ${tiles} tiles`),
-            h("div", {}, `${terrain.groundTiles.length} ground · ${terrain.cliffTiles.length} cliff textures`),
+            groundFacts,
             cliffInfo, texInfo,
           ),
-          h("h4", {}, `Ground textures (${terrain.groundTiles.length})`), texList,
+          texHeading, texList,
           h("h4", {}, "Selection"), selInfo,
           h("h4", {}, "Placed objects"), markerList, problems,
         );
@@ -551,13 +597,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const setTool = (t: Tool) => setToolRef(t);
         function toolBar() {
           const buttons = new Map<Tool, HTMLButtonElement>();
-          const texSelect = h("select", { title: "Ground texture to paint", onchange: () => { paintTex = Number(texSelect.value); } },
-            ...terrain.groundTiles.map((id, i) => h("option", { value: String(i) }, id)));
-          tilePaths(w3).then((paths) => terrain.groundTiles.forEach((id, i) => {
-            const o = texSelect.options[i];
-            const file = paths.get(id)?.split("\\").pop()?.replace(/\.blp$/i, "");
-            if (o && file) o.textContent = `${id} · ${file}`;
-          })).catch(() => { /* ids only */ });
+          const texSelect = h("select", { title: "Ground texture to paint (other tiles are added to the map)", onchange: () => { paintTile = texSelect.value; } });
+          const fillPalette = async () => {
+            const catalog = await tileCatalog(w3).catch(() => new Map<string, { path: string; name: string }>());
+            const opt = (id: string) => h("option", { value: id, selected: id === paintTile }, `${catalog.get(id)?.name ?? id} (${id})`);
+            const inMap = new Set(terrain.groundTiles);
+            const byTileset = new Map<string, string[]>();
+            for (const id of catalog.keys()) if (!inMap.has(id)) byTileset.set(id[0], [...(byTileset.get(id[0]) ?? []), id]);
+            const own = byTileset.get(terrain.tileset) ?? [];
+            byTileset.delete(terrain.tileset);
+            texSelect.replaceChildren(
+              h("optgroup", { label: `This map (${terrain.groundTiles.length}/${MAX_GROUND_TILES})` }, ...terrain.groundTiles.map(opt)),
+              ...(own.length ? [h("optgroup", { label: `${TILESETS[terrain.tileset] ?? terrain.tileset}: adds to the map` }, ...own.map(opt))] : []),
+              ...[...byTileset].sort(([x], [y]) => (TILESETS[x] ?? x).localeCompare(TILESETS[y] ?? y))
+                .map(([ts, ids]) => h("optgroup", { label: `${TILESETS[ts] ?? ts}: adds to the map` }, ...ids.map(opt))),
+            );
+          };
+          void fillPalette();
+          refreshPalette = () => void fillPalette();
           const texWrap = h("span.terrain-tool-opt", {}, texSelect);
           const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
             h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
