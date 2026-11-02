@@ -7,7 +7,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
-import { planCliffs, type CliffType } from "./cliffs";
+import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import type { Rgb } from "./minimap";
 import { buildMinimap } from "./minimapgen";
@@ -211,13 +211,73 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           texList.append(row);
           texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
           groundFacts.textContent = `${terrain.groundTiles.length} ground · ${terrain.cliffTiles.length} cliff textures`;
-          if (!path) status(row, "missing");
-          else readGroundTexture(w3, doc, path).then(({ buf, name }) => {
-            renderer.setGroundTexture(i, decodeImage(buf, name).mip(0));
+          if (!path) { status(row, "missing"); return; }
+          let img = tileImages.get(id);
+          if (!img) {
+            img = readGroundTexture(w3, doc, path).then(({ buf, name }) => ({ img: decodeImage(buf, name).mip(0), name }));
+            tileImages.set(id, img);
+          }
+          img.then(({ img: mip, name }) => {
+            // The list may have changed meanwhile; only the current index gets it.
+            if (terrain.groundTiles[i] !== id) return;
+            renderer.setGroundTexture(i, mip);
             row.title = name;
             status(row, "ok");
             redraw();
           }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`));
+        };
+        /** Decoded ground textures by tile id. */
+        const tileImages = new Map<string, Promise<{ img: ReturnType<ReturnType<typeof decodeImage>["mip"]>; name: string }>>();
+        /** Rebuilds the side list and the renderer's textures after the tile list changed. */
+        const syncTileList = async () => {
+          texList.replaceChildren();
+          const paths = await tilePaths(w3);
+          terrain.groundTiles.forEach((_, i) => loadTile(i, paths));
+        };
+
+        /** Changes the map's ground tile list: `tiles` is the new list, `map`
+         *  gives each old index's new index. Corners and cliff types are
+         *  remapped; one undo step. */
+        const changeTileList = (tiles: string[], map: (oldIndex: number) => number) => {
+          const snap = () => ({
+            ground: [...terrain.groundTiles], cliffs: [...terrain.cliffTiles], custom: terrain.customTilesetsRaw,
+            tex: terrain.corners.map((c) => c.texture), ctex: terrain.corners.map((c) => c.cliffTexture),
+          });
+          const restore = (v: ReturnType<typeof snap>) => {
+            terrain.groundTiles = [...v.ground];
+            terrain.cliffTiles = [...v.cliffs];
+            terrain.customTilesetsRaw = v.custom;
+            terrain.customTilesets = v.custom !== 0;
+            terrain.corners.forEach((c, i) => { c.texture = v.tex[i]; c.cliffTexture = v.ctex[i]; });
+            void syncTileList();
+          };
+          const before = snap();
+          // Cliff types follow the ground tile order (see cliffs.ts).
+          const types = cliffData?.types ?? new Map<string, CliffType>();
+          const oldCliffs = cliffList(terrain, types);
+          terrain.groundTiles = [...tiles];
+          const newCliffs = cliffList(terrain, types);
+          for (const c of terrain.corners) {
+            c.texture = map(c.texture);
+            if (c.cliffTexture < 15 && oldCliffs.length) {
+              const type = oldCliffs[c.cliffTexture];
+              const ni = type ? newCliffs.indexOf(type) : -1;
+              // A removed tile's cliffs take the replacement's cliff type (or the first).
+              c.cliffTexture = ni >= 0 ? ni : Math.max(0, newCliffs.findIndex((t) => t.groundTile === tiles[c.texture]));
+            }
+          }
+          // Stored cliff list: the derived order first, then entries no tile uses.
+          const derived = newCliffs.map((t) => t.cliffID);
+          terrain.cliffTiles = [...derived, ...before.cliffs.filter((id) => !derived.includes(id) && !oldCliffs.some((t) => t.cliffID === id))];
+          terrain.customTilesets = true;
+          terrain.customTilesetsRaw = 1;
+          const after = snap();
+          pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: true, objects: false });
+          void syncTileList();
+          replanCliffs();
+          renderer.terrainChanged();
+          minimapStale = true;
+          redraw();
         };
         // The tileset's blight texture (UI\WorldEditData.txt, [TileSets]: name,texture).
         w3.game.readText("UI\\WorldEditData.txt").then(async (text) => {
@@ -831,6 +891,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           terrainChanged: () => { renderer.terrainChanged(); doc.setDirty(true); redraw(); },
           commitTerrain,
           ensureGroundTile: (id) => ensureTile(id),
+          groundTileUsage: () => {
+            const n = terrain.groundTiles.map(() => 0);
+            for (const c of terrain.corners) if (c.texture < n.length) n[c.texture]++;
+            return n;
+          },
+          moveGroundTile: (from, to) => {
+            const t = terrain.groundTiles;
+            if (from === to || from < 0 || to < 0 || from >= t.length || to >= t.length) return;
+            const order = t.map((_, i) => i);
+            order.splice(to, 0, order.splice(from, 1)[0]);
+            const inverse = new Map(order.map((old, nw) => [old, nw]));
+            changeTileList(order.map((i) => t[i]), (old) => inverse.get(old) ?? old);
+          },
+          removeGroundTile: (index, replacement) => {
+            const t = terrain.groundTiles;
+            if (index === replacement || index < 0 || index >= t.length || replacement < 0 || replacement >= t.length) return;
+            const tiles = t.filter((_, i) => i !== index);
+            const shift = (i: number) => (i > index ? i - 1 : i);
+            changeTileList(tiles, (old) => shift(old === index ? replacement : old));
+          },
           groundTileThumb: async (id) => {
             const path = (await tilePaths(w3)).get(id);
             return path ? tileThumb(path) : null;
@@ -1042,6 +1122,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (e.button === 0 && press && !box?.shown) pickAt(e);
           press = null;
         });
+        // Undo/redo anywhere in the editor (toolbars, panels), except while typing.
+        el.addEventListener("keydown", (e) => {
+          const t = e.target as HTMLElement;
+          if (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "range", "button"].includes((t as HTMLInputElement).type))) return;
+          if (!(e.ctrlKey || e.metaKey)) return;
+          if (e.key === "z" || e.key === "Z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+          else if (e.key === "y" || e.key === "Y") { e.preventDefault(); redo(); }
+        });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
@@ -1050,8 +1138,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
-          if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
-          if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
           const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
           if (!d) return;
           e.preventDefault();

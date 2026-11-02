@@ -94,6 +94,12 @@ export interface TerrainEditorHandle {
   commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): void;
   /** Index of a ground tile type in the map's list, adding it if needed (null when the list is full). */
   ensureGroundTile(id: string): Promise<number | null>;
+  /** Corners using each ground tile (by index). */
+  groundTileUsage(): number[];
+  /** Moves a tile in the map's list (later tiles are drawn over earlier ones at transitions); one undo step. */
+  moveGroundTile(from: number, to: number): void;
+  /** Removes a tile; its corners get `replacement` (an index in the current list); one undo step. */
+  removeGroundTile(index: number, replacement: number): void;
   /** Small thumbnail (data URL) of a ground tile type's texture. */
   groundTileThumb(id: string): Promise<string | null>;
   readonly objects: TerrainObjects;

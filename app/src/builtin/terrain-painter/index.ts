@@ -104,13 +104,53 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     );
   };
   void fillPalette();
-  const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect);
+
+  // ---- the map's tile list: order (drawing order at transitions) and removal ----------
+  const tilePanel = h("div.terrain-tilemgr", { hidden: true });
+  /** Index whose removal is being confirmed. */
+  let removing: number | null = null;
+  const renderTiles = async () => {
+    if (tilePanel.hidden) return;
+    const names = await tileNames(w3);
+    const usage = ed.groundTileUsage();
+    const total = usage.reduce((a, b) => a + b, 0) || 1;
+    const t = terrain.groundTiles;
+    tilePanel.replaceChildren(
+      h("div.muted", {}, "Draw order: tiles further down are drawn over the ones above them where they meet. Changes are one undo step each."),
+      ...t.map((id, i) => {
+        const img = h("img", { alt: id });
+        void ed.groundTileThumb(id).then((src) => { if (src) img.src = src; });
+        const label = `${names.get(id) ?? id} (${id})`;
+        if (removing === i) {
+          const others = t.map((o, j) => [o, j] as const).filter(([, j]) => j !== i);
+          const sel = h("select", {}, ...others.map(([o, j]) => h("option", { value: String(j) }, `${names.get(o) ?? o} (${o})`)));
+          return h("div.terrain-tilemgr-row.removing", {}, img, h("span", {}, `Remove ${label}: paint its ${usage[i].toLocaleString()} corners with`), sel,
+            h("button", { onclick: () => { removing = null; ed.removeGroundTile(i, Number(sel.value)); } }, "Remove"),
+            h("button", { onclick: () => { removing = null; void renderTiles(); } }, "Cancel"));
+        }
+        return h("div.terrain-tilemgr-row", {}, img,
+          h("span.terrain-tilemgr-name", {}, label),
+          h("span.muted", { title: `${usage[i].toLocaleString()} corners` }, `${((100 * usage[i]) / total).toFixed(1)}%`),
+          h("button", { title: "Move up (drawn earlier, under the others)", disabled: i === 0, onclick: () => ed.moveGroundTile(i, i - 1) }, "↑"),
+          h("button", { title: "Move down (drawn later, over the others)", disabled: i === t.length - 1, onclick: () => ed.moveGroundTile(i, i + 1) }, "↓"),
+          h("button", { title: "Remove from the map (its corners get another tile)", disabled: t.length < 2, onclick: () => { removing = i; void renderTiles(); } }, "✕"));
+      }),
+    );
+  };
+  const tilesButton = h("button", { title: "The map's ground tiles: drawing order and removal", onclick: () => {
+    tilePanel.hidden = !tilePanel.hidden;
+    tilesButton.classList.toggle("active", !tilePanel.hidden);
+    removing = null;
+    void renderTiles();
+  } }, "Tiles…");
+  const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect, tilesButton);
   const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
     h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
   const setTool = (t: Tool) => {
     tool = t;
     for (const [k, b] of buttons) b.classList.toggle("active", k === t);
     texWrap.hidden = t !== "paint";
+    if (t !== "paint") { tilePanel.hidden = true; tilesButton.classList.remove("active"); }
     strengthWrap.hidden = t !== "raise" && t !== "lower";
     ed.setBrush(null);
     ed.focus();
@@ -123,7 +163,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     }),
     h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
       h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
-    strengthWrap, texWrap,
+    strengthWrap, texWrap, tilePanel,
   );
   setTool("raise");
 
@@ -168,5 +208,13 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     },
     pointerUp() { endStroke(); },
     pointerLeave() { if (!stroke) ed.setBrush(null); },
+    changed(what) {
+      // Tile list edits (and their undo) change the palette and the panel.
+      if (!what.terrain) return;
+      if (paintTex >= terrain.groundTiles.length) paintTex = 0;
+      if (!terrain.groundTiles.includes(paintTile)) paintTile = terrain.groundTiles[0] ?? "";
+      void fillPalette();
+      void renderTiles();
+    },
   };
 }
