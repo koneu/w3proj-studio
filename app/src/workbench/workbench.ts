@@ -13,6 +13,9 @@ import { StatusBar } from "./statusbar";
 import { ViewService } from "./views";
 import { PROJECT_SETTINGS, SettingsService, WorkspaceService } from "./workspace";
 
+/** Shows the mouse pointer before a native dialog (see ui_show_cursor in the backend). */
+const showCursor = () => invoke("ui_show_cursor").catch(() => {});
+
 const TEXT_EXT = /\.(j|lua|ai|txt|wts|json|toml|fdf|toc|slk|md|csv|ini|xml|html|css|js|ts|gitignore|gitattributes)$/i;
 
 export class Workbench {
@@ -164,9 +167,9 @@ export class Workbench {
         showError: (m, ...a) => wb.notifications.show("error", m, a),
         quickPick: (items, opts) => wb.quickInput.pick(items, opts),
         inputBox: (opts) => wb.quickInput.ask(opts),
-        pickFile: async (opts) => (await openDialog({ title: opts?.title, filters: opts?.filters, multiple: false, directory: false })) as string | null,
-        pickFolder: async (opts) => (await openDialog({ title: opts?.title, directory: true, multiple: false })) as string | null,
-        pickSaveFile: async (opts) => (await saveDialog({ title: opts?.title, defaultPath: opts?.defaultPath, filters: opts?.filters })) ?? null,
+        pickFile: async (opts) => (await showCursor(), (await openDialog({ title: opts?.title, filters: opts?.filters, multiple: false, directory: false })) as string | null),
+        pickFolder: async (opts) => (await showCursor(), (await openDialog({ title: opts?.title, directory: true, multiple: false })) as string | null),
+        pickSaveFile: async (opts) => (await showCursor(), (await saveDialog({ title: opts?.title, defaultPath: opts?.defaultPath, filters: opts?.filters })) ?? null),
         withProgress: (title, task) => wb.progress.run(title, task),
       },
       statusBar: { add: (opts) => wb.statusBar.add(opts) },

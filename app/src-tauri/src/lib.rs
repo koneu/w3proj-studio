@@ -303,6 +303,36 @@ fn fs_read_bytes(path: String) -> CmdResult<tauri::ipc::Response> {
     Ok(tauri::ipc::Response::new(std::fs::read(&path).map_err(err)?))
 }
 
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    fn ShowCursor(show: i32) -> i32;
+}
+
+/// Makes the mouse pointer visible before a native dialog opens. With
+/// Windows' "hide pointer while typing", the web view hides it on a key
+/// press and only shows it again when the mouse moves over the page, which
+/// a dialog opened from the keyboard (command palette, shortcut) prevents.
+/// The display counter is shared with the dialog (same UI thread).
+#[tauri::command]
+fn ui_show_cursor(app: AppHandle) -> CmdResult<()> {
+    #[cfg(windows)]
+    app.run_on_main_thread(|| unsafe {
+        let mut count = ShowCursor(1);
+        while count < 0 {
+            count = ShowCursor(1);
+        }
+        // It was visible already: undo the extra increment.
+        if count > 0 {
+            ShowCursor(0);
+        }
+    })
+    .map_err(err)?;
+    #[cfg(not(windows))]
+    let _ = app;
+    Ok(())
+}
+
 #[tauri::command]
 fn fs_exists(path: String) -> bool {
     Path::new(&path).exists()
@@ -539,6 +569,7 @@ pub fn run() {
             project_files,
             project_unpack,
             project_create,
+            ui_show_cursor,
             project_pack,
             objects_canonicalize,
             codec_canonicalize,
