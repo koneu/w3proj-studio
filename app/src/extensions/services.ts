@@ -74,6 +74,8 @@ export interface TerrainEditorHandle {
   /** The terrain being edited (live; see lib/terrain/w3e). */
   readonly terrain: import("../lib/terrain/w3e").Terrain;
   readonly editable: boolean;
+  /** The editor element (for overlays such as pickers). */
+  readonly host: HTMLElement;
   redraw(): void;
   /** Adds an undo step (and marks the document modified). */
   pushEdit(e: { undo(): void; redo(): void; terrain: boolean; objects: boolean }): void;
@@ -84,4 +86,57 @@ export interface TerrainEditorHandle {
   /** The pathing map as generated from terrain and doodads; `filtered` applies the groups' filterPathing. */
   pathing(opts?: { filtered?: boolean }): Promise<{ cells: Uint8Array; width: number; height: number }>;
   focus(): void;
+  /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
+  terrainChanged(): void;
+  /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
+   *  the corners; objects standing on the changed `corners` (indices) follow the
+   *  ground; `cliffs` re-plans cliff and ramp models. */
+  commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): void;
+  /** Index of a ground tile type in the map's list, adding it if needed (null when the list is full). */
+  ensureGroundTile(id: string): Promise<number | null>;
+  /** Small thumbnail (data URL) of a ground tile type's texture. */
+  groundTileThumb(id: string): Promise<string | null>;
+  readonly objects: TerrainObjects;
+}
+
+/** A placed unit, item, doodad or destructable (the placement files' JSON entry). */
+export interface PlacedEntry {
+  id: string;
+  variation: number;
+  position: [number, number, number];
+  /** Radians. */
+  angle: number;
+  scale: [number, number, number];
+  player?: number;
+}
+
+export interface TerrainObjectType {
+  /** w3u, w3t, w3b or w3d. */
+  kind: string;
+  numVar: number;
+  /** Random scale range for new placements. */
+  randScale: boolean;
+  minScale: number;
+  maxScale: number;
+  /** Fixed facing in degrees, or null. */
+  fixedRot: number | null;
+}
+
+export interface TerrainObjects {
+  type(id: string): TerrainObjectType | null;
+  /** A new entry of `kind`/`id` (not yet on the map), or an error message. */
+  create(kind: string, id: string, at: { x: number; y: number; angle: number; player?: number }): PlacedEntry | string;
+  /** Puts created entries on the map / takes them off (no undo step; pair them in pushEdit). */
+  insert(entries: PlacedEntry[]): void;
+  remove(entries: PlacedEntry[]): void;
+  /** Footprints against blocked ground and placed objects (rebuilt after edits). */
+  occupancy(): Promise<TerrainOccupancy>;
+}
+
+export interface TerrainOccupancy {
+  /** Footprint size in pathing cells, or null when the type takes no room. */
+  footprint(kind: string, id: string): Promise<{ width: number; height: number } | null>;
+  fits(kind: string, id: string, x: number, y: number, angle: number): Promise<boolean>;
+  /** Marks the footprint as taken (for several placements in one go). */
+  mark(kind: string, id: string, x: number, y: number, angle: number): Promise<void>;
 }

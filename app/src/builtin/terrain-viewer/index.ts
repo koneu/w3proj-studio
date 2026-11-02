@@ -1,4 +1,5 @@
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
+import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry } from "./toolhost";
 import { h } from "../../workbench/dom";
@@ -11,24 +12,17 @@ import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import type { Rgb } from "./minimap";
 import { buildMinimap } from "./minimapgen";
 import { Occupancy } from "./occupancy";
-import { toolIcon } from "./toolicons";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { applyHeight, applyLayer, paintBlight, paintTexture, Stroke, toggleRamp, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
-import { groundHeight, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 
 const PATH = "map/war3map.w3e";
 /** TEAM_COLORS index used for neutral players. */
 const NEUTRAL = 20;
 
-const TILESETS: Record<string, string> = {
-  A: "Ashenvale", B: "Barrens", C: "Felwood", D: "Dungeon", F: "Lordaeron Fall", G: "Underground",
-  I: "Icecrown Glacier", J: "Dalaran Ruins", K: "Black Citadel", L: "Lordaeron Summer", N: "Northrend",
-  O: "Outland", Q: "Village Fall", V: "Village", W: "Lordaeron Winter", X: "Dalaran", Y: "Cityscape", Z: "Sunken Ruins",
-};
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
 
@@ -146,14 +140,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const redraw = () => { dirty = true; };
 
         // ---- editing ------------------------------------------------------------------
-        type Tool = "select" | HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
-        const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffDown", "shallow", "deep", "dry"];
-        const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
         const editable = !doc.readOnly;
-        let tool: Tool = "select", size = 2, strength = 16, paintTex = 0;
-        /** Tile type chosen for painting (may not be in the map yet). */
-        let paintTile = terrain.groundTiles[0] ?? "";
-        let refreshPalette = () => {};
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
         /** Undo history; `at` edits are applied, `savedAt` matches the files. */
@@ -184,86 +171,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           at = history.length;
           doc.setDirty(at !== savedAt);
         };
-        let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
-        /** One brush application at a ground point. */
-        const applyAt = (p: Vec3) => {
-          if (!stroke) return;
-          const brush = { x: p[0], y: p[1], radius: size };
-          const did = tool === "paint"
-            ? paintTexture(terrain, brush, paintTex, stroke.s)
-            : tool === "blight" || tool === "unblight"
-            ? paintBlight(terrain, brush, tool === "blight", stroke.s)
-            : isLayerTool(tool)
-            ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
-            : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
-          if (did) {
-            renderer.terrainChanged();
-            doc.setDirty(true);
-            redraw();
-          }
-        };
         const groundAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
           return renderer.pickGround(renderer.ray(e.clientX - rect.left, e.clientY - rect.top));
         };
-        const startStroke = async (e: MouseEvent) => {
-          const p = groundAt(e);
-          if (!p) return;
-          if (tool === "ramp") {
-            const s = new Stroke("ramp");
-            const problem = toggleRamp(terrain, p[0], p[1], size, s);
-            if (problem) { w3.window.showWarning(problem); return; }
-            stroke = { s, target: 0, layer: { layer: 2 }, last: performance.now() };
-            endStroke();
-            return;
-          }
-          if (tool === "paint") {
-            const i = await ensureTile(paintTile);
-            if (i === null) return;
-            paintTex = i;
-          }
-          const c = terrain.corners[Math.round((p[1] - terrain.offsetY) / 128) * terrain.width + Math.round((p[0] - terrain.offsetX) / 128)];
-          // Cliff tools step one level from the start point; water goes one or
-          // two levels below it, with the surface at its original height.
-          const step = tool === "cliffUp" ? 1 : tool === "cliffDown" ? -1 : tool === "shallow" ? -1 : tool === "deep" ? -2 : 0;
-          const layer: LayerTarget = c
-            ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - 8) }
-            : { layer: 2 };
-          stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
-          applyAt(p);
-        };
-        const endStroke = () => {
-          if (!stroke) return;
-          const s = stroke.s;
-          if (s.finish(terrain)) {
-            // Objects on the edited ground follow it (doodads with a fixed
-            // height, flag 4, keep theirs).
-            const follow = groundFollowers(s.corners());
-            const setZ = (z: number[]) => follow.forEach((p, i) => { p.position = [p.position[0], p.position[1], z[i]]; });
-            const zBefore = follow.map((p) => p.position[2]);
-            const zAfter = follow.map((p) => heightAt(terrain, p.position[0], p.position[1]));
-            const moved = zAfter.some((z, i) => Math.abs(z - zBefore[i]) > 0.01);
-            pushEdit({
-              undo: () => { s.undo(terrain); if (moved) setZ(zBefore); },
-              redo: () => { s.redo(terrain); if (moved) setZ(zAfter); },
-              terrain: true, objects: moved,
-            });
-            if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); }
-            if (isLayerTool(s.label as Tool) || s.label === "ramp") { replanCliffs(); renderer.terrainChanged(); redraw(); }
-          }
-          doc.setDirty(at !== savedAt);
-          stroke = null;
-        };
-        const BRUSH_COLORS: Record<Tool, Vec3> = {
-          select: [0, 0, 0], raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
-          cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150], ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160],
-        };
-        const showBrush = (e: MouseEvent | null) => {
-          const scattering = tool === "select" && placing !== null && scatter;
-          const p = e && (tool !== "select" || scattering) ? groundAt(e) : null;
-          renderer.setBrush(p ? { x: p[0], y: p[1], r: size * 128, rgb: scattering ? [140, 230, 140] : BRUSH_COLORS[tool] } : null);
+        /** A finished terrain stroke as one undo step; objects on the edited
+         *  ground follow it (doodads with a fixed height, flag 4, keep theirs). */
+        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }) => {
+          const follow = groundFollowers(st.corners);
+          const setZ = (z: number[]) => follow.forEach((p, i) => { p.position = [p.position[0], p.position[1], z[i]]; });
+          const zBefore = follow.map((p) => p.position[2]);
+          const zAfter = follow.map((p) => heightAt(terrain, p.position[0], p.position[1]));
+          const moved = zAfter.some((z, i) => Math.abs(z - zBefore[i]) > 0.01);
+          pushEdit({
+            undo: () => { st.undo(); if (moved) setZ(zBefore); },
+            redo: () => { st.redo(); if (moved) setZ(zAfter); },
+            terrain: true, objects: moved,
+          });
+          if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); }
+          if (st.cliffs) replanCliffs();
+          renderer.terrainChanged();
           redraw();
-          return p;
         };
 
         // ---- side panel ---------------------------------------------------------
@@ -341,7 +269,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const added = terrain.groundTiles.length - 1;
           // Load in the background so the stroke starts right away.
           void tilePaths(w3).then((paths) => loadTile(added, paths));
-          refreshPalette();
           minimapStale = true;
           return terrain.groundTiles.length - 1;
         };
@@ -528,32 +455,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const e of entries) setPlacement(e, [...e.position], e.angle + (deg * Math.PI) / 180);
           moveEdits(entries, before);
         };
-        /** Type chosen with "Place…"; each click on the ground places one. */
-        let placing: { kind: string; id: string; name: string } | null = null;
-        /** Owner of placed units (kept between placements). */
-        let placeOwner = 0;
-        /** Scatter mode: each click fills the brush with the chosen object. */
-        let scatter = false;
-        const placeHint = h("span.terrain-place-hint");
-        const setPlacing = (p: typeof placing) => {
-          placing = p;
-          if (!p) { placeHint.replaceChildren(); showBrush(null); return; }
-          const owner = h("select", { title: "Owner of placed units", onchange: () => { placeOwner = Number(owner.value); canvas.focus(); } },
-            ...Array.from({ length: 28 }, (_, i) => h("option", { value: String(i), selected: i === placeOwner }, ownerName(i))));
-          const toggle = (label: string, title: string, get: () => boolean, set: (v: boolean) => void) => {
-            const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); canvas.focus(); } });
-            return h("label.terrain-place-opt", { title }, box, ` ${label}`);
-          };
-          placeHint.replaceChildren(`Placing ${p.name} (${p.id}): click the ground · Esc to stop`, ...(p.kind === "w3u" ? [" · for ", owner] : []),
-            toggle("Scatter", "Click or drag to fill the brush (Size) with this object, spaced by its footprint, with random variation, facing and scale",
-              () => scatter, (v) => { scatter = v; }),
-            h("label.terrain-place-opt", { title: "Scatter density: 100% packs objects as close as their footprints allow (setting terrain.placement.scatterDensity)" }, "Density ",
-              h("input", { type: "range", min: "10", max: "100", value: String(Math.round((w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1) * 100)),
-                onchange: (e: Event) => { void w3.settings.set("terrain.placement.scatterDensity", Number((e.target as HTMLInputElement).value) / 100); canvas.focus(); } })),
-            toggle("Respect pathing", "Only place where the object's footprint is free (no cliffs, deep water or other objects); setting terrain.placement.respectPathing",
-              () => w3.settings.get<boolean>("terrain.placement.respectPathing"), (v) => void w3.settings.set("terrain.placement.respectPathing", v)));
-        };
-
         /** Blocked ground and object footprints, built when placing needs it
          *  and dropped after any edit. */
         let occupancyPromise: Promise<Occupancy> | null = null;
@@ -569,119 +470,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return Occupancy.build(terrain, await pathingData, placed);
           })();
           return occupancyPromise;
-        };
-
-        /** A scatter drag in progress: everything it placed becomes one undo step. */
-        let scatterStroke: { f: PlacedFile; entries: Placed[]; last: Vec3; queue: Promise<void> } | null = null;
-        const startScatter = (pos: Vec3) => {
-          if (!placing) return;
-          const f = placing.kind === "w3u" || placing.kind === "w3t" ? unitsFile : dooFile;
-          if (!f) { w3.window.showError(`This project has no ${placing.kind === "w3u" || placing.kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
-          scatterStroke = { f, entries: [], last: pos, queue: Promise.resolve() };
-          scatterStroke.queue = placeAt(pos, scatterStroke);
-        };
-        /** Fills again once the mouse moved half a brush radius. */
-        const continueScatter = (pos: Vec3) => {
-          const s = scatterStroke;
-          if (!s || Math.hypot(pos[0] - s.last[0], pos[1] - s.last[1]) < size * 64) return;
-          s.last = pos;
-          s.queue = s.queue.then(() => placeAt(pos, s));
-        };
-        const endScatter = () => {
-          const s = scatterStroke;
-          if (!s) return;
-          scatterStroke = null;
-          void s.queue.then(() => {
-            if (!s.entries.length) { if (placing) w3.window.showWarning(`No free room for ${placing.name} under the brush.`); return; }
-            const { f, entries } = s;
-            pushEdit({ undo: () => { for (const e of entries) f.list.splice(f.list.indexOf(e), 1); }, redo: () => { f.list.push(...entries); }, terrain: false, objects: true });
-          });
-        };
-
-        /** Places the chosen object at `pos`, or (scatter, with `stroke`) fills the brush there. */
-        const placeAt = async (pos: Vec3, stroke?: { entries: Placed[] }) => {
-          if (!placing) return;
-          const { kind, id } = placing;
-          const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
-          if (!f) { w3.window.showError(`This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`); return; }
-          const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
-          const respect = w3.settings.get<boolean>("terrain.placement.respectPathing");
-          const occ = respect || scatter ? await occupancy() : null;
-          const fp = occ ? await occ.footprint(id, kind) : null;
-          const deg = (d: number) => (d * Math.PI) / 180;
-          const facing = () => (skin?.fixedRot != null ? deg(skin.fixedRot) : scatter ? Math.random() * Math.PI * 2 : deg(270));
-
-          const spots: { x: number; y: number; angle: number }[] = [];
-          if (!stroke) {
-            const angle = facing();
-            if (respect && fp && !occ!.fits(fp, pos[0], pos[1], angle)) {
-              w3.window.showWarning(`No room for ${placing.name} here (its footprint overlaps blocked ground or another object). Turn off "Respect pathing" to place it anyway.`);
-              return;
-            }
-            spots.push({ x: pos[0], y: pos[1], angle });
-          } else {
-            // A jittered grid over the brush, spaced by the footprint (wider at lower density).
-            const density = Math.min(1, Math.max(0.05, w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1));
-            const spacing = Math.max(64, fp ? Math.max(fp.width, fp.height) * 32 : 128) / Math.sqrt(density);
-            const radius = size * 128;
-            const candidates: [number, number][] = [];
-            for (let gy = -radius; gy <= radius; gy += spacing) {
-              for (let gx = -radius; gx <= radius; gx += spacing) {
-                const x = pos[0] + gx + (Math.random() - 0.5) * spacing * 0.6, y = pos[1] + gy + (Math.random() - 0.5) * spacing * 0.6;
-                if (Math.hypot(x - pos[0], y - pos[1]) <= radius) candidates.push([x, y]);
-              }
-            }
-            for (const [x, y] of candidates) {
-              const angle = facing();
-              // Snap to the pathing grid like the World Editor (cell centres for trees).
-              const sx = Math.round(x / 32) * 32, sy = Math.round(y / 32) * 32;
-              if (fp) {
-                if (respect && !occ!.fits(fp, sx, sy, angle)) continue;
-                // Without "respect pathing" new objects still don't overlap each other.
-                if (!respect && [...spots, ...stroke.entries.map((e) => ({ x: e.position[0], y: e.position[1] }))]
-                  .some((s) => Math.hypot(s.x - sx, s.y - sy) < spacing * 0.75)) continue;
-                if (respect) occ!.mark(fp, sx, sy, angle);
-              }
-              spots.push({ x: sx, y: sy, angle });
-            }
-            if (!spots.length) return;
-          }
-
-          const entries: Placed[] = [];
-          for (const s of spots) {
-            const entry = newEntry(f, id, [s.x, s.y, heightAt(terrain, s.x, s.y)], kind === "w3u" ? placeOwner : undefined);
-            if (!entry) { w3.window.showError(`${f.name} has no entries to take the layout from yet.`); return; }
-            entry.angle = s.angle;
-            if (stroke) {
-              if ((skin?.numVar ?? 1) > 1) entry.variation = Math.floor(Math.random() * skin!.numVar);
-              if (skin?.randScale && skin.maxScale > skin.minScale) {
-                const k = skin.minScale + Math.random() * (skin.maxScale - skin.minScale);
-                entry.scale = [k, k, k];
-              }
-            }
-            entries.push(entry);
-            f.list.push(entry);
-          }
-          objectsTouched = true;
-          if (stroke) {
-            // The drag's undo step is pushed when it ends (endScatter).
-            stroke.entries.push(...entries);
-          } else {
-            const remove = () => { for (const e of entries) f.list.splice(f.list.indexOf(e), 1); };
-            pushEdit({ undo: remove, redo: () => { f.list.push(...entries); }, terrain: false, objects: true });
-          }
-          void rebuildObjects();
-        };
-        /** The Object Editor's object browser (service "w3.objects"). */
-        const choosePlacement = async () => {
-          try {
-            const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
-            const r = await objects.pick(el, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"] });
-            if (r) { setTool("select"); setPlacing({ kind: r.kind, id: r.id, name: r.name }); }
-          } catch (e) {
-            w3.window.showError(String((e as Error).message ?? e));
-          }
-          canvas.focus();
         };
 
         // ---- selection --------------------------------------------------------------
@@ -867,86 +655,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("h4", {}, "Placed objects"), markerList, problems,
         );
 
-        let setToolRef: (t: Tool) => void = () => {};
-        const setTool = (t: Tool) => setToolRef(t);
-        function toolBar() {
-          const buttons = new Map<Tool, HTMLButtonElement>();
-          // This map's tiles as thumbnails; the dropdown adds tiles from any tileset.
-          const thumbs = h("span.terrain-tex-thumbs");
-          const texSelect = h("select", { title: "Paint with a tile this map doesn't use yet (it's added on the first stroke)", onchange: () => {
-            if (texSelect.value) paintTile = texSelect.value;
-            void fillPalette();
-          } });
-          const fillPalette = async () => {
-            const catalog = await tileCatalog(w3).catch(() => new Map<string, { path: string; name: string }>());
-            const opt = (id: string) => h("option", { value: id, selected: id === paintTile }, `${catalog.get(id)?.name ?? id} (${id})`);
-            thumbs.replaceChildren(...terrain.groundTiles.map((id) => {
-              const img = h("img", { alt: id });
-              const path = catalog.get(id)?.path;
-              if (path) void tileThumb(path).then((src) => { if (src) img.src = src; });
-              return h(`button.terrain-tex-thumb${id === paintTile ? ".on" : ""}`, {
-                title: `${catalog.get(id)?.name ?? id} (${id})`,
-                onclick: () => { paintTile = id; void fillPalette(); canvas.focus(); },
-              }, img);
-            }));
-            const inMap = new Set(terrain.groundTiles);
-            const byTileset = new Map<string, string[]>();
-            for (const id of catalog.keys()) if (!inMap.has(id)) byTileset.set(id[0], [...(byTileset.get(id[0]) ?? []), id]);
-            const own = byTileset.get(terrain.tileset) ?? [];
-            byTileset.delete(terrain.tileset);
-            texSelect.replaceChildren(
-              h("option", { value: "", selected: inMap.has(paintTile) }, `Add tile… (${terrain.groundTiles.length}/${MAX_GROUND_TILES})`),
-              ...(own.length ? [h("optgroup", { label: `${TILESETS[terrain.tileset] ?? terrain.tileset}: adds to the map` }, ...own.map(opt))] : []),
-              ...[...byTileset].sort(([x], [y]) => (TILESETS[x] ?? x).localeCompare(TILESETS[y] ?? y))
-                .map(([ts, ids]) => h("optgroup", { label: `${TILESETS[ts] ?? ts}: adds to the map` }, ...ids.map(opt))),
-            );
-          };
-          void fillPalette();
-          refreshPalette = () => void fillPalette();
-          const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect);
+        function selectBar() {
           // Which kinds a selection box picks up.
-          const boxWrap = h("span.terrain-tool-opt", { title: "Kinds of objects a selection box picks up" }, "Box selects:",
-            ...([["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"]] as const).map(([k, label]) => {
-              const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus(); } });
-              return h("label.terrain-place-opt", {}, cb, ` ${label}`);
-            }));
-          const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
-            h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
-          const setTool = (t: Tool) => {
-            tool = t;
-            setPlacing(null);
-            for (const [k, b] of buttons) b.classList.toggle("active", k === t);
-            texWrap.hidden = t !== "paint";
-            boxWrap.hidden = t !== "select";
-            strengthWrap.hidden = t !== "raise" && t !== "lower";
-            showBrush(null);
-          };
-          const tools: [Tool, string, string][] = [
-            ["select", "Select", "Select units and doodads"], ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
-            ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"], ["paint", "Paint", "Paint a ground texture"],
-            ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
-            ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
-            ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
-            ["blight", "Blight +", "Paint Undead blight"], ["unblight", "Blight −", "Remove blight"],
-            ["ramp", "Ramp", "Click a one-level cliff edge to build a ramp (Size sets its width); click a ramp to remove it"],
-          ];
-          const bar = h("div.model-toolbar.terrain-tools", {},
-            ...tools.map(([t, label, title]) => {
-              const b = h("button.tool-button", { title, onclick: () => setTool(t) }, toolIcon(t), label);
-              buttons.set(t, b);
-              return b;
-            }),
-            h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
-              h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
-            strengthWrap, texWrap, boxWrap,
-            h("button", { title: "Place units, items, doodads or destructables", onclick: () => { void choosePlacement(); } }, "Place…"),
-            h("button", { title: "Undo (Ctrl+Z)", onclick: undo }, "↶"),
-            h("button", { title: "Redo (Ctrl+Y)", onclick: redo }, "↷"),
-          );
-          setToolRef = setTool;
-          setTool("select");
-          bar.append(placeHint);
-          return bar;
+          return h("div.terrain-group-tools", {},
+            h("span.terrain-tool-opt", { title: "Kinds of objects a selection box picks up" }, "Box selects:",
+              ...([["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"]] as const).map(([k, label]) => {
+                const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus(); } });
+                return h("label.terrain-place-opt", {}, cb, ` ${label}`);
+              })),
+            h("span.muted", {}, "Click to select · drag a box · Ctrl+click adds/removes · drag a selected object to move · [ ] turn · Del delete"));
         }
 
         // ---- tool groups of other extensions ("w3.terrain") --------------------------
@@ -956,8 +673,50 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const w = v.getUint32(8, true), hgt = v.getUint32(12, true);
           for (const g of groupInsts.values()) g.filterPathing?.(wpm.subarray(16), w, hgt);
         };
+        /** File each created entry goes to (set by objects.create). */
+        const entryFile = new WeakMap<Placed, PlacedFile>();
         const handle: TerrainEditorHandle = {
-          terrain, editable, redraw,
+          terrain, editable, redraw, host: el,
+          terrainChanged: () => { renderer.terrainChanged(); doc.setDirty(true); redraw(); },
+          commitTerrain,
+          ensureGroundTile: (id) => ensureTile(id),
+          groundTileThumb: async (id) => {
+            const path = (await tilePaths(w3)).get(id);
+            return path ? tileThumb(path) : null;
+          },
+          objects: {
+            type: (id) => {
+              const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
+              return skin ? { kind: skin.kind, numVar: skin.numVar, randScale: skin.randScale, minScale: skin.minScale, maxScale: skin.maxScale, fixedRot: skin.fixedRot } : null;
+            },
+            create: (kind, id, at) => {
+              const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
+              if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
+              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player);
+              if (!entry) return `${f.name} has no entries to take the layout from yet.`;
+              entry.angle = at.angle;
+              entryFile.set(entry, f);
+              return entry;
+            },
+            insert: (entries) => {
+              for (const e of entries) { const f = entryFile.get(e as Placed); if (f && !f.list.includes(e as Placed)) f.list.push(e as Placed); }
+              objectsTouched = true;
+              void rebuildObjects();
+            },
+            remove: (entries) => {
+              for (const e of entries) { const f = entryFile.get(e as Placed) ?? fileOf(e as Placed); const i = f?.list.indexOf(e as Placed) ?? -1; if (i >= 0) f!.list.splice(i, 1); }
+              objectsTouched = true;
+              void rebuildObjects();
+            },
+            occupancy: async () => {
+              const occ = await occupancy();
+              return {
+                footprint: async (kind, id) => { const fp = await occ.footprint(id, kind); return fp && { width: fp.width, height: fp.height }; },
+                fits: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); return !fp || occ.fits(fp, x, y, angle); },
+                mark: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); if (fp) occ.mark(fp, x, y, angle); },
+              };
+            },
+          },
           pushEdit: (e) => pushEdit(e),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
@@ -971,7 +730,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           focus: () => canvas.focus(),
         };
         const tabsEl = h("div.terrain-tabs");
-        const groupBar = h("div.model-toolbar.terrain-tools", { hidden: true });
+        const builtinBar = selectBar();
+        const groupBar = h("div.model-toolbar.terrain-tools", {}, builtinBar);
         /** The active tab: null = the built-in tools. */
         let activeGroup: string | null = null;
         /** A drag taken by the active group's pointerDown. */
@@ -982,10 +742,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           activeInst()?.deactivate?.();
           activeGroup = id;
           const inst = activeInst();
-          const builtin = tabsEl.nextElementSibling as HTMLElement | null;
-          if (builtin) builtin.hidden = !!inst;
-          if (inst) { setTool("select"); setPlacing(null); groupBar.replaceChildren(inst.toolbar); }
-          groupBar.hidden = !inst;
+          groupBar.replaceChildren(inst ? inst.toolbar : builtinBar);
           renderer.setBrush(null);
           inst?.activate?.();
           renderTabs();
@@ -994,8 +751,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const renderTabs = () => {
           const tab = (id: string | null, title: string) =>
             h(`button.terrain-tab${id === activeGroup ? ".on" : ""}`, { onclick: () => showTab(id) }, title);
-          tabsEl.replaceChildren(tab(null, "Terrain & objects"), ...toolGroups.all().filter((g) => groupInsts.has(g.id)).map((g) => tab(g.id, g.title)));
-          tabsEl.hidden = groupInsts.size === 0;
+          tabsEl.replaceChildren(tab(null, "Select"), ...toolGroups.all().filter((g) => groupInsts.has(g.id)).map((g) => tab(g.id, g.title)),
+            h("span.terrain-tabs-gap"),
+            h("button", { title: "Undo (Ctrl+Z)", onclick: undo }, "↶"),
+            h("button", { title: "Redo (Ctrl+Y)", onclick: redo }, "↷"));
         };
         const syncGroups = () => {
           const wanted = new Set(toolGroups.all().map((g) => g.id));
@@ -1026,7 +785,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
               h("span.muted", {}, "Drag: select box · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
-            ...(editable ? [tabsEl, toolBar(), groupBar] : []),
+            ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas)),
           side));
 
@@ -1070,17 +829,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             groupDrag = true;
             return;
           }
-          if (e.button === 0 && tool !== "select") {
-            e.preventDefault();
-            startStroke(e);
-            return;
-          }
-          if (e.button === 0 && placing) {
-            const p = groundAt(e);
-            // Scatter paints while the button is held; otherwise one object per click.
-            if (p) { if (scatter) startScatter(p); else void placeAt(p); }
-            return;
-          }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
             const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top)) : null;
@@ -1118,15 +866,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return;
           }
           if (drag) return;
-          const p = showBrush(e);
-          if (scatterStroke && p) continueScatter(p);
-          // Re-apply while held, a few times per second.
-          if (stroke && p && performance.now() - stroke.last > 40) {
-            stroke.last = performance.now();
-            applyAt(p);
-          }
         });
-        canvas.addEventListener("mouseleave", () => { if (!stroke) showBrush(null); if (!groupDrag) activeInst()?.pointerLeave?.(); });
+        canvas.addEventListener("mouseleave", () => { if (!groupDrag) activeInst()?.pointerLeave?.(); });
         canvas.addEventListener("mouseup", (e) => {
           if (e.button === 0 && press && !box?.shown) pickAt(e);
           press = null;
@@ -1135,7 +876,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         canvas.addEventListener("keydown", (e) => {
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
-          if (e.key === "Escape") { if (placing) setPlacing(null); else clearSelection(); return; }
+          if (e.key === "Escape") { clearSelection(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
           if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
@@ -1172,8 +913,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return;
           }
           drag = null;
-          endStroke();
-          endScatter();
           if (objDrag?.moved) moveEdits(objDrag.entries, objDrag.before);
           objDrag = null;
           if (box?.shown) {

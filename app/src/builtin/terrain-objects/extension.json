@@ -1,0 +1,17 @@
+{
+  "id": "w3.terrainObjects",
+  "name": "Object Placer",
+  "version": "0.1.0",
+  "description": "Places units, items, doodads and destructables in the terrain editor, one at a time or scattered (forests), optionally respecting pathing.",
+  "activationEvents": ["onEditor:w3.terrainViewer"],
+  "extensionDependencies": ["w3.terrainViewer", "w3.objectEditor"],
+  "contributes": {
+    "configuration": {
+      "title": "Object Placer",
+      "properties": {
+        "terrain.placement.respectPathing": { "type": "boolean", "default": true, "description": "Place objects only where their footprint is free: no cliffs, deep water, unwalkable ground or other objects." },
+        "terrain.placement.scatterDensity": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 1, "description": "How closely Scatter packs objects: 1 = as close as their footprints allow; 0.5 = half as many per area." }
+      }
+    }
+  }
+}

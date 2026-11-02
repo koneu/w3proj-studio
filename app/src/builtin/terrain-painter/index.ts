@@ -1,0 +1,172 @@
+// Terrain Painter: the terrain brushes as a tool group of the terrain editor
+// (service "w3.terrain"): height, ground textures, cliffs, water, blight, ramps.
+
+import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
+import { parseSlk } from "../../lib/formats/text";
+import { TILESETS } from "../../lib/terrain/tilesets";
+import { groundHeight } from "../../lib/terrain/w3e";
+import { h } from "../../workbench/dom";
+import { toolIcon } from "./toolicons";
+import { applyHeight, applyLayer, paintBlight, paintTexture, Stroke, toggleRamp, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+
+type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
+const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffDown", "shallow", "deep", "dry"];
+const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
+
+/** Maps hold at most this many ground tile types (World Editor limit). */
+const MAX_GROUND_TILES = 16;
+
+const TOOLS: [Tool, string, string][] = [
+  ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
+  ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"], ["paint", "Paint", "Paint a ground texture"],
+  ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
+  ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
+  ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
+  ["blight", "Blight +", "Paint Undead blight"], ["unblight", "Blight −", "Remove blight"],
+  ["ramp", "Ramp", "Click a one-level cliff edge to build a ramp (Size sets its width); click a ramp to remove it"],
+];
+
+const BRUSH_COLORS: Record<Tool, [number, number, number]> = {
+  raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
+  cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
+  ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160],
+};
+
+export function activate(w3: W3Api, ctx: ExtensionContext) {
+  void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
+    ctx.subscriptions.push(s.registerToolGroup({ id: "terrain", title: "Terrain", order: 10, create: (ed) => painter(w3, ed) }));
+  });
+}
+
+/** Every ground tile type the game knows: a readable name per id. */
+let catalog: Promise<Map<string, string>> | null = null;
+const tileNames = (w3: W3Api) => (catalog ??= w3.game.readText("TerrainArt\\Terrain.slk")
+  .then((t) => new Map(parseSlk(t).filter((r) => r.tileID).map((r) => [r.tileID, r.comment || r.file])))
+  .catch(() => new Map<string, string>()));
+
+function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
+  const terrain = ed.terrain;
+  let tool: Tool = "raise", size = 2, strength = 16, paintTex = 0;
+  /** Tile type chosen for painting (may not be in the map yet). */
+  let paintTile = terrain.groundTiles[0] ?? "";
+  let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
+
+  /** One brush application at a ground point. */
+  const applyAt = (p: [number, number, number]) => {
+    if (!stroke) return;
+    const brush = { x: p[0], y: p[1], radius: size };
+    const did = tool === "paint"
+      ? paintTexture(terrain, brush, paintTex, stroke.s)
+      : tool === "blight" || tool === "unblight"
+      ? paintBlight(terrain, brush, tool === "blight", stroke.s)
+      : isLayerTool(tool)
+      ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
+      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
+    if (did) ed.terrainChanged();
+  };
+  const endStroke = () => {
+    if (!stroke) return;
+    const s = stroke.s;
+    stroke = null;
+    if (!s.finish(terrain)) return;
+    ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: isLayerTool(s.label as Tool) || s.label === "ramp" });
+  };
+
+  // ---- toolbar -----------------------------------------------------------------------
+  const buttons = new Map<Tool, HTMLButtonElement>();
+  const thumbs = h("span.terrain-tex-thumbs");
+  const texSelect = h("select", { title: "Paint with a tile this map doesn't use yet (it's added on the first stroke)", onchange: () => {
+    if (texSelect.value) paintTile = texSelect.value;
+    void fillPalette();
+  } });
+  const fillPalette = async () => {
+    const names = await tileNames(w3);
+    const opt = (id: string) => h("option", { value: id, selected: id === paintTile }, `${names.get(id) ?? id} (${id})`);
+    thumbs.replaceChildren(...terrain.groundTiles.map((id) => {
+      const img = h("img", { alt: id });
+      void ed.groundTileThumb(id).then((src) => { if (src) img.src = src; });
+      return h(`button.terrain-tex-thumb${id === paintTile ? ".on" : ""}`, {
+        title: `${names.get(id) ?? id} (${id})`,
+        onclick: () => { paintTile = id; void fillPalette(); ed.focus(); },
+      }, img);
+    }));
+    const inMap = new Set(terrain.groundTiles);
+    const byTileset = new Map<string, string[]>();
+    for (const id of names.keys()) if (!inMap.has(id)) byTileset.set(id[0], [...(byTileset.get(id[0]) ?? []), id]);
+    const own = byTileset.get(terrain.tileset) ?? [];
+    byTileset.delete(terrain.tileset);
+    texSelect.replaceChildren(
+      h("option", { value: "", selected: inMap.has(paintTile) }, `Add tile… (${terrain.groundTiles.length}/${MAX_GROUND_TILES})`),
+      ...(own.length ? [h("optgroup", { label: `${TILESETS[terrain.tileset] ?? terrain.tileset}: adds to the map` }, ...own.map(opt))] : []),
+      ...[...byTileset].sort(([x], [y]) => (TILESETS[x] ?? x).localeCompare(TILESETS[y] ?? y))
+        .map(([ts, ids]) => h("optgroup", { label: `${TILESETS[ts] ?? ts}: adds to the map` }, ...ids.map(opt))),
+    );
+  };
+  void fillPalette();
+  const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect);
+  const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
+    h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
+  const setTool = (t: Tool) => {
+    tool = t;
+    for (const [k, b] of buttons) b.classList.toggle("active", k === t);
+    texWrap.hidden = t !== "paint";
+    strengthWrap.hidden = t !== "raise" && t !== "lower";
+    ed.setBrush(null);
+    ed.focus();
+  };
+  const toolbar = h("div.terrain-group-tools", {},
+    ...TOOLS.map(([t, label, title]) => {
+      const b = h("button.tool-button", { title, onclick: () => setTool(t) }, toolIcon(t), label);
+      buttons.set(t, b);
+      return b;
+    }),
+    h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
+      h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
+    strengthWrap, texWrap,
+  );
+  setTool("raise");
+
+  return {
+    toolbar,
+    deactivate() { endStroke(); ed.setBrush(null); },
+    pointerDown(p) {
+      if (!ed.editable || !p.ground) return false;
+      const g = p.ground;
+      if (tool === "ramp") {
+        const s = new Stroke("ramp");
+        const problem = toggleRamp(terrain, g[0], g[1], size, s);
+        if (problem) w3.window.showWarning(problem);
+        else { stroke = { s, target: 0, layer: { layer: 2 }, last: 0 }; endStroke(); }
+        return true;
+      }
+      const start = async () => {
+        if (tool === "paint") {
+          const i = await ed.ensureGroundTile(paintTile);
+          if (i === null) return;
+          paintTex = i;
+          void fillPalette();
+        }
+        const c = terrain.corners[Math.round((g[1] - terrain.offsetY) / 128) * terrain.width + Math.round((g[0] - terrain.offsetX) / 128)];
+        // Cliff tools step one level from the start point; water goes one or
+        // two levels below it, with the surface at its original height.
+        const step = tool === "cliffUp" ? 1 : tool === "cliffDown" ? -1 : tool === "shallow" ? -1 : tool === "deep" ? -2 : 0;
+        const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - 8) } : { layer: 2 };
+        stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
+        applyAt(g);
+      };
+      void start();
+      return true;
+    },
+    pointerMove(p) {
+      ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool] } : null);
+      // Re-apply while held, a few times per second.
+      if (p.down && stroke && p.ground && performance.now() - stroke.last > 40) {
+        stroke.last = performance.now();
+        applyAt(p.ground);
+      }
+    },
+    pointerUp() { endStroke(); },
+    pointerLeave() { if (!stroke) ed.setBrush(null); },
+  };
+}

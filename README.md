@@ -233,7 +233,12 @@ disabled or missing, the dependent fails to activate with a message naming it
 
 | Service | Provider | What |
 |---|---|---|
-| `w3.objects` | Object Editor | `pick(host, { title, kinds })`: the object browser (search, facets, field filters, the map's custom objects), one tab per kind |
+| `w3.objects` | Object Editor | `pick(host, { title, kinds })`: the object browser (search, facets, field filters, the map's custom objects), one tab per kind; `icon(kind, id)` |
+| `w3.terrain` | Terrain Viewer | `registerToolGroup(group)`: a tab in the terrain editor with its own toolbar, pointer/key handlers, ground overlay, pathing filter and save hook; the handle exposes terrain strokes, ground tiles and placed objects |
+
+The terrain editor itself only does view, selection, undo and saving; its tools are sub-extensions
+that use `w3.terrain`: Terrain Painter (`terrain-painter`), Object Placer (`terrain-objects`) and
+Pathing Editor (`terrain-pathing`, overrides in `.w3proj/pathing.json`).
 
 ## Known limits / next steps
 
