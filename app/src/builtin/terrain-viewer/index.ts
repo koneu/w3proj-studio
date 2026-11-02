@@ -693,8 +693,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...(editable ? [h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point")] : [])),
             ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete")] : []),
           );
-          const [x, y, , r] = inst.sphere!;
-          renderer.setSelection({ x, y, r: Math.min(400, Math.max(40, r * 0.8)), rgb: pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120] });
+          renderer.setSelection(ringOf(inst));
           redraw();
         };
         const clearSelection = () => {
@@ -710,9 +709,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let group: Placed[] = [];
         /** Object kinds a selection box picks up. */
         const boxKinds = new Set(["w3u", "w3t", "w3b", "w3d"]);
+        /** Selection ring radius per type: the collision size (units) or the
+         *  pathing footprint (buildings, doodads, destructables), like the game. */
+        const ringRadius = new Map<string, number>();
+        const ringLoading = new Set<string>();
+        const radiusOf = (kind: string, id: string): number | undefined => {
+          const key = `${kind}:${id}`;
+          if (ringRadius.has(key)) return ringRadius.get(key);
+          if (!ringLoading.has(key)) {
+            ringLoading.add(key);
+            void (async () => {
+              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+              const data = await pathingData;
+              const texRadius = async (path?: string) => { const t = path ? await data.texture(path) : null; return t ? Math.max(t.width, t.height) * 16 : undefined; };
+              let r: number | undefined;
+              if (kind === "w3t") r = 24;
+              else if (kind === "w3u") { const sh = data.unitShape(id); r = (await texRadius(sh?.path)) ?? sh?.collision ?? 32; }
+              else r = (await texRadius(data.placedTex(id)?.path)) ?? 32;
+              ringRadius.set(key, Math.max(16, r));
+              refreshRings();
+            })().catch(() => { ringRadius.set(key, 32); });
+          }
+          return undefined;
+        };
         const ringOf = (inst: ObjectInstance) => {
-          const [x, y, , r] = inst.sphere!, pl = inst.pick!.placed;
-          return { x, y, r: Math.min(400, Math.max(40, r * 0.8)), rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
+          const [, , , sr] = inst.sphere!, pl = inst.pick!.placed;
+          // Until the size is known: a modest share of the model bounds.
+          const r = radiusOf(inst.pick!.kind, inst.pick!.id) ?? Math.min(96, Math.max(24, sr * 0.4));
+          // Centred on the object position (model bounds can be off-centre).
+          return { x: pl.position[0], y: pl.position[1], r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
+        };
+        /** Redraws the selection rings (after a size became known). */
+        const refreshRings = () => {
+          const insts = (group.length ? group : selected?.pick ? [selected.pick.placed] : []).map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
+          renderer.setSelection(insts.map(ringOf));
+          redraw();
         };
         /** Selects these entries: none clears, one shows its details, more a summary. */
         const selectEntries = (entries: Placed[]) => {
