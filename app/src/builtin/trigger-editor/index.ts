@@ -81,7 +81,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
         const strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
-        const display: DisplayContext = { data, string: (v) => strings?.resolve(v) ?? v, objectName: (id) => names.get(id) };
+        // Ids that show up later (new parameters) are looked up on demand; the view redraws once.
+        const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
+        const asked = new Set(names.keys());
+        let redraw = 0;
+        const objectName = (id: string) => {
+          if (!asked.has(id) && objects) {
+            asked.add(id);
+            void objects.name(id).then((n) => {
+              if (!n) return;
+              names.set(id, n);
+              clearTimeout(redraw);
+              redraw = window.setTimeout(() => view.refresh(), 50);
+            });
+          }
+          return names.get(id);
+        };
+        const display: DisplayContext = { data, string: (v) => strings?.resolve(v) ?? v, objectName };
         const lua = await w3.workspace.readText("map/war3map.w3i.json").then((t) => JSON.parse(t).scriptType === 1).catch(() => false);
         el.replaceChildren();
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d));
@@ -168,11 +184,12 @@ class TriggerView {
   private undo: { label: string; before: Snapshot; after: Snapshot }[] = [];
   private at = 0;
   private savedAt = 0;
-  private body: { dispose?(): void } | void = undefined;
+  private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean } | void = undefined;
   private handle: TriggerEditorHandle;
   private unsubscribe: () => void;
   private keydown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+    if (this.body?.keyDown?.(e)) { e.preventDefault(); return; }
     if (e.key === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
@@ -213,6 +230,9 @@ class TriggerView {
   }
 
   markSaved() { this.savedAt = this.at; this.setDirty(false); }
+
+  /** Redraws the selected item (e.g. after names were looked up). */
+  refresh() { this.renderDetail(); }
 
   // ---- undo -------------------------------------------------------------------------
   private snapshot(): Snapshot {

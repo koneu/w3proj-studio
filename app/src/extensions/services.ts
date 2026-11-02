@@ -186,7 +186,8 @@ export interface TriggerKind {
   priority?: number;
   matches(trigger: TriggerItem, editor: TriggerEditorHandle): boolean;
   /** Fills `el` with the trigger's body (below the host's name, flags and comment). */
-  render(el: HTMLElement, trigger: TriggerItem, editor: TriggerEditorHandle): { dispose?(): void } | void;
+  render(el: HTMLElement, trigger: TriggerItem, editor: TriggerEditorHandle):
+    { dispose?(): void; /** Return true if the key was handled (before the host's shortcuts). */ keyDown?(e: KeyboardEvent): boolean } | void;
   /** Sets up a new trigger of this kind (flags, ECAs, custom text). Omitted: can't be created. */
   init?(trigger: TriggerItem, editor: TriggerEditorHandle): void;
 }
@@ -205,4 +206,24 @@ export interface TriggerEditorHandle {
   edit(label: string, change: () => void): void;
   /** Icon of a trigger category path (ReplaceableTextures\WorldEditUI\…) as a data URL. */
   icon(path: string): Promise<string | null>;
+}
+
+/** "w3.triggers.gui", provided by the GUI trigger kind (a sub-extension of the
+ *  Trigger Editor): editors for parameter values of given TriggerData types,
+ *  offered next to Preset / Variable / Function / Value when a parameter is edited. */
+export interface TriggerGuiService {
+  registerParamEditor(editor: TriggerParamEditor): { dispose(): void };
+}
+
+export const TRIGGER_GUI_SERVICE = "w3.triggers.gui";
+
+export interface TriggerParamEditor {
+  id: string;
+  /** Button label in the parameter dialog ("Pick unit…"). */
+  title: string;
+  /** TriggerData types this editor handles ("unitcode", "abilcode", …). */
+  types: string[];
+  /** Asks for a value; resolves with the new parameter, or undefined when cancelled. */
+  edit(opts: { type: string; current: import("../lib/triggers/wtg").Param; editor: TriggerEditorHandle }):
+    Promise<import("../lib/triggers/wtg").Param | undefined>;
 }

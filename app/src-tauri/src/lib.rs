@@ -340,13 +340,22 @@ fn fs_exists(path: String) -> bool {
 
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> CmdResult<()> {
-    let p = PathBuf::from(&path);
+    // Explorer only understands backslashes, and needs `/select,"path"` as one
+    // raw argument (Rust would quote the whole thing, which it misreads).
+    let native = path.replace('/', "\\");
+    let p = PathBuf::from(&native);
     let mut cmd = Command::new("explorer");
-    if p.is_file() {
-        cmd.arg(format!("/select,{}", p.display()));
-    } else {
-        cmd.arg(&p);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if p.is_file() {
+            cmd.raw_arg(format!("/select,\"{native}\""));
+        } else {
+            cmd.raw_arg(format!("\"{native}\""));
+        }
     }
+    #[cfg(not(windows))]
+    cmd.arg(&p);
     cmd.spawn().map(|_| ()).map_err(err)
 }
 

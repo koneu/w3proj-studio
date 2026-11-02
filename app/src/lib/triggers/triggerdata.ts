@@ -23,6 +23,8 @@ export interface TriggerFunction {
   /** Text and argument placeholders ("~Name" entries), as in _Parameters. */
   pattern: (string | { arg: string })[];
   category: string;
+  /** Default per argument from _Defaults: a preset, call or value; "_" for none. */
+  defaults: string[];
 }
 
 export interface TriggerData {
@@ -45,7 +47,8 @@ function splitList(v: string): string[] {
   out.push(cur);
   return out.map((s) => s.trim());
 }
-const unquote = (s: string) => (s.startsWith('"') && s.endsWith('"') && s.length >= 2 ? s.slice(1, -1) : s);
+/** Strips surrounding quotes (some game lines lack the closing one). */
+const unquote = (s: string) => (s.startsWith('"') ? s.slice(1, s.length > 1 && s.endsWith('"') ? -1 : undefined) : s);
 
 export function parseTriggerData(text: string, strings: Map<string, string> = new Map()): TriggerData {
   const str = (s: string) => { const u = unquote(s); return strings.get(u.toUpperCase()) ?? u; };
@@ -76,7 +79,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       const vals = splitList(value);
       const call = si === CALL;
       const args = (call ? vals.slice(3) : vals.slice(1)).filter((a) => a && a !== "nothing");
-      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "" });
+      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [] });
     } else if (section === "TriggerCategories") {
       const v = splitList(value);
       categories.set(key, { name: str(v[0] ?? key), icon: v[1] ?? "", hideName: v[2] === "1" });
@@ -94,6 +97,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       if (!e) continue;
       if (e.has("DisplayName")) f.displayName = str(e.get("DisplayName")!);
       if (e.has("Category")) f.category = e.get("Category")!;
+      if (e.get("Defaults")) f.defaults = splitList(e.get("Defaults")!);
       if (e.has("Parameters")) {
         f.pattern = splitList(e.get("Parameters")!).filter((p) => p !== "").map((p) => (p.startsWith("~") ? { arg: p.slice(1) } : str(p)));
         // SetVariable's pattern repeats the display name in front ("Set Variable","Set ",~Variable…).
