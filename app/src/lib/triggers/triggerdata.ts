@@ -96,6 +96,8 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       if (e.has("Category")) f.category = e.get("Category")!;
       if (e.has("Parameters")) {
         f.pattern = splitList(e.get("Parameters")!).filter((p) => p !== "").map((p) => (p.startsWith("~") ? { arg: p.slice(1) } : str(p)));
+        // SetVariable's pattern repeats the display name in front ("Set Variable","Set ",~Variable…).
+        if (f.pattern.length > 1 && f.pattern[0] === f.displayName && f.pattern.some((p) => typeof p !== "string")) f.pattern.shift();
       }
     }
   });

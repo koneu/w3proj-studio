@@ -86,6 +86,17 @@ export function objectsService(w3: W3Api): ObjectsService {
   /** Tab last used per set of kinds, so the browser reopens where it was. */
   const lastTab = new Map<string, number>();
   return {
+    async name(id, kinds = Object.keys(KIND_LABELS)) {
+      for (const kind of kinds) {
+        const kd = await loadKind(w3, kind).catch(() => null);
+        if (!kd) continue;
+        const custom = (await customObjects(w3, kind, kd).catch(() => [])).find((c) => c.id === id);
+        if (custom) return custom.name;
+        const n = kd.names.get(id);
+        if (n) return stripColors(n);
+      }
+      return undefined;
+    },
     async icon(kind, id) {
       if (!ICON_FIELDS[kind]) return null;
       const kd = await loadKind(w3, kind);

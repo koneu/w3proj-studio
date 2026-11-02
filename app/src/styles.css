@@ -429,3 +429,34 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .newmap-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .newmap-error { color: var(--error); min-height: 1em; }
 .newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.trig-editor { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; height: 100%; overflow: hidden; }
+.trig-loading { padding: 16px; }
+.trig-tree { overflow: auto; border-right: 1px solid var(--border); padding: 4px 0; user-select: none; }
+.trig-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; cursor: pointer; white-space: nowrap; }
+.trig-row:hover { background: var(--bg-hover); }
+.trig-row.active { background: #37414f; }
+.trig-row.off .trig-label { color: var(--fg-muted); font-style: italic; }
+.trig-caret { width: 12px; flex: none; color: var(--fg-muted); font-size: 10px; text-align: center; }
+.trig-label { overflow: hidden; text-overflow: ellipsis; }
+.trig-row.trig-map .trig-label, .trig-row.trig-vars .trig-label { font-weight: 600; }
+.trig-row.trig-cat .trig-label::before { content: "📁 "; }
+.trig-row.trig-gui .trig-label::before { content: "⚡ "; }
+.trig-row.trig-custom .trig-label::before { content: "✎ "; }
+.trig-row.trig-comment .trig-label::before { content: "💬 "; }
+.trig-row.trig-var .trig-label::before { content: "𝑥 "; }
+.trig-detail { overflow: auto; padding: 12px 18px; }
+.trig-detail h2 { margin: 0 0 8px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.trig-badge { font-size: 11px; font-weight: normal; padding: 1px 6px; border-radius: 3px; background: var(--bg-hover); color: var(--fg-muted); }
+.trig-desc { white-space: pre-wrap; color: var(--fg-muted); margin: 0 0 10px; }
+.trig-section { font-weight: 600; margin: 10px 0 2px; }
+.trig-ecas { padding-left: 14px; }
+.trig-eca { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.trig-eca.off span { color: var(--fg-muted); font-style: italic; text-decoration: line-through; }
+.trig-icon { width: 16px; height: 16px; flex: none; }
+.trig-icon.none { visibility: hidden; }
+.trig-branch { padding-left: 22px; }
+.trig-branch-label { color: var(--fg-muted); padding: 1px 0; }
+.trig-branch > .trig-eca, .trig-branch > .trig-block { margin-left: 14px; }
+.trig-code { font-family: var(--mono); font-size: 12px; background: var(--bg-2); padding: 8px 10px; border-radius: 4px; overflow: auto; white-space: pre; }
+.trig-vars-table { border-collapse: collapse; }
+.trig-vars-table th, .trig-vars-table td { text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--border); }

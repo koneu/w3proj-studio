@@ -1,0 +1,10 @@
+{
+  "id": "w3.triggerEditor",
+  "name": "Trigger Editor",
+  "version": "0.1.0",
+  "description": "GUI triggers (war3map.wtg) and custom script (war3map.wct): categories, triggers, variables and the events, conditions and actions as the World Editor shows them. Read-only for now.",
+  "contributes": {
+    "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "patterns": ["war3map.wtg"] }],
+    "commands": [{ "id": "w3.triggers.open", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" }]
+  }
+}

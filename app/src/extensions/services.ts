@@ -9,6 +9,8 @@ export interface ObjectsService {
   pick(host: HTMLElement, opts: { title: string; kinds: string[] }): Promise<PickedObject | undefined>;
   /** Icon of an object (custom ids use the map's own art, else their base's) as a data URL, or null. */
   icon(kind: string, id: string): Promise<string | null>;
+  /** Display name of an object id (custom objects: the map's name), searching `kinds` (default: all). */
+  name(id: string, kinds?: string[]): Promise<string | undefined>;
 }
 
 export interface PickedObject {
