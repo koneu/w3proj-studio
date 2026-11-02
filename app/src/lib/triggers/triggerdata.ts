@@ -27,6 +27,8 @@ export interface TriggerFunction {
   defaults: string[];
   /** Explanation shown under the function list (TriggerStrings.txt: <Name>Hint=…). */
   hint: string;
+  /** The JASS function it compiles to (_ScriptName), else its own name. */
+  scriptName: string;
 }
 
 export interface TriggerData {
@@ -82,7 +84,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       const vals = splitList(value);
       const call = si === CALL;
       const args = (call ? vals.slice(3) : vals.slice(1)).filter((a) => a && a !== "nothing");
-      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [], hint: "" });
+      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [], hint: "", scriptName: key });
     } else if (section === "TriggerCategories") {
       const v = splitList(value);
       categories.set(key, { name: str(v[0] ?? key), icon: v[1] ?? "", hideName: v[2] === "1" });
@@ -103,6 +105,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       if (!e) continue;
       if (e.has("DisplayName")) f.displayName = str(e.get("DisplayName")!);
       if (e.has("Category")) f.category = e.get("Category")!;
+      if (e.get("ScriptName")) f.scriptName = e.get("ScriptName")!;
       if (e.get("Defaults")) f.defaults = splitList(e.get("Defaults")!);
       if (e.has("Parameters")) {
         f.pattern = splitList(e.get("Parameters")!).filter((p) => p !== "").map((p) => (p.startsWith("~") ? { arg: p.slice(1) } : str(p)));

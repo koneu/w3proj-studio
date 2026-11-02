@@ -7,6 +7,7 @@
 
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
+import { triggersSection } from "./triggers";
 
 // ---- inputs (the format engine's JSON) ----------------------------------------------
 
@@ -286,6 +287,7 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Sound Assets", sounds(i)],
     ["Regions", regions(i)],
     ["Cameras", cameras(i)],
+    ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom }) : ""],
   ]);
 }
 
