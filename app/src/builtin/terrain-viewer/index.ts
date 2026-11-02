@@ -7,6 +7,7 @@ import { parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
+import type { Rgb } from "./minimap";
 import { buildMinimap } from "./minimapgen";
 import { buildPathingMap } from "./pathmap";
 import { predictShadows } from "./shadowmap";
@@ -712,29 +713,42 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             doc.setDirty(false);
             const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
             const rf = (p: string) => readFile(w3, doc, p);
+            const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
             // The pathing map follows terrain and doodads.
-            try {
-              const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf);
+            if (cfg<boolean>("pathing.regenerate")) try {
+              const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf, cfg<number>("pathing.deepWater"));
               await w3.workspace.writeBytes("map/war3map.wpm", wpm);
               if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
             } catch (e) {
               w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
             }
             // Shadows: only cells whose prediction changed since the last save.
-            try {
+            if (cfg<boolean>("shadows.update")) try {
               const skins = objCtx?.skins ?? new Map(), baseOf = (id: string) => objCtx?.bases.get(id);
-              const before = await predictShadows(parseW3e(savedW3e), savedDoodads ?? doodads, skins, baseOf, rf);
-              const after = await predictShadows(terrain, doodads, skins, baseOf, rf);
+              const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
+              const before = await predictShadows(parseW3e(savedW3e), savedDoodads ?? doodads, skins, baseOf, rf, sun);
+              const after = await predictShadows(terrain, doodads, skins, baseOf, rf, sun);
               const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
               const shd = updateShadows(stored, before, after);
               if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
             } catch (e) {
               w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
             }
-            // The minimap is redrawn only when something changed since the last save.
-            if (minimapStale) {
+            // The minimap is redrawn when something changed since the last save (by default).
+            const minimapMode = cfg<string>("minimap.regenerate");
+            if (minimapMode === "always" || (minimapMode !== "never" && minimapStale)) {
               try {
-                await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf));
+                const params = {
+                  groundBrightness: cfg<number>("minimap.groundBrightness"),
+                  waterShallowColor: cfg<Rgb>("minimap.waterShallowColor"),
+                  waterDeepColor: cfg<Rgb>("minimap.waterDeepColor"),
+                  waterOpacityShallow: cfg<number>("minimap.waterOpacityShallow"),
+                  waterOpacityDeep: cfg<number>("minimap.waterOpacityDeep"),
+                  waterFullDepth: cfg<number>("minimap.waterFullDepth"),
+                  objectRadius: cfg<number>("minimap.objectRadius"),
+                  blurPasses: cfg<number>("minimap.blurPasses"),
+                };
+                await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, params, cfg<number>("minimap.jpegQuality")));
                 minimapStale = false;
               } catch (e) {
                 w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);

@@ -37,6 +37,8 @@ export interface PathingInput {
   margins: [number, number, number, number];
   tileRules: Map<string, TileRule>;
   stamps?: PathingStamp[];
+  /** Water deeper than this can't be walked (default DEEP_WATER). */
+  deepWater?: number;
 }
 
 /** Water deeper than this (world units) can't be walked. */
@@ -46,6 +48,7 @@ const depth = (k: Corner) => (k.hasWater ? k.water - k.height : -Infinity);
 
 export function generatePathing(input: PathingInput): Uint8Array {
   const { terrain: t, margins: [ml, mr, mb, mt], tileRules } = input;
+  const deep = input.deepWater ?? DEEP_WATER;
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const out = new Uint8Array(16 + w * h);
   const view = new DataView(out.buffer);
@@ -72,13 +75,13 @@ export function generatePathing(input: PathingInput): Uint8Array {
       }
       if (c.blight) p |= BLIGHT;
       const cliff = new Set(q.map((k) => k.layer)).size > 1 && !q.some((k) => k.ramp);
-      if (q.every((k) => depth(k) > 0) || depth(c) > DEEP_WATER) {
+      if (q.every((k) => depth(k) > 0) || depth(c) > deep) {
         // Water (the whole tile is under water) hides cliffs; unwalkable
         // ground stays dry but blocked.
         if (unwalkable) p |= NO_BUILD | BLOCKED;
         else {
           p = (p & ~(NO_WATER | NO_WALK)) | NO_BUILD;
-          if ((cliff ? Math.max(...q.map(depth)) : depth(c)) > DEEP_WATER) p |= NO_WALK;
+          if ((cliff ? Math.max(...q.map(depth)) : depth(c)) > deep) p |= NO_WALK;
         }
       } else if (cliff) p |= NO_WALK | NO_BUILD | BLOCKED;
       // Shore: dry, but the nearest corner is under water.

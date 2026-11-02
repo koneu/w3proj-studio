@@ -38,6 +38,28 @@ export interface EditorContribution {
   priority?: "default" | "option";
 }
 
+/** One declared setting (shown in the Settings editor). */
+export interface ConfigurationProperty {
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object";
+  default?: unknown;
+  description?: string;
+  /** Allowed values (shown as a dropdown), with optional labels. */
+  enum?: unknown[];
+  enumDescriptions?: string[];
+  minimum?: number;
+  maximum?: number;
+  /** "project" (default): a project may override it in .w3proj/settings.json;
+   *  "user": machine-specific (paths, lists), user settings only. */
+  scope?: "user" | "project";
+}
+
+export interface ConfigurationContribution {
+  /** Section title in the Settings editor (defaults to the extension name). */
+  title?: string;
+  /** Setting key → declaration; keys are dotted ("terrain.minimap.blur"). */
+  properties: Record<string, ConfigurationProperty>;
+}
+
 /** A service other extensions can use through `w3.services.get(id)`. */
 export interface ServiceContribution {
   id: string;
@@ -61,6 +83,7 @@ export interface ExtensionManifest {
     views?: ViewContribution[];
     editors?: EditorContribution[];
     services?: ServiceContribution[];
+    configuration?: ConfigurationContribution;
   };
 }
 
@@ -134,9 +157,26 @@ export interface GameInfo {
   stored: number;
 }
 
+export type SettingsTarget = "user" | "project";
+
+/** A declared setting with its values per layer. */
+export interface SettingInfo {
+  key: string;
+  property: ConfigurationProperty;
+  /** Declaring extension id ("core" for the workbench) and section title. */
+  source: string;
+  section: string;
+}
+
+/** Settings in layers: project (.w3proj/settings.json of the open project),
+ *  then user (settings.json), then the declared default. */
 export interface Settings {
   get<T = unknown>(key: string, fallback?: T): T;
-  set(key: string, value: unknown): Promise<void>;
+  /** Writes one layer (default "user"); `undefined` removes the key there. */
+  set(key: string, value: unknown, target?: SettingsTarget): Promise<void>;
+  inspect(key: string): { defaultValue?: unknown; user?: unknown; project?: unknown };
+  /** Every declared setting (workbench and extensions). */
+  declared(): SettingInfo[];
   onDidChange(listener: (key: string) => void): Disposable;
 }
 

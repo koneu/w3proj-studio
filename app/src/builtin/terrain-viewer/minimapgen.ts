@@ -5,7 +5,7 @@ import type { W3Api } from "../../extensions/api";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseSlk } from "../../lib/formats/text";
-import { MINIMAP_SIZE, renderMinimap, type Rgb } from "./minimap";
+import { MINIMAP_SIZE, renderMinimap, type MinimapParams, type Rgb } from "./minimap";
 import type { Placed } from "./objects";
 import { pathOverrides, readMapJson } from "./pathmap";
 import type { Terrain } from "./w3e";
@@ -14,7 +14,7 @@ import type { Terrain } from "./w3e";
 const tileColors = new Map<string, Promise<Rgb>>();
 
 export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>): Promise<Uint8Array> {
+  readFile: (path: string) => Promise<Uint8Array>, params?: Partial<MinimapParams>, quality = 80): Promise<Uint8Array> {
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
 
@@ -53,6 +53,6 @@ export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[
     if (r?.showInMM === "1" && r.useMMColor === "1") objects.push({ x: d.position[0], y: d.position[1], rgb: [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] });
   }
 
-  const rgba = renderMinimap({ terrain, margins: [m[0], m[1], m[2], m[3]], tileColor: (id) => colors.get(id) ?? [128, 128, 128], waterColor, objects });
-  return encodeBlp1Jpeg(MINIMAP_SIZE, MINIMAP_SIZE, rgba, 80);
+  const rgba = renderMinimap({ terrain, margins: [m[0], m[1], m[2], m[3]], tileColor: (id) => colors.get(id) ?? [128, 128, 128], waterColor, objects, params });
+  return encodeBlp1Jpeg(MINIMAP_SIZE, MINIMAP_SIZE, rgba, quality);
 }

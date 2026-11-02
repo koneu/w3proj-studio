@@ -13,13 +13,16 @@ import type { Model } from "../../lib/model/mdx";
 import type { Terrain } from "./w3e";
 
 /** Direction toward the sun: azimuth (degrees, counter-clockwise from +x)
- *  and elevation above the horizon. Fitted against the sample maps. */
-export const SUN_AZIMUTH = 225, SUN_ELEVATION = 30;
+ *  and elevation above the horizon. */
+export interface Sun { azimuth: number; elevation: number }
 
-const sun = (() => {
-  const az = (SUN_AZIMUTH * Math.PI) / 180, el = (SUN_ELEVATION * Math.PI) / 180;
+/** Fitted against the sample maps. */
+export const DEFAULT_SUN: Sun = { azimuth: 225, elevation: 30 };
+
+function sunVector(s: Sun): [number, number, number] {
+  const az = (s.azimuth * Math.PI) / 180, el = (s.elevation * Math.PI) / 180;
   return [Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el)];
-})();
+}
 
 /** Ground height (bilinear over the corners), clamped to the map. */
 function groundAt(t: Terrain, wx: number, wy: number): number {
@@ -32,7 +35,8 @@ function groundAt(t: Terrain, wx: number, wy: number): number {
 
 /** Terrain shadows: a cell is dark when the ray from its centre toward the
  *  sun passes under the ground. */
-export function terrainShadows(t: Terrain): Uint8Array {
+export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN): Uint8Array {
+  const sun = sunVector(s);
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const out = new Uint8Array(w * h);
   const len = Math.hypot(sun[0], sun[1]), dx = sun[0] / len, dy = sun[1] / len, rise = sun[2] / len;
@@ -129,7 +133,8 @@ export interface ShadowCaster {
 
 /** Darkens the cells under a model's shadow (projected along the sun onto
  *  the ground; cells whose centre is covered). */
-export function castShadow(out: Uint8Array, t: Terrain, c: ShadowCaster) {
+export function castShadow(out: Uint8Array, t: Terrain, c: ShadowCaster, s: Sun = DEFAULT_SUN) {
+  const sun = sunVector(s);
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const { positions: pos, faces } = c.mesh;
   const ca = Math.cos(c.angle), sa = Math.sin(c.angle);

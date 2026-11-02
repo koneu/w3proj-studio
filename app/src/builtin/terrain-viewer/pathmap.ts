@@ -46,7 +46,7 @@ export async function pathOverrides(w3: W3Api, name: string, field: string): Pro
  *  map's imports first, then the game. Textures that can't be read are
  *  listed in `missing` (their objects leave no pathing). */
 export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>): Promise<{ wpm: Uint8Array; missing: string[] }> {
+  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number): Promise<{ wpm: Uint8Array; missing: string[] }> {
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
   const tileRules = new Map<string, TileRule>();
@@ -96,6 +96,6 @@ export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Plac
     const t = await texture(path!);
     if (t) stamps.push({ x: d.position[0], y: d.position[1], angle: d.angle, width: t.width, height: t.height, rgba: t.rgba, clear });
   }));
-  const wpm = generatePathing({ terrain, margins: [m[0], m[1], m[2], m[3]], tileRules, stamps });
+  const wpm = generatePathing({ terrain, margins: [m[0], m[1], m[2], m[3]], tileRules, stamps, deepWater });
   return { wpm, missing: [...missing] };
 }

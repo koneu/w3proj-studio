@@ -18,22 +18,47 @@ export interface MinimapInput {
   waterColor: Rgb;
   /** Doodads/destructables shown on the minimap, in their minimap colour. */
   objects: { x: number; y: number; rgb: Rgb }[];
+  /** Look of the render (settings "terrain.minimap.*"). */
+  params?: Partial<MinimapParams>;
 }
 
+export interface MinimapParams {
+  /** Ground colours relative to the texture average. */
+  groundBrightness: number;
+  /** Water colour over the ground, shallow and at full depth (fitted for
+   *  Lordaeron water; other tilesets shift the hue toward their minimap colour). */
+  waterShallowColor: Rgb;
+  waterDeepColor: Rgb;
+  waterOpacityShallow: number;
+  waterOpacityDeep: number;
+  /** Depth (world units) at which water reaches the deep colour. */
+  waterFullDepth: number;
+  /** Radius of object dots in tiles. */
+  objectRadius: number;
+  blurPasses: number;
+}
+
+/** Fitted against 61 sample maps. */
+export const DEFAULT_MINIMAP: MinimapParams = {
+  groundBrightness: 0.9,
+  waterShallowColor: [57, 55, 115],
+  waterDeepColor: [32, 38, 148],
+  waterOpacityShallow: 0.5,
+  waterOpacityDeep: 0.62,
+  waterFullDepth: 96,
+  objectRadius: 0.6,
+  blurPasses: 2,
+};
+
 export const MINIMAP_SIZE = 256;
-/** Ground colours come out slightly darker than the texture average. */
-const GROUND_GAIN = 0.9;
-/** Water over the ground: colour and opacity from shallow to 96+ deep
- *  (fitted for Lordaeron water, whose minimap colour is 0,0,192). */
-const WATER_SHALLOW: Rgb = [57, 55, 115], WATER_DEEP: Rgb = [32, 38, 148], LORDAERON_WATER: Rgb = [0, 0, 192];
-const WATER_ALPHA = [0.5, 0.62], WATER_FULL_DEPTH = 96, HUE_OFFSET = 64;
-/** Object dots: radius in tiles. */
-const OBJECT_RADIUS = 0.6;
-const BLUR_PASSES = 2;
+/** Minimap colour of the water the fit was made for (Lordaeron). */
+const LORDAERON_WATER: Rgb = [0, 0, 192];
+const HUE_OFFSET = 64;
 
 /** RGBA pixels, rows top to bottom (north up). */
 export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const { terrain: t, margins: [ml, mr, mb, mt], tileColor, waterColor } = input;
+  const P = { ...DEFAULT_MINIMAP, ...input.params };
   const N = MINIMAP_SIZE;
   const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt;
   const scale = N / Math.max(pw, ph); // pixels per tile
@@ -55,14 +80,14 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       let depth = 0;
       q.forEach((c, i) => {
         const tc = tileColor(t.groundTiles[c.texture]);
-        for (let k = 0; k < 3; k++) col[k] += tc[k] * w[i] * GROUND_GAIN;
+        for (let k = 0; k < 3; k++) col[k] += tc[k] * w[i] * P.groundBrightness;
         depth += (c.hasWater ? c.water - c.height : -64) * w[i];
       });
       if (depth > 0) {
-        const f = Math.min(1, depth / WATER_FULL_DEPTH);
-        const a = WATER_ALPHA[0] + (WATER_ALPHA[1] - WATER_ALPHA[0]) * f;
+        const f = Math.min(1, depth / P.waterFullDepth);
+        const a = P.waterOpacityShallow + (P.waterOpacityDeep - P.waterOpacityShallow) * f;
         for (let k = 0; k < 3; k++) {
-          const wc = Math.min(255, (WATER_SHALLOW[k] * (1 - f) + WATER_DEEP[k] * f) * hue[k]);
+          const wc = Math.min(255, (P.waterShallowColor[k] * (1 - f) + P.waterDeepColor[k] * f) * hue[k]);
           col[k] = col[k] * (1 - a) + wc * a;
         }
       }
@@ -70,7 +95,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     }
   }
 
-  const rad = OBJECT_RADIUS * scale;
+  const rad = P.objectRadius * scale;
   for (const o of input.objects) {
     const cx = ((o.x - t.offsetX) / 128 - ml) * scale + ox, cy = N - (((o.y - t.offsetY) / 128 - mb) * scale + oy);
     for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
@@ -82,7 +107,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   }
 
   // Soften like the World Editor's render (3×3 tent filter).
-  for (let pass = 0; pass < BLUR_PASSES; pass++) {
+  for (let pass = 0; pass < P.blurPasses; pass++) {
     const src = img.slice();
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {

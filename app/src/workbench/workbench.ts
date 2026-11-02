@@ -11,7 +11,7 @@ import { OutputPanel } from "./output";
 import { QuickInput } from "./quickinput";
 import { StatusBar } from "./statusbar";
 import { ViewService } from "./views";
-import { SettingsService, WorkspaceService } from "./workspace";
+import { PROJECT_SETTINGS, SettingsService, WorkspaceService } from "./workspace";
 
 const TEXT_EXT = /\.(j|lua|ai|txt|wts|json|toml|fdf|toc|slk|md|csv|ini|xml|html|css|js|ts|gitignore|gitattributes)$/i;
 
@@ -56,6 +56,8 @@ export class Workbench {
         await this.workspace.writeText(p, t);
         // Settings edited as JSON take effect on save.
         if (p === this.settings.settingsPath()) await this.settings.load(p);
+        const project = this.workspace.project();
+        if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
       },
     });
     this.statusBar = new StatusBar((c) => this.run(c));
@@ -135,6 +137,7 @@ export class Workbench {
     for (const vc of c.viewContainers ?? []) this.views.contributeContainer(vc);
     for (const v of c.views ?? []) this.views.contributeView(v);
     for (const e of c.editors ?? []) this.editors.contribute(rec.manifest.id, e);
+    if (c.configuration) this.settings.contribute(rec.manifest.id, c.configuration.title ?? rec.manifest.name, c.configuration.properties);
   }
 
   private createApi(): W3Api {
@@ -270,6 +273,13 @@ export class Workbench {
       const p = this.settings.settingsPath();
       if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("worldEditor.path", this.settings.get("worldEditor.path"));
       await this.editors.open(p, "w3.textEditor");
+    }, { category: "Preferences" });
+    c("workbench.openProjectSettings", "Open Project Settings (JSON)", async () => {
+      const p = this.settings.projectSettingsPath();
+      if (!p) throw new Error("Open a project first.");
+      if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.workspace.writeText(PROJECT_SETTINGS, "{}\n");
+      await this.workspace.refresh();
+      await this.editors.open(PROJECT_SETTINGS, "w3.textEditor");
     }, { category: "Preferences" });
     c("workbench.reload", "Reload Window", () => location.reload(), { category: "Developer", keybinding: "ctrl+r" });
     c("workbench.showLog", "Show Extension Host Log", () => this.log.show(), { category: "Developer" });

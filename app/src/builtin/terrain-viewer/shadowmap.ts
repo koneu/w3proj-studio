@@ -5,7 +5,7 @@
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import type { loadSkins, Placed } from "./objects";
-import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, type AlphaMap, type ShadowMesh } from "./shadows";
+import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, type AlphaMap, type ShadowMesh, type Sun } from "./shadows";
 import type { Terrain } from "./w3e";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
@@ -42,14 +42,14 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
 }
 
 export async function predictShadows(terrain: Terrain, doodads: Placed[], skins: Skins, baseOf: (id: string) => string | undefined,
-  readFile: (path: string) => Promise<Uint8Array>): Promise<Uint8Array> {
-  const out = terrainShadows(terrain);
+  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun): Promise<Uint8Array> {
+  const out = terrainShadows(terrain, sun);
   for (const d of doodads) {
     const skin = skins.get(d.id) ?? skins.get(baseOf(d.id) ?? "");
     if (!skin || skin.kind !== "w3d") continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
     const mesh = await modelMesh(path, readFile);
-    if (mesh) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale });
+    if (mesh) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
   }
   return out;
 }

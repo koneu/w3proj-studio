@@ -210,6 +210,19 @@ Extensions activate lazily: a contributed command, view or editor activates
 its extension on first use. `"activationEvents": ["onStartup"]` loads it
 immediately. *Extensions: Create Sample Extension* writes a working example.
 
+**Settings.** Extensions declare settings in `contributes.configuration` (type, default,
+description, minimum/maximum, enum) and read them with `w3.settings.get(key)`. Values come from
+the open project (`.w3proj/settings.json`, versioned with the map), then the user
+(`%APPDATA%dev.w3proj.studiosettings.json`), then the declared default; settings with
+`"scope": "user"` (paths, lists) ignore the project layer. *Preferences: Open Settings* (Ctrl+,)
+edits either layer; the map tools' parameters live under `terrain.*` (pathing, shadows, minimap).
+
+```json
+"configuration": { "title": "Stats", "properties": {
+  "stats.limit": { "type": "integer", "default": 10, "minimum": 1, "description": "Rows to show." }
+} }
+```
+
 **Services and dependencies.** An extension shares functionality by declaring
 `"contributes": { "services": [{ "id": "me.thing" }] }` and calling
 `w3.services.provide("me.thing", impl)` in `activate`. Users call

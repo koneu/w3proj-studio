@@ -8,6 +8,26 @@
     "viewContainers": [{ "id": "terrain", "title": "Terrain", "icon": "⛰", "order": 3 }],
     "views": [{ "id": "w3.terrain.overview", "title": "Terrain", "container": "terrain" }],
     "editors": [{ "id": "w3.terrainViewer", "title": "Terrain Viewer", "patterns": ["*.w3e"] }],
-    "commands": [{ "id": "w3.terrain.open", "title": "Open Terrain", "category": "Terrain", "keybinding": "f3" }]
+    "commands": [{ "id": "w3.terrain.open", "title": "Open Terrain", "category": "Terrain", "keybinding": "f3" }],
+    "configuration": {
+      "title": "Terrain",
+      "properties": {
+        "terrain.pathing.regenerate": { "type": "boolean", "default": true, "description": "Rewrite the pathing map (war3map.wpm) from terrain and doodads on every save." },
+        "terrain.pathing.deepWater": { "type": "number", "default": 52, "minimum": 0, "maximum": 1000, "description": "Water deeper than this (world units, at a cell's nearest corner) can't be walked. 52 matches the World Editor." },
+        "terrain.shadows.update": { "type": "boolean", "default": true, "description": "Update the shadow map (war3map.shd) on save. Only cells whose predicted shadow changed since the last save are rewritten." },
+        "terrain.shadows.sunAzimuth": { "type": "number", "default": 225, "minimum": 0, "maximum": 360, "description": "Direction toward the sun in degrees, counter-clockwise from east (225 = south-west, as the World Editor)." },
+        "terrain.shadows.sunElevation": { "type": "number", "default": 30, "minimum": 1, "maximum": 89, "description": "Sun height above the horizon in degrees (30 as the World Editor). Lower casts longer shadows." },
+        "terrain.minimap.regenerate": { "type": "string", "default": "afterEdits", "enum": ["afterEdits", "always", "never"], "enumDescriptions": ["After edits", "On every save", "Never"], "description": "When to redraw the minimap (war3mapMap.blp). \"After edits\" keeps the World Editor's image until something changes." },
+        "terrain.minimap.groundBrightness": { "type": "number", "default": 0.9, "minimum": 0, "maximum": 3, "description": "Ground colour relative to the average colour of its texture." },
+        "terrain.minimap.waterShallowColor": { "type": "array", "default": [57, 55, 115], "description": "Water colour [r, g, b] at shallow depth (for Lordaeron water; other tilesets are shifted toward their own minimap water colour)." },
+        "terrain.minimap.waterDeepColor": { "type": "array", "default": [32, 38, 148], "description": "Water colour [r, g, b] at full depth." },
+        "terrain.minimap.waterOpacityShallow": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "description": "How much shallow water covers the ground (0–1)." },
+        "terrain.minimap.waterOpacityDeep": { "type": "number", "default": 0.62, "minimum": 0, "maximum": 1, "description": "How much deep water covers the ground (0–1)." },
+        "terrain.minimap.waterFullDepth": { "type": "number", "default": 96, "minimum": 1, "maximum": 2000, "description": "Depth (world units) at which water reaches its deep colour and opacity." },
+        "terrain.minimap.objectRadius": { "type": "number", "default": 0.6, "minimum": 0, "maximum": 8, "description": "Size of tree/doodad dots (in tiles) for objects with a minimap colour." },
+        "terrain.minimap.blurPasses": { "type": "integer", "default": 2, "minimum": 0, "maximum": 10, "description": "Softening passes (the World Editor's minimaps are soft)." },
+        "terrain.minimap.jpegQuality": { "type": "integer", "default": 80, "minimum": 10, "maximum": 100, "description": "JPEG quality of the minimap file." }
+      }
+    }
   }
 }

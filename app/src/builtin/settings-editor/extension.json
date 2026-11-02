@@ -1,0 +1,10 @@
+{
+  "id": "w3.settingsEditor",
+  "name": "Settings Editor",
+  "version": "0.1.0",
+  "description": "Edit the declared settings of the workbench and all extensions, for the user or the open project.",
+  "contributes": {
+    "editors": [{ "id": "w3.settingsEditor", "title": "Settings", "patterns": ["w3:settings"] }],
+    "commands": [{ "id": "w3.settings.open", "title": "Open Settings", "category": "Preferences", "keybinding": "ctrl+," }]
+  }
+}
