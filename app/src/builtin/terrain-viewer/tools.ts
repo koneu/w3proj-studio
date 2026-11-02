@@ -45,6 +45,11 @@ export class Stroke {
 
   constructor(readonly label: string) {}
 
+  /** Indices of the corners the stroke changed (or touched). */
+  corners(): number[] {
+    return [...this.before.keys()];
+  }
+
   touch(t: Terrain, i: number) {
     if (!this.before.has(i)) this.before.set(i, { ...t.corners[i] });
   }

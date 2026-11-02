@@ -15,7 +15,7 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { applyHeight, applyLayer, paintTexture, Stroke, waterLevelAt, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
-import { groundHeight, parseW3e, writeW3e, type Terrain } from "./w3e";
+import { groundHeight, heightAt, parseW3e, writeW3e, type Terrain } from "./w3e";
 
 const PATH = "map/war3map.w3e";
 /** TEAM_COLORS index used for neutral players. */
@@ -198,7 +198,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!stroke) return;
           const s = stroke.s;
           if (s.finish(terrain)) {
-            pushEdit({ undo: () => s.undo(terrain), redo: () => s.redo(terrain), terrain: true, objects: false });
+            // Objects on the edited ground follow it (doodads with a fixed
+            // height, flag 4, keep theirs).
+            const follow = groundFollowers(s.corners());
+            const setZ = (z: number[]) => follow.forEach((p, i) => { p.position = [p.position[0], p.position[1], z[i]]; });
+            const zBefore = follow.map((p) => p.position[2]);
+            const zAfter = follow.map((p) => heightAt(terrain, p.position[0], p.position[1]));
+            const moved = zAfter.some((z, i) => Math.abs(z - zBefore[i]) > 0.01);
+            pushEdit({
+              undo: () => { s.undo(terrain); if (moved) setZ(zBefore); },
+              redo: () => { s.redo(terrain); if (moved) setZ(zAfter); },
+              terrain: true, objects: moved,
+            });
+            if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); }
             if (isLayerTool(s.label as Tool)) { replanCliffs(); renderer.terrainChanged(); redraw(); }
           }
           doc.setDirty(at !== savedAt);
@@ -338,6 +350,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
         }
         const fileOf = (entry: Placed) => (dooFile?.list.includes(entry) ? dooFile : unitsFile?.list.includes(entry) ? unitsFile : null);
+        /** Placed objects standing on the given corners' tiles that follow the
+         *  ground: units, items and doodads without a fixed height (flag 4). */
+        const groundFollowers = (corners: number[]): Placed[] => {
+          if (!corners.length) return [];
+          let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+          for (const i of corners) {
+            const cx = i % terrain.width, cy = Math.floor(i / terrain.width);
+            x0 = Math.min(x0, cx); x1 = Math.max(x1, cx); y0 = Math.min(y0, cy); y1 = Math.max(y1, cy);
+          }
+          // Tiles next to a changed corner change too.
+          const minX = terrain.offsetX + (x0 - 1) * 128, maxX = terrain.offsetX + (x1 + 1) * 128;
+          const minY = terrain.offsetY + (y0 - 1) * 128, maxY = terrain.offsetY + (y1 + 1) * 128;
+          const inside = (p: Placed) => p.position[0] >= minX && p.position[0] <= maxX && p.position[1] >= minY && p.position[1] <= maxY;
+          const doodads = (dooFile?.list ?? []).filter((p) => !(((p as Placed & { flags?: number }).flags ?? 0) & 4));
+          return [...doodads, ...(unitsFile?.list ?? [])].filter(inside);
+        };
         /** Moves/turns an entry and its model in place (no rebuild). */
         const setPlacement = (entry: Placed, position: [number, number, number], angle: number) => {
           const inst = findInstance(entry);

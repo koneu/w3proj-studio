@@ -137,6 +137,17 @@ export function groundHeight(c: Corner): number {
   return (c.rawHeight - 0x2000) / 4;
 }
 
+/** Height of the ground at a world position: bilinear over the tile's
+ *  corners (layers included). Doodads without a fixed height sit exactly
+ *  there in World Editor maps (97% within half a unit). */
+export function heightAt(t: Terrain, wx: number, wy: number): number {
+  const fx = Math.min(Math.max((wx - t.offsetX) / 128, 0), t.width - 1.000001);
+  const fy = Math.min(Math.max((wy - t.offsetY) / 128, 0), t.height - 1.000001);
+  const x = Math.floor(fx), y = Math.floor(fy), u = fx - x, v = fy - y;
+  const c = (i: number, j: number) => t.corners[(y + j) * t.width + x + i].height;
+  return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
+}
+
 /** Serializes a terrain; an unedited one comes out byte for byte as it was read. */
 export function writeW3e(t: Terrain): Uint8Array {
   const per = t.version === 12 ? 8 : 7;
