@@ -8,7 +8,6 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { NotUtf8Error } from "../../workbench/backend";
 import { h } from "../../workbench/dom";
 import { jass } from "./jass";
 
@@ -50,7 +49,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           text = await doc.readText();
         } catch (e) {
-          if (e instanceof NotUtf8Error) {
+          if ((e as Error).name === "NotUtf8Error") {
             el.append(h("div.editor-error", {}, "This file is not UTF-8 text. ",
               h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
             return {};

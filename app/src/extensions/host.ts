@@ -84,20 +84,54 @@ export class ExtensionHost {
     if (kind === "onCommand") return !!c.commands?.some((x) => x.id === id);
     if (kind === "onView") return !!c.views?.some((x) => x.id === id);
     if (kind === "onEditor") return !!c.editors?.some((x) => x.id === id);
+    if (kind === "onService") return !!c.services?.some((x) => x.id === id);
     return false;
+  }
+
+  private services = new Map<string, unknown>();
+
+  provideService(id: string, impl: unknown): { dispose(): void } {
+    if (this.services.has(id)) throw new Error(`The service "${id}" is already provided.`);
+    this.services.set(id, impl);
+    return { dispose: () => { if (this.services.get(id) === impl) this.services.delete(id); } };
+  }
+
+  async getService<T>(id: string): Promise<T> {
+    if (!this.services.has(id)) {
+      const provider = this.extensions.find((e) => e.manifest.contributes?.services?.some((s) => s.id === id));
+      if (!provider) throw new Error(`No extension provides the service "${id}".`);
+      if (provider.disabled) throw new Error(`The service "${id}" comes from ${provider.manifest.name} (${provider.manifest.id}), which is disabled.`);
+      await this.activate(provider);
+      if (provider.error) throw new Error(`The service "${id}" is unavailable: ${provider.manifest.id} failed to activate (${provider.error}).`);
+    }
+    if (!this.services.has(id)) throw new Error(`${id} is declared but its extension didn't register it.`);
+    return this.services.get(id) as T;
+  }
+
+  /** Activates the extensions `e` depends on; throws naming a missing or
+   *  disabled one. */
+  private async activateDependencies(e: ExtensionRecord) {
+    for (const id of e.manifest.extensionDependencies ?? []) {
+      const dep = this.extensions.find((x) => x.manifest.id === id);
+      if (!dep) throw new Error(`requires ${id}, which isn't installed`);
+      if (dep.disabled) throw new Error(`requires ${dep.manifest.name} (${id}), which is disabled`);
+      await this.activate(dep);
+      if (dep.error) throw new Error(`requires ${id}, which failed to activate`);
+    }
   }
 
   activate(e: ExtensionRecord): Promise<void> {
     e.activating ??= (async () => {
       const started = performance.now();
       try {
+        await this.activateDependencies(e);
         const mod = await e.load();
         e.ctx = { extensionId: e.manifest.id, extensionPath: e.dir, subscriptions: [] };
         await mod.activate(this.api, e.ctx);
         e.active = true;
         this.log(`activated ${e.manifest.id} (${e.source}) in ${Math.round(performance.now() - started)} ms`);
       } catch (err) {
-        e.error = String(err);
+        e.error = err instanceof Error ? err.message : String(err);
         this.log(`failed to activate ${e.manifest.id}: ${err}`);
         console.error(err);
       }

@@ -38,19 +38,29 @@ export interface EditorContribution {
   priority?: "default" | "option";
 }
 
+/** A service other extensions can use through `w3.services.get(id)`. */
+export interface ServiceContribution {
+  id: string;
+  description?: string;
+}
+
 export interface ExtensionManifest {
   id: string;
   name: string;
   version: string;
   description?: string;
   main?: string;
-  /** "*" | "onStartup" | "onCommand:<id>" | "onView:<id>" | "onEditor:<id>" */
+  /** "*" | "onStartup" | "onCommand:<id>" | "onView:<id>" | "onEditor:<id>" | "onService:<id>" */
   activationEvents?: string[];
+  /** Extensions that must be active first. If one is missing or disabled,
+   *  this extension fails to activate with a message saying which. */
+  extensionDependencies?: string[];
   contributes?: {
     commands?: CommandContribution[];
     viewContainers?: ViewContainerContribution[];
     views?: ViewContribution[];
     editors?: EditorContribution[];
+    services?: ServiceContribution[];
   };
 }
 
@@ -67,6 +77,7 @@ export interface EditorDocument {
   readonly absolutePath: string | null;
   /** Game files ("game:…") cannot be written. */
   readonly readOnly: boolean;
+  /** Rejects with an error whose `name` is "NotUtf8Error" for binary files. */
   readText(): Promise<string>;
   readBytes(): Promise<Uint8Array>;
   writeText(text: string): Promise<void>;
@@ -172,6 +183,7 @@ export interface W3Api {
     files(): FileInfo[];
     refresh(): Promise<void>;
     resolve(projectPath: string): string;
+    /** Rejects with an error whose `name` is "NotUtf8Error" for binary files. */
     readText(projectPath: string): Promise<string>;
     writeText(projectPath: string, text: string): Promise<void>;
     readBytes(projectPath: string): Promise<Uint8Array>;
@@ -198,6 +210,16 @@ export interface W3Api {
   };
   extensions: {
     all(): { manifest: ExtensionManifest; source: string; active: boolean; disabled: boolean; error?: string }[];
+  };
+  /** Shared functionality between extensions. A provider declares the id in
+   *  `contributes.services` and registers it in activate(); users list the
+   *  provider in `extensionDependencies`. Service types live in
+   *  `extensions/services.ts`. */
+  services: {
+    provide<T>(id: string, impl: T): Disposable;
+    /** Activates the providing extension if needed. Rejects when no
+     *  extension provides `id` or its provider is disabled. */
+    get<T>(id: string): Promise<T>;
   };
 }
 

@@ -3,6 +3,7 @@
   "name": "Terrain Viewer",
   "version": "0.1.0",
   "description": "3D view of a map's terrain (war3map.w3e): ground textures, heights, water, and where doodads and units are placed.",
+  "extensionDependencies": ["w3.objectEditor"],
   "contributes": {
     "viewContainers": [{ "id": "terrain", "title": "Terrain", "icon": "⛰", "order": 3 }],
     "views": [{ "id": "w3.terrain.overview", "title": "Terrain", "container": "terrain" }],

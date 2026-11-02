@@ -2,7 +2,7 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
-import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../model-viewer/renderer";
+import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Placed } from "./objects";
 import type { Terrain } from "./w3e";
 

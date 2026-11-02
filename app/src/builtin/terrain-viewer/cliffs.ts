@@ -7,7 +7,7 @@
 // textures (#ignore_Cliffs\Cliff1_Diffuse…) that stand for its HD set.
 // Ramps (tiles with the ramp flag) aren't modelled and stay sloped ground.
 
-import type { Mat4 } from "../model-viewer/renderer";
+import type { Mat4 } from "../../lib/model/renderer";
 import type { ModelRequest } from "./objects";
 import type { Terrain } from "./w3e";
 

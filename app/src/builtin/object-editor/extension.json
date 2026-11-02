@@ -41,6 +41,12 @@
         "title": "Object Data",
         "container": "objects"
       }
+    ],
+    "services": [
+      {
+        "id": "w3.objects",
+        "description": "Object browser over game and custom objects (pick)."
+      }
     ]
   }
 }

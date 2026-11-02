@@ -1,7 +1,9 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
-import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "./metadata";
+import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
+import { objectsService, parseWts, stripColors } from "./service";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -31,18 +33,6 @@ function modLists(o: Obj): { label: string; mods: Mod[] }[] {
   return [{ label: "", mods: o.mods }];
 }
 
-/** war3map.wts: STRING <n> [// comment] { text } */
-function parseWts(text: string): Map<string, string> {
-  const map = new Map<string, string>();
-  const re = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n([\s\S]*?)\r?\n\}/g;
-  for (let m; (m = re.exec(text)); ) map.set(`TRIGSTR_${m[1].padStart(3, "0")}`, m[2]);
-  return map;
-}
-
-function stripColors(s: string) {
-  return s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
-}
-
 function parseValue(type: ValueType, text: string): number | string | null {
   if (type === "string") return text;
   const n = Number(text);
@@ -57,6 +47,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let pendingFocus: { path: string; id: string } | null = null;
 
   ctx.subscriptions.push(
+    w3.services.provide(OBJECTS_SERVICE, objectsService(w3)),
     w3.views.register("w3.objects.kinds", {
       render(el) {
         if (!w3.workspace.project()) {

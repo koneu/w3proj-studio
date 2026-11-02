@@ -37,6 +37,8 @@ export class EditorService {
   /** Fallback when no contribution matches: decides text vs binary. */
   fallback: (path: string) => Promise<string> = async () => "w3.textEditor";
   confirm: (message: string, ...actions: string[]) => Promise<string | undefined> = async () => undefined;
+  /** Why an extension's editor isn't available (disabled, failed to activate). */
+  whyUnavailable: (extensionId: string) => string | undefined = () => undefined;
 
   constructor(private io: DocumentIO) {
     this.content.append(this.empty);
@@ -85,7 +87,11 @@ export class EditorService {
     id ??= await this.fallback(path);
     if (!this.providers.has(id)) await this.activate(`onEditor:${id}`);
     const provider = this.providers.get(id);
-    if (!provider) throw new Error(`no editor provider ${id} — is its extension disabled ("extensions.disabled") or failed to load?`);
+    if (!provider) {
+      const ext = this.contributions.find((c) => c.id === id)?.extensionId;
+      const why = ext ? this.whyUnavailable(ext) : undefined;
+      throw new Error(why ? `Can't open ${path}: ${why}` : `no editor provider ${id} — is its extension disabled ("extensions.disabled") or failed to load?`);
+    }
 
     const el = h("div.editor-pane");
     const title = path.startsWith("w3:")

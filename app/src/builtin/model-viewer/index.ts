@@ -1,8 +1,8 @@
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { formatBytes, h } from "../../workbench/dom";
-import { decodeImage } from "../image-viewer/decode/index.ts";
-import { parseMdx } from "./mdx";
-import { ModelRenderer, TEAM_COLORS, type Clock } from "./renderer";
+import { decodeImage } from "../../lib/image/index.ts";
+import { parseMdx } from "../../lib/model/mdx";
+import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
 
 const FILTER_NAMES = ["none", "transparent", "blend", "additive", "add alpha", "modulate", "modulate 2x"];
 

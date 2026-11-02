@@ -3,7 +3,7 @@
 // overlay inside the object editor.
 
 import { h } from "../../workbench/dom";
-import type { FieldMeta, KindData } from "./metadata";
+import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 
 const MAX_ROWS = 300;
 const OPS = [">=", "<=", "!=", ">", "<", "=", ":"] as const;

@@ -1,6 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
-import { parseIni, parseSlk, westring } from "../object-editor/metadata";
+import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "./wts";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional

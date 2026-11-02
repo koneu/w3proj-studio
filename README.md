@@ -67,13 +67,21 @@ crates/cli       `w3proj` command line
 app/             Tauri desktop app
   src-tauri/     Rust backend (thin: exposes the core, files, launching WE/game)
   src/workbench/ VS Code-like shell: activity bar, views, tabs, palette, status bar, output
-  src/extensions/api.ts   the public extension API
-  src/builtin/   built-in extensions (explorer, text editor, object editor, texture viewer, map project, …)
-    model-viewer/          MDX parser (v800–v1800) and WebGL2 renderer (GPU skinning)
-    terrain-viewer/        w3e parser, ground/water renderer, cliff and object placement
-    image-viewer/decode/   dependency-free BLP1/BLP2, DDS (BC1–5) and TGA decoders, incl. a
+  src/extensions/api.ts       the public extension API
+  src/extensions/services.ts  contracts of the services extensions provide each other
+  src/lib/       shared code that belongs to no extension
+    image/                 dependency-free BLP1/BLP2, DDS (BC1–5) and TGA decoders, incl. a
                            baseline + progressive JPEG decoder for BLP1's 4-channel JPEGs
+    model/                 MDX parser (v800–v1800) and WebGL2 renderer (GPU skinning)
+    formats/text.ts        SLK and INI parsing
+    objects/metadata.ts    object data knowledge from the game (fields, names, defaults)
+  src/builtin/   built-in extensions (explorer, text editor, object editor, texture viewer, map project, …)
+    terrain-viewer/        w3e parser, ground/water renderer, cliffs, object placement, pathing map
 ```
+
+Module boundaries (checked by `npm run check` and the build, `app/scripts/check-imports.mjs`):
+an extension imports only its own files, `src/lib`, `src/extensions` and `workbench/dom`.
+Functionality one extension offers others goes through a service, not an import.
 
 ## Build & run
 
@@ -201,6 +209,18 @@ Host log), so a replacement uses its own id plus one of these two settings.
 Extensions activate lazily: a contributed command, view or editor activates
 its extension on first use. `"activationEvents": ["onStartup"]` loads it
 immediately. *Extensions: Create Sample Extension* writes a working example.
+
+**Services and dependencies.** An extension shares functionality by declaring
+`"contributes": { "services": [{ "id": "me.thing" }] }` and calling
+`w3.services.provide("me.thing", impl)` in `activate`. Users call
+`await w3.services.get("me.thing")` (which activates the provider) and list the
+provider in `"extensionDependencies": ["me.provider"]`. If a dependency is
+disabled or missing, the dependent fails to activate with a message naming it
+(Extensions view). Built-in services:
+
+| Service | Provider | What |
+|---|---|---|
+| `w3.objects` | Object Editor | `pick(host, { title, kinds })`: the object browser (search, facets, field filters, the map's custom objects), one tab per kind |
 
 ## Known limits / next steps
 

@@ -1,6 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { formatBytes, h } from "../../workbench/dom";
-import { decodeImage, type Mip } from "./decode/index.ts";
+import { decodeImage, type Mip } from "../../lib/image/index.ts";
 
 type Channel = "rgba" | "rgb" | "r" | "g" | "b" | "a";
 

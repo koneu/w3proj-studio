@@ -18,6 +18,7 @@ export async function readBytes(path: string): Promise<Uint8Array> {
 export class NotUtf8Error extends Error {
   constructor(path: string) {
     super(`${path} is not valid UTF-8`);
+    this.name = "NotUtf8Error";
   }
 }
 

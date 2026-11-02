@@ -76,6 +76,12 @@ export class Workbench {
     this.editors.activate = fire;
     this.views.run = (c) => this.run(c);
     this.editors.confirm = (m, ...a) => this.notifications.show("warning", m, a);
+    this.editors.whyUnavailable = (id) => {
+      const e = this.host.extensions.find((x) => x.manifest.id === id);
+      if (!e) return undefined;
+      if (e.disabled) return `${e.manifest.name} is disabled ("extensions.disabled").`;
+      return e.error ? `${e.manifest.name} ${e.error}.` : undefined;
+    };
     this.editors.fallback = async (path) => {
       if (path.startsWith("w3:")) throw new Error(`unknown virtual document ${path}`);
       if (TEXT_EXT.test(path)) return "w3.textEditor";
@@ -186,6 +192,10 @@ export class Workbench {
       backend: { invoke, listen },
       extensions: {
         all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, disabled: e.disabled, error: e.error })),
+      },
+      services: {
+        provide: (id, impl) => wb.host.provideService(id, impl),
+        get: (id) => wb.host.getService(id),
       },
     };
   }

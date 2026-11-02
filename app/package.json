@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && node scripts/check-imports.mjs && vite build",
+    "check": "tsc --noEmit && node scripts/check-imports.mjs",
     "tauri": "tauri",
     "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png"
   },

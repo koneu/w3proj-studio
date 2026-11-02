@@ -3,8 +3,8 @@
 // doodads and walkable destructables (with the map's object data overrides).
 
 import type { W3Api } from "../../extensions/api";
-import { decodeImage } from "../image-viewer/decode/index.ts";
-import { parseSlk } from "../object-editor/metadata";
+import { decodeImage } from "../../lib/image/index.ts";
+import { parseSlk } from "../../lib/formats/text";
 import { generatePathing, type PathingStamp, type TileRule } from "./pathing";
 import type { Placed } from "./objects";
 import type { Terrain } from "./w3e";

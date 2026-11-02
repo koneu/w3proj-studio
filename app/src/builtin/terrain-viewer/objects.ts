@@ -3,10 +3,10 @@
 // skin tables, models and textures are loaded once and shared.
 
 import type { W3Api } from "../../extensions/api";
-import { decodeImage } from "../image-viewer/decode/index.ts";
-import { parseMdx } from "../model-viewer/mdx";
-import { bounds, ModelGpu, uploadTexture, type Mat4 } from "../model-viewer/renderer";
-import { parseIni } from "../object-editor/metadata";
+import { decodeImage } from "../../lib/image/index.ts";
+import { parseMdx } from "../../lib/model/mdx";
+import { bounds, ModelGpu, uploadTexture, type Mat4 } from "../../lib/model/renderer";
+import { parseIni } from "../../lib/formats/text";
 import type { ObjectBatch, ObjectInstance } from "./renderer";
 
 export interface Placed {
