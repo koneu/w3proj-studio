@@ -352,3 +352,4 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-sel-num { width: 100%; box-sizing: border-box; }
 .terrain-sel-triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
 .terrain-place-hint select { font-size: 12px; }
+.picker-tabs { display: flex; gap: 6px; flex-wrap: wrap; }

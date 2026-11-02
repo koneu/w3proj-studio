@@ -3,6 +3,7 @@ import { h } from "../../workbench/dom";
 import { decodeImage } from "../image-viewer/decode/index.ts";
 import { TEAM_COLORS, type Vec3 } from "../model-viewer/renderer";
 import { loadKind, parseSlk } from "../object-editor/metadata";
+import { pickObject } from "../object-editor/picker";
 import { planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import { buildPathingMap } from "./pathmap";
@@ -380,6 +381,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Type chosen with "Place…"; each click on the ground places one. */
         let placing: { kind: string; id: string; name: string } | null = null;
+        /** Kind tab last used in the place dialog. */
+        let placeTab = 0;
         /** Owner of placed units (kept between placements). */
         let placeOwner = 0;
         const placeHint = h("span.terrain-place-hint");
@@ -401,24 +404,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objectsTouched = true;
           void rebuildObjects();
         };
+        /** The object browser of the object editor, with a tab per kind. */
         const choosePlacement = async () => {
-          const kinds: [string, string][] = [["w3u", "Unit"], ["w3t", "Item"], ["w3b", "Destructable"], ["w3d", "Doodad"]];
-          const items: { label: string; description: string; value: { kind: string; id: string; name: string } }[] = [];
-          for (const [kind, label] of kinds) {
-            const k = await loadKind(w3, kind).catch(() => null);
-            if (!k) continue;
-            for (const id of k.baseIds) {
-              const name = k.names.get(id) ?? id;
-              items.push({ label: name, description: `${id} · ${label}`, value: { kind, id, name } });
-            }
-            for (const [id, base] of objCtx?.bases ?? []) {
-              if (!k.names.has(base)) continue;
-              const name = `${k.names.get(base)} (custom)`;
-              items.push({ label: name, description: `${id} · ${label}`, value: { kind, id, name } });
-            }
+          const kinds: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"]];
+          let query = "";
+          for (;;) {
+            const [kind] = kinds[placeTab];
+            const k = await loadKind(w3, kind).catch((e) => { w3.window.showError(String(e)); return null; });
+            if (!k) return;
+            const custom = [...(objCtx?.bases ?? [])].filter(([, base]) => k.names.has(base))
+              .map(([id, base]) => ({ id, base, name: `${k.names.get(base)} (custom)` }));
+            const r = await pickObject(el, k, { title: "Place…", custom, tabs: { labels: kinds.map(([, l]) => l), active: placeTab }, query });
+            if (!r) { canvas.focus(); return; }
+            if ("tab" in r) { placeTab = r.tab; query = r.query; continue; }
+            const name = custom.find((c) => c.id === r.id)?.name ?? k.names.get(r.id) ?? r.id;
+            setTool("select");
+            setPlacing({ kind, id: r.id, name: name.replace(/\|c[0-9a-f]{8}|\|r/gi, "") });
+            canvas.focus();
+            return;
           }
-          const pick = await w3.window.quickPick(items, { placeholder: "What to place (name or id)…" });
-          if (pick?.value) { setTool("select"); setPlacing(pick.value); canvas.focus(); }
         };
 
         // ---- selection --------------------------------------------------------------

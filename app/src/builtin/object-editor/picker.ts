@@ -13,6 +13,8 @@ const TOKEN = /^([^\s<>=!:]+)(>=|<=|!=|>|<|=|:)(.*)$/;
 
 interface Entry {
   id: string;
+  /** Custom objects: the game object field values come from. */
+  base?: string;
   name: string;
   facets: Record<string, string>;
   haystack: string;
@@ -67,12 +69,36 @@ export function pickBaseObject(
   kd: KindData,
   opts: { title: string; pinned?: string },
 ): Promise<string | undefined> {
+  return pickObject(host, kd, opts).then((r) => (r && "id" in r ? r.id : undefined));
+}
+
+export interface PickOptions {
+  title: string;
+  /** Listed first, marked "base of selected". */
+  pinned?: string;
+  /** The map's custom objects, listed with the game objects. */
+  custom?: { id: string; base: string; name: string }[];
+  /** Kind tabs (e.g. Unit / Item / …): choosing another one closes the
+   *  picker with `{ tab, query }` so the caller can reopen it for that kind. */
+  tabs?: { labels: string[]; active: number };
+  /** Initial search text. */
+  query?: string;
+}
+
+export type PickResult = { id: string } | { tab: number; query: string } | undefined;
+
+/** The object browser: resolves with the chosen id, a tab switch, or
+ *  undefined when cancelled. */
+export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): Promise<PickResult> {
   const strip = (s: string) => s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
-  const entries: Entry[] = kd.baseIds.map((id) => {
-    const name = strip(kd.names.get(id) ?? id);
-    const facets = kd.facets(id);
-    return { id, name, facets, haystack: `${name} ${id} ${Object.values(facets).join(" ")}`.toLowerCase() };
-  });
+  const entry = (id: string, name: string, base?: string): Entry => {
+    const facets = kd.facets(base ?? id);
+    return { id, base, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")}`.toLowerCase() };
+  };
+  const entries: Entry[] = [
+    ...(opts.custom ?? []).map((c) => entry(c.id, strip(c.name), c.base)),
+    ...kd.baseIds.map((id) => entry(id, strip(kd.names.get(id) ?? id))),
+  ];
   entries.sort((a, b) => (a.id === opts.pinned ? -1 : b.id === opts.pinned ? 1 : a.name.localeCompare(b.name)));
 
   // Field values are looked up lazily and cached (level 1 for per-level fields).
@@ -96,7 +122,7 @@ export function pickBaseObject(
   return new Promise((resolve) => {
     const finish = (id: string | undefined) => {
       overlay.remove();
-      resolve(id);
+      resolve(id === undefined ? undefined : { id });
     };
 
     const parseQuery = () => {
@@ -117,12 +143,13 @@ export function pickBaseObject(
       }
       for (const f of filters) {
         if (!f.field) continue; // unknown field: shown as an error chip, ignored
-        if (!compare(fieldValue(f.field, e.id), f.op, f.value)) return false;
+        if (!compare(fieldValue(f.field, e.base ?? e.id), f.op, f.value)) return false;
       }
       return true;
     };
 
     const search = h("input.picker-search", {
+      value: opts.query ?? "",
       placeholder: "Search by name, id, race … or filter fields: gold>100  hp>=500  ubdg=1",
       oninput: () => { active = 0; render(); },
       onkeydown: (e: KeyboardEvent) => {
@@ -225,7 +252,8 @@ export function pickBaseObject(
           h("span.picker-name", {}, e.name),
           h("code", {}, e.id),
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,
-          ...shownFields.map((f) => h("span.picker-value", { title: f.label }, `${f.label}: ${strip(fieldValue(f, e.id) ?? "—")}`)),
+          e.base ? h("span.badge", { title: "Custom object of this map" }, `custom · ${e.base}`) : null,
+          ...shownFields.map((f) => h("span.picker-value", { title: f.label }, `${f.label}: ${strip(fieldValue(f, e.base ?? e.id) ?? "—")}`)),
           h("span.picker-tags", {}, Object.values(e.facets).join(" · ")),
         )));
       rowsEl.children[active]?.scrollIntoView({ block: "nearest" });
@@ -243,6 +271,10 @@ export function pickBaseObject(
     const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) finish(undefined); } },
       h("div.picker", {},
         h("div.picker-header", {}, h("strong", {}, opts.title), countEl, h("button.icon-button", { title: "Cancel (Esc)", onclick: () => finish(undefined) }, "×")),
+        opts.tabs ? h("div.picker-tabs", {}, ...opts.tabs.labels.map((label, i) =>
+          h(`button.chip${i === opts.tabs!.active ? ".on" : ""}`, {
+            onclick: () => { if (i === opts.tabs!.active) return; overlay.remove(); resolve({ tab: i, query: search.value }); },
+          }, label))) : null,
         search,
         filterChips,
         builder,
