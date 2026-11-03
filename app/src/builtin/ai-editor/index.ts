@@ -83,6 +83,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
       },
     }),
+    // Side bar: new/open, the project's AI files and the game's own (read-only).
+    w3.views.register("w3.ai.files", {
+      render(el) {
+        const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
+        const row = (label: string, title: string, open: () => Promise<unknown>) =>
+          h("div.tree-row.obj-kind", { title, onclick: run(open) }, h("span.tree-icon", {}, "›"), h("span.tree-label", {}, label));
+        el.append(h("div.camp-side-actions", {},
+          h("button", { onclick: run(() => w3.commands.execute("w3.ai.new")) }, "New AI…"), " ",
+          h("button", { onclick: run(() => w3.commands.execute("w3.ai.open")) }, "Open AI…"), " ",
+          h("button", { title: "Export the open AI's script (.ai)", onclick: run(() => w3.commands.execute("w3.ai.exportScript")) }, "Export…")));
+        const own = w3.workspace.project() ? w3.workspace.files().filter((f) => /\.wai$/i.test(f.path)) : [];
+        el.append(h("div.camp-side-head", {}, "In this project"),
+          own.length
+            ? h("div.tree", {}, ...own.map((f) => row(f.path.split("/").pop()!, f.path, () => w3.editors.open(f.path, "w3.aiEditor"))))
+            : h("div.view-empty", {}, w3.workspace.project() ? "No AI files (.wai) in this project." : "No project open."));
+        const game = h("div.tree", {}, h("div.view-empty", {}, "Loading…"));
+        el.append(h("div.camp-side-head", {}, "Game AIs (read-only)"), game);
+        void w3.game.list().then((list) => {
+          // One entry per file (the base game's copy), by name.
+          const byName = new Map<string, string>();
+          for (const full of list) {
+            if (!/\.wai$/i.test(full)) continue;
+            const name = full.split(/[:/\\]/).pop()!;
+            if (!byName.has(name.toLowerCase()) || /^War3\.w3mod:[^_]/i.test(full)) byName.set(name.toLowerCase(), full);
+          }
+          const files = [...byName.values()].sort((a, b) => a.localeCompare(b));
+          game.replaceChildren(...(files.length
+            ? files.map((full) => row(full.split(/[:/\\]/).pop()!, full, () => w3.editors.open(`game:${full}`, "w3.aiEditor")))
+            : [h("div.view-empty", {}, "None found.")]));
+        }, (e) => game.replaceChildren(h("div.view-empty", {}, `Game data unavailable (${e})`)));
+      },
+    }),
+    w3.workspace.onDidChange(() => w3.views.refresh("w3.ai.files")),
     w3.commands.register("w3.ai.exportScript", async () => {
       if (!current) throw new Error("Open an AI file in the AI Editor first.");
       await current.exportScript();
