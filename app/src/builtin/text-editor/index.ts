@@ -8,7 +8,7 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, type CompletionItem, type CompletionProvider, type CompletionRequest } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, type CompletionItem, type CompletionProvider, type CompletionRequest, type FileLanguage } from "../../extensions/services";
 import { checkJass, envWithout } from "../../lib/jass/check";
 import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
@@ -101,7 +101,16 @@ const extraCompletion = async (request: CompletionRequest): Promise<CompletionIt
   return lists.flat();
 };
 
+/** Languages claiming files (registerFileLanguage). */
+const fileLanguages: FileLanguage[] = [];
+const claimOf = (path: string, text: string) => fileLanguages.find((l) => l.extensions?.some((e) => path.toLowerCase().endsWith(e.toLowerCase())))
+  ?? fileLanguages.find((l) => l.detect?.(path, text));
+
 const codeEditors: CodeEditorService = {
+  registerFileLanguage(lang) {
+    fileLanguages.push(lang);
+    return { dispose: () => { const i = fileLanguages.indexOf(lang); if (i >= 0) fileLanguages.splice(i, 1); } };
+  },
   registerCompletion(provider) {
     completionProviders.push(provider);
     return { dispose: () => { const i = completionProviders.indexOf(provider); if (i >= 0) completionProviders.splice(i, 1); } };
@@ -182,13 +191,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const updateStatus = (view: EditorView) => {
           const pos = view.state.selection.main.head;
           const line = view.state.doc.lineAt(pos);
-          status.text = `Ln ${line.number}, Col ${pos - line.from + 1}  ${eol === "\r\n" ? "CRLF" : eol === "\r" ? "CR" : "LF"}  UTF-8${doc.readOnly ? "  read-only" : ""}`;
+          status.text = `Ln ${line.number}, Col ${pos - line.from + 1}  ${eol === "\r\n" ? "CRLF" : eol === "\r" ? "CR" : "LF"}  UTF-8${claim ? `  ${claim.title}` : ""}${doc.readOnly ? "  read-only" : ""}`;
         };
-        // JASS files are checked against the game's common.j and Blizzard.j (and themselves, in order);
-        // AI scripts (.ai) also use common.ai, which isn't loaded.
-        const jass = /\.j$/i.test(doc.path);
+        // A language extension may claim the file (vJASS in a .j file, .vj files): its base language
+        // and its checker. Else JASS files are checked against the game's common.j and Blizzard.j
+        // (and themselves, in order); AI scripts (.ai) also use common.ai, which isn't loaded.
+        const claim = claimOf(doc.path, text);
+        const jass = claim ? claim.base === "jass" : /\.j$/i.test(doc.path);
         const problems = h("div.cm-diag-list", { hidden: true });
-        const lint = jass ? linter(async (t) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t)), problems) : null;
+        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t)) : undefined;
+        const lint = check ? linter(check, problems) : null;
         if (lint) el.classList.add("text-with-problems");
         const view = new EditorView({
           parent: el,
@@ -196,7 +208,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             doc: text,
             extensions: [
               EditorState.lineSeparator.of(eol),
-              ...basics(language(doc.path), doc.readOnly),
+              ...basics(language(claim ? `x.${claim.base === "jass" ? "j" : claim.base}` : doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
               ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t), elsewhere(), extraCompletion)] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),

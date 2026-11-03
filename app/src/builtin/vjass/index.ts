@@ -11,9 +11,9 @@ import { mapJass } from "../../lib/jass/env";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
 
-/** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments,
- *  //! directives. */
-const SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|module|interface|textmacro|endlibrary|endscope|endstruct)\b|\/\*|^\s*\/\/!/m;
+/** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments
+ *  (not in a // comment: "//****" banners are plain JASS), //! directives. */
+const SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|module|interface|textmacro|endlibrary|endscope|endstruct)\b|^(?:(?!\/\/).)*\/\*|^\s*\/\/!/m;
 /** vJASS keywords (completion). */
 const KEYWORDS = ["library", "endlibrary", "scope", "endscope", "struct", "endstruct", "method", "endmethod", "module", "endmodule",
   "interface", "endinterface", "implement", "private", "public", "static", "stub", "operator", "thistype", "requires", "needs", "uses",
@@ -57,7 +57,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   });
 
   // vJASS keywords in code editors, for texts that use vJASS already (plain JASS isn't cluttered).
+  // Files: .vj and .zn are vJASS; .j files are when their content is (not checked as plain JASS).
   void w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).then((editors) => {
+    ctx.subscriptions.push(editors.registerFileLanguage({
+      id: "vjass", title: "vJASS", base: "jass", extensions: [".vj", ".zn"],
+      detect: (path, text) => /\.j$/i.test(path) && SOURCE.test(text),
+    }));
     ctx.subscriptions.push(editors.registerCompletion({
       languages: ["jass"],
       provide: ({ text, inString, inRawcode, prefix }) => (inString || inRawcode || prefix.length < 2 || !SOURCE.test(text) ? []

@@ -197,6 +197,23 @@ export interface CodeEditorService {
   /** Adds completion items to code editors of the given languages (all open and future ones):
    *  e.g. file paths in strings, rawcodes, a language's keywords. */
   registerCompletion(provider: CompletionProvider): { dispose(): void };
+  /** Claims files for a language in the text editor: by file extension (".vj") or by content
+   *  (a .j file written in vJASS). Applies to files opened afterwards; the first claim wins. */
+  registerFileLanguage(language: FileLanguage): { dispose(): void };
+}
+export interface FileLanguage {
+  id: string;
+  /** Shown in the status bar ("vJASS"). */
+  title: string;
+  /** Highlighting and completion it builds on ("jass": JASS symbols and other extensions' JASS items). */
+  base: "jass" | "lua" | "text";
+  /** File extensions with the dot (".vj", ".zn"); the files also need an editor contribution
+   *  for "w3.textEditor" with these patterns to open in it. */
+  extensions?: string[];
+  /** Content check for other files (e.g. a .j file using vJASS). */
+  detect?(path: string, text: string): boolean;
+  /** Problems shown for the text; omitted: not checked (the plain JASS checker isn't used). */
+  check?(text: string): Promise<import("../lib/jass/check").Diagnostic[]> | import("../lib/jass/check").Diagnostic[];
 }
 export interface CompletionProvider {
   /** "jass" (also used for vJASS trigger texts), "lua", … */

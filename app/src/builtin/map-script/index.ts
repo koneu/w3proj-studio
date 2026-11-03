@@ -17,7 +17,7 @@ const INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|doo|w3e|w3u|w3t|w3a
 /** vJASS in trigger texts (libraries, scopes, structs, block comments, //! directives), or a
  *  script JassHelper compiled ("//globals from <library>:", LIBRARY_<name> constants). Such
  *  maps need a vJASS compiler: writing the triggers into war3map.j as they are breaks the map. */
-const VJASS_SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|module|interface|textmacro|endlibrary|endscope|endstruct)\b|\/\*|^\s*\/\/!/m;
+const VJASS_SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|module|interface|textmacro|endlibrary|endscope|endstruct)\b|^(?:(?!\/\/).)*\/\*|^\s*\/\/!/m;
 const VJASS_OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
 
 /** Ability files with the orders that switch autocast on and off. */
