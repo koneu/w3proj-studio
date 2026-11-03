@@ -531,3 +531,33 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .cm-symbol-tip code { font-family: var(--mono); white-space: pre-wrap; }
 .cm-outline-panel { padding: 2px 6px; border-bottom: 1px solid var(--border); background: var(--bg-panel, #252526); }
 .cm-outline { font: inherit; font-size: 12px; max-width: 100%; }
+
+/* Sound Editor */
+.snd-editor { display: flex; height: 100%; overflow: hidden; }
+.snd-left { width: 360px; min-width: 260px; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.snd-browser { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.snd-tabs { display: flex; gap: 2px; padding: 6px 6px 0; }
+.snd-tabs button { flex: 1; border: 1px solid var(--border); background: transparent; color: var(--fg-muted); padding: 3px; cursor: pointer; }
+.snd-tabs button.active { background: #37414f; color: inherit; }
+.snd-search { margin: 6px; font: inherit; padding: 2px 6px; }
+.snd-files { flex: 1; overflow: auto; min-height: 0; }
+.snd-dir, .snd-file { padding: 1px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.snd-dir { font-weight: 600; }
+.snd-dir:hover, .snd-file:hover, .snd-row:hover { background: var(--bg-hover); }
+.snd-file.active, .snd-row.active { background: #37414f; }
+.snd-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-top: 1px solid var(--border); }
+.snd-right { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.snd-list { max-height: 45%; overflow: auto; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.snd-table { border-collapse: collapse; width: 100%; }
+.snd-table th, .snd-table td { text-align: left; padding: 2px 10px 2px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.snd-row { cursor: pointer; }
+.snd-path { max-width: 360px; overflow: hidden; text-overflow: ellipsis; color: var(--fg-muted); }
+.snd-detail { flex: 1; overflow: auto; padding: 0 12px 12px; }
+.snd-head { display: flex; align-items: center; gap: 6px; }
+.snd-head h3 { margin-right: auto; }
+.snd-field { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 8px; margin: 4px 0; }
+.snd-field input[type="text"] { font: inherit; }
+.snd-field > div > input[type="text"]:not(.snd-num) { width: 100%; max-width: 420px; }
+.snd-num { width: 6em; }
+.snd-flag { margin-right: 12px; white-space: nowrap; }
+.snd-note { margin: 4px 0; }
