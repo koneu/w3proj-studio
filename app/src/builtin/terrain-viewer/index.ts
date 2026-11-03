@@ -19,6 +19,7 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 const PATH = "map/war3map.w3e";
 /** TEAM_COLORS index used for neutral players. */
@@ -928,8 +929,75 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let ghostReq = 0;
         /** File each created entry goes to (set by objects.create). */
         const entryFile = new WeakMap<Placed, PlacedFile>();
+        /** Rewrites a project JSON document of the format engine (or its raw file when the project keeps it raw). */
+        const editDoc = async (name: string, change: (d: Record<string, unknown>) => void) => {
+          const root = w3.workspace.project()!.root, path = `map/${name}`;
+          const json = await w3.workspace.readText(`${path}.json`).catch(() => null);
+          const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path }).catch(() => null) : null;
+          if (json === null && raw === null) return;
+          const d = JSON.parse((json ?? raw)!) as Record<string, unknown>;
+          change(d);
+          if (json !== null) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
+          else await w3.backend.invoke("codec_write", { root, path, text: JSON.stringify(d) });
+        };
+        /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
+        const resizeMap = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
+          if (!editable) throw new Error("This map is read-only.");
+          const problem = resizeProblem(terrain, change, complements);
+          if (problem) throw new Error(problem);
+          // Everything (terrain, objects, other tabs) saved first: the files are rewritten below.
+          await editorApi.save?.();
+          const next = resizeTerrain(terrain, change);
+          const rect = worldRect(next);
+          const inside = (x: number, y: number) => x >= rect.left && x <= rect.right && y >= rect.bottom && y <= rect.top;
+          // Start locations aren't removed but moved into the map (a player needs one).
+          const pb = cameraBounds(next, complements);
+          const clamp = (x: number, y: number): [number, number] => [Math.min(Math.max(x, pb[0]), pb[2]), Math.min(Math.max(y, pb[1]), pb[3])];
+          let removed = 0;
+          for (const f of [dooFile, unitsFile]) {
+            if (!f) continue;
+            for (const p of f.list) if (p.id === "sloc" && !inside(p.position[0], p.position[1])) [p.position[0], p.position[1]] = clamp(p.position[0], p.position[1]);
+            const keep = f.list.filter((p) => inside(p.position[0], p.position[1]));
+            removed += f.list.length - keep.length;
+            f.list.splice(0, f.list.length, ...keep);
+            await savePlacedFile(w3, f);
+          }
+          await doc.writeBytes(writeW3e(next));
+          await editDoc("war3map.w3i", (info) => {
+            info.cameraComplements = [...complements];
+            info.cameraBounds = cameraBounds(next, complements);
+            [info.playableWidth, info.playableHeight] = playableSize(next, complements);
+            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) if (!inside(pl.start[0], pl.start[1])) [pl.start[0], pl.start[1]] = clamp(pl.start[0], pl.start[1]);
+          });
+          // Regions are clipped to the map (those left outside go).
+          await editDoc("war3map.w3r", (d) => {
+            type R = { left: number; right: number; bottom: number; top: number };
+            const list = (d.regions as R[] | undefined) ?? [];
+            for (const r of list) {
+              r.left = Math.max(r.left, rect.left); r.right = Math.min(r.right, rect.right);
+              r.bottom = Math.max(r.bottom, rect.bottom); r.top = Math.min(r.top, rect.top);
+            }
+            d.regions = list.filter((r) => r.right > r.left && r.top > r.bottom);
+          });
+          const shd = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
+          if (shd) await w3.workspace.writeBytes("map/war3map.shd", resizeGrid(shd, terrain, change, 4));
+          // Pathing and minimap from the new terrain. Pathing Editor overrides are by cell, so they
+          // only apply while the size stays.
+          const rf = (p: string) => readFile(w3, doc, p);
+          const doodads = dooFile?.list ?? [];
+          const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"));
+          if (change.every((c) => c === 0)) filterPathing(wpm);
+          await w3.workspace.writeBytes("map/war3map.wpm", wpm);
+          await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
+          // The editor opens again on the new terrain.
+          void (async () => {
+            await w3.editors.close(PATH);
+            await w3.editors.open(PATH, "w3.terrainViewer");
+          })().catch((e) => w3.window.showError(String(e)));
+          return { removed };
+        };
         const handle: TerrainEditorHandle = {
-          terrain, editable, redraw, host: el,
+          terrain, editable, redraw, host: el, resizeMap,
           terrainChanged: () => { renderer.terrainChanged(); doc.setDirty(true); redraw(); },
           commitTerrain,
           ensureGroundTile: (id) => ensureTile(id),
@@ -1294,7 +1362,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         raf = requestAnimationFrame(tick);
 
-        return {
+        const editorApi = {
           save: editable ? async () => {
             const w3e = writeW3e(terrain);
             await doc.writeBytes(w3e);
@@ -1356,6 +1424,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             renderer.dispose();
           },
         };
+        return editorApi;
       },
     }),
   );

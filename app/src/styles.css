@@ -582,3 +582,11 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-path-edit { flex: 1; font-family: var(--mono); font-size: 12px; min-width: 0; }
 .imp-actions { display: flex; gap: 6px; margin-top: 10px; }
 .imp-warn { color: #cca700; }
+
+/* Map Size tab (terrain editor) */
+.terrain-group-tools.mapsize { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.mapsize-grid { display: grid; grid-template-columns: auto repeat(4, 5.5em); gap: 4px 8px; align-items: center; }
+.mapsize-num { width: 5.5em; font: inherit; }
+.mapsize-side { display: flex; flex-direction: column; gap: 4px; }
+.mapsize-buttons { display: flex; gap: 6px; }
+.mapsize-problem { color: #f14c4c; }

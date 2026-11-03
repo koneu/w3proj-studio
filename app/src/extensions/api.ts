@@ -200,6 +200,8 @@ export interface W3Api {
     activePath(): string | null;
     /** Closes every editor without asking (used when files change on disk). */
     closeAll(): Promise<void>;
+    /** Closes the editors of one file without asking. */
+    close(path: string): Promise<void>;
   };
   window: {
     showInfo(message: string, ...actions: string[]): Promise<string | undefined>;

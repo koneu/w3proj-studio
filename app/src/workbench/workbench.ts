@@ -160,6 +160,7 @@ export class Workbench {
         open: (path, providerId) => wb.editors.open(path, providerId),
         activePath: () => wb.editors.activePath(),
         closeAll: () => wb.editors.closeAll(),
+        close: (p) => wb.editors.closeWhere((x) => x === p),
       },
       window: {
         showInfo: (m, ...a) => wb.notifications.show("info", m, a),
