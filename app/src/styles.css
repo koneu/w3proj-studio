@@ -654,3 +654,12 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .ai-chips button.active { background: #37414f; }
 .ai-orders { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 .ai-skills select { max-width: 220px; }
+
+/* Campaign Editor */
+.camp-editor { height: 100%; outline: none; }
+.camp-chapters td { white-space: nowrap; }
+.camp-row { cursor: pointer; }
+.camp-row:hover { background: var(--bg-hover); }
+.camp-row.active { background: #37414f; }
+.camp-missing { color: var(--error); }
+.camp-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }

@@ -1,0 +1,10 @@
+{
+  "id": "w3.campaignEditor",
+  "name": "Campaign Editor",
+  "version": "0.1.0",
+  "description": "Campaigns (.w3n projects) like the World Editor's Campaign Editor: name, author, description and difficulty, the campaign screen (background, ambient sound, fog, interface race) and the chapter buttons with their maps. Chapter maps are projects of their own under maps/; add maps and open them from here.",
+  "contributes": {
+    "editors": [{ "id": "w3.campaignEditor", "title": "Campaign Editor", "patterns": ["war3campaign.w3f.json"] }],
+    "commands": [{ "id": "w3.campaign.open", "title": "Campaign Editor", "category": "Module" }]
+  }
+}

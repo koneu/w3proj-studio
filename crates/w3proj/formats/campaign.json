@@ -18,7 +18,7 @@
     { "name": "difficulty", "type": "cstring", "doc": "text shown for the difficulty" },
     { "name": "author", "type": "cstring" },
     { "name": "description", "type": "cstring" },
-    { "name": "flags", "type": "u32", "doc": "1 variable difficulty, 2 custom race (expansion) data, 4 uses expansion" },
+    { "name": "flags", "type": "u32", "doc": "1 variable difficulty; 2 and 4 seen, meaning unknown" },
     { "name": "background", "type": "i32", "doc": "campaign screen preset; -1 custom (backgroundPath)" },
     { "name": "backgroundPath", "type": "cstring" },
     { "name": "minimapPath", "type": "cstring", "doc": "picture shown for the campaign" },
@@ -33,7 +33,7 @@
     { "name": "unknown", "type": "u32", "count": 1, "if": "version == 2", "doc": "0 in the sample" },
     { "name": "unknown3", "type": "u32", "count": 7, "if": "version >= 3", "doc": "0, 0, 0, 0, 0, 0, 1 in the sample" },
     { "name": "chapters", "type": "struct", "count": "u32", "fields": [
-      { "name": "flags", "type": "u32", "doc": "0 shown, 2 hidden until unlocked, 3 shown and open from the start (version 2+)" },
+      { "name": "flags", "type": "u32", "doc": "1 button shown from the start; 2 set on acts, interludes and cinematics (meaning unconfirmed); version 1 files may hold leftover values" },
       { "name": "chapter", "type": "cstring", "doc": "button title (\"Chapter One\")" },
       { "name": "title", "type": "cstring", "doc": "map title" },
       { "name": "map", "type": "cstring", "doc": "map file in the campaign" }
