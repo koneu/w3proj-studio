@@ -440,6 +440,9 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-name { font-size: 15px; font-weight: 600; min-width: 260px; }
 .trig-flag { display: inline-flex; gap: 4px; align-items: center; color: var(--fg-muted); }
 .trig-desc-edit { width: 100%; resize: vertical; font: inherit; margin-bottom: 6px; box-sizing: border-box; }
+.trig-code { border: 1px solid var(--border); }
+.trig-code .cm-editor { max-height: 70vh; font-size: 12px; }
+.trig-code .cm-scroller { overflow: auto; }
 .trig-code-edit { width: 100%; box-sizing: border-box; resize: vertical; font-family: var(--mono); font-size: 12px; white-space: pre; tab-size: 4; }
 .trig-hint { font-size: 11px; }
 .trig-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; cursor: pointer; white-space: nowrap; }

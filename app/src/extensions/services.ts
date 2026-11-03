@@ -179,6 +179,26 @@ export interface TriggersService {
 
 export const TRIGGERS_SERVICE = "w3.triggers";
 
+/** Code editors (CodeMirror with the app's languages and theme) for other extensions' views. */
+export const CODE_EDITOR_SERVICE = "w3.codeEditor";
+export interface CodeEditorService {
+  create(parent: HTMLElement, opts: CodeEditorOptions): CodeEditorHandle;
+}
+export interface CodeEditorOptions {
+  value: string;
+  language: "jass" | "lua" | "json" | "text";
+  readOnly?: boolean;
+  /** After the text changed and typing paused (and when the editor loses focus with changes). */
+  onChange?(value: string): void;
+  /** Pause in ms before onChange (default 600). */
+  debounce?: number;
+}
+export interface CodeEditorHandle {
+  value(): string;
+  focus(): void;
+  dispose(): void;
+}
+
 type TriggerItem = import("../lib/triggers/wtg").TriggerItem;
 
 export interface TriggerKind {
@@ -205,8 +225,9 @@ export interface TriggerEditorHandle {
   /** The trigger's custom script text (war3map.wct), or null. */
   customText(trigger: TriggerItem): string | null;
   setCustomText(trigger: TriggerItem, text: string | null): void;
-  /** Runs `change` on the trigger data as one undo step (snapshot before and after) and redraws. */
-  edit(label: string, change: () => void): void;
+  /** Runs `change` on the trigger data as one undo step (snapshot before and after) and redraws;
+   *  `keepView` leaves the trigger's own view as it is (an editor committing while typing). */
+  edit(label: string, change: () => void, opts?: { keepView?: boolean }): void;
   /** Icon of a trigger category path (ReplaceableTextures\WorldEditUI\…) as a data URL. */
   icon(path: string): Promise<string | null>;
 }

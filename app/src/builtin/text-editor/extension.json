@@ -2,8 +2,9 @@
   "id": "w3.textEditor",
   "name": "Text Editor",
   "version": "0.1.0",
-  "description": "CodeMirror editor with JASS, Lua and JSON highlighting.",
+  "description": "CodeMirror editor with JASS, Lua and JSON highlighting; also offers code editors to other extensions (service w3.codeEditor).",
   "contributes": {
+    "services": [{ "id": "w3.codeEditor", "description": "Code editors (JASS, Lua, JSON) inside other views: create(parent, options)." }],
     "editors": [
       {
         "id": "w3.textEditor",

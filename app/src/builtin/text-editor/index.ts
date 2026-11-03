@@ -8,6 +8,7 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { jass } from "./jass";
 
@@ -38,7 +39,53 @@ function lineEnding(text: string): string {
   return crlf > lf ? "\r\n" : "\n";
 }
 
+/** The editing basics every code view shares (highlighting by `lang`, theme, keys). */
+function basics(lang: Extension, readOnly: boolean): Extension[] {
+  return [
+    EditorState.readOnly.of(readOnly),
+    lineNumbers(), highlightActiveLineGutter(), foldGutter(), history(), drawSelection(), indentOnInput(),
+    bracketMatching(), highlightActiveLine(), highlightSelectionMatches(),
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+    oneDark, lang,
+  ];
+}
+
+/** Code editors embedded in other extensions' views (custom script triggers, the map header). */
+const codeEditors: CodeEditorService = {
+  create(parent, opts: CodeEditorOptions) {
+    const eol = lineEnding(opts.value);
+    let committed = opts.value, timer: ReturnType<typeof setTimeout> | undefined;
+    const commit = () => {
+      clearTimeout(timer);
+      const v = view.state.sliceDoc();
+      if (v !== committed) { committed = v; opts.onChange?.(v); }
+    };
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: opts.value,
+        extensions: [
+          EditorState.lineSeparator.of(eol),
+          ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
+          EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
+            if (u.focusChanged && !u.view.hasFocus) commit();
+          }),
+        ],
+      }),
+    });
+    return {
+      value: () => view.state.sliceDoc(),
+      focus: () => view.focus(),
+      dispose: () => { commit(); view.destroy(); },
+    };
+  },
+};
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(w3.services.provide(CODE_EDITOR_SERVICE, codeEditors));
   const status = w3.statusBar.add({ id: "w3.textEditor.cursor", text: "", align: "right", priority: 10 });
   ctx.subscriptions.push(status);
 
@@ -69,20 +116,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             doc: text,
             extensions: [
               EditorState.lineSeparator.of(eol),
-              EditorState.readOnly.of(doc.readOnly),
-              lineNumbers(),
-              highlightActiveLineGutter(),
-              foldGutter(),
-              history(),
-              drawSelection(),
-              indentOnInput(),
-              bracketMatching(),
-              highlightActiveLine(),
-              highlightSelectionMatches(),
-              syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-              keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
-              oneDark,
-              language(doc.path),
+              ...basics(language(doc.path), doc.readOnly),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);

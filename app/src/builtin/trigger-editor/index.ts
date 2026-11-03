@@ -6,7 +6,7 @@
 // custom script, …). The files round-trip byte-exactly through lib/triggers.
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
-import { OBJECTS_SERVICE, TRIGGERS_SERVICE, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggersService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggersService } from "../../extensions/services";
 import { StringTable } from "../../lib/formats/wts";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -119,7 +119,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const display: DisplayContext = { data, string: (v) => strings?.resolve(v) ?? v, objectName };
         const lua = await w3.workspace.readText("map/war3map.w3i.json").then((t) => JSON.parse(t).scriptType === 1).catch(() => false);
         el.replaceChildren();
-        const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d));
+        const code = await w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null);
+        const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d), code);
         if (!doc.readOnly) openView = view;
         if (startWithVariables) { startWithVariables = false; view.showVariables(); }
         return {
@@ -214,6 +215,8 @@ class TriggerView {
   private area: "tree" | "detail" = "tree";
   private keydown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+    // Code editors have their own undo, copy and paste.
+    if (e.target instanceof Element && e.target.closest(".cm-editor")) return;
     if (this.area === "detail" && this.body?.keyDown?.(e)) { e.preventDefault(); return; }
     if (e.key === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
@@ -229,7 +232,7 @@ class TriggerView {
 
   constructor(private w3: W3Api, private el: HTMLElement, private kinds: KindRegistry, public file: TriggerFile,
     private custom: CustomTextFile | null, data: TriggerData, display: DisplayContext, editable: boolean,
-    language: "jass" | "lua", private setDirty: (dirty: boolean) => void) {
+    language: "jass" | "lua", private setDirty: (dirty: boolean) => void, private code: CodeEditorService | null = null) {
     const tt = textTriggers(file);
     tt.forEach((t, i) => this.texts.set(t, custom?.texts[i] ?? null));
     this.header = custom?.header ?? null;
@@ -239,7 +242,7 @@ class TriggerView {
       get file() { return view.file; }, data, display, editable, language,
       customText: (t) => this.texts.get(t) ?? null,
       setCustomText: (t, text) => { this.texts.set(t, text); },
-      edit: (label, change) => this.edit(label, change),
+      edit: (label, change, opts) => this.edit(label, change, opts),
       icon: (path) => icon(w3, path),
     };
     this.vars = {
@@ -306,14 +309,14 @@ class TriggerView {
     this.renderTree();
     this.renderDetail();
   }
-  private edit(label: string, change: () => void) {
+  private edit(label: string, change: () => void, opts: { keepView?: boolean } = {}) {
     const before = this.snapshot();
     change();
     this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot() });
     this.at = this.undo.length;
     this.setDirty(this.at !== this.savedAt);
     this.renderTree();
-    this.renderDetail();
+    if (!opts.keepView) this.renderDetail();
   }
   private step(dir: -1 | 1) {
     if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
@@ -605,6 +608,17 @@ class TriggerView {
     const s = this.selected;
     const editable = this.handle.editable;
     if (s.kind === "header") {
+      const heading = [h("h2", {}, "Map script header"), ...(this.custom?.comment ? [h("p.trig-desc", {}, this.custom.comment)] : [])];
+      if (this.code) {
+        const box = h("div.trig-code");
+        this.detail.replaceChildren(...heading, box);
+        const ed = this.code.create(box, {
+          value: this.header ?? "", language: this.handle.language, readOnly: !editable,
+          onChange: (v) => this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); }, { keepView: true }),
+        });
+        this.body = { dispose: () => ed.dispose() };
+        return;
+      }
       const area = h("textarea.trig-code-edit", {
         spellcheck: false, readOnly: !editable, rows: 16, value: this.header ?? "",
         placeholder: `Map-specific ${this.handle.language === "lua" ? "Lua" : "JASS"} code, placed in the map script before the triggers.`,

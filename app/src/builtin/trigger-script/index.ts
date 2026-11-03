@@ -1,16 +1,17 @@
 // Custom Script Triggers: the trigger kind for triggers converted to custom
-// text. Their JASS or Lua code lives in war3map.wct; this shows and edits it.
+// text. Their JASS or Lua code lives in war3map.wct; this shows and edits it
+// in a code editor (service "w3.codeEditor"; a plain text box without it).
 // A new one gets the InitTrig_<name> function the World Editor expects.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { TRIGGERS_SERVICE, type TriggersService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type TriggersService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 
 /** The trigger's name as the World Editor turns it into identifiers (gg_trg_<name>). */
 const ident = (name: string) => name.trim().replace(/[^A-Za-z0-9_]/g, "_");
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
-  void w3.services.get<TriggersService>(TRIGGERS_SERVICE).then((s) => {
+  void Promise.all([w3.services.get<TriggersService>(TRIGGERS_SERVICE), w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null)]).then(([s, code]) => {
     ctx.subscriptions.push(s.registerKind({
       id: "script",
       priority: 5,
@@ -25,12 +26,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
       render(el, t, ed) {
         const lang = ed.language === "lua" ? "Lua" : "JASS";
+        const hint = h("p.muted.trig-hint", {}, `Copied into war3map.${ed.language === "lua" ? "lua" : "j"} as it is when the map script is generated.`);
+        el.append(h("div.trig-section", {}, `Custom script (${lang})`));
+        if (code) {
+          const box = h("div.trig-code");
+          el.append(box, hint);
+          // Typing is committed after a pause (one undo step each) without redrawing the editor.
+          const editor = code.create(box, {
+            value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable,
+            onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
+          });
+          return { dispose: () => editor.dispose() };
+        }
         const area = h("textarea.trig-code-edit", {
           spellcheck: false, readOnly: !ed.editable, rows: 24, value: ed.customText(t) ?? "",
           onchange: () => ed.edit("Edit script", () => ed.setCustomText(t, area.value)),
         });
-        el.append(h("div.trig-section", {}, `Custom script (${lang})`), area,
-          h("p.muted.trig-hint", {}, "The World Editor compiles this into war3map.j / war3map.lua when it saves the map; W3Proj Studio doesn't regenerate the map script yet."));
+        el.append(area, hint);
       },
     }));
   });
