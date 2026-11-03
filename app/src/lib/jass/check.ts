@@ -6,6 +6,18 @@
 
 export interface Diagnostic { from: number; to: number; message: string; severity: "error" | "warning" }
 
+/** A declaration with its place in the source (for completion, hover and go to definition). */
+export interface Decl {
+  name: string;
+  kind: "type" | "native" | "function" | "global" | "constant" | "local" | "param";
+  /** As written: "function F takes integer a returns nothing", "local unit u", … */
+  detail: string;
+  from: number;
+  to: number;
+  /** Locals and parameters: the function they belong to (start, end). */
+  scope?: [number, number];
+}
+
 export interface FunctionSig { params: { name: string; type: string }[]; returns: string; native: boolean; constant: boolean }
 export interface GlobalVar { type: string; array: boolean; constant: boolean }
 export interface JassEnv {
@@ -91,8 +103,12 @@ class Checker {
   readonly diags: Diagnostic[] = [];
   /** What this source declares (merged into an environment by envFrom). */
   readonly declared: JassEnv = emptyEnv();
+  /** Declarations with positions, in source order. */
+  readonly decls: Decl[] = [];
   private locals = new Map<string, Local>();
   private fn: { name: string; returns: string } | null = null;
+  /** Parameters and locals of the function being read (their scope is set at its end). */
+  private ownDecls: Decl[] = [];
   /** Loops around the current statement (exitwhen needs one). */
   private loops = 0;
   /** Functions this source defines, by name → position, for "declared later" checks. */
@@ -180,6 +196,7 @@ class Checker {
       const parent = this.ident("the parent type");
       if (!this.isType(parent.text)) this.err(parent.from, parent.to, `Unknown type ${parent.text}`);
       this.declared.types.set(name.text, parent.text);
+      this.decls.push({ name: name.text, kind: "type", detail: `type ${name.text} extends ${parent.text}`, from: name.from, to: name.to });
       this.endLine();
       return;
     }
@@ -187,7 +204,9 @@ class Checker {
     const constant = this.accept("constant");
     if (this.accept("native")) {
       const name = this.ident("a function name");
-      this.declared.functions.set(name.text, { ...this.signature(), native: true, constant });
+      const sig = this.signature();
+      this.declared.functions.set(name.text, { ...sig, native: true, constant });
+      this.decls.push({ name: name.text, kind: "native", detail: `${constant ? "constant " : ""}native ${sigText(name.text, sig)}`, from: name.from, to: name.to });
       this.endLine();
       return;
     }
@@ -195,13 +214,14 @@ class Checker {
     throw new SyntaxError(this.t, this.t.kind === "id" && this.is("(") ? "Code must be inside a function" : `Expected a function, globals or type, found "${this.t.text || "end of line"}"`);
   }
 
-  private signature(): { params: { name: string; type: string }[]; returns: string } {
+  private signature(): { params: { name: string; type: string; at?: number }[]; returns: string } {
     this.expect("takes");
-    const params: { name: string; type: string }[] = [];
+    const params: { name: string; type: string; at?: number }[] = [];
     if (!this.accept("nothing")) {
       do {
         const type = this.typeName();
-        params.push({ type, name: this.ident("a parameter name").text });
+        const id = this.ident("a parameter name");
+        params.push({ type, name: id.text, at: id.from });
       } while (this.accept(","));
     }
     this.expect("returns");
@@ -230,6 +250,7 @@ class Checker {
           if (!this.assignable(v, type)) this.err(name.from, name.to, `${name.text} is ${type}, the value is ${v}`);
         } else if (constant) this.err(name.from, name.to, "Constants need a value");
         this.declared.globals.set(name.text, { type, array, constant });
+        this.decls.push({ name: name.text, kind: constant ? "constant" : "global", detail: `${constant ? "constant " : ""}${type}${array ? " array" : ""} ${name.text}`, from: name.from, to: name.to });
         this.endLine();
       } catch (e) {
         if (!(e instanceof SyntaxError)) throw e;
@@ -246,12 +267,20 @@ class Checker {
     const sig = this.signature();
     if (this.opts.semantic && (this.declared.functions.has(name.text))) this.err(name.from, name.to, `${name.text} is already defined`);
     this.declared.functions.set(name.text, { ...sig, native: false, constant });
+    const fnDecl: Decl = { name: name.text, kind: "function", detail: `${constant ? "constant " : ""}function ${sigText(name.text, sig)}`, from: name.from, to: name.to };
+    this.decls.push(fnDecl);
+    const own: Decl[] = sig.params.map((q) => ({ name: q.name, kind: "param", detail: `${q.type} ${q.name}`, from: q.at ?? name.from, to: (q.at ?? name.from) + q.name.length }));
+    this.decls.push(...own);
+    this.ownDecls = own;
     this.endLine();
     this.locals = new Map(sig.params.map((p) => [p.name, { type: p.type, array: false }]));
     this.fn = { name: name.text, returns: sig.returns };
     try {
       this.body();
     } finally {
+      const scope: [number, number] = [name.from, this.toks[Math.max(0, this.p - 1)].to];
+      for (const d of this.ownDecls) d.scope = scope;
+      this.ownDecls = [];
       this.fn = null;
       this.locals = new Map();
     }
@@ -292,6 +321,9 @@ class Checker {
       if (!this.assignable(v, type)) this.err(name.from, name.to, `${name.text} is ${type}, the value is ${v}`);
     }
     this.locals.set(name.text, { type, array });
+    const d: Decl = { name: name.text, kind: "local", detail: `local ${type}${array ? " array" : ""} ${name.text}`, from: name.from, to: name.to };
+    this.decls.push(d);
+    this.ownDecls.push(d);
     this.endLine();
   }
 
@@ -525,6 +557,18 @@ class Checker {
     }
     throw new SyntaxError(t, t.kind === "nl" || t.kind === "eof" ? "Expected a value before the end of the line" : `Expected a value, found "${t.text}"`);
   }
+}
+
+/** "F takes integer a, unit u returns boolean". */
+export function sigText(name: string, f: { params: { name: string; type: string }[]; returns: string }): string {
+  return `${name} takes ${f.params.length ? f.params.map((p) => `${p.type} ${p.name}`).join(", ") : "nothing"} returns ${f.returns}`;
+}
+
+/** The declarations `src` makes, with positions (syntax errors are skipped over). */
+export function declarations(src: string, env: JassEnv = emptyEnv()): Decl[] {
+  const c = new Checker(src, env, { semantic: false, ordered: false });
+  c.run();
+  return c.decls;
 }
 
 /** Declarations of `sources` (in order) merged into one environment; syntax errors are ignored. */

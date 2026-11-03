@@ -19,7 +19,7 @@ import {
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { checkJass } from "../../lib/jass/check";
-import { mapJassChecker } from "../../lib/jass/env";
+import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 
@@ -678,10 +678,11 @@ class TriggerView {
         const box = h("div.trig-code");
         this.detail.replaceChildren(...heading, box);
         // JASS headers are checked like the map script they open (its own functions in order).
-        const envFor = mapJassChecker((p) => this.w3.game.readText(p), this.w3.workspace.readText("map/war3map.j").catch(() => null));
-        const check = this.handle.language === "jass" ? async (text: string) => checkJass(text, await envFor(text)) : undefined;
+        const map = mapJass((p) => this.w3.game.readText(p), this.w3.workspace.readText("map/war3map.j").catch(() => null));
+        const jass = this.handle.language === "jass";
+        const check = jass ? async (text: string) => checkJass(text, await map.without(text)) : undefined;
         const ed = this.code.create(box, {
-          value: this.header ?? "", language: this.handle.language, readOnly: !editable, check,
+          value: this.header ?? "", language: this.handle.language, readOnly: !editable, check, symbols: jass ? map.symbols : undefined,
           onChange: (v) => this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); }, { keepView: true }),
         });
         this.body = { dispose: () => ed.dispose() };

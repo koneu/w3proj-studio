@@ -192,8 +192,20 @@ export interface CodeEditorOptions {
   onChange?(value: string): void;
   /** Pause in ms before onChange (default 600). */
   debounce?: number;
+  /** Names for completion, hover and go to definition (F12, Ctrl+click), for the current text. */
+  symbols?(text: string): Promise<CodeSymbol[]>;
   /** Problems in the text (lib/jass/check), shown as underlines and a list below the editor. */
   check?(text: string): Promise<import("../lib/jass/check").Diagnostic[]> | import("../lib/jass/check").Diagnostic[];
+}
+export interface CodeSymbol {
+  name: string;
+  kind: "type" | "native" | "function" | "global" | "constant" | "local" | "param" | "keyword";
+  /** How it is declared ("function F takes integer a returns nothing"). */
+  detail: string;
+  /** Declared in the edited text at this offset (go to definition). */
+  at?: number;
+  /** Visible only within this range (locals and parameters). */
+  scope?: [number, number];
 }
 export interface CodeEditorHandle {
   value(): string;

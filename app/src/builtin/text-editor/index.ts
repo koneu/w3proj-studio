@@ -10,7 +10,8 @@ import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutt
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService } from "../../extensions/services";
 import { checkJass, envWithout } from "../../lib/jass/check";
-import { gameJassEnv } from "../../lib/jass/env";
+import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
+import { symbolTools } from "./jasstools";
 import { linter } from "./lint";
 import { h } from "../../workbench/dom";
 import { jass } from "./jass";
@@ -75,6 +76,7 @@ const codeEditors: CodeEditorService = {
           ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
           EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
           ...(lint ? [lint.extension] : []),
+          ...(opts.symbols ? [symbolTools(opts.symbols)] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
             if (u.focusChanged && !u.view.hasFocus) commit();
@@ -132,6 +134,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               EditorState.lineSeparator.of(eol),
               ...basics(language(doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
+              ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t))] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);

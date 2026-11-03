@@ -11,6 +11,7 @@
     "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.8.0",
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/language": "^6.10.8",
