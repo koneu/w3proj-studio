@@ -9,7 +9,8 @@
     "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "patterns": ["war3map.wtg"] }],
     "commands": [
       { "id": "w3.triggers.open", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" },
-      { "id": "w3.triggers.variables", "title": "Trigger Editor: Variables", "category": "Module" }
+      { "id": "w3.triggers.variables", "title": "Trigger Editor: Variables", "category": "Module" },
+      { "id": "w3.triggers.reveal", "title": "Trigger Editor: Go to Trigger", "category": "Module", "hidden": true }
     ],
     "services": [{ "id": "w3.triggers", "description": "Trigger kinds (GUI, custom script, …) shown in the trigger editor: registerKind." }]
   }

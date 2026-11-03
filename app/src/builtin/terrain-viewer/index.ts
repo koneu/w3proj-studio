@@ -86,7 +86,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.editors.open(PATH, "w3.terrainViewer");
     }),
     // Shows a world point in the terrain editor (opening it first); used by the Object Manager.
-    w3.commands.register("w3.terrain.showPoint", async (x: number, y: number) => {
+    w3.commands.register("w3.terrain.showPoint", async (x?: number, y?: number) => {
+      if (typeof x !== "number" || typeof y !== "number") return w3.commands.execute("w3.terrain.open");
       toolGroups.pendingLook = [x, y];
       await w3.commands.execute("w3.terrain.open");
       if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y); toolGroups.pendingLook = null; }

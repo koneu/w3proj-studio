@@ -10,7 +10,8 @@
     "editors": [{ "id": "w3.terrainViewer", "title": "Terrain Viewer", "patterns": ["*.w3e"] }],
     "commands": [
       { "id": "w3.terrain.open", "title": "Open Terrain", "category": "Terrain", "keybinding": "f3" },
-      { "id": "w3.map.new", "title": "New Map…", "category": "Project", "keybinding": "ctrl+n" }
+      { "id": "w3.map.new", "title": "New Map…", "category": "Project", "keybinding": "ctrl+n" },
+      { "id": "w3.terrain.showPoint", "title": "Show Point on Terrain", "category": "Terrain", "hidden": true }
     ],
     "services": [{ "id": "w3.terrain", "description": "Tool groups (tabs) in the terrain editor: registerToolGroup." }],
     "configuration": {
