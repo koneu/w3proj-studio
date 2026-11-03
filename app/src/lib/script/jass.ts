@@ -344,7 +344,7 @@ export function cameras(i: ScriptInput): string {
 
 /** The sections generated so far, keyed by banner title ("" = the header before the first). */
 export function generateSections(i: ScriptInput): Map<string, string> {
-  const destructables = destructableObjects(i), items = placedItems(i), groups = randomGroups(i);
+  const destructables = destructableObjects(i), items = placedItems(i), groups = randomGroups(i), units = unitCreation(i);
   const sections = new Map([
     ["", header(i)],
     ["Global Variables", banner("Global Variables") + globals(i) + initGlobals(i)],
@@ -358,10 +358,10 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Regions", regions(i)],
     ["Cameras", cameras(i)],
     ["Items", items],
-    ["Unit Creation", unitCreation(i)],
+    ["Unit Creation", units],
     ...techSections(i),
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom, lua: i.lua }) : ""],
-    ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups }),
+    ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups, units: !!units }),
   ]);
   // Sections of functions end with a blank line, the drop tables with two.
   for (const [k, v] of sections) {
@@ -423,7 +423,9 @@ function techSections(i: ScriptInput): [string, string][] {
   return [["Upgrades", up ? banner("Upgrades") + up : ""], ["TechTree", tech ? banner("TechTree") + tech : ""]];
 }
 
-function setupSections(i: ScriptInput, made: { destructables: boolean; items: boolean; randomGroups: boolean }): [string, string][] {
+/** `made`: which sections were written (main calls only functions that exist; start locations
+ *  alone make no Unit Creation section). */
+function setupSections(i: ScriptInput, made: { destructables: boolean; items: boolean; randomGroups: boolean; units: boolean }): [string, string][] {
   const info = i.info as unknown as SetupInput["info"];
   const items = i.triggers?.items ?? [];
   const setup: SetupInput = {
@@ -431,7 +433,7 @@ function setupSections(i: ScriptInput, made: { destructables: boolean; items: bo
     has: {
       sounds: !!i.sounds?.length, regions: !!i.regions?.length, cameras: !!i.cameras?.length,
       upgrades: !!(info.upgrades as unknown[] | undefined)?.length, techs: !!(info.techs as unknown[] | undefined)?.length,
-      ...made, units: !!i.units?.length,
+      ...made,
       initTriggers: items.some((t) => "ecas" in t && t.enabled && !t.isComment && (t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === 0 && e.name === "MapInitializationEvent"))),
     },
   };
