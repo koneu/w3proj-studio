@@ -192,6 +192,8 @@ export interface CodeEditorOptions {
   onChange?(value: string): void;
   /** Pause in ms before onChange (default 600). */
   debounce?: number;
+  /** Problems in the text (lib/jass/check), shown as underlines and a list below the editor. */
+  check?(text: string): Promise<import("../lib/jass/check").Diagnostic[]> | import("../lib/jass/check").Diagnostic[];
 }
 export interface CodeEditorHandle {
   value(): string;

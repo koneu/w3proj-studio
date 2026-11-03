@@ -9,6 +9,9 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService } from "../../extensions/services";
+import { checkJass, envWithout } from "../../lib/jass/check";
+import { gameJassEnv } from "../../lib/jass/env";
+import { linter } from "./lint";
 import { h } from "../../workbench/dom";
 import { jass } from "./jass";
 
@@ -56,6 +59,8 @@ const codeEditors: CodeEditorService = {
   create(parent, opts: CodeEditorOptions) {
     const eol = lineEnding(opts.value);
     let committed = opts.value, timer: ReturnType<typeof setTimeout> | undefined;
+    const problems = h("div.cm-diag-list", { hidden: true });
+    const lint = opts.check ? linter(opts.check, problems) : null;
     const commit = () => {
       clearTimeout(timer);
       const v = view.state.sliceDoc();
@@ -69,6 +74,7 @@ const codeEditors: CodeEditorService = {
           EditorState.lineSeparator.of(eol),
           ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
           EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
+          ...(lint ? [lint.extension] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
             if (u.focusChanged && !u.view.hasFocus) commit();
@@ -76,10 +82,12 @@ const codeEditors: CodeEditorService = {
         ],
       }),
     });
+    parent.append(problems);
+    lint?.start(view);
     return {
       value: () => view.state.sliceDoc(),
       focus: () => view.focus(),
-      dispose: () => { commit(); view.destroy(); },
+      dispose: () => { commit(); lint?.stop(); view.destroy(); problems.remove(); },
     };
   },
 };
@@ -110,6 +118,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const line = view.state.doc.lineAt(pos);
           status.text = `Ln ${line.number}, Col ${pos - line.from + 1}  ${eol === "\r\n" ? "CRLF" : eol === "\r" ? "CR" : "LF"}  UTF-8${doc.readOnly ? "  read-only" : ""}`;
         };
+        // JASS files are checked against the game's common.j and Blizzard.j (and themselves, in order);
+        // AI scripts (.ai) also use common.ai, which isn't loaded.
+        const jass = /\.j$/i.test(doc.path);
+        const problems = h("div.cm-diag-list", { hidden: true });
+        const lint = jass ? linter(async (t) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t)), problems) : null;
+        if (lint) el.classList.add("text-with-problems");
         const view = new EditorView({
           parent: el,
           state: EditorState.create({
@@ -117,6 +131,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             extensions: [
               EditorState.lineSeparator.of(eol),
               ...basics(language(doc.path), doc.readOnly),
+              ...(lint ? [lint.extension] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);
@@ -126,6 +141,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }),
         });
         updateStatus(view);
+        if (lint) { el.append(problems); lint.start(view); }
         return {
           async save() {
             if (doc.readOnly) return;
@@ -136,6 +152,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           focus: () => view.focus(),
           dispose: () => {
+            lint?.stop();
             view.destroy();
             status.text = "";
           },

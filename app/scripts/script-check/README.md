@@ -24,3 +24,14 @@ files) and `soundinfo/*.slk` (the `UI\SoundInfo\*.slk` tables, for labelled soun
 `sections.mts` also counts whole files that come out identical, `(whole file)`; pass that as the
 section to see where a file whose sections all match still differs. Sound durations are compared
 as 0 (they come from the sound files).
+
+## JASS checker (`lib/jass/check.ts`)
+
+Also needs `common.j` and `Blizzard.j` (`w3proj game cat "War3.w3mod:Scripts/common.j"`, …):
+
+    node --experimental-transform-types --import ./tsregister.mjs <repo>/app/scripts/script-check/jass-valid.mts <repo>/app/src/lib [reports to show] [map]
+    node --experimental-transform-types --import ./tsregister.mjs <repo>/app/scripts/script-check/jass-mistakes.mts <repo>/app/src/lib
+
+`jass-valid.mts` checks common.j, Blizzard.j and every map's war3map.j (valid JASS: any report is
+a false positive); `jass-mistakes.mts` has deliberate mistakes that must be reported and correct
+code that must not.

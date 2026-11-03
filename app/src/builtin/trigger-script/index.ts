@@ -5,6 +5,8 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type TriggersService } from "../../extensions/services";
+import { checkJass } from "../../lib/jass/check";
+import { mapJassChecker } from "../../lib/jass/env";
 import { h } from "../../workbench/dom";
 
 /** The trigger's name as the World Editor turns it into identifiers (gg_trg_<name>). */
@@ -32,8 +34,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const box = h("div.trig-code");
           el.append(box, hint);
           // Typing is committed after a pause (one undo step each) without redrawing the editor.
+          // JASS is checked against the game's scripts and the map script's declarations
+          // (war3map.j as last generated; this trigger's own global may be newer).
+          const envFor = mapJassChecker((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null));
+          const check = ed.language === "jass" ? async (text: string) => {
+            const env = await envFor(text);
+            env.globals.set(`gg_trg_${ident(t.name)}`, { type: "trigger", array: false, constant: false });
+            return checkJass(text, env, { ordered: false });
+          } : undefined;
           const editor = code.create(box, {
-            value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable,
+            value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable, check,
             onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
           });
           return { dispose: () => editor.dispose() };
