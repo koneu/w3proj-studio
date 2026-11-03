@@ -116,10 +116,10 @@ async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomple
     .map_err(err)?
 }
 
-/// Creates an empty project for a new map (see `w3proj::create`).
+/// Creates an empty project for a new map, or a new campaign with `campaign` (see `w3proj::create`).
 #[tauri::command]
-fn project_create(dir: String, name: String, flags: u32, max_players: u32) -> CmdResult<()> {
-    let header = w3proj::header::MapHeader { name, flags, max_players, unknown: 0 };
+fn project_create(dir: String, name: String, flags: u32, max_players: u32, campaign: Option<bool>) -> CmdResult<()> {
+    let header = (!campaign.unwrap_or(false)).then(|| w3proj::header::MapHeader { name, flags, max_players, unknown: 0 });
     w3proj::create(Path::new(&dir), header).map_err(err)
 }
 

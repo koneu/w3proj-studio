@@ -5,11 +5,13 @@
 // buttons and their maps). Texts that are TRIGSTR references are edited in
 // war3campaign.wts. Chapter maps unpacked as projects live under maps/<file>/;
 // "Add map…" unpacks another map there, "Open" switches to a chapter's project.
+// "New Campaign…" starts an empty campaign project.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { StringTable } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
+import { askNewCampaign, createCampaign } from "./newcampaign";
 
 const FILE = "map/war3campaign.w3f.json", WTS = "map/war3campaign.wts";
 const FORMAT = "w3proj.campaign/1";
@@ -83,6 +85,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.campaign.open", (section?: SectionId, chapter?: number) => open(section, chapter)),
     // Chapters from the side bar: through the editor (it records the change and saves).
     w3.commands.register("w3.campaign.addMap", async () => { await open("chapters"); await [...openViews][0]?.addMap(); }),
+    w3.commands.register("w3.campaign.new", async () => {
+      const o = await askNewCampaign(w3);
+      if (!o) return;
+      if (await w3.backend.invoke<boolean>("fs_exists", { path: o.dir })) throw new Error(`${o.dir} already exists.`);
+      if (!(await w3.editors.closeAllAsking())) return;
+      await w3.window.withProgress(`Creating ${o.name}`, () => createCampaign(w3, o));
+      await open("general");
+    }),
     w3.commands.register("w3.campaign.newMap", async () => { await open("chapters"); await [...openViews][0]?.newMap(); }),
     w3.commands.register("w3.campaign.back", async () => {
       const parent = await parentCampaign(w3);
@@ -93,12 +103,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // Side bar: the campaign's sections and chapters, or the way back from a chapter map.
     w3.views.register("w3.campaign.overview", {
       render(el) {
-        if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a campaign (.w3n) to edit it.")); return; }
+        const newCampaign = () => h("button", { onclick: run(() => w3.commands.execute("w3.campaign.new")) }, "New campaign…");
+        if (!w3.workspace.project()) {
+          el.append(h("div.view-empty", {}, "Open or import a campaign (.w3n) to edit it."),
+            h("div.camp-side-actions", {}, newCampaign(), " ", h("button", { onclick: run(() => w3.commands.execute("w3.project.importMap")) }, "Import a campaign…")));
+          return;
+        }
         if (!isCampaign(w3)) {
           el.append(h("div.view-empty", {}, "This project isn't a campaign."));
           void parentCampaign(w3).then((parent) => {
             if (!parent) {
-              el.append(h("div.camp-side-actions", {}, h("button", { onclick: run(() => w3.commands.execute("w3.project.importMap")) }, "Import a campaign…")));
+              el.append(h("div.camp-side-actions", {}, newCampaign(), " ", h("button", { onclick: run(() => w3.commands.execute("w3.project.importMap")) }, "Import a campaign…")));
               return;
             }
             el.replaceChildren(h("div.view-empty", {}, "This map is a chapter of a campaign."),

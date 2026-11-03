@@ -531,16 +531,17 @@ pub fn unpack(map: &Path, project: &Path, codecs: &Registry, opts: &UnpackOption
 }
 
 /// Starts an empty project for a new map: manifest (with the map header),
-/// git files and an empty `map/` folder. The map files are written by the
-/// caller. Fails if the directory exists and isn't empty.
-pub fn create(project: &Path, header: MapHeader) -> Result<()> {
+/// git files and an empty `map/` folder. With `header` None it is a campaign's
+/// (`.w3n` archives have no map header). The files are written by the caller.
+/// Fails if the directory exists and isn't empty.
+pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
     if project.exists() && fs::read_dir(project)?.next().is_some() {
         return Err(Error::Project(format!("{} is not empty", project.display())));
     }
     fs::create_dir_all(project.join(MAP_DIR))?;
     let manifest = Manifest {
         format: FORMAT_VERSION,
-        map: Some(header),
+        map: header,
         archive: ArchiveSettings::default(),
         pack: PackSettings::default(),
     };
