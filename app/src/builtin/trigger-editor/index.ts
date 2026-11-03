@@ -36,6 +36,9 @@ class KindRegistry implements TriggersService {
   onChange(l: () => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
 }
 
+/** The open trigger editor (there is one war3map.wtg per project). */
+let openView: TriggerView | null = null;
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const kinds = new KindRegistry();
   const open = () => w3.commands.execute("w3.triggers.open").catch((e) => w3.window.showError(String(e)));
@@ -46,6 +49,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) throw new Error("This project has no war3map.wtg.");
       await w3.editors.open(WTG, "w3.triggerEditor");
     }),
+    w3.commands.register("w3.triggers.variables", async () => {
+      await w3.commands.execute("w3.triggers.open");
+      openView?.showVariables();
+    }),
     // Activity bar entry: a way in and what the map has.
     w3.views.register("w3.triggers.overview", {
       render(el) {
@@ -53,7 +60,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) { el.append(h("div.view-empty", {}, "This project has no war3map.wtg.")); return; }
         const facts = h("div.terrain-facts.muted", {}, "Reading triggers…");
         el.append(h("div.tree", {}, h("div.tree-row.obj-kind", { onclick: open, title: "F4" },
-          h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open Trigger Editor"))), facts);
+          h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open Trigger Editor")),
+          h("div.tree-row.obj-kind", { onclick: () => w3.commands.execute("w3.triggers.variables").catch((e) => w3.window.showError(String(e))) },
+            h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Variables"))), facts);
         void (async () => {
           const file = parseWtg(await w3.workspace.readBytes(WTG), await triggerData(w3));
           const n = (t: number) => file.items.filter((i) => i.type === t).length;
@@ -103,13 +112,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const lua = await w3.workspace.readText("map/war3map.w3i.json").then((t) => JSON.parse(t).scriptType === 1).catch(() => false);
         el.replaceChildren();
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d));
+        if (!doc.readOnly) openView = view;
         return {
           save: async () => {
             await doc.writeBytes(writeWtg(view.file));
             await w3.workspace.writeBytes(WCT, writeWct(view.customFile()));
             view.markSaved();
           },
-          dispose: () => view.dispose(),
+          dispose: () => { view.dispose(); if (openView === view) openView = null; },
         };
       },
     }),
@@ -244,6 +254,9 @@ class TriggerView {
   }
 
   markSaved() { this.savedAt = this.at; this.setDirty(false); }
+
+  /** Selects the variables table. */
+  showVariables() { this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
 
   /** Redraws the selected item (e.g. after names were looked up). */
   refresh() { this.renderDetail(); }

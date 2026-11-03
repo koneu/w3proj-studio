@@ -501,3 +501,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-preview { border-top: 1px solid var(--border); padding-top: 6px; min-height: 42px; }
 .trig-preview-text { margin-bottom: 4px; }
 .trig-preview-hint { font-size: 12px; }
+
+/* Point pick for other modules (trigger parameters) over the terrain editor. */
+.terrain-pick-banner { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--bg-panel, #252526); border: 1px solid var(--accent, #4a8bd6); border-radius: 4px; box-shadow: 0 2px 8px #0008; }

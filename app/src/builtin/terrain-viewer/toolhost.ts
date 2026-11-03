@@ -1,11 +1,19 @@
 // The "w3.terrain" service: tool groups other extensions add to the terrain
 // editor (see extensions/services.ts). Open editors follow registrations.
+// Also picks a point on the map for other modules (trigger parameters).
 
 import type { TerrainService, TerrainToolGroup } from "../../extensions/services";
+
+type Point = { x: number; y: number };
 
 export class TerrainToolRegistry implements TerrainService {
   private groups: TerrainToolGroup[] = [];
   private listeners = new Set<() => void>();
+  /** The pick in progress: its prompt and how it ends. */
+  picking: { prompt: string; finish(p: Point | undefined): void } | null = null;
+
+  /** `open` brings up the terrain editor (for pickPoint). */
+  constructor(private open: () => Promise<void>) {}
 
   registerToolGroup(group: TerrainToolGroup) {
     this.groups.push(group);
@@ -18,12 +26,30 @@ export class TerrainToolRegistry implements TerrainService {
     };
   }
 
+  async pickPoint(opts: { prompt: string }): Promise<Point | undefined> {
+    this.picking?.finish(undefined);
+    const result = new Promise<Point | undefined>((resolve) => {
+      this.picking = {
+        prompt: opts.prompt,
+        finish: (p) => { this.picking = null; this.listeners.forEach((l) => l()); resolve(p); },
+      };
+    });
+    this.listeners.forEach((l) => l());
+    try {
+      await this.open();
+    } catch (e) {
+      this.picking?.finish(undefined);
+      throw e;
+    }
+    return result;
+  }
+
   /** Registered groups in tab order. */
   all(): TerrainToolGroup[] {
     return [...this.groups].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
   }
 
-  /** Calls `l` whenever groups are added or removed; returns the unsubscribe. */
+  /** Calls `l` whenever groups are added or removed, or a pick starts or ends; returns the unsubscribe. */
   onChange(l: () => void): () => void {
     this.listeners.add(l);
     return () => this.listeners.delete(l);

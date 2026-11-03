@@ -7,7 +7,10 @@
     "viewContainers": [{ "id": "triggers", "title": "Triggers", "icon": "ϟ", "order": 5 }],
     "views": [{ "id": "w3.triggers.overview", "title": "Triggers", "container": "triggers" }],
     "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "patterns": ["war3map.wtg"] }],
-    "commands": [{ "id": "w3.triggers.open", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" }],
+    "commands": [
+      { "id": "w3.triggers.open", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" },
+      { "id": "w3.triggers.variables", "title": "Trigger Editor: Variables", "category": "Module" }
+    ],
     "services": [{ "id": "w3.triggers", "description": "Trigger kinds (GUI, custom script, …) shown in the trigger editor: registerKind." }]
   }
 }

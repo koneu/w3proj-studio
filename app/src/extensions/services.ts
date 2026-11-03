@@ -29,6 +29,9 @@ export const OBJECTS_SERVICE = "w3.objects";
 export interface TerrainService {
   /** Adds a tool group to every terrain editor (open now or later). */
   registerToolGroup(group: TerrainToolGroup): { dispose(): void };
+  /** Opens the terrain editor and resolves with the next point clicked on the ground
+   *  (undefined on Esc or when another pick starts). `prompt` is shown meanwhile. */
+  pickPoint(opts: { prompt: string }): Promise<{ x: number; y: number } | undefined>;
 }
 
 export const TERRAIN_SERVICE = "w3.terrain";

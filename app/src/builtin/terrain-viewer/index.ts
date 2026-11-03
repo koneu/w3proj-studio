@@ -76,7 +76,7 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
-  const toolGroups = new TerrainToolRegistry();
+  const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   ctx.subscriptions.push(
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
     w3.commands.register("w3.terrain.open", async () => {
@@ -1064,6 +1064,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderTabs();
         };
         const stopGroups = toolGroups.onChange(syncGroups);
+        // A point pick for another module (trigger parameters): banner, click on the ground, Esc cancels.
+        const pickBanner = h("div.terrain-pick-banner", { hidden: true });
+        el.append(pickBanner);
+        const syncPick = () => {
+          const p = toolGroups.picking;
+          pickBanner.hidden = !p;
+          if (p) pickBanner.replaceChildren(h("span", {}, p.prompt), h("span.muted", {}, " · Esc to cancel"),
+            h("button", { onclick: () => toolGroups.picking?.finish(undefined) }, "Cancel"));
+        };
+        syncPick();
+        const stopPick = toolGroups.onChange(syncPick);
         if (editable) queueMicrotask(syncGroups);
 
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
@@ -1116,6 +1127,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let press: { x: number; y: number } | null = null;
         canvas.addEventListener("mousedown", (e) => {
           canvas.focus();
+          if (toolGroups.picking && e.button === 0) {
+            e.preventDefault();
+            const g = groundAt(e);
+            if (g) toolGroups.picking.finish({ x: g[0], y: g[1] });
+            return;
+          }
           const gi = activeInst();
           if (gi && e.button === 0 && gi.pointerDown?.({ ground: groundAt(e), event: e, down: false })) {
             e.preventDefault();
@@ -1181,6 +1198,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
+          if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); toolGroups.picking.finish(undefined); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
@@ -1302,6 +1320,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           focus: () => canvas.focus(),
           dispose: () => {
             stopGroups();
+            stopPick();
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             window.removeEventListener("mousemove", onMove);
