@@ -17,6 +17,7 @@ import {
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
+import { dropMode, moveItem, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 
 const WTG = "map/war3map.wtg", WCT = "map/war3map.wct";
@@ -220,6 +221,10 @@ class TriggerView {
       allocId: (type) => this.allocId(type),
       category: () => this.variableCategory(),
       select: (v) => { this.selected = this.file.reforged ? { kind: "item", type: 64, id: v.id } : { kind: "variables" }; },
+      scripts: () => [
+        { get: () => this.header, set: (t) => { this.header = t; } },
+        ...textTriggers(this.file).map((t) => ({ get: () => this.texts.get(t) ?? null, set: (text: string) => { this.texts.set(t, text); } })),
+      ],
     };
     el.tabIndex = -1;
     el.addEventListener("keydown", this.keydown);
@@ -377,6 +382,44 @@ class TriggerView {
     });
   }
 
+  // ---- drag and drop ----------------------------------------------------------------
+  private drop(drag: Item, target: Item, mode: DropMode) {
+    this.edit(`Move ${drag.name}`, () => {
+      moveItem(this.file, drag, target, mode);
+      if (mode === "into") this.collapsed.delete(target.id);
+    });
+  }
+  private dragging: Item | null = null;
+  private dragHandlers(sel: Selection): Record<string, unknown> {
+    const it = this.find(sel);
+    if (!this.handle.editable || !it || it.type === 1) return {};
+    const clear = () => this.tree.querySelectorAll(".drop-into, .drop-before").forEach((e) => e.classList.remove("drop-into", "drop-before"));
+    const mode = (e: DragEvent) => {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      return this.dragging ? dropMode(this.file, this.dragging, it, e.clientY < r.top + r.height / 3) : null;
+    };
+    return {
+      draggable: true,
+      ondragstart: (e: DragEvent) => { this.dragging = it; e.dataTransfer?.setData("text/plain", it.name); },
+      ondragend: () => { this.dragging = null; clear(); },
+      ondragover: (e: DragEvent) => {
+        const m = mode(e);
+        if (!m) return;
+        e.preventDefault();
+        clear();
+        (e.currentTarget as HTMLElement).classList.add(m === "into" ? "drop-into" : "drop-before");
+      },
+      ondragleave: (e: DragEvent) => (e.currentTarget as HTMLElement).classList.remove("drop-into", "drop-before"),
+      ondrop: (e: DragEvent) => {
+        e.preventDefault();
+        const m = mode(e), d = this.dragging;
+        clear();
+        this.dragging = null;
+        if (m && d) { this.selected = { kind: "item", type: d.type, id: d.id }; this.drop(d, it, m); }
+      },
+    };
+  }
+
   private toolbar(): HTMLElement {
     const newMenu = h("select.trig-new", { title: "Add to the selected category", onchange: () => {
       const v = newMenu.value;
@@ -409,6 +452,7 @@ class TriggerView {
       onclick: () => { this.selected = sel; this.renderTree(); this.renderDetail(); this.el.focus(); },
       ondblclick: () => { if (opts.toggle !== undefined) this.toggle(opts.toggle); },
       oncontextmenu: (e: MouseEvent) => this.menu(e, sel, opts.toggle),
+      ...this.dragHandlers(sel),
     }, caret, h("span.trig-label", {}, label));
   }
   /** Right-click in the tree: selects the row, then offers new items, moving and deleting. */

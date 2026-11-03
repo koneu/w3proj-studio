@@ -20,6 +20,37 @@ export interface VariableHost {
   /** The category a new item goes into (Reforged files list variables in categories). */
   category(): { parent: number; index: number };
   select(variable: Variable): void;
+  /** Custom script text that can name variables (map header, custom-text triggers). */
+  scripts(): { get(): string | null; set(text: string): void }[];
+}
+
+/** udg_<name> as a whole identifier. */
+const scriptRef = (name: string) => new RegExp(`(?<![A-Za-z0-9_])udg_${name}(?![A-Za-z0-9_])`, "g");
+
+/** "Custom Script" actions in GUI triggers (their one parameter is script text). */
+function customScriptParams(file: TriggerFile): Param[] {
+  const out: Param[] = [];
+  type E = { name: string; params: Param[]; children: E[] };
+  const visit = (e: E) => { if (e.name === "CustomScriptCode" && e.params[0]) out.push(e.params[0]); e.children.forEach(visit); };
+  for (const it of file.items) if ("ecas" in it) (it.ecas as E[]).forEach(visit);
+  return out;
+}
+
+/** How often udg_<name> appears in custom script (texts, header, Custom Script actions). */
+export function scriptUses(host: VariableHost, name: string): number {
+  const re = scriptRef(name);
+  const count = (t: string | null) => (t ? t.match(re)?.length ?? 0 : 0);
+  return host.scripts().reduce((n, s) => n + count(s.get()), 0)
+    + customScriptParams(host.handle.file).reduce((n, p) => n + count(p.value), 0);
+}
+
+/** Renames udg_<from> to udg_<to> in custom script. Run inside an edit. */
+export function renameInScripts(host: VariableHost, from: string, to: string): void {
+  for (const s of host.scripts()) {
+    const t = s.get();
+    if (t && scriptRef(from).test(t)) s.set(t.replace(scriptRef(from), `udg_${to}`));
+  }
+  for (const p of customScriptParams(host.handle.file)) p.value = p.value.replace(scriptRef(from), `udg_${to}`);
 }
 
 /** Every parameter that names a variable (array indexes and nested calls included). */
@@ -107,7 +138,7 @@ function editRow(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable):
   const ed = host.handle;
   const used = () => variableParams(ed.file, v.name).length;
 
-  const name = h("input.trig-var-name", { type: "text", value: v.name, title: `udg_${v.name} in the script`, onchange: () => {
+  const name = h("input.trig-var-name", { type: "text", value: v.name, title: `udg_${v.name} in the script`, onchange: async () => {
     const n = name.value.trim();
     if (n === v.name) return;
     const clash = ed.file.variables.some((x) => x !== v && x.name.toLowerCase() === n.toLowerCase());
@@ -116,8 +147,18 @@ function editRow(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable):
       name.value = v.name;
       return;
     }
+    // Custom script isn't updated by the World Editor; here it's offered.
+    let scripts = false;
+    const inScript = scriptUses(host, v.name);
+    if (inScript) {
+      const c = await w3.window.showWarning(`udg_${v.name} appears ${inScript} time${inScript === 1 ? "" : "s"} in custom script. Rename it there too?`,
+        "Rename in script too", "Only GUI triggers");
+      if (c === undefined) { name.value = v.name; return; }
+      scripts = c === "Rename in script too";
+    }
     ed.edit(`Rename ${v.name}`, () => {
       const target = ed.file.variables.find((x) => x.id === v.id && x.name === v.name)!;
+      if (scripts) renameInScripts(host, target.name, n);
       for (const p of variableParams(ed.file, target.name)) p.value = n;
       const it = treeItem(ed.file, target);
       if (it) it.name = n;
