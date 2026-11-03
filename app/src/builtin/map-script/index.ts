@@ -13,6 +13,12 @@ const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j")
 /** Files war3map.j is made from (also as their .json documents). */
 const INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|doo|w3e|w3u|w3t|w3a)|war3mapUnits\.doo|war3mapSkin\.w3u)(\.json)?$/i;
 
+/** vJASS in trigger texts (libraries, scopes, structs, block comments, //! directives), or a
+ *  script JassHelper compiled ("//globals from <library>:", LIBRARY_<name> constants). Such
+ *  maps need a vJASS compiler: writing the triggers into war3map.j as they are breaks the map. */
+const VJASS_SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|module|interface|textmacro|endlibrary|endscope|endstruct)\b|\/\*|^\s*\/\/!/m;
+const VJASS_OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
+
 /** Ability files with the orders that switch autocast on and off. */
 const ABILITY_FUNC = ["Campaign", "Common", "Human", "Item", "Neutral", "NightElf", "Orc", "Undead"].map((r) => `Units\\${r}AbilityFunc.txt`);
 
@@ -61,7 +67,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** Builds the map script from the project's files. */
-  const generate = async (): Promise<{ path: string; text: string }> => {
+  const generate = async (): Promise<{ path: string; text: string; vjass?: string }> => {
     // Read directly rather than from the file list, which lags behind fresh saves (New Map).
     const json = async <T>(p: string): Promise<T | null> => {
       const text = await w3.workspace.readText(`${p}.json`).catch(() => null);
@@ -76,6 +82,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const wtg = await bytes("map/war3map.wtg"), wct = await bytes("map/war3map.wct");
     const triggers = wtg ? parseWtg(wtg, g.data) : undefined;
     const custom = triggers && wct ? parseWct(wct, textTriggers(triggers).length) : null;
+    // vJASS maps aren't regenerated (no vJASS compiler yet).
+    const texts = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")].join("\n");
+    const current = await w3.workspace.readText(path).catch(() => "");
+    if (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current)) {
+      return { path, text: "", vjass: VJASS_OUTPUT.test(current) ? "its script was compiled from vJASS" : "its triggers contain vJASS" };
+    }
     const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
     const wts = wtsText === null ? null : new StringTable(wtsText);
     const w3e = await bytes("map/war3map.w3e");
@@ -141,11 +153,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   let running: Promise<void> = Promise.resolve();
+  /** Projects already told that their vJASS script isn't regenerated. */
+  const warned = new Set<string>();
   const write = (reason: string) => {
     running = running.then(async () => {
       try {
-        const { path, text } = await generate();
+        const { path, text, vjass } = await generate();
         const file = path.slice(4);
+        if (vjass) {
+          out.append(`${reason}: ${file} not written: ${vjass}, which needs a vJASS compiler (JassHelper); the script stays as it is.`);
+          const root = w3.workspace.project()?.root ?? "";
+          if (!warned.has(root)) {
+            warned.add(root);
+            void w3.window.showWarning(`This map uses vJASS (${vjass}), so ${file} isn't regenerated from the triggers: changed triggers don't reach the map script. ` +
+              "Compile it in the World Editor (JassHelper) for now.");
+          }
+          return;
+        }
         const current = await w3.workspace.readText(path).catch(() => null);
         if (current === text) { out.append(`${reason}: ${file} up to date`); return; }
         await w3.workspace.writeText(path, text);

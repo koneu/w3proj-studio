@@ -76,11 +76,15 @@ async function loadTilesets(w3: W3Api): Promise<Tileset[]> {
 }
 
 /** The New Map dialog; resolves with the choices, or null when cancelled. */
-export async function askNewMap(w3: W3Api): Promise<(NewMapOptions & { tilesetInfo: Tileset }) | null> {
+/** Preset for the dialog (e.g. a campaign's chapter map): parent folder, a suffix for the folder
+ *  name (".w3x": chapter projects are named like their map file), dialog title. */
+export interface NewMapPreset { parent?: string; suffix?: string; title?: string }
+
+export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(NewMapOptions & { tilesetInfo: Tileset }) | null> {
   const tilesets = await loadTilesets(w3);
   if (!tilesets.length) throw new Error("No tilesets found in the game data.");
   return new Promise((resolve) => {
-    let parent = "";
+    let parent = preset.parent ?? "";
     const name = h("input.newmap-input", { type: "text", value: "Untitled", placeholder: "Map name" });
     const author = h("input.newmap-input", { type: "text", value: "", placeholder: "Author" });
     const description = h("textarea.newmap-input", { rows: 2, placeholder: "Description" });
@@ -100,7 +104,7 @@ export async function askNewMap(w3: W3Api): Promise<(NewMapOptions & { tilesetIn
       base.replaceChildren(...t.tiles.map((x) => h("option", { value: x.id, selected: x === pick }, `${x.name} (${x.id})`)));
     };
     const folderName = () => name.value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled";
-    const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName()}` : "");
+    const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName()}${preset.suffix ?? ""}` : "");
     const update = () => {
       playable.textContent = `playable ${Number(width.value) - MARGINS[0] - MARGINS[1]} × ${Number(height.value) - MARGINS[2] - MARGINS[3]}`;
       // Shown right-aligned to clip the start of long paths; the mark keeps them left-to-right.
@@ -132,7 +136,7 @@ export async function askNewMap(w3: W3Api): Promise<(NewMapOptions & { tilesetIn
         if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement)) create();
       },
     }, h("div.picker.newmap-dialog", {},
-      h("div.picker-header", {}, h("strong", {}, "New Map"), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),
+      h("div.picker-header", {}, h("strong", {}, preset.title ?? "New Map"), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),
       row("Name", name),
       row("Author", author),
       row("Description", description),
@@ -298,6 +302,8 @@ export async function createMap(w3: W3Api, o: NewMapOptions & { tilesetInfo: Til
   const lights = { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") };
 
   await w3.backend.invoke("project_create", { dir: o.dir, name: o.name, flags: FLAGS, maxPlayers: 1 });
+  // Switching projects closes the other project's editors (as Open Project does).
+  await w3.editors.closeAll();
   await w3.workspace.open(o.dir);
   const root = w3.workspace.project()!.root;
   const json = async (path: string, value: unknown) =>

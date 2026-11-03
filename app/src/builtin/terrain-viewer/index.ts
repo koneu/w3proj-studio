@@ -10,7 +10,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
 import { buildMinimap, minimapSettings } from "./minimapgen";
-import { askNewMap, createMap } from "./newmap";
+import { askNewMap, createMap, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
@@ -92,9 +92,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.commands.execute("w3.terrain.open");
       if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y); toolGroups.pendingLook = null; }
     }),
-    w3.commands.register("w3.map.new", async () => {
-      const o = await askNewMap(w3);
-      if (o) await w3.window.withProgress(`Creating ${o.name}…`, () => createMap(w3, o));
+    // `opts` (other extensions): dialog preset, and a step before the map is created (and opened).
+    w3.commands.register("w3.map.new", async (opts?: NewMapPreset & { beforeCreate?(o: { dir: string; name: string }): Promise<void> }) => {
+      const o = await askNewMap(w3, opts ?? {});
+      if (!o) return null;
+      await opts?.beforeCreate?.(o);
+      await w3.window.withProgress(`Creating ${o.name}…`, () => createMap(w3, o));
+      return o.dir;
     }),
 
     // Activity bar entry (like the World Editor's terrain palette): map facts and

@@ -484,7 +484,9 @@ class Checker {
       const op = this.next();
       const b = this.sum();
       if (op.text === "==" || op.text === "!=") {
-        if (!this.assignable(a, b) && !this.assignable(b, a)) this.err(op.from, op.to, `Can't compare ${a} with ${b}`);
+        // The game also compares integers with null (vJASS structs compiled by JassHelper: "if this==null").
+        const intNull = (a === "integer" && b === "null") || (a === "null" && b === "integer");
+        if (!intNull && !this.assignable(a, b) && !this.assignable(b, a)) this.err(op.from, op.to, `Can't compare ${a} with ${b}`);
       } else if (!this.numeric(a) || !this.numeric(b)) this.err(op.from, op.to, `"${op.text}" compares numbers, not ${a} and ${b}`);
       return "boolean";
     }

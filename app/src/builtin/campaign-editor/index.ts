@@ -81,6 +81,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   ctx.subscriptions.push(
     w3.commands.register("w3.campaign.open", (section?: SectionId, chapter?: number) => open(section, chapter)),
+    // Chapters from the side bar: through the editor (it records the change and saves).
+    w3.commands.register("w3.campaign.addMap", async () => { await open("chapters"); await [...openViews][0]?.addMap(); }),
+    w3.commands.register("w3.campaign.newMap", async () => { await open("chapters"); await [...openViews][0]?.newMap(); }),
     w3.commands.register("w3.campaign.back", async () => {
       const parent = await parentCampaign(w3);
       if (!parent) throw new Error("This project isn't a chapter map of a campaign.");
@@ -108,7 +111,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("div.tree-row.obj-kind", { onclick, title }, h("span.tree-icon", {}, "›"), h("span.tree-label", {}, label), extra ?? null);
         el.append(h("div.tree", {}, ...SECTIONS.map(([id, label]) => row(label, run(() => open(id))))));
         const list = h("div.tree.camp-side-chapters", {}, h("div.view-empty", {}, "Loading chapters…"));
-        el.append(h("div.camp-side-head", {}, "Chapters"), list);
+        el.append(h("div.camp-side-head", {}, "Chapters"), list,
+          h("div.camp-side-actions", {},
+            h("button", { onclick: run(() => w3.commands.execute("w3.campaign.newMap")), title: "Create a new map as the next chapter" }, "New map…"), " ",
+            h("button", { onclick: run(() => w3.commands.execute("w3.campaign.addMap")), title: "Add an existing .w3x/.w3m as the next chapter" }, "Add map…")));
         void (async () => {
           const info: CampaignInfo = JSON.parse(await w3.workspace.readText(FILE));
           const wts = await w3.workspace.readText(WTS).catch(() => null);
@@ -128,17 +134,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const info: CampaignInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
         const wtsText = await w3.workspace.readText(WTS).catch(() => null);
-        const view = new CampaignView(w3, el, info, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d));
+        const save = async () => {
+          const root = w3.workspace.project()!.root;
+          await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(view.info) }));
+          await view.saveStrings();
+          view.saved();
+        };
+        const view: CampaignView = new CampaignView(w3, el, info, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), save);
         if (requested) { view.show(requested.section, requested.chapter); requested = null; }
         openViews.add(view);
         const stop = w3.workspace.onDidChange(() => view.render());
         return {
-          save: async () => {
-            const root = w3.workspace.project()!.root;
-            await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(view.info) }));
-            await view.saveStrings();
-            view.saved();
-          },
+          save,
           focus: () => el.focus(),
           dispose: () => { stop.dispose(); openViews.delete(view); },
         };
@@ -160,7 +167,7 @@ class CampaignView {
   private selected = -1;
 
   constructor(private w3: W3Api, private el: HTMLElement, public info: CampaignInfo, private strings: StringTable | null,
-    private editable: boolean, private setDirty: (dirty: boolean) => void) {
+    private editable: boolean, private setDirty: (dirty: boolean) => void, private save: () => Promise<void>) {
     el.classList.add("camp-editor");
     el.tabIndex = -1;
     el.addEventListener("keydown", (e) => this.keyDown(e));
@@ -286,7 +293,7 @@ class CampaignView {
     return has ? `${this.w3.workspace.project()!.root}\\maps\\${dir}` : null;
   }
 
-  private async addMap() {
+  async addMap() {
     const src = await this.w3.window.pickFile({ title: "Add a map to the campaign", filters: [{ name: "Warcraft III map", extensions: ["w3x", "w3m"] }] });
     if (!src) return;
     const name = src.split(/[\\/]/).pop()!;
@@ -302,6 +309,30 @@ class CampaignView {
       this.selected = this.info.chapters.length - 1;
     });
     void this.w3.window.showInfo(`${name} was unpacked into maps/ and added as a chapter. Save the campaign to keep the chapter.`);
+  }
+
+  /** A new map as the next chapter: created under maps/ (and opened), the button added and the
+   *  campaign saved first (opening the map closes this editor). */
+  async newMap() {
+    if (!this.editable) return;
+    if (this.undoStack.length !== this.savedAt) {
+      const c = await this.w3.window.showWarning("The campaign has unsaved changes. They are saved before the new map opens.", "Save and continue", "Cancel");
+      if (c !== "Save and continue") return;
+    }
+    const root = this.w3.workspace.project()!.root;
+    await this.w3.commands.execute("w3.map.new", {
+      parent: `${root}\\maps`, suffix: ".w3x", title: "New Chapter Map",
+      beforeCreate: async (o: { dir: string; name: string }) => {
+        const map = toArchiveName(o.dir.split(/[\\/]/).pop()!);
+        if (this.campaignMaps().some((m) => m.name.toLowerCase() === map.toLowerCase())) throw new Error(`${map} is already in the campaign.`);
+        this.change(() => {
+          this.info.chapters.push({ flags: 0, chapter: `Chapter ${this.info.chapters.length + 1}`, title: o.name, map });
+          if (!this.info.mapOrder.some((m) => m.map.toLowerCase() === map.toLowerCase())) this.info.mapOrder.push({ unknown: "", map });
+          this.selected = this.info.chapters.length - 1;
+        });
+        await this.save();
+      },
+    });
   }
 
   async openMap(map: string) {
@@ -400,6 +431,7 @@ class CampaignView {
         c.chapters.length ? table : h("p.muted", {}, "No chapters yet."),
         h("div.camp-buttons", {},
           ...(this.editable ? [
+            h("button", { onclick: run(() => this.newMap()) }, "New map…"),
             h("button", { onclick: run(() => this.addMap()) }, "Add map…"),
             h("button", { disabled: !unused.length, onclick: () => this.change(() => {
               c.chapters.push({ flags: 0, chapter: `Chapter ${c.chapters.length + 1}`, title: unused[0].name.replace(/\.w3[mx]$/i, ""), map: unused[0].name });
