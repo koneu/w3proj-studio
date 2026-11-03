@@ -59,6 +59,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       );
       return;
     }
+    /** Files of a project inside this one (a campaign's chapter maps under maps/<file>/) need that
+     *  project open: their editors find the map's other files relative to the project. */
+    const openFile = async (path: string) => {
+      const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+      const parts = path.split("/");
+      let inner = -1;
+      for (let i = parts.length - 1; i > 0; i--) {
+        if (files.has(`${parts.slice(0, i).join("/")}/w3proj.toml`.toLowerCase())) { inner = i; break; }
+      }
+      if (inner < 0) return w3.editors.open(path);
+      const dir = parts.slice(0, inner).join("/");
+      const c = await w3.window.showWarning(`${parts.slice(inner).join("/")} belongs to the map project ${dir}. Its editors (terrain objects, object data, triggers…) need that project open.`,
+        "Open map project", "Open here anyway", "Cancel");
+      if (c === "Open here anyway") return w3.editors.open(path);
+      if (c !== "Open map project") return;
+      await w3.commands.execute("w3.project.open", `${w3.workspace.project()!.root}\\${dir.replace(/\//g, "\\")}`);
+      await w3.editors.open(parts.slice(inner).join("/"));
+    };
     const tree = buildTree(w3.workspace.files());
     const list = h("div.tree", { tabindex: 0 });
     const walk = (node: Node, depth: number) => {
@@ -77,7 +95,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (open) expanded.delete(child.path);
                 else expanded.add(child.path);
               } else {
-                w3.editors.open(child.path).catch((e) => w3.window.showError(String(e)));
+                openFile(child.path).catch((e) => w3.window.showError(String(e)));
               }
               w3.views.refresh("w3.explorer.files");
             },
