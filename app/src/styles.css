@@ -330,6 +330,8 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .model-warn.clickable { cursor: pointer; }
 .model-warn.clickable:hover { text-decoration: underline; }
 .terrain-cleanup { margin-top: 6px; }
+.terrain-game-tex summary { cursor: pointer; }
+.terrain-game-tex .clickable:hover { text-decoration: underline; }
 .model-list { display: flex; flex-direction: column; gap: 2px; }
 .model-row { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
 .model-row span { overflow: hidden; text-overflow: ellipsis; }

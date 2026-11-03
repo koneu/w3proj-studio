@@ -372,16 +372,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const texInfo = h("div.muted");
         const loader = new ObjectLoader(renderer.gl, (p) => readFile(w3, doc, p), () => {
           redraw();
-          const n = loader.missing.size;
           const list = [...loader.missing];
           // Click: the placed objects whose model uses the texture.
           const users = (tex: string) => {
             const models = loader.modelsUsing(tex);
             return renderer.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed && models.has(i.pick.model.toLowerCase())).map((i) => i.pick!.placed);
           };
-          texInfo.replaceChildren(n ? `${n} model texture${n === 1 ? "" : "s"} not found` : "",
-            ...list.slice(0, 3).map(([p, e]) => h("div.model-warn.clickable", { title: `${p}: ${e}\nClick: show the objects using it`,
-              onclick: () => showEntries(users(p)) }, `${p}: ${e}`)));
+          // Textures missing in models the map imports are the map's to fix; the game's own models
+          // have a few broken references too (the DE Sheep names textures in the wrong folder).
+          const mapFiles = new Set(w3.workspace.project() ? w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()) : []);
+          const fromMap = (tex: string) => [...loader.modelsUsing(tex)].some((m) => mapFiles.has(`map/${m.replace(/\\/g, "/")}`));
+          const ours = list.filter(([p]) => fromMap(p)), game = list.filter(([p]) => !fromMap(p));
+          const line = ([p, e]: [string, string], cls: string) => h(`div.${cls}.clickable`, { title: `${p}: ${e}\nClick: show the objects using it`,
+            onclick: () => showEntries(users(p)) }, `${p}: ${e}`);
+          texInfo.replaceChildren(
+            ours.length ? `${ours.length} texture${ours.length === 1 ? "" : "s"} of the map's models not found` : "",
+            ...ours.slice(0, 3).map((x) => line(x, "model-warn")),
+            ...(game.length ? [h("details.terrain-game-tex", {},
+              h("summary", { title: "The game's own models reference these, but the game data doesn't have them there. Nothing the map can fix." },
+                `${game.length} texture${game.length === 1 ? "" : "s"} missing in the game's own models`),
+              ...game.slice(0, 20).map((x) => line(x, "muted")))] : []));
           texInfo.title = list.map(([p, e]) => `${p}: ${e}`).join("\n");
         });
         const cliffInfo = h("div.muted", {}, "Loading cliffs…");
