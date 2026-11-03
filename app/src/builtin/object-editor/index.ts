@@ -726,10 +726,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           filter = id.toLowerCase();
           const o = file.custom.find((c) => c.id === id) ?? file.original.find((c) => c.base === id);
           select(o ?? null);
-          if (!o) status.textContent = `${id} isn't in this map's object data — a game object: use "Edit standard" to change it; ` +
-            "a campaign's custom object: edit it in the campaign project.";
           renderList();
           renderDetail();
+          if (o) return;
+          // An unchanged game object: shown as a standard entry without modifications, like the World
+          // Editor (such entries aren't written, so this changes nothing until a field is edited).
+          void loadKind(w3, kind).then((k) => {
+            if (!k.names.has(id)) {
+              status.textContent = `${id} isn't in this map's object data or the game's — a campaign's custom object is edited in the campaign project.`;
+              return;
+            }
+            const std: Obj = file.version >= 3 ? { base: id, mods: [] } : { base: id, end: id, mods: [] };
+            file.original.push(std);
+            select(std);
+            status.textContent = `${k.names.get(id)} (${id}): game object, unchanged in this map — edits change it for this map.`;
+            renderList();
+            renderDetail();
+          }, () => { status.textContent = `${id}: game data unavailable.`; });
         };
         focusers.set(doc.path, focusObject);
         renderList();
