@@ -45,8 +45,15 @@ function parseValue(type: ValueType, text: string): number | string | null {
   return n;
 }
 
+/** Whether Shift is down (updated on every key and mouse press). */
+let shiftHeld = false;
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const icons = iconLoader(w3);
+  // Shift held while a new object's base is confirmed: ask for its id.
+  const trackShift = (e: KeyboardEvent | MouseEvent) => { shiftHeld = e.shiftKey; };
+  for (const t of ["keydown", "keyup", "mousedown"] as const) window.addEventListener(t, trackShift, true);
+  ctx.subscriptions.push({ dispose: () => { for (const t of ["keydown", "keyup", "mousedown"] as const) window.removeEventListener(t, trackShift, true); } });
   const images = imageLoader(w3);
   const objects = objectsService(w3);
   /** Open editors by document path: show an object (filter the list to it and select it). */
@@ -644,16 +651,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return null;
         };
         const newObject = async () => {
-          const base = await pickBase(`New ${kindInfo?.singular ?? "object"} based on…`);
+          const base = await pickBase(`New ${kindInfo?.singular ?? "object"} based on… (hold Shift to choose the id)`);
           if (!base || base.length !== 4) return;
+          const askId = shiftHeld;
           const taken = new Set<string>([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...(kd?.baseIds ?? [])]);
-          const id = await w3.window.inputBox({ prompt: `New ${kindInfo?.singular ?? "object"} id`, value: nextFreeId(kind, base, taken) });
-          if (!id) return;
-          if (id.length !== 4) return w3.window.showWarning("Object ids are exactly four characters.");
-          if (taken.has(id)) return w3.window.showWarning(`${id} is already used.`);
-          // Other object types: the map's custom objects and the game's (ids should be unique overall).
-          const clash = await usedElsewhere(id);
-          if (clash && (await w3.window.showWarning(`${id} is already ${clash}. Use it anyway?`, "Use it", "Cancel")) !== "Use it") return;
+          // The next free id, like the World Editor (also free among the other object types).
+          let free = nextFreeId(kind, base, taken);
+          for (let n = 0; n < 50 && (await usedElsewhere(free)); n++) { taken.add(free); free = nextFreeId(kind, base, taken); }
+          let id = free;
+          if (askId) {
+            const typed = await w3.window.inputBox({ prompt: `New ${kindInfo?.singular ?? "object"} id`, value: free });
+            if (!typed) return;
+            if (typed.length !== 4) return w3.window.showWarning("Object ids are exactly four characters.");
+            if (taken.has(typed) && typed !== free) return w3.window.showWarning(`${typed} is already used.`);
+            // Other object types: the map's custom objects and the game's (ids should be unique overall).
+            const clash = await usedElsewhere(typed);
+            if (clash && (await w3.window.showWarning(`${typed} is already ${clash}. Use it anyway?`, "Use it", "Cancel")) !== "Use it") return;
+            id = typed;
+          }
           const o: Obj = file.version >= 3 ? { base, id, mods: [] } : { base, id, end: id, mods: [] };
           file.custom.push(o);
           select(o);
