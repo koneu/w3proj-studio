@@ -5,16 +5,16 @@
 //! //== war3map.wct: version 1, reforged, comment "" ==
 //! //== header ==
 //! <custom script code>
-//! //== trigger 0 ==
+//! //== trigger 0: Melee Initialization ==
 //! <text of the first trigger with a text slot>
-//! //== trigger 1 (no text) ==
+//! //== trigger 1 (no text): Another Trigger ==
 //! ```
 //!
 //! Lines end with the texts' own line break (CRLF when any text uses it). A text whose
 //! stored length is 0 is "(no text)"; an empty text is stored as a lone zero byte. Layouts:
 //! Reforged: marker, version, comment, header, texts until the end (no count). Classic:
-//! version (0/1), [comment, header,] count, texts. The trigger names live in war3map.wtg,
-//! which needs the game's TriggerData.txt to read, so sections are numbered.
+//! version (0/1), [comment, header,] count, texts. The trigger names come from war3map.wtg
+//! (`with_names`, when it could be read); they are comments, ignored when packing.
 
 use crate::{Error, Result};
 
@@ -128,13 +128,18 @@ fn write(w: &Wct) -> Vec<u8> {
     out
 }
 
-fn section(name: &str, t: &Option<String>) -> String {
-    format!("//== {}{} ==", name, if t.is_none() { " (no text)" } else { "" })
+/// Binary → text form (sections numbered).
+pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
+    render(&parse(bytes)?, &[])
 }
 
-/// Binary → text form.
-pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
-    let w = parse(bytes)?;
+/// The text form with each trigger section named (`names`: the wtg's triggers with a text slot,
+/// in order; line breaks in names become spaces).
+pub fn with_names(text: &[u8], names: &[String]) -> Result<Vec<u8>> {
+    render(&parse_text(text)?, names)
+}
+
+fn render(w: &Wct, names: &[String]) -> Result<Vec<u8>> {
     let mut all = w.header.iter().flatten().chain(w.texts.iter().flatten());
     let eol = if all.any(|t| t.contains("\r\n")) { "\r\n" } else { "\n" };
     let comment = serde_json::to_string(&w.comment).map_err(|e| err(e.to_string()))?;
@@ -144,8 +149,13 @@ pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
     }
     s += " ==";
     s += eol;
-    let mut put = |name: String, t: &Option<String>| {
-        s += &section(&name, t);
+    let mut put = |name: String, t: &Option<String>, label: Option<&String>| {
+        s += &format!("//== {name}{}", if t.is_none() { " (no text)" } else { "" });
+        if let Some(l) = label.filter(|l| !l.is_empty()) {
+            s += ": ";
+            s += &l.replace(['\r', '\n'], " ");
+        }
+        s += " ==";
         s += eol;
         if let Some(t) = t {
             s += t;
@@ -153,16 +163,20 @@ pub fn to_text(bytes: &[u8]) -> Result<Vec<u8>> {
         }
     };
     if let Some(h) = &w.header {
-        put("header".into(), h);
+        put("header".into(), h, None);
     }
     for (k, t) in w.texts.iter().enumerate() {
-        put(format!("trigger {k}"), t);
+        put(format!("trigger {k}"), t, names.get(k));
     }
     Ok(s.into_bytes())
 }
 
 /// Text form → binary.
 pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
+    Ok(write(&parse_text(bytes)?))
+}
+
+fn parse_text(bytes: &[u8]) -> Result<Wct> {
     let s = std::str::from_utf8(bytes).map_err(|_| err("text form isn't UTF-8"))?;
     let first_end = s.find('\n').ok_or_else(|| err("no first line"))?;
     let eol = if s[..first_end].ends_with('\r') { "\r\n" } else { "\n" };
@@ -190,12 +204,21 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
     for line in body.split_inclusive('\n') {
         let l = line.trim_end_matches('\n').trim_end_matches('\r');
         if let Some(m) = l.strip_prefix("//== ").and_then(|r| r.strip_suffix(" ==")) {
-            let (name, none) = match m.strip_suffix(" (no text)") {
-                Some(n) => (n, true),
-                None => (m, false),
+            // "header" or "trigger <n>", then " (no text)", then ": <trigger name>" (a comment).
+            let (name, rest) = if let Some(r) = m.strip_prefix("header") {
+                ("header".to_string(), r)
+            } else if let Some(r) = m.strip_prefix("trigger ") {
+                let digits = r.find(|c: char| !c.is_ascii_digit()).unwrap_or(r.len());
+                (format!("trigger {}", &r[..digits]), if digits == 0 { "x" } else { &r[digits..] })
+            } else {
+                (String::new(), "x")
             };
-            if name == "header" || name.strip_prefix("trigger ").is_some_and(|n| n.parse::<usize>().is_ok()) {
-                marks.push((at, at + line.len(), name.to_string(), !none));
+            let (none, rest) = match rest.strip_prefix(" (no text)") {
+                Some(r) => (true, r),
+                None => (false, rest),
+            };
+            if rest.is_empty() || (rest.starts_with(": ") && name != "header") {
+                marks.push((at, at + line.len(), name, !none));
             }
         }
         at += line.len();
@@ -229,7 +252,7 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
     if (w.reforged || w.version >= 1) != w.header.is_some() {
         return Err(err("header section doesn't match the version"));
     }
-    Ok(write(&w))
+    Ok(w)
 }
 
 #[cfg(test)]
@@ -267,6 +290,15 @@ mod tests {
             String::from_utf8(t).unwrap(),
             "//== war3map.wct: version 1, reforged, comment \"c \\\"q\\\"\" ==\r\n//== header ==\r\nh\r\n\r\n//== trigger 0 (no text) ==\r\n//== trigger 1 ==\r\na\r\nb\r\n"
         );
+    }
+
+    #[test]
+    fn names_are_comments() {
+        let b = bin(true, 1, Some(Some("h")), &[Some("a"), None]);
+        let named = with_names(&to_text(&b).unwrap(), &["Melee Init".into(), "Two\nLines".into()]).unwrap();
+        let t = String::from_utf8(named.clone()).unwrap();
+        assert!(t.contains("//== trigger 0: Melee Init ==\n") && t.contains("//== trigger 1 (no text): Two Lines ==\n"), "{t}");
+        assert_eq!(from_text(&named).unwrap(), b);
     }
 
     #[test]

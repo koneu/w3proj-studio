@@ -283,6 +283,14 @@ pub fn extract_with(archive: &Archive, codecs: &Registry, extra: &[String]) -> E
         report.files.push(entry);
     }
 
+    // Custom script sections get their triggers' names (comments; only when the wtg was decoded).
+    let names = files.get("war3map.wtg.json").and_then(|j| crate::wtg::text_trigger_names(j));
+    if let (Some(names), Some(text)) = (names, files.get("war3map.wct.txt")) {
+        if let Ok(named) = crate::wct::with_names(text, &names) {
+            files.insert("war3map.wct.txt".into(), named);
+        }
+    }
+
     // Chapter maps of a campaign become projects of their own (if they unpack completely).
     let mut nested = BTreeMap::new();
     if files.contains_key("war3campaign.w3f") || files.keys().any(|k| k.starts_with("war3campaign.w3f.")) {

@@ -535,3 +535,18 @@ pub fn from_json(json: &[u8]) -> Result<Vec<u8>> {
     }
     Ok(write(&f))
 }
+
+/// Names of the triggers with a custom text slot (types 8 and 32), in war3map.wct's order, from
+/// the JSON form.
+pub fn text_trigger_names(json: &[u8]) -> Option<Vec<String>> {
+    let f: TriggerFile = serde_json::from_slice(json).ok()?;
+    Some(
+        f.items
+            .into_iter()
+            .filter_map(|i| match i {
+                Item::Trigger(t) if t.ty == 8 || t.ty == 32 => Some(t.name),
+                _ => None,
+            })
+            .collect(),
+    )
+}

@@ -153,7 +153,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           save: async () => {
             await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, view.file);
-            await writeWctFile(w3.workspace, view.customFile());
+            await writeWctFile(w3.workspace, view.customFile(), textTriggers(view.file).map((t) => t.name));
             view.markSaved();
           },
           dispose: () => { view.dispose(); if (openView === view) openView = null; },

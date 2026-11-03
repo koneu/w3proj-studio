@@ -367,19 +367,22 @@ export async function writeWtgFile(io: Pick<WctIO, "writeText" | "writeBytes">, 
 
 // The project keeps war3map.wct as text (map/war3map.wct.txt, the w3proj codec "wct-text", see
 // crates/w3proj/src/wct.rs): a first line with version/layout/comment, then a marker line per
-// section ("//== header ==", "//== trigger 3 ==", " (no text)" for a stored length 0), each text
-// followed by one line break. Line breaks are CRLF when any text uses them. Files the codec can't
+// section ("//== header ==", "//== trigger 3: Its Name ==", " (no text)" for a stored length 0;
+// the name is a comment), each text followed by one line break. Line breaks are CRLF when any text uses them. Files the codec can't
 // represent (texts that aren't UTF-8, or that contain a marker line) stay raw (map/war3map.wct).
 export const WCT_RAW = "map/war3map.wct", WCT_TEXT = "map/war3map.wct.txt";
 
-export function writeWctText(f: CustomTextFile): string {
+/** `names`: the text triggers' names (textTriggers order), written as comments in the markers. */
+export function writeWctText(f: CustomTextFile, names: string[] = []): string {
   const withHeader = f.reforged || f.version >= 1;
   const all = [...(withHeader ? [f.header] : []), ...f.texts];
   const eol = all.some((t) => t?.includes("\r\n")) ? "\r\n" : "\n";
   let s = `//== war3map.wct: version ${f.version}${f.reforged ? ", reforged" : ""}${withHeader ? `, comment ${JSON.stringify(f.comment)}` : ""} ==${eol}`;
-  const put = (name: string, t: string | null) => { s += `//== ${name}${t === null ? " (no text)" : ""} ==${eol}${t === null ? "" : t + eol}`; };
+  const put = (name: string, t: string | null, label = "") => {
+    s += `//== ${name}${t === null ? " (no text)" : ""}${label ? `: ${label.replace(/[\r\n]/g, " ")}` : ""} ==${eol}${t === null ? "" : t + eol}`;
+  };
   if (withHeader) put("header", f.header);
-  f.texts.forEach((t, k) => put(`trigger ${k}`, t));
+  f.texts.forEach((t, k) => put(`trigger ${k}`, t, names[k]));
   return s;
 }
 
@@ -391,8 +394,12 @@ export function parseWctText(s: string): CustomTextFile {
   const f: CustomTextFile = { reforged: !!first[2], version: Number(first[1]), comment: first[3] ? JSON.parse(first[3]) : "", header: null, texts: [] };
   const body = s.slice(firstEnd + 1);
   const marks: { start: number; from: number; name: string; has: boolean }[] = [];
-  const re = /^\/\/== (header|trigger \d+)( \(no text\))? ==\r?(?:\n|$)/gm;
-  for (let m; (m = re.exec(body));) marks.push({ start: m.index, from: m.index + m[0].length, name: m[1], has: !m[2] });
+  // Trigger markers may carry the trigger's name (a comment); the header's can't.
+  const re = /^\/\/== (header|trigger \d+)( \(no text\))?(: .*)? ==\r?(?:\n|$)/gm;
+  for (let m; (m = re.exec(body));) {
+    if (m[1] === "header" && m[3]) continue;
+    marks.push({ start: m.index, from: m.index + m[0].length, name: m[1], has: !m[2] });
+  }
   if ((marks[0]?.start ?? body.length) !== 0) throw new Error("war3map.wct.txt: text before the first section");
   let header = false;
   marks.forEach((m, k) => {
@@ -432,9 +439,9 @@ export async function readWctFile(io: WctIO, triggers: number): Promise<CustomTe
 }
 
 /** Writes the custom script texts in text form, or raw if the text form wouldn't read back the
- *  same; the other form is removed. */
-export async function writeWctFile(io: WctIO, f: CustomTextFile) {
-  const text = writeWctText(f);
+ *  same; the other form is removed. `names`: see writeWctText. */
+export async function writeWctFile(io: WctIO, f: CustomTextFile, names: string[] = []) {
+  const text = writeWctText(f, names);
   let same = false;
   try {
     const back = parseWctText(text);
