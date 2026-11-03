@@ -18,6 +18,11 @@ export class TerrainToolRegistry implements TerrainService {
 
   placedObjects() { return this.livePlacements?.() ?? null; }
 
+  /** Set by the open terrain editor: moves its camera to a point. */
+  look: ((x: number, y: number) => void) | null = null;
+  /** A point to show once the terrain editor has opened. */
+  pendingLook: [number, number] | null = null;
+
   /** `open` brings up the terrain editor (for pickPoint). */
   constructor(private open: () => Promise<void>) {}
 

@@ -46,6 +46,8 @@ let treeClipboard: { items: Item[]; texts: (string | null)[]; variables: Variabl
 let openView: TriggerView | null = null;
 /** "Variables" asked before the editor was open: the new view starts there. */
 let startWithVariables = false;
+/** A trigger to select once the editor has opened (w3.triggers.reveal before it existed). */
+let startWithTrigger: string | null = null;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const kinds = new KindRegistry();
@@ -57,6 +59,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) throw new Error("This project has no war3map.wtg.");
       await w3.editors.open(WTG, "w3.triggerEditor");
       openView?.setMode("triggers");
+    }),
+    // Selects a trigger by name (opening the editor first); used by the Object Manager.
+    w3.commands.register("w3.triggers.reveal", async (name: string) => {
+      startWithVariables = false;
+      startWithTrigger = openView ? null : name;
+      await w3.commands.execute("w3.triggers.open");
+      const it = openView?.file.items.find((i) => "ecas" in i && i.name === name);
+      if (it) openView!.revealItem(it);
     }),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
@@ -126,6 +136,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d), code);
         if (!doc.readOnly) openView = view;
         if (startWithVariables) { startWithVariables = false; view.showVariables(); }
+        if (startWithTrigger) {
+          const it = view.file.items.find((i) => "ecas" in i && i.name === startWithTrigger);
+          startWithTrigger = null;
+          if (it) view.revealItem(it);
+        }
         return {
           save: async () => {
             await doc.writeBytes(writeWtg(view.file));

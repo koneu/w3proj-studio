@@ -1,0 +1,13 @@
+{
+  "id": "w3.objectManager",
+  "name": "Object Manager",
+  "version": "0.1.0",
+  "description": "Everything the map contains and uses, like the World Editor's Object Manager: placed units, items, doodads and destructables by type, custom objects, regions, cameras, sounds, triggers, variables and imports, with the triggers that use each. Double-click goes to it.",
+  "activationEvents": ["onStartup"],
+  "extensionDependencies": ["w3.objectEditor"],
+  "contributes": {
+    "viewContainers": [{ "id": "objectManager", "title": "Object Manager", "icon": "☰", "order": 6 }],
+    "views": [{ "id": "w3.objectManager.tree", "title": "Object Manager", "container": "objectManager" }],
+    "commands": [{ "id": "w3.objectManager.refresh", "title": "Object Manager: Refresh", "category": "Module" }]
+  }
+}

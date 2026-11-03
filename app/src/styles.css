@@ -601,3 +601,20 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .obj-select { font: inherit; max-width: 320px; }
 .obj-art-thumb { width: 32px; height: 32px; margin-top: 2px; image-rendering: auto; border: 1px solid var(--border); }
 .obj-art-view { align-self: flex-start; margin-top: 2px; font-size: 12px; padding: 1px 8px; }
+
+/* Object Manager (side bar) */
+.om-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.om-toolbar { display: flex; gap: 4px; padding: 4px 6px; }
+.om-search { flex: 1; font: inherit; padding: 2px 6px; min-width: 0; }
+.om-tree { flex: 1; overflow: auto; min-height: 0; }
+.om-row { cursor: pointer; white-space: nowrap; }
+.om-row.active { background: #37414f; }
+.om-detail { margin-left: 8px; color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.om-used { margin-left: auto; padding-left: 8px; color: #cca700; font-size: 11px; }
+.om-info { border-top: 1px solid var(--border); padding: 6px 8px; max-height: 40%; overflow: auto; }
+.om-info:empty { display: none; }
+.om-info-title { font-weight: 600; }
+.om-info-sub { margin-top: 4px; color: var(--fg-muted); }
+.om-trigger { cursor: pointer; padding: 1px 0; }
+.om-trigger:hover { text-decoration: underline; }
+.om-hint { margin-top: 4px; font-size: 11px; }

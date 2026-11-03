@@ -85,6 +85,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) throw new Error("This project has no war3map.w3e.");
       await w3.editors.open(PATH, "w3.terrainViewer");
     }),
+    // Shows a world point in the terrain editor (opening it first); used by the Object Manager.
+    w3.commands.register("w3.terrain.showPoint", async (x: number, y: number) => {
+      toolGroups.pendingLook = [x, y];
+      await w3.commands.execute("w3.terrain.open");
+      if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y); toolGroups.pendingLook = null; }
+    }),
     w3.commands.register("w3.map.new", async () => {
       const o = await askNewMap(w3);
       if (o) await w3.window.withProgress(`Creating ${o.name}…`, () => createMap(w3, o));
@@ -1166,6 +1172,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // However the pick ends (click, Esc, Cancel, another pick), the ring goes.
         const stopPickRing = toolGroups.onChange(() => { if (!toolGroups.picking) showPickTarget(null); });
         toolGroups.livePlacements = live;
+        const look = (x: number, y: number) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); };
+        toolGroups.look = look;
+        if (toolGroups.pendingLook) { const [px, py] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py)); }
         if (editable) queueMicrotask(syncGroups);
 
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
@@ -1417,6 +1426,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPick();
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
+            if (toolGroups.look === look) toolGroups.look = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             window.removeEventListener("mousemove", onMove);
