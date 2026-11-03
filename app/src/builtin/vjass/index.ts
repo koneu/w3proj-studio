@@ -10,6 +10,7 @@ import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type C
 import { mapJass } from "../../lib/jass/env";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
+import { vjassSymbols } from "./symbols";
 
 /** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments
  *  (not in a // comment: "//****" banners are plain JASS), //! directives. */
@@ -73,6 +74,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     ctx.subscriptions.push(editors.registerFileLanguage({
       id: "vjass", title: "vJASS", base: "jass", extensions: [".vj", ".zn"],
       detect: (path, text) => /\.j$/i.test(path) && SOURCE.test(text),
+      symbols: vjassSymbols,
     }));
     ctx.subscriptions.push(editors.registerCompletion({
       languages: ["jass"],
@@ -126,7 +128,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Completion from the map script as last generated (JassHelper's output: libraries' functions too).
         const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null));
         const editor = code.create(box, {
-          value: ed.customText(t) ?? "", language: "jass", readOnly: !ed.editable, symbols: map.symbols,
+          value: ed.customText(t) ?? "", language: "jass", readOnly: !ed.editable,
+          // The text's own declarations from the vJASS scanner; the rest from the game and the map.
+          symbols: async (text) => [...vjassSymbols(text), ...(await map.symbols("").catch(() => []))],
           openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
         });

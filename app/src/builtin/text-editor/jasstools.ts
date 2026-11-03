@@ -13,7 +13,10 @@ import { h } from "../../workbench/dom";
 
 const COMPLETION_TYPE: Record<string, string> = {
   function: "function", native: "function", global: "variable", constant: "constant", local: "variable", param: "variable", type: "type", keyword: "keyword",
+  library: "namespace", struct: "class", method: "method", field: "property", macro: "text",
 };
+/** What the outline lists: declarations that structure a text. */
+const OUTLINE = new Set(["library", "struct", "function", "method", "macro"]);
 
 /** Symbols visible at `pos`: locals and parameters only inside their function. */
 function visible(symbols: CodeSymbol[], pos: number): CodeSymbol[] {
@@ -57,18 +60,28 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
     view.focus();
     return true;
   };
-  // The outline: the text's own functions, in order; picking one moves there.
+  // The outline: the text's own functions (and vJASS libraries, structs, methods), in order;
+  // picking one moves there.
   const outline = (view: EditorView): Panel => {
-    const select = h("select.cm-outline", { title: "Functions in this text", onchange: () => {
+    const select = h("select.cm-outline", { title: "Declarations in this text", onchange: () => {
       const at = Number(select.value);
       if (Number.isFinite(at) && select.value !== "") { view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); view.focus(); }
       select.value = "";
     } }) as HTMLSelectElement;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const fill = () => void current(view).then((list) => {
-      const fns = list.filter((s) => s.at !== undefined && (s.kind === "function" || s.kind === "native"));
-      select.replaceChildren(h("option", { value: "" }, fns.length ? `Functions (${fns.length})…` : "No functions"),
-        ...fns.map((s) => h("option", { value: String(s.at) }, s.name)));
+      const items = list.filter((s) => s.at !== undefined && OUTLINE.has(s.kind)).sort((a, b) => a.at! - b.at!);
+      const fns = items.filter((s) => s.kind === "function" || s.kind === "method").length;
+      // Indented under their library/struct (non-breaking spaces: option text isn't laid out).
+      const depth = new Map<string, number>();
+      for (const s of items) if (s.kind === "library" || s.kind === "struct") depth.set(s.name, s.container ? (depth.get(s.container) ?? 0) + 1 : 0);
+      const label = (s: CodeSymbol) => {
+        const d = s.container !== undefined ? (depth.get(s.container) ?? 0) + 1 : 0;
+        const what = s.kind === "function" || s.kind === "native" ? "" : `${s.kind === "macro" ? "textmacro" : s.detail.split(" ").find((w) => /^(library|library_once|scope|struct|module|interface|method)$/.test(w)) ?? s.kind} `;
+        return `${String.fromCharCode(0xa0).repeat(3 * d)}${what}${s.name}`;
+      };
+      select.replaceChildren(h("option", { value: "" }, items.length ? (fns === items.length ? `Functions (${fns})…` : `Outline (${fns} functions)…`) : "No functions"),
+        ...items.map((s) => h("option", { value: String(s.at) }, label(s))));
     }).catch(() => {});
     fill();
     return {

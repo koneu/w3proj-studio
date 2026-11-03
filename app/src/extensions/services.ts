@@ -212,6 +212,8 @@ export interface FileLanguage {
   extensions?: string[];
   /** Content check for other files (e.g. a .j file using vJASS). */
   detect?(path: string, text: string): boolean;
+  /** The text's own declarations (outline, go to definition); omitted: the base language's. */
+  symbols?(text: string): CodeSymbol[];
   /** Problems shown for the text; omitted: not checked (the plain JASS checker isn't used). */
   check?(text: string): Promise<import("../lib/jass/check").Diagnostic[]> | import("../lib/jass/check").Diagnostic[];
 }
@@ -257,7 +259,9 @@ export interface CodeEditorOptions {
 }
 export interface CodeSymbol {
   name: string;
-  kind: "type" | "native" | "function" | "global" | "constant" | "local" | "param" | "keyword";
+  /** library: also scopes; struct: also modules and interfaces; field: a struct member. */
+  kind: "type" | "native" | "function" | "global" | "constant" | "local" | "param" | "keyword"
+    | "library" | "struct" | "method" | "field" | "macro";
   /** How it is declared ("function F takes integer a returns nothing"). */
   detail: string;
   /** Declared in the edited text at this offset (go to definition). */
@@ -266,6 +270,8 @@ export interface CodeSymbol {
   location?: string;
   /** Visible only within this range (locals and parameters). */
   scope?: [number, number];
+  /** The library or struct it is declared in (shown in the outline). */
+  container?: string;
 }
 export interface CodeEditorHandle {
   value(): string;

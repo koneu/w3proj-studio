@@ -212,7 +212,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               EditorState.lineSeparator.of(eol),
               ...basics(language(claim ? `x.${claim.base === "jass" ? "j" : claim.base}` : doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
-              ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t), elsewhere(), extraCompletion)] : []),
+              ...(jass ? [symbolTools(async (t) => {
+                const env = await gameJassEnv((p) => w3.game.readText(p));
+                // A claiming language's own declarations, then the game's (no JASS parse of its text).
+                return claim?.symbols ? [...claim.symbols(t), ...jassSymbols(env, "")] : jassSymbols(env, t);
+              }, elsewhere(), extraCompletion)] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);
