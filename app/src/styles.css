@@ -590,3 +590,14 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .mapsize-side { display: flex; flex-direction: column; gap: 4px; }
 .mapsize-buttons { display: flex; gap: 6px; }
 .mapsize-problem { color: #f14c4c; }
+
+/* Object editor field controls (object-editor/fields.ts) */
+.obj-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.obj-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 6px; border: 1px solid var(--border); border-radius: 10px; font-size: 12px; }
+.obj-chip .icon-button { padding: 0 4px; }
+.obj-chip-add { font-size: 12px; padding: 1px 8px; }
+.obj-checks { display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.obj-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; }
+.obj-select { font: inherit; max-width: 320px; }
+.obj-art-thumb { width: 32px; height: 32px; margin-top: 2px; image-rendering: auto; border: 1px solid var(--border); }
+.obj-art-view { align-self: flex-start; margin-top: 2px; font-size: 12px; padding: 1px 8px; }

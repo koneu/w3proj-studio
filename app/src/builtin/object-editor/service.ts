@@ -7,6 +7,7 @@ import { loadKind, type KindData } from "../../lib/objects/metadata";
 import { pickObject } from "./picker";
 import { decodeImage } from "../../lib/image/index.ts";
 import { StringTable } from "../../lib/formats/wts";
+import { toProjectPath } from "../../lib/formats/archivepath";
 
 const KIND_LABELS: Record<string, string> = {
   w3u: "Units", w3t: "Items", w3a: "Abilities", w3h: "Buffs/Effects", w3b: "Destructables", w3d: "Doodads", w3q: "Upgrades",
@@ -50,15 +51,16 @@ async function customObjects(w3: W3Api, kind: string, kd: KindData): Promise<{ i
 const ICON_FIELDS: Record<string, string> = { w3u: "uico", w3t: "iico", w3a: "aart", w3h: "fart", w3q: "gar1" };
 
 /** Data URLs of object icons (map imports first, then the game), cached. */
-export function iconLoader(w3: W3Api) {
+/** Images (icons, textures) as data URLs: the map's imports first, then the game's files (cached). */
+export function imageLoader(w3: W3Api): (path: string) => Promise<string | null> {
   const cache = new Map<string, Promise<string | null>>();
-  const load = (path: string) => {
+  return (path: string) => {
     const key = path.toLowerCase();
     let p = cache.get(key);
     if (!p) {
       p = (async () => {
         const project = w3.workspace.project();
-        const bytes = await (project ? w3.workspace.readBytes(`map/${path.replace(/\\/g, "/")}`).catch(() => w3.game.read(path)) : w3.game.read(path));
+        const bytes = await (project ? w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => w3.game.read(path)) : w3.game.read(path));
         const mip = decodeImage(bytes, path).mip(0);
         const canvas = document.createElement("canvas");
         canvas.width = mip.width;
@@ -70,6 +72,10 @@ export function iconLoader(w3: W3Api) {
     }
     return p;
   };
+}
+
+export function iconLoader(w3: W3Api) {
+  const load = imageLoader(w3);
   /** Icon of object `id` of `kind` (custom objects: `base` and the map's own value in `custom`). */
   return (kd: KindData, kind: string, id: string, base?: string, custom?: string): Promise<string | null> => {
     const field = ICON_FIELDS[kind] && kd.fieldById.get(ICON_FIELDS[kind]);

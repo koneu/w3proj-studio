@@ -3,7 +3,10 @@ import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
-import { iconLoader, objectsService, parseWts, stripColors } from "./service";
+import { iconLoader, imageLoader, objectsService, stripColors } from "./service";
+import { toProjectPath } from "../../lib/formats/archivepath";
+import { StringTable } from "../../lib/formats/wts";
+import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType } from "./fields";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -44,13 +47,15 @@ function parseValue(type: ValueType, text: string): number | string | null {
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const icons = iconLoader(w3);
+  const images = imageLoader(w3);
+  const objects = objectsService(w3);
   /** Open editors by document path: show an object (filter the list to it and select it). */
   const focusers = new Map<string, (id: string) => void>();
   /** Object to show once an editor that is being opened has loaded. */
   let pendingFocus: { path: string; id: string } | null = null;
 
   ctx.subscriptions.push(
-    w3.services.provide(OBJECTS_SERVICE, objectsService(w3)),
+    w3.services.provide(OBJECTS_SERVICE, objects),
     w3.views.register("w3.objects.kinds", {
       render(el) {
         if (!w3.workspace.project()) {
@@ -112,16 +117,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const kindInfo = KINDS.find((k) => k.ext === kind);
         const optInts = OPT_INTS.has(kind);
 
-        let strings = new Map<string, string>();
-        try {
-          strings = parseWts(await w3.workspace.readText("map/war3map.wts"));
-        } catch { /* no string table */ }
-        const trigKey = (v: string) => v.replace(/^(TRIGSTR_)0*(\d{3,})$/, "$1$2");
-        const resolveStr = (v: unknown) => (typeof v === "string" && strings.has(trigKey(v)) ? strings.get(trigKey(v))! : null);
+        // The map's string table: TRIGSTR_n values show (and edit) their text in war3map.wts.
+        let savedWts = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        let table = new StringTable(savedWts ?? "");
+        const trigRef = (v: unknown) => {
+          const n = typeof v === "string" ? StringTable.ref(v) : null;
+          return n !== null && table.has(n) ? n : null;
+        };
+        const resolveStr = (v: unknown) => { const n = trigRef(v); return n === null ? null : table.get(n)!; };
 
         // Game knowledge; until it loads (or without a game install) the
         // editor shows only the modifications, with raw ids.
         let kd: KindData | null = null;
+        /** UnitEditorData's value types (choices, lists, flags); plain text until loaded. */
+        let editorTypes: Map<string, EditorType> | null = null;
         const baseName = (o: Obj) => kd?.names.get(o.base) ?? "";
         const nameOf = (o: Obj) => {
           for (const { mods } of modLists(o)) {
@@ -150,8 +159,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // left out, so adding one and removing it again is not a change.
         const serialize = () => JSON.stringify({ ...file, original: file.original.filter(hasMods) });
         let saved = "";
-        /** Re-evaluates the dirty state against the last saved content. */
-        const markDirty = () => doc.setDirty(serialize() !== saved);
+        // Undo/redo: every change ends in markDirty, which records the whole file (snapshots;
+        // object data files are small). Restoring maps the selection back by id.
+        const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: table.serialize() });
+        const history = [snapshot()];
+        let at = 0;
+        const record = () => {
+          const s = snapshot();
+          if (s === history[at]) return;
+          history.splice(at + 1, history.length, s);
+          if (history.length > 200) history.shift();
+          at = history.length - 1;
+        };
+        /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
+        const isDirty = () => serialize() !== saved || (savedWts !== null && table.serialize() !== savedWts);
+        const markDirty = () => { record(); doc.setDirty(isDirty()); };
+        const keyOf = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
+        const restore = (s: string) => {
+          const keys = new Set([...selection].map(keyOf)), anchor = selected ? keyOf(selected) : null;
+          const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: string };
+          file.custom = d.custom;
+          file.original = d.original;
+          if (savedWts !== null) table = new StringTable(d.wts);
+          const all = [...file.custom, ...file.original];
+          selection = new Set(all.filter((o) => keys.has(keyOf(o))));
+          selected = all.find((o) => keyOf(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
+          if (selected) selection.add(selected);
+          doc.setDirty(isDirty());
+          renderDetail();
+        };
+        const step = (dir: -1 | 1) => {
+          const to = at + dir;
+          if (to < 0 || to >= history.length) return;
+          at = to;
+          restore(history[at]);
+        };
 
         const listEl = h("div.obj-list");
         // Created once and re-attached on every render, so typing keeps focus
@@ -278,6 +320,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (found) found.mods.splice(found.mods.indexOf(found.m), 1);
         };
 
+        /** Icons and textures as a thumbnail; models with a button opening the model viewer. */
+        const artPreview = (metaType: string, value: string): HTMLElement | null => {
+          const path = value.split(",")[0]?.trim();
+          if (!path || path === "_") return null;
+          if (metaType === "icon" || metaType === "texture") {
+            const img = h("img.obj-art-thumb", { alt: "", title: path });
+            void images(/\.\w+$/.test(path) ? path : `${path}.blp`).then((src) => { if (src) img.src = src; else img.remove(); });
+            return img;
+          }
+          if (metaType === "model" || metaType === "modelList") {
+            // Data names .mdl; the game stores .mdx. The map's imports come first.
+            const mdx = path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx");
+            return h("button.obj-art-view", { title: `Open ${mdx} in the model viewer`, onclick: async () => {
+              const imported = `map/${toProjectPath(mdx)}`;
+              const has = w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === imported.toLowerCase());
+              await w3.editors.open(has ? imported : `game:${mdx}`).catch((e) => w3.window.showError(String(e)));
+            } }, "View");
+          }
+          return null;
+        };
         /** Editor for one field value. `mixed` lists differing values (multi-selection). */
         const valueEditor = (type: ValueType, metaType: string, current: number | string, inherited: boolean, onCommit: (v: number | string) => void, mixed?: string[]) => {
           if (metaType === "bool") {
@@ -285,6 +347,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (mixed) box.indeterminate = true;
             return h("label.obj-bool", {}, box, h("span.muted", {}, mixed ? "mixed" : inherited ? "inherited" : ""));
           }
+          // A string kept in war3map.wts: the text itself is edited (shared by everything using it).
+          const ref = mixed || type !== "string" ? null : trigRef(current);
+          if (ref !== null) {
+            const text = table.get(ref) ?? "";
+            const input = h(`input.obj-value${inherited ? ".inherited" : ""}`, {
+              value: text, title: `Text of TRIGSTR_${ref} in war3map.wts (every use of this string changes)`,
+              onchange: () => { table.set(ref, input.value); markDirty(); renderDetail(); },
+            });
+            return h("div.obj-value-cell", {}, input, h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
+          }
+          // Object codes and lists of them: the object browser; the value types of UnitEditorData:
+          // a choice, a list or flags. (Mixed values in a multi-selection stay plain text.)
+          if (!mixed && (OBJECT_CODE[metaType] || OBJECT_LIST[metaType])) {
+            return objectEditor(objects, el, OBJECT_CODE[metaType] ?? OBJECT_LIST[metaType], !!OBJECT_LIST[metaType], current, onCommit);
+          }
+          const et = editorTypes?.get(metaType);
+          if (!mixed && et) return typeEditor(et, current, type !== "string", onCommit);
           const resolved = mixed ? null : resolveStr(current);
           const shown = mixed?.map((v) => stripColors(resolveStr(v) ?? v) || "(empty)");
           const input = h(`input.obj-value${inherited ? ".inherited" : ""}${mixed ? ".mixed" : ""}`, {
@@ -298,7 +377,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onCommit(v);
             },
           });
-          return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null);
+          return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null, mixed ? null : artPreview(metaType, String(current)));
         };
 
         const fieldRow = (o: Obj, f: FieldMeta, level: number, levels: number) => {
@@ -548,6 +627,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return pickBaseObject(el, kd, { title: placeholder, pinned, iconOf: (id) => icons(k, kind, id) });
         };
 
+        /** Where an id is in use in the other object types ("a custom item of this map"), or null. */
+        const usedElsewhere = async (id: string): Promise<string | null> => {
+          for (const k of KINDS) {
+            if (k.ext === kind) continue;
+            const text = await w3.workspace.readText(`map/war3map.${k.ext}.json`).catch(() => null);
+            const other = text ? (JSON.parse(text) as ObjectFile) : null;
+            if (other?.custom.some((o) => o.id === id)) return `a custom ${k.singular} of this map`;
+            const okd = await loadKind(w3, k.ext).catch(() => null);
+            if (okd?.baseIds.includes(id)) return `a game ${k.singular} (${stripColors(okd.names.get(id) ?? id)})`;
+          }
+          return null;
+        };
         const newObject = async () => {
           const base = await pickBase(`New ${kindInfo?.singular ?? "object"} based on…`);
           if (!base || base.length !== 4) return;
@@ -556,6 +647,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!id) return;
           if (id.length !== 4) return w3.window.showWarning("Object ids are exactly four characters.");
           if (taken.has(id)) return w3.window.showWarning(`${id} is already used.`);
+          // Other object types: the map's custom objects and the game's (ids should be unique overall).
+          const clash = await usedElsewhere(id);
+          if (clash && (await w3.window.showWarning(`${id} is already ${clash}. Use it anyway?`, "Use it", "Cancel")) !== "Use it") return;
           const o: Obj = file.version >= 3 ? { base, id, mods: [] } : { base, id, end: id, mods: [] };
           file.custom.push(o);
           select(o);
@@ -596,6 +690,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ),
         );
         saved = serialize();
+        // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) anywhere in the editor except while typing in a field.
+        el.addEventListener("keydown", (e) => {
+          if (!(e.ctrlKey || e.metaKey)) return;
+          const t = e.target as HTMLElement;
+          if ((t.tagName === "INPUT" && (t as HTMLInputElement).type !== "checkbox") || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return;
+          const k = e.key.toLowerCase();
+          if (k === "z" && !e.shiftKey) { e.preventDefault(); step(-1); }
+          else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); step(1); }
+        });
         const focusObject = (id: string) => {
           search.value = id;
           filter = id.toLowerCase();
@@ -613,6 +716,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pendingFocus = null;
         }
         status.textContent ||= "Loading game data…";
+        loadEditorTypes(w3).then((t) => { editorTypes = t; renderDetail(); }, () => {});
         loadKind(w3, kind).then(
           (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderList(); renderDetail(); },
           (e) => { status.textContent = `Game data unavailable — showing raw ids (${e})`; },
@@ -624,6 +728,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // it in canonical formatting, so diffs stay minimal.
             const text = await w3.backend.invoke<string>("objects_canonicalize", { name: doc.path, text: serialize() });
             await doc.writeText(text);
+            // Edited strings go to war3map.wts (only changed blocks are rewritten).
+            const wts = table.serialize();
+            if (savedWts !== null && wts !== savedWts) {
+              await w3.workspace.writeText("map/war3map.wts", wts);
+              savedWts = wts;
+            }
             saved = serialize();
             doc.setDirty(false);
             w3.views.refresh("w3.objects.kinds");
