@@ -200,7 +200,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // and caret (a fresh input per render lost both after each key).
         const fieldSearch = h("input.obj-field-search", { placeholder: "Filter fields…" });
         fieldSearch.addEventListener("input", () => { fieldFilter = fieldSearch.value; renderDetail(); });
-        const detailEl = h("div.obj-detail");
+        const detailEl = h("div.obj-detail", { tabindex: -1 });
         const status = h("div.obj-status");
         const search = h("input.obj-search", { placeholder: "Filter by id or name…", oninput: () => { filter = search.value.toLowerCase(); renderList(); } });
 
@@ -451,10 +451,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const renderDetail = () => {
           const focused = document.activeElement === fieldSearch;
           const caret = [fieldSearch.selectionStart, fieldSearch.selectionEnd] as const;
+          const inside = el.contains(document.activeElement);
           renderDetailInner();
           if (focused) {
             fieldSearch.focus();
             fieldSearch.setSelectionRange(caret[0], caret[1]);
+          } else if (inside && !el.contains(document.activeElement)) {
+            // The focused field was redrawn: keep the keys (Ctrl+Z) in the editor.
+            detailEl.focus({ preventScroll: true });
           }
         };
         const renderDetailInner = () => {
@@ -690,11 +694,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ),
         );
         saved = serialize();
-        // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) anywhere in the editor except while typing in a field.
+        // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) anywhere in the editor. In a text field only when nothing was
+        // typed since its value was set (else the field undoes its own typing).
         el.addEventListener("keydown", (e) => {
           if (!(e.ctrlKey || e.metaKey)) return;
           const t = e.target as HTMLElement;
-          if ((t.tagName === "INPUT" && (t as HTMLInputElement).type !== "checkbox") || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return;
+          const typing = (t instanceof HTMLInputElement && t.type !== "checkbox" && t.value !== t.defaultValue)
+            || (t instanceof HTMLTextAreaElement && t.value !== t.defaultValue);
+          if (typing) return;
           const k = e.key.toLowerCase();
           if (k === "z" && !e.shiftKey) { e.preventDefault(); step(-1); }
           else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); step(1); }

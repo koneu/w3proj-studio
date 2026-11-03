@@ -163,7 +163,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-item code { color: var(--accent); }
 .obj-item small { color: var(--fg-muted); }
 .obj-item span { overflow: hidden; text-overflow: ellipsis; }
-.obj-detail { flex: 1; overflow: auto; padding: 12px 20px; }
+.obj-detail { flex: 1; overflow: auto; padding: 12px 20px; outline: none; }
 .obj-detail-header { display: flex; gap: 14px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
 .obj-detail-header h2 { margin: 0; font-weight: 400; }
 .obj-detail-header button { margin-left: auto; }
