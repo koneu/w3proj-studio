@@ -663,7 +663,18 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<Tool
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let out = cmd.output().map_err(|e| format!("{exe}: {e}"))?;
+        let child = cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("{exe}: {e}"))?;
+        // Whatever the tool starts ends with it (e.g. JassHelper opens its error dialog in a
+        // second process): the job is closed when the tool has exited.
+        #[cfg(windows)]
+        let job = job::kill_on_close(&child);
+        let out = child.wait_with_output().map_err(|e| format!("{exe}: {e}"))?;
+        #[cfg(windows)]
+        drop(job);
         Ok(ToolResult {
             code: out.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -672,6 +683,45 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<Tool
     })
     .await
     .map_err(err)?
+}
+
+#[cfg(windows)]
+mod job {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    /// A job object; closing it (drop) ends every process still in it.
+    pub struct Job(HANDLE);
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    /// Puts `child` (and the processes it starts from now on) into a new kill-on-close job.
+    pub fn kill_on_close(child: &std::process::Child) -> Option<Job> {
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return None;
+            }
+            let job = Job(job);
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+            if SetInformationJobObject(job.0, JobObjectExtendedLimitInformation, &info as *const _ as *const _, size) == 0
+                || AssignProcessToJobObject(job.0, child.as_raw_handle() as HANDLE) == 0
+            {
+                return None;
+            }
+            Some(job)
+        }
+    }
 }
 
 /// A new empty folder in the system's temp folder, for one tool run's input and output files.

@@ -3953,6 +3953,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "w3proj",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

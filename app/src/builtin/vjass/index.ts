@@ -19,6 +19,8 @@ const KEYWORDS = ["library", "endlibrary", "scope", "endscope", "struct", "endst
   "interface", "endinterface", "implement", "private", "public", "static", "stub", "operator", "thistype", "requires", "needs", "uses",
   "optional", "initializer", "delegate", "readonly", "extends", "array", "key", "hook", "textmacro", "endtextmacro", "runtextmacro",
   "allocate", "deallocate", "onInit", "onDestroy", "create", "destroy", "super", "defaults", "debug", "inject", "endinject", "zinc", "endzinc"];
+/** The functions a map script needs besides the checked text (JassHelper fails without main). */
+const STUB = "function main takes nothing returns nothing\r\nendfunction\r\nfunction config takes nothing returns nothing\r\nendfunction\r\n";
 /** JassHelper's output ("//globals from <library>:", LIBRARY_<name> constants). */
 const OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
 
@@ -42,7 +44,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (r.code !== 0) {
       // JassHelper writes its errors (its own, or pjass's) to logs\compileerrors.txt.
       const log = await w3.workspace.readText(`${dir}\\logs\\compileerrors.txt`).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
-      throw new Error(`JassHelper: ${log.split(/\r?\n/).filter(Boolean).slice(0, 8).join(" · ")} (files in ${dir})`);
+      // The log starts with the script's file name and ends with a count; the errors are between.
+      const lines = log.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^logs[\\/]/i.test(l) && !/^\d+$/.test(l));
+      throw new Error(`JassHelper: ${lines.slice(0, 8).join(" · ")} (files in ${dir})`);
     }
     return w3.workspace.readText(`${dir}\\output.j`);
   };
@@ -92,7 +96,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             status.textContent = "Compiling…";
             try {
               const [commonJ, blizzardJ] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
-              await compile(ed.customText(t) ?? "", commonJ, blizzardJ);
+              // JassHelper wants a whole map script: empty main and config after the text.
+              await compile(`${ed.customText(t) ?? ""}\r\n${STUB}`, commonJ, blizzardJ);
               status.textContent = "JassHelper: no errors.";
             } catch (e) { status.textContent = e instanceof Error ? e.message : String(e); }
           },
