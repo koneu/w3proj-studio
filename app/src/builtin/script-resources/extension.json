@@ -1,0 +1,8 @@
+{
+  "id": "w3.scriptResources",
+  "name": "Script Resources",
+  "version": "0.1.0",
+  "description": "Completion in map scripts and custom text (JASS, vJASS): inside strings the files a parameter wants (models for modelName, icons, sound files) from the game and the map's imports, sound labels and order strings; inside rawcodes ('hfoo') the game's and the map's objects with their names, narrowed by the parameter (unitId → units, abilityId → abilities, …). Ctrl+Space shows the list anywhere.",
+  "activationEvents": ["onStartup"],
+  "extensionDependencies": ["w3.textEditor"]
+}

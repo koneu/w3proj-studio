@@ -194,6 +194,34 @@ export const TRIGGERS_SERVICE = "w3.triggers";
 export const CODE_EDITOR_SERVICE = "w3.codeEditor";
 export interface CodeEditorService {
   create(parent: HTMLElement, opts: CodeEditorOptions): CodeEditorHandle;
+  /** Adds completion items to code editors of the given languages (all open and future ones):
+   *  e.g. file paths in strings, rawcodes, a language's keywords. */
+  registerCompletion(provider: CompletionProvider): { dispose(): void };
+}
+export interface CompletionProvider {
+  /** "jass" (also used for vJASS trigger texts), "lua", … */
+  languages: string[];
+  provide(request: CompletionRequest): Promise<CompletionItem[]> | CompletionItem[];
+}
+export interface CompletionRequest {
+  language: string;
+  text: string;
+  pos: number;
+  /** Inside a string ("…") or a rawcode ('…'), with what is typed there (string escapes resolved). */
+  inString: boolean;
+  inRawcode: boolean;
+  prefix: string;
+  /** The innermost call the cursor is an argument of, and that parameter when known. */
+  call?: { name: string; argIndex: number; param?: { name: string; type: string } };
+}
+export interface CompletionItem {
+  /** Shown, and inserted unless `insert` is given (in strings: escaped by the editor). */
+  label: string;
+  insert?: string;
+  detail?: string;
+  info?: string;
+  kind?: "file" | "constant" | "text" | "keyword" | "variable" | "function" | "type" | "class";
+  boost?: number;
 }
 export interface CodeEditorOptions {
   value: string;

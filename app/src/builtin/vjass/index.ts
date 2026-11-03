@@ -5,11 +5,16 @@
 // as the World Editor does on save.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguagesService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, type CodeEditorService, type ScriptLanguagesService } from "../../extensions/services";
 
 /** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments,
  *  //! directives. */
 const SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|module|interface|textmacro|endlibrary|endscope|endstruct)\b|\/\*|^\s*\/\/!/m;
+/** vJASS keywords (completion). */
+const KEYWORDS = ["library", "endlibrary", "scope", "endscope", "struct", "endstruct", "method", "endmethod", "module", "endmodule",
+  "interface", "endinterface", "implement", "private", "public", "static", "stub", "operator", "thistype", "requires", "needs", "uses",
+  "optional", "initializer", "delegate", "readonly", "extends", "array", "key", "hook", "textmacro", "endtextmacro", "runtextmacro",
+  "allocate", "deallocate", "onInit", "onDestroy", "create", "destroy", "super", "defaults", "debug", "inject", "endinject", "zinc", "endzinc"];
 /** JassHelper's output ("//globals from <library>:", LIBRARY_<name> constants). */
 const OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
 
@@ -46,6 +51,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       compile: ({ script, commonJ, blizzardJ }) => compile(script, commonJ, blizzardJ),
     }));
   });
+
+  // vJASS keywords in code editors, for texts that use vJASS already (plain JASS isn't cluttered).
+  void w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).then((editors) => {
+    ctx.subscriptions.push(editors.registerCompletion({
+      languages: ["jass"],
+      provide: ({ text, inString, inRawcode, prefix }) => (inString || inRawcode || prefix.length < 2 || !SOURCE.test(text) ? []
+        : KEYWORDS.filter((k) => k.startsWith(prefix)).map((k) => ({ label: k, kind: "keyword" as const, detail: "vJASS" }))),
+    }));
+  }).catch(() => {});
 
   ctx.subscriptions.push(w3.commands.register("w3.vjass.check", async () => {
     const path = exe();

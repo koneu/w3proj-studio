@@ -8,7 +8,7 @@ import { EditorState, type Extension } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, type CompletionItem, type CompletionProvider, type CompletionRequest } from "../../extensions/services";
 import { checkJass, envWithout } from "../../lib/jass/check";
 import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
@@ -93,7 +93,19 @@ const elsewhere = (owner?: (location: string, name: string) => void) => (locatio
   else owner?.(location, name);
 };
 
+/** Completion items from other extensions (registerCompletion), by language. */
+const completionProviders: CompletionProvider[] = [];
+const extraCompletion = async (request: CompletionRequest): Promise<CompletionItem[]> => {
+  const lists = await Promise.all(completionProviders.filter((p) => p.languages.includes(request.language))
+    .map((p) => Promise.resolve(p.provide(request)).catch(() => [] as CompletionItem[])));
+  return lists.flat();
+};
+
 const codeEditors: CodeEditorService = {
+  registerCompletion(provider) {
+    completionProviders.push(provider);
+    return { dispose: () => { const i = completionProviders.indexOf(provider); if (i >= 0) completionProviders.splice(i, 1); } };
+  },
   create(parent, opts: CodeEditorOptions) {
     const eol = lineEnding(opts.value);
     let committed = opts.value, timer: ReturnType<typeof setTimeout> | undefined;
@@ -113,7 +125,7 @@ const codeEditors: CodeEditorService = {
           ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
           EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
           ...(lint ? [lint.extension] : []),
-          ...(opts.symbols ? [symbolTools(opts.symbols, elsewhere(opts.openLocation?.bind(opts)))] : []),
+          ...(opts.symbols ? [symbolTools(opts.symbols, elsewhere(opts.openLocation?.bind(opts)), opts.language === "jass" ? extraCompletion : undefined)] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
             if (u.focusChanged && !u.view.hasFocus) commit();
@@ -186,7 +198,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               EditorState.lineSeparator.of(eol),
               ...basics(language(doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
-              ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t), elsewhere())] : []),
+              ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t), elsewhere(), extraCompletion)] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);
