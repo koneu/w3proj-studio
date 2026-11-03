@@ -70,6 +70,12 @@ export class WorkspaceService {
     await invoke("fs_rename", { root: this.info.root, from: this.resolve(from), to: this.resolve(to) });
     await this.refresh();
   }
+  /** Copies a file (project paths or absolute ones) in the backend; the file list is refreshed. */
+  async copy(from: string, to: string) {
+    await invoke("fs_copy", { from: this.resolve(from), to: this.resolve(to) });
+    if (this.info) await this.refresh();
+    this.onDidSave.fire(to.replace(/\\/g, "/"));
+  }
   async writeBytes(p: string, bytes: Uint8Array) {
     await writeBytes(this.resolve(p), bytes);
     this.onDidSave.fire(p.replace(/\\/g, "/"));

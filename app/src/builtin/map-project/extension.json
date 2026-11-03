@@ -7,7 +7,7 @@
   "contributes": {
     "commands": [
       { "id": "w3.project.open", "title": "Open Project Folder…", "category": "Project", "keybinding": "ctrl+o" },
-      { "id": "w3.project.importMap", "title": "Import .w3x as New Project…", "category": "Project" },
+      { "id": "w3.project.importMap", "title": "Import Map or Campaign as New Project…", "category": "Project" },
       { "id": "w3.project.syncFromMap", "title": "Sync Project from .w3x…", "category": "Project" },
       { "id": "w3.project.pack", "title": "Pack Release .w3x", "category": "Project", "keybinding": "ctrl+shift+b" },
       { "id": "w3.project.packAs", "title": "Pack Release .w3x As…", "category": "Project" },

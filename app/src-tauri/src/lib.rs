@@ -389,6 +389,20 @@ fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
     std::fs::rename(&src, &dst).map_err(|e| format!("{}: {e}", src.display()))
 }
 
+/// Copies a file (creating folders as needed), without passing its bytes through the webview:
+/// imports and exports of large files (maps, campaigns, movies).
+#[tauri::command]
+async fn fs_copy(from: String, to: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(parent) = Path::new(&to).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        std::fs::copy(&from, &to).map(|_| ()).map_err(|e| format!("{from} → {to}: {e}"))
+    })
+    .await
+    .map_err(err)?
+}
+
 #[tauri::command]
 fn fs_exists(path: String) -> bool {
     Path::new(&path).exists()
@@ -647,6 +661,7 @@ pub fn run() {
             fs_write_bytes,
             fs_delete,
             fs_rename,
+            fs_copy,
             fs_read_bytes,
             fs_exists,
             reveal_in_explorer,

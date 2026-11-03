@@ -10,6 +10,8 @@ import { archivePath, candidates, importPath, isMapFile, kindOf, NEW_IMPORT_FLAG
 import type { FileInfo } from "../../extensions/api";
 
 const RAW = "map/war3map.imp", FILE = `${RAW}.json`;
+/** Files above this size aren't opened in a viewer (they're read whole into the window). */
+const MAX_OPEN = 256 * 1024 * 1024;
 
 interface ImportsDoc { format?: string; version: number; files: ImportEntry[] }
 
@@ -79,9 +81,16 @@ class ImportView {
     void this.run("Import", async () => {
       const src = await this.w3.window.pickFile({ title: "Import a file into the map" });
       if (!src) return;
-      const bytes = await this.w3.workspace.readBytes(src);
+      // A map or campaign is more likely meant to become a project of its own.
+      if (/\.w3[mxn]$/i.test(src)) {
+        const c = await this.w3.window.showWarning(`${src.split(/[\\/]/).pop()} is a map or campaign. Import it into this map as a file anyway?`,
+          "Import as file", "Open as new project…", "Cancel");
+        if (c === "Open as new project…") { await this.w3.commands.execute("w3.project.importMap"); return; }
+        if (c !== "Import as file") return;
+      }
       const path = importPath(src, (p) => this.taken(p));
-      await this.w3.workspace.writeBytes(projectPath(path), bytes);
+      // Copied in the backend: imports can be far larger than the webview can hold.
+      await this.w3.window.withProgress(`Importing ${path}`, () => this.w3.workspace.copy(src, projectPath(path)));
       this.list.files.push({ flags: NEW_IMPORT_FLAGS, path });
       await this.write();
       await this.w3.workspace.refresh();
@@ -125,7 +134,7 @@ class ImportView {
     void this.run("Export", async () => {
       const target = await this.w3.window.pickSaveFile({ title: "Export file", defaultPath: path.split("\\").pop() });
       if (!target) return;
-      await this.w3.workspace.writeBytes(target, await this.w3.workspace.readBytes(file));
+      await this.w3.window.withProgress(`Exporting ${path}`, () => this.w3.workspace.copy(file, target));
       void this.w3.window.showInfo(`Exported to ${target}`);
     });
   }
@@ -169,7 +178,7 @@ class ImportView {
       const active = this.selected !== null && samePath(this.selected, e.path);
       return h(`tr.imp-row${active ? ".active" : ""}${f ? "" : ".missing"}`, {
         onclick: () => { this.selected = e.path; this.render(); },
-        ondblclick: () => { if (f) this.openFile(e.path, f.path); },
+        ondblclick: () => { if (f && f.size <= MAX_OPEN) this.openFile(e.path, f.path); },
         title: f ? "" : "Not in the project's map folder",
       }, h("td.imp-path", {}, e.path), h("td", {}, kindOf(e.path)), h("td.imp-size", {}, f ? size(f.size) : "missing"), h("td.muted", {}, String(e.flags)));
     });
@@ -199,7 +208,9 @@ class ImportView {
       h("div.imp-field", {}, h("label", {}, "Type"), h("span", {}, `${kindOf(e.path)} · flags ${e.flags}`)),
       exists ? null : h("p.imp-warn", {}, "This file isn't in the project's map folder, so it isn't packed. (Blizzard's own maps list files the game provides itself.)"),
       h("div.imp-actions", {},
-        h("button", { disabled: !exists, onclick: () => file && this.openFile(e.path, file.path) }, kindOf(e.path) === "Sound" ? "▶ Play" : "Open"),
+        // Viewers load the whole file: very large ones (maps, campaigns, movies) can only be exported.
+        h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : "",
+          onclick: () => file && this.openFile(e.path, file.path) }, kindOf(e.path) === "Sound" ? "▶ Play" : "Open"),
         h("button", { disabled: !exists, onclick: () => file && this.exportFile(e.path, file.path) }, "Export…"),
         ...(this.editable ? [h("button", { onclick: () => this.remove(e) }, "Remove")] : [])));
   }

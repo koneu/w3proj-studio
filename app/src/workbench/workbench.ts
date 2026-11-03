@@ -191,6 +191,7 @@ export class Workbench {
         onDidSave: (l) => wb.workspace.onDidSave.on(l),
         delete: (p) => wb.workspace.delete(p),
         rename: (a, b) => wb.workspace.rename(a, b),
+        copy: (a, b) => wb.workspace.copy(a, b),
       },
       settings: wb.settings,
       game: {
