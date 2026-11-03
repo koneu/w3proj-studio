@@ -338,11 +338,7 @@ class CampaignView {
   async openMap(map: string) {
     const dir = this.projectDir(map);
     if (!dir) throw new Error(`${map} isn't unpacked as a project (it stays packed in the campaign, e.g. because not all of its files could be named).`);
-    // Switching projects closes the editors (the campaign's too).
-    if (this.undoStack.length !== this.savedAt) {
-      const c = await this.w3.window.showWarning("The campaign has unsaved changes. Opening the map closes it without saving.", "Open anyway", "Cancel");
-      if (c !== "Open anyway") return;
-    }
+    // Opening the map's project asks about unsaved changes (the campaign's too).
     await this.w3.commands.execute("w3.project.open", dir);
   }
 

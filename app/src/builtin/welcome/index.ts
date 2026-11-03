@@ -25,7 +25,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 h("section", {},
                   h("h2", {}, "Recent"),
                   recent.length
-                    ? recent.map((p) => h("button.link", { onclick: () => w3.workspace.open(p).catch((e) => w3.window.showError(String(e))) },
+                    ? recent.map((p) => h("button.link", { onclick: () => w3.commands.execute("w3.project.open", p).catch((e) => w3.window.showError(String(e))) },
                         h("span", {}, p.split(/[\\/]/).pop() ?? p), h("small", {}, p)))
                     : h("p.muted", {}, "No recent projects."),
                 ),

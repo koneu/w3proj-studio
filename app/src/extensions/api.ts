@@ -200,6 +200,9 @@ export interface W3Api {
     activePath(): string | null;
     /** Saves every editor with unsaved changes (e.g. before packing); resolves with how many. */
     saveAll(): Promise<number>;
+    /** Asks once about unsaved changes (save all / don't save / cancel), then closes every
+     *  editor; false when cancelled. Use before switching projects. */
+    closeAllAsking(): Promise<boolean>;
     /** Closes every editor without asking (used when files change on disk). */
     closeAll(): Promise<void>;
     /** Closes the editors of one file without asking. */

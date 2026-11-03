@@ -99,7 +99,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.project.open", async (path?: string) => {
       path ??= (await w3.window.pickFolder({ title: "Open map project folder" })) ?? undefined;
       if (!path) return;
-      await w3.editors.closeAll();
+      if (!(await w3.editors.closeAllAsking())) return;
       await w3.workspace.open(path);
       out.append(`opened ${path}`);
     }),
@@ -117,10 +117,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const c = await w3.window.showWarning(`${dir} already is a project. Overwrite its map files with ${baseName(map)}?`, "Overwrite", "Cancel");
         if (c !== "Overwrite") return;
       }
+      // The new project replaces the open one: unsaved changes are settled first.
+      if (!(await w3.editors.closeAllAsking())) return;
       const r = await unpack(map, dir, "Importing map");
       if (!r) return;
       logReport(`imported ${map} → ${dir}`, r);
-      await w3.editors.closeAll();
       await w3.workspace.open(dir);
       const unnamed = r.unnamed.length ? ` ${r.unnamed.length} unnamed files were saved to unnamed/ but won't be packed.` : "";
       w3.window.showInfo(`Imported ${r.files.length} files into ${dir}.${unnamed}`);
@@ -174,7 +175,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
 
     w3.commands.register("w3.project.close", async () => {
-      await w3.editors.closeAll();
+      if (!(await w3.editors.closeAllAsking())) return;
       w3.workspace.close();
       await w3.editors.open("w3:welcome");
     }),

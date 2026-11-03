@@ -156,6 +156,21 @@ export class EditorService {
     return n;
   }
 
+  /** Before switching projects: asks once about unsaved changes (save all, discard, cancel),
+   *  then closes every editor. False when cancelled (nothing closed). */
+  async closeAllAsking(): Promise<boolean> {
+    const dirty = this.tabs.filter((t) => t.dirty);
+    if (dirty.length) {
+      const names = dirty.map((t) => t.path.split(/[/:]/).pop()).join(", ");
+      const r = await this.confirm(`Unsaved changes in ${dirty.length === 1 ? names : `${dirty.length} files (${names})`}. Save before closing?`,
+        "Save All", "Don't Save", "Cancel");
+      if (r === "Save All") { for (const t of dirty) await t.instance?.save?.(); }
+      else if (r !== "Don't Save") return false;
+    }
+    await this.closeAll();
+    return true;
+  }
+
   async closeAll() {
     for (const t of [...this.tabs]) await this.close(t, true);
   }

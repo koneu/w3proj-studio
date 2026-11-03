@@ -107,6 +107,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.map.new", async (opts?: NewMapPreset & { beforeCreate?(o: { dir: string; name: string }): Promise<void> }) => {
       const o = await askNewMap(w3, opts ?? {});
       if (!o) return null;
+      // The new map opens as the project: unsaved changes are settled first.
+      if (!(await w3.editors.closeAllAsking())) return null;
       await opts?.beforeCreate?.(o);
       await w3.window.withProgress(`Creating ${o.name}…`, () => createMap(w3, o));
       return o.dir;
