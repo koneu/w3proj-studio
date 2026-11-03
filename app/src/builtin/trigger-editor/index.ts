@@ -14,10 +14,10 @@ import type { DisplayContext } from "../../lib/triggers/display";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
   parseWct, parseWtg, textTriggers, writeWct, writeWtg,
-  type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem,
+  type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
-import { dropMode, moveItem, type DropMode } from "./tree";
+import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 
 const WTG = "map/war3map.wtg", WCT = "map/war3map.wct";
@@ -35,6 +35,9 @@ class KindRegistry implements TriggersService {
   all() { return [...this.kinds].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); }
   onChange(l: () => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
 }
+
+/** Copied tree items with their contents, custom text and variables (shared by all maps). */
+let treeClipboard: { items: Item[]; texts: (string | null)[]; variables: Variable[] } | null = null;
 
 /** The open trigger editor (there is one war3map.wtg per project). */
 let openView: TriggerView | null = null;
@@ -201,12 +204,19 @@ class TriggerView {
   private handle: TriggerEditorHandle;
   private vars: VariableHost;
   private unsubscribe: () => void;
+  /** Where the last click was: keys go to the trigger's contents or to the tree. */
+  private area: "tree" | "detail" = "tree";
   private keydown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-    if (this.body?.keyDown?.(e)) { e.preventDefault(); return; }
+    if (this.area === "detail" && this.body?.keyDown?.(e)) { e.preventDefault(); return; }
     if (e.key === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
+    if (this.area === "tree" && (k === "c" || k === "x" || k === "v")) {
+      e.preventDefault();
+      if (k === "v") this.pasteItems(); else this.copyItem(k === "x");
+      return;
+    }
     if (k === "z" && !e.shiftKey) { e.preventDefault(); this.step(-1); }
     else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); this.step(1); }
   };
@@ -238,7 +248,8 @@ class TriggerView {
     };
     el.tabIndex = -1;
     el.addEventListener("keydown", this.keydown);
-    el.append(h("div.trig-tree", {}, editable ? this.toolbar() : null, this.tree), this.detail);
+    el.append(h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, editable ? this.toolbar() : null, this.tree), this.detail);
+    this.detail.addEventListener("mousedown", () => { this.area = "detail"; });
     this.unsubscribe = kinds.onChange(() => this.renderDetail());
     this.renderTree();
     this.renderDetail();
@@ -299,10 +310,12 @@ class TriggerView {
   /** A new id for an item of `type` (Reforged: type index in the high byte, counted per type). */
   private allocId(type: number): number {
     if (this.file.reforged) {
+      // Past the stored count and every id in use (category ids exceed the count in some maps).
       const idx = TYPE_INDEX[type], c = this.file.counts[idx];
-      const id = (idx << 24) | c.count;
-      c.count++;
-      return id;
+      const used = this.file.items.filter((i) => TYPE_INDEX[i.type] === idx).map((i) => (i.id & 0xffffff) + 1);
+      const n = Math.max(c.count, ...used);
+      c.count = n + 1;
+      return (idx << 24) | n;
     }
     return 1 + Math.max(-1, ...this.file.items.filter((i) => (type === 4 ? i.type === 4 : i.type !== 4)).map((i) => i.id));
   }
@@ -395,6 +408,34 @@ class TriggerView {
     });
   }
 
+  // ---- copy and paste ---------------------------------------------------------------
+  private copyItem(cut: boolean) {
+    const sel = this.find(this.selected);
+    if (!sel || sel.type === 1) return;
+    const block = subtree(this.file, sel);
+    treeClipboard = {
+      items: structuredClone(block),
+      texts: block.map((it) => ("ecas" in it ? this.texts.get(it) ?? null : null)),
+      variables: structuredClone(this.file.variables.filter((v) => block.some((i) => i.type === 64 && i.id === v.id))),
+    };
+    if (cut && this.handle.editable) this.deleteSelected();
+  }
+  /** Pastes copied items after the selection (or into the selected category). */
+  private pasteItems() {
+    const clip = treeClipboard;
+    if (!clip || !this.handle.editable) return;
+    // Variables live in Reforged files' tree only.
+    if (!this.file.reforged && clip.items.some((i) => i.type === 64)) { void this.w3.window.showWarning("This trigger file keeps variables outside the tree; use the Variables table."); return; }
+    this.edit("Paste", () => {
+      const root = clip.items[0];
+      const at = root.type === 64 ? this.variableCategory() : this.insertionPoint(root.type === 4 || root.type === 2);
+      const pasted = pasteBlock(this.file, clip, at, (type) => this.allocId(type));
+      pasted.forEach((it, k) => { if ("ecas" in it) this.texts.set(it, clip.texts[k]); });
+      this.collapsed.delete(at.parent);
+      this.selected = { kind: "item", type: pasted[0].type, id: pasted[0].id };
+    });
+  }
+
   // ---- drag and drop ----------------------------------------------------------------
   private drop(drag: Item, target: Item, mode: DropMode) {
     this.edit(`Move ${drag.name}`, () => {
@@ -483,8 +524,10 @@ class TriggerView {
         { label: "New Comment", run: () => this.newTrigger(null) }, { label: "New Variable", run: () => newVariable(this.vars) });
       if (sel.kind === "item") {
         items.push("-", { label: "Move Up", run: () => this.move(-1) }, { label: "Move Down", run: () => this.move(1) },
-          "-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
+          "-", { label: "Cut", hint: "Ctrl+X", run: () => this.copyItem(true) }, { label: "Copy", hint: "Ctrl+C", run: () => this.copyItem(false) });
       }
+      if (treeClipboard) items.push("-", { label: `Paste ${treeClipboard.items[0].name}`, hint: "Ctrl+V", run: () => this.pasteItems() });
+      if (sel.kind === "item") items.push("-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
     }
     if (items.length) this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
   }

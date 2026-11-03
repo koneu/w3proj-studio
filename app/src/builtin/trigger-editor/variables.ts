@@ -77,9 +77,9 @@ export function newVariable(host: VariableHost): void {
   const ed = host.handle;
   ed.edit("New variable", () => {
     const file = ed.file;
-    const taken = new Set(file.variables.map((v) => v.name.toLowerCase()));
+    const taken = new Set(file.variables.map((v) => v.name));
     let name = "NewVariable";
-    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `NewVariable${n}`;
+    for (let n = 2; taken.has(name); n++) name = `NewVariable${n}`;
     const v: Variable = { name, type: "integer", unknown: 1, isArray: false, arraySize: 1, initialized: false, initialValue: "", id: file.variables.length, parent: -1 };
     if (file.reforged) {
       const { parent, index } = host.category();
@@ -141,7 +141,7 @@ function editRow(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable):
   const name = h("input.trig-var-name", { type: "text", value: v.name, title: `udg_${v.name} in the script`, onchange: async () => {
     const n = name.value.trim();
     if (n === v.name) return;
-    const clash = ed.file.variables.some((x) => x !== v && x.name.toLowerCase() === n.toLowerCase());
+    const clash = ed.file.variables.some((x) => x !== v && x.name === n);
     if (!validName(n) || clash) {
       w3.window.showError(clash ? `There already is a variable ${n}.` : "Names start with a letter and use letters, digits and _ (not at the end).");
       name.value = v.name;

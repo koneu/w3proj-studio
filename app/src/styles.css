@@ -445,8 +445,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; cursor: pointer; white-space: nowrap; }
 .trig-row:hover { background: var(--bg-hover); }
 .trig-row.active { background: #37414f; }
-.trig-row.drop-into { outline: 1px solid var(--accent, #4a8bd6); outline-offset: -1px; }
-.trig-row.drop-before { box-shadow: inset 0 2px 0 var(--accent, #4a8bd6); }
+.trig-row.drop-into, .trig-pick.drop-into { outline: 1px solid var(--accent, #4a8bd6); outline-offset: -1px; }
+.trig-row.drop-before, .trig-pick.drop-before { box-shadow: inset 0 2px 0 var(--accent, #4a8bd6); }
 .trig-row.off .trig-label { color: var(--fg-muted); font-style: italic; }
 .trig-caret { width: 12px; flex: none; color: var(--fg-muted); font-size: 10px; text-align: center; }
 .trig-label { overflow: hidden; text-overflow: ellipsis; }
