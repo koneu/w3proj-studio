@@ -5,7 +5,7 @@
 // files. Conditions are function trees like trigger parameters; their
 // argument counts come from TriggerData plus AIEditorData's [AIFunctions].
 
-import type { TriggerData } from "../triggers/triggerdata";
+import { CALL, CONDITION, type TriggerData, type TriggerFunction } from "../triggers/triggerdata";
 import type { Param } from "../triggers/wtg";
 
 export interface AiCall { name: string; hasParams: boolean; params: Param[]; trailer: number }
@@ -97,32 +97,31 @@ class Writer {
   done() { return new Uint8Array(this.parts); }
 }
 
-/** Argument counts by function name: TriggerData's functions and the AI functions. */
+/** Argument counts by function name. */
 export type ArgCount = (name: string) => number;
 
-/** AIEditorData.txt [AIFunctions] ("GetGold=1,0,integer", "GetUnitGoldCost=1,0,integer,unitcode"): name → argument types. */
-export function parseAiFunctions(text: string): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  let section = "";
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line.startsWith("[")) { section = line.slice(1, line.indexOf("]")); continue; }
-    if (section !== "AIFunctions" || !line || line.startsWith("//") || line.startsWith("_")) continue;
-    const eq = line.indexOf("=");
-    if (eq <= 0) continue;
-    const v = line.slice(eq + 1).split(",");
-    out.set(line.slice(0, eq), v.slice(3).filter((a) => a && a !== "nothing"));
-  }
-  return out;
+/** The functions AI conditions are made of: AIEditorData.txt's [AIFunctions] (written like
+ *  TriggerData's [TriggerCalls]) and the TriggerData calls marked _UseWithAI, which take their
+ *  _AIDefaults there. Types, presets and categories are TriggerData's. `parse` is parseTriggerData
+ *  with the game's strings. */
+export function aiTriggerData(data: TriggerData, aiEditorData: string, parse: (text: string) => TriggerData): TriggerData {
+  // Conditions (comparisons, And, Or) at the top of a condition; calls inside them.
+  const [conditions, calls] = [CONDITION, CALL].map((kind) => {
+    const m = new Map<string, TriggerFunction>();
+    for (const f of data.functions[kind].values()) if (f.useWithAI) m.set(f.name, { ...f, defaults: f.aiDefaults ?? f.defaults });
+    return m;
+  });
+  for (const f of parse(aiEditorData.replace(/^\[AIFunctions\]/m, "[TriggerCalls]")).functions[CALL].values()) calls.set(f.name, f);
+  const functions = [new Map(), conditions, new Map(), calls];
+  return { ...data, functions, find: (kind, name) => functions[kind]?.get(name) ?? conditions.get(name) ?? calls.get(name) };
 }
 
-/** Argument counts from TriggerData (any kind) and the AI functions. */
-export function aiArgCount(data: TriggerData, ai: Map<string, string[]>): ArgCount {
+/** Argument counts from AI trigger data (see aiTriggerData). */
+export function aiArgCount(data: TriggerData): ArgCount {
   return (name) => {
-    const a = ai.get(name);
-    if (a) return a.length;
-    for (const kind of [3, 1, 2, 0]) { const f = data.find(kind, name); if (f) return f.args.length; }
-    throw new Error(`unknown AI function ${name}`);
+    const f = data.find(CONDITION, name);
+    if (!f) throw new Error(`unknown AI function ${name}`);
+    return f.args.length;
   };
 }
 
@@ -261,4 +260,18 @@ export function writeWai(f: AiFile): Uint8Array {
   out.set(head);
   out.set(f.extra, head.length);
   return out;
+}
+
+/** No object (unset hero, skill or worker). */
+export const NO_ID = "\0\0\0\0";
+
+/** A new, empty AI like the AI Editor starts with. */
+export function newWai(): AiFile {
+  return {
+    version: 2, name: "Untitled AI", race: 1, options: 0x3e, workers: ["hpea", "hpea", "htow", "htow"], conditionsUnknown: 0, conditions: [],
+    heroes: [NO_ID, NO_ID, NO_ID], heroChances: [100, 0, 0, 0, 0, 0], skills: Array.from({ length: 9 }, () => Array(10).fill(NO_ID)),
+    build: [], harvest: [], targets: [], repeatWaves: 1, minForces: 0, initialDelay: 0,
+    groups: [{ index: 0, name: "All Units", units: [] }], waves: [], wavesUnknown: 1,
+    gameOptions: 0, gameSpeed: 3, mapPath: "", players: [], trailer: 0, extra: new Uint8Array(),
+  };
 }

@@ -4,5 +4,8 @@
   "version": "0.1.0",
   "description": "Events, conditions and actions of GUI triggers, worded as the World Editor shows them, with category icons and nested blocks.",
   "activationEvents": ["onEditor:w3.triggerEditor"],
-  "extensionDependencies": ["w3.triggerEditor"]
+  "extensionDependencies": ["w3.triggerEditor"],
+  "contributes": {
+    "services": [{ "id": "w3.triggers.gui", "description": "Parameter editors for GUI triggers (registerParamEditor), and the parameter dialog for other function trees (editParam)." }]
+  }
 }

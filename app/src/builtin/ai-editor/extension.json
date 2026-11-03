@@ -1,0 +1,13 @@
+{
+  "id": "w3.aiEditor",
+  "name": "AI Editor",
+  "version": "0.1.0",
+  "description": "AI definitions (.wai) like the World Editor's AI Editor: name, race and options, workers, conditions, heroes and their skills, build, harvest and target priorities, attack groups and waves, and the test configuration.",
+  "contributes": {
+    "editors": [{ "id": "w3.aiEditor", "title": "AI Editor", "patterns": ["*.wai"] }],
+    "commands": [
+      { "id": "w3.ai.open", "title": "AI Editor: Open AI…", "category": "Module" },
+      { "id": "w3.ai.new", "title": "AI Editor: New AI…", "category": "Module" }
+    ]
+  }
+}

@@ -103,7 +103,7 @@ export function pickFunction(ed: TriggerEditorHandle, title: string, functions: 
 
 /** Edits one parameter of argument type `type`. */
 export function editParam(ed: TriggerEditorHandle, type: string, current: Param, extra: TriggerParamEditor[],
-  limits?: [number | null, number | null]): Promise<Param | undefined> {
+  limits?: [number | null, number | null], opts: { variables?: boolean } = {}): Promise<Param | undefined> {
   const data = ed.data, file = ed.file;
   const typeName = data.types.get(type)?.name ?? type;
   return modal<Param>(`${typeName}`, (done, hide) => {
@@ -111,7 +111,7 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
     const presets = presetsFor(data, type);
     if (presets.length) tabs.push({ label: "Preset", build: () => listPicker(presets.map(([k, n]) => ({ label: n, detail: k, value: k })), (v) => done({ type: PRESET, value: v })) });
     const vars = variablesFor(data, file, type);
-    tabs.push({ label: "Variable", build: () => {
+    if (opts.variables !== false) tabs.push({ label: "Variable", build: () => {
       const items = vars.map((v) => ({ label: v.name + (v.isArray ? "[]" : ""), detail: data.types.get(v.type)?.name ?? v.type, value: v }));
       return items.length
         ? listPicker(items, (v) => done({ type: VARIABLE, value: v.name, ...(v.isArray ? { index: { type: VALUE, value: "0" } } : {}) }))

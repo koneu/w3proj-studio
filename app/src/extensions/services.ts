@@ -268,6 +268,12 @@ export interface TriggerEditorHandle {
  *  offered next to Preset / Variable / Function / Value when a parameter is edited. */
 export interface TriggerGuiService {
   registerParamEditor(editor: TriggerParamEditor): { dispose(): void };
+  /** The parameter dialog on its own, for other function trees (AI conditions): presets,
+   *  functions and values of `data`, and the registered editors; no variables. */
+  editParam(opts: {
+    data: import("../lib/triggers/triggerdata").TriggerData; display: import("../lib/triggers/display").DisplayContext;
+    type: string; current: import("../lib/triggers/wtg").Param; limits?: [number | null, number | null];
+  }): Promise<import("../lib/triggers/wtg").Param | undefined>;
 }
 
 export const TRIGGER_GUI_SERVICE = "w3.triggers.gui";

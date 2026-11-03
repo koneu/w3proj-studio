@@ -618,3 +618,39 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .om-trigger { cursor: pointer; padding: 1px 0; }
 .om-trigger:hover { text-decoration: underline; }
 .om-hint { margin-top: 4px; font-size: 11px; }
+
+/* AI Editor */
+.ai-editor { display: flex; flex-direction: column; height: 100%; overflow: hidden; outline: none; }
+.ai-tabs { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
+.ai-tabs button { border: 1px solid var(--border); border-bottom: none; background: transparent; color: var(--fg-muted); padding: 3px 12px; cursor: pointer; }
+.ai-tabs button.active { background: #37414f; color: inherit; }
+.ai-subtabs { padding: 0; margin-bottom: 6px; }
+.ai-title { margin-left: auto; margin-right: 8px; }
+.ai-page { flex: 1; overflow: auto; padding: 8px 14px 14px; }
+.ai-field { display: grid; grid-template-columns: 170px 1fr; align-items: center; gap: 8px; margin: 4px 0; }
+.ai-field > div { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.ai-text { font: inherit; width: 100%; max-width: 420px; }
+.ai-num { width: 6em; font: inherit; }
+.ai-options { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); width: 100%; }
+.ai-check { white-space: nowrap; margin-right: 12px; }
+.ai-object { display: inline-flex; align-items: center; gap: 2px; }
+.ai-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.ai-table { border-collapse: collapse; width: 100%; }
+.ai-table th, .ai-table td { text-align: left; padding: 2px 12px 2px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.ai-table td.ai-cond-cell, .ai-table td:last-child { white-space: normal; }
+.ai-row { cursor: pointer; }
+.ai-row:hover { background: var(--bg-hover); }
+.ai-row.active { background: #37414f; }
+.ai-split { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.ai-lists { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: auto; padding: 0 12px 12px; }
+.ai-attack > .ai-lists + .ai-lists { border-left: 1px solid var(--border); }
+.ai-section { display: flex; flex-direction: column; min-height: 0; }
+.ai-list { max-height: 260px; overflow: auto; }
+.ai-detail-pane { width: 420px; min-width: 300px; overflow: auto; padding: 0 12px 12px; border-left: 1px solid var(--border); }
+.ai-detail { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
+.ai-cond { margin: 6px 0; padding: 6px 8px; background: var(--bg-hover); border-radius: 3px; }
+.ai-cond-text { margin-bottom: 6px; line-height: 1.6; }
+.ai-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.ai-chips button.active { background: #37414f; }
+.ai-orders { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.ai-skills select { max-width: 220px; }

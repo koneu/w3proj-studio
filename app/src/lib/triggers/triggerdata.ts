@@ -31,6 +31,9 @@ export interface TriggerFunction {
   hint: string;
   /** The JASS function it compiles to (_ScriptName), else its own name. */
   scriptName: string;
+  /** Usable in AI Editor conditions (_UseWithAI), with defaults of their own there (_AIDefaults). */
+  useWithAI?: boolean;
+  aiDefaults?: string[];
 }
 
 export interface TriggerData {
@@ -110,6 +113,8 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       if (e.has("Category")) f.category = e.get("Category")!;
       if (e.get("ScriptName")) f.scriptName = e.get("ScriptName")!;
       if (e.get("Defaults")) f.defaults = splitList(e.get("Defaults")!);
+      if (e.get("UseWithAI") === "1") f.useWithAI = true;
+      if (e.get("AIDefaults")) f.aiDefaults = splitList(e.get("AIDefaults")!);
       if (e.get("Limits")) {
         // Two entries per argument: minimum, maximum ("_" for none).
         const v = splitList(e.get("Limits")!).map((x) => (x === "_" || x === "" || Number.isNaN(Number(x)) ? null : Number(x)));
