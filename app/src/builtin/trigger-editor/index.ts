@@ -14,7 +14,7 @@ import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
-  parseWct, parseWtg, textTriggers, writeWct, writeWtg,
+  parseWtg, readWctFile, textTriggers, writeWctFile, writeWtg,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -23,7 +23,7 @@ import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 
-const WTG = "map/war3map.wtg", WCT = "map/war3map.wct";
+const WTG = "map/war3map.wtg";
 /** Item type → index in the per-type counts (and the high byte of its ids). */
 const TYPE_INDEX: Record<number, number> = { 1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6 };
 
@@ -52,6 +52,11 @@ let startWithTrigger: string | null = null;
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const kinds = new KindRegistry();
   const open = () => w3.commands.execute("w3.triggers.open").catch((e) => w3.window.showError(String(e)));
+  // war3map.wct.txt (every trigger's text in one file) in the text editor: highlighted, not checked
+  // (its texts use the map's generated globals and each other).
+  void w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).then((code) => {
+    ctx.subscriptions.push(code.registerFileLanguage({ id: "wct", title: "Custom script texts", base: "jass", extensions: [".wct.txt"] }));
+  }).catch(() => {});
   ctx.subscriptions.push(
     w3.services.provide(TRIGGERS_SERVICE, kinds),
     w3.commands.register("w3.triggers.open", async () => {
@@ -108,8 +113,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return {};
         }
         const game = doc.path.startsWith("game:");
-        const wctBytes = game ? null : await w3.workspace.readBytes(WCT).catch(() => null);
-        const custom = wctBytes ? parseWct(wctBytes, textTriggers(file).length) : null;
+        const custom = game ? null : await readWctFile(w3.workspace, textTriggers(file).length);
         const wtsText = game ? null : await w3.workspace.readText("map/war3map.wts").catch(() => null);
         const strings = wtsText !== null ? new StringTable(wtsText) : null;
         const names = await objectNames(w3, file);
@@ -144,7 +148,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           save: async () => {
             await doc.writeBytes(writeWtg(view.file));
-            await w3.workspace.writeBytes(WCT, writeWct(view.customFile()));
+            await writeWctFile(w3.workspace, view.customFile());
             view.markSaved();
           },
           dispose: () => { view.dispose(); if (openView === view) openView = null; },

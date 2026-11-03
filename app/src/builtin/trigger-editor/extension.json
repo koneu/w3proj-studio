@@ -3,6 +3,7 @@
   "name": "Trigger Editor",
   "version": "0.2.0",
   "description": "GUI triggers (war3map.wtg) and custom script (war3map.wct): the tree of categories, triggers and variables, names, flags, comments, undo and saving. What a trigger contains is shown by trigger kinds from other extensions (service w3.triggers).",
+  "activationEvents": ["onStartup"],
   "contributes": {
     "viewContainers": [{ "id": "triggers", "title": "Triggers", "icon": "ϟ", "order": 5 }],
     "views": [{ "id": "w3.triggers.overview", "title": "Triggers", "container": "triggers" }],

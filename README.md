@@ -19,7 +19,8 @@ MPQ archive. The archive holds files like:
 | `war3map.doo`, `war3mapUnits.doo` | placed doodads/destructables; units, items, start locations (v8, v12, v13) | **JSON** |
 | `war3map.w3e`, `.wpm`, `.shd` | terrain, pathing, shadows | binary |
 | `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | **JSON** |
-| `war3map.wtg/.wct` | GUI triggers / custom script text | binary |
+| `war3map.wtg` | GUI triggers, variables, categories | binary |
+| `war3map.wct` | custom script: the map header and each trigger's text | **text** (`war3map.wct.txt`, one section per trigger) |
 | `war3map.imp`, `war3mapImported\*` | imports | as-is |
 
 Every codec is checked on unpack: a file is stored as JSON only if
@@ -242,7 +243,7 @@ Pathing Editor (`terrain-pathing`, overrides in `.w3proj/pathing.json`).
 
 ## Known limits / next steps
 
-- Binary formats (`w3e`, `doo`, `w3i`, `wtg`, …) are stored raw. New codecs
+- Binary formats (`w3e`, `wpm`, `shd`, `wtg`, …) are stored raw. New codecs
   plug into `crates/w3proj/src/codec.rs` and are verified automatically.
 - Game data is read-only, and only files stored locally can be read (other
   locales aren't downloaded). Encrypted CASC entries aren't supported; none

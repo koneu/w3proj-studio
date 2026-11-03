@@ -8,6 +8,7 @@ pub mod names;
 pub mod objdata;
 pub mod paths;
 pub mod project;
+pub mod wct;
 
 pub use codec::{Codec, Registry};
 pub use project::{

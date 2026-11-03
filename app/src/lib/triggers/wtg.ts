@@ -303,6 +303,88 @@ export function writeWct(f: CustomTextFile): Uint8Array {
   return w.done();
 }
 
+// The project keeps war3map.wct as text (map/war3map.wct.txt, the w3proj codec "wct-text", see
+// crates/w3proj/src/wct.rs): a first line with version/layout/comment, then a marker line per
+// section ("//== header ==", "//== trigger 3 ==", " (no text)" for a stored length 0), each text
+// followed by one line break. Line breaks are CRLF when any text uses them. Files the codec can't
+// represent (texts that aren't UTF-8, or that contain a marker line) stay raw (map/war3map.wct).
+export const WCT_RAW = "map/war3map.wct", WCT_TEXT = "map/war3map.wct.txt";
+
+export function writeWctText(f: CustomTextFile): string {
+  const withHeader = f.reforged || f.version >= 1;
+  const all = [...(withHeader ? [f.header] : []), ...f.texts];
+  const eol = all.some((t) => t?.includes("\r\n")) ? "\r\n" : "\n";
+  let s = `//== war3map.wct: version ${f.version}${f.reforged ? ", reforged" : ""}${withHeader ? `, comment ${JSON.stringify(f.comment)}` : ""} ==${eol}`;
+  const put = (name: string, t: string | null) => { s += `//== ${name}${t === null ? " (no text)" : ""} ==${eol}${t === null ? "" : t + eol}`; };
+  if (withHeader) put("header", f.header);
+  f.texts.forEach((t, k) => put(`trigger ${k}`, t));
+  return s;
+}
+
+export function parseWctText(s: string): CustomTextFile {
+  const firstEnd = s.indexOf("\n");
+  const first = /^\/\/== war3map\.wct: version (\d+)(, reforged)?(?:, comment (".*"))? ==\r?$/.exec(s.slice(0, firstEnd));
+  if (firstEnd < 0 || !first) throw new Error("war3map.wct.txt: the first line isn't a war3map.wct line");
+  const eol = s[firstEnd - 1] === "\r" ? "\r\n" : "\n";
+  const f: CustomTextFile = { reforged: !!first[2], version: Number(first[1]), comment: first[3] ? JSON.parse(first[3]) : "", header: null, texts: [] };
+  const body = s.slice(firstEnd + 1);
+  const marks: { start: number; from: number; name: string; has: boolean }[] = [];
+  const re = /^\/\/== (header|trigger \d+)( \(no text\))? ==\r?(?:\n|$)/gm;
+  for (let m; (m = re.exec(body));) marks.push({ start: m.index, from: m.index + m[0].length, name: m[1], has: !m[2] });
+  if ((marks[0]?.start ?? body.length) !== 0) throw new Error("war3map.wct.txt: text before the first section");
+  let header = false;
+  marks.forEach((m, k) => {
+    const chunk = body.slice(m.from, marks[k + 1]?.start ?? body.length);
+    if (m.has && !chunk.endsWith(eol)) throw new Error(`war3map.wct.txt: ${m.name} doesn't end with a line break`);
+    if (!m.has && chunk) throw new Error(`war3map.wct.txt: text after "${m.name} (no text)"`);
+    const t = m.has ? chunk.slice(0, -eol.length) : null;
+    if (m.name === "header") {
+      if (k !== 0) throw new Error("war3map.wct.txt: the header isn't first");
+      header = true;
+      f.header = t;
+    } else {
+      if (m.name !== `trigger ${f.texts.length}`) throw new Error(`war3map.wct.txt: ${m.name} where trigger ${f.texts.length} was expected`);
+      f.texts.push(t);
+    }
+  });
+  if (header !== (f.reforged || f.version >= 1)) throw new Error("war3map.wct.txt: the header section doesn't match the version");
+  return f;
+}
+
+/** Project file access for war3map.wct (a workspace). */
+export interface WctIO {
+  readText(path: string): Promise<string>;
+  readBytes(path: string): Promise<Uint8Array>;
+  writeText(path: string, text: string): Promise<void>;
+  writeBytes(path: string, bytes: Uint8Array): Promise<void>;
+  delete(path: string): Promise<void>;
+}
+
+/** The project's custom script texts (text form, else the raw file); null if there are none.
+ *  `triggers`: the wtg's text trigger count (a raw Reforged file stores none). */
+export async function readWctFile(io: WctIO, triggers: number): Promise<CustomTextFile | null> {
+  const text = await io.readText(WCT_TEXT).catch(() => null);
+  if (text !== null) return parseWctText(text);
+  const bytes = await io.readBytes(WCT_RAW).catch(() => null);
+  return bytes ? parseWct(bytes, triggers) : null;
+}
+
+/** Writes the custom script texts in text form, or raw if the text form wouldn't read back the
+ *  same; the other form is removed. */
+export async function writeWctFile(io: WctIO, f: CustomTextFile) {
+  const text = writeWctText(f);
+  let same = false;
+  try {
+    const back = parseWctText(text);
+    same = back.reforged === f.reforged && back.version === f.version && back.comment === f.comment
+      && (f.reforged || f.version >= 1 ? back.header === f.header : true)
+      && back.texts.length === f.texts.length && back.texts.every((t, k) => t === f.texts[k]);
+  } catch { /* raw */ }
+  if (same) await io.writeText(WCT_TEXT, text);
+  else await io.writeBytes(WCT_RAW, writeWct(f));
+  await io.delete(same ? WCT_RAW : WCT_TEXT).catch(() => {});
+}
+
 /** The GUI triggers of a file, in the order their custom texts are stored. */
 export function textTriggers(f: TriggerFile): TriggerItem[] {
   return f.items.filter((i): i is TriggerItem => i.type === 8 || i.type === 32);

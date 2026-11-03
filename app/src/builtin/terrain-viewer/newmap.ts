@@ -9,6 +9,7 @@
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { randomVariation, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { parseWct, writeWctFile } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { buildMinimap, minimapSettings } from "./minimapgen";
 import { buildPathingMap } from "./pathmap";
@@ -317,7 +318,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions & { tilesetInfo: Til
   await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 0, cameras: [] });
   await json("map/war3map.w3s.json", { format: "w3proj.sounds/1", version: 3, sounds: [] });
   await w3.workspace.writeBytes("map/war3map.wtg", defaultWtg());
-  await w3.workspace.writeBytes("map/war3map.wct", defaultWct());
+  await writeWctFile(w3.workspace, parseWct(defaultWct(), 1));
   await w3.workspace.writeBytes("map/war3map.w3e", writeW3e(t));
   await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", mapScript(o, t, lights));
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));

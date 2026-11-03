@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::format::{self, FormatCodec};
-use crate::{objdata, Result};
+use crate::{objdata, wct, Result};
 
 pub trait Codec: Send + Sync {
     /// Stable identifier, e.g. `objdata-json`.
@@ -50,6 +50,27 @@ impl Codec for ObjectDataJson {
     }
 }
 
+/// Custom script texts as one text file (see `wct`).
+pub struct CustomTextCodec;
+
+impl Codec for CustomTextCodec {
+    fn id(&self) -> &'static str {
+        "wct-text"
+    }
+    fn suffix(&self) -> &'static str {
+        ".txt"
+    }
+    fn matches(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("war3map.wct")
+    }
+    fn decode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        wct::to_text(bytes)
+    }
+    fn encode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        wct::from_text(bytes)
+    }
+}
+
 pub struct Registry {
     codecs: Vec<Box<dyn Codec>>,
 }
@@ -64,7 +85,7 @@ impl Default for Registry {
 impl Registry {
     /// Built-ins plus definitions from override folders (later folders win).
     pub fn with_formats(override_dirs: &[PathBuf]) -> Result<Self> {
-        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson)];
+        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(CustomTextCodec)];
         for def in format::load_definitions(override_dirs)? {
             codecs.push(Box::new(FormatCodec::new(def)));
         }
