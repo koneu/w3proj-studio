@@ -154,6 +154,7 @@ export class Workbench {
       views: {
         register: (id, provider) => wb.views.register(id, provider),
         refresh: (id) => wb.views.refresh(id),
+        show: (container) => wb.views.showContainer(container),
       },
       editors: {
         registerProvider: (id, provider) => wb.editors.registerProvider(id, provider),

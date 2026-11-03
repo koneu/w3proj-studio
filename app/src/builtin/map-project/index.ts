@@ -1,4 +1,5 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -72,10 +73,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
   };
 
-  const pack = async (output: string | null): Promise<PackReport> => {
+  /** `check`: run the Problems checks first and ask before packing a map with errors. */
+  const pack = async (output: string | null, check = false): Promise<PackReport | null> => {
     // What's open in editors goes into the build too.
     const saved = await w3.editors.saveAll();
     if (saved) out.append(`saved ${saved} editor${saved === 1 ? "" : "s"} before packing`);
+    if (check) {
+      const problems = await w3.services.get<ProblemsService>(PROBLEMS_SERVICE).catch(() => null);
+      const found = problems ? await w3.window.withProgress("Checking for problems", () => problems.run()) : [];
+      const errors = found.filter((p) => p.severity === "error").length;
+      if (found.length) out.append(`problems before packing: ${errors} errors, ${found.length - errors} warnings`);
+      if (errors) {
+        const c = await w3.window.showWarning(`The map has ${errors} error${errors === 1 ? "" : "s"} (see Problems). Pack anyway?`, "Pack anyway", "Show Problems", "Cancel");
+        if (c === "Show Problems") await w3.commands.execute("w3.problems.show");
+        if (c !== "Pack anyway") return null;
+      }
+    }
     const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
     out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);
     return r;
@@ -134,7 +147,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
 
     w3.commands.register("w3.project.pack", async () => {
-      const r = await pack(null);
+      const r = await pack(null, true);
+      if (!r) return;
       const c = await w3.window.showInfo(`Packed ${r.files} files → ${r.output}`, "Reveal");
       if (c === "Reveal") await w3.backend.invoke("reveal_in_explorer", { path: r.output });
     }),
@@ -144,7 +158,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!p) throw new Error("Open or import a project first.");
       const target = await w3.window.pickSaveFile({ title: "Pack map as", defaultPath: p.default_output, filters: MAP_FILTERS });
       if (!target) return;
-      const r = await pack(target);
+      const r = await pack(target, true);
+      if (!r) return;
       w3.window.showInfo(`Packed ${r.files} files → ${r.output}`);
     }),
 
@@ -160,7 +175,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
 
     w3.commands.register("w3.project.testMap", async () => {
-      const r = await pack(null);
+      const r = await pack(null, true);
+      if (!r) return;
       await w3.backend.invoke("game_test_map", { exe: w3.settings.get<string>("game.path"), map: r.output });
       out.append(`launched game with ${r.output}`);
     }),

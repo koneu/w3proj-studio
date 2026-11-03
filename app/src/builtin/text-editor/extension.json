@@ -11,6 +11,7 @@
         "title": "Text Editor",
         "patterns": ["*.j", "*.lua", "*.ai", "*.txt", "*.wts", "*.json", "*.toml", "*.fdf", "*.toc", "*.slk", "*.md", ".gitignore", ".gitattributes"]
       }
-    ]
+    ],
+    "commands": [{ "id": "w3.text.revealAt", "title": "Open File at Position", "category": "Text", "hidden": true }]
   }
 }

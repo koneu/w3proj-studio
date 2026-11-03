@@ -278,6 +278,34 @@ export interface TriggerGuiService {
 
 export const TRIGGER_GUI_SERVICE = "w3.triggers.gui";
 
+/** "w3.problems", provided by the Problems view: checks of the open project (like compiler
+ *  errors), shown in a list and run before packing. Extensions add their own checks. */
+export interface ProblemsService {
+  registerCheck(check: ProblemCheck): { dispose(): void };
+  /** Runs every check; the view shows the result. Resolves with all problems found. */
+  run(): Promise<Problem[]>;
+  /** The result of the last run. */
+  problems(): Problem[];
+}
+
+export const PROBLEMS_SERVICE = "w3.problems";
+
+export interface ProblemCheck {
+  id: string;
+  /** Group title in the list ("Map script", "Object data paths"). */
+  title: string;
+  run(): Promise<Problem[]>;
+}
+
+export interface Problem {
+  severity: "error" | "warning";
+  message: string;
+  /** Where (file, object), shown next to the message. */
+  location?: string;
+  /** What a click does: a command with its arguments. */
+  reveal?: { command: string; args?: unknown[] };
+}
+
 export interface TriggerParamEditor {
   id: string;
   /** Button label in the parameter dialog ("Pick unit…"). */

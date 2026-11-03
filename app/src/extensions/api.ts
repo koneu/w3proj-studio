@@ -193,6 +193,8 @@ export interface W3Api {
     register(id: string, provider: ViewProvider): Disposable;
     /** Re-render a view (e.g. after its data changed). */
     refresh(id: string): void;
+    /** Shows a view container in the side bar (its activity bar id, e.g. "problems"). */
+    show(container: string): Promise<void>;
   };
   editors: {
     registerProvider(id: string, provider: EditorProvider): Disposable;

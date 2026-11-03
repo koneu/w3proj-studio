@@ -695,3 +695,15 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 
 /* Build / Test in the status bar: the release step, visible */
 .statusbar-item[data-id="w3.project.build"], .statusbar-item[data-id="w3.project.test"] { font-weight: 600; padding: 0 10px; background: rgba(255, 255, 255, 0.10); border-radius: 3px; margin: 0 2px; }
+
+/* Problems */
+.problems-head { cursor: pointer; }
+.problems-failed { color: var(--error); }
+.problem-row { display: flex; gap: 6px; align-items: baseline; padding: 2px 14px; line-height: 1.35; }
+.problem-row.clickable { cursor: pointer; }
+.problem-row:hover { background: var(--bg-hover); }
+.problem-icon { flex-shrink: 0; width: 12px; }
+.problem-row.error .problem-icon { color: var(--error); }
+.problem-row.warning .problem-icon { color: var(--warning); }
+.problem-text { overflow-wrap: anywhere; }
+.statusbar-item[data-id="w3.problems.status"] { white-space: pre; }

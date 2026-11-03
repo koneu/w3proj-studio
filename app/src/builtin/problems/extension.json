@@ -1,0 +1,16 @@
+{
+  "id": "w3.problems",
+  "name": "Problems",
+  "version": "0.1.0",
+  "description": "Checks of the open project like compiler errors: JASS errors of the map script, files used by object data that don't exist or point to someone's disk, textures of imported models, placed objects of unknown types, imports without their file. Click a problem to go there; Build runs the checks first. Other extensions add checks (service w3.problems).",
+  "contributes": {
+    "services": [{ "id": "w3.problems", "description": "Project checks shown in the Problems view and run before packing: registerCheck, run, problems." }],
+    "viewContainers": [{ "id": "problems", "title": "Problems", "icon": "⚠", "order": 9 }],
+    "views": [{ "id": "w3.problems.list", "title": "Problems", "container": "problems" }],
+    "commands": [
+      { "id": "w3.problems.run", "title": "Check Project for Problems", "category": "Project" },
+      { "id": "w3.problems.show", "title": "Show Problems", "category": "Project" },
+      { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
+    ]
+  }
+}

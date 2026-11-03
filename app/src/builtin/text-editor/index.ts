@@ -58,13 +58,20 @@ function basics(lang: Extension, readOnly: boolean): Extension[] {
 /** Code editors embedded in other extensions' views (custom script triggers, the map header). */
 /** Open text editors by path, to show a declaration in a file that is already open. */
 const openViews = new Map<string, EditorView>();
-/** Declarations to show once their file opens (go to definition into a game script). */
-const pendingReveal = new Map<string, string>();
+/** Declarations (names) or text offsets to show once their file opens (go to definition, problems). */
+const pendingReveal = new Map<string, string | number>();
 /** Opens a game script at a declaration (set up in activate). */
 let openGameScript = (_path: string, _name: string) => {};
 
-/** Selects where `name` is declared (native, function, global) and scrolls there. */
-function reveal(view: EditorView, name: string) {
+/** Selects where `name` is declared (native, function, global), or the line at a text offset,
+ *  and scrolls there. */
+function reveal(view: EditorView, name: string | number) {
+  if (typeof name === "number") {
+    const line = view.state.doc.lineAt(Math.max(0, Math.min(name, view.state.doc.length)));
+    view.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true });
+    view.focus();
+    return;
+  }
   const text = view.state.sliceDoc();
   const re = [
     new RegExp(String.raw`^[ \t]*(?:constant[ \t]+)?(?:native|function)[ \t]+${name}\b`, "m"),
@@ -134,6 +141,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }).catch((e) => w3.window.showError(String(e)));
   };
   ctx.subscriptions.push(w3.services.provide(CODE_EDITOR_SERVICE, codeEditors));
+  // Opens a file at a text offset (e.g. a JASS problem's position); selects that line.
+  ctx.subscriptions.push(w3.commands.register("w3.text.revealAt", async (path: string, at: number) => {
+    pendingReveal.set(path, at);
+    await w3.editors.open(path, "w3.textEditor");
+    const view = openViews.get(path);
+    if (view && pendingReveal.get(path) === at) { pendingReveal.delete(path); reveal(view, at); }
+  }));
   const status = w3.statusBar.add({ id: "w3.textEditor.cursor", text: "", align: "right", priority: 10 });
   ctx.subscriptions.push(status);
 
