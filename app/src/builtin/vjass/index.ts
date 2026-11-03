@@ -21,6 +21,13 @@ const KEYWORDS = ["library", "endlibrary", "scope", "endscope", "struct", "endst
   "allocate", "deallocate", "onInit", "onDestroy", "create", "destroy", "super", "defaults", "debug", "inject", "endinject", "zinc", "endzinc"];
 /** The functions a map script needs besides the checked text (JassHelper fails without main). */
 const STUB = "function main takes nothing returns nothing\r\nendfunction\r\nfunction config takes nothing returns nothing\r\nendfunction\r\n";
+/** A library name from an item name: JassHelper rejects underscores in library and scope names
+ *  ("Untitled Script 001" → "UntitledScript001"). */
+export function libraryName(name: string): string {
+  const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1));
+  const id = words.join("");
+  return /^[A-Za-z]/.test(id) ? id : `Lib${id}`;
+}
 /** JassHelper's output ("//globals from <library>:", LIBRARY_<name> constants). */
 const OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
 
@@ -86,7 +93,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       matches: (t, ed) => ed.language === "jass" && (t.isCustom || t.type === 32) && SOURCE.test(ed.customText(t) ?? ""),
       init(t, ed) {
         t.isCustom = true;
-        ed.setCustomText(t, `library ${ident(t.name)} initializer Init\r\n\r\n    private function Init takes nothing returns nothing\r\n    endfunction\r\n\r\nendlibrary\r\n`);
+        ed.setCustomText(t, `library ${libraryName(t.name)} initializer Init\r\n\r\n    private function Init takes nothing returns nothing\r\n    endfunction\r\n\r\nendlibrary\r\n`);
       },
       render(el, t, ed) {
         const status = h("span.muted");
