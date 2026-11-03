@@ -12,6 +12,7 @@ import {
   AI_OPTIONS, aiArgCount, aiTriggerData, embeddedObjectData, newWai, NO_ID, parseWai, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
+import { generateAiScript } from "../../lib/ai/script";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { callText, paramText, type DisplayContext } from "../../lib/triggers/display";
 import { CONDITION, parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -73,15 +74,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ]);
         const bytes = await doc.readBytes();
         const ai = parseWai(bytes, aiArgCount(data));
-        const view = new AiView(w3, el, ai, data, objects, gui, !doc.readOnly, (d) => doc.setDirty(d));
+        const view = new AiView(w3, el, ai, data, objects, gui, !doc.readOnly, (d) => doc.setDirty(d), doc.absolutePath ?? doc.path);
+        current = view;
         return {
           save: async () => { await doc.writeBytes(writeWai(view.ai)); view.saved(); },
           focus: () => el.focus(),
+          dispose: () => { if (current === view) current = null; },
         };
       },
     }),
+    w3.commands.register("w3.ai.exportScript", async () => {
+      if (!current) throw new Error("Open an AI file in the AI Editor first.");
+      await current.exportScript();
+    }),
   );
 }
+
+/** The AI Editor last opened (for the export command). */
+let current: AiView | null = null;
 
 type Selection = { list: "build" | "harvest" | "targets"; i: number } | null;
 
@@ -103,7 +113,7 @@ class AiView {
   private display: DisplayContext;
 
   constructor(private w3: W3Api, private el: HTMLElement, public ai: AiFile, private data: TriggerData, private objects: ObjectsService,
-    private gui: TriggerGuiService, private editable: boolean, private setDirty: (dirty: boolean) => void) {
+    private gui: TriggerGuiService, private editable: boolean, private setDirty: (dirty: boolean) => void, private source: string) {
     this.display = { data, objectName: (id) => this.names.get(id) };
     el.classList.add("ai-editor");
     el.tabIndex = -1;
@@ -113,6 +123,15 @@ class AiView {
   }
 
   saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+
+  /** Writes the .ai script for the AI as it is now (unsaved changes included). */
+  async exportScript() {
+    const base = this.source.replace(/\\/g, "/").split("/").pop()!.replace(/\.wai$/i, "");
+    const target = await this.w3.window.pickSaveFile({ title: "Export AI script", defaultPath: `${base}.ai`, filters: [{ name: "AI scripts", extensions: ["ai"] }] });
+    if (!target) return;
+    await this.w3.workspace.writeText(target, generateAiScript(this.ai, this.data));
+    void this.w3.window.showInfo(`AI script written to ${target}. Import it into a map (e.g. Scripts\\${base}.ai) and start it with "AI - Start Campaign AI Script" or "Start Melee AI Script".`);
+  }
 
   // ---- changes and undo ---------------------------------------------------------------
   private change(fn: () => void) {
@@ -332,7 +351,9 @@ class AiView {
     const body = [() => this.general(), () => this.heroes(), () => this.building(), () => this.attacking(), () => this.testConfig()][this.tab]();
     this.el.replaceChildren(
       h("div.ai-tabs", {}, ...tabs.map((t, i) => h(`button${i === this.tab ? ".active" : ""}`, { onclick: () => { this.tab = i; this.render(); } }, t)),
-        h("span.muted.ai-title", {}, this.ai.name), this.editable ? null : h("span.muted", {}, "(read-only)")),
+        h("span.muted.ai-title", {}, this.ai.name), this.editable ? null : h("span.muted", {}, "(read-only)"),
+        h("button.ai-export", { title: "Write the AI script (.ai) the game runs, like the World Editor's File > Export AI Script",
+          onclick: () => void this.exportScript().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))) }, "Export AI Script…")),
       body);
     this.el.querySelectorAll(".ai-scroll").forEach((e, i) => { e.scrollTop = scroll[i] ?? 0; });
     // The changed control was replaced (or a dialog closed): keep the keys (undo) here.

@@ -7,7 +7,8 @@
     "editors": [{ "id": "w3.aiEditor", "title": "AI Editor", "patterns": ["*.wai"] }],
     "commands": [
       { "id": "w3.ai.open", "title": "AI Editor: Open AI…", "category": "Module" },
-      { "id": "w3.ai.new", "title": "AI Editor: New AI…", "category": "Module" }
+      { "id": "w3.ai.new", "title": "AI Editor: New AI…", "category": "Module" },
+      { "id": "w3.ai.exportScript", "title": "AI Editor: Export AI Script…", "category": "Module" }
     ]
   }
 }

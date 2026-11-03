@@ -676,3 +676,4 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .tree-row:hover .camp-side-open { visibility: visible; }
 .camp-side-actions { padding: 4px 14px; }
 .camp-side-path { font-size: 11px; }
+.ai-export { margin-left: 8px; }
