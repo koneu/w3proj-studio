@@ -220,12 +220,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     })
     .then((d) => ctx.subscriptions.push(d));
 
-  // Reopen the last project.
+  // Reopen the last project (the workbench restores its tabs; the welcome page goes).
   const last = w3.settings.get<string[]>("recentProjects", [])[0];
   if (last) {
     w3.workspace.open(last).then(
       async () => {
-        await w3.editors.closeAll();
+        await w3.editors.close("w3:welcome");
         out.append(`reopened ${last}`);
       },
       () => out.append(`could not reopen ${last}`),

@@ -4,7 +4,7 @@ import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { invoke, listen, NotUtf8Error } from "./backend";
 import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
-import { EditorService } from "./editors";
+import { EditorService, type OpenEditors } from "./editors";
 import { GAME_SCHEME, GameService } from "./game";
 import { Notifications, Progress } from "./notifications";
 import { OutputPanel } from "./output";
@@ -95,6 +95,27 @@ export class Workbench {
       const sample = bytes.subarray(0, 4096);
       return sample.includes(0) ? "w3.hexViewer" : "w3.textEditor";
     };
+    // Open tabs are remembered per project in the webview's storage (this machine only, not
+    // in the project): files that are gone by the next start are left out.
+    const memoryKey = () => {
+      const root = this.workspace.project()?.root;
+      return root ? `w3.openEditors:${root.replace(/[\\/]+$/, "").toLowerCase()}` : null;
+    };
+    this.editors.memory = {
+      load: () => {
+        const key = memoryKey();
+        let state: OpenEditors | null = null;
+        try { state = key ? JSON.parse(localStorage.getItem(key) ?? "null") : null; } catch { return null; }
+        if (!state || !Array.isArray(state.tabs)) return null;
+        const files = new Set(this.workspace.files().map((f) => f.path.toLowerCase()));
+        const exists = (p: string) => p.startsWith("w3:") || isGame(p) || /^[a-z]:[\\/]/i.test(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
+        return { tabs: state.tabs.filter((t) => typeof t.path === "string" && typeof t.editor === "string" && exists(t.path)), active: state.active };
+      },
+      store: (state) => {
+        const key = memoryKey();
+        try { if (key) localStorage.setItem(key, JSON.stringify(state)); } catch { /* not remembered */ }
+      },
+    };
     this.registerCoreCommands();
     this.registerKeybindings();
   }
@@ -133,12 +154,14 @@ export class Workbench {
       }
     });
 
-    // Projects can ship their own extensions in .w3proj/extensions.
+    // Projects can ship their own extensions in .w3proj/extensions. Then the project's tabs
+    // from last time are opened again.
     let scannedRoot: string | null = null;
     this.workspace.onDidChange.on(async () => {
       const root = this.workspace.project()?.root ?? null;
-      if (!root || root === scannedRoot) return;
+      if (root === scannedRoot) return;
       scannedRoot = root;
+      if (!root) return;
       try {
         this.host.addExternal(await invoke("extensions_scan", { projectRoot: root }));
         await this.host.fire("onStartup");
@@ -146,6 +169,7 @@ export class Workbench {
       } catch (e) {
         this.log.append(`could not scan project extensions: ${e}`);
       }
+      if (this.workspace.project()?.root === root) await this.editors.restore().catch((e) => this.log.append(`could not restore tabs: ${e}`));
     });
   }
 

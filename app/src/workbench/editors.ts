@@ -10,6 +10,14 @@ interface Tab {
   dirty: boolean;
   doc?: EditorDocument;
   provider?: EditorProvider;
+  /** Restored but not opened yet: the editor is created when the tab is first shown. */
+  pending?: boolean;
+}
+
+/** Open tabs as remembered per project (see EditorService.memory). */
+export interface OpenEditors {
+  tabs: { path: string; editor: string }[];
+  active?: string;
 }
 
 export interface DocumentIO {
@@ -42,6 +50,10 @@ export class EditorService {
   confirm: (message: string, ...actions: string[]) => Promise<string | undefined> = async () => undefined;
   /** Why an extension's editor isn't available (disabled, failed to activate). */
   whyUnavailable: (extensionId: string) => string | undefined = () => undefined;
+  /** Where the open tabs are remembered (per project; null: not remembered). */
+  memory: { load(): OpenEditors | null; store(state: OpenEditors): void } | null = null;
+  /** Off while tabs are closed for a project switch or restored. */
+  private remembering = true;
 
   constructor(private io: DocumentIO) {
     this.content.append(this.empty);
@@ -95,6 +107,14 @@ export class EditorService {
 
     let id = providerId ?? this.associated(path) ?? this.candidates(path).find((c) => c.priority !== "option")?.id;
     id ??= await this.fallback(path);
+    const provider = await this.provider(id, path);
+    const tab = this.addTab(path, id);
+    this.show(tab);
+    await this.resolveTab(tab, provider);
+  }
+
+  /** The provider of an editor id, its extension activated first. */
+  private async provider(id: string, path: string): Promise<EditorProvider> {
     // Always fired: extensions that hook into an editor (e.g. terrain tool groups)
     // start with it even when the editor's own extension is already running.
     await this.activate(`onEditor:${id}`);
@@ -104,7 +124,10 @@ export class EditorService {
       const why = ext ? this.whyUnavailable(ext) : undefined;
       throw new Error(why ? `Can't open ${path}: ${why}` : `no editor provider ${id} — is its extension disabled ("extensions.disabled") or failed to load?`);
     }
+    return provider;
+  }
 
+  private addTab(path: string, id: string): Tab {
     const el = h("div.editor-pane");
     const title = path.startsWith("w3:")
       ? (this.contributions.find((c) => c.id === id)?.title ?? path)
@@ -119,8 +142,12 @@ export class EditorService {
     this.tabs.push(tab);
     this.tabsEl.append(tab.tabEl);
     this.content.append(el);
-    this.show(tab);
+    el.hidden = true;
+    return tab;
+  }
 
+  private async resolveTab(tab: Tab, provider: EditorProvider) {
+    const path = tab.path;
     const doc: EditorDocument = {
       path,
       absolutePath: this.io.resolve(path),
@@ -134,6 +161,29 @@ export class EditorService {
     tab.doc = doc;
     tab.provider = provider;
     await this.load(tab);
+  }
+
+  /** Reopens the tabs remembered for the current project (the active one is loaded, the
+   *  others when they are first shown). Tabs already open stay. */
+  async restore() {
+    const state = this.memory?.load();
+    if (!state?.tabs.length) return;
+    this.remembering = false;
+    try {
+      for (const { path, editor } of state.tabs) {
+        if (this.tabs.some((t) => t.path === path) || !this.contributions.some((c) => c.id === editor) && !this.providers.has(editor)) continue;
+        this.addTab(path, editor).pending = true;
+      }
+    } finally {
+      this.remembering = true;
+    }
+    const active = this.tabs.find((t) => t.path === state.active) ?? this.tabs.find((t) => t.pending);
+    if (active) this.show(active);
+  }
+
+  private remember() {
+    if (!this.remembering || !this.memory) return;
+    this.memory.store({ tabs: this.tabs.map((t) => ({ path: t.path, editor: t.providerId })), active: this.active?.path });
   }
 
   private async load(tab: Tab) {
@@ -199,8 +249,14 @@ export class EditorService {
     return true;
   }
 
+  /** Closes every editor (e.g. for a project switch: the project's tabs stay remembered). */
   async closeAll() {
-    for (const t of [...this.tabs]) await this.close(t, true);
+    this.remembering = false;
+    try {
+      for (const t of [...this.tabs]) await this.close(t, true);
+    } finally {
+      this.remembering = true;
+    }
   }
 
   private async close(tab: Tab, force = false) {
@@ -223,6 +279,7 @@ export class EditorService {
         this.onDidChangeActive.fire(null);
       }
     }
+    this.remember();
   }
 
   private show(tab: Tab) {
@@ -235,5 +292,11 @@ export class EditorService {
     tab.tabEl.scrollIntoView({ block: "nearest", inline: "nearest" });
     tab.instance?.focus?.();
     this.onDidChangeActive.fire({ path: tab.path, editor: tab.providerId });
+    this.remember();
+    if (tab.pending) {
+      tab.pending = false;
+      this.provider(tab.providerId, tab.path).then((p) => this.resolveTab(tab, p),
+        (e) => tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e instanceof Error ? e.message : e}`)));
+    }
   }
 }
