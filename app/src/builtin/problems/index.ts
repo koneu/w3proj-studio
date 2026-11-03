@@ -46,9 +46,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         groups = result;
         ran = true;
         updateStatus();
-        w3.views.refresh("w3.problems.list");
         return all();
-      })().finally(() => { running = null; });
+      })().finally(() => {
+        // Redrawn once the run is over (its button shows "Checking…" while running).
+        running = null;
+        w3.views.refresh("w3.problems.list");
+      });
+      w3.views.refresh("w3.problems.list");
       return running;
     },
     problems: all,
