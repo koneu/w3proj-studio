@@ -236,11 +236,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ),
             ];
           };
-          const unchanged = file.original.filter((o) => !hasMods(o)).length;
-          const cleanUp = unchanged
-            ? h("button.link-inline", { title: "Remove standard objects that have no modified fields", onclick: cleanUpStandard }, `Clean up (${unchanged})`)
-            : undefined;
           const matchesFilter = (o: Obj) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)}`.toLowerCase().includes(filter);
+          // With a filter, only the listed entries are cleaned up.
+          const unchanged = file.original.filter((o) => !hasMods(o) && matchesFilter(o)).length;
+          const cleanUp = unchanged
+            ? h("button.link-inline", {
+              title: filter ? "Remove the listed standard objects that have no modified fields" : "Remove standard objects that have no modified fields",
+              onclick: () => cleanUpStandard(matchesFilter),
+            }, `Clean up (${unchanged})`)
+            : undefined;
           visible = [...file.custom, ...file.original].filter(matchesFilter);
           listEl.replaceChildren(...group("Custom", file.custom), ...group("Modified standard", file.original, cleanUp));
         };
@@ -282,8 +286,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
 
         const hasMods = (o: Obj) => modLists(o).some((l) => l.mods.length > 0);
-        const cleanUpStandard = () => {
-          const keep = file.original.filter(hasMods);
+        /** Removes standard entries without modifications (those `which` accepts). */
+        const cleanUpStandard = (which: (o: Obj) => boolean = () => true) => {
+          const keep = file.original.filter((o) => hasMods(o) || !which(o));
           if (keep.length === file.original.length) return;
           file.original = keep;
           for (const o of [...selection]) if (!file.custom.includes(o) && !keep.includes(o)) selection.delete(o);
