@@ -43,6 +43,12 @@ const SECTIONS = [
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
 
+/** Settings outside war3map.w3i (World Editor: Advanced menu), each in its own editor. */
+const ADVANCED = [
+  { label: "Gameplay Constants", command: "w3.gameplayConstants.open", hint: "war3mapMisc.txt: max hero level, experience, damage tables, …" },
+  { label: "Game Interface", command: "w3.gameInterface.open", hint: "war3mapSkin.txt: icons, models, sounds and texts of the interface" },
+];
+
 /** Map option flags as the World Editor names them. */
 const FLAGS: [number, string][] = [
   [0x0001, "Hide minimap in preview screens"],
@@ -140,7 +146,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         el.append(h("div.tree", {}, ...SECTIONS.map((s) =>
           h("div.tree-row.obj-kind", { onclick: () => openAt(s.id).catch((e) => w3.window.showError(String(e))) },
-            h("span.tree-icon", {}, "›"), h("span.tree-label", {}, s.label)))));
+            h("span.tree-icon", {}, "›"), h("span.tree-label", {}, s.label)))),
+          // The World Editor's Advanced menu (other extensions; shown when they're installed).
+          h("div.tree", {}, ...ADVANCED.map((a) =>
+            h("div.tree-row.obj-kind", { title: a.hint, onclick: () => w3.commands.execute(a.command).catch((e) => w3.window.showError(String(e))) },
+              h("span.tree-icon", {}, "›"), h("span.tree-label", {}, a.label)))));
       },
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.scenario.sections")),
@@ -351,7 +361,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const body = h("div.form-body");
         const show = (s: SectionId) => {
           section = s;
-          nav.replaceChildren(...SECTIONS.map((x) => h(`button.form-nav-item${x.id === section ? ".active" : ""}`, { onclick: () => show(x.id) }, x.label)));
+          nav.replaceChildren(...SECTIONS.map((x) => h(`button.form-nav-item${x.id === section ? ".active" : ""}`, { onclick: () => show(x.id) }, x.label)),
+            h("div.form-nav-sep", {}, "Advanced"),
+            ...ADVANCED.map((a) => h("button.form-nav-item", { title: a.hint,
+              onclick: () => w3.commands.execute(a.command).catch((e) => w3.window.showError(String(e))) }, `${a.label} ↗`)));
           body.replaceChildren(h("h2", {}, SECTIONS.find((x) => x.id === section)!.label), ...renderers[section]());
         };
         el.append(h("div.map-info", {}, nav, body));

@@ -677,3 +677,18 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .camp-side-actions { padding: 4px 14px; }
 .camp-side-path { font-size: 11px; }
 .ai-export { margin-left: 8px; }
+
+/* Gameplay Constants / Game Interface */
+.form-nav-sep { padding: 14px 16px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
+.gs-editor { display: flex; flex-direction: column; height: 100%; overflow: hidden; outline: none; }
+.gs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.gs-search { width: 260px; font: inherit; }
+.gs-check { white-space: nowrap; }
+.gs-list { flex: 1; overflow: auto; padding: 0 12px 16px; }
+.gs-section { margin-top: 10px; padding: 4px 0; font-weight: 600; cursor: pointer; border-bottom: 1px solid var(--border); }
+.gs-row { display: grid; grid-template-columns: minmax(200px, 2fr) minmax(160px, 3fr) minmax(0, 2fr) 24px; gap: 8px; align-items: center; padding: 2px 0; }
+.gs-row:hover { background: var(--bg-hover); }
+.gs-row.set .gs-label { font-weight: 600; }
+.gs-input { width: 100%; font: inherit; }
+.gs-default { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.gs-empty, .gs-loading { padding: 12px; }

@@ -58,7 +58,9 @@ export class EditorService {
   candidates(path: string) {
     return this.contributions
       .filter((c) => c.patterns.some((p) => globMatch(p, path)))
-      .sort((a, b) => (a.priority === "option" ? 1 : 0) - (b.priority === "option" ? 1 : 0));
+      // Defaults first; among them an exact file name ("war3mapMisc.txt") before a wildcard ("*.txt").
+      .sort((a, b) => (a.priority === "option" ? 1 : 0) - (b.priority === "option" ? 1 : 0)
+        || Number(!a.patterns.some((p) => !p.includes("*") && globMatch(p, path))) - Number(!b.patterns.some((p) => !p.includes("*") && globMatch(p, path))));
   }
 
   /** Editor chosen for a path by the "editorAssociations" setting, if it exists. */

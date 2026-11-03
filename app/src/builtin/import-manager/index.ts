@@ -182,7 +182,15 @@ class ImportView {
     const total = this.list.files.reduce((n, e) => n + (this.fileOf(e, files)?.size ?? 0), 0);
 
     const search = h("input.imp-search", { type: "search", placeholder: "Filter by path", value: this.query,
-      oninput: () => { this.query = search.value; this.render(); (this.el.querySelector(".imp-search") as HTMLInputElement | null)?.focus(); } });
+      oninput: () => {
+        const caret = search.selectionStart ?? search.value.length;
+        this.query = search.value;
+        this.render();
+        // The redrawn box keeps the focus and the cursor where it was.
+        const box = this.el.querySelector(".imp-search") as HTMLInputElement | null;
+        box?.focus();
+        box?.setSelectionRange(caret, caret);
+      } });
     const toolbar = h("div.imp-toolbar", {},
       ...(this.editable ? [h("button.primary", { onclick: () => this.importFile() }, "Import file…")] : []),
       search, h("span.muted", {}, `${this.list.files.length} imported · ${size(total)}`));
