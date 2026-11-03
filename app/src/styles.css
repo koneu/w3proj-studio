@@ -529,3 +529,5 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-search { margin: 4px 6px 0; width: calc(100% - 12px); box-sizing: border-box; font: inherit; padding: 2px 6px; }
 .cm-symbol-tip { padding: 4px 8px; max-width: 640px; font-size: 12px; }
 .cm-symbol-tip code { font-family: var(--mono); white-space: pre-wrap; }
+.cm-outline-panel { padding: 2px 6px; border-bottom: 1px solid var(--border); background: var(--bg-panel, #252526); }
+.cm-outline { font: inherit; font-size: 12px; max-width: 100%; }

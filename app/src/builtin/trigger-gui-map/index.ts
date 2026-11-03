@@ -17,6 +17,12 @@ type Placed = PlacedJson & { position: number[]; player?: number };
 type Region = { name: string; left: number; right: number; bottom: number; top: number };
 /** How far from a click a placed object may stand to be picked. */
 const PICK_RADIUS = 128;
+/** Placed objects by parameter type: their file, object data kind and global prefix. */
+const PICKED: Record<string, { file: "units" | "doodads"; kind: string; prefix: string }> = {
+  unit: { file: "units", kind: "w3u", prefix: "unit" },
+  item: { file: "units", kind: "w3t", prefix: "item" },
+  destructable: { file: "doodads", kind: "w3b", prefix: "dest" },
+};
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const json = async <T>(path: string): Promise<T | null> => {
@@ -84,17 +90,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       title: "Pick on map…",
       types: Object.keys(what),
       async edit({ type }) {
-        const p = await terrain.pickPoint({ prompt: `Click ${what[type]} on the map` }).finally(() => w3.commands.execute("w3.triggers.open").catch(() => {}));
+        // Objects of the parameter's kind are ringed under the pointer; the click takes that one.
+        const spec = PICKED[type];
+        let pick: { file: "units" | "doodads"; accept(e: unknown): boolean; radius: number } | undefined;
+        if (spec) {
+          const list = spec.file === "units" ? await units() : await doodads();
+          const ok = new Set<string>();
+          for (const id of new Set(list.map((e) => e.id))) if (await objects.name(id, [spec.kind]).catch(() => undefined) !== undefined) ok.add(id);
+          pick = { file: spec.file, accept: (e) => ok.has((e as Placed).id), radius: PICK_RADIUS };
+        }
+        const p = await terrain.pickPoint({ prompt: `Click ${what[type]} on the map`, objects: pick })
+          .finally(() => w3.commands.execute("w3.triggers.open").catch(() => {}));
         if (!p) return undefined;
         if (type === "rect") {
           const hit = (await regions()).filter((r) => p.x >= r.left && p.x <= r.right && p.y >= r.bottom && p.y <= r.top)
             .sort((a, b) => (a.right - a.left) * (a.top - a.bottom) - (b.right - b.left) * (b.top - b.bottom))[0];
           if (hit) return global(`gg_rct_${ident(hit.name)}`);
-        } else {
-          const near = (await placedOf[type]()).map((c) => ({ c, d: Math.hypot(c.at[0] - p.x, c.at[1] - p.y) }))
-            .filter((x) => x.d <= PICK_RADIUS).sort((a, b) => a.d - b.d)[0];
-          if (near) return near.c.param;
-        }
+        } else if (spec && p.object) return global(placedName(p.object as Placed, spec.prefix));
         void w3.window.showWarning(`There is no ${type === "rect" ? "region" : type} there.`);
         return undefined;
       },

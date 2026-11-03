@@ -1,11 +1,12 @@
 // Name help for code editors: completion while typing (Ctrl+Space too), the
-// declaration of the name under the mouse, and go to definition (F12 or
-// Ctrl+click) for names declared in the same text. Symbols come from the
-// editor's owner (for JASS: the game's scripts, the map script and the text).
+// declaration of the name under the mouse, go to definition (F12 or
+// Ctrl+click: in the same text, a game script, or another trigger) and an
+// outline of the text's functions above it. Symbols come from the editor's
+// owner (for JASS: the game's scripts, the map script and the text).
 
 import { autocompletion, type Completion, type CompletionContext } from "@codemirror/autocomplete";
 import { type Extension } from "@codemirror/state";
-import { EditorView, hoverTooltip, keymap } from "@codemirror/view";
+import { EditorView, hoverTooltip, keymap, showPanel, type Panel } from "@codemirror/view";
 import type { CodeSymbol } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 
@@ -29,16 +30,47 @@ function wordAt(view: EditorView, pos: number): { from: number; to: number; text
   return w ? { from: w.from, to: w.to, text: view.state.sliceDoc(w.from, w.to) } : null;
 }
 
-export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>): Extension {
+/** Where a symbol declared elsewhere is ("in common.j", "in trigger X"). */
+function whereText(location: string): string {
+  if (location.startsWith("trigger:")) return `in trigger ${location.slice(8)}`;
+  return `in ${location.replace(/^game:/, "").split(/[\\/]/).pop()}`;
+}
+
+/** `openElsewhere` goes to a symbol declared outside the text (its `location`). */
+export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, openElsewhere: (location: string, name: string) => void): Extension {
   const current = (view: EditorView) => symbols(view.state.sliceDoc());
   const goTo = async (view: EditorView, pos: number) => {
     const w = wordAt(view, pos);
     if (!w) return false;
     const s = lookup(await current(view), w.text, pos);
-    if (s?.at === undefined) return false;
+    if (s?.at === undefined) {
+      if (s?.location) { openElsewhere(s.location, s.name); return true; }
+      return false;
+    }
     view.dispatch({ selection: { anchor: s.at, head: s.at + s.name.length }, scrollIntoView: true });
     view.focus();
     return true;
+  };
+  // The outline: the text's own functions, in order; picking one moves there.
+  const outline = (view: EditorView): Panel => {
+    const select = h("select.cm-outline", { title: "Functions in this text", onchange: () => {
+      const at = Number(select.value);
+      if (Number.isFinite(at) && select.value !== "") { view.dispatch({ selection: { anchor: at }, scrollIntoView: true }); view.focus(); }
+      select.value = "";
+    } }) as HTMLSelectElement;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fill = () => void current(view).then((list) => {
+      const fns = list.filter((s) => s.at !== undefined && (s.kind === "function" || s.kind === "native"));
+      select.replaceChildren(h("option", { value: "" }, fns.length ? `Functions (${fns.length})…` : "No functions"),
+        ...fns.map((s) => h("option", { value: String(s.at) }, s.name)));
+    }).catch(() => {});
+    fill();
+    return {
+      dom: h("div.cm-outline-panel", {}, select),
+      top: true,
+      update: (u) => { if (u.docChanged) { clearTimeout(timer); timer = setTimeout(fill, 800); } },
+      destroy: () => clearTimeout(timer),
+    };
   };
   return [
     autocompletion({
@@ -68,10 +100,13 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>): E
       if (!s) return null;
       return {
         pos: w.from, end: w.to, above: true,
-        create: () => ({ dom: h("div.cm-symbol-tip", {}, h("code", {}, s.detail), s.at !== undefined ? h("div.muted", {}, "F12 / Ctrl+click: go to definition") : null) }),
+        create: () => ({ dom: h("div.cm-symbol-tip", {}, h("code", {}, s.detail),
+          s.at !== undefined ? h("div.muted", {}, "F12 / Ctrl+click: go to definition")
+            : s.location ? h("div.muted", {}, `Declared ${whereText(s.location)} · F12 / Ctrl+click opens it`) : null) }),
       };
     }),
     keymap.of([{ key: "F12", run: (view) => { void goTo(view, view.state.selection.main.head); return true; } }]),
+    showPanel.of(outline),
     EditorView.domEventHandlers({
       mousedown: (e, view) => {
         if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return false;

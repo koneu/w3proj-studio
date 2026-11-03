@@ -7,10 +7,9 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type TriggersService } from "../../extensions/services";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
+import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
 
-/** The trigger's name as the World Editor turns it into identifiers (gg_trg_<name>). */
-const ident = (name: string) => name.trim().replace(/[^A-Za-z0-9_]/g, "_");
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   void Promise.all([w3.services.get<TriggersService>(TRIGGERS_SERVICE), w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null)]).then(([s, code]) => {
@@ -46,6 +45,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const editor = code.create(box, {
             value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable, check,
             symbols: ed.language === "jass" ? map.symbols : undefined,
+            openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
             onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
           });
           return { dispose: () => editor.dispose() };

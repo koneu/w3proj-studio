@@ -30,8 +30,11 @@ export interface TerrainService {
   /** Adds a tool group to every terrain editor (open now or later). */
   registerToolGroup(group: TerrainToolGroup): { dispose(): void };
   /** Opens the terrain editor and resolves with the next point clicked on the ground
-   *  (undefined on Esc or when another pick starts). `prompt` is shown meanwhile. */
-  pickPoint(opts: { prompt: string }): Promise<{ x: number; y: number } | undefined>;
+   *  (undefined on Esc or when another pick starts). `prompt` is shown meanwhile. With
+   *  `objects`, the nearest accepted placement (war3mapUnits.doo or war3map.doo entry) within
+   *  `radius` of the pointer is ringed, and a click returns it as `object`. */
+  pickPoint(opts: { prompt: string; objects?: { file: "units" | "doodads"; accept(entry: unknown): boolean; radius?: number } }):
+    Promise<{ x: number; y: number; object?: unknown } | undefined>;
   /** The open terrain editor's placements as they are now (unsaved ones included), as in
    *  war3mapUnits.doo / war3map.doo JSON; null when no terrain editor is open. */
   placedObjects(): { units: unknown[]; doodads: unknown[] } | null;
@@ -197,6 +200,8 @@ export interface CodeEditorOptions {
   debounce?: number;
   /** Names for completion, hover and go to definition (F12, Ctrl+click), for the current text. */
   symbols?(text: string): Promise<CodeSymbol[]>;
+  /** Go to definition of a symbol declared elsewhere that the editor can't open itself ("trigger:<name>"). */
+  openLocation?(location: string, name: string): void;
   /** Problems in the text (lib/jass/check), shown as underlines and a list below the editor. */
   check?(text: string): Promise<import("../lib/jass/check").Diagnostic[]> | import("../lib/jass/check").Diagnostic[];
 }
@@ -207,6 +212,8 @@ export interface CodeSymbol {
   detail: string;
   /** Declared in the edited text at this offset (go to definition). */
   at?: number;
+  /** Declared elsewhere: "game:<path>" (opened in the text editor) or "trigger:<name>" (see openLocation). */
+  location?: string;
   /** Visible only within this range (locals and parameters). */
   scope?: [number, number];
 }

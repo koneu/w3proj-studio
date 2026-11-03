@@ -4,13 +4,14 @@
 
 import type { TerrainService, TerrainToolGroup } from "../../extensions/services";
 
-type Point = { x: number; y: number };
+type Point = { x: number; y: number; object?: unknown };
+type PickObjects = { file: "units" | "doodads"; accept(entry: unknown): boolean; radius?: number };
 
 export class TerrainToolRegistry implements TerrainService {
   private groups: TerrainToolGroup[] = [];
   private listeners = new Set<() => void>();
   /** The pick in progress: its prompt and how it ends. */
-  picking: { prompt: string; finish(p: Point | undefined): void } | null = null;
+  picking: { prompt: string; objects?: PickObjects; finish(p: Point | undefined): void } | null = null;
 
   /** Set by the open terrain editor: its live placements. */
   livePlacements: (() => { units: unknown[]; doodads: unknown[] }) | null = null;
@@ -31,11 +32,11 @@ export class TerrainToolRegistry implements TerrainService {
     };
   }
 
-  async pickPoint(opts: { prompt: string }): Promise<Point | undefined> {
+  async pickPoint(opts: { prompt: string; objects?: PickObjects }): Promise<Point | undefined> {
     this.picking?.finish(undefined);
     const result = new Promise<Point | undefined>((resolve) => {
       this.picking = {
-        prompt: opts.prompt,
+        prompt: opts.prompt, objects: opts.objects,
         finish: (p) => { this.picking = null; this.listeners.forEach((l) => l()); resolve(p); },
       };
     });

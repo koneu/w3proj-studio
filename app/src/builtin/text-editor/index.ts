@@ -56,6 +56,36 @@ function basics(lang: Extension, readOnly: boolean): Extension[] {
 }
 
 /** Code editors embedded in other extensions' views (custom script triggers, the map header). */
+/** Open text editors by path, to show a declaration in a file that is already open. */
+const openViews = new Map<string, EditorView>();
+/** Declarations to show once their file opens (go to definition into a game script). */
+const pendingReveal = new Map<string, string>();
+/** Opens a game script at a declaration (set up in activate). */
+let openGameScript = (_path: string, _name: string) => {};
+
+/** Selects where `name` is declared (native, function, global) and scrolls there. */
+function reveal(view: EditorView, name: string) {
+  const text = view.state.sliceDoc();
+  const re = [
+    new RegExp(String.raw`^[ \t]*(?:constant[ \t]+)?(?:native|function)[ \t]+${name}\b`, "m"),
+    new RegExp(String.raw`^[ \t]*(?:constant[ \t]+)?\w+[ \t]+(?:array[ \t]+)?${name}\b`, "m"),
+  ];
+  for (const r of re) {
+    const m = r.exec(text);
+    if (!m) continue;
+    const at = m.index + m[0].length - name.length;
+    view.dispatch({ selection: { anchor: at, head: at + name.length }, scrollIntoView: true });
+    view.focus();
+    return;
+  }
+}
+
+/** Go to definition outside the text: game scripts here, the rest by the editor's owner. */
+const elsewhere = (owner?: (location: string, name: string) => void) => (location: string, name: string) => {
+  if (location.startsWith("game:")) openGameScript(location, name);
+  else owner?.(location, name);
+};
+
 const codeEditors: CodeEditorService = {
   create(parent, opts: CodeEditorOptions) {
     const eol = lineEnding(opts.value);
@@ -76,7 +106,7 @@ const codeEditors: CodeEditorService = {
           ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
           EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
           ...(lint ? [lint.extension] : []),
-          ...(opts.symbols ? [symbolTools(opts.symbols)] : []),
+          ...(opts.symbols ? [symbolTools(opts.symbols, elsewhere(opts.openLocation?.bind(opts)))] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
             if (u.focusChanged && !u.view.hasFocus) commit();
@@ -95,6 +125,14 @@ const codeEditors: CodeEditorService = {
 };
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  openGameScript = (path, name) => {
+    pendingReveal.set(path, name);
+    void w3.editors.open(path, "w3.textEditor").then(() => {
+      // Already open: the view exists and just moves.
+      const view = openViews.get(path);
+      if (view && pendingReveal.get(path) === name) { pendingReveal.delete(path); reveal(view, name); }
+    }).catch((e) => w3.window.showError(String(e)));
+  };
   ctx.subscriptions.push(w3.services.provide(CODE_EDITOR_SERVICE, codeEditors));
   const status = w3.statusBar.add({ id: "w3.textEditor.cursor", text: "", align: "right", priority: 10 });
   ctx.subscriptions.push(status);
@@ -134,7 +172,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               EditorState.lineSeparator.of(eol),
               ...basics(language(doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
-              ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t))] : []),
+              ...(jass ? [symbolTools(async (t) => jassSymbols(await gameJassEnv((p) => w3.game.readText(p)), t), elsewhere())] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);
@@ -144,6 +182,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }),
         });
         updateStatus(view);
+        openViews.set(doc.path, view);
+        const want = pendingReveal.get(doc.path);
+        if (want) { pendingReveal.delete(doc.path); requestAnimationFrame(() => reveal(view, want)); }
         if (lint) { el.append(problems); lint.start(view); }
         return {
           async save() {
@@ -155,6 +196,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           focus: () => view.focus(),
           dispose: () => {
+            if (openViews.get(doc.path) === view) openViews.delete(doc.path);
             lint?.stop();
             view.destroy();
             status.text = "";

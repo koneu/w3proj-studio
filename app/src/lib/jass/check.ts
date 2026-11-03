@@ -18,8 +18,9 @@ export interface Decl {
   scope?: [number, number];
 }
 
-export interface FunctionSig { params: { name: string; type: string }[]; returns: string; native: boolean; constant: boolean }
-export interface GlobalVar { type: string; array: boolean; constant: boolean }
+/** `source`: the label of the source that declared it (envFrom). */
+export interface FunctionSig { params: { name: string; type: string }[]; returns: string; native: boolean; constant: boolean; source?: string }
+export interface GlobalVar { type: string; array: boolean; constant: boolean; source?: string }
 export interface JassEnv {
   /** Type → its parent ("" for the primitives). */
   types: Map<string, string>;
@@ -572,15 +573,16 @@ export function declarations(src: string, env: JassEnv = emptyEnv()): Decl[] {
 }
 
 /** Declarations of `sources` (in order) merged into one environment; syntax errors are ignored. */
-export function envFrom(sources: string[], base: JassEnv = emptyEnv()): JassEnv {
+export function envFrom(sources: string[], base: JassEnv = emptyEnv(), labels: string[] = []): JassEnv {
   const env: JassEnv = { types: new Map(base.types), globals: new Map(base.globals), functions: new Map(base.functions) };
-  for (const src of sources) {
+  sources.forEach((src, k) => {
     const c = new Checker(src, env, { semantic: false, ordered: false });
     c.run();
-    for (const [k, v] of c.declared.types) env.types.set(k, v);
-    for (const [k, v] of c.declared.globals) env.globals.set(k, v);
-    for (const [k, v] of c.declared.functions) env.functions.set(k, v);
-  }
+    const source = labels[k];
+    for (const [n, v] of c.declared.types) env.types.set(n, v);
+    for (const [n, v] of c.declared.globals) env.globals.set(n, source ? { ...v, source } : v);
+    for (const [n, v] of c.declared.functions) env.functions.set(n, source ? { ...v, source } : v);
+  });
   return env;
 }
 

@@ -93,16 +93,19 @@ export function newVariable(host: VariableHost): void {
 }
 
 /** Deletes `v`, after asking when triggers use it (their parameters become unset). */
-export async function deleteVariable(w3: W3Api, host: VariableHost, v: Variable): Promise<void> {
+export async function deleteVariable(w3: W3Api, host: VariableHost, v: Variable, opts: { cut?: boolean } = {}): Promise<void> {
   const ed = host.handle;
   const uses = variableParams(ed.file, v.name).length;
+  // Cut keeps the uses: they refer to the variable again once it's pasted (under its name).
   if (uses) {
-    const c = await w3.window.showWarning(`${v.name} is used ${uses} time${uses === 1 ? "" : "s"} in triggers. Delete it and clear those parameters?`, "Delete", "Cancel");
-    if (c !== "Delete") return;
+    const c = opts.cut
+      ? await w3.window.showWarning(`${v.name} is used ${uses} time${uses === 1 ? "" : "s"} in triggers. Those uses stay and work again when you paste it; until then the map script can't be compiled.`, "Cut", "Cancel")
+      : await w3.window.showWarning(`${v.name} is used ${uses} time${uses === 1 ? "" : "s"} in triggers. Delete it and clear those parameters?`, "Delete", "Cancel");
+    if (c !== (opts.cut ? "Cut" : "Delete")) return;
   }
-  ed.edit(`Delete ${v.name}`, () => {
+  ed.edit(`${opts.cut ? "Cut" : "Delete"} ${v.name}`, () => {
     const file = ed.file;
-    for (const p of variableParams(file, v.name)) { p.type = -1; p.value = ""; delete p.call; delete p.index; }
+    if (!opts.cut) for (const p of variableParams(file, v.name)) { p.type = -1; p.value = ""; delete p.call; delete p.index; }
     file.variables = file.variables.filter((x) => x.id !== v.id || x.name !== v.name);
     if (file.reforged) {
       file.items = file.items.filter((i) => !(i.type === 64 && i.id === v.id));

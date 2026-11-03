@@ -419,12 +419,12 @@ class TriggerView {
     }
     return { parent: cat.id, index: items.reduce((last, it, i) => (it.parent === cat!.id ? i : last), items.indexOf(cat)) + 1 };
   }
-  private deleteSelected() {
+  private deleteSelected(cut = false) {
     const sel = this.find(this.selected);
     if (!sel || sel.type === 1) return;
     if (sel.type === 64) {
       const v = this.file.variables.find((x) => x.id === sel.id);
-      if (v) void deleteVariable(this.w3, this.vars, v).then(() => { if (!this.file.variables.includes(v)) { this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); } });
+      if (v) void deleteVariable(this.w3, this.vars, v, { cut }).then(() => { if (!this.file.variables.includes(v)) { this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); } });
       return;
     }
     this.edit(`Delete ${sel.name}`, () => {
@@ -462,7 +462,7 @@ class TriggerView {
       texts: block.map((it) => ("ecas" in it ? this.texts.get(it) ?? null : null)),
       variables: structuredClone(this.file.variables.filter((v) => block.some((i) => i.type === 64 && i.id === v.id))),
     };
-    if (cut && this.handle.editable) this.deleteSelected();
+    if (cut && this.handle.editable) this.deleteSelected(true);
   }
   /** Pastes copied items after the selection (or into the selected category). */
   private pasteItems() {
@@ -683,6 +683,7 @@ class TriggerView {
         const check = jass ? async (text: string) => checkJass(text, await map.without(text)) : undefined;
         const ed = this.code.create(box, {
           value: this.header ?? "", language: this.handle.language, readOnly: !editable, check, symbols: jass ? map.symbols : undefined,
+          openLocation: (loc) => { if (loc.startsWith("trigger:")) this.handle.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); }, { keepView: true }),
         });
         this.body = { dispose: () => ed.dispose() };

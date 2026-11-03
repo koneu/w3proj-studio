@@ -1076,6 +1076,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         syncPick();
         const stopPick = toolGroups.onChange(syncPick);
         const live = () => ({ units: unitsFile?.list ?? [], doodads: dooFile?.list ?? [] });
+        /** While picking objects: the accepted placement nearest to a ground point, if close enough. */
+        const pickTarget = (g: [number, number, number] | null): Placed | null => {
+          const o = toolGroups.picking?.objects;
+          if (!o || !g) return null;
+          const list = (o.file === "units" ? unitsFile?.list : dooFile?.list) ?? [];
+          let best: Placed | null = null, bestD = o.radius ?? 128;
+          for (const e of list) {
+            const d = Math.hypot(e.position[0] - g[0], e.position[1] - g[1]);
+            if (d <= bestD && o.accept(e)) { best = e; bestD = d; }
+          }
+          return best;
+        };
+        let pickRing = false;
+        const showPickTarget = (t: Placed | null) => {
+          if (!t && !pickRing) return;
+          pickRing = !!t;
+          renderer.setBrush(t ? { x: t.position[0], y: t.position[1], r: 64, rgb: [1, 0.85, 0.2] } : null);
+          redraw();
+        };
+        // However the pick ends (click, Esc, Cancel, another pick), the ring goes.
+        const stopPickRing = toolGroups.onChange(() => { if (!toolGroups.picking) showPickTarget(null); });
         toolGroups.livePlacements = live;
         if (editable) queueMicrotask(syncGroups);
 
@@ -1132,7 +1153,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (toolGroups.picking && e.button === 0) {
             e.preventDefault();
             const g = groundAt(e);
-            if (g) toolGroups.picking.finish({ x: g[0], y: g[1] });
+            const target = pickTarget(g);
+            showPickTarget(null);
+            if (g) toolGroups.picking.finish({ x: g[0], y: g[1], ...(target ? { object: target } : {}) });
             return;
           }
           const gi = activeInst();
@@ -1167,6 +1190,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           press = null;
         });
         canvas.addEventListener("mousemove", (e) => {
+          if (toolGroups.picking?.objects) { showPickTarget(pickTarget(groundAt(e))); return; }
           activeInst()?.pointerMove?.({ ground: groundAt(e), event: e, down: groupDrag });
           if (groupDrag) return;
           if (facing) { const g = groundAt(e); if (g) faceToward(g); return; }
@@ -1200,7 +1224,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
-          if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); toolGroups.picking.finish(undefined); return; }
+          if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
@@ -1323,6 +1347,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dispose: () => {
             stopGroups();
             stopPick();
+            stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
