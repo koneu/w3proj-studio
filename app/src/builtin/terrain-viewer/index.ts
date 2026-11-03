@@ -38,6 +38,17 @@ async function customBases(w3: W3Api): Promise<Map<string, string>> {
       for (const o of j.custom ?? []) if (o.id) out.set(o.id, o.base);
     } catch { /* unreadable: no custom ids */ }
   }
+  // A campaign's chapter map (…/maps/<file>) also uses the campaign's custom objects.
+  const root = w3.workspace.project()?.root;
+  const campaign = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
+  if (campaign) {
+    for (const k of ["w3u", "w3t", "w3b", "w3d"]) {
+      try {
+        const j = JSON.parse(await w3.workspace.readText(`${campaign}\\map\\war3campaign.${k}.json`)) as { custom?: { id?: string; base: string }[] };
+        for (const o of j.custom ?? []) if (o.id && !out.has(o.id)) out.set(o.id, o.base);
+      } catch { /* no campaign object data of this kind */ }
+    }
+  }
   return out;
 }
 
@@ -362,10 +373,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const loader = new ObjectLoader(renderer.gl, (p) => readFile(w3, doc, p), () => {
           redraw();
           const n = loader.missing.size;
-          const list = [...loader.missing].map(([p, e]) => `${p}: ${e}`);
+          const list = [...loader.missing];
+          // Click: the placed objects whose model uses the texture.
+          const users = (tex: string) => {
+            const models = loader.modelsUsing(tex);
+            return renderer.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed && models.has(i.pick.model.toLowerCase())).map((i) => i.pick!.placed);
+          };
           texInfo.replaceChildren(n ? `${n} model texture${n === 1 ? "" : "s"} not found` : "",
-            ...list.slice(0, 3).map((l) => h("div.model-warn", { title: l }, l)));
-          texInfo.title = list.join("\n");
+            ...list.slice(0, 3).map(([p, e]) => h("div.model-warn.clickable", { title: `${p}: ${e}\nClick: show the objects using it`,
+              onclick: () => showEntries(users(p)) }, `${p}: ${e}`)));
+          texInfo.title = list.map(([p, e]) => `${p}: ${e}`).join("\n");
         });
         const cliffInfo = h("div.muted", {}, "Loading cliffs…");
         /** Cliff types and the game's file list, once loaded. */
@@ -431,9 +448,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Objects without a model (start locations, unknown ids) stay markers.
           renderer.setMarkers("doodads", d.unresolved.map((p) => marker(p, [90, 200, 90])));
           renderer.setMarkers("units", u.unresolved.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
-          const errors = [...d.errors, ...u.errors];
-          problems.replaceChildren(...errors.slice(0, 20).map((e) => h("div.model-warn", { title: e }, e)),
-            ...(errors.length > 20 ? [h("div.muted", {}, `… ${errors.length - 20} more`)] : []));
+          // Each problem shows its objects when clicked; those without a model can be removed at once.
+          const found = [...d.problems, ...u.problems];
+          const broken = found.flatMap((p) => p.items);
+          problems.replaceChildren(
+            ...found.slice(0, 20).map((p) => h("div.model-warn.clickable", {
+              title: `${p.message}\nClick: show ${p.items.length === 1 ? "the object" : `the ${p.items.length} objects`}`,
+              onclick: () => showEntries(p.items),
+            }, `${p.message} (${p.items.length})`)),
+            ...(found.length > 20 ? [h("div.muted", {}, `… ${found.length - 20} more`)] : []),
+            ...(broken.length && editable ? [h("button.terrain-cleanup", {
+              title: "Deletes every placed object whose model doesn't load or whose id is unknown (one undo step)",
+              onclick: async () => {
+                const c = await w3.window.showWarning(`Delete ${broken.length} placed object${broken.length === 1 ? "" : "s"} without a model? (Ctrl+Z undoes it)`, "Delete", "Cancel");
+                if (c === "Delete") deleteEntries(broken);
+              },
+            }, `Remove ${broken.length} without a model`)] : []));
           // Keep the selection on the same entries.
           if (group.length) selectEntries(group.filter((p) => fileOf(p)));
           else {
@@ -504,9 +534,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const apply = (poses: Pose[]) => { entries.forEach((e, i) => setPlacement(e, [...poses[i].position], poses[i].angle)); refreshGroupRings(); };
           pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });
         };
-        const deleteSelected = () => {
+        const deleteSelected = () => deleteEntries(selectedEntries());
+        /** Deletes placements as one undo step. */
+        const deleteEntries = (entries: Placed[]) => {
           // Each entry with its file and index, so undo restores the order.
-          const items = selectedEntries().map((entry) => ({ entry, f: fileOf(entry)! })).filter((x) => x.f)
+          const items = entries.map((entry) => ({ entry, f: fileOf(entry)! })).filter((x) => x.f)
             .map((x) => ({ ...x, i: x.f.list.indexOf(x.entry) })).sort((a, b) => a.i - b.i);
           if (!items.length) return;
           const doIt = () => { for (const { entry, f } of items) f.list.splice(f.list.indexOf(entry), 1); };
@@ -767,6 +799,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const insts = (group.length ? group : selected?.pick ? [selected.pick.placed] : []).map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
           renderer.setSelection(insts.map(ringOf));
           redraw();
+        };
+        /** Moves the view to entries (the first one) and selects those that have a model. */
+        const showEntries = (entries: Placed[]) => {
+          if (!entries.length) return;
+          // Close enough to see one object (objects without a model are only markers).
+          renderer.distance = Math.min(renderer.distance, 1600);
+          look(entries[0].position[0], entries[0].position[1]);
+          selectEntries(entries);
         };
         /** Selects these entries: none clears, one shows its details, more a summary. */
         const selectEntries = (entries: Placed[]) => {

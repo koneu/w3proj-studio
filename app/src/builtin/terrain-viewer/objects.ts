@@ -105,8 +105,11 @@ export interface LoadResult {
   batches: ObjectBatch[];
   /** Objects without a drawable model (start locations, unknown ids, load errors). */
   unresolved: Placed[];
-  errors: string[];
+  /** Models that didn't load and ids without a model, with the placements concerned. */
+  problems: LoadProblem[];
 }
+
+export interface LoadProblem { message: string; items: Placed[] }
 
 /** Loads models for the terrain view. `readFile` reads map-imported files
  *  first; textures are shared between models. */
@@ -114,6 +117,13 @@ export class ObjectLoader {
   private textures = new Map<string, Promise<WebGLTexture | null>>();
   /** Textures that couldn't be read or decoded, with the reason. */
   readonly missing = new Map<string, string>();
+  /** Texture path (lower case) → model paths (lower case) that use it. */
+  private textureUsers = new Map<string, Set<string>>();
+
+  /** Model paths (lower case) that use a texture (as listed in `missing`). */
+  modelsUsing(texture: string): Set<string> {
+    return this.textureUsers.get(texture.toLowerCase()) ?? new Set();
+  }
 
   constructor(private gl: WebGL2RenderingContext,
     private readFile: (path: string) => Promise<Uint8Array>, private onTexture: () => void) {}
@@ -157,7 +167,12 @@ export class ObjectLoader {
         const stand = model.sequences.find((s) => /^stand/i.test(s.name)) ?? model.sequences[0];
         gpu.pose({ frame: stand?.start ?? 0, seqStart: stand?.start ?? 0, seqEnd: stand?.end ?? 0, time: 0 });
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
-          if (p) this.texture(req.retexture?.(p) ?? p, model.textures[i].flags).then((t) => { gpu.textures[i] = t; });
+          if (!p) return;
+          const tex = req.retexture?.(p) ?? p;
+          let users = this.textureUsers.get(tex.toLowerCase());
+          if (!users) this.textureUsers.set(tex.toLowerCase(), (users = new Set()));
+          users.add(req.path.toLowerCase());
+          this.texture(tex, model.textures[i].flags).then((t) => { gpu.textures[i] = t; });
         });
         return gpu;
       })();
@@ -207,9 +222,15 @@ export class ObjectLoader {
     baseOf: (id: string) => string | undefined = () => undefined): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
+    // Ids without a model (start locations have none on purpose).
+    const unknown = new Map<string, Placed[]>();
     for (const [index, p] of placed.entries()) {
       const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
-      if (!skin) { unresolved.push(p); continue; }
+      if (!skin) {
+        unresolved.push(p);
+        if (p.id !== "sloc") unknown.set(p.id, [...(unknown.get(p.id) ?? []), p]);
+        continue;
+      }
       const path = modelPath(skin, p.variation);
       const key = `${path}|${skin.texFile}`;
       let entry = byModel.get(key);
@@ -227,6 +248,10 @@ export class ObjectLoader {
     const entries = [...byModel.values()];
     const { batches, failed } = await this.loadModels(group, entries.map((e) => e.req));
     for (const f of failed) unresolved.push(...entries[f.index].items);
-    return { batches, unresolved, errors: failed.map((f) => f.error) };
+    const problems: LoadProblem[] = [
+      ...failed.map((f) => ({ message: f.error, items: entries[f.index].items })),
+      ...[...unknown].map(([id, items]) => ({ message: `${id}: unknown object (no model; not in the game's or the map's object data)`, items })),
+    ];
+    return { batches, unresolved, problems };
   }
 }

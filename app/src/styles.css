@@ -327,6 +327,9 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .model-side h4 { margin: 14px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
 .model-facts div { margin: 2px 0; }
 .model-warn { color: var(--warning); }
+.model-warn.clickable { cursor: pointer; }
+.model-warn.clickable:hover { text-decoration: underline; }
+.terrain-cleanup { margin-top: 6px; }
 .model-list { display: flex; flex-direction: column; gap: 2px; }
 .model-row { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
 .model-row span { overflow: hidden; text-overflow: ellipsis; }
