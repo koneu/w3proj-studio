@@ -150,6 +150,8 @@ export interface ProjectInfo {
 export interface FileInfo {
   path: string;
   size: number;
+  /** Last write (ms since 1970). */
+  modified: number;
 }
 
 export interface GameInfo {
@@ -200,6 +202,10 @@ export interface W3Api {
     registerProvider(id: string, provider: EditorProvider): Disposable;
     open(path: string, providerId?: string): Promise<void>;
     activePath(): string | null;
+    /** Whether an editor of the file has unsaved changes. */
+    isDirty(path: string): boolean;
+    /** When another tab becomes active (its file and editor id), or the last one closes (null). */
+    onDidChangeActive(listener: (active: { path: string; editor: string } | null) => void): Disposable;
     /** Saves every editor with unsaved changes (e.g. before packing); resolves with how many. */
     saveAll(): Promise<number>;
     /** Asks once about unsaved changes (save all / don't save / cancel), then closes every

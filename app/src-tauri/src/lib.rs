@@ -60,6 +60,8 @@ fn project_open(path: String) -> CmdResult<ProjectInfo> {
 struct FileInfo {
     path: String,
     size: u64,
+    /// Last write, ms since the Unix epoch (0 if unknown): to notice changes made outside the app.
+    modified: u64,
 }
 
 /// All project files except build output and VCS metadata.
@@ -78,8 +80,14 @@ fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
                     stack.push(path);
                 }
             } else {
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                out.push(FileInfo { path: rel, size });
+                let meta = entry.metadata().ok();
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let modified = meta
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                out.push(FileInfo { path: rel, size, modified });
             }
         }
     }

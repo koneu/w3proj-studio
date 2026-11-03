@@ -8,6 +8,8 @@ interface Tab {
   tabEl: HTMLElement;
   instance?: EditorInstance;
   dirty: boolean;
+  doc?: EditorDocument;
+  provider?: EditorProvider;
 }
 
 export interface DocumentIO {
@@ -30,7 +32,8 @@ export class EditorService {
   private providers = new Map<string, EditorProvider>();
   private tabs: Tab[] = [];
   private active: Tab | null = null;
-  readonly onDidChangeActive = new Emitter<string | null>();
+  /** The active tab (file and editor id), or null when none is open. */
+  readonly onDidChangeActive = new Emitter<{ path: string; editor: string } | null>();
   activate: (event: string) => Promise<void> = async () => {};
   /** "editorAssociations" setting: glob → editor id; checked before manifest defaults. */
   associations: () => Record<string, string> = () => ({});
@@ -73,6 +76,11 @@ export class EditorService {
 
   allContributions() {
     return this.contributions;
+  }
+
+  /** Whether an editor of the file has unsaved changes. */
+  isDirty(path: string): boolean {
+    return this.tabs.some((t) => t.path.toLowerCase() === path.toLowerCase() && t.dirty);
   }
 
   activePath(): string | null {
@@ -123,12 +131,32 @@ export class EditorService {
       writeBytes: (bytes) => this.io.writeBytes(path, bytes),
       setDirty: (d) => { tab.dirty = d; tab.tabEl.classList.toggle("dirty", d); },
     };
+    tab.doc = doc;
+    tab.provider = provider;
+    await this.load(tab);
+  }
+
+  private async load(tab: Tab) {
     try {
-      tab.instance = await provider.resolve(el, doc);
+      tab.instance = await tab.provider!.resolve(tab.el, tab.doc!);
       if (this.active === tab) tab.instance.focus?.();
     } catch (e) {
-      el.replaceChildren(h("div.editor-error", {}, `Could not open ${path}: ${e}`));
+      tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e}`));
     }
+  }
+
+  /** Files changed outside the app: their editors without unsaved changes open the file again
+   *  (in place); resolves with the paths whose editors have unsaved changes (left as they are). */
+  async reload(paths: Set<string>): Promise<string[]> {
+    const kept: string[] = [];
+    for (const t of this.tabs.filter((x) => paths.has(x.path.toLowerCase()) && x.provider)) {
+      if (t.dirty) { kept.push(t.path); continue; }
+      t.instance?.dispose?.();
+      t.instance = undefined;
+      t.el.replaceChildren();
+      await this.load(t);
+    }
+    return kept;
   }
 
   async save() {
@@ -206,6 +234,6 @@ export class EditorService {
     }
     tab.tabEl.scrollIntoView({ block: "nearest", inline: "nearest" });
     tab.instance?.focus?.();
-    this.onDidChangeActive.fire(tab.path);
+    this.onDidChangeActive.fire({ path: tab.path, editor: tab.providerId });
   }
 }

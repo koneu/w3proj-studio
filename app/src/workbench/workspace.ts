@@ -39,13 +39,49 @@ export class WorkspaceService {
     if (!this.info) return;
     this.info = await invoke<ProjectInfo>("project_open", { path: this.info.root });
     this.fileList = await invoke<FileInfo[]>("project_files", { root: this.info.root });
+    this.ownWrites.clear();
     if (fire) this.onDidChange.fire();
+  }
+
+  /** Files written through the workspace since the last refresh (lower case). */
+  private ownWrites = new Set<string>();
+
+  /** Re-reads the file list and returns the files changed, added or removed by something else
+   *  (git, another program) since the last refresh, lower case; fires onDidChange if any. */
+  async externalChanges(): Promise<Set<string>> {
+    if (!this.info) return new Set();
+    const before = new Map(this.fileList.map((f) => [f.path.toLowerCase(), f]));
+    const own = new Set(this.ownWrites);
+    const root = this.info.root;
+    const after = await invoke<FileInfo[]>("project_files", { root });
+    if (this.info?.root !== root) return new Set();
+    const changed = new Set<string>();
+    for (const f of after) {
+      const k = f.path.toLowerCase(), b = before.get(k);
+      before.delete(k);
+      if ((!b || b.size !== f.size || b.modified !== f.modified) && !own.has(k)) changed.add(k);
+    }
+    for (const k of before.keys()) if (!own.has(k)) changed.add(k);
+    this.fileList = after;
+    this.ownWrites.clear();
+    if (changed.size) {
+      this.info = await invoke<ProjectInfo>("project_open", { path: root });
+      this.onDidChange.fire();
+    }
+    return changed;
   }
 
   resolve(projectPath: string): string {
     if (/^[a-z]:[\\/]/i.test(projectPath) || projectPath.startsWith("\\\\")) return projectPath;
     if (!this.info) throw new Error("no project is open");
     return joinPath(this.info.root, projectPath);
+  }
+
+  /** A path as the file list has it (project-relative, forward slashes), lower case. */
+  private relative(p: string): string {
+    const abs = this.resolve(p).replace(/\\/g, "/").toLowerCase();
+    const root = (this.info?.root ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return abs.startsWith(root + "/") ? abs.slice(root.length + 1) : abs;
   }
 
   readText(p: string) {
@@ -56,6 +92,7 @@ export class WorkspaceService {
   }
   async writeText(p: string, text: string) {
     await writeText(this.resolve(p), text);
+    this.ownWrites.add(this.relative(p));
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
   /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
@@ -78,6 +115,7 @@ export class WorkspaceService {
   }
   async writeBytes(p: string, bytes: Uint8Array) {
     await writeBytes(this.resolve(p), bytes);
+    this.ownWrites.add(this.relative(p));
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
 }

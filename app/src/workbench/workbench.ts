@@ -112,6 +112,27 @@ export class Workbench {
     await this.host.fire("*");
     await this.views.showContainer("explorer");
 
+    // Files changed outside the app (git checkout, another editor) are noticed when the window
+    // gets the focus back: the file list refreshes and their open editors reload.
+    let checking = false;
+    window.addEventListener("focus", async () => {
+      if (checking || !this.workspace.project()) return;
+      checking = true;
+      try {
+        const changed = await this.workspace.externalChanges();
+        if (!changed.size) return;
+        this.log.append(`${changed.size} file(s) changed outside the app`);
+        const kept = await this.editors.reload(changed);
+        if (kept.length) {
+          void this.notifications.show("warning", `Changed on disk while you have unsaved edits: ${kept.join(", ")}. Saving overwrites the file; close without saving to load it again.`, []);
+        }
+      } catch (e) {
+        this.log.append(`checking for external changes failed: ${e}`);
+      } finally {
+        checking = false;
+      }
+    });
+
     // Projects can ship their own extensions in .w3proj/extensions.
     let scannedRoot: string | null = null;
     this.workspace.onDidChange.on(async () => {
@@ -160,6 +181,8 @@ export class Workbench {
         registerProvider: (id, provider) => wb.editors.registerProvider(id, provider),
         open: (path, providerId) => wb.editors.open(path, providerId),
         activePath: () => wb.editors.activePath(),
+        onDidChangeActive: (l) => wb.editors.onDidChangeActive.on(l),
+        isDirty: (p) => wb.editors.isDirty(p),
         closeAll: () => wb.editors.closeAll(),
         closeAllAsking: () => wb.editors.closeAllAsking(),
         saveAll: () => wb.editors.saveAll(),

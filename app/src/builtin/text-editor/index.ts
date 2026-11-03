@@ -171,6 +171,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   }));
   const status = w3.statusBar.add({ id: "w3.textEditor.cursor", text: "", align: "right", priority: 10 });
   ctx.subscriptions.push(status);
+  // The cursor status belongs to the active text editor (each editor fills it when it becomes active).
+  ctx.subscriptions.push(w3.editors.onDidChangeActive((a) => { if (a?.editor !== "w3.textEditor") status.text = ""; }));
 
   ctx.subscriptions.push(
     w3.editors.registerProvider("w3.textEditor", {
@@ -220,6 +222,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }),
         });
         updateStatus(view);
+        const activeSub = w3.editors.onDidChangeActive((a) => { if (a?.editor === "w3.textEditor" && a.path === doc.path) updateStatus(view); });
         openViews.set(doc.path, view);
         const want = pendingReveal.get(doc.path);
         if (want) { pendingReveal.delete(doc.path); requestAnimationFrame(() => reveal(view, want)); }
@@ -236,8 +239,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dispose: () => {
             if (openViews.get(doc.path) === view) openViews.delete(doc.path);
             lint?.stop();
+            activeSub.dispose();
             view.destroy();
-            status.text = "";
           },
         };
       },
