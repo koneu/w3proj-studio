@@ -129,8 +129,11 @@ export class EditorService {
 
   private addTab(path: string, id: string): Tab {
     const el = h("div.editor-pane");
+    // Virtual documents show their editor's title; "w3:<kind>:<file>" ones (e.g. a diff) the file too.
+    const editorTitle = this.contributions.find((c) => c.id === id)?.title ?? path;
+    const about = /^w3:[^:]+:(.+)$/.exec(path)?.[1];
     const title = path.startsWith("w3:")
-      ? (this.contributions.find((c) => c.id === id)?.title ?? path)
+      ? (about ? `${about.split("/").pop()} (${editorTitle})` : editorTitle)
       : path.split(/[/:]/).pop()!;
     const tab: Tab = { path, providerId: id, el, dirty: false, tabEl: h("div.tab", { title: path }) };
     const closeBtn = h("span.tab-close", { onclick: (e: MouseEvent) => { e.stopPropagation(); this.close(tab); } }, "×");

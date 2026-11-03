@@ -698,6 +698,106 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<Tool
     .map_err(err)?
 }
 
+// ---------------------------------------------------------------- git
+
+/// Runs git in `root` (no console window): stdout, or git's message on failure.
+fn git(root: &str, args: &[&str]) -> CmdResult<Vec<u8>> {
+    let mut cmd = Command::new("git");
+    cmd.args(args).current_dir(root);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().map_err(|e| format!("git: {e} (is git installed and on PATH?)"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(out.stdout)
+}
+
+#[derive(Serialize)]
+struct GitChange {
+    /// Project-relative, forward slashes.
+    path: String,
+    /// "M" modified, "A" added, "D" deleted, "R" renamed, "U" untracked, "C" conflict.
+    status: String,
+    /// Renames: the old path.
+    from: Option<String>,
+}
+
+#[derive(Serialize)]
+struct GitStatus {
+    branch: String,
+    changes: Vec<GitChange>,
+}
+
+/// The project's uncommitted changes (it may sit anywhere inside a repository); None when it
+/// isn't in one.
+#[tauri::command]
+async fn git_status(root: String) -> CmdResult<Option<GitStatus>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Ok(prefix) = git(&root, &["rev-parse", "--show-prefix"]) else { return Ok(None) };
+        let prefix = String::from_utf8_lossy(&prefix).trim().to_string();
+        let branch = git(&root, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|b| String::from_utf8_lossy(&b).trim().to_string())
+            .unwrap_or_default();
+        let out = git(&root, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."])?;
+        let text = String::from_utf8_lossy(&out);
+        let rel = |p: &str| p.strip_prefix(&prefix).unwrap_or(p).to_string();
+        let mut changes = Vec::new();
+        let mut parts = text.split('\0').filter(|s| !s.is_empty());
+        while let Some(entry) = parts.next() {
+            if entry.len() < 4 {
+                continue;
+            }
+            let (x, y) = (entry.as_bytes()[0] as char, entry.as_bytes()[1] as char);
+            let path = rel(&entry[3..]);
+            // Renames and copies are followed by the old path.
+            let from = if matches!(x, 'R' | 'C') { parts.next().map(rel) } else { None };
+            let status = match (x, y) {
+                ('?', _) => "U",
+                ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D') => "C",
+                (_, 'D') | ('D', _) => "D",
+                ('R', _) => "R",
+                ('A', _) => "A",
+                _ => "M",
+            };
+            changes.push(GitChange { path, status: status.into(), from });
+        }
+        Ok(Some(GitStatus { branch, changes }))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// A project file as committed in HEAD: its text, or None when HEAD doesn't have it. Fails for
+/// files that aren't UTF-8 text.
+#[tauri::command]
+async fn git_show(root: String, path: String) -> CmdResult<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let spec = format!("HEAD:./{path}");
+        if git(&root, &["cat-file", "-e", &spec]).is_err() {
+            return Ok(None);
+        }
+        let bytes = git(&root, &["show", &spec])?;
+        String::from_utf8(bytes).map(Some).map_err(|_| "binary file".to_string())
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Size of a file in HEAD (for binary files), or None.
+#[tauri::command]
+async fn git_size(root: String, path: String) -> CmdResult<Option<u64>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let spec = format!("HEAD:./{path}");
+        Ok(git(&root, &["cat-file", "-s", &spec]).ok().and_then(|b| String::from_utf8_lossy(&b).trim().parse().ok()))
+    })
+    .await
+    .map_err(err)?
+}
+
 #[cfg(windows)]
 mod job {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -790,6 +890,9 @@ pub fn run() {
             world_editor_open,
             game_test_map,
             tool_run,
+            git_status,
+            git_show,
+            git_size,
             tool_temp_dir,
             watched_maps,
             game_info,

@@ -710,5 +710,23 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .problem-icon { flex-shrink: 0; width: 12px; }
 .problem-row.error .problem-icon { color: var(--error); }
 .problem-row.warning .problem-icon { color: var(--warning); }
+
+/* Source Control */
+.scm-commit { display: flex; flex-direction: column; gap: 4px; padding: 6px 14px; }
+.scm-message { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.scm-row { display: flex; align-items: baseline; gap: 2px; padding: 2px 8px 2px 14px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.scm-row:hover { background: var(--bg-hover); }
+.scm-row small { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.scm-status { font-family: var(--mono); font-weight: bold; padding-left: 6px; }
+.scm-M .scm-status, .scm-R .scm-status { color: var(--warning); }
+.scm-A .scm-status, .scm-U .scm-status { color: #98c379; }
+.scm-D .scm-status, .scm-C .scm-status { color: var(--error); }
+.scm-D .scm-name { text-decoration: line-through; }
+.diff-pane { display: flex; flex-direction: column; height: 100%; }
+.diff-head { display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.diff-actions { margin-left: auto; display: flex; gap: 4px; }
+.diff-view { flex: 1; min-height: 0; overflow: auto; }
+.diff-view .cm-mergeView { min-height: 100%; }
+.diff-view .cm-editor { font-family: var(--mono); }
 .problem-text { overflow-wrap: anywhere; }
 .statusbar-item[data-id="w3.problems.status"] { white-space: pre; }
