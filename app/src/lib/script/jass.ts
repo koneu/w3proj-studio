@@ -9,7 +9,7 @@ import { parseSlk } from "../formats/text";
 import { jassToLua, RAW } from "./lua";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
-import { triggersSection } from "./triggers";
+import { scriptItems, triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { itemsSection, unitsSection, type UnitJson } from "./units";
 import { dropSection, itemTablesSection, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
@@ -73,6 +73,7 @@ export interface ScriptInput {
 // ---- helpers ---------------------------------------------------------------------------
 
 const EOL = "\r\n";
+const STARS = "//***************************************************************************";
 /** Section banner as the World Editor writes it. */
 export function banner(title: string): string {
   return ["//***************************************************************************", "//*", `//*  ${title}`, "//*",
@@ -184,8 +185,9 @@ function sortedRegions(i: ScriptInput): RegionJson[] {
   return i.regions ?? [];
 }
 
+/** Triggers (not variables, and not script items: type 32 has no trigger object). */
 function triggerItems(i: ScriptInput) {
-  return (i.triggers?.items ?? []).filter((t): t is Extract<typeof t, { ecas: unknown }> => "ecas" in t && t.type !== 16);
+  return (i.triggers?.items ?? []).filter((t): t is Extract<typeof t, { ecas: unknown }> => "ecas" in t && t.type !== 16 && t.type !== 32);
 }
 
 /** The value a variable starts with: its initial value, else the type's default (CreateGroup() …). */
@@ -223,8 +225,13 @@ export function customScript(i: ScriptInput): string {
   // Leading line breaks of the stored text are dropped.
   const text = (i.custom?.header ?? "").replace(/^(\r?\n)+/, "");
   // In Lua maps the header is Lua already: copied line by line (lua.ts RAW).
-  if (i.lua) return banner("Custom Script Code") + (text ? text.split(/\r?\n/).map((l) => RAW + l + EOL).join("") : "");
-  return banner("Custom Script Code") + (text ? text.replace(/\r?\n/g, EOL) + EOL : "");
+  const lines = (t: string) => (i.lua ? t.split(/\r?\n/).map((l) => RAW + l + EOL).join("") : t.replace(/\r?\n/g, EOL) + EOL);
+  // Then the script items (Reforged): each under its own banner.
+  const scripts = i.triggers ? scriptItems({ triggers: i.triggers, custom: i.custom }) : [];
+  if (!scripts.length) return banner("Custom Script Code") + (text ? lines(text) : "");
+  // With script items the banner's empty line moves to the end of the section.
+  return banner("Custom Script Code").slice(0, -EOL.length) + (text ? lines(text) : "")
+    + scripts.map((s) => `${STARS}${EOL}//*  ${s.name}${EOL}${s.text ? lines(s.text) : ""}`).join("") + EOL;
 }
 
 export function sounds(i: ScriptInput): string {

@@ -5,6 +5,7 @@
   "description": "Writes war3map.j (or war3map.lua for Lua maps) from the map's data like the World Editor does on save: triggers, variables, regions, cameras, sounds, placed units and destructables, item tables, player and force setup. Runs when one of those files is saved, or on command.",
   "activationEvents": ["onStartup"],
   "contributes": {
+    "services": [{ "id": "w3.scriptLanguages", "description": "Script languages written in trigger texts that compile to JASS (vJASS, Zinc, cJass, Wurst …): register." }],
     "commands": [{ "id": "w3.script.generate", "title": "Generate Map Script", "category": "Project" }],
     "configuration": {
       "title": "Map Script",

@@ -281,6 +281,15 @@ function banner(t: TriggerItem): string {
   return lines.join(EOL) + EOL;
 }
 
+/** Script items (wtg item type 32, Reforged): custom script that isn't a trigger. The World
+ *  Editor writes them into the "Custom Script Code" section after the map's header, in tree
+ *  order (disabled ones left out), each under a "//*  <name>" banner. */
+export function scriptItems(i: Pick<TriggerScriptInput, "triggers" | "custom">): { name: string; text: string }[] {
+  const items = i.triggers.items.filter((t): t is TriggerItem => "ecas" in t && (t.type === 8 || t.type === 32));
+  return items.map((t, k) => ({ t, text: i.custom?.texts[k] ?? "" }))
+    .filter(({ t }) => t.type === 32 && t.enabled && !t.isComment).map(({ t, text }) => ({ name: t.name, text: text ?? "" }));
+}
+
 /** The trigger part of war3map.j (after the "Triggers" banner). */
 export function triggersSection(i: TriggerScriptInput): string {
   const items = i.triggers.items.filter((t): t is TriggerItem => "ecas" in t && t.type !== 16);
@@ -289,8 +298,9 @@ export function triggersSection(i: TriggerScriptInput): string {
   const out: string[] = [];
   const included: TriggerItem[] = [];
   for (const t of items) {
-    // Disabled triggers and comment items (separators) aren't compiled.
-    if (!t.enabled || t.isComment) continue;
+    // Disabled triggers and comment items (separators) aren't compiled; script items (type 32)
+    // are in the "Custom Script Code" section.
+    if (!t.enabled || t.isComment || t.type === 32) continue;
     included.push(t);
     // GUI triggers end with a blank line; custom text gets one line break after it (even when it ends with one).
     if (t.isCustom) {

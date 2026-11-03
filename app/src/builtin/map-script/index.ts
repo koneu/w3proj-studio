@@ -1,4 +1,5 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesService } from "../../extensions/services";
 import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
@@ -39,6 +40,16 @@ interface GameTables {
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const out = w3.output.channel("Map Script");
+  // Script languages (extensions) that compile trigger texts into JASS.
+  const languages: ScriptLanguage[] = [];
+  const languageService: ScriptLanguagesService = {
+    register(language) {
+      languages.push(language);
+      return { dispose: () => { const i = languages.indexOf(language); if (i >= 0) languages.splice(i, 1); } };
+    },
+    languages: () => [...languages],
+  };
+  ctx.subscriptions.push(w3.services.provide(SCRIPT_LANGUAGES_SERVICE, languageService));
 
   let tables: Promise<GameTables> | null = null;
   const gameTables = () => {
@@ -67,7 +78,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** Builds the map script from the project's files. */
-  const generate = async (): Promise<{ path: string; text: string; vjass?: string }> => {
+  const generate = async (): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
     // Read directly rather than from the file list, which lags behind fresh saves (New Map).
     const json = async <T>(p: string): Promise<T | null> => {
       const text = await w3.workspace.readText(`${p}.json`).catch(() => null);
@@ -82,10 +93,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const wtg = await bytes("map/war3map.wtg"), wct = await bytes("map/war3map.wct");
     const triggers = wtg ? parseWtg(wtg, g.data) : undefined;
     const custom = triggers && wct ? parseWct(wct, textTriggers(triggers).length) : null;
-    // vJASS maps aren't regenerated (no vJASS compiler yet).
-    const texts = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")].join("\n");
+    // A language extension compiles maps written in it (JASS maps only); vJASS without one isn't
+    // regenerated (the uncompiled text would break the map).
+    const textList = [custom?.header ?? "", ...(custom?.texts ?? []).map((t) => t ?? "")];
+    const texts = textList.join("\n");
     const current = await w3.workspace.readText(path).catch(() => "");
-    if (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current)) {
+    const language = info.scriptType === 1 ? undefined : languages.find((l) => l.detect({ texts: textList, script: current }));
+    if (!language && (VJASS_SOURCE.test(texts) || VJASS_OUTPUT.test(current))) {
       return { path, text: "", vjass: VJASS_OUTPUT.test(current) ? "its script was compiled from vJASS" : "its triggers contain vJASS" };
     }
     const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
@@ -120,7 +134,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const sounds = (await json<{ sounds: NonNullable<ScriptInput["sounds"]> }>("map/war3map.w3s"))?.sounds ?? [];
     const durations = await soundDurations(sounds.map((s) => s.file), path);
 
-    return { path, text: generateScript({
+    const script = generateScript({
       info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a),
       lights: { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") },
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
@@ -129,7 +143,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       regions: (await json<{ regions: ScriptInput["regions"] }>("map/war3map.w3r"))?.regions,
       cameras: (await json<{ cameras: ScriptInput["cameras"] }>("map/war3map.w3c"))?.cameras,
       sounds, soundDuration: (f) => durations.get(f), soundLabel: (l) => g.soundLabels.get(l), string: (v) => wts?.resolve(v) ?? v,
-    }) };
+    });
+    if (!language) return { path, text: script };
+    // The language's compiler gets the script as the World Editor hands it to JassHelper.
+    const [commonJ, blizzardJ] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
+    return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title };
   };
 
   /** Sound lengths in ms: imported files, the game's, else what the current script says. */
@@ -158,22 +176,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const write = (reason: string) => {
     running = running.then(async () => {
       try {
-        const { path, text, vjass } = await generate();
+        const { path, text, vjass, language } = await generate();
         const file = path.slice(4);
         if (vjass) {
-          out.append(`${reason}: ${file} not written: ${vjass}, which needs a vJASS compiler (JassHelper); the script stays as it is.`);
+          out.append(`${reason}: ${file} not written: ${vjass}, and no script language extension compiles it (vJASS: enable "vJASS (JassHelper)"); the script stays as it is.`);
           const root = w3.workspace.project()?.root ?? "";
           if (!warned.has(root)) {
             warned.add(root);
             void w3.window.showWarning(`This map uses vJASS (${vjass}), so ${file} isn't regenerated from the triggers: changed triggers don't reach the map script. ` +
-              "Compile it in the World Editor (JassHelper) for now.");
+              "Enable the vJASS (JassHelper) extension, or compile it in the World Editor.");
           }
           return;
         }
         const current = await w3.workspace.readText(path).catch(() => null);
         if (current === text) { out.append(`${reason}: ${file} up to date`); return; }
         await w3.workspace.writeText(path, text);
-        out.append(`${reason}: ${file} written (${text.length} chars)`);
+        out.append(`${reason}: ${file} written (${text.length} chars${language ? `, compiled with ${language}` : ""})`);
       } catch (e) {
         out.append(`${reason}: map script not written: ${e instanceof Error ? e.message : String(e)}`);
         throw e;

@@ -290,6 +290,29 @@ export interface ProblemsService {
 
 export const PROBLEMS_SERVICE = "w3.problems";
 
+/** "w3.scriptLanguages", provided by Map Script: languages written in trigger texts that compile
+ *  to the JASS the game runs (vJASS, Zinc, cJass, Wurst, …), each one an extension. When the map
+ *  script is generated, the first language that detects itself compiles it. */
+export interface ScriptLanguagesService {
+  register(language: ScriptLanguage): { dispose(): void };
+  /** The registered languages (in registration order). */
+  languages(): ScriptLanguage[];
+}
+
+export const SCRIPT_LANGUAGES_SERVICE = "w3.scriptLanguages";
+
+export interface ScriptLanguage {
+  id: string;
+  /** Shown in messages ("vJASS (JassHelper)"). */
+  title: string;
+  /** Whether the map uses the language: the trigger texts (map header first) and the current
+   *  map script (e.g. a compiler's output markers). */
+  detect(opts: { texts: string[]; script: string }): boolean;
+  /** The generated script (trigger texts as written) turned into plain JASS. Throws with the
+   *  compiler's messages when it fails. */
+  compile(opts: { script: string; commonJ: string; blizzardJ: string }): Promise<string>;
+}
+
 export interface ProblemCheck {
   id: string;
   /** Group title in the list ("Map script", "Object data paths"). */

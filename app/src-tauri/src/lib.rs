@@ -626,6 +626,47 @@ fn game_test_map(exe: String, map: String) -> CmdResult<()> {
     launch(&exe, &map).map(|_| ())
 }
 
+/// What an external tool run printed and returned.
+#[derive(Serialize)]
+struct ToolResult {
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+/// Runs an external program (e.g. a script compiler a language extension uses, like the game's
+/// JassHelper) in `cwd` and waits for it; no console window, output captured.
+#[tauri::command]
+async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<ToolResult> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = Command::new(&exe);
+        cmd.args(&args).current_dir(&cwd);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let out = cmd.output().map_err(|e| format!("{exe}: {e}"))?;
+        Ok(ToolResult {
+            code: out.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
+/// A new empty folder in the system's temp folder, for one tool run's input and output files.
+#[tauri::command]
+fn tool_temp_dir() -> CmdResult<String> {
+    let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let dir = std::env::temp_dir().join("w3proj-studio").join(format!("tool-{stamp}"));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn watched_maps(watches: State<Watches>) -> Vec<String> {
     watches
@@ -669,6 +710,8 @@ pub fn run() {
             extensions_scan,
             world_editor_open,
             game_test_map,
+            tool_run,
+            tool_temp_dir,
             watched_maps,
             game_info,
             game_list,

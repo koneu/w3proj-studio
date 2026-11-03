@@ -1,0 +1,19 @@
+{
+  "id": "w3.vjass",
+  "name": "vJASS (JassHelper)",
+  "version": "0.1.0",
+  "description": "Compiles vJASS in trigger texts (libraries, scopes, structs, Zinc, //! directives) into the map's JASS with JassHelper, which ships with the game (_retail_\\x86_64\\JassHelper). JassHelper is open source (zlib licence, by Víctor Hugo Soliz); it isn't copied, the installed program is called. A script language extension (service w3.scriptLanguages): other languages can be added the same way.",
+  "activationEvents": ["onStartup"],
+  "extensionDependencies": ["w3.mapScript"],
+  "contributes": {
+    "commands": [{ "id": "w3.vjass.check", "title": "vJASS: Check JassHelper", "category": "Project" }],
+    "configuration": {
+      "title": "vJASS (JassHelper)",
+      "properties": {
+        "vjass.jassHelper": { "type": "string", "scope": "user", "default": "", "description": "jasshelper.exe to use. Empty: the one in the game folder (game.installDir\\_retail_\\x86_64\\JassHelper)." },
+        "vjass.debug": { "type": "boolean", "default": false, "description": "Debug mode (--debug): keeps debug statements and adds checks, like the World Editor's JassHelper > Enable debug mode." },
+        "vjass.optimize": { "type": "boolean", "default": true, "description": "Optimizer (off: --nooptimize), like the World Editor's JassHelper > Enable optimizer." }
+      }
+    }
+  }
+}
