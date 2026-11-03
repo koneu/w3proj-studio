@@ -1075,6 +1075,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         syncPick();
         const stopPick = toolGroups.onChange(syncPick);
+        const live = () => ({ units: unitsFile?.list ?? [], doodads: dooFile?.list ?? [] });
+        toolGroups.livePlacements = live;
         if (editable) queueMicrotask(syncGroups);
 
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
@@ -1321,6 +1323,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           dispose: () => {
             stopGroups();
             stopPick();
+            if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             window.removeEventListener("mousemove", onMove);

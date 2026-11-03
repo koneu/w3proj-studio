@@ -41,10 +41,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       });
     };
 
+    // The open terrain editor's placements (unsaved ones too), else the saved files.
+    const units = async () => (terrain.placedObjects()?.units as Placed[] | undefined) ?? (await json<{ units: Placed[] }>("map/war3mapUnits.doo"))?.units ?? [];
+    const doodads = async () => (terrain.placedObjects()?.doodads as Placed[] | undefined) ?? (await json<{ doodads: Placed[] }>("map/war3map.doo"))?.doodads ?? [];
     const placedOf: Record<string, () => Promise<(TriggerParamChoice & { at: number[] })[]>> = {
-      unit: async () => placed((await json<{ units: Placed[] }>("map/war3mapUnits.doo"))?.units ?? [], "w3u", "unit", true),
-      item: async () => placed((await json<{ units: Placed[] }>("map/war3mapUnits.doo"))?.units ?? [], "w3t", "item", false),
-      destructable: async () => placed((await json<{ doodads: Placed[] }>("map/war3map.doo"))?.doodads ?? [], "w3b", "dest", false),
+      unit: async () => placed(await units(), "w3u", "unit", true),
+      item: async () => placed(await units(), "w3t", "item", false),
+      destructable: async () => placed(await doodads(), "w3b", "dest", false),
     };
     const regions = async () => (await json<{ regions: Region[] }>("map/war3map.w3r"))?.regions ?? [];
     const lists: Record<string, () => Promise<TriggerParamChoice[]>> = {
@@ -75,7 +78,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }));
 
     // Clicking it on the map: the nearest placed object, or the smallest region there.
-    // (Reads the saved files: placements not saved yet aren't found.)
     const what: Record<string, string> = { unit: "a unit", item: "an item", destructable: "a destructable", rect: "a region" };
     ctx.subscriptions.push(gui.registerParamEditor({
       id: "map.pick",
@@ -93,7 +95,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             .filter((x) => x.d <= PICK_RADIUS).sort((a, b) => a.d - b.d)[0];
           if (near) return near.c.param;
         }
-        void w3.window.showWarning(`There is no ${type === "rect" ? "region" : type} there (saved placements only).`);
+        void w3.window.showWarning(`There is no ${type === "rect" ? "region" : type} there.`);
         return undefined;
       },
     }));

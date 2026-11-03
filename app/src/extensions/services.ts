@@ -32,6 +32,9 @@ export interface TerrainService {
   /** Opens the terrain editor and resolves with the next point clicked on the ground
    *  (undefined on Esc or when another pick starts). `prompt` is shown meanwhile. */
   pickPoint(opts: { prompt: string }): Promise<{ x: number; y: number } | undefined>;
+  /** The open terrain editor's placements as they are now (unsaved ones included), as in
+   *  war3mapUnits.doo / war3map.doo JSON; null when no terrain editor is open. */
+  placedObjects(): { units: unknown[]; doodads: unknown[] } | null;
 }
 
 export const TERRAIN_SERVICE = "w3.terrain";
