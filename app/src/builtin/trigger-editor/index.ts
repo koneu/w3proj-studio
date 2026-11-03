@@ -41,6 +41,8 @@ let treeClipboard: { items: Item[]; texts: (string | null)[]; variables: Variabl
 
 /** The open trigger editor (there is one war3map.wtg per project). */
 let openView: TriggerView | null = null;
+/** "Variables" asked before the editor was open: the new view starts there. */
+let startWithVariables = false;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const kinds = new KindRegistry();
@@ -51,9 +53,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) throw new Error("This project has no war3map.wtg.");
       await w3.editors.open(WTG, "w3.triggerEditor");
+      openView?.setMode("triggers");
     }),
     w3.commands.register("w3.triggers.variables", async () => {
-      await w3.commands.execute("w3.triggers.open");
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      startWithVariables = !openView;
+      await w3.editors.open(WTG, "w3.triggerEditor");
       openView?.showVariables();
     }),
     // Activity bar entry: a way in and what the map has.
@@ -116,6 +121,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.replaceChildren();
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d));
         if (!doc.readOnly) openView = view;
+        if (startWithVariables) { startWithVariables = false; view.showVariables(); }
         return {
           save: async () => {
             await doc.writeBytes(writeWtg(view.file));
@@ -240,7 +246,10 @@ class TriggerView {
       handle: this.handle,
       allocId: (type) => this.allocId(type),
       category: () => this.variableCategory(),
-      select: (v) => { this.selected = this.file.reforged ? { kind: "item", type: 64, id: v.id } : { kind: "variables" }; },
+      select: (v) => {
+        this.selected = this.file.reforged ? { kind: "item", type: 64, id: v.id } : { kind: "variables" };
+        if (this.mode === "triggers") this.mode = "variables";
+      },
       scripts: () => [
         { get: () => this.header, set: (t) => { this.header = t; } },
         ...textTriggers(this.file).map((t) => ({ get: () => this.texts.get(t) ?? null, set: (text: string) => { this.texts.set(t, text); } })),
@@ -248,7 +257,7 @@ class TriggerView {
     };
     el.tabIndex = -1;
     el.addEventListener("keydown", this.keydown);
-    el.append(h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, editable ? this.toolbar() : null, this.tree), this.detail);
+    el.append(h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, editable ? this.toolbar() : null, this.tree), this.detail);
     this.detail.addEventListener("mousedown", () => { this.area = "detail"; });
     this.unsubscribe = kinds.onChange(() => this.renderDetail());
     this.renderTree();
@@ -267,7 +276,21 @@ class TriggerView {
   markSaved() { this.savedAt = this.at; this.setDirty(false); }
 
   /** Selects the variables table. */
-  showVariables() { this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
+  showVariables() { this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
+
+  /** What the tree lists: triggers and comments, variables, or both (as stored, Reforged files
+   *  keep variables in the categories). Categories show in every mode. */
+  private mode: "triggers" | "variables" | "all" = "triggers";
+  private modeBar = h("div.trig-modes");
+  setMode(m: "triggers" | "variables" | "all") {
+    if (m === this.mode) return;
+    this.mode = m;
+    const s = this.find(this.selected);
+    // A selection the tree no longer shows goes back to the map header.
+    if (s && ((m === "triggers" && s.type === 64) || (m === "variables" && "ecas" in s))) this.selected = { kind: "header" };
+    this.renderTree();
+    this.renderDetail();
+  }
 
   /** Redraws the selected item (e.g. after names were looked up). */
   refresh() { this.renderDetail(); }
@@ -537,6 +560,9 @@ class TriggerView {
     this.renderTree();
   }
   private renderTree() {
+    const modes = [["triggers", "Triggers"], ["variables", "Variables"], ["all", "All"]] as const;
+    this.modeBar.replaceChildren(...modes.map(([m, label]) =>
+      h(`button.trig-mode${this.mode === m ? ".active" : ""}`, { onclick: () => this.setMode(m) }, label)));
     const rows: HTMLElement[] = [];
     const root = this.file.items.find((i) => i.type === 1);
     rows.push(this.row(root?.name || this.w3.workspace.project()?.name || "Map", "trig-map", 0, { kind: "header" }, { title: "Map header: custom script code" }));
@@ -549,8 +575,8 @@ class TriggerView {
         if (it.type === 2 || it.type === 4) {
           rows.push(this.row(it.name, it.type === 4 ? "trig-cat" : "trig-lib", depth, sel, { toggle: it.id }));
           if (!this.collapsed.has(it.id)) walk(it.id, depth + 1);
-        } else if (it.type === 64) rows.push(this.row(it.name, "trig-var", depth, sel));
-        else if ("ecas" in it) {
+        } else if (it.type === 64) { if (this.mode !== "triggers") rows.push(this.row(it.name, "trig-var", depth, sel)); }
+        else if ("ecas" in it && this.mode !== "variables") {
           rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel, { off: !it.enabled }));
         }
       }
