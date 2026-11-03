@@ -10,7 +10,8 @@ import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditor
 import { StringTable } from "../../lib/formats/wts";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
-import type { DisplayContext } from "../../lib/triggers/display";
+import { ecaText, type DisplayContext } from "../../lib/triggers/display";
+import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
   parseWct, parseWtg, textTriggers, writeWct, writeWtg,
@@ -246,6 +247,11 @@ class TriggerView {
       setCustomText: (t, text) => { this.texts.set(t, text); },
       edit: (label, change, opts) => this.edit(label, change, opts),
       icon: (path) => icon(w3, path),
+      openTrigger: (name) => {
+        const it = this.file.items.find((i) => "ecas" in i && i.type !== 16 && `gg_trg_${ident(i.name)}` === name);
+        if (it) this.revealItem(it);
+        return !!it;
+      },
     };
     this.vars = {
       handle: this.handle,
@@ -262,7 +268,7 @@ class TriggerView {
     };
     el.tabIndex = -1;
     el.addEventListener("keydown", this.keydown);
-    el.append(h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, editable ? this.toolbar() : null, this.tree), this.detail);
+    el.append(h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, this.searchBox, editable ? this.toolbar() : null, this.tree), this.detail);
     this.detail.addEventListener("mousedown", () => { this.area = "detail"; });
     this.unsubscribe = kinds.onChange(() => this.renderDetail());
     this.renderTree();
@@ -583,16 +589,23 @@ class TriggerView {
       h(`button.trig-mode${this.mode === m ? ".active" : ""}`, { onclick: () => this.setMode(m) }, label)));
     const rows: HTMLElement[] = [];
     const root = this.file.items.find((i) => i.type === 1);
-    rows.push(this.row(root?.name || this.w3.workspace.project()?.name || "Map", "trig-map", 0, { kind: "header" }, { title: "Map header: custom script code" }));
-    rows.push(this.row(`Variables (${this.file.variables.length})`, "trig-vars", 0, { kind: "variables" }));
+    const q = this.query.trim().toLowerCase();
+    if (!q) {
+      rows.push(this.row(root?.name || this.w3.workspace.project()?.name || "Map", "trig-map", 0, { kind: "header" }, { title: "Map header: custom script code" }));
+      rows.push(this.row(`Variables (${this.file.variables.length})`, "trig-vars", 0, { kind: "variables" }));
+    }
     const children = new Map<number, Item[]>();
     for (const it of this.file.items) if (it.type !== 1) children.set(it.parent, [...(children.get(it.parent) ?? []), it]);
+    // While searching: only matches and the categories around them (expanded).
+    const shown = q ? this.searchMatches(q, children) : null;
+    if (shown && !shown.size) rows.push(h("div.trig-row.muted", {}, "No matches."));
     const walk = (parent: number, depth: number) => {
       for (const it of children.get(parent) ?? []) {
+        if (shown && !shown.has(it)) continue;
         const sel: Selection = { kind: "item", type: it.type, id: it.id };
         if (it.type === 2 || it.type === 4) {
           rows.push(this.row(it.name, it.type === 4 ? "trig-cat" : "trig-lib", depth, sel, { toggle: it.id }));
-          if (!this.collapsed.has(it.id)) walk(it.id, depth + 1);
+          if (shown || !this.collapsed.has(it.id)) walk(it.id, depth + 1);
         } else if (it.type === 64) { if (this.mode !== "triggers") rows.push(this.row(it.name, "trig-var", depth, sel)); }
         else if ("ecas" in it && this.mode !== "variables") {
           rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel, { off: !it.enabled }));
@@ -601,6 +614,56 @@ class TriggerView {
     };
     walk(root ? root.id : -1, 1);
     this.tree.replaceChildren(...rows);
+  }
+
+  /** Search text of the tree (names, comments, lines of GUI triggers, custom script, variables). */
+  private query = "";
+  private searchBox = h("input.trig-search", { type: "search", placeholder: "Search triggers (names, actions, script)",
+    oninput: () => { clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => { this.query = this.searchBox.value; this.renderTree(); }, 150); },
+    onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") { this.searchBox.value = ""; this.query = ""; this.renderTree(); } } });
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Items matching `q` in the current mode, with the categories containing them. */
+  private searchMatches(q: string, children: Map<number, Item[]>): Set<Item> {
+    const display = this.handle.display;
+    const hit = (s: string | null | undefined) => !!s && s.toLowerCase().includes(q);
+    const ecaHit = (es: Eca[]): boolean => es.some((e) => {
+      try { if (hit(ecaText(e, display)) || hit(e.name)) return true; } catch { /* unknown function */ }
+      return ecaHit(e.children);
+    });
+    const matches = (it: Item): boolean => {
+      if (it.type === 64) {
+        const v = this.file.variables.find((x) => x.id === it.id);
+        return this.mode !== "triggers" && (hit(it.name) || hit(v?.type) || hit(v ? this.handle.data.types.get(v.type)?.name : ""));
+      }
+      if (!("ecas" in it) || this.mode === "variables") return false;
+      return hit(it.name) || hit(it.description) || ecaHit(it.ecas) || (it.isCustom && hit(this.texts.get(it)));
+    };
+    const shown = new Set<Item>();
+    const visit = (it: Item): boolean => {
+      let any = it.type !== 2 && it.type !== 4 ? matches(it) : hit(it.name);
+      for (const c of children.get(it.id) ?? []) if (it.type === 2 || it.type === 4) any = visit(c) || any;
+      if (any) shown.add(it);
+      return any;
+    };
+    const root = this.file.items.find((i) => i.type === 1);
+    for (const it of children.get(root ? root.id : -1) ?? []) visit(it);
+    return shown;
+  }
+  /** Selects a trigger (from a gg_trg_ reference elsewhere). */
+  revealItem(it: Item) {
+    if (this.query) { this.query = ""; this.searchBox.value = ""; }
+    if ("ecas" in it && this.mode === "variables") this.mode = "triggers";
+    for (let p = it.parent; ;) {
+      const c = this.file.items.find((x) => (x.type === 4 || x.type === 2) && x.id === p);
+      if (!c) break;
+      this.collapsed.delete(c.id);
+      p = c.parent;
+    }
+    this.selected = { kind: "item", type: it.type, id: it.id };
+    this.area = "tree";
+    this.renderTree();
+    this.renderDetail();
+    this.tree.querySelector(".trig-row.active")?.scrollIntoView({ block: "nearest" });
   }
 
   // ---- detail -----------------------------------------------------------------------

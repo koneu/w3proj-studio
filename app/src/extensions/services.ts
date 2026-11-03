@@ -232,6 +232,8 @@ export interface TriggerEditorHandle {
   edit(label: string, change: () => void, opts?: { keepView?: boolean }): void;
   /** Icon of a trigger category path (ReplaceableTextures\WorldEditUI\…) as a data URL. */
   icon(path: string): Promise<string | null>;
+  /** Selects the trigger a gg_trg_<name> global stands for; false if there's none. */
+  openTrigger(global: string): boolean;
 }
 
 /** "w3.triggers.gui", provided by the GUI trigger kind (a sub-extension of the

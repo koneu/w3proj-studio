@@ -25,6 +25,8 @@ export interface TriggerFunction {
   category: string;
   /** Default per argument from _Defaults: a preset, call or value; "_" for none. */
   defaults: string[];
+  /** Allowed range per argument from _Limits (min, max; null = open); none when there are none. */
+  limits?: [number | null, number | null][];
   /** Explanation shown under the function list (TriggerStrings.txt: <Name>Hint=…). */
   hint: string;
   /** The JASS function it compiles to (_ScriptName), else its own name. */
@@ -108,6 +110,11 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       if (e.has("Category")) f.category = e.get("Category")!;
       if (e.get("ScriptName")) f.scriptName = e.get("ScriptName")!;
       if (e.get("Defaults")) f.defaults = splitList(e.get("Defaults")!);
+      if (e.get("Limits")) {
+        // Two entries per argument: minimum, maximum ("_" for none).
+        const v = splitList(e.get("Limits")!).map((x) => (x === "_" || x === "" || Number.isNaN(Number(x)) ? null : Number(x)));
+        f.limits = f.args.map((_, k) => [v[2 * k] ?? null, v[2 * k + 1] ?? null]);
+      }
       if (e.has("Parameters")) {
         f.pattern = splitList(e.get("Parameters")!).filter((p) => p !== "").map((p) => (p.startsWith("~") ? { arg: p.slice(1) } : str(p)));
         // SetVariable's pattern repeats the display name in front ("Set Variable","Set ",~Variable…).

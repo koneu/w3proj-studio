@@ -70,9 +70,12 @@ class GuiView {
     e.preventDefault();
     e.stopPropagation();
     this.select(sel);
-    if (!this.ed.editable) return;
     const items: MenuItem[] = [];
-    if ("section" in sel) items.push({ label: `New ${KIND_NAMES[sel.section]}…`, run: () => void this.add(sel.section) });
+    const onEca = "path" in sel && sel.branch === undefined;
+    if (!this.ed.editable) {
+      // Read-only: copying and following references only.
+      if (onEca) items.push({ label: "Copy", hint: "Ctrl+C", run: () => this.copy(false) });
+    } else if ("section" in sel) items.push({ label: `New ${KIND_NAMES[sel.section]}…`, run: () => void this.add(sel.section) });
     else if (sel.branch !== undefined) {
       const at = this.locate(sel.path);
       const k = at ? branchKind(at.eca, sel.branch) : ACTION;
@@ -89,9 +92,19 @@ class GuiView {
         { label: "Cut", hint: "Ctrl+X", run: () => this.copy(true) },
         { label: "Copy", hint: "Ctrl+C", run: () => this.copy(false) });
     }
-    if (clipboard.length) items.push(...(items.length ? ["-" as const] : []), { label: `Paste ${clipboard.length > 1 ? `${clipboard.length} lines` : KIND_NAMES[clipboard[0].kind]}`, hint: "Ctrl+V", run: () => this.paste() });
-    if ("path" in sel && sel.branch === undefined) items.push("-", { label: "Delete", hint: "Del", run: () => this.remove() });
-    this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
+    if (this.ed.editable) {
+      if (clipboard.length) items.push(...(items.length ? ["-" as const] : []), { label: `Paste ${clipboard.length > 1 ? `${clipboard.length} lines` : KIND_NAMES[clipboard[0].kind]}`, hint: "Ctrl+V", run: () => this.paste() });
+      if (onEca) items.push("-", { label: "Delete", hint: "Del", run: () => this.remove() });
+    }
+    // Triggers this line refers to.
+    if (onEca && "path" in sel) {
+      const at = this.locate(sel.path);
+      const refs = new Set<string>();
+      const visitP = (p: Param) => { if (p.type === 1 && p.value.startsWith("gg_trg_")) refs.add(p.value); p.call?.params.forEach(visitP); };
+      at?.eca.params.forEach(visitP);
+      if (refs.size) items.push(...(items.length ? ["-" as const] : []), ...[...refs].map((r) => ({ label: `Go to ${r.slice(7).replace(/_/g, " ")}`, run: () => { this.ed.openTrigger(r); } })));
+    }
+    if (items.length) this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
   }
 
   /** Del removes the selected ECA; Ctrl+C/X/V copy, cut and paste ECAs. */
@@ -350,9 +363,15 @@ class GuiView {
     const at = s && "path" in s ? this.locate(s.path) : null;
     if (at) this.ed.edit(at.eca.enabled ? "Disable" : "Enable", () => { at.eca.enabled = !at.eca.enabled; });
   }
-  private async editParamAt(owner: Param[], i: number, type: string) {
-    const p = await editParam(this.ed, type, owner[i], this.editors.forType(type));
+  private async editParamAt(owner: Param[], i: number, type: string, limits?: [number | null, number | null]) {
+    const p = await editParam(this.ed, type, owner[i], this.editors.forType(type), limits);
     if (p) this.ed.edit("Edit parameter", () => { owner[i] = p; });
+  }
+  /** The index of an array variable parameter (an integer of its own). */
+  private async editIndex(p: Param) {
+    const current = p.index ?? { type: 3, value: "0" };
+    const v = await editParam(this.ed, "integer", current, this.editors.forType("integer"));
+    if (v) this.ed.edit("Edit array index", () => { p.index = v; });
   }
 
   // ---- display ----------------------------------------------------------------------
@@ -365,10 +384,20 @@ class GuiView {
       const content: (HTMLElement | string)[] = p && p.type === FUNCTION && p.call
         ? ["(", ...this.sentence(p.call.kind, p.call.name, p.call.params), ")"]
         : [unset ? `<${f?.args[i] ?? "?"}>` : paramText(p, ed.display, type)];
-      if (p?.index) content.push("[", paramText(p.index, ed.display, "integer"), "]");
+      if (p?.index) {
+        const idx = p.index;
+        content.push("[", h(`span.trig-param${ed.editable ? ".editable" : ""}`, {
+          title: "Array index (integer)",
+          onclick: (e: Event) => { if (!ed.editable) return; e.stopPropagation(); void this.editIndex(p); },
+        }, idx.type === FUNCTION && idx.call ? ["(", ...this.sentence(idx.call.kind, idx.call.name, idx.call.params), ")"] : paramText(idx, ed.display, "integer")), "]");
+      }
+      const trigRef = p && p.type === 1 && p.value.startsWith("gg_trg_");
       return h(`span.trig-param${unset ? ".unset" : ""}${ed.editable ? ".editable" : ""}`, {
-        title: ed.data.types.get(type)?.name ?? type,
-        onclick: (e: Event) => { if (!ed.editable) return; e.stopPropagation(); void this.editParamAt(params, i, type); },
+        title: `${ed.data.types.get(type)?.name ?? type}${trigRef ? " · Ctrl+click opens the trigger" : ""}`,
+        onclick: (e: MouseEvent) => {
+          if (trigRef && (e.ctrlKey || e.metaKey)) { e.stopPropagation(); ed.openTrigger(p.value); return; }
+          if (!ed.editable) return;
+          e.stopPropagation(); void this.editParamAt(params, i, type, f?.limits?.[i]); },
       }, ...content);
     };
     if (!f) return name ? [`${name}(`, ...params.flatMap((_, i) => (i ? [", ", link(i)] : [link(i)])), ")"] : [];

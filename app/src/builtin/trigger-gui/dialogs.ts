@@ -102,7 +102,8 @@ export function pickFunction(ed: TriggerEditorHandle, title: string, functions: 
 }
 
 /** Edits one parameter of argument type `type`. */
-export function editParam(ed: TriggerEditorHandle, type: string, current: Param, extra: TriggerParamEditor[]): Promise<Param | undefined> {
+export function editParam(ed: TriggerEditorHandle, type: string, current: Param, extra: TriggerParamEditor[],
+  limits?: [number | null, number | null]): Promise<Param | undefined> {
   const data = ed.data, file = ed.file;
   const typeName = data.types.get(type)?.name ?? type;
   return modal<Param>(`${typeName}`, (done, hide) => {
@@ -121,9 +122,29 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       categoryName: categoryName(ed), preview: (f) => functionPreview(ed, f),
     }) });
     if (takesValue(data, type)) tabs.push({ label: "Value", build: () => {
+      // Numbers must be numbers (whole for integers) within the function's limits (_Limits).
+      const base = data.types.get(type)?.base ?? type;
+      const problem = (v: string): string | null => {
+        if (base !== "integer" && base !== "real") return null;
+        const n = Number(v.trim());
+        if (v.trim() === "" || !Number.isFinite(n)) return `Enter a number.`;
+        if (base === "integer" && !Number.isInteger(n)) return "Enter a whole number.";
+        const [min, max] = limits ?? [null, null];
+        if (min !== null && n < min) return `The lowest value is ${min}.`;
+        if (max !== null && n > max) return `The highest value is ${max}.`;
+        return null;
+      };
+      const note = h("div.trig-value-note", {}, limits && (limits[0] !== null || limits[1] !== null)
+        ? `Allowed: ${limits[0] ?? "…"} to ${limits[1] ?? "…"}` : "");
+      const take = () => {
+        const err = problem(input.value);
+        if (err) { note.textContent = err; note.classList.add("error"); input.focus(); return; }
+        done({ type: VALUE, value: base === "integer" || base === "real" ? input.value.trim() : input.value });
+      };
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
-        onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") done({ type: VALUE, value: input.value }); } });
-      return [input, h("div.newmap-buttons", {}, h("button.primary", { onclick: () => done({ type: VALUE, value: input.value }) }, "OK"))];
+        onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") take(); },
+        oninput: () => { note.classList.remove("error"); } });
+      return [input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: take }, "OK"))];
     } });
     const body = h("div.trig-dialog-body");
     const bar = h("div.picker-tabs");
