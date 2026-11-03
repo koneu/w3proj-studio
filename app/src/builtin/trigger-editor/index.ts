@@ -362,9 +362,19 @@ class TriggerView {
     for (let n = 1; ; n++) { const name = `${base} ${String(n).padStart(3, "0")}`; if (!taken.has(name)) return name; }
   }
 
-  private newCategory() {
-    this.edit("New category", () => {
-      const { parent, index } = this.insertionPoint(true);
+  /** The selected category, if categories can nest there (Reforged files only). */
+  private subcategoryParent(): Item | undefined {
+    const sel = this.find(this.selected);
+    return this.file.reforged && sel && sel.type === 4 ? sel : undefined;
+  }
+  /** A new category next to the selected one, or (`sub`) inside it, after its contents. */
+  private newCategory(sub = false) {
+    const outer = sub ? this.subcategoryParent() : undefined;
+    if (sub && !outer) return;
+    this.edit(sub ? "New subcategory" : "New category", () => {
+      const { parent, index } = outer
+        ? { parent: outer.id, index: this.file.items.indexOf(subtree(this.file, outer).at(-1)!) + 1 }
+        : this.insertionPoint(true);
       const it: Item = { type: 4, id: this.allocId(4), name: this.uniqueName("Untitled Category"), isComment: 0, expanded: 1, parent };
       this.file.items.splice(index, 0, it);
       this.collapsed.delete(parent);
@@ -502,11 +512,13 @@ class TriggerView {
       const v = newMenu.value;
       newMenu.value = "";
       if (v === "category") this.newCategory();
+      else if (v === "subcategory") this.newCategory(true);
       else if (v === "comment") this.newTrigger(null);
       else if (v === "variable") newVariable(this.vars);
       else { const k = this.kinds.all().find((x) => x.id === v); if (k) this.newTrigger(k); }
     } });
     const fill = () => newMenu.replaceChildren(h("option", { value: "" }, "New…"), h("option", { value: "category" }, "Category"),
+      ...(this.file.reforged ? [h("option", { value: "subcategory", title: "Inside the selected category" }, "Subcategory")] : []),
       ...this.kinds.all().filter((k) => k.init).map((k) => h("option", { value: k.id }, k.title)), h("option", { value: "comment" }, "Comment"),
       h("option", { value: "variable" }, "Variable"));
     fill();
@@ -543,6 +555,7 @@ class TriggerView {
     if (category !== undefined) items.push({ label: this.collapsed.has(category) ? "Expand" : "Collapse", run: () => this.toggle(category) }, "-");
     if (this.handle.editable) {
       items.push({ label: "New Category", run: () => this.newCategory() },
+        ...(this.subcategoryParent() ? [{ label: "New Subcategory", run: () => this.newCategory(true) }] : []),
         ...this.kinds.all().filter((k) => k.init).map((k) => ({ label: `New ${k.title}`, run: () => this.newTrigger(k) })),
         { label: "New Comment", run: () => this.newTrigger(null) }, { label: "New Variable", run: () => newVariable(this.vars) });
       if (sel.kind === "item") {
