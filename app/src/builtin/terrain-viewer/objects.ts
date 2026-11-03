@@ -132,8 +132,13 @@ export class ObjectLoader {
     const key = `${path.toLowerCase()}|${flags}`;
     let t = this.textures.get(key);
     if (!t) {
-      // Reforged models name .tif/.blp sources the game ships as .dds.
-      const variants = /\.(blp|tif|tga)$/i.test(path) ? [path, path.replace(/\.\w+$/, ".dds")] : [path];
+      // Reforged models name .tif/.blp sources the game ships as .dds. Some (even the game's own DE
+      // Goldmine) name a texture by an absolute path on the artist's machine
+      // ("C:/Users/…/Art/HD//Buildings/Other/Goldmine/…"): its tail parts are tried as game paths.
+      const tails = /^([a-z]:)?[\\/]/i.test(path)
+        ? path.split(/[\\/]+/).map((_, i, parts) => parts.slice(i).join("\\")).slice(1).filter((t) => t.includes("\\"))
+        : [path];
+      const variants = tails.flatMap((t) => (/\.(blp|tif|tga)$/i.test(t) ? [t, t.replace(/\.\w+$/, ".dds")] : [t]));
       t = (async () => {
         let error = "";
         for (const v of variants) {
