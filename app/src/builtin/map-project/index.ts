@@ -25,7 +25,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const out = w3.output.channel("Project");
   const projectItem = w3.statusBar.add({ id: "w3.project.name", text: "", command: "w3.project.reveal", priority: 100 });
   const weItem = w3.statusBar.add({ id: "w3.project.we", text: "", tooltip: "World Editor is open; saves sync into the project", align: "right", priority: 50 });
-  ctx.subscriptions.push(projectItem, weItem);
+  // The release step on screen (not only in the command palette): pack, and pack + start the game.
+  const buildItem = w3.statusBar.add({ id: "w3.project.build", text: "", command: "w3.project.pack", priority: 99 });
+  const testItem = w3.statusBar.add({ id: "w3.project.test", text: "", command: "w3.project.testMap", priority: 98 });
+  ctx.subscriptions.push(projectItem, weItem, buildItem, testItem);
 
   const root = () => {
     const p = w3.workspace.project();
@@ -37,6 +40,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const p = w3.workspace.project();
     projectItem.text = p ? `◈ ${p.name.replace(/\|c[0-9a-f]{8}|\|r/gi, "")}` : "";
     projectItem.tooltip = p?.root ?? "";
+    buildItem.text = p ? "⬇ Build" : "";
+    buildItem.tooltip = p ? `Pack the project into ${p.default_output} (Ctrl+Shift+B)` : "";
+    testItem.text = p ? "▶ Test" : "";
+    testItem.tooltip = p ? "Pack and start Warcraft III with the map (Ctrl+F5)" : "";
   };
   ctx.subscriptions.push(w3.workspace.onDidChange(updateStatus));
 
@@ -66,6 +73,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   const pack = async (output: string | null): Promise<PackReport> => {
+    // What's open in editors goes into the build too.
+    const saved = await w3.editors.saveAll();
+    if (saved) out.append(`saved ${saved} editor${saved === 1 ? "" : "s"} before packing`);
     const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
     out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);
     return r;

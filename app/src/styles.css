@@ -692,3 +692,6 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .gs-input { width: 100%; font: inherit; }
 .gs-default { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .gs-empty, .gs-loading { padding: 12px; }
+
+/* Build / Test in the status bar: the release step, visible */
+.statusbar-item[data-id="w3.project.build"], .statusbar-item[data-id="w3.project.test"] { font-weight: 600; padding: 0 10px; background: rgba(255, 255, 255, 0.10); border-radius: 3px; margin: 0 2px; }

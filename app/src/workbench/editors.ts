@@ -147,6 +147,15 @@ export class EditorService {
     for (const t of this.tabs.filter((t) => pred(t.path))) await this.close(t, true);
   }
 
+  /** Saves every editor with unsaved changes; resolves with how many were saved. */
+  async saveAll(): Promise<number> {
+    let n = 0;
+    for (const t of this.tabs) {
+      if (t.dirty && t.instance?.save) { await t.instance.save(); n++; }
+    }
+    return n;
+  }
+
   async closeAll() {
     for (const t of [...this.tabs]) await this.close(t, true);
   }

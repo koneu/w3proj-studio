@@ -198,6 +198,8 @@ export interface W3Api {
     registerProvider(id: string, provider: EditorProvider): Disposable;
     open(path: string, providerId?: string): Promise<void>;
     activePath(): string | null;
+    /** Saves every editor with unsaved changes (e.g. before packing); resolves with how many. */
+    saveAll(): Promise<number>;
     /** Closes every editor without asking (used when files change on disk). */
     closeAll(): Promise<void>;
     /** Closes the editors of one file without asking. */

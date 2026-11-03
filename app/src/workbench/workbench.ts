@@ -160,6 +160,7 @@ export class Workbench {
         open: (path, providerId) => wb.editors.open(path, providerId),
         activePath: () => wb.editors.activePath(),
         closeAll: () => wb.editors.closeAll(),
+        saveAll: () => wb.editors.saveAll(),
         close: (p) => wb.editors.closeWhere((x) => x === p),
       },
       window: {
