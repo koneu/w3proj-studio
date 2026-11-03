@@ -830,7 +830,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           list.append(...shown.map((c) => {
             const name = h("span", {}, c.id);
             loadKind(w3, c.kind).then((k) => { const n = k.names.get(c.id) ?? k.names.get(objCtx?.bases.get(c.id) ?? ""); if (n) name.textContent = n; }).catch(() => { /* id */ });
-            return h("div.terrain-sel-row", {}, h("span.muted", {}, `${c.n} ×`), name);
+            return h("div.terrain-sel-row", {}, h("span.muted", {}, `${c.n} ×`), name,
+              h("button.icon-button.terrain-sel-open", {
+                title: `Open ${c.id} in the Object Editor`,
+                onclick: () => w3.commands.execute("w3.objectEditor.open", c.kind, c.id).catch((e) => w3.window.showError(String(e))),
+              }, "↗"));
           }), ...(rows.length > shown.length ? [h("div.muted", {}, `… ${rows.length - shown.length} more types`)] : []));
           // Owner for all selected units at once.
           const units = group.filter((p) => p.player !== undefined && objCtx?.skins.get(p.id)?.kind !== "w3t");

@@ -726,7 +726,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           filter = id.toLowerCase();
           const o = file.custom.find((c) => c.id === id) ?? file.original.find((c) => c.base === id);
           select(o ?? null);
-          if (!o) status.textContent = `${id} has no modifications in this map — use "Edit standard" to change it.`;
+          if (!o) status.textContent = `${id} isn't in this map's object data — a game object: use "Edit standard" to change it; ` +
+            "a campaign's custom object: edit it in the campaign project.";
           renderList();
           renderDetail();
         };
