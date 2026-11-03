@@ -14,7 +14,7 @@ import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
-  parseWtg, readWctFile, textTriggers, writeWctFile, writeWtg,
+  readWctFile, readWtgFile, textTriggers, writeWctFile, writeWtgFile, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -23,7 +23,8 @@ import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 
-const WTG = "map/war3map.wtg";
+/** The project's trigger file (war3map.wtg.json, or a raw war3map.wtg), or null. */
+const triggerFile = (w3: W3Api) => wtgPath(w3.workspace.files());
 /** Item type → index in the per-type counts (and the high byte of its ids). */
 const TYPE_INDEX: Record<number, number> = { 1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6 };
 
@@ -61,8 +62,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.services.provide(TRIGGERS_SERVICE, kinds),
     w3.commands.register("w3.triggers.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
-      if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) throw new Error("This project has no war3map.wtg.");
-      await w3.editors.open(WTG, "w3.triggerEditor");
+      const path = triggerFile(w3);
+      if (!path) throw new Error("This project has no war3map.wtg.");
+      await w3.editors.open(path, "w3.triggerEditor");
       openView?.setMode("triggers");
     }),
     // Selects a trigger by name (opening the editor first); used by the Object Manager.
@@ -75,22 +77,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      const path = triggerFile(w3);
+      if (!path) throw new Error("This project has no war3map.wtg.");
       startWithVariables = !openView;
-      await w3.editors.open(WTG, "w3.triggerEditor");
+      await w3.editors.open(path, "w3.triggerEditor");
       openView?.showVariables();
     }),
     // Activity bar entry: a way in and what the map has.
     w3.views.register("w3.triggers.overview", {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its triggers.")); return; }
-        if (!w3.workspace.files().some((f) => f.path.toLowerCase() === WTG)) { el.append(h("div.view-empty", {}, "This project has no war3map.wtg.")); return; }
+        const path = triggerFile(w3);
+        if (!path) { el.append(h("div.view-empty", {}, "This project has no war3map.wtg.")); return; }
         const facts = h("div.terrain-facts.muted", {}, "Reading triggers…");
         el.append(h("div.tree", {}, h("div.tree-row.obj-kind", { onclick: open, title: "F4" },
           h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open Trigger Editor")),
           h("div.tree-row.obj-kind", { onclick: () => w3.commands.execute("w3.triggers.variables").catch((e) => w3.window.showError(String(e))) },
             h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Variables"))), facts);
         void (async () => {
-          const file = parseWtg(await w3.workspace.readBytes(WTG), await triggerData(w3));
+          const file = await readWtgFile(w3.workspace, path, () => triggerData(w3));
           const n = (t: number) => file.items.filter((i) => i.type === t).length;
           facts.replaceChildren(
             h("div", {}, `${n(8) + n(32)} triggers · ${n(4)} categories`),
@@ -106,7 +111,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const data = await triggerData(w3);
         let file: TriggerFile;
         try {
-          file = parseWtg(await doc.readBytes(), data);
+          file = await readWtgFile(doc, doc.path, async () => data);
         } catch (e) {
           el.replaceChildren(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
             h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
@@ -147,7 +152,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         return {
           save: async () => {
-            await doc.writeBytes(writeWtg(view.file));
+            await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, view.file);
             await writeWctFile(w3.workspace, view.customFile());
             view.markSaved();
           },

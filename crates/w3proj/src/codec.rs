@@ -5,9 +5,11 @@
 //! is always lossless no matter how incomplete a codec is.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use crate::format::{self, FormatCodec};
-use crate::{objdata, wct, Result};
+use crate::triggerdata::TriggerData;
+use crate::{objdata, wct, wtg, Error, Result};
 
 pub trait Codec: Send + Sync {
     /// Stable identifier, e.g. `objdata-json`.
@@ -71,6 +73,45 @@ impl Codec for CustomTextCodec {
     }
 }
 
+/// Where the GUI trigger codec gets the game's TriggerData.txt (asked on the first decode).
+pub type TriggerDataSource = Arc<dyn Fn() -> Option<Arc<TriggerData>> + Send + Sync>;
+
+/// GUI triggers as JSON (see `wtg`). Decoding needs TriggerData; without a source the file
+/// stays raw on unpack, while projects that have the JSON still pack.
+pub struct TriggersJson {
+    source: Option<TriggerDataSource>,
+    data: OnceLock<Option<Arc<TriggerData>>>,
+}
+
+impl TriggersJson {
+    pub fn new(source: Option<TriggerDataSource>) -> Self {
+        TriggersJson { source, data: OnceLock::new() }
+    }
+}
+
+impl Codec for TriggersJson {
+    fn id(&self) -> &'static str {
+        "wtg-json"
+    }
+    fn suffix(&self) -> &'static str {
+        ".json"
+    }
+    fn matches(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("war3map.wtg")
+    }
+    fn decode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        let data = self
+            .data
+            .get_or_init(|| self.source.as_ref().and_then(|s| s()))
+            .as_ref()
+            .ok_or_else(|| Error::Format("war3map.wtg: the game's TriggerData.txt isn't available".into()))?;
+        wtg::to_json(bytes, data)
+    }
+    fn encode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        wtg::from_json(bytes)
+    }
+}
+
 pub struct Registry {
     codecs: Vec<Box<dyn Codec>>,
 }
@@ -85,7 +126,7 @@ impl Default for Registry {
 impl Registry {
     /// Built-ins plus definitions from override folders (later folders win).
     pub fn with_formats(override_dirs: &[PathBuf]) -> Result<Self> {
-        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(CustomTextCodec)];
+        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(CustomTextCodec), Box::new(TriggersJson::new(None))];
         for def in format::load_definitions(override_dirs)? {
             codecs.push(Box::new(FormatCodec::new(def)));
         }
@@ -107,6 +148,15 @@ impl Registry {
 
     pub fn empty() -> Self {
         Registry { codecs: Vec::new() }
+    }
+
+    /// Lets the GUI trigger codec decode (it needs the game's TriggerData.txt).
+    pub fn set_trigger_data(&mut self, source: TriggerDataSource) {
+        for c in &mut self.codecs {
+            if c.id() == "wtg-json" {
+                *c = Box::new(TriggersJson::new(Some(source.clone())));
+            }
+        }
     }
 
     pub fn register(&mut self, codec: Box<dyn Codec>) {

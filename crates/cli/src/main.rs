@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -10,24 +11,47 @@ use w3proj::{Registry, UnpackOptions};
 
 const DEFAULT_INSTALL: &str = r"C:\Program Files (x86)\Warcraft III";
 
-/// The installed game's file names, read when first needed (none if it can't be opened).
-fn game_names(install: &str) -> Option<w3proj::project::NameSource> {
+/// The installed game's data, opened when first needed (None: "none", or it can't be opened).
+type LazyGame = Arc<dyn Fn() -> Option<Arc<casc::GameData>> + Send + Sync>;
+
+fn lazy_game(install: &str) -> Option<LazyGame> {
     if install.eq_ignore_ascii_case("none") {
         return None;
     }
     let install = PathBuf::from(install);
-    let names = std::sync::OnceLock::new();
-    Some(std::sync::Arc::new(move || {
+    let game = OnceLock::new();
+    Some(Arc::new(move || {
+        game.get_or_init(|| match casc::GameData::open(&install) {
+            Ok(g) => Some(Arc::new(g)),
+            Err(e) => {
+                eprintln!("note: game data not used ({e})");
+                None
+            }
+        })
+        .clone()
+    }))
+}
+
+/// The installed game's file names, read when first needed.
+fn game_names(game: &Option<LazyGame>) -> Option<w3proj::project::NameSource> {
+    let game = game.clone()?;
+    let names = OnceLock::new();
+    Some(Arc::new(move || {
         names
-            .get_or_init(|| match casc::GameData::open(&install) {
-                Ok(game) => w3proj::names::from_game_paths(game.all_paths()),
-                Err(e) => {
-                    eprintln!("note: game file names not used ({e})");
-                    Vec::new()
-                }
-            })
+            .get_or_init(|| game().map(|g| w3proj::names::from_game_paths(g.all_paths())).unwrap_or_default())
             .clone()
     }))
+}
+
+/// Lets `codecs` read GUI triggers with the game's TriggerData.txt.
+fn with_trigger_data(mut codecs: Registry, game: &Option<LazyGame>) -> Registry {
+    if let Some(game) = game.clone() {
+        codecs.set_trigger_data(Arc::new(move || {
+            let (_, bytes) = game()?.read(r"UI\TriggerData.txt", casc::Mode::Hd, None).ok()?;
+            Some(Arc::new(w3proj::triggerdata::TriggerData::parse(&String::from_utf8_lossy(&bytes))))
+        }));
+    }
+    codecs
 }
 
 #[derive(Parser)]
@@ -46,8 +70,9 @@ enum Cmd {
         /// Write the project even if some files can't be read or named.
         #[arg(long)]
         allow_incomplete: bool,
-        /// Game install folder: its file names are tried when a map's names are missing
-        /// (protected maps, files replacing the game's). "none" to skip.
+        /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
+        /// file names are tried when a map's names are missing (protected maps, files replacing
+        /// the game's). "none" to skip both.
         #[arg(long, default_value = DEFAULT_INSTALL)]
         game: String,
     },
@@ -64,8 +89,9 @@ enum Cmd {
         /// Only print failures and a summary.
         #[arg(short, long)]
         quiet: bool,
-        /// Game install folder: its file names are tried when a map's names are missing
-        /// (protected maps, files replacing the game's). "none" to skip.
+        /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
+        /// file names are tried when a map's names are missing (protected maps, files replacing
+        /// the game's). "none" to skip both.
         #[arg(long, default_value = DEFAULT_INSTALL)]
         game: String,
     },
@@ -134,11 +160,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             allow_incomplete,
             game,
         } => {
+            let game = lazy_game(&game);
             let opts = UnpackOptions {
                 allow_incomplete,
                 more_names: game_names(&game),
             };
-            let codecs = Registry::for_project(&project, &extra)?;
+            let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &game);
             let report = match w3proj::unpack(&map, &project, &codecs, &opts) {
                 Err(w3proj::Error::Incomplete(r)) => {
                     for (f, e) in &r.errors {
@@ -185,7 +212,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
         Cmd::Verify { maps, quiet, game } => {
-            let codecs = Registry::with_formats(&extra)?;
+            let game = lazy_game(&game);
+            let codecs = with_trigger_data(Registry::with_formats(&extra)?, &game);
             let names = game_names(&game);
             let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
             for map in &maps {

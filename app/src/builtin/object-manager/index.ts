@@ -7,7 +7,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { loadKind } from "../../lib/objects/metadata";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { parseWtg } from "../../lib/triggers/wtg";
+import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { buildTree, triggerRefs, type MapContents, type Node as TreeNode, type Target } from "./data";
 
@@ -138,8 +138,8 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const ids = new Set<string>([...units.map((u) => u.id), ...doodads.map((d) => d.id), ...custom.flatMap((k) => k.ids.map((o) => o.id))]);
   const names = new Map<string, string>();
   await Promise.all([...ids].map(async (id) => { const n = await objects?.name(id).catch(() => undefined); if (n) names.set(id, n); }));
-  const wtg = await w3.workspace.readBytes("map/war3map.wtg").catch(() => null);
-  const triggers = wtg ? parseWtg(wtg, parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"))) : null;
+  const wtg = wtgPath(w3.workspace.files());
+  const triggers = wtg ? await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"))).catch(() => null) : null;
   const imp = await json<{ files: { path: string }[] }>("war3map.imp");
   return {
     units, doodads, kindOf, nameOf: (id) => names.get(id) ?? id, custom,

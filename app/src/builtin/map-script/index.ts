@@ -6,7 +6,7 @@ import { StringTable } from "../../lib/formats/wts";
 import { generateScript, parseSoundLabels, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { parseWtg, readWctFile, textTriggers } from "../../lib/triggers/wtg";
+import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
 const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
@@ -90,8 +90,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const path = scriptPath(info.scriptType === 1);
     const g = await gameTables();
 
-    const wtg = await bytes("map/war3map.wtg");
-    const triggers = wtg ? parseWtg(wtg, g.data) : undefined;
+    // Either form, read directly (the file list may lag behind a fresh save).
+    // A broken file fails the generation; only a missing one means no triggers.
+    const wtgJson = await w3.workspace.readText(WTG_JSON).catch(() => null);
+    const wtg = wtgJson === null ? await bytes(WTG_RAW) : null;
+    const triggers = wtgJson !== null ? parseWtgJson(wtgJson) : wtg ? parseWtg(wtg, g.data) : undefined;
     const custom = triggers ? await readWctFile(w3.workspace, textTriggers(triggers).length) : null;
     // A language extension compiles maps written in it (JASS maps only); vJASS without one isn't
     // regenerated (the uncompiled text would break the map).

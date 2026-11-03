@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { parseWtg, writeWtg, type Param } from "../../lib/triggers/wtg";
+import { readWtgFile, writeWtgFile, wtgPath, type Param } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
@@ -115,16 +115,16 @@ async function renameReferences(w3: W3Api, renames: Map<string, string>) {
       out.append(`renamed sounds in ${n} region${n === 1 ? "" : "s"}`);
     }
   }
-  const wtg = await w3.workspace.readBytes("map/war3map.wtg").catch(() => null);
+  const wtg = wtgPath(w3.workspace.files());
   if (wtg) {
-    const file = parseWtg(wtg, parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")));
+    const file = await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")));
     let n = 0;
     const visit = (p: Param) => { if (p.type === 1 && renames.has(p.value)) { p.value = renames.get(p.value)!; n++; } p.call?.params.forEach(visit); if (p.index) visit(p.index); };
     type E = { params: Param[]; children: E[] };
     const walk = (e: E) => { e.params.forEach(visit); e.children.forEach(walk); };
     for (const it of file.items) if ("ecas" in it) (it.ecas as E[]).forEach(walk);
     if (n) {
-      await w3.workspace.writeBytes("map/war3map.wtg", writeWtg(file));
+      await writeWtgFile(w3.workspace, wtg, file);
       out.append(`renamed sounds in ${n} trigger parameter${n === 1 ? "" : "s"} (an open Trigger Editor with unsaved changes would overwrite this)`);
     }
   }

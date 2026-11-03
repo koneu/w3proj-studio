@@ -100,16 +100,29 @@ fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
 async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomplete: bool, install: Option<String>) -> CmdResult<Value> {
     let user_formats = user_format_dirs(&app)?;
     // The game's file names, for files a map has replaced (asked only when names are missing).
-    let more_names = install.filter(|i| !i.is_empty()).map(|install| {
+    let install = install.filter(|i| !i.is_empty());
+    let more_names = install.clone().map(|install| {
         let app = app.clone();
         Arc::new(move || match game_data(&app.state::<Game>(), &install) {
             Ok(g) => w3proj::names::from_game_paths(g.all_paths()),
             Err(_) => Vec::new(),
         }) as w3proj::project::NameSource
     });
+    // GUI triggers (war3map.wtg) become JSON when the game's TriggerData.txt can be read.
+    let trigger_data = install.map(|install| {
+        let app = app.clone();
+        Arc::new(move || {
+            let g = game_data(&app.state::<Game>(), &install).ok()?;
+            let (_, bytes) = g.read(r"UI\TriggerData.txt", casc::Mode::Hd, None).ok()?;
+            Some(Arc::new(w3proj::triggerdata::TriggerData::parse(&String::from_utf8_lossy(&bytes))))
+        }) as w3proj::codec::TriggerDataSource
+    });
     tauri::async_runtime::spawn_blocking(move || {
         let opts = UnpackOptions { allow_incomplete, more_names };
-        let codecs = Registry::for_project(Path::new(&dir), &user_formats).map_err(err)?;
+        let mut codecs = Registry::for_project(Path::new(&dir), &user_formats).map_err(err)?;
+        if let Some(source) = trigger_data {
+            codecs.set_trigger_data(source);
+        }
         match w3proj::unpack(Path::new(&map), Path::new(&dir), &codecs, &opts) {
             Ok(report) => serde_json::to_value(&report).map_err(err),
             Err(w3proj::Error::Incomplete(r)) => Err(format!(
@@ -127,7 +140,7 @@ async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomple
 /// Creates an empty project for a new map, or a new campaign with `campaign` (see `w3proj::create`).
 #[tauri::command]
 fn project_create(dir: String, name: String, flags: u32, max_players: u32, campaign: Option<bool>) -> CmdResult<()> {
-    let header = (!campaign.unwrap_or(false)).then(|| w3proj::header::MapHeader { name, flags, max_players, unknown: 0 });
+    let header = (!campaign.unwrap_or(false)).then_some(w3proj::header::MapHeader { name, flags, max_players, unknown: 0 });
     w3proj::create(Path::new(&dir), header).map_err(err)
 }
 

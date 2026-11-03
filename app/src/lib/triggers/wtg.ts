@@ -303,6 +303,55 @@ export function writeWct(f: CustomTextFile): Uint8Array {
   return w.done();
 }
 
+// The project keeps war3map.wtg as JSON (map/war3map.wtg.json, the w3proj codec "wtg-json", see
+// crates/w3proj/src/wtg.rs) when it could be read with the game's TriggerData.txt on unpack, else
+// raw. The JSON is a TriggerFile with keys in a fixed order (the codec's), two-space indented.
+export const WTG_RAW = "map/war3map.wtg", WTG_JSON = "map/war3map.wtg.json";
+
+/** The project's trigger file: the JSON form if there is one, else the raw file, else null. */
+export function wtgPath(files: { path: string }[]): string | null {
+  const has = (p: string) => files.some((f) => f.path.toLowerCase() === p);
+  return has(WTG_JSON) ? WTG_JSON : has(WTG_RAW) ? WTG_RAW : null;
+}
+
+/** A TriggerFile as the codec writes it (same key order, so saves don't reorder the file). */
+export function writeWtgJson(f: TriggerFile): string {
+  const opt = <K extends string, V>(k: K, v: V | undefined) => (v === undefined ? {} : { [k]: v }) as { [P in K]?: V };
+  const param = (p: Param): object => ({
+    type: p.type, value: p.value,
+    ...opt("call", p.call && { kind: p.call.kind, name: p.call.name, hasParams: p.call.hasParams, params: p.call.params.map(param), ...opt("trailer", p.call.trailer) }),
+    ...opt("index", p.index && param(p.index)),
+  });
+  const eca = (e: Eca): object => ({ kind: e.kind, ...opt("group", e.group), name: e.name, enabled: e.enabled, params: e.params.map(param), children: e.children.map(eca) });
+  const item = (i: Item): object => i.type === 64 ? { type: i.type, id: i.id, name: i.name, parent: i.parent }
+    : "ecas" in i ? { type: i.type, name: i.name, description: i.description, isComment: i.isComment, id: i.id, enabled: i.enabled, isCustom: i.isCustom,
+        initiallyOff: i.initiallyOff, runOnInit: i.runOnInit, parent: i.parent, ecas: i.ecas.map(eca) }
+    : { type: i.type, id: i.id, name: i.name, isComment: i.isComment, expanded: i.expanded, parent: i.parent };
+  return JSON.stringify({
+    reforged: f.reforged, version: f.version, counts: f.counts.map((c) => ({ count: c.count, deleted: c.deleted })), unknown: f.unknown,
+    variables: f.variables.map((v) => ({ name: v.name, type: v.type, unknown: v.unknown, isArray: v.isArray, arraySize: v.arraySize, initialized: v.initialized,
+      initialValue: v.initialValue, id: v.id, parent: v.parent })),
+    items: f.items.map(item),
+  }, null, 2) + "\n";
+}
+
+export function parseWtgJson(text: string): TriggerFile {
+  const f = JSON.parse(text) as TriggerFile;
+  if (typeof f?.reforged !== "boolean" || !Array.isArray(f.items) || !Array.isArray(f.variables)) throw new Error("war3map.wtg.json isn't a trigger file");
+  return f;
+}
+
+/** Reads the project's trigger file in either form (`path` from wtgPath). */
+export async function readWtgFile(io: Pick<WctIO, "readText" | "readBytes">, path: string, data: () => Promise<TriggerData>): Promise<TriggerFile> {
+  return path.toLowerCase().endsWith(".json") ? parseWtgJson(await io.readText(path)) : parseWtg(await io.readBytes(path), await data());
+}
+
+/** Writes the trigger file in the form `path` has. */
+export async function writeWtgFile(io: Pick<WctIO, "writeText" | "writeBytes">, path: string, f: TriggerFile) {
+  if (path.toLowerCase().endsWith(".json")) await io.writeText(path, writeWtgJson(f));
+  else await io.writeBytes(path, writeWtg(f));
+}
+
 // The project keeps war3map.wct as text (map/war3map.wct.txt, the w3proj codec "wct-text", see
 // crates/w3proj/src/wct.rs): a first line with version/layout/comment, then a marker line per
 // section ("//== header ==", "//== trigger 3 ==", " (no text)" for a stored length 0), each text

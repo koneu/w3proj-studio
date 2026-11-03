@@ -10,6 +10,9 @@
 //      the high byte (category 0x02…, trigger 0x03…).
 // wct: marker, version 1, comment, custom script length, trigger text count.
 
+import type { TriggerData } from "../../lib/triggers/triggerdata";
+import { parseWtg, type TriggerFile } from "../../lib/triggers/wtg";
+
 /** The melee actions of the default trigger, in order. */
 export const MELEE_ACTIONS = [
   "MeleeStartingVisibility", "MeleeStartingHeroLimit", "MeleeGrantHeroItems", "MeleeStartingResources",
@@ -49,4 +52,11 @@ export function defaultWtg(): Uint8Array {
 
 export function defaultWct(): Uint8Array {
   return new Writer().u32(MARKER).u32(1).str("").u32(0).u32(0).done();
+}
+
+/** The default trigger file as the project keeps it (war3map.wtg.json). Its functions take no
+ *  arguments, so it is read without the game's TriggerData. */
+export function defaultTriggerFile(): TriggerFile {
+  const noArgs = { find: () => ({ args: [] }) } as unknown as TriggerData;
+  return parseWtg(defaultWtg(), noArgs);
 }
