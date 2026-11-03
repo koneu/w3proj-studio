@@ -367,8 +367,13 @@ fn inside(root: &str, path: &str) -> CmdResult<PathBuf> {
 fn fs_delete(root: String, path: String) -> CmdResult<()> {
     let p = inside(&root, &path)?;
     std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
-    let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
-    let mut dir = p.parent().map(Path::to_path_buf);
+    remove_empty_parents(&root, &p)
+}
+
+/// Removes the folders above `file` that are empty now (up to the project root).
+fn remove_empty_parents(root: &str, file: &Path) -> CmdResult<()> {
+    let root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let mut dir = file.parent().map(Path::to_path_buf);
     while let Some(d) = dir {
         if d == root || std::fs::remove_dir(&d).is_err() {
             break;
@@ -378,7 +383,8 @@ fn fs_delete(root: String, path: String) -> CmdResult<()> {
     Ok(())
 }
 
-/// Renames (moves) a file within the project, creating folders as needed.
+/// Renames (moves) a file within the project, creating folders as needed; folders it
+/// leaves empty are removed.
 #[tauri::command]
 fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
     let src = inside(&root, &from)?;
@@ -394,7 +400,9 @@ fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
     if dst.exists() {
         return Err(format!("{to} already exists"));
     }
-    std::fs::rename(&src, &dst).map_err(|e| format!("{}: {e}", src.display()))
+    std::fs::rename(&src, &dst).map_err(|e| format!("{}: {e}", src.display()))?;
+    // A folder the file was the last one in goes too (as when deleting).
+    remove_empty_parents(&root, &src)
 }
 
 /// Copies a file (creating folders as needed), without passing its bytes through the webview:

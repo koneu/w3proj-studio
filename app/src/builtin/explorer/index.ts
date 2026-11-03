@@ -52,6 +52,9 @@ function cleanPath(input: string): string | null {
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const expanded = new Set<string>(["map"]);
   let selected: string | null = null;
+  /** Clicking a folder redraws the tree: the new one gets the keyboard focus back (F2, Del).
+   *  A clicked file opens, and its editor takes the focus. */
+  let refocus = false;
   const fail = (e: unknown) => void w3.window.showError(String(e instanceof Error ? e.message : e));
   /** The files at or under `path` (a file, or a folder of the tree). */
   const filesUnder = (path: string) => {
@@ -71,6 +74,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.workspace.refresh();
     for (let i = path.indexOf("/"); i > 0; i = path.indexOf("/", i + 1)) expanded.add(path.slice(0, i));
     selected = path;
+    w3.views.refresh("w3.explorer.files");
     await w3.editors.open(path);
   };
   const rename = async (path: string, isDir: boolean) => {
@@ -93,6 +97,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     if (isDir && expanded.has(path)) expanded.add(to);
     selected = to;
+    w3.views.refresh("w3.explorer.files");
     for (const f of reopen) await w3.editors.open(target(f));
   };
   const remove = async (path: string, isDir: boolean) => {
@@ -181,6 +186,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             title: child.file ? `${child.path} — ${formatBytes(child.file.size)}` : child.path,
             onclick: () => {
               selected = child.path;
+              refocus = isDir;
               if (isDir) {
                 if (open) expanded.delete(child.path);
                 else expanded.add(child.path);
@@ -200,6 +206,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     };
     walk(tree, 0);
     el.append(list);
+    if (refocus) { refocus = false; requestAnimationFrame(() => list.focus({ preventScroll: true })); }
   };
 
   ctx.subscriptions.push(
