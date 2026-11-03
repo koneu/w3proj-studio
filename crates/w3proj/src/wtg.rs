@@ -477,12 +477,47 @@ pub fn write(f: &TriggerFile) -> Vec<u8> {
     w.out
 }
 
-/// Binary → JSON (pretty, two-space indent, trailing line break; the app writes the same).
+/// The file's layout (the app writes the same): the file, triggers and ECAs (objects with
+/// `items`, `ecas` or `children`) one key per line, two-space indent; arrays of objects one
+/// element per line; everything else (parameters, variables, categories, counts) on one line.
+fn layout(v: &serde_json::Value, indent: &str, out: &mut String) {
+    use serde_json::Value;
+    let inner = format!("{indent}  ");
+    match v {
+        Value::Object(m) if ["items", "ecas", "children"].iter().any(|k| m.contains_key(*k)) => {
+            out.push_str("{\n");
+            for (i, (k, x)) in m.iter().enumerate() {
+                out.push_str(&inner);
+                out.push_str(&Value::String(k.clone()).to_string());
+                out.push_str(": ");
+                layout(x, &inner, out);
+                out.push_str(if i + 1 < m.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(indent);
+            out.push('}');
+        }
+        Value::Array(a) if a.iter().any(Value::is_object) => {
+            out.push_str("[\n");
+            for (i, x) in a.iter().enumerate() {
+                out.push_str(&inner);
+                layout(x, &inner, out);
+                out.push_str(if i + 1 < a.len() { ",\n" } else { "\n" });
+            }
+            out.push_str(indent);
+            out.push(']');
+        }
+        _ => out.push_str(&v.to_string()),
+    }
+}
+
+/// Binary → JSON (see `layout`; trailing line break).
 pub fn to_json(b: &[u8], data: &TriggerData) -> Result<Vec<u8>> {
     let f = parse(b, data)?;
-    let mut out = serde_json::to_vec_pretty(&f).map_err(|e| err(e.to_string()))?;
-    out.push(b'\n');
-    Ok(out)
+    let v = serde_json::to_value(&f).map_err(|e| err(e.to_string()))?;
+    let mut out = String::new();
+    layout(&v, "", &mut out);
+    out.push('\n');
+    Ok(out.into_bytes())
 }
 
 /// JSON → binary.

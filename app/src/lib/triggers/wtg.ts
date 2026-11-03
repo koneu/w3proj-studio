@@ -305,7 +305,7 @@ export function writeWct(f: CustomTextFile): Uint8Array {
 
 // The project keeps war3map.wtg as JSON (map/war3map.wtg.json, the w3proj codec "wtg-json", see
 // crates/w3proj/src/wtg.rs) when it could be read with the game's TriggerData.txt on unpack, else
-// raw. The JSON is a TriggerFile with keys in a fixed order (the codec's), two-space indented.
+// raw. The JSON is a TriggerFile with keys in a fixed order and the codec's layout (see layout()).
 export const WTG_RAW = "map/war3map.wtg", WTG_JSON = "map/war3map.wtg.json";
 
 /** The project's trigger file: the JSON form if there is one, else the raw file, else null. */
@@ -327,12 +327,25 @@ export function writeWtgJson(f: TriggerFile): string {
     : "ecas" in i ? { type: i.type, name: i.name, description: i.description, isComment: i.isComment, id: i.id, enabled: i.enabled, isCustom: i.isCustom,
         initiallyOff: i.initiallyOff, runOnInit: i.runOnInit, parent: i.parent, ecas: i.ecas.map(eca) }
     : { type: i.type, id: i.id, name: i.name, isComment: i.isComment, expanded: i.expanded, parent: i.parent };
-  return JSON.stringify({
+  return layout({
     reforged: f.reforged, version: f.version, counts: f.counts.map((c) => ({ count: c.count, deleted: c.deleted })), unknown: f.unknown,
     variables: f.variables.map((v) => ({ name: v.name, type: v.type, unknown: v.unknown, isArray: v.isArray, arraySize: v.arraySize, initialized: v.initialized,
       initialValue: v.initialValue, id: v.id, parent: v.parent })),
     items: f.items.map(item),
-  }, null, 2) + "\n";
+  }, "") + "\n";
+}
+
+/** The codec's layout: the file, triggers and ECAs (objects with items/ecas/children) one key per
+ *  line, two-space indent; arrays of objects one element per line; everything else (parameters,
+ *  variables, categories, counts) on one line. */
+function layout(v: unknown, indent: string): string {
+  const inner = indent + "  ";
+  const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+  if (isObject(v) && ("items" in v || "ecas" in v || "children" in v)) {
+    return `{\n${Object.entries(v).map(([k, x]) => `${inner}${JSON.stringify(k)}: ${layout(x, inner)}`).join(",\n")}\n${indent}}`;
+  }
+  if (Array.isArray(v) && v.some(isObject)) return `[\n${v.map((x) => inner + layout(x, inner)).join(",\n")}\n${indent}]`;
+  return JSON.stringify(v);
 }
 
 export function parseWtgJson(text: string): TriggerFile {
