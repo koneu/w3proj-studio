@@ -11,7 +11,10 @@ import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
+import { diffObjects, type ObjectChange } from "./objdiff";
 
 interface Change { path: string; status: "M" | "A" | "D" | "R" | "U" | "C"; from?: string | null }
 interface Status { branch: string; changes: Change[] }
@@ -180,7 +183,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Previous change", onclick: step(goToPreviousChunk) }, "↑"),
               h("button", { title: "Next change", onclick: step(goToNextChunk) }, "↓"),
               missing(after) ? null : h("button", { onclick: () => w3.editors.open(path).catch(failed) }, "Open File")));
-          el.replaceChildren(head, box);
+          el.replaceChildren(head, ...(OBJECT_FILE.test(path) ? [objectSummary(w3, path, a, b)] : []), box);
         };
         await render();
         // Saved again (here or outside the app): redraw.
@@ -196,4 +199,61 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
   );
   void refresh();
+}
+
+/** Object data files (map, skin and campaign); group 1 is the kind ("w3u"). */
+const OBJECT_FILE = /(?:^|\/)war3(?:map|campaign)(?:Skin)?\.(w3[utabdhq])\.json$/i;
+const MAX_OBJECTS = 200;
+
+/** Changed objects of an object data file, with their changed fields (labels and names from the
+ *  game's data, filled in when loaded); an object opens in the Object Editor. */
+function objectSummary(w3: W3Api, path: string, before: string, after: string): HTMLElement {
+  const kind = OBJECT_FILE.exec(path)![1].toLowerCase();
+  const el = h("div.diff-objects");
+  let changes: ObjectChange[];
+  try {
+    changes = diffObjects(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null);
+  } catch (e) {
+    el.append(h("div.muted", {}, `Objects can't be compared: ${(e as Error).message}`));
+    return el;
+  }
+  if (!changes.length) return el;
+  const show = (v: unknown) => {
+    const s = typeof v === "string" ? JSON.stringify(v) : String(v);
+    return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+  };
+  const counts = (["added", "changed", "removed"] as const).map((w) => [w, changes.filter((c) => c.what === w).length] as const).filter(([, n]) => n);
+  el.append(h("div.diff-objects-head", {}, `Objects: ${counts.map(([w, n]) => `${n} ${w}`).join(", ")}`));
+  const list = h("div.diff-objects-list");
+  el.append(list);
+  // Labels and names come later (game data); rows are drawn first with ids.
+  const labels = new Map<string, HTMLElement[]>(), names = new Map<string, HTMLElement[]>();
+  const later = (map: Map<string, HTMLElement[]>, key: string, node: HTMLElement) => { map.set(key, [...(map.get(key) ?? []), node]); return node; };
+  for (const c of changes.slice(0, MAX_OBJECTS)) {
+    const mark = c.what === "added" ? "+" : c.what === "removed" ? "−" : "✎";
+    const open = c.what === "removed" || /campaign/i.test(path) ? undefined
+      : () => void w3.commands.execute("w3.objectEditor.open", kind, c.id).catch((e) => w3.window.showError(String(e)));
+    list.append(h(`div.diff-object.diff-${c.what}${open ? ".clickable" : ""}`, { onclick: open, title: open ? "Open in the Object Editor" : "" },
+      h("span.diff-mark", {}, mark), h("code", {}, c.id), " ", later(names, c.id, h("span", {})),
+      h("small.muted", {}, c.section === "custom" ? ` custom, based on ${c.base}` : " game object")));
+    for (const f of c.fields) {
+      const where = [f.level ? `level ${f.level}` : "", f.data ? `data ${String.fromCharCode(64 + f.data)}` : "", f.set ? `set ${f.set}` : ""].filter(Boolean).join(", ");
+      list.append(h("div.diff-field", {},
+        later(labels, f.field, h("span", {}, f.field)), h("small.muted", {}, ` ${f.field}${where ? ` (${where})` : ""}: `),
+        f.before === undefined ? h("span.diff-new", {}, show(f.after))
+          : f.after === undefined ? h("span.diff-old", {}, `${show(f.before)} (back to default)`)
+          : h("span", {}, h("span.diff-old", {}, show(f.before)), " → ", h("span.diff-new", {}, show(f.after)))));
+    }
+  }
+  if (changes.length > MAX_OBJECTS) list.append(h("div.muted", {}, `… and ${changes.length - MAX_OBJECTS} more`));
+  void (async () => {
+    const meta = await loadKind(w3, kind).catch(() => null);
+    for (const [id, nodes] of labels) { const l = meta?.fieldById.get(id)?.label; if (l) for (const n of nodes) { n.textContent = l; } }
+    const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
+    for (const [id, nodes] of names) {
+      const n = (await objects?.name(id, [kind]).catch(() => undefined)) ?? meta?.names.get(id);
+      if (n) for (const node of nodes) node.textContent = n;
+    }
+  })();
+  return el;
 }

@@ -728,5 +728,18 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .diff-view { flex: 1; min-height: 0; overflow: auto; }
 .diff-view .cm-mergeView { min-height: 100%; }
 .diff-view .cm-editor { font-family: var(--mono); }
+.diff-objects { max-height: 35%; overflow: auto; border-bottom: 1px solid var(--border); padding: 4px 12px; }
+.diff-objects:empty { display: none; }
+.diff-objects-head { font-weight: bold; padding: 2px 0 4px; }
+.diff-object { display: flex; align-items: baseline; gap: 4px; padding: 3px 0 1px; }
+.diff-object.clickable { cursor: pointer; }
+.diff-object.clickable:hover { background: var(--bg-hover); }
+.diff-mark { width: 1.2em; text-align: center; font-weight: bold; }
+.diff-added .diff-mark { color: #98c379; }
+.diff-removed .diff-mark { color: var(--error); }
+.diff-changed .diff-mark { color: var(--warning); }
+.diff-field { padding-left: 2.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.diff-old { color: var(--error); }
+.diff-new { color: #98c379; }
 .problem-text { overflow-wrap: anywhere; }
 .statusbar-item[data-id="w3.problems.status"] { white-space: pre; }
