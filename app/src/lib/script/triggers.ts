@@ -233,6 +233,14 @@ class TriggerCompiler {
     }
     const f = this.fn(ACTION, a.name);
     const args = a.params.map((_, k) => arg(k));
+    // Children left on a plain action (older edits) aren't compiled, but the World Editor
+    // still writes the helpers they would need.
+    a.children.forEach((c, k) => {
+      if (!c.enabled) return;
+      const cp = `${p}Func${pad3(k + 1)}`;
+      if (c.kind === CONDITION) this.condExpr(c, cp);
+      else this.action(c, cp, ind + "    ", depth + 1);
+    });
     return [`${ind}call ${f?.scriptName ?? a.name}(${args.length ? ` ${args.join(", ")} ` : "  "})`];
   }
 
@@ -284,11 +292,11 @@ export function triggersSection(i: TriggerScriptInput): string {
     // Disabled triggers and comment items (separators) aren't compiled.
     if (!t.enabled || t.isComment) continue;
     included.push(t);
-    // GUI triggers end with a blank line; custom text is followed directly by the next banner.
+    // GUI triggers end with a blank line; custom text gets one line break after it (even when it ends with one).
     if (t.isCustom) {
       let text = (textOf.get(t) ?? "").replace(/\r?\n/g, EOL);
       if (i.lua && text) text = text.split(EOL).map((l, k, all) => (k === all.length - 1 && l === "" ? l : RAW + l)).join(EOL);
-      out.push(banner(t) + text + (text.endsWith(EOL) ? "" : EOL));
+      out.push(banner(t) + text + EOL);
     } else out.push(banner(t) + new TriggerCompiler(i, t).compile() + EOL);
   }
   // Custom text that defines no InitTrig_<name> (a code library) isn't initialized.
