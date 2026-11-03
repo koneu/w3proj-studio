@@ -7,7 +7,8 @@ import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWct, parseWtg, textTriggers } from "../../lib/triggers/wtg";
 
-const SCRIPT = "map/war3map.j";
+/** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
+const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
 
 /** Files war3map.j is made from (also as their .json documents). */
 const INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|doo|w3e|w3u|w3t|w3a)|war3mapUnits\.doo|war3mapSkin\.w3u)(\.json)?$/i;
@@ -59,8 +60,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return tables;
   };
 
-  /** Builds war3map.j from the project's files; null for Lua maps. */
-  const generate = async (): Promise<string | null> => {
+  /** Builds the map script from the project's files. */
+  const generate = async (): Promise<{ path: string; text: string }> => {
     // Read directly rather than from the file list, which lags behind fresh saves (New Map).
     const json = async <T>(p: string): Promise<T | null> => {
       const text = await w3.workspace.readText(`${p}.json`).catch(() => null);
@@ -69,7 +70,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
     if (!info) throw new Error("map/war3map.w3i.json is missing");
-    if (info.scriptType === 1) return null;
+    const path = scriptPath(info.scriptType === 1);
     const g = await gameTables();
 
     const wtg = await bytes("map/war3map.wtg"), wct = await bytes("map/war3map.wct");
@@ -105,9 +106,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       g.worldEdit.get(sec)?.get(lightEnv) ?? `Environment\\DNC\\DNCLordaeron\\DNCLordaeron${kind}\\DNCLordaeron${kind}.mdl`;
 
     const sounds = (await json<{ sounds: NonNullable<ScriptInput["sounds"]> }>("map/war3map.w3s"))?.sounds ?? [];
-    const durations = await soundDurations(sounds.map((s) => s.file));
+    const durations = await soundDurations(sounds.map((s) => s.file), path);
 
-    return generateScript({
+    return { path, text: generateScript({
       info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a),
       lights: { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") },
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
@@ -116,18 +117,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       regions: (await json<{ regions: ScriptInput["regions"] }>("map/war3map.w3r"))?.regions,
       cameras: (await json<{ cameras: ScriptInput["cameras"] }>("map/war3map.w3c"))?.cameras,
       sounds, soundDuration: (f) => durations.get(f), soundLabel: (l) => g.soundLabels.get(l), string: (v) => wts?.resolve(v) ?? v,
-    });
+    }) };
   };
 
   /** Sound lengths in ms: imported files, the game's, else what the current script says. */
-  const soundDurations = async (soundFiles: string[]) => {
+  const soundDurations = async (soundFiles: string[], path: string) => {
     const out = new Map<string, number>();
     const old = new Map<string, number>();
-    const script = await w3.workspace.readText(SCRIPT).catch(() => null);
+    const script = await w3.workspace.readText(path).catch(() => null);
+    // JASS ("set x = CreateSound( "…"") or Lua ("x = CreateSound("…"").
     if (script !== null) {
       const fileOf = new Map<string, string>();
-      for (const m of script.matchAll(/set (\w+) = CreateSound\( "((?:[^"\\]|\\.)*)"/g)) fileOf.set(m[1], m[2].replace(/\\\\/g, "\\"));
-      for (const m of script.matchAll(/SetSoundDuration\( (\w+), (\d+) \)/g)) { const f = fileOf.get(m[1]); if (f) old.set(f, Number(m[2])); }
+      for (const m of script.matchAll(/(\w+) = CreateSound\( ?"((?:[^"\\]|\\.)*)"/g)) fileOf.set(m[1], m[2].replace(/\\\\/g, "\\"));
+      for (const m of script.matchAll(/SetSoundDuration\( ?(\w+), (\d+) ?\)/g)) { const f = fileOf.get(m[1]); if (f) old.set(f, Number(m[2])); }
     }
     for (const f of new Set(soundFiles)) {
       const buf = await w3.workspace.readBytes(`map/${f.replace(/\\/g, "/")}`).catch(() => w3.game.read(f)).catch(() => null);
@@ -142,14 +144,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const write = (reason: string) => {
     running = running.then(async () => {
       try {
-        const script = await generate();
-        if (script === null) { out.append(`${reason}: Lua map, war3map.lua left as it is`); return; }
-        const current = await w3.workspace.readText(SCRIPT).catch(() => null);
-        if (current === script) { out.append(`${reason}: war3map.j up to date`); return; }
-        await w3.workspace.writeText(SCRIPT, script);
-        out.append(`${reason}: war3map.j written (${script.length} chars)`);
+        const { path, text } = await generate();
+        const file = path.slice(4);
+        const current = await w3.workspace.readText(path).catch(() => null);
+        if (current === text) { out.append(`${reason}: ${file} up to date`); return; }
+        await w3.workspace.writeText(path, text);
+        out.append(`${reason}: ${file} written (${text.length} chars)`);
       } catch (e) {
-        out.append(`${reason}: war3map.j not written: ${e instanceof Error ? e.message : String(e)}`);
+        out.append(`${reason}: map script not written: ${e instanceof Error ? e.message : String(e)}`);
         throw e;
       }
     });

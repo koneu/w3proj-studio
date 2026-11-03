@@ -9,6 +9,8 @@
 import { ACTION, CALL, CONDITION, EVENT, type TriggerData } from "../triggers/triggerdata";
 import type { Call, CustomTextFile, Eca, Param, TriggerFile, TriggerItem } from "../triggers/wtg";
 
+import { CONCAT, INT_DIV, RAW } from "./lua";
+
 const EOL = "\r\n";
 const SEP = "//===========================================================================";
 
@@ -16,6 +18,8 @@ export interface TriggerScriptInput {
   data: TriggerData;
   triggers: TriggerFile;
   custom?: CustomTextFile | null;
+  /** For war3map.lua: the map's own code is marked RAW (it is Lua already), `..` and `//` by markers (lua.ts). */
+  lua?: boolean;
 }
 
 const ident = (name: string) => {
@@ -87,7 +91,8 @@ class TriggerCompiler {
     }
     const args = c.params.map((q, k) => this.expr(q, this.argType(CALL, c.name, k), `${path}${pad3(k + 1)}`));
     // String concatenation has no operator argument.
-    if (c.name === "OperatorString") return `( ${args.join(" + ")} )`;
+    if (c.name === "OperatorString") return `( ${args.join(this.i.lua ? ` ${CONCAT} ` : " + ")} )`;
+    if (this.i.lua && c.name === "OperatorInt" && args[1] === "/") args[1] = INT_DIV;
     if (OPERATORS.test(c.name)) return `( ${args.join(" ")} )`;
     // These two are written with spaces inside the parentheses.
     if (c.name === "GetBooleanAnd" || c.name === "GetBooleanOr") return `${c.name}( ${args.join(", ")} )`;
@@ -158,7 +163,7 @@ class TriggerCompiler {
     const branch = (g: number) => a.children.filter((c) => (c.group ?? 0) === g);
     switch (a.name) {
       case "CommentString": return [`${ind}// ${a.params[0]?.value ?? ""}`];
-      case "CustomScriptCode": return [`${ind}${a.params[0]?.value ?? ""}`];
+      case "CustomScriptCode": return [this.i.lua ? `${RAW}${a.params[0]?.value ?? ""}` : `${ind}${a.params[0]?.value ?? ""}`];
       case "SetVariable": {
         const v = a.params[0];
         const type = this.i.triggers.variables.find((x) => x.name === v?.value)?.type ?? "";
@@ -281,7 +286,8 @@ export function triggersSection(i: TriggerScriptInput): string {
     included.push(t);
     // GUI triggers end with a blank line; custom text is followed directly by the next banner.
     if (t.isCustom) {
-      const text = (textOf.get(t) ?? "").replace(/\r?\n/g, EOL);
+      let text = (textOf.get(t) ?? "").replace(/\r?\n/g, EOL);
+      if (i.lua && text) text = text.split(EOL).map((l, k, all) => (k === all.length - 1 && l === "" ? l : RAW + l)).join(EOL);
       out.push(banner(t) + text + (text.endsWith(EOL) ? "" : EOL));
     } else out.push(banner(t) + new TriggerCompiler(i, t).compile() + EOL);
   }

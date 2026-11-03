@@ -6,6 +6,7 @@
 // Work in progress: sections not generated yet are listed in OPEN_POINTS.md.
 
 import { parseSlk } from "../formats/text";
+import { jassToLua, RAW } from "./lua";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { triggersSection } from "./triggers";
@@ -65,6 +66,8 @@ export interface ScriptInput {
   soundDuration?: (file: string) => number | undefined;
   /** A sound label's settings (UI\SoundInfo\*.slk), for labelled sounds. */
   soundLabel?: (label: string) => SoundLabel | undefined;
+  /** Generate for war3map.lua (set by generateScript for Lua maps). */
+  lua?: boolean;
 }
 
 // ---- helpers ---------------------------------------------------------------------------
@@ -219,6 +222,8 @@ export function initGlobals(i: ScriptInput): string {
 export function customScript(i: ScriptInput): string {
   // Leading line breaks of the stored text are dropped.
   const text = (i.custom?.header ?? "").replace(/^(\r?\n)+/, "");
+  // In Lua maps the header is Lua already: copied line by line (lua.ts RAW).
+  if (i.lua) return banner("Custom Script Code") + (text ? text.split(/\r?\n/).map((l) => RAW + l + EOL).join("") : "");
   return banner("Custom Script Code") + (text ? text.replace(/\r?\n/g, EOL) + EOL : "");
 }
 
@@ -348,7 +353,7 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Items", items],
     ["Unit Creation", unitCreation(i)],
     ...techSections(i),
-    ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom }) : ""],
+    ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom, lua: i.lua }) : ""],
     ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups }),
   ]);
   // Sections of functions end with a blank line, the drop tables with two.
@@ -449,8 +454,11 @@ const SECTION_ORDER = ["", "Global Variables", "Custom Script Code", "Random Gro
   "Sound Assets", "Destructable Objects", "Items", "Unit Creation", "Regions", "Cameras", "Triggers", "Upgrades", "TechTree",
   "Players", "Main Initialization", "Map Configuration"];
 
-/** The whole war3map.j as the World Editor writes it. */
+/** The whole map script as the World Editor writes it: war3map.j, or war3map.lua for Lua maps
+ *  (scriptType 1; the same functions, translated by lua.ts). */
 export function generateScript(i: ScriptInput): string {
-  const sections = generateSections(i);
-  return SECTION_ORDER.map((k) => sections.get(k) ?? "").join("");
+  const lua = i.info.scriptType === 1;
+  const sections = generateSections({ ...i, lua });
+  const jass = SECTION_ORDER.map((k) => sections.get(k) ?? "").join("");
+  return lua ? jassToLua(jass) : jass;
 }
