@@ -77,9 +77,46 @@ pub const KNOWN: &[&str] = &[
     "UI\\WorldEditStrings.txt",
     "UI\\FrameDef\\FrameDef.toc",
     "war3mapImported\\ui.toc",
+    // Campaigns (.w3n): campaign info, object data, strings, imports. Chapter maps are named
+    // in war3campaign.w3f (found by scanning it).
+    "war3campaign.w3f",
+    "war3campaign.w3u",
+    "war3campaign.w3t",
+    "war3campaign.w3b",
+    "war3campaign.w3d",
+    "war3campaign.w3a",
+    "war3campaign.w3h",
+    "war3campaign.w3q",
+    "war3campaign.wts",
+    "war3campaign.imp",
+    "war3campaignSkin.w3u",
+    "war3campaignSkin.w3t",
+    "war3campaignSkin.w3b",
+    "war3campaignSkin.w3d",
+    "war3campaignSkin.w3a",
+    "war3campaignSkin.w3h",
+    "war3campaignSkin.w3q",
+    "war3campaignSkin.txt",
+    "war3campaignMisc.txt",
+    "war3campaignExtra.txt",
+    "war3campImported\\ui.toc",
 ];
 
 pub const META_FILES: &[&str] = &["(listfile)", "(attributes)", "(signature)"];
+
+/// Archive names for the game's stored paths ("War3.w3mod:_HD.w3mod:Units/X.mdx"): the path
+/// a map would use to replace the file, for each art set ("Units\\X.mdx", "_HD.w3mod\\Units\\X.mdx").
+pub fn from_game_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut out = BTreeSet::new();
+    for p in paths {
+        let path = p.rsplit(':').next().unwrap_or(p).replace('/', "\\");
+        if p.to_ascii_lowercase().contains("_hd.w3mod:") {
+            out.insert(format!("_HD.w3mod\\{path}"));
+        }
+        out.insert(path);
+    }
+    out.into_iter().collect()
+}
 
 pub fn is_meta(name: &str) -> bool {
     META_FILES.iter().any(|m| m.eq_ignore_ascii_case(name))
@@ -94,7 +131,7 @@ pub fn parse_listfile(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// `war3map.imp`: u32 version, u32 count, {u8 flag, cstring path}[count].
+/// `war3map.imp` / `war3campaign.imp`: u32 version, u32 count, {u8 flag, cstring path}[count].
 pub fn parse_imp(bytes: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     if bytes.len() < 8 {
@@ -113,6 +150,7 @@ pub fn parse_imp(bytes: &[u8]) -> Vec<String> {
         if let Ok(s) = std::str::from_utf8(&bytes[p..p + n]) {
             out.push(s.to_string());
             out.push(format!("war3mapImported\\{s}"));
+            out.push(format!("war3campImported\\{s}"));
         }
         p += n + 1;
     }
@@ -121,7 +159,7 @@ pub fn parse_imp(bytes: &[u8]) -> Vec<String> {
 
 const EXTS: &[&str] = &[
     "mdx", "mdl", "blp", "tga", "dds", "png", "wav", "mp3", "flac", "ogg", "txt", "slk", "fdf",
-    "toc", "j", "lua", "ai", "pld", "imp",
+    "toc", "j", "lua", "ai", "pld", "imp", "w3x", "w3m",
 ];
 
 fn is_path_byte(b: u8) -> bool {
@@ -150,15 +188,27 @@ pub fn scan_candidates(bytes: &[u8], out: &mut BTreeSet<String>) {
             if stem.is_empty() || !EXTS.contains(&ext.as_str()) {
                 continue;
             }
-            let cand = cand.replace('/', "\\");
-            out.insert(cand.clone());
+            let mut forms = vec![cand.replace('/', "\\")];
             if ext == "mdl" || ext == "mdx" {
-                out.insert(format!("{stem}.mdx").replace('/', "\\"));
-                out.insert(format!("{stem}_portrait.mdx").replace('/', "\\"));
-                out.insert(format!("{stem}_Portrait.mdx").replace('/', "\\"));
+                let stem = stem.replace('/', "\\");
+                forms.extend([format!("{stem}.mdx"), format!("{stem}_portrait.mdx"), format!("{stem}_Portrait.mdx")]);
             }
-            if !cand.to_ascii_lowercase().starts_with("war3mapimported\\") {
-                out.insert(format!("war3mapImported\\{cand}"));
+            let lower = forms[0].to_ascii_lowercase();
+            // Command button icons come with a disabled variant the game derives the name of.
+            if let Some(i) = lower.find("commandbuttons\\") {
+                let file = &forms[0][i + "commandbuttons\\".len()..];
+                if !file.contains('\\') && !lower.contains("commandbuttonsdisabled") {
+                    out.insert(format!("ReplaceableTextures\\CommandButtonsDisabled\\DIS{file}"));
+                }
+            }
+            // Imports may sit in the import folder of a map or a campaign.
+            let imported = lower.starts_with("war3mapimported\\") || lower.starts_with("war3campimported\\");
+            for f in forms {
+                if !imported {
+                    out.insert(format!("war3mapImported\\{f}"));
+                    out.insert(format!("war3campImported\\{f}"));
+                }
+                out.insert(f);
             }
         }
     }

@@ -200,6 +200,11 @@ impl GameData {
             .map(|(_, e)| e.path.as_str())
     }
 
+    /// All root entries, stored locally or not (names only).
+    pub fn all_paths(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|e| e.path.as_str())
+    }
+
     pub fn total_entries(&self) -> usize {
         self.entries.len()
     }

@@ -8,6 +8,28 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use w3proj::{Registry, UnpackOptions};
 
+const DEFAULT_INSTALL: &str = r"C:\Program Files (x86)\Warcraft III";
+
+/// The installed game's file names, read when first needed (none if it can't be opened).
+fn game_names(install: &str) -> Option<w3proj::project::NameSource> {
+    if install.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let install = PathBuf::from(install);
+    let names = std::sync::OnceLock::new();
+    Some(std::sync::Arc::new(move || {
+        names
+            .get_or_init(|| match casc::GameData::open(&install) {
+                Ok(game) => w3proj::names::from_game_paths(game.all_paths()),
+                Err(e) => {
+                    eprintln!("note: game file names not used ({e})");
+                    Vec::new()
+                }
+            })
+            .clone()
+    }))
+}
+
 #[derive(Parser)]
 #[command(name = "w3proj", version, about)]
 struct Cli {
@@ -24,6 +46,10 @@ enum Cmd {
         /// Write the project even if some files can't be read or named.
         #[arg(long)]
         allow_incomplete: bool,
+        /// Game install folder: its file names are tried when a map's names are missing
+        /// (protected maps, files replacing the game's). "none" to skip.
+        #[arg(long, default_value = DEFAULT_INSTALL)]
+        game: String,
     },
     /// Pack a project folder into a .w3x (the release step).
     Pack {
@@ -38,6 +64,10 @@ enum Cmd {
         /// Only print failures and a summary.
         #[arg(short, long)]
         quiet: bool,
+        /// Game install folder: its file names are tried when a map's names are missing
+        /// (protected maps, files replacing the game's). "none" to skip.
+        #[arg(long, default_value = DEFAULT_INSTALL)]
+        game: String,
     },
     /// List the files in a map.
     Ls { map: PathBuf },
@@ -57,7 +87,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: GameCmd,
         /// Game install folder (the one containing .build.info).
-        #[arg(long, global = true, default_value = r"C:\Program Files (x86)\Warcraft III")]
+        #[arg(long, global = true, default_value = DEFAULT_INSTALL)]
         install: PathBuf,
         /// Art set used to resolve plain paths: sd, hd or de.
         #[arg(long, global = true, default_value = "sd")]
@@ -102,8 +132,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             map,
             project,
             allow_incomplete,
+            game,
         } => {
-            let opts = UnpackOptions { allow_incomplete };
+            let opts = UnpackOptions {
+                allow_incomplete,
+                more_names: game_names(&game),
+            };
             let codecs = Registry::for_project(&project, &extra)?;
             let report = match w3proj::unpack(&map, &project, &codecs, &opts) {
                 Err(w3proj::Error::Incomplete(r)) => {
@@ -150,11 +184,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 .with_context(|| format!("packing {}", project.display()))?;
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
-        Cmd::Verify { maps, quiet } => {
+        Cmd::Verify { maps, quiet, game } => {
             let codecs = Registry::with_formats(&extra)?;
+            let names = game_names(&game);
             let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
             for map in &maps {
-                match w3proj::verify(map, &codecs) {
+                match w3proj::verify(map, &codecs, names.as_ref()) {
                     Ok(r) if r.ok() => {
                         ok += 1;
                         let partial = r.unnamed + r.errors.len() > 0;

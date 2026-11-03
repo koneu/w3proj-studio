@@ -15,10 +15,10 @@ interface PackReport {
   bytes: number;
 }
 
-const MAP_FILTERS = [{ name: "Warcraft III map", extensions: ["w3x", "w3m"] }];
+const MAP_FILTERS = [{ name: "Warcraft III map or campaign", extensions: ["w3x", "w3m", "w3n"] }];
 
 function baseName(p: string) {
-  return p.split(/[\\/]/).pop()!.replace(/\.(w3x|w3m)$/i, "");
+  return p.split(/[\\/]/).pop()!.replace(/\.(w3x|w3m|w3n)$/i, "");
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -50,7 +50,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Unpacks, asking before writing an incomplete (protected) map. */
   const unpack = async (map: string, dir: string, title: string): Promise<UnpackReport | null> => {
     const run = (allowIncomplete: boolean) =>
-      w3.window.withProgress(title, () => w3.backend.invoke<UnpackReport>("project_unpack", { map, dir, allowIncomplete }));
+      w3.window.withProgress(title, () => w3.backend.invoke<UnpackReport>("project_unpack", { map, dir, allowIncomplete, install: w3.settings.get<string>("game.installDir") }));
     try {
       return await run(false);
     } catch (e) {

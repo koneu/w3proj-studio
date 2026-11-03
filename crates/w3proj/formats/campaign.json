@@ -1,0 +1,46 @@
+// war3campaign.w3f — campaign information: name, author, description, the
+// campaign screen (background, ambient sound, fog, interface race) and the
+// chapter buttons with their maps. Layout of the classic documentation
+// (version 1), checked on campaigns of version 1, 2 and 3: version 2 adds a
+// u32 before the chapters (0 in the sample), version 3 six more (0, … , 1).
+// Version 1 files may hold leftover memory in the chapter flags.
+{
+  "name": "campaign",
+  "description": "Campaign info: name, author, description, campaign screen, chapters and map order",
+  "files": ["war3campaign.w3f"],
+  "jsonFormat": "w3proj.campaign/1",
+  "accept": "version >= 1 && version <= 3",
+  "fields": [
+    { "name": "version", "type": "u32" },
+    { "name": "campaignVersion", "type": "u32", "doc": "how often the campaign was saved" },
+    { "name": "editorVersion", "type": "u32" },
+    { "name": "name", "type": "cstring" },
+    { "name": "difficulty", "type": "cstring", "doc": "text shown for the difficulty" },
+    { "name": "author", "type": "cstring" },
+    { "name": "description", "type": "cstring" },
+    { "name": "flags", "type": "u32", "doc": "1 variable difficulty, 2 custom race (expansion) data, 4 uses expansion" },
+    { "name": "background", "type": "i32", "doc": "campaign screen preset; -1 custom (backgroundPath)" },
+    { "name": "backgroundPath", "type": "cstring" },
+    { "name": "minimapPath", "type": "cstring", "doc": "picture shown for the campaign" },
+    { "name": "ambientSound", "type": "i32", "doc": "preset; -1 custom (ambientSoundPath), 0 none" },
+    { "name": "ambientSoundPath", "type": "cstring" },
+    { "name": "fogStyle", "type": "i32", "doc": "-1 or 0 none" },
+    { "name": "fogStartZ", "type": "f32" },
+    { "name": "fogEndZ", "type": "f32" },
+    { "name": "fogDensity", "type": "f32" },
+    { "name": "fogColor", "type": "rgba" },
+    { "name": "race", "type": "i32", "doc": "interface: 0 human, 1 orc, 2 undead, 3 night elf" },
+    { "name": "unknown", "type": "u32", "count": 1, "if": "version == 2", "doc": "0 in the sample" },
+    { "name": "unknown3", "type": "u32", "count": 7, "if": "version >= 3", "doc": "0, 0, 0, 0, 0, 0, 1 in the sample" },
+    { "name": "chapters", "type": "struct", "count": "u32", "fields": [
+      { "name": "flags", "type": "u32", "doc": "0 shown, 2 hidden until unlocked, 3 shown and open from the start (version 2+)" },
+      { "name": "chapter", "type": "cstring", "doc": "button title (\"Chapter One\")" },
+      { "name": "title", "type": "cstring", "doc": "map title" },
+      { "name": "map", "type": "cstring", "doc": "map file in the campaign" }
+    ] },
+    { "name": "mapOrder", "type": "struct", "count": "u32", "fields": [
+      { "name": "unknown", "type": "cstring" },
+      { "name": "map", "type": "cstring" }
+    ] }
+  ]
+}

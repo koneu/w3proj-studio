@@ -89,10 +89,18 @@ fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
 
 /// Imports a map into `dir` (new project) or re-syncs an existing one.
 #[tauri::command]
-async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomplete: bool) -> CmdResult<Value> {
+async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomplete: bool, install: Option<String>) -> CmdResult<Value> {
     let user_formats = user_format_dirs(&app)?;
+    // The game's file names, for files a map has replaced (asked only when names are missing).
+    let more_names = install.filter(|i| !i.is_empty()).map(|install| {
+        let app = app.clone();
+        Arc::new(move || match game_data(&app.state::<Game>(), &install) {
+            Ok(g) => w3proj::names::from_game_paths(g.all_paths()),
+            Err(_) => Vec::new(),
+        }) as w3proj::project::NameSource
+    });
     tauri::async_runtime::spawn_blocking(move || {
-        let opts = UnpackOptions { allow_incomplete };
+        let opts = UnpackOptions { allow_incomplete, more_names };
         let codecs = Registry::for_project(Path::new(&dir), &user_formats).map_err(err)?;
         match w3proj::unpack(Path::new(&map), Path::new(&dir), &codecs, &opts) {
             Ok(report) => serde_json::to_value(&report).map_err(err),

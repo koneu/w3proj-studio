@@ -6,7 +6,7 @@
 {
   "name": "imports",
   "description": "Imported files: path in the archive and flags",
-  "files": ["war3map.imp"],
+  "files": ["war3map.imp", "war3campaign.imp"],
   "jsonFormat": "w3proj.imports/1",
   "accept": "version == 1",
   "fields": [
