@@ -1,0 +1,8 @@
+{
+  "id": "w3.triggerGuiMap",
+  "name": "Trigger Map Objects",
+  "version": "0.1.0",
+  "description": "A \"Map\" tab in the GUI trigger parameter dialog: the map's regions, cameras, sounds, music, triggers and placed units, items and destructables, used as their generated globals (gg_rct_…, gg_unit_…).",
+  "activationEvents": ["onEditor:w3.triggerEditor"],
+  "extensionDependencies": ["w3.triggerGui", "w3.objectEditor"]
+}

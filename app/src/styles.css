@@ -470,6 +470,13 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-code { font-family: var(--mono); font-size: 12px; background: var(--bg-2); padding: 8px 10px; border-radius: 4px; overflow: auto; white-space: pre; }
 .trig-vars-table { border-collapse: collapse; }
 .trig-vars-table th, .trig-vars-table td { text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--border); }
+.trig-vars-table input[type="text"], .trig-vars-table select { font: inherit; }
+.trig-var-name { width: 16em; font-family: var(--mono, monospace); }
+.trig-var-array { display: inline-flex; align-items: center; gap: 4px; }
+.trig-var-size { width: 5.5em; }
+.trig-var-value { width: 12em; }
+.trig-var-del { padding: 0 6px; }
+.trig-vars-actions { margin-top: 8px; }
 .trig-gui-toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 6px; }
 .trig-pick { cursor: pointer; border-radius: 3px; }
 .trig-pick:hover { background: var(--bg-hover); }

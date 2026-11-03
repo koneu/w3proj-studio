@@ -223,7 +223,16 @@ export interface TriggerParamEditor {
   title: string;
   /** TriggerData types this editor handles ("unitcode", "abilcode", …). */
   types: string[];
-  /** Asks for a value; resolves with the new parameter, or undefined when cancelled. */
-  edit(opts: { type: string; current: import("../lib/triggers/wtg").Param; editor: TriggerEditorHandle }):
+  /** Asks for a value in its own dialog; resolves with the new parameter, or undefined when cancelled. */
+  edit?(opts: { type: string; current: import("../lib/triggers/wtg").Param; editor: TriggerEditorHandle }):
     Promise<import("../lib/triggers/wtg").Param | undefined>;
+  /** Or: choices shown as a tab of the parameter dialog (searchable list; `group` adds filter chips). */
+  list?(opts: { type: string; editor: TriggerEditorHandle }): Promise<TriggerParamChoice[]>;
+}
+
+export interface TriggerParamChoice {
+  label: string;
+  detail?: string;
+  group?: string;
+  param: import("../lib/triggers/wtg").Param;
 }

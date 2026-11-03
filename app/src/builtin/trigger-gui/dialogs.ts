@@ -133,18 +133,38 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
       (body.querySelector("input") as HTMLElement | null)?.focus();
     };
     tabs.forEach((t, i) => bar.append(h("button.trig-tab", { onclick: () => show(i) }, t.label)));
+    // Editors with a list are tabs of their own (filled when first shown).
     for (const x of extra) {
+      if (!x.list) continue;
+      const list = x.list({ type, editor: ed }).catch(() => []);
+      tabs.push({ label: x.title, build: () => {
+        const box = h("div.trig-dialog-list", {}, h("p.muted", {}, "Loading…"));
+        void list.then((choices) => {
+          box.replaceChildren(...(choices.length
+            ? listPicker(choices.map((c) => ({ label: c.label, detail: c.detail, category: c.group, value: c.param })), (p) => done(p),
+              { categoryName: choices.some((c) => c.group) ? (g) => g : undefined })
+            : [h("p.muted", {}, `Nothing in this map for ${typeName}.`)]));
+          (box.querySelector("input") as HTMLElement | null)?.focus();
+        });
+        return [box];
+      } });
+    }
+    for (const x of extra) {
+      if (!x.edit) continue;
+      const edit = x.edit.bind(x);
       bar.append(h("button.trig-tab-extra", { onclick: async () => {
         // Hidden meanwhile, so the extension's own dialog is on top.
         hide(true);
-        const p = await x.edit({ type, current, editor: ed }).catch(() => undefined);
+        const p = await edit({ type, current, editor: ed }).catch(() => undefined);
         hide(false);
         if (p) done(p);
       } }, x.title));
     }
     // The tab of the current kind of value; an unset parameter starts at Value, else Preset.
     const tabOf = (label: string) => tabs.findIndex((t) => t.label === label);
-    const currentTab = ({ [PRESET]: "Preset", [VARIABLE]: "Variable", [FUNCTION]: "Function", [VALUE]: "Value" } as Record<number, string>)[current.type];
+    // A generated global (gg_rct_…) is on its map list, if one shows the type.
+    const mapTab = current.type === VARIABLE && current.value.startsWith("gg_") ? extra.find((x) => x.list)?.title : undefined;
+    const currentTab = mapTab ?? ({ [PRESET]: "Preset", [VARIABLE]: "Variable", [FUNCTION]: "Function", [VALUE]: "Value" } as Record<number, string>)[current.type];
     const start = Math.max(0, currentTab ? tabOf(currentTab) : Math.max(tabOf("Value"), tabOf("Preset")));
     queueMicrotask(() => tabs.length && show(start));
     return [h("div.muted", {}, `Current: ${paramText(current, ed.display, type)}`), bar, body];

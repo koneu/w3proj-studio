@@ -36,7 +36,8 @@ export interface TriggerData {
   /** Any kind, for calls stored with a kind that doesn't list them. */
   find(kind: number, name: string): TriggerFunction | undefined;
   categories: Map<string, { name: string; icon: string; hideName: boolean }>;
-  types: Map<string, { name: string; base?: string }>;
+  /** In file order (the Variables dialog's order); `global`: can be a variable's type. */
+  types: Map<string, { name: string; base?: string; global: boolean }>;
   /** Preset parameter → script text and display name. */
   presets: Map<string, { type: string; script: string; name: string }>;
 }
@@ -59,7 +60,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
   const str = (s: string) => { const u = unquote(s); return strings.get(u.toUpperCase()) ?? u; };
   const functions = SECTIONS.map(() => new Map<string, TriggerFunction>());
   const categories = new Map<string, { name: string; icon: string; hideName: boolean }>();
-  const types = new Map<string, { name: string; base?: string }>();
+  const types = new Map<string, { name: string; base?: string; global: boolean }>();
   const presets = new Map<string, { type: string; script: string; name: string }>();
   // _Name_Field entries come after their function; keyed per section.
   const extra = SECTIONS.map(() => new Map<string, Map<string, string>>());
@@ -90,7 +91,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       categories.set(key, { name: str(v[0] ?? key), icon: v[1] ?? "", hideName: v[2] === "1" });
     } else if (section === "TriggerTypes") {
       const v = splitList(value);
-      types.set(key, { name: str(v[3] ?? key), base: v[4] || undefined });
+      types.set(key, { name: str(v[3] ?? key), base: v[4] || undefined, global: v[1] === "1" });
     } else if (section === "TriggerParams") {
       const v = splitList(value);
       presets.set(key, { type: v[1] ?? "", script: unquote(v[2] ?? "").replace(/`/g, '"'), name: str(v[3] ?? key) });

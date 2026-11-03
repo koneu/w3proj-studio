@@ -14,9 +14,10 @@ import type { DisplayContext } from "../../lib/triggers/display";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
   parseWct, parseWtg, textTriggers, writeWct, writeWtg,
-  type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
+  type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
+import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 
 const WTG = "map/war3map.wtg", WCT = "map/war3map.wct";
 /** Item type → index in the per-type counts (and the high byte of its ids). */
@@ -187,6 +188,7 @@ class TriggerView {
   private savedAt = 0;
   private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean } | void = undefined;
   private handle: TriggerEditorHandle;
+  private vars: VariableHost;
   private unsubscribe: () => void;
   private keydown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
@@ -212,6 +214,12 @@ class TriggerView {
       setCustomText: (t, text) => { this.texts.set(t, text); },
       edit: (label, change) => this.edit(label, change),
       icon: (path) => icon(w3, path),
+    };
+    this.vars = {
+      handle: this.handle,
+      allocId: (type) => this.allocId(type),
+      category: () => this.variableCategory(),
+      select: (v) => { this.selected = this.file.reforged ? { kind: "item", type: 64, id: v.id } : { kind: "variables" }; },
     };
     el.tabIndex = -1;
     el.addEventListener("keydown", this.keydown);
@@ -323,9 +331,27 @@ class TriggerView {
       this.selected = { kind: "item", type, id: t.id };
     });
   }
+  /** Where a new variable goes: the selected category (or the selected item's), else the first one. */
+  private variableCategory(): { parent: number; index: number } {
+    const items = this.file.items;
+    const at = this.insertionPoint(false);
+    const isCategory = (id: number) => items.some((i) => i.type === 4 && i.id === id);
+    if (isCategory(at.parent)) return at;
+    let cat = items.find((i) => i.type === 4);
+    if (!cat) {
+      cat = { type: 4, id: this.allocId(4), name: "Variables", isComment: 0, expanded: 1, parent: this.root() };
+      items.push(cat);
+    }
+    return { parent: cat.id, index: items.reduce((last, it, i) => (it.parent === cat!.id ? i : last), items.indexOf(cat)) + 1 };
+  }
   private deleteSelected() {
     const sel = this.find(this.selected);
     if (!sel || sel.type === 1) return;
+    if (sel.type === 64) {
+      const v = this.file.variables.find((x) => x.id === sel.id);
+      if (v) void deleteVariable(this.w3, this.vars, v).then(() => { if (!this.file.variables.includes(v)) { this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); } });
+      return;
+    }
     this.edit(`Delete ${sel.name}`, () => {
       const gone = new Set<Item>();
       const collect = (it: Item) => { gone.add(it); for (const c of this.file.items) if (c.parent === it.id && (it.type === 2 || it.type === 4) && c !== it) collect(c); };
@@ -357,10 +383,12 @@ class TriggerView {
       newMenu.value = "";
       if (v === "category") this.newCategory();
       else if (v === "comment") this.newTrigger(null);
+      else if (v === "variable") newVariable(this.vars);
       else { const k = this.kinds.all().find((x) => x.id === v); if (k) this.newTrigger(k); }
     } });
     const fill = () => newMenu.replaceChildren(h("option", { value: "" }, "New…"), h("option", { value: "category" }, "Category"),
-      ...this.kinds.all().filter((k) => k.init).map((k) => h("option", { value: k.id }, k.title)), h("option", { value: "comment" }, "Comment"));
+      ...this.kinds.all().filter((k) => k.init).map((k) => h("option", { value: k.id }, k.title)), h("option", { value: "comment" }, "Comment"),
+      h("option", { value: "variable" }, "Variable"));
     fill();
     this.kinds.onChange(fill);
     return h("div.trig-toolbar", {}, newMenu,
@@ -395,7 +423,7 @@ class TriggerView {
     if (this.handle.editable) {
       items.push({ label: "New Category", run: () => this.newCategory() },
         ...this.kinds.all().filter((k) => k.init).map((k) => ({ label: `New ${k.title}`, run: () => this.newTrigger(k) })),
-        { label: "New Comment", run: () => this.newTrigger(null) });
+        { label: "New Comment", run: () => this.newTrigger(null) }, { label: "New Variable", run: () => newVariable(this.vars) });
       if (sel.kind === "item") {
         items.push("-", { label: "Move Up", run: () => this.move(-1) }, { label: "Move Down", run: () => this.move(1) },
           "-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
@@ -447,7 +475,7 @@ class TriggerView {
         ...(this.custom?.comment ? [h("p.trig-desc", {}, this.custom.comment)] : []), area);
       return;
     }
-    if (s.kind === "variables") { this.detail.replaceChildren(h("h2", {}, "Variables"), this.variablesTable(this.file.variables)); return; }
+    if (s.kind === "variables") { this.detail.replaceChildren(h("h2", {}, "Variables"), variablesTable(this.w3, this.vars, this.file.variables)); return; }
     const it = this.find(s);
     if (!it) { this.detail.replaceChildren(h("p.muted", {}, "Nothing selected.")); return; }
     const name = h("input.trig-name", { type: "text", value: it.name, readOnly: !editable, onchange: () => {
@@ -457,7 +485,7 @@ class TriggerView {
     } });
     if (it.type === 64) {
       const v = this.file.variables.find((x) => x.id === it.id);
-      this.detail.replaceChildren(h("h2", {}, it.name), v ? this.variablesTable([v]) : h("p.muted", {}, "Variable not found."));
+      this.detail.replaceChildren(h("h2", {}, "Variable"), v ? variablesTable(this.w3, this.vars, [v]) : h("p.muted", {}, "Variable not found."));
       return;
     }
     if (!("ecas" in it)) {
@@ -484,20 +512,5 @@ class TriggerView {
     this.detail.replaceChildren(head, desc, body);
     if (!kind) { body.append(h("p.muted", {}, "No installed extension shows this kind of trigger.")); return; }
     this.body = kind.render(body, it, this.handle);
-  }
-
-  private variablesTable(vars: Variable[]): HTMLElement {
-    if (!vars.length) return h("p.muted", {}, "No variables.");
-    const data = this.handle.data;
-    const typeName = (t: string) => data.types.get(t)?.name ?? t;
-    return h("table.trig-vars-table", {},
-      h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Type"), h("th", {}, "Array"), h("th", {}, "Initial value"))),
-      h("tbody", {}, ...vars.map((v) => h("tr", {},
-        h("td", {}, h("code", { title: `udg_${v.name} in the script` }, v.name)),
-        h("td", {}, typeName(v.type)),
-        h("td", {}, v.isArray ? `[${v.arraySize}]` : ""),
-        h("td", {}, v.initialized
-          ? data.presets.get(v.initialValue)?.name ?? this.handle.display.string?.(v.initialValue) ?? v.initialValue
-          : h("span.muted", {}, "default"))))));
   }
 }
