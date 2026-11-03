@@ -2,7 +2,7 @@
   "id": "w3.vjass",
   "name": "vJASS (JassHelper)",
   "version": "0.1.0",
-  "description": "Compiles vJASS in trigger texts (libraries, scopes, structs, Zinc, //! directives) into the map's JASS with JassHelper, which ships with the game (_retail_\\x86_64\\JassHelper). JassHelper is open source (zlib licence, by Víctor Hugo Soliz); it isn't copied, the installed program is called. A script language extension (service w3.scriptLanguages): other languages can be added the same way.",
+  "description": "Compiles vJASS in trigger texts (libraries, scopes, structs, Zinc, //! directives) into the map's JASS with JassHelper, which ships with the game (_retail_\\x86_64\\JassHelper). JassHelper is open source (zlib licence, by Víctor Hugo Soliz); it isn't copied, the installed program is called. Adds \"vJASS Library\" to the trigger editor's New menu (vJASS texts open in a code editor with a JassHelper check). A script language extension (service w3.scriptLanguages): other languages can be added the same way.",
   "activationEvents": ["onStartup"],
   "extensionDependencies": ["w3.mapScript"],
   "contributes": {

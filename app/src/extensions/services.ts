@@ -270,6 +270,11 @@ export interface TriggerKind {
     { dispose?(): void; /** Return true if the key was handled (before the host's shortcuts). */ keyDown?(e: KeyboardEvent): boolean } | void;
   /** Sets up a new trigger of this kind (flags, ECAs, custom text). Omitted: can't be created. */
   init?(trigger: TriggerItem, editor: TriggerEditorHandle): void;
+  /** What a new one is: 8 a trigger (default), 32 a script item (Reforged files: code in the
+   *  "Custom Script Code" section, no trigger object; older files get a custom text trigger). */
+  itemType?: 8 | 32;
+  /** Whether "New …" offers it in this editor (e.g. only for JASS maps). Default: yes. */
+  available?(editor: TriggerEditorHandle): boolean;
 }
 
 export interface TriggerEditorHandle {

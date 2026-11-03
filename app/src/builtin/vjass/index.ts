@@ -2,10 +2,14 @@
 // vJASS get their generated war3map.j compiled by JassHelper, the open-source
 // compiler (zlib licence) that ships with the game. It is called, not copied:
 // script-only mode in a temp folder, with the game's common.j and Blizzard.j,
-// as the World Editor does on save.
+// as the World Editor does on save. In the trigger editor it adds "vJASS Library"
+// (New ▸, and how trigger texts with vJASS are shown).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, type CodeEditorService, type ScriptLanguagesService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ScriptLanguagesService, type TriggersService } from "../../extensions/services";
+import { mapJass } from "../../lib/jass/env";
+import { ident } from "../../lib/script/jass";
+import { h } from "../../workbench/dom";
 
 /** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments,
  *  //! directives. */
@@ -58,6 +62,59 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       languages: ["jass"],
       provide: ({ text, inString, inRawcode, prefix }) => (inString || inRawcode || prefix.length < 2 || !SOURCE.test(text) ? []
         : KEYWORDS.filter((k) => k.startsWith(prefix)).map((k) => ({ label: k, kind: "keyword" as const, detail: "vJASS" }))),
+    }));
+  }).catch(() => {});
+
+  // The trigger editor's kind for vJASS texts: new ones are libraries (a script item in Reforged
+  // files, else a custom text trigger without InitTrig), edited without the plain JASS checker.
+  void Promise.all([w3.services.get<TriggersService>(TRIGGERS_SERVICE), w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null)]).then(([triggers, code]) => {
+    ctx.subscriptions.push(triggers.registerKind({
+      id: "vjass",
+      priority: 7,
+      title: "vJASS Library",
+      itemType: 32,
+      available: (ed) => ed.language === "jass",
+      matches: (t, ed) => ed.language === "jass" && (t.isCustom || t.type === 32) && SOURCE.test(ed.customText(t) ?? ""),
+      init(t, ed) {
+        t.isCustom = true;
+        ed.setCustomText(t, `library ${ident(t.name)} initializer Init\r\n\r\n    private function Init takes nothing returns nothing\r\n    endfunction\r\n\r\nendlibrary\r\n`);
+      },
+      render(el, t, ed) {
+        const status = h("span.muted");
+        const checkBtn = h("button", {
+          title: "Compiles this text alone with JassHelper (with common.j and Blizzard.j; the map's own globals and functions are unknown there).",
+          onclick: async () => {
+            status.textContent = "Compiling…";
+            try {
+              const [commonJ, blizzardJ] = await Promise.all([w3.game.readText("Scripts\\common.j"), w3.game.readText("Scripts\\Blizzard.j")]);
+              await compile(ed.customText(t) ?? "", commonJ, blizzardJ);
+              status.textContent = "JassHelper: no errors.";
+            } catch (e) { status.textContent = e instanceof Error ? e.message : String(e); }
+          },
+        }, "Check with JassHelper");
+        el.append(h("div.trig-section", {}, "vJASS"));
+        const hint = h("p.muted.trig-hint", {}, t.type === 32
+          ? `Copied into the "Custom Script Code" section of war3map.j; JassHelper compiles the map's script when it is generated.`
+          : "Copied into war3map.j; JassHelper compiles the map's script when it is generated.");
+        if (!code) {
+          const area = h("textarea.trig-code-edit", {
+            spellcheck: false, readOnly: !ed.editable, rows: 24, value: ed.customText(t) ?? "",
+            onchange: () => ed.edit("Edit script", () => ed.setCustomText(t, area.value)),
+          });
+          el.append(area, h("div.trig-gui-toolbar", {}, checkBtn, status), hint);
+          return;
+        }
+        const box = h("div.trig-code");
+        el.append(box, h("div.trig-gui-toolbar", {}, checkBtn, status), hint);
+        // Completion from the map script as last generated (JassHelper's output: libraries' functions too).
+        const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null));
+        const editor = code.create(box, {
+          value: ed.customText(t) ?? "", language: "jass", readOnly: !ed.editable, symbols: map.symbols,
+          openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
+          onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
+        });
+        return { dispose: () => editor.dispose() };
+      },
     }));
   }).catch(() => {});
 

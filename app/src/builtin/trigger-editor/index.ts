@@ -410,9 +410,9 @@ class TriggerView {
   private newTrigger(kind: TriggerKind | null) {
     this.edit(kind ? `New ${kind.title}` : "New comment", () => {
       const { parent, index } = this.insertionPoint(false);
-      const type = kind ? 8 : 16;
+      const type = !kind ? 16 : kind.itemType === 32 && this.file.reforged ? 32 : 8;
       const t: TriggerItem = {
-        type, name: this.uniqueName(kind ? "Untitled Trigger" : "Untitled Comment"), description: "", isComment: kind ? 0 : 1, id: this.allocId(type),
+        type, name: this.uniqueName(!kind ? "Untitled Comment" : kind.itemType === 32 ? "Untitled Script" : "Untitled Trigger"), description: "", isComment: kind ? 0 : 1, id: this.allocId(type),
         enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent, ecas: [],
       };
       this.file.items.splice(index, 0, t);
@@ -545,7 +545,7 @@ class TriggerView {
     } });
     const fill = () => newMenu.replaceChildren(h("option", { value: "" }, "New…"), h("option", { value: "category" }, "Category"),
       ...(this.file.reforged ? [h("option", { value: "subcategory", title: "Inside the selected category" }, "Subcategory")] : []),
-      ...this.kinds.all().filter((k) => k.init).map((k) => h("option", { value: k.id }, k.title)), h("option", { value: "comment" }, "Comment"),
+      ...this.kinds.all().filter((k) => k.init && (k.available?.(this.handle) ?? true)).map((k) => h("option", { value: k.id }, k.title)), h("option", { value: "comment" }, "Comment"),
       h("option", { value: "variable" }, "Variable"));
     fill();
     this.kinds.onChange(fill);
@@ -582,7 +582,7 @@ class TriggerView {
     if (this.handle.editable) {
       items.push({ label: "New Category", run: () => this.newCategory() },
         ...(this.subcategoryParent() ? [{ label: "New Subcategory", run: () => this.newCategory(true) }] : []),
-        ...this.kinds.all().filter((k) => k.init).map((k) => ({ label: `New ${k.title}`, run: () => this.newTrigger(k) })),
+        ...this.kinds.all().filter((k) => k.init && (k.available?.(this.handle) ?? true)).map((k) => ({ label: `New ${k.title}`, run: () => this.newTrigger(k) })),
         { label: "New Comment", run: () => this.newTrigger(null) }, { label: "New Variable", run: () => newVariable(this.vars) });
       if (sel.kind === "item") {
         items.push("-", { label: "Move Up", run: () => this.move(-1) }, { label: "Move Down", run: () => this.move(1) },
@@ -623,7 +623,7 @@ class TriggerView {
           if (shown || !this.collapsed.has(it.id)) walk(it.id, depth + 1);
         } else if (it.type === 64) { if (this.mode !== "triggers") rows.push(this.row(it.name, "trig-var", depth, sel)); }
         else if ("ecas" in it && this.mode !== "variables") {
-          rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel, { off: !it.enabled }));
+          rows.push(this.row(it.name, it.type === 16 ? "trig-comment" : it.type === 32 ? "trig-script" : it.isCustom ? "trig-custom" : "trig-gui", depth, sel, { off: !it.enabled }));
         }
       }
     };
@@ -736,13 +736,14 @@ class TriggerView {
       return h("label.trig-flag", {}, box, label);
     };
     const desc = h("textarea.trig-desc-edit", {
-      rows: 2, value: it.description, readOnly: !editable, placeholder: it.type === 16 ? "Comment" : "Trigger comment",
+      rows: 2, value: it.description, readOnly: !editable, placeholder: it.type === 16 ? "Comment" : it.type === 32 ? "Script comment" : "Trigger comment",
       onchange: () => this.edit("Edit comment", () => { it.description = desc.value; }),
     });
     const head = h("div.trig-head", {}, name,
       ...(it.type === 16 ? [] : [
         flag("Enabled", () => it.enabled, (v) => { it.enabled = v; }),
-        flag("Initially on", () => !it.initiallyOff, (v) => { it.initiallyOff = !v; }),
+        // A script item is no trigger: nothing to turn on.
+        ...(it.type === 32 ? [] : [flag("Initially on", () => !it.initiallyOff, (v) => { it.initiallyOff = !v; })]),
       ]));
     if (it.type === 16) { this.detail.replaceChildren(head, desc); return; }
     const kind = this.kinds.all().find((k) => k.matches(it, this.handle));
