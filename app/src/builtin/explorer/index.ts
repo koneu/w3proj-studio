@@ -148,7 +148,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         h("div.view-empty", {},
           h("p", {}, "No project is open."),
           h("button.primary", { onclick: () => w3.commands.execute("w3.project.open") }, "Open Project Folder"),
-          h("button.primary", { onclick: () => w3.commands.execute("w3.project.importMap") }, "Import .w3x Map…"),
+          h("button.primary", { onclick: () => w3.commands.execute("w3.project.importMap") }, "Import Map or Campaign…"),
           h("button.primary", { onclick: () => w3.commands.execute("w3.map.new") }, "New Map…"),
         ),
       );

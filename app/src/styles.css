@@ -434,6 +434,10 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .newmap-input { flex: 1; }
 textarea.newmap-input { resize: vertical; font: inherit; }
 .newmap-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+/* The placeholder ("Choose a parent folder…") reads left to right; only paths are clipped at the start. */
+.newmap-folder.muted { direction: ltr; }
+/* CodeMirror's panels and tooltips (z-index 200–500) stay inside their editor, below dialogs and menus. */
+.cm-editor { isolation: isolate; }
 .newmap-error { color: var(--error); min-height: 1em; }
 .newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }
 .trig-editor { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; height: 100%; overflow: hidden; }
