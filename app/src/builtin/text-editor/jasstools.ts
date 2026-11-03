@@ -87,7 +87,8 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
         if (spot.inString || spot.inRawcode) {
           if (!extra) return null;
           if (!ctx.explicit && spot.prefix === "" && !/["']$/.test(ctx.state.sliceDoc(ctx.pos - 1, ctx.pos))) return null;
-          const all = await symbols(text);
+          // Without symbols (e.g. text the parser gives up on) paths and object ids are still offered.
+          const all = await symbols(text).catch(() => [] as CodeSymbol[]);
           const sig = spot.call ? lookup(all, spot.call.name, ctx.pos)?.detail : undefined;
           const call = spot.call ? { ...spot.call, param: sig ? paramOf(sig, spot.call.argIndex) : undefined } : undefined;
           const items = await extra({ language: "jass", text, pos: ctx.pos, inString: spot.inString, inRawcode: spot.inRawcode, prefix: spot.prefix, call });
