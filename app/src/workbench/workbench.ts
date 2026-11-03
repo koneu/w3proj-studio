@@ -188,6 +188,8 @@ export class Workbench {
         writeBytes: (p, b) => wb.workspace.writeBytes(p, b),
         onDidChange: (l) => wb.workspace.onDidChange.on(l),
         onDidSave: (l) => wb.workspace.onDidSave.on(l),
+        delete: (p) => wb.workspace.delete(p),
+        rename: (a, b) => wb.workspace.rename(a, b),
       },
       settings: wb.settings,
       game: {

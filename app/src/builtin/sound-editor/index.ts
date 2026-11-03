@@ -6,6 +6,7 @@
 // the World Editor stores them.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, writeWtg, type Param } from "../../lib/triggers/wtg";
@@ -147,7 +148,7 @@ class SoundEditor {
     el.classList.add("snd-editor");
     el.append(h("div.snd-left", {}, this.browser), h("div.snd-right", {}, this.list, this.detail));
     this.imported = w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"))
-      .filter((p) => p.startsWith("map/") && SOUND_EXTENSIONS.test(p)).map((p) => p.slice(4).replace(/\//g, "\\"));
+      .filter((p) => p.startsWith("map/") && SOUND_EXTENSIONS.test(p)).map((p) => toArchiveName(p.slice(4)));
     this.renderBrowser();
     this.renderList();
     this.renderDetail();
@@ -167,7 +168,7 @@ class SoundEditor {
   /** Plays a sound file: imported ones from the project, game ones from storage (other extensions tried). */
   private async play(path: string) {
     this.stop();
-    let bytes: Uint8Array | null = await this.w3.workspace.readBytes(`map/${path.replace(/\\/g, "/")}`).catch(() => null);
+    let bytes: Uint8Array | null = await this.w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => null);
     if (!bytes && this.game) {
       const full = this.game.files.get(path)
         ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => this.game!.files.get(path.replace(SOUND_EXTENSIONS, e))).find(Boolean);

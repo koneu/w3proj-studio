@@ -333,6 +333,54 @@ fn ui_show_cursor(app: AppHandle) -> CmdResult<()> {
     Ok(())
 }
 
+/// A file path inside `root` (the open project); deleting and renaming go
+/// nowhere else.
+fn inside(root: &str, path: &str) -> CmdResult<PathBuf> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("{root}: {e}"))?;
+    let p = PathBuf::from(path);
+    let parent = p.parent().ok_or("no parent folder")?;
+    let parent = std::fs::canonicalize(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    if !parent.starts_with(&root) {
+        return Err(format!("{path} is outside the project"));
+    }
+    Ok(parent.join(p.file_name().ok_or("no file name")?))
+}
+
+/// Deletes a file of the project; empty folders it leaves behind go too (up to the root).
+#[tauri::command]
+fn fs_delete(root: String, path: String) -> CmdResult<()> {
+    let p = inside(&root, &path)?;
+    std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
+    let mut dir = p.parent().map(Path::to_path_buf);
+    while let Some(d) = dir {
+        if d == root || std::fs::remove_dir(&d).is_err() {
+            break;
+        }
+        dir = d.parent().map(Path::to_path_buf);
+    }
+    Ok(())
+}
+
+/// Renames (moves) a file within the project, creating folders as needed.
+#[tauri::command]
+fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
+    let src = inside(&root, &from)?;
+    // Checked as written before any folder is created, then again resolved.
+    let target = Path::new(&to);
+    if target.components().any(|c| matches!(c, std::path::Component::ParentDir)) || !target.starts_with(&root) {
+        return Err(format!("{to} is outside the project"));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let dst = inside(&root, &to)?;
+    if dst.exists() {
+        return Err(format!("{to} already exists"));
+    }
+    std::fs::rename(&src, &dst).map_err(|e| format!("{}: {e}", src.display()))
+}
+
 #[tauri::command]
 fn fs_exists(path: String) -> bool {
     Path::new(&path).exists()
@@ -589,6 +637,8 @@ pub fn run() {
             fs_read_text,
             fs_write_text,
             fs_write_bytes,
+            fs_delete,
+            fs_rename,
             fs_read_bytes,
             fs_exists,
             reveal_in_explorer,
@@ -604,4 +654,51 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running W3Proj Studio");
+}
+
+#[cfg(test)]
+mod fs_tests {
+    use super::*;
+
+    fn project() -> (PathBuf, String) {
+        let dir = std::env::temp_dir().join(format!("w3proj-fs-test-{}-{}", std::process::id(), rand_suffix()));
+        std::fs::create_dir_all(dir.join("map/sub")).unwrap();
+        std::fs::write(dir.join("map/sub/a.txt"), b"a").unwrap();
+        let root = dir.to_string_lossy().into_owned();
+        (dir, root)
+    }
+    fn rand_suffix() -> u128 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    }
+
+    #[test]
+    fn rename_inside_and_delete_removes_empty_folders() {
+        let (dir, root) = project();
+        let from = dir.join("map/sub/a.txt").to_string_lossy().into_owned();
+        let to = dir.join("map/new/deep/b.txt").to_string_lossy().into_owned();
+        fs_rename(root.clone(), from.clone(), to.clone()).unwrap();
+        assert!(!Path::new(&from).exists() && Path::new(&to).exists());
+        fs_delete(root.clone(), to).unwrap();
+        // The emptied folders go, the project root and map/ stay (map/sub is empty but wasn't touched).
+        assert!(!dir.join("map/new").exists());
+        assert!(dir.join("map").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn nothing_outside_the_project() {
+        let (dir, root) = project();
+        let from = dir.join("map/sub/a.txt").to_string_lossy().into_owned();
+        let outside = std::env::temp_dir().join(format!("w3proj-outside-{}", rand_suffix()));
+        assert!(fs_rename(root.clone(), from.clone(), outside.join("x.txt").to_string_lossy().into_owned()).is_err());
+        assert!(!outside.exists(), "no folder created outside");
+        let sneaky = format!(r"{root}\map\..\..\escape.txt");
+        assert!(fs_rename(root.clone(), from.clone(), sneaky).is_err());
+        let victim = std::env::temp_dir().join(format!("w3proj-victim-{}.txt", rand_suffix()));
+        std::fs::write(&victim, b"keep").unwrap();
+        assert!(fs_delete(root.clone(), victim.to_string_lossy().into_owned()).is_err());
+        assert!(victim.exists());
+        std::fs::remove_file(victim).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

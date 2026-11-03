@@ -1,0 +1,19 @@
+// war3map.imp — the Import Manager's list of files imported into the map.
+// Version 1: a count, then per file a flag byte and its path in the archive.
+// The classic documentation knows flags 5/8 (standard path) and 10/13 (custom
+// path); the game's maps (102 files) use 13, 17, 21, 24, 25 and 29, so the
+// flag is kept as a number.
+{
+  "name": "imports",
+  "description": "Imported files: path in the archive and flags",
+  "files": ["war3map.imp"],
+  "jsonFormat": "w3proj.imports/1",
+  "accept": "version == 1",
+  "fields": [
+    { "name": "version", "type": "u32" },
+    { "name": "files", "type": "struct", "count": "u32", "fields": [
+      { "name": "flags", "type": "u8", "doc": "5/8 standard path, 10/13 custom path (classic); Reforged maps also use 17, 21, 24, 25, 29" },
+      { "name": "path", "type": "cstring" }
+    ] }
+  ]
+}

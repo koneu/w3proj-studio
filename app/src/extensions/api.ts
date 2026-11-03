@@ -234,6 +234,10 @@ export interface W3Api {
     readBytes(projectPath: string): Promise<Uint8Array>;
     writeBytes(projectPath: string, bytes: Uint8Array): Promise<void>;
     onDidChange(listener: () => void): Disposable;
+    /** Deletes a project file (only inside the project; empty folders it leaves go too). */
+    delete(projectPath: string): Promise<void>;
+    /** Moves a project file to another path in the project (fails if the target exists). */
+    rename(from: string, to: string): Promise<void>;
     /** A project file was written through the workspace (path as written, forward slashes). */
     onDidSave(listener: (path: string) => void): Disposable;
   };

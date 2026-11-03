@@ -58,6 +58,18 @@ export class WorkspaceService {
     await writeText(this.resolve(p), text);
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
+  /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
+  async delete(p: string) {
+    if (!this.info) throw new Error("no project is open");
+    await invoke("fs_delete", { root: this.info.root, path: this.resolve(p) });
+    await this.refresh();
+  }
+  /** Moves a project file to another project path; the file list is refreshed. */
+  async rename(from: string, to: string) {
+    if (!this.info) throw new Error("no project is open");
+    await invoke("fs_rename", { root: this.info.root, from: this.resolve(from), to: this.resolve(to) });
+    await this.refresh();
+  }
   async writeBytes(p: string, bytes: Uint8Array) {
     await writeBytes(this.resolve(p), bytes);
     this.onDidSave.fire(p.replace(/\\/g, "/"));
