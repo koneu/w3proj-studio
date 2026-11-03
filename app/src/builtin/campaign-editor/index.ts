@@ -45,20 +45,92 @@ const RACES: [number, string][] = [[0, "Human"], [1, "Orc"], [2, "Undead"], [3, 
 const SECTIONS = [["general", "General"], ["screen", "Campaign Screen"], ["chapters", "Chapters"]] as const;
 type SectionId = (typeof SECTIONS)[number][0];
 
+/** Where the next editor (or the open ones) should go: from the side view. */
+let requested: { section: SectionId; chapter?: number } | null = null;
+const openViews = new Set<CampaignView>();
+
+const isCampaign = (w3: W3Api) => w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === FILE.toLowerCase());
+
+/** The campaign project a chapter project sits in (…/maps/<file>), or null. */
+async function parentCampaign(w3: W3Api): Promise<string | null> {
+  const root = w3.workspace.project()?.root;
+  const m = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root) : null;
+  if (!m) return null;
+  return (await w3.backend.invoke<boolean>("fs_exists", { path: `${m[1]}\\${FILE.replace(/\//g, "\\")}` })) ? m[1] : null;
+}
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  const open = async (section?: SectionId, chapter?: number) => {
+    if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+    if (!isCampaign(w3)) throw new Error("This project isn't a campaign (no map/war3campaign.w3f.json). Import a .w3n to get one.");
+    if (section) {
+      requested = { section, chapter };
+      for (const v of openViews) v.show(section, chapter);
+    }
+    await w3.editors.open(FILE, "w3.campaignEditor");
+  };
+  /** Opens a chapter's project: through an open editor (it asks about unsaved changes). */
+  const openChapter = async (map: string) => {
+    const view = [...openViews][0];
+    if (view) return view.openMap(map);
+    const dir = `${w3.workspace.project()!.root}\\maps\\${toProjectPath(map)}`;
+    if (!(await w3.backend.invoke<boolean>("fs_exists", { path: `${dir}\\w3proj.toml` }))) throw new Error(`${map} isn't unpacked as a project.`);
+    await w3.commands.execute("w3.project.open", dir);
+  };
+  const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
+
   ctx.subscriptions.push(
-    w3.commands.register("w3.campaign.open", async () => {
-      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
-      const has = w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === FILE.toLowerCase());
-      if (!has) throw new Error("This project isn't a campaign (no map/war3campaign.w3f.json). Import a .w3n to get one.");
-      await w3.editors.open(FILE, "w3.campaignEditor");
+    w3.commands.register("w3.campaign.open", (section?: SectionId, chapter?: number) => open(section, chapter)),
+    w3.commands.register("w3.campaign.back", async () => {
+      const parent = await parentCampaign(w3);
+      if (!parent) throw new Error("This project isn't a chapter map of a campaign.");
+      await w3.commands.execute("w3.project.open", parent);
+      await open();
     }),
+    // Side bar: the campaign's sections and chapters, or the way back from a chapter map.
+    w3.views.register("w3.campaign.overview", {
+      render(el) {
+        if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a campaign (.w3n) to edit it.")); return; }
+        if (!isCampaign(w3)) {
+          el.append(h("div.view-empty", {}, "This project isn't a campaign."));
+          void parentCampaign(w3).then((parent) => {
+            if (!parent) {
+              el.append(h("div.camp-side-actions", {}, h("button", { onclick: run(() => w3.commands.execute("w3.project.importMap")) }, "Import a campaign…")));
+              return;
+            }
+            el.replaceChildren(h("div.view-empty", {}, "This map is a chapter of a campaign."),
+              h("div.camp-side-actions", {}, h("button", { onclick: run(() => w3.commands.execute("w3.campaign.back")) }, "Back to campaign")),
+              h("div.view-empty.camp-side-path", { title: parent }, parent.split(/[\\/]/).pop() ?? parent));
+          });
+          return;
+        }
+        const row = (label: string, onclick: () => void, extra?: HTMLElement, title = "") =>
+          h("div.tree-row.obj-kind", { onclick, title }, h("span.tree-icon", {}, "›"), h("span.tree-label", {}, label), extra ?? null);
+        el.append(h("div.tree", {}, ...SECTIONS.map(([id, label]) => row(label, run(() => open(id))))));
+        const list = h("div.tree.camp-side-chapters", {}, h("div.view-empty", {}, "Loading chapters…"));
+        el.append(h("div.camp-side-head", {}, "Chapters"), list);
+        void (async () => {
+          const info: CampaignInfo = JSON.parse(await w3.workspace.readText(FILE));
+          const wts = await w3.workspace.readText(WTS).catch(() => null);
+          const strings = wts !== null ? new StringTable(wts) : null;
+          const text = (v: string) => strings?.resolve(v) ?? v;
+          list.replaceChildren(...info.chapters.map((c, i) => row(`${text(c.chapter)}: ${text(c.title)}`, run(() => open("chapters", i)),
+            h("button.icon-button.camp-side-open", { title: `Open ${c.map}`, onclick: (e: MouseEvent) => { e.stopPropagation(); run(() => openChapter(c.map))(); } }, "↗"),
+            c.map)));
+          if (!info.chapters.length) list.replaceChildren(h("div.view-empty", {}, "No chapters yet."));
+        })().catch((e) => list.replaceChildren(h("div.view-empty", {}, String(e))));
+      },
+    }),
+    w3.workspace.onDidChange(() => w3.views.refresh("w3.campaign.overview")),
+    w3.workspace.onDidSave((p) => { if (/war3campaign\.(w3f\.json|wts)$/i.test(p)) w3.views.refresh("w3.campaign.overview"); }),
     w3.editors.registerProvider("w3.campaignEditor", {
       async resolve(el, doc) {
         const info: CampaignInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
         const wtsText = await w3.workspace.readText(WTS).catch(() => null);
         const view = new CampaignView(w3, el, info, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d));
+        if (requested) { view.show(requested.section, requested.chapter); requested = null; }
+        openViews.add(view);
         const stop = w3.workspace.onDidChange(() => view.render());
         return {
           save: async () => {
@@ -68,7 +140,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             view.saved();
           },
           focus: () => el.focus(),
-          dispose: () => stop.dispose(),
+          dispose: () => { stop.dispose(); openViews.delete(view); },
         };
       },
     }),
@@ -96,6 +168,13 @@ class CampaignView {
   }
 
   saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+
+  /** Shows a section (and selects a chapter button). */
+  show(section: SectionId, chapter?: number) {
+    this.section = section;
+    if (chapter !== undefined) this.selected = chapter;
+    this.render();
+  }
 
   async saveStrings() {
     if (!this.strings || !this.texts.size) return;
@@ -225,7 +304,7 @@ class CampaignView {
     void this.w3.window.showInfo(`${name} was unpacked into maps/ and added as a chapter. Save the campaign to keep the chapter.`);
   }
 
-  private async openMap(map: string) {
+  async openMap(map: string) {
     const dir = this.projectDir(map);
     if (!dir) throw new Error(`${map} isn't unpacked as a project (it stays packed in the campaign, e.g. because not all of its files could be named).`);
     // Switching projects closes the editors (the campaign's too).

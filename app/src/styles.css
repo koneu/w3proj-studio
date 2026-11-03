@@ -664,3 +664,9 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .camp-row.active { background: #37414f; }
 .camp-missing { color: var(--error); }
 .camp-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.camp-side-head { padding: 10px 14px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
+.camp-side-chapters .tree-label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.camp-side-open { visibility: hidden; }
+.tree-row:hover .camp-side-open { visibility: visible; }
+.camp-side-actions { padding: 4px 14px; }
+.camp-side-path { font-size: 11px; }

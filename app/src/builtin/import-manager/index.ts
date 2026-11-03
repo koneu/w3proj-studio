@@ -6,10 +6,14 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
-import { archivePath, candidates, importPath, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
 
-const RAW = "map/war3map.imp", FILE = `${RAW}.json`;
+/** The import list: the map's, or in a campaign project the campaign's. */
+const lists = (campaign: boolean) => {
+  const raw = campaign ? "map/war3campaign.imp" : "map/war3map.imp";
+  return { RAW: raw, FILE: `${raw}.json` };
+};
 /** Files above this size aren't opened in a viewer (they're read whole into the window). */
 const MAX_OPEN = 256 * 1024 * 1024;
 
@@ -21,6 +25,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const p = w3.workspace.project();
       if (!p) throw new Error("Open or import a project first.");
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+      const { RAW, FILE } = lists(files.has("map/war3campaign.w3f.json") || files.has("map/war3campaign.w3f"));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.importManager"); return; }
       // A map without imports gets an empty list.
       if (!files.has(FILE)) {
@@ -42,7 +47,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(list) }));
           doc.setDirty(false);
         };
-        const view = new ImportView(w3, el, list, write, !doc.readOnly);
+        const campaign = /war3campaign\.imp(\.json)?$/i.test(doc.path);
+        const view = new ImportView(w3, el, list, write, !doc.readOnly, campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER);
         const stop = w3.workspace.onDidChange(() => view.render());
         return { dispose: () => stop.dispose() };
       },
@@ -54,7 +60,8 @@ class ImportView {
   private selected: string | null = null;
   private query = "";
 
-  constructor(private w3: W3Api, private el: HTMLElement, private list: ImportsDoc, private write: () => Promise<void>, private editable: boolean) {
+  constructor(private w3: W3Api, private el: HTMLElement, private list: ImportsDoc, private write: () => Promise<void>, private editable: boolean,
+    private folder: string) {
     el.classList.add("imp-editor");
     this.render();
   }
@@ -64,9 +71,14 @@ class ImportView {
     return new Map(this.w3.workspace.files().map((f) => [f.path.replace(/\\/g, "/").toLowerCase(), f]));
   }
   /** The project file an entry stands for (sounds may be stored under another extension). */
-  private fileOf(path: string, files = this.files()): FileInfo | undefined {
-    for (const c of candidates(path)) { const f = files.get(c.toLowerCase()); if (f) return f; }
+  private fileOf(e: ImportEntry, files = this.files()): FileInfo | undefined {
+    for (const c of entryCandidates(e, this.folder)) { const f = files.get(c.toLowerCase()); if (f) return f; }
     return undefined;
+  }
+  /** The path the game uses for an entry: standard-path entries found in the import folder get it in front. */
+  private shownPath(e: ImportEntry, f: FileInfo | undefined): string {
+    const inFolder = f?.path.replace(/\\/g, "/").toLowerCase().startsWith(`map/${this.folder.toLowerCase()}/`);
+    return inFolder && !e.path.toLowerCase().startsWith(`${this.folder.toLowerCase()}\\`) ? `${this.folder}\\${e.path}` : e.path;
   }
   private taken(path: string) {
     return this.list.files.some((f) => samePath(f.path, path)) || this.files().has(projectPath(path).toLowerCase());
@@ -85,10 +97,10 @@ class ImportView {
       if (/\.w3[mxn]$/i.test(src)) {
         const c = await this.w3.window.showWarning(`${src.split(/[\\/]/).pop()} is a map or campaign. Import it into this map as a file anyway?`,
           "Import as file", "Open as new project…", "Cancel");
-        if (c === "Open as new project…") { await this.w3.commands.execute("w3.project.importMap"); return; }
+        if (c === "Open as new project…") { await this.w3.commands.execute("w3.project.importMap", src); return; }
         if (c !== "Import as file") return;
       }
-      const path = importPath(src, (p) => this.taken(p));
+      const path = importPath(src, (p) => this.taken(p), this.folder);
       // Copied in the backend: imports can be far larger than the webview can hold.
       await this.w3.window.withProgress(`Importing ${path}`, () => this.w3.workspace.copy(src, projectPath(path)));
       this.list.files.push({ flags: NEW_IMPORT_FLAGS, path });
@@ -107,11 +119,13 @@ class ImportView {
   private changePath(entry: ImportEntry, to: string) {
     void this.run("Change path", async () => {
       to = to.trim().replace(/^\\+/, "");
-      if (!to || samePath(to, entry.path)) return;
+      const f = this.fileOf(entry);
+      if (!to || samePath(to, this.shownPath(entry, f))) return;
       if (to.split("\\").some((part) => part === ".." || part === "")) throw new Error("Not a valid path.");
       if (this.taken(to)) throw new Error(`${to} is already in the map.`);
-      const f = this.fileOf(entry.path);
       if (f) await this.w3.workspace.rename(f.path, projectPath(to));
+      // A standard-path entry (name inside the import folder) now has a path of its own.
+      if (entry.path !== this.shownPath(entry, f)) entry.flags = CUSTOM_PATH_FLAGS;
       entry.path = to;
       await this.write();
       this.selected = to;
@@ -122,7 +136,7 @@ class ImportView {
     void this.run("Remove", async () => {
       const c = await this.w3.window.showWarning(`Remove ${entry.path} from the map? The file is deleted from the project.`, "Remove", "Cancel");
       if (c !== "Remove") return;
-      const f = this.fileOf(entry.path);
+      const f = this.fileOf(entry);
       if (f) await this.w3.workspace.delete(f.path);
       this.list.files = this.list.files.filter((f) => f !== entry);
       await this.write();
@@ -160,12 +174,12 @@ class ImportView {
     const size = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
     const listed = this.list.files.filter((f) => !q || f.path.toLowerCase().includes(q));
     // Files the list stands for (with their other sound extensions), then the rest of the map folder.
-    const claimed = new Set(this.list.files.map((e) => this.fileOf(e.path, files)?.path.replace(/\\/g, "/").toLowerCase()).filter((x): x is string => !!x));
+    const claimed = new Set(this.list.files.map((e) => this.fileOf(e, files)?.path.replace(/\\/g, "/").toLowerCase()).filter((x): x is string => !!x));
     // Files in the map folder that the list doesn't register (and that aren't the map's own).
     const unlisted = [...files.values()].map((f) => f.path.replace(/\\/g, "/")).filter((p) => p.startsWith("map/"))
       .map(archivePath)
       .filter((p) => !isMapFile(p) && !claimed.has(projectPath(p).toLowerCase()) && (!q || p.toLowerCase().includes(q)));
-    const total = this.list.files.reduce((n, e) => n + (this.fileOf(e.path, files)?.size ?? 0), 0);
+    const total = this.list.files.reduce((n, e) => n + (this.fileOf(e, files)?.size ?? 0), 0);
 
     const search = h("input.imp-search", { type: "search", placeholder: "Filter by path", value: this.query,
       oninput: () => { this.query = search.value; this.render(); (this.el.querySelector(".imp-search") as HTMLInputElement | null)?.focus(); } });
@@ -174,19 +188,19 @@ class ImportView {
       search, h("span.muted", {}, `${this.list.files.length} imported · ${size(total)}`));
 
     const rows = listed.map((e) => {
-      const f = this.fileOf(e.path, files);
+      const f = this.fileOf(e, files);
       const active = this.selected !== null && samePath(this.selected, e.path);
       return h(`tr.imp-row${active ? ".active" : ""}${f ? "" : ".missing"}`, {
         onclick: () => { this.selected = e.path; this.render(); },
         ondblclick: () => { if (f && f.size <= MAX_OPEN) this.openFile(e.path, f.path); },
         title: f ? "" : "Not in the project's map folder",
-      }, h("td.imp-path", {}, e.path), h("td", {}, kindOf(e.path)), h("td.imp-size", {}, f ? size(f.size) : "missing"), h("td.muted", {}, String(e.flags)));
+      }, h("td.imp-path", {}, this.shownPath(e, f)), h("td", {}, kindOf(e.path)), h("td.imp-size", {}, f ? size(f.size) : "missing"), h("td.muted", {}, String(e.flags)));
     });
     const table = h("table.imp-table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Path in the map"), h("th", {}, "Type"), h("th", {}, "Size"), h("th", { title: "Import flags (war3map.imp)" }, "Flags"))),
       h("tbody", {}, ...rows));
 
     const sel = this.selected ? this.list.files.find((e) => samePath(e.path, this.selected!)) : undefined;
-    const detail = sel ? this.detail(sel, this.fileOf(sel.path, files)) : h("p.muted", {}, "Select a file to change its path, open, export or remove it.");
+    const detail = sel ? this.detail(sel, this.fileOf(sel, files)) : h("p.muted", {}, "Select a file to change its path, open, export or remove it.");
 
     this.el.replaceChildren(h("div.imp-main", {}, toolbar,
       listed.length ? table : h("p.muted", {}, q ? "No imported file matches." : "No imported files yet."),
@@ -199,7 +213,7 @@ class ImportView {
 
   private detail(e: ImportEntry, file: FileInfo | undefined): HTMLElement {
     const exists = !!file;
-    const path = h("input.imp-path-edit", { type: "text", value: e.path, readOnly: !this.editable });
+    const path = h("input.imp-path-edit", { type: "text", value: this.shownPath(e, file), readOnly: !this.editable });
     return h("div", {},
       h("h3", {}, e.path.split(/[\\/]/).pop() ?? e.path),
       h("div.imp-field", {}, h("label", {}, "Path in the map"), path,

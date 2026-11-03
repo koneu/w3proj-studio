@@ -94,8 +94,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       out.append(`opened ${path}`);
     }),
 
-    w3.commands.register("w3.project.importMap", async () => {
-      const map = await w3.window.pickFile({ title: "Choose a map to import", filters: MAP_FILTERS });
+    // `file`: the map or campaign to import (else asked for).
+    w3.commands.register("w3.project.importMap", async (file?: string) => {
+      const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Choose a map to import", filters: MAP_FILTERS });
       if (!map) return;
       const parent = await w3.window.pickFolder({ title: "Choose where to create the project folder" });
       if (!parent) return;
