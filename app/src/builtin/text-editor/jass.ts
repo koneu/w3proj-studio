@@ -28,6 +28,8 @@ export const jass: StreamParser<{ inComment: boolean }> = {
     if (stream.match("/*")) { state.inComment = true; return "comment"; }
     if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) return "string";
     if (stream.match(/^'(?:[^'\\]|\\.){1,4}'/)) return "number"; // rawcode 'hfoo'
+    // vJASS textmacro parameter ($NAME$), before "$" hex numbers ($FF) would take its first letters.
+    if (stream.match(/^\$[A-Za-z_]\w*\$/)) return "macroName";
     if (stream.match(/^(?:0x|\$)[0-9a-f]+/i) || stream.match(/^\d*\.?\d+/)) return "number";
     if (stream.match(/^[A-Za-z_][A-Za-z0-9_]*/)) {
       const w = stream.current();
