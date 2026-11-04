@@ -610,14 +610,15 @@ fn modified(p: &Path) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
 
-/// Launches an executable with `-launch -loadfile <map>`. `-launch` makes the
-/// Reforged binaries start directly instead of bouncing to the launcher.
-fn launch(exe: &str, map: &str) -> CmdResult<std::process::Child> {
+/// Launches an executable with `-launch -loadfile <map>` and `extra` arguments. `-launch`
+/// makes the Reforged binaries start directly instead of bouncing to the launcher.
+fn launch(exe: &str, map: &str, extra: &[&str]) -> CmdResult<std::process::Child> {
     if !Path::new(exe).exists() {
         return Err(format!("not found: {exe} (check settings)"));
     }
     Command::new(exe)
         .args(["-launch", "-loadfile", map])
+        .args(extra)
         .current_dir(Path::new(exe).parent().unwrap_or(Path::new(".")))
         .spawn()
         .map_err(err)
@@ -627,7 +628,7 @@ fn launch(exe: &str, map: &str) -> CmdResult<std::process::Child> {
 /// saves, `w3://map-saved` is emitted so the UI can sync the project.
 #[tauri::command]
 fn world_editor_open(app: AppHandle, watches: State<Watches>, exe: String, map: String, root: String) -> CmdResult<()> {
-    let mut child = launch(&exe, &map)?;
+    let mut child = launch(&exe, &map, &[])?;
     let map_path = PathBuf::from(&map);
     watches.0.lock().unwrap().push(map_path.clone());
     std::thread::spawn(move || {
@@ -654,9 +655,13 @@ fn world_editor_open(app: AppHandle, watches: State<Watches>, exe: String, map: 
     Ok(())
 }
 
+/// Starts the game with the map as the World Editor's Test Map does (seen on 3.0.1): normal
+/// difficulty, the "WorldEdit" test profile (not the player's own), a fixed random seed.
+/// Unlike the World Editor, which Battle.net starts with its session, the game asks for a
+/// login when this app wasn't started by Battle.net.
 #[tauri::command]
 fn game_test_map(exe: String, map: String) -> CmdResult<()> {
-    launch(&exe, &map).map(|_| ())
+    launch(&exe, &map, &["-mapdiff", "1", "-testmapprofile", "WorldEdit", "-fixedseed", "1"]).map(|_| ())
 }
 
 /// What an external tool run printed and returned.
