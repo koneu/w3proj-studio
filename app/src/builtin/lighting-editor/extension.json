@@ -1,0 +1,12 @@
+{
+  "id": "w3.lightingEditor",
+  "name": "Lighting Editor",
+  "version": "0.1.0",
+  "description": "The map's own day/night lighting (war3map.w3l), like World Editor 3.0.1's lighting editor: copy the game's terrain or unit lighting into the map and edit its intensities, colours over the day and direction.",
+  "contributes": {
+    "viewContainers": [{ "id": "lighting", "title": "Lighting", "icon": "☀", "order": 4.5 }],
+    "views": [{ "id": "w3.lighting.overview", "title": "Lighting", "container": "lighting" }],
+    "editors": [{ "id": "w3.lightingEditor", "title": "Lighting Editor", "patterns": ["*.mdl"] }],
+    "commands": [{ "id": "w3.lighting.show", "title": "Lighting", "category": "Module" }]
+  }
+}

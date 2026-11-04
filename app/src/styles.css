@@ -765,3 +765,12 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .diff-new { color: #98c379; }
 .problem-text { overflow-wrap: anywhere; }
 .statusbar-item[data-id="w3.problems.status"] { white-space: pre; }
+.lighting-view { padding: 4px 12px; }
+.lighting-section { margin-bottom: 14px; }
+.lighting-section h4 { margin: 6px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
+.lighting-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lighting-head { margin-bottom: 12px; }
+.lighting-keys { width: auto; margin-bottom: 4px; }
+.form-table .form-num.lighting-num, .lighting-num { width: 80px; }
+.lighting-gradient { height: 14px; max-width: 480px; border: 1px solid var(--border); border-radius: 2px; margin: 2px 0 6px; }
+.form-input.invalid { outline: 1px solid var(--error); }
