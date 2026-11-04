@@ -798,3 +798,20 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .form-table .form-num.lighting-num, .lighting-num { width: 80px; }
 .lighting-gradient { height: 14px; max-width: 480px; border: 1px solid var(--border); border-radius: 2px; margin: 2px 0 6px; }
 .form-input.invalid { outline: 1px solid var(--error); }
+.model-pick-backdrop { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); }
+.model-pick { display: flex; flex-direction: column; gap: 10px; width: min(900px, 94vw); height: min(620px, 90vh); padding: 14px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+.model-pick-title { font-weight: 600; }
+.model-pick-body { flex: 1; display: flex; gap: 14px; min-height: 0; }
+.model-pick-left { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.model-pick-search { width: 100%; }
+.model-pick-count { font-size: 11px; }
+.model-pick-list { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 3px; }
+.model-pick-row { display: flex; flex-direction: column; padding: 3px 8px; cursor: pointer; }
+.model-pick-row small { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-pick-row:hover { background: var(--bg-hover); }
+.model-pick-row.active { background: var(--accent-2); color: #fff; }
+.model-pick-row.active small { color: rgba(255, 255, 255, 0.8); }
+.model-pick-right { width: 250px; display: flex; flex-direction: column; gap: 4px; }
+.model-pick-right .obj-preview { float: none; margin: 0 0 8px; width: 250px; height: 230px; }
+.model-pick-caption { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-pick-actions { display: flex; justify-content: flex-end; gap: 8px; }

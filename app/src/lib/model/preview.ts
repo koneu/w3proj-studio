@@ -1,12 +1,15 @@
-// A small live model view for the object editor: the selected object's model (the map's
-// imported file first, else the game's), its Stand animation, turning slowly; drag to turn it.
+// A small live model view (object editor, the Problems view's model picker): a model's Stand
+// animation, turning slowly; drag to turn it. The map's imported file wins, else the game's:
+// through the graphics mode, or (`classic`) the Classic files exactly, as Classic graphics
+// shows them.
 
 import type { W3Api } from "../../extensions/api";
-import { toProjectPath } from "../../lib/formats/archivepath";
-import { decodeImage } from "../../lib/image/index.ts";
-import { parseMdx } from "../../lib/model/mdx";
-import { ModelRenderer, standClock, type Clock } from "../../lib/model/renderer";
-import { h } from "../../workbench/dom";
+import { toProjectPath } from "../formats/archivepath";
+import { decodeImage } from "../image/index.ts";
+import { parseMdx } from "./mdx";
+import { ModelRenderer, standClock, type Clock } from "./renderer";
+
+const div = (cls: string) => Object.assign(document.createElement("div"), { className: cls });
 
 export class ModelPreview {
   readonly el: HTMLElement;
@@ -18,16 +21,23 @@ export class ModelPreview {
   private started = performance.now();
   private drag: number | null = null;
 
-  constructor(private w3: W3Api) {
-    this.canvas = h("canvas.obj-preview-canvas") as HTMLCanvasElement;
-    this.note = h("div.obj-preview-note.muted");
-    this.el = h("div.obj-preview", { title: "Drag to turn" }, this.canvas, this.note);
-    this.canvas.addEventListener("mousedown", (e) => { this.drag = e.clientX; e.preventDefault(); });
+  constructor(private w3: W3Api, private opts: { classic?: boolean } = {}) {
+    this.canvas = this.newCanvas();
+    this.note = div("obj-preview-note muted");
+    this.el = div("obj-preview");
+    this.el.title = "Drag to turn";
+    this.el.append(this.canvas, this.note);
     window.addEventListener("mousemove", this.onMove);
     window.addEventListener("mouseup", this.onUp);
     this.raf = requestAnimationFrame(this.tick);
   }
 
+  private newCanvas(): HTMLCanvasElement {
+    const c = document.createElement("canvas");
+    c.className = "obj-preview-canvas";
+    c.addEventListener("mousedown", (e) => { this.drag = e.clientX; e.preventDefault(); });
+    return c;
+  }
   private onMove = (e: MouseEvent) => {
     if (this.drag === null || !this.renderer) return;
     this.renderer.yaw -= (e.clientX - this.drag) * 0.01;
@@ -46,7 +56,7 @@ export class ModelPreview {
     this.note.title = mdx ?? "";
     if (!mdx) return;
     void this.load(mdx).catch((e) => {
-      if (this.path === mdx) this.note.textContent = `Can't show ${mdx.split("\\").pop()}: ${(e as Error).message ?? e}`;
+      if (this.path === mdx) this.note.textContent = `Can't show ${mdx.split(/[\\/]/).pop()}: ${(e as Error).message ?? e}`;
     });
   }
 
@@ -59,7 +69,9 @@ export class ModelPreview {
       if (files.has(own.toLowerCase())) return this.w3.workspace.readBytes(own);
     }
     let last: unknown = new Error(`${path} not found`);
-    for (const v of variants) {
+    // Classic: the base folder exactly (not its Reforged versions), else as the game resolves it.
+    const tries = this.opts.classic ? variants.flatMap((v) => [`War3.w3mod:${v.replace(/\\/g, "/")}`, v]) : variants;
+    for (const v of tries) {
       try { return await this.w3.game.read(v); } catch (e) { last = e; }
     }
     throw last;
@@ -69,8 +81,7 @@ export class ModelPreview {
     const model = parseMdx(await this.read(mdx));
     if (this.path !== mdx) return;
     // A fresh canvas per model: a disposed renderer's WebGL context can't be used again.
-    const canvas = h("canvas.obj-preview-canvas") as HTMLCanvasElement;
-    canvas.addEventListener("mousedown", (e) => { this.drag = e.clientX; e.preventDefault(); });
+    const canvas = this.newCanvas();
     this.canvas.replaceWith(canvas);
     this.canvas = canvas;
     const r = new ModelRenderer(canvas, model);
@@ -87,7 +98,7 @@ export class ModelPreview {
   private tick = (now: number) => {
     this.raf = requestAnimationFrame(this.tick);
     const r = this.renderer;
-    // Only while shown (a hidden tab or a closed detail pane has no size).
+    // Only while shown (a hidden tab or a closed pane has no size).
     if (!r || !this.canvas.isConnected || this.canvas.clientWidth === 0) return;
     if (this.drag === null) r.yaw += 0.004;
     const stand = standClock(r.model);

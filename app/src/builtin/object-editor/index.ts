@@ -8,7 +8,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { pickFile, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType } from "./fields";
-import { ModelPreview } from "./preview";
+import { ModelPreview } from "../../lib/model/preview";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }

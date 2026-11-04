@@ -11,6 +11,7 @@ import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
+import { pickClassicModel } from "./modelpick";
 
 const KINDS = ["w3u", "w3t", "w3a", "w3h", "w3b", "w3d", "w3q"];
 /** Object data field types that hold file paths (shadow textures are names, not paths). */
@@ -362,11 +363,15 @@ async function useClassicModel(w3: W3Api, kind: string, base: string, id: string
   const words = (current.split(/[\\/]/).pop() ?? "").replace(/\.\w+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2);
   const score = (p: string) => { const l = p.toLowerCase(); return words.reduce((n, w) => n + (l.includes(w) ? 1 : 0), 0); };
   const list = [...models].map((p) => ({ p, s: score(p) })).sort((x, y) => y.s - x.s || x.p.localeCompare(y.p));
-  const pick = await w3.window.quickPick(list.map(({ p, s }) => ({
-    label: p.split("\\").pop()!.replace(/\.mdx$/i, ""), description: p.replace(/\\[^\\]+$/, "") + (s ? "  ·  name match" : ""), value: p,
-  })), { placeholder: `Classic model for ${name} (${id})` });
-  if (!pick?.value) return;
-  const model = pick.value.replace(/\.mdx$/i, ".mdl");
+  const pick = await pickClassicModel(w3, {
+    title: `Classic model for ${name} (${id})`,
+    current: current || null,
+    choices: list.map(({ p, s }) => ({
+      path: p, label: p.split("\\").pop()!.replace(/\.mdx$/i, ""), detail: p.replace(/\\[^\\]+$/, "") + (s ? "  ·  name match" : ""),
+    })),
+  });
+  if (!pick) return;
+  const model = pick.replace(/\.mdx$/i, ".mdl");
   const fields = MODEL_FIELDS[kind];
   const path = `map/war3map.${kind}.json`;
   const text = await w3.workspace.readText(path).catch(() => null);
