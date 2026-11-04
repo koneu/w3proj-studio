@@ -58,6 +58,41 @@ const COLOR_FS = `#version 300 es
 precision mediump float; in vec4 vColor; out vec4 outColor;
 void main() { outColor = vColor; }`;
 
+// Water: the tileset's animated texture (one copy per tile) under a colour that goes from
+// "shallow min" to "shallow max" as the water deepens to 64/128 of a cliff layer (from 10/128),
+// then from "deep min" to "deep max" until 72/128 (TerrainArt\Water.slk).
+const WATER_VS = `#version 300 es
+in vec3 aPos; in vec2 aUv; in float aDepth;
+uniform mat4 uViewProj;
+out vec2 vUv; out float vDepth;
+void main() { vUv = aUv; vDepth = aDepth; gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+const WATER_FS = `#version 300 es
+precision mediump float;
+in vec2 vUv; in float vDepth;
+uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
+out vec4 outColor;
+void main() {
+  const float minDepth = 10.0 / 128.0, deepLevel = 64.0 / 128.0, maxDepth = 72.0 / 128.0;
+  vec4 c = vDepth <= deepLevel
+    ? mix(uShallowMin, uShallowMax, clamp((vDepth - minDepth) / (deepLevel - minDepth), 0.0, 1.0))
+    : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
+  outColor = texture(uTex, vUv) * c;
+}`;
+
+/** A tileset's water: animation frames (by index; null until loaded), frames per second and
+ *  the colour ramp (r, g, b, a in 0–1). */
+export interface WaterLook {
+  frames: (WebGLTexture | null)[];
+  rate: number;
+  shallowMin: number[]; shallowMax: number[]; deepMin: number[]; deepMax: number[];
+}
+
+/** Until the game's water is known: an untextured blue-grey ramp. */
+const WATER_DEFAULT: WaterLook = {
+  frames: [], rate: 1,
+  shallowMin: [0.12, 0.32, 0.5, 0.25], shallowMax: [0.12, 0.32, 0.5, 0.6], deepMin: [0.12, 0.32, 0.5, 0.6], deepMax: [0.1, 0.27, 0.45, 0.85],
+};
+
 // Ground overlay: a texture spread over the map (one texel per 32×32 pathing
 // cell), e.g. the pathing editor's view.
 const OVERLAY_VS = `#version 300 es
@@ -147,6 +182,13 @@ export class TerrainRenderer {
   private textures: ({ tex: WebGLTexture; extended: boolean } | null)[];
   private placeholder: WebGLTexture;
   private water: Mesh;
+  private waterProg: WebGLProgram;
+  /** The tileset's water (see setWaterLook); the default ramp until then. */
+  private waterLook: WaterLook = WATER_DEFAULT;
+  /** Water frame shown by the last render (the view redraws when it changes). */
+  private waterFrameShown = -1;
+  /** White texture for untextured water. */
+  private waterWhite: WebGLTexture;
   private overlayProg: WebGLProgram | null = null;
   private overlay: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
   private wire: Mesh;
@@ -191,6 +233,10 @@ export class TerrainRenderer {
     this.gl = gl;
     this.groundProg = compile(gl, GROUND_VS, GROUND_FS);
     this.colorProg = compile(gl, COLOR_VS, COLOR_FS);
+    this.waterProg = compile(gl, WATER_VS, WATER_FS);
+    this.waterWhite = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.waterWhite);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
     this.textures = terrain.groundTiles.map(() => null);
     this.placeholder = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.placeholder);
@@ -344,22 +390,58 @@ export class TerrainRenderer {
     return { vao, count: data.length / 7 };
   }
 
+  /** Water tiles: position, texture coordinate (one copy per tile), depth in cliff layers. */
   private buildWater(): Mesh {
-    const t = this.terrain, out: number[] = [];
+    const t = this.terrain, gl = this.gl, out: number[] = [];
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
         if (!cs.some((c) => c.hasWater) || cs.every((c) => c.water <= c.height)) continue;
         const v = cs.map((c, i) => {
-          const cx = x + (i === 1 || i === 2 ? 1 : 0), cy = y + (i >= 2 ? 1 : 0);
-          const depth = c.water - c.height;
-          const a = Math.min(0.85, Math.max(0.25, 0.25 + depth / 160));
-          return [t.offsetX + cx * 128, t.offsetY + cy * 128, c.water, 0.12, 0.32, 0.5, a];
+          const dx = i === 1 || i === 2 ? 1 : 0, dy = i >= 2 ? 1 : 0;
+          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, c.water, dx, 1 - dy, (c.water - c.height) / 128];
         });
         out.push(...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]);
       }
     }
-    return this.colorMesh(out);
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(out), gl.STATIC_DRAW);
+    const attr = (name: string, size: number, offset: number) => {
+      const loc = gl.getAttribLocation(this.waterProg, name);
+      if (loc < 0) return;
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 24, offset * 4);
+    };
+    attr("aPos", 3, 0); attr("aUv", 2, 3); attr("aDepth", 1, 5);
+    gl.bindVertexArray(null);
+    return { vao, count: out.length / 6 };
+  }
+
+  /** The tileset's water (frames are filled in by setWaterFrame as they load). */
+  setWaterLook(look: Omit<WaterLook, "frames">, frames: number) {
+    this.waterLook = { ...look, frames: new Array(frames).fill(null) };
+    this.waterFrameShown = -1;
+  }
+
+  setWaterFrame(i: number, img: DecodedTexture) {
+    if (i >= this.waterLook.frames.length) return;
+    const gl = this.gl, tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    this.waterLook.frames[i] = tex;
+  }
+
+  /** The water animation frame for now. */
+  private waterFrame(): number {
+    const n = this.waterLook.frames.length;
+    return n > 1 ? Math.floor((performance.now() / 1000) * this.waterLook.rate) % n : 0;
   }
 
   private buildWire(): Mesh {
@@ -572,6 +654,7 @@ export class TerrainRenderer {
 
   /** Whether the view changes by itself (particles): then it should be drawn every frame. */
   get animating(): boolean {
+    if (this.showWater && this.water.count && this.waterLook.frames.length > 1 && this.waterFrame() !== this.waterFrameShown) return true;
     return this.showEffects && this.batches.some((b) => b.instances.length && b.effects && !this.hiddenGroups.has(b.group));
   }
 
@@ -682,13 +765,26 @@ export class TerrainRenderer {
       gl.bindVertexArray(m.vao);
       gl.drawArrays(gl.POINTS, 0, m.count);
     }
-    if (this.showWater) {
+    if (this.showWater && this.water.count) {
+      const look = this.waterLook, frame = this.waterFrame();
+      this.waterFrameShown = frame;
+      gl.useProgram(this.waterProg);
+      gl.uniformMatrix4fv(gl.getUniformLocation(this.waterProg, "uViewProj"), false, viewProj);
+      gl.uniform1i(gl.getUniformLocation(this.waterProg, "uTex"), 0);
+      for (const [name, v] of [["uShallowMin", look.shallowMin], ["uShallowMax", look.shallowMax], ["uDeepMin", look.deepMin], ["uDeepMax", look.deepMax]] as const) {
+        gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, look.frames[frame] ?? look.frames.find((f) => f) ?? this.waterWhite);
       gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
       gl.disable(gl.CULL_FACE);
       gl.bindVertexArray(this.water.vao);
       gl.drawArrays(gl.TRIANGLES, 0, this.water.count);
       gl.depthMask(true);
+      // The rings below use the colour program (its view matrix is still set).
+      gl.useProgram(this.colorProg);
     }
     // Rings stay visible through trees and water.
     gl.disable(gl.DEPTH_TEST);

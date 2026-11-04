@@ -380,6 +380,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }).catch(() => { /* blight shows as the placeholder colour */ });
         tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
+        // The tileset's water (TerrainArt\Water.slk, row "<tileset>Sha"): animation frames
+        // <texFile>00…, frames per second, and the shallow/deep colour ramp (alpha, r, g, b).
+        w3.game.readText("TerrainArt\\Water.slk").then((text) => {
+          const rows = parseSlk(text);
+          const row = rows.find((r) => r.waterID === `${terrain.tileset}Sha`) ?? rows.find((r) => r.waterID?.toLowerCase() === `${terrain.tileset}sha`.toLowerCase());
+          if (!row) return;
+          const argb = (k: string) => [`${k}_R`, `${k}_G`, `${k}_B`, `${k}_A`].map((c) => Number(row[c] ?? 255) / 255);
+          const frames = Math.max(1, Number(row.numTex) || 1);
+          renderer.setWaterLook({ rate: Number(row.texRate) || 1, shallowMin: argb("Smin"), shallowMax: argb("Smax"), deepMin: argb("Dmin"), deepMax: argb("Dmax") }, frames);
+          for (let i = 0; i < frames; i++) {
+            const path = frames > 1 ? `${row.texFile}${String(i).padStart(2, "0")}.blp` : `${row.texFile}.blp`;
+            readFile(w3, doc, path).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path).mip(0)); redraw(); }, () => {});
+          }
+        }).catch(() => { /* the default water colour */ });
         const thumbCache = new Map<string, Promise<string | null>>();
         /** Data URL of a ground texture's first cell (the plain tile). */
         const tileThumb = (path: string) => {
