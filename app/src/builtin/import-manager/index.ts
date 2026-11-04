@@ -6,6 +6,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
+import { findPathRefs, updatePathRefs } from "./references";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
 
@@ -120,13 +121,26 @@ class ImportView {
       if (!to || samePath(to, this.shownPath(entry, f))) return;
       if (to.split("\\").some((part) => part === ".." || part === "")) throw new Error("Not a valid path.");
       if (this.taken(to)) throw new Error(`${to} is already in the map.`);
+      const from = this.shownPath(entry, f);
       if (f) await this.w3.workspace.rename(f.path, projectPath(to));
       // A standard-path entry (name inside the import folder) now has a path of its own.
-      if (entry.path !== this.shownPath(entry, f)) entry.flags = CUSTOM_PATH_FLAGS;
+      if (entry.path !== from) entry.flags = CUSTOM_PATH_FLAGS;
       entry.path = to;
       await this.write();
       this.selected = to;
-      void this.w3.window.showInfo(`Moved. Object data, triggers or scripts that use the old path aren't changed.`);
+      // What used the old path (object data, triggers, scripts, models) can follow.
+      const refs = await findPathRefs(this.w3, from, projectPath(to));
+      const raw = refs.raw.length ? ` Not changeable (kept in binary form; re-sync the project to get text): ${refs.raw.map((p) => p.slice(4)).join(", ")}.` : "";
+      if (!refs.files.length) {
+        void this.w3.window.showInfo(`Moved. Nothing in the map's text files or models used the old path.${raw}`);
+        return;
+      }
+      const count = refs.files.reduce((n, r) => n + r.count, 0);
+      const list = refs.files.map((r) => `${r.path.slice(4)} (${r.count})`).join(", ");
+      const pick = await this.w3.window.showInfo(`Moved. ${count} reference${count === 1 ? "" : "s"} to the old path in ${list}.${raw}`, "Update references", "Keep them");
+      if (pick !== "Update references") return;
+      await updatePathRefs(this.w3, refs, from, to);
+      void this.w3.window.showInfo(`Updated ${count} reference${count === 1 ? "" : "s"} to ${to}.`);
     });
   }
   private remove(entry: ImportEntry) {
