@@ -160,12 +160,17 @@ class SettingsView {
   }
 
   saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+  /** Merges the edited texts onto war3map.wts as it is now (other editors may have saved
+   *  strings since it was read); `strings` holds the file as read or last saved here. */
   async saveStrings() {
     if (!this.strings || !this.texts.size) return;
-    for (const [n, t] of this.texts) this.strings.set(n, t);
-    if (!this.strings.dirty) return;
-    await this.w3.workspace.writeText(WTS, this.strings.serialize());
-    this.strings.markSaved();
+    const base = this.strings.serialize();
+    const edited = new StringTable(base);
+    for (const [n, t] of this.texts) edited.set(n, t);
+    const current = await this.w3.workspace.readText(WTS).catch(() => base);
+    const merged = StringTable.merge(base, edited, current);
+    if (merged !== current) await this.w3.workspace.writeText(WTS, merged);
+    this.strings.rebase(merged);
   }
 
   private change(fn: () => void) {

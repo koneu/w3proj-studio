@@ -60,4 +60,26 @@ export class StringTable {
     this.text = this.serialize();
     this.changed.clear();
   }
+
+  /** Reloads the table from `text` (e.g. the file as saved, with other editors' strings). */
+  rebase(text: string) {
+    this.text = text;
+    this.values.clear();
+    this.changed.clear();
+    for (const m of text.matchAll(BLOCK)) this.values.set(Number(m[2]), m[3]);
+  }
+
+  /** The file to save when several editors edit it: `current` (the file on disk now, possibly
+   *  saved by another editor meanwhile) with only the strings that `edited` changed compared
+   *  with `base` (the file as that editor read or last saved it). Writing `edited` as a whole
+   *  would undo the other editors' saved strings. */
+  static merge(base: string, edited: StringTable, current: string): string {
+    const before = new StringTable(base);
+    const out = new StringTable(current);
+    const same = (a: string | undefined, b: string | undefined) => a?.replace(/\r\n/g, "\n") === b?.replace(/\r\n/g, "\n");
+    for (const [n, v] of edited.entries()) {
+      if (!same(before.get(n), v) && out.has(n) && !same(out.get(n), v)) out.set(n, v);
+    }
+    return out.serialize();
+  }
 }

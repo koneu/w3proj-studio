@@ -46,6 +46,24 @@ test("string table edits change only the edited block", () => {
   assert.equal(t.dirty, false);
 });
 
+test("two editors saving the string table keep each other's edits", () => {
+  const disk0 = "STRING 1\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nFootman\r\n}\r\n\r\nSTRING 3\r\n{\r\nLine one\r\nLine two\r\n}\r\n";
+  // Both open the same file; Map Properties renames the map, the object editor the unit.
+  const mapProps = new StringTable(disk0), objects = new StringTable(disk0);
+  mapProps.set(1, "Better Map");
+  objects.set(2, "Knight");
+  // A multi-line text set with "\n" is unchanged against the file's "\r\n": not an edit.
+  objects.set(3, "Line one\nLine two");
+  const disk1 = StringTable.merge(disk0, mapProps, disk0);
+  mapProps.rebase(disk1);
+  const disk2 = StringTable.merge(disk0, objects, disk1);
+  assert.equal(disk2, disk0.replace("My Map", "Better Map").replace("Footman", "Knight"));
+  // Map Properties sees the object editor's string after its next save, and an unchanged save writes nothing new.
+  assert.equal(StringTable.merge(disk1, mapProps, disk2), disk2);
+  mapProps.rebase(disk2);
+  assert.equal(mapProps.get(2), "Knight");
+});
+
 test("archive names ↔ project paths escape what Windows can't store", () => {
   assert.equal(toProjectPath("war3mapImported\\x.mdx"), "war3mapImported/x.mdx");
   assert.equal(toProjectPath("a:b\\CON.txt"), "a%3Ab/%43ON.txt");

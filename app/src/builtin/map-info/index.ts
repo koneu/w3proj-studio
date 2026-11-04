@@ -163,8 +163,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const info: MapInfo = JSON.parse(await doc.readText());
         if (info.format !== FORMAT) throw new Error(`unsupported format ${info.format}`);
-        const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
-        const strings = wtsText !== null ? new StringTable(wtsText) : null;
+        // war3map.wts as read or last saved here: saving merges this editor's string edits onto
+        // the file as it is then (other editors may have saved strings meanwhile).
+        let wtsBase = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        const strings = wtsBase !== null ? new StringTable(wtsBase) : null;
         const v = info.version;
         // Start locations (war3mapUnits.doo, either project form): players without one can't be added.
         const root = w3.workspace.project()!.root;
@@ -426,9 +428,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           async save() {
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(info) });
             await doc.writeText(text);
-            if (strings?.dirty) {
-              await w3.workspace.writeText("map/war3map.wts", strings.serialize());
-              strings.markSaved();
+            if (strings && wtsBase !== null) {
+              const base = wtsBase;
+              const current = await w3.workspace.readText("map/war3map.wts").catch(() => base);
+              const merged = StringTable.merge(base, strings, current);
+              if (merged !== current) await w3.workspace.writeText("map/war3map.wts", merged);
+              strings.rebase(merged);
+              wtsBase = merged;
             }
             history.markSaved();
             doc.setDirty(false);

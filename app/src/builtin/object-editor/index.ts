@@ -791,11 +791,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const text = await w3.backend.invoke<string>("objects_canonicalize", { name: doc.path, text: serialize() });
             await doc.writeText(text);
             if (isNew && !exists()) await w3.workspace.refresh();
-            // Edited strings go to war3map.wts (only changed blocks are rewritten).
-            const wts = table.serialize();
-            if (savedWts !== null && wts !== savedWts) {
-              await w3.workspace.writeText("map/war3map.wts", wts);
-              savedWts = wts;
+            // Edited strings go to war3map.wts, merged onto the file as it is now (other editors
+            // may have saved strings meanwhile; only changed blocks are rewritten).
+            if (savedWts !== null && table.serialize() !== savedWts) {
+              const base = savedWts;
+              const current = await w3.workspace.readText("map/war3map.wts").catch(() => base);
+              const merged = StringTable.merge(base, table, current);
+              if (merged !== current) await w3.workspace.writeText("map/war3map.wts", merged);
+              savedWts = merged;
+              table = new StringTable(merged);
             }
             saved = serialize();
             doc.setDirty(false);
