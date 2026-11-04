@@ -118,9 +118,6 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   return { buf: await w3.game.read(path), name: path };
 }
 
-/** Hour of the game day the terrain view is lit at (null: a neutral light); kept between editors. */
-let lightHour: number | null = 12;
-
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   ctx.subscriptions.push(
@@ -206,19 +203,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const redraw = () => { dirty = true; };
 
         // ---- day/night lighting ---------------------------------------------------------
+        // Settings: on/off (off: an even light) and the hour; both remembered across maps.
         let lighting: MapLighting | null = null;
-        const lightSelect = h("select", {
-          onchange: () => { lightHour = lightSelect.value === "" ? null : Number(lightSelect.value); applyLight(); },
-        }, h("option", { value: "", selected: lightHour === null }, "Neutral"),
-          ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour === hr }, `${hr}:00`)));
+        const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
+        const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
+        const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => void w3.settings.set("terrain.lighting.enabled", lightBox.checked) });
+        const lightSelect = h("select", { onchange: () => void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)) },
+          ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
         const applyLight = () => {
-          renderer.terrainLight = lightHour !== null && lighting?.terrain ? lightAt(lighting.terrain, lightHour) : null;
-          renderer.unitLight = lightHour !== null && lighting?.unit ? lightAt(lighting.unit, lightHour) : null;
+          const on = lightOn(), hour = lightHour();
+          lightBox.checked = on;
+          lightSelect.value = String(hour);
+          lightSelect.disabled = !on;
+          renderer.terrainLight = on && lighting?.terrain ? lightAt(lighting.terrain, hour) : null;
+          renderer.unitLight = on && lighting?.unit ? lightAt(lighting.unit, hour) : null;
           redraw();
         };
+        const stopLightSettings = w3.settings.onDidChange((key) => { if (key.startsWith("terrain.lighting.")) applyLight(); });
         const reloadLighting = () => void loadMapLighting(w3, terrain.tileset).then((l) => {
           lighting = l;
-          lightSelect.title = `Time of day for the map's day/night lighting (${l.source}); Neutral: an even light`;
+          lightBox.title = `The map's day/night lighting (${l.source}); off: an even light`;
+          lightSelect.title = "Time of day";
           applyLight();
         }, () => {});
         // Saved lighting, map properties (light environment) or lighting models change the light.
@@ -1313,7 +1318,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.model-toolbar", {},
               toggle("Water", () => renderer.showWater, (v) => { renderer.showWater = v; }),
               toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
-              h("label.model-toggle", {}, "Light ", lightSelect),
+              h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
@@ -1571,6 +1576,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             stopLightWatch.dispose();
+            stopLightSettings.dispose();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
             renderer.dispose();
