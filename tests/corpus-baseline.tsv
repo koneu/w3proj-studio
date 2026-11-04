@@ -1571,3 +1571,597 @@ empty_map_on_newest_world_editor.w3m	war3map.w3r	format:regions
 empty_map_on_newest_world_editor.w3m	war3map.wct	wct-text
 empty_map_on_newest_world_editor.w3m	war3map.wtg	wtg-json
 empty_map_on_newest_world_editor.w3m	war3mapUnits.doo	format:units
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.doo	format:doodads
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3a	objdata-json
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3e	w3e-text
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3i	format:w3i
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3t	objdata-json
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3u	objdata-json
+new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3mapUnits.doo	format:units
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.doo	format:doodads
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.imp	format:imports
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.mmp	format:minimap
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3a	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3c	format:cameras
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3e	w3e-text
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3h	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3i	format:w3i
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3q	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3r	format:regions
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3s	format:sounds
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3t	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.w3u	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.wct	wct-text
+new(er)_maps/Firebrand Exarchate Race.w3x	war3map.wtg	wtg-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3a	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3h	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3q	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3t	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3mapSkin.w3u	objdata-json
+new(er)_maps/Firebrand Exarchate Race.w3x	war3mapUnits.doo	format:units
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.doo	format:doodads
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.imp	format:imports
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.mmp	format:minimap
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3a	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3b	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3c	format:cameras
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3e	w3e-text
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3h	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3i	format:w3i
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3q	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3r	format:regions
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3t	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.w3u	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.wct	raw
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3map.wtg	wtg-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3a	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3b	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3h	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3q	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3t	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapSkin.w3u	objdata-json
+new(er)_maps/Frostwolf Clan v1.0.w3x	war3mapUnits.doo	format:units
+new(er)_maps/MatrixPCDefense_v4.3.w3x	war3map.doo	format:doodads
+new(er)_maps/MatrixPCDefense_v4.3.w3x	war3map.w3a	objdata-json
+new(er)_maps/MatrixPCDefense_v4.3.w3x	war3map.w3e	w3e-text
+new(er)_maps/MatrixPCDefense_v4.3.w3x	war3map.w3i	format:w3i
+new(er)_maps/MatrixPCDefense_v4.3.w3x	war3map.w3u	objdata-json
+new(er)_maps/MatrixPCDefense_v4.3.w3x	war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	ChainsOfBlood.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo03.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo04.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Demo05.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	HunterOfShadows.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	IntroTutorialCinematic.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc01.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3i	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc02Interlude.w3m/war3mapUnits.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc03.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3i	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc04Interlude.w3m/war3mapUnits.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc06.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc07.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc09.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	OrcEndingCinematic.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue01.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Prologue02.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3q	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TheDemigodsIncursion.w3x/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	TutorialIn.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3b	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3f	format:campaign
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3h	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3q	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	war3campaign.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	ChainsOfBlood.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo03.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo04.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Demo05.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	HunterOfShadows.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	IntroTutorialCinematic.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc01.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3i	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc02Interlude.w3m/war3mapUnits.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc03.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3i	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc04Interlude.w3m/war3mapUnits.doo	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc06.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc07.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc09.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	OrcEndingCinematic.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue01.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Prologue02.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3q	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3s	format:sounds
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.w3u	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TheDemigodsIncursion.w3x/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m	map project
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.doo	format:doodads
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.mmp	format:minimap
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3c	format:cameras
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3e	w3e-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3i	format:w3i
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.w3r	format:regions
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.wct	wct-text
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3map.wtg	wtg-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	TutorialIn.w3m/war3mapUnits.doo	format:units
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.imp	format:imports
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3a	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3b	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3f	format:campaign
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3h	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3q	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3t	objdata-json
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	war3campaign.w3u	objdata-json

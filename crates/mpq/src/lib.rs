@@ -1,6 +1,9 @@
 //! Minimal, dependency-light MPQ v1 reader/writer for Warcraft III maps.
 
+mod adpcm;
 pub mod crypto;
+mod huffman;
+mod huffman_tables;
 mod read;
 mod write;
 

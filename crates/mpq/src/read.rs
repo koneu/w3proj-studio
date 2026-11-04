@@ -9,7 +9,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::crypto::{self, HASH_FILE_KEY, HASH_NAME_A, HASH_NAME_B, HASH_TABLE_OFFSET};
-use crate::{flags, Error, Result};
+use crate::{adpcm, flags, huffman, Error, Result};
 
 pub const HASH_EMPTY: u32 = 0xFFFF_FFFF;
 pub const HASH_DELETED: u32 = 0xFFFF_FFFE;
@@ -318,7 +318,7 @@ fn decompress(buf: &[u8], expected: usize, block_flags: u32) -> Result<Vec<u8>> 
         return explode::explode(buf).map_err(|_| Error::Decompress("pkware"));
     }
     let (&mask, data) = buf.split_first().ok_or(Error::Corrupt("empty sector"))?;
-    if mask & !(0x10 | 0x08 | 0x02) != 0 {
+    if mask & !(0x10 | 0x08 | 0x02 | 0x01 | 0x40 | 0x80) != 0 {
         return Err(Error::UnsupportedCompression(mask));
     }
     // Decompression runs in the reverse order of Storm's compression order.
@@ -339,6 +339,19 @@ fn decompress(buf: &[u8], expected: usize, block_flags: u32) -> Result<Vec<u8>> 
             .read_to_end(&mut out)
             .map_err(|_| Error::Decompress("zlib"))?;
         cur = out;
+    }
+    // Sounds: ADPCM, then Huffman on top (older maps' WAV files use 0x41).
+    if mask & 0x01 != 0 {
+        cur = huffman::decompress(&cur, expected).ok_or(Error::Decompress("huffman"))?;
+    }
+    if mask & 0x80 != 0 {
+        cur = adpcm::decompress(&cur, expected, 2).ok_or(Error::Decompress("adpcm"))?;
+    } else if mask & 0x40 != 0 {
+        cur = adpcm::decompress(&cur, expected, 1).ok_or(Error::Decompress("adpcm"))?;
+    }
+    // A sector decodes to exactly its size; anything else means it was decoded wrongly.
+    if mask & (0x01 | 0x40 | 0x80) != 0 && cur.len() != expected {
+        return Err(Error::Decompress("huffman/adpcm: wrong sector size"));
     }
     Ok(cur)
 }
