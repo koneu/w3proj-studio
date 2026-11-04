@@ -454,6 +454,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 /* CodeMirror's panels and tooltips (z-index 200–500) stay inside their editor, below dialogs and menus. */
 .cm-editor { isolation: isolate; }
 .newmap-error { color: var(--error); min-height: 1em; }
+.scm-outer { padding: 2px 12px 4px; font-size: 11px; overflow-wrap: anywhere; }
 .newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }
 .newmap-tiles { display: flex; flex-direction: column; gap: 6px; margin-left: 98px; }
 .newmap-tiles[hidden] { display: none; }

@@ -729,6 +729,8 @@ struct GitChange {
 #[derive(Serialize)]
 struct GitStatus {
     branch: String,
+    /// The repository's folder, when the project is a subfolder of it (else empty).
+    outer_repo: String,
     changes: Vec<GitChange>,
 }
 
@@ -739,6 +741,11 @@ async fn git_status(root: String) -> CmdResult<Option<GitStatus>> {
     tauri::async_runtime::spawn_blocking(move || {
         let Ok(prefix) = git(&root, &["rev-parse", "--show-prefix"]) else { return Ok(None) };
         let prefix = String::from_utf8_lossy(&prefix).trim().to_string();
+        let outer_repo = if prefix.is_empty() {
+            String::new()
+        } else {
+            git(&root, &["rev-parse", "--show-toplevel"]).map(|t| String::from_utf8_lossy(&t).trim().to_string()).unwrap_or_default()
+        };
         let branch = git(&root, &["rev-parse", "--abbrev-ref", "HEAD"])
             .map(|b| String::from_utf8_lossy(&b).trim().to_string())
             .unwrap_or_default();
@@ -765,7 +772,7 @@ async fn git_status(root: String) -> CmdResult<Option<GitStatus>> {
             };
             changes.push(GitChange { path, status: status.into(), from });
         }
-        Ok(Some(GitStatus { branch, changes }))
+        Ok(Some(GitStatus { branch, outer_repo, changes }))
     })
     .await
     .map_err(err)?

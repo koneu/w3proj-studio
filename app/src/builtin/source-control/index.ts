@@ -17,7 +17,7 @@ import { formatBytes, h } from "../../workbench/dom";
 import { diffObjects, type ObjectChange } from "./objdiff";
 
 interface Change { path: string; status: "M" | "A" | "D" | "R" | "U" | "C"; from?: string | null }
-interface Status { branch: string; changes: Change[] }
+interface Status { branch: string; outer_repo: string; changes: Change[] }
 
 const STATUS_TEXT: Record<Change["status"], string> = {
   M: "modified", A: "added", D: "deleted", R: "renamed", U: "untracked (new)", C: "conflict",
@@ -119,6 +119,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           oninput: () => { message = input.value; },
           onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); commit().catch(failed); } },
         }) as HTMLTextAreaElement;
+        // A project inside a bigger repository (or one created by accident, e.g. in the home
+        // folder): commits go there.
+        if (status.outer_repo) {
+          el.append(h("div.scm-outer.muted", { title: "The project is a folder inside this repository; commits are made there (limited to the project's files)." },
+            `Repository: ${status.outer_repo}`));
+        }
         el.append(h("div.scm-commit", {}, input, h("button", {
           disabled: busy || !n, title: "Stages and commits every change of the project (Ctrl+Enter)", onclick: () => commit().catch(failed),
         }, busy ? "Committing…" : `Commit${n ? ` ${n} change${n === 1 ? "" : "s"}` : ""}`)));
@@ -219,7 +225,8 @@ function objectSummary(w3: W3Api, path: string, before: string, after: string): 
   }
   if (!changes.length) return el;
   const show = (v: unknown) => {
-    const s = typeof v === "string" ? JSON.stringify(v) : String(v);
+    // Quoted, line breaks visible; paths keep single backslashes.
+    const s = typeof v === "string" ? `"${v.replace(/\r?\n/g, "\\n")}"` : String(v);
     return s.length > 80 ? `${s.slice(0, 77)}…` : s;
   };
   const counts = (["added", "changed", "removed"] as const).map((w) => [w, changes.filter((c) => c.what === w).length] as const).filter(([, n]) => n);
