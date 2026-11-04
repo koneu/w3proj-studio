@@ -79,6 +79,8 @@ export function listItem(raw: string, i: number): string | undefined {
 }
 
 export function westring(we: Map<string, string>, s: string): string {
-  const v = s.startsWith("WESTRING_") ? (we.get(s.toUpperCase()) ?? s) : s;
+  // Entries can name another entry (WESTRING_UE_UNITRACE_HUMAN=WESTRING_RACE_HUMAN).
+  let v = s;
+  for (let i = 0; i < 4 && v.startsWith("WESTRING_"); i++) v = we.get(v.toUpperCase()) ?? v;
   return v.replace(/&/g, "");
 }

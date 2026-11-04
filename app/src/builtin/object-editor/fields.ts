@@ -6,7 +6,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import type { ObjectsService } from "../../extensions/services";
-import { parseIni } from "../../lib/formats/text";
+import { parseIni, westring } from "../../lib/formats/text";
 import { h } from "../../workbench/dom";
 
 /** Metadata types holding one object code, and the object kinds offered. */
@@ -42,7 +42,7 @@ export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
       for (const [k, v] of sec) {
         if (!/^\d+$/.test(k)) continue;
         const [value, label] = v.split(",");
-        entries.push({ value, label: strings.get((label ?? "").toUpperCase()) ?? label ?? value, alts: (sec.get(`${k}_alt`) ?? "").split(",").filter(Boolean) });
+        entries.push({ value, label: label ? westring(strings, label) : value, alts: (sec.get(`${k}_alt`) ?? "").split(",").filter(Boolean) });
       }
       if (!entries.length) continue;
       // unitClass is stored as a comma list too ("giant,undead"), though its name doesn't say so.
