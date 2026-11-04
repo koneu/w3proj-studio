@@ -172,6 +172,16 @@ export class ObjectLoader {
   /** Texture path (lower case) → model paths (lower case) that use it. */
   private textureUsers = new Map<string, Set<string>>();
 
+  /** Forgets every loaded model and texture (and what was missing): files the map imports
+   *  changed, so they're read again on the next load. */
+  reset() {
+    this.textures.clear();
+    this.missing.clear();
+    this.textureUsers.clear();
+    this.models.clear();
+    this.effectSources.clear();
+  }
+
   /** Model paths (lower case) that use a texture (as listed in `missing`). */
   modelsUsing(texture: string): Set<string> {
     return this.textureUsers.get(texture.toLowerCase()) ?? new Set();

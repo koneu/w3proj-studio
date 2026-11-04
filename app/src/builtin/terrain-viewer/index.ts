@@ -615,6 +615,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           redraw();
         }
+        // Object data (models, scales, …), the import list or imported files saved elsewhere (the
+        // Object Editor, a Problems fix, the Import Manager): the placed objects are loaded
+        // again, imports read anew, and the problem list follows.
+        let objectReload: ReturnType<typeof setTimeout> | undefined;
+        let importsChanged = false;
+        const stopObjectWatch = w3.workspace.onDidSave((p) => {
+          const l = p.replace(/\\/g, "/").toLowerCase();
+          const art = /^map\/war3map(skin)?\.w3[udbt](\.json)?$/.test(l);
+          const imported = /^map\/war3map\.imp(\.json)?$/.test(l) || (l.startsWith("map/") && /\.(mdx|mdl|blp|dds|tga)$/.test(l));
+          if (!objCtx || (!art && !imported)) return;
+          importsChanged ||= imported;
+          clearTimeout(objectReload);
+          objectReload = setTimeout(async () => {
+            if (importsChanged) loader.reset();
+            importsChanged = false;
+            const [skins, { bases, art: data }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
+            objCtx = { skins: withObjectArt(skins, data), bases };
+            await rebuildObjects();
+          }, 300);
+        });
         if (!doc.path.startsWith("game:") && w3.workspace.project()) {
           Promise.all([
             loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null),
@@ -1667,6 +1687,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             stopLightWatch.dispose();
+            stopObjectWatch.dispose();
+            clearTimeout(objectReload);
             stopLightSettings.dispose();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
