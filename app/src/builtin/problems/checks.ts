@@ -331,6 +331,14 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
             void w3.window.showInfo(`Imported ${name}'s Reforged model with its textures (${(bytes / 1048576).toFixed(1)} MB).`);
           },
         }, {
+          label: "Import, colour texture only",
+          title: "Like the import, but only the model's colour (diffuse) texture: about a third of the size, if Classic graphics doesn't use the normal/ORM/environment textures (to be confirmed)",
+          run: async () => {
+            let bytes = 0;
+            for (const path of paths.get(id) ?? []) bytes += await importReforged(w3, path, stored, classic, true);
+            void w3.window.showInfo(`Imported ${name}'s Reforged model with its colour texture only (${(bytes / 1048576).toFixed(1)} MB).`);
+          },
+        }, {
           label: `Remove the ${items.length} placed`,
           title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
           run: () => removePlaced(w3, file, key, id),
@@ -356,7 +364,9 @@ async function removePlaced(w3: W3Api, file: string, key: string, id: string) {
 /** Copies the game's Reforged model at `path` (DE, else HD) into the map with the textures
  *  Classic graphics wouldn't find, renamed to the DDS files that are copied (Reforged models
  *  name .tif sources), and lists them in war3map.imp. Resolves with the bytes written. */
-async function importReforged(w3: W3Api, path: string, stored: Map<string, string[]>, classic: Set<string>): Promise<number> {
+/** `colourOnly`: of the textures to copy, only those layers use as their colour (slot 0); the
+ *  others stay named but missing. */
+async function importReforged(w3: W3Api, path: string, stored: Map<string, string[]>, classic: Set<string>, colourOnly = false): Promise<number> {
   const plain = (p: string) => p.replace(/\\/g, "/").toLowerCase();
   const pick = (p: string) => {
     const copies = stored.get(plain(p)) ?? [];
@@ -367,7 +377,10 @@ async function importReforged(w3: W3Api, path: string, stored: Map<string, strin
   const model = await w3.game.read(full);
   const files: [string, Uint8Array][] = [];
   const renamed = new Map<string, string>();
-  for (const t of parseMdx(model).textures) {
+  const parsed = parseMdx(model);
+  const colour = new Set(parsed.materials.flatMap((m) => m.layers.map((l) => l.textureIds[0])));
+  for (const [i, t] of parsed.textures.entries()) {
+    if (colourOnly && !colour.has(i)) continue;
     if (t.replaceableId !== 0 || !t.path || /^([a-z]:)?[\\/]/i.test(t.path)) continue;
     const variants = [t.path, t.path.replace(/\.\w+$/, ".dds"), t.path.replace(/\.\w+$/, ".blp")];
     // Textures Classic graphics finds in the game anyway stay as they are.
