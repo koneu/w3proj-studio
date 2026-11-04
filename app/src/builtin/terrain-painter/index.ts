@@ -212,7 +212,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("div.painter-sections", {}, ...SECTIONS.map(([name, tools]) => h("div.painter-section", {},
       h("span.painter-section-title", {}, name),
       h("div.painter-section-buttons", {}, ...tools.map(([t, label, title]) => {
-        const b = h("button.tool-button", { title, onclick: () => setTool(t) }, toolIcon(t), label);
+        // Narrow toolbars show icons only (the name stays in the tooltip).
+        const b = h("button.tool-button", { title: `${label}: ${title}`, onclick: () => setTool(t) }, toolIcon(t), h("span.tool-label", {}, label));
         buttons.set(t, b);
         return b;
       }))))),
