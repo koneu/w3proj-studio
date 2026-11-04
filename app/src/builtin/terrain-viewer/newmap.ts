@@ -424,15 +424,15 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await json("map/war3map.doo.json", doodads);
   await json("map/war3mapUnits.doo.json", units);
   // Empty regions and cameras, the default trigger (the World Editor needs the trigger files),
-  // the player and force names, the start location's minimap icon, and the empty lights, object
-  // groups and conversation files World Editor 3.0.1 writes (their formats aren't known yet).
+  // the player and force names, the start location's minimap icon, and the empty lights (no
+  // edited lighting), object groups (format unknown) and conversation files World Editor 3.0.1 writes.
   await json("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 7, regions: [] });
   await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 3, cameras: [] });
   await w3.workspace.writeText(WTG_JSON, writeWtgJson(defaultTriggerFile(o.name)));
   await writeWctFile(w3.workspace, parseWct(defaultWct(), 1), textTriggers(defaultTriggerFile(o.name)).map((t) => t.name));
   await w3.workspace.writeText("map/war3map.wts", "\uFEFFSTRING 1\r\n{\r\nPlayer 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nForce 1\r\n}\r\n\r\n");
   await json("map/war3map.mmp.json", { format: "w3proj.minimap/1", version: 0, icons: [startIcon(t, sx, sy)] });
-  await w3.workspace.writeBytes("map/war3map.w3l", Uint8Array.from([0x57, 0x33, 0x4c, 0x21, 3, ...new Array<number>(17).fill(0)]));
+  await json("map/war3map.w3l.json", { format: "w3proj.lights/1", magic: "W3L!", version: 3, terrainModel: "", unitModel: "", unknown: [0, 0, 0] });
   await w3.workspace.writeBytes("map/war3map.w3grp", new Uint8Array(12));
   await w3.workspace.writeText("map/conversation.json", '{\n    "stringTablePath": "war3map.wts",\n    "conversation": {}\n}');
   await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));

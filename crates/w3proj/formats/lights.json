@@ -1,0 +1,20 @@
+// war3map.w3l — the map's own day/night lighting from the lighting editor (World Editor 3.0.1).
+// The editor saves the edited lighting as a model in the map ("<guid>.mdl", a copy of the
+// tileset's DNC light model, e.g. Model "DNCLordaeronTerrain" with its light "FDirectSun") and
+// names it here. Every map saved by that editor has the file; without edits both names are
+// empty and the numbers 0. Worked out from one map with edited terrain lighting (numbers 1, 0,
+// 0) and two without; which number belongs to what isn't confirmed.
+{
+  "name": "lights",
+  "description": "Lighting: the map's own terrain and unit light models (lighting editor)",
+  "files": ["war3map.w3l"],
+  "jsonFormat": "w3proj.lights/1",
+  "accept": "version == 3",
+  "fields": [
+    { "name": "magic", "type": "id", "doc": "\"W3L!\"" },
+    { "name": "version", "type": "u32" },
+    { "name": "terrainModel", "type": "cstring", "doc": "the edited terrain lighting model in the map, empty for the tileset's" },
+    { "name": "unitModel", "type": "cstring", "doc": "presumably the edited unit lighting model; empty in all samples" },
+    { "name": "unknown", "type": "u32", "count": 3, "doc": "1, 0, 0 with an edited terrain light, else 0, 0, 0 (flags per model?)" }
+  ]
+}

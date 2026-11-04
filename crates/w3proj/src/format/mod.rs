@@ -52,6 +52,7 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ("imports.json", include_str!("../../formats/imports.json")),
     ("campaign.json", include_str!("../../formats/campaign.json")),
     ("minimap.json", include_str!("../../formats/minimap.json")),
+    ("lights.json", include_str!("../../formats/lights.json")),
 ];
 
 /// The source text of a built-in definition (to copy it into a project and edit).
