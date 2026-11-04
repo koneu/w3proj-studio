@@ -63,7 +63,7 @@ export class Stroke {
     for (const [i, b] of this.before) {
       const a = this.after.get(i)!;
       if (a.rawHeight !== b.rawHeight || a.texture !== b.texture || a.variation !== b.variation || a.ramp !== b.ramp || a.blight !== b.blight
-        || a.layer !== b.layer || a.hasWater !== b.hasWater || a.rawWater !== b.rawWater) return true;
+        || a.layer !== b.layer || a.hasWater !== b.hasWater || a.rawWater !== b.rawWater || a.cliffTexture !== b.cliffTexture) return true;
     }
     return false;
   }
@@ -142,6 +142,39 @@ export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke):
     stroke.touch(t, i);
     c.texture = tex;
     c.variation = randomVariation();
+    changed = true;
+  }
+  return changed;
+}
+
+/** Corners of cliff tiles whose ground tile has a cliff version take that cliff type, so painting
+ *  grass next to a cliff, or raising a cliff on grass, gives a grass cliff. That's what the World
+ *  Editor's maps show: on cliff corners the ground tile and the cliff type agree in 85–100 % (12
+ *  maps), on flat ground they don't. `cliffGround`: the ground tile of each cliff type number;
+ *  corners next to `around` are checked too (a cliff's type comes from its bottom-left corner). */
+export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: Stroke): boolean {
+  if (!cliffGround.length) return false;
+  const W = t.width, H = t.height;
+  const layer = (x: number, y: number) => t.corners[y * W + x].layer;
+  /** The tile with bottom-left corner (x, y) is a cliff (its corners aren't all on one layer). */
+  const cliffTile = (x: number, y: number) => x >= 0 && y >= 0 && x < W - 1 && y < H - 1
+    && !(layer(x, y) === layer(x + 1, y) && layer(x, y) === layer(x, y + 1) && layer(x, y) === layer(x + 1, y + 1));
+  const near = new Set<number>();
+  for (const i of around) {
+    const x = i % W, y = Math.floor(i / W);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (x + dx >= 0 && y + dy >= 0 && x + dx < W && y + dy < H) near.add((y + dy) * W + x + dx);
+    }
+  }
+  let changed = false;
+  for (const i of near) {
+    const x = i % W, y = Math.floor(i / W);
+    if (!(cliffTile(x - 1, y - 1) || cliffTile(x, y - 1) || cliffTile(x - 1, y) || cliffTile(x, y))) continue;
+    const c = t.corners[i];
+    const type = cliffGround.indexOf(t.groundTiles[c.texture]);
+    if (type < 0 || c.cliffTexture === type) continue;
+    stroke.touch(t, i);
+    c.cliffTexture = type;
     changed = true;
   }
   return changed;

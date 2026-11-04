@@ -1179,6 +1179,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
           },
           pushEdit: (e) => pushEdit(e),
+          cliffGroundTiles: () => cliffList(terrain, cliffData?.types ?? new Map()).map((c) => c.groundTile),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
           pathing: async (opts) => {

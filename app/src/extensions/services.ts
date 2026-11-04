@@ -118,6 +118,8 @@ export interface TerrainEditorHandle {
    *  the corners; objects standing on the changed `corners` (indices) follow the
    *  ground; `cliffs` re-plans cliff and ramp models. */
   commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): void;
+  /** The ground tile of each cliff type number a corner can have (empty until the game's cliff types are read). */
+  cliffGroundTiles(): string[];
   /** Index of a ground tile type in the map's list, adding it if needed (null when the list is full). */
   ensureGroundTile(id: string): Promise<number | null>;
   /** Corners using each ground tile (by index). */

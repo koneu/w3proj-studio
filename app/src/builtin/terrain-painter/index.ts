@@ -8,7 +8,7 @@ import { TILESETS } from "../../lib/terrain/tilesets";
 import { groundHeight, waterLevelAt } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, paintBlight, paintTexture, Stroke, toggleRamp, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, matchCliffTypes, paintBlight, paintTexture, Stroke, toggleRamp, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
@@ -73,8 +73,10 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (!stroke) return;
     const s = stroke.s;
     stroke = null;
+    // Cliffs next to painted ground or new cliffs take the cliff type of their ground tile.
+    const retyped = (s.label === "paint" || isLayerTool(s.label as Tool)) && matchCliffTypes(terrain, s.corners(), ed.cliffGroundTiles(), s);
     if (!s.finish(terrain)) return;
-    ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: isLayerTool(s.label as Tool) || s.label === "ramp" });
+    ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
   };
 
   // ---- toolbar -----------------------------------------------------------------------
