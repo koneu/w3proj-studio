@@ -99,11 +99,13 @@ async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
   throw last;
 }
 
-async function readFile(w3: W3Api, doc: EditorDocument, path: string): Promise<Uint8Array> {
+/** A file the map imports, else the game's; `tileset`: the map's, whose own versions of game
+ *  files (`_Tilesets/<letter>.w3mod`: water, some creeps' textures, …) win as in the game. */
+async function readFile(w3: W3Api, doc: EditorDocument, path: string, tileset?: string): Promise<Uint8Array> {
   if (!doc.path.startsWith("game:") && w3.workspace.project()) {
     try { return await readImport(w3, path); } catch { /* use the game's */ }
   }
-  return w3.game.read(path);
+  return w3.game.read(path, { tileset });
 }
 
 /** A ground tile texture. The map's own import wins; otherwise HD/DE modes use
@@ -407,7 +409,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setWaterLook({ rate: Number(row.texRate) || 1, shallowMin: argb("Smin"), shallowMax: argb("Smax"), deepMin: argb("Dmin"), deepMax: argb("Dmax") }, frames);
           for (let i = 0; i < frames; i++) {
             const path = frames > 1 ? `${row.texFile}${String(i).padStart(2, "0")}.blp` : `${row.texFile}.blp`;
-            readFile(w3, doc, path).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path).mip(0)); redraw(); }, () => {});
+            // The tileset's own water frames (`_Tilesets/<letter>.w3mod`) where it has them.
+            readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path).mip(0)); redraw(); }, () => {});
           }
         }).catch(() => { /* the default water colour */ });
         };
@@ -465,7 +468,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const problems = h("div.model-list");
         const texInfo = h("div.muted");
-        const loader = new ObjectLoader(renderer.gl, (p) => readFile(w3, doc, p), () => {
+        const loader = new ObjectLoader(renderer.gl, (p) => readFile(w3, doc, p, terrain.tileset), () => {
           redraw();
           const list = [...loader.missing];
           // Click: the placed objects whose model uses the texture.

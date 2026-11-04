@@ -36,16 +36,17 @@ export class GameService {
     return this.listCache;
   }
 
-  resolve(path: string): Promise<string | null> {
-    return invoke<string | null>("game_resolve", { ...this.args(), path });
+  /** `tileset`: a tileset letter; its folders (`_Tilesets/<letter>.w3mod`) are searched first, as the game does for a map of that tileset. */
+  resolve(path: string, tileset?: string): Promise<string | null> {
+    return invoke<string | null>("game_resolve", { ...this.args(), path, tileset: tileset ?? null });
   }
 
-  async read(path: string): Promise<Uint8Array> {
-    return new Uint8Array(await invoke<ArrayBuffer>("game_read", { ...this.args(), path }));
+  async read(path: string, tileset?: string): Promise<Uint8Array> {
+    return new Uint8Array(await invoke<ArrayBuffer>("game_read", { ...this.args(), path, tileset: tileset ?? null }));
   }
 
-  async readText(path: string): Promise<string> {
+  async readText(path: string, tileset?: string): Promise<string> {
     // TextDecoder drops a leading byte-order mark by default.
-    return new TextDecoder("utf-8").decode(await this.read(path));
+    return new TextDecoder("utf-8").decode(await this.read(path, tileset));
   }
 }

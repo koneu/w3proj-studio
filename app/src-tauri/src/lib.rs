@@ -586,19 +586,24 @@ async fn game_list(state: State<'_, Game>, install: String) -> CmdResult<String>
 
 /// Resolves a plain path (`Units\UnitData.slk`) to the stored full path.
 #[tauri::command]
-async fn game_resolve(state: State<'_, Game>, install: String, path: String, mode_name: String) -> CmdResult<Option<String>> {
+async fn game_resolve(state: State<'_, Game>, install: String, path: String, mode_name: String, tileset: Option<String>) -> CmdResult<Option<String>> {
     let g = game_data(&state, &install)?;
-    Ok(g.resolve(&path, mode(&mode_name)?, None).map(str::to_string))
+    Ok(g.resolve(&path, mode(&mode_name)?, tileset_letter(&tileset)).map(str::to_string))
+}
+
+/** A tileset letter ("L"), which adds that tileset's folders (`_Tilesets/L.w3mod`) to the lookup. */
+fn tileset_letter(t: &Option<String>) -> Option<char> {
+    t.as_deref().and_then(|s| s.chars().next())
 }
 
 /// Reads a full path (`War3.w3mod:…`) as-is, or resolves a plain path.
 #[tauri::command]
-async fn game_read(state: State<'_, Game>, install: String, path: String, mode_name: String) -> CmdResult<tauri::ipc::Response> {
+async fn game_read(state: State<'_, Game>, install: String, path: String, mode_name: String, tileset: Option<String>) -> CmdResult<tauri::ipc::Response> {
     let g = game_data(&state, &install)?;
     let bytes = if path.contains(".w3mod:") {
         g.read_exact(&path)
     } else {
-        g.read(&path, mode(&mode_name)?, None).map(|(_, b)| b)
+        g.read(&path, mode(&mode_name)?, tileset_letter(&tileset)).map(|(_, b)| b)
     }
     .map_err(err)?;
     Ok(tauri::ipc::Response::new(bytes))

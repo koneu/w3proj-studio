@@ -190,6 +190,8 @@ export interface Settings {
   onDidChange(listener: (key: string) => void): Disposable;
 }
 
+export interface GameReadOptions { tileset?: string }
+
 export interface W3Api {
   readonly version: string;
   commands: {
@@ -271,10 +273,12 @@ export interface W3Api {
     info(): Promise<GameInfo>;
     /** Full paths of all stored files. */
     list(): Promise<string[]>;
-    resolve(path: string): Promise<string | null>;
-    read(path: string): Promise<Uint8Array>;
+    /** `tileset` (a letter, e.g. the map's): that tileset's own versions of files
+     *  (`_Tilesets/<letter>.w3mod`, e.g. its water) win, as in the game. */
+    resolve(path: string, opts?: GameReadOptions): Promise<string | null>;
+    read(path: string, opts?: GameReadOptions): Promise<Uint8Array>;
     /** UTF-8 text with any byte-order mark removed. */
-    readText(path: string): Promise<string>;
+    readText(path: string, opts?: GameReadOptions): Promise<string>;
   };
   /** Escape hatch to the Rust backend commands. */
   backend: {

@@ -254,9 +254,9 @@ export class Workbench {
       game: {
         info: () => wb.game.info(),
         list: () => wb.game.list(),
-        resolve: (p) => wb.game.resolve(p),
-        read: (p) => wb.game.read(p),
-        readText: (p) => wb.game.readText(p),
+        resolve: (p, o) => wb.game.resolve(p, o?.tileset),
+        read: (p, o) => wb.game.read(p, o?.tileset),
+        readText: (p, o) => wb.game.readText(p, o?.tileset),
       },
       backend: { invoke, listen },
       extensions: {
