@@ -8,7 +8,7 @@ import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
-import { loadSkins, ObjectLoader, placement, type Placed } from "./objects";
+import { loadSkins, ObjectLoader, placement, withObjectArt, type ObjectArt, type Placed } from "./objects";
 import { buildMinimap, minimapSettings } from "./minimapgen";
 import { askNewMap, createMap, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
@@ -32,27 +32,30 @@ const NEUTRAL = 20;
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
 
 /** Custom object id → base id, from the project's object data (war3map.w3u.json, …). */
-async function customBases(w3: W3Api): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  for (const f of w3.workspace.files()) {
-    if (!/^map\/war3map\.w3[utbd]\.json$/i.test(f.path)) continue;
-    try {
-      const j = JSON.parse(await w3.workspace.readText(f.path)) as { custom?: { id?: string; base: string }[] };
-      for (const o of j.custom ?? []) if (o.id) out.set(o.id, o.base);
-    } catch { /* unreadable: no custom ids */ }
-  }
-  // A campaign's chapter map (…/maps/<file>) also uses the campaign's custom objects.
-  const root = w3.workspace.project()?.root;
-  const campaign = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-  if (campaign) {
-    for (const k of ["w3u", "w3t", "w3b", "w3d"]) {
-      try {
-        const j = JSON.parse(await w3.workspace.readText(`${campaign}\\map\\war3campaign.${k}.json`)) as { custom?: { id?: string; base: string }[] };
-        for (const o of j.custom ?? []) if (o.id && !out.has(o.id)) out.set(o.id, o.base);
-      } catch { /* no campaign object data of this kind */ }
+/** The object data the terrain view needs (units, items, destructables, doodads): the bases
+ *  of custom ids, and the files in the order their art applies — a chapter map's campaign first, then
+ *  the map's own, then its Skin files (Reforged keeps art changes there). */
+async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; art: ObjectArt[] }> {
+  const kinds = ["w3u", "w3t", "w3b", "w3d"];
+  const read = async (path: string, kind: string): Promise<ObjectArt | null> => {
+    try { return { ...(JSON.parse(await w3.workspace.readText(path)) as Omit<ObjectArt, "kind">), kind }; } catch { return null; }
+  };
+  const art: ObjectArt[] = [];
+  // A campaign's chapter map also uses the campaign's custom objects.
+  const campaign = campaignRoot(w3);
+  if (campaign) for (const k of kinds) { const f = await read(`${campaign}\\map\\war3campaign.${k}.json`, k); if (f) art.push(f); }
+  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  for (const prefix of ["war3map", "war3mapSkin"]) {
+    for (const k of kinds) {
+      const path = `map/${prefix}.${k}.json`;
+      if (!files.has(path.toLowerCase())) continue;
+      const f = await read(path, k);
+      if (f) art.push(f);
     }
   }
-  return out;
+  const bases = new Map<string, string>();
+  for (const f of [...art].reverse()) for (const o of f.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
+  return { bases, art };
 }
 
 /** Ground tile id → texture path, from TerrainArt\Terrain.slk. */
@@ -70,9 +73,32 @@ async function tileCatalog(w3: W3Api): Promise<Map<string, { path: string; name:
 const MAX_GROUND_TILES = 16;
 
 /** A game file, or the map's imported replacement of it. */
+/** The campaign project of a chapter map project (…/maps/<file>), or undefined. */
+function campaignRoot(w3: W3Api): string | undefined {
+  const root = w3.workspace.project()?.root;
+  return root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
+}
+
+/** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
+ *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
+async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
+  const rel = path.replace(/\//g, "\\");
+  const names = (w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd" ? [`_HD.w3mod\\${rel}`, rel] : [rel];
+  const campaign = campaignRoot(w3);
+  // The project's own files are known; only those are read (most paths are the game's).
+  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const own = names.map((n) => `map/${n.replace(/\\/g, "/")}`).filter((p) => files.has(p.toLowerCase()));
+  const candidates = [...own, ...(campaign ? names.map((n) => `${campaign}\\map\\${n}`) : [])];
+  let last: unknown = new Error(`${path} isn't imported`);
+  for (const c of candidates) {
+    try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }
+  }
+  throw last;
+}
+
 async function readFile(w3: W3Api, doc: EditorDocument, path: string): Promise<Uint8Array> {
   if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return await w3.workspace.readBytes(`map/${path.replace(/\\/g, "/")}`); } catch { /* use the game's */ }
+    try { return await readImport(w3, path); } catch { /* use the game's */ }
   }
   return w3.game.read(path);
 }
@@ -81,7 +107,7 @@ async function readFile(w3: W3Api, doc: EditorDocument, path: string): Promise<U
  *  the Reforged "_Diffuse" texture (the plain name is the classic one). */
 async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): Promise<{ buf: Uint8Array; name: string }> {
   if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-    try { return { buf: await w3.workspace.readBytes(`map/${path.replace(/\\/g, "/")}`), name: path }; } catch { /* use the game's */ }
+    try { return { buf: await readImport(w3, path), name: path }; } catch { /* use the game's */ }
   }
   if ((w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd") {
     const hd = path.replace(/\.\w+$/, "_Diffuse.blp");
@@ -497,13 +523,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null),
             loadPlacedFile(w3, "war3mapUnits.doo", "units").catch(() => null),
             loadSkins(w3),
-            customBases(w3),
-          ]).then(async ([df, uf, skins, bases]) => {
+            mapObjectData(w3),
+          ]).then(async ([df, uf, skins, { bases, art }]) => {
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
             savedStarts = startLocations(uf?.list ?? []);
-            objCtx = { skins, bases };
+            objCtx = { skins: withObjectArt(skins, art), bases };
             await rebuildObjects();
           });
         }

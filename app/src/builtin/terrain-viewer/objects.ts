@@ -75,6 +75,50 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
   return out;
 }
 
+/** Object data fields that change a skin entry, per kind (UnitMetaData & co., "Profile" fields;
+ *  units' alternate models umd1/umd2 and selection scale aren't drawn). */
+const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
+  w3u: { file: "umdl", modelScale: "usca" },
+  w3t: { file: "ifil", modelScale: "isca" },
+  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr" },
+  w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr" },
+};
+
+interface ArtMod { field: string; value: number | string }
+interface ArtObject { base: string; id?: string; mods?: ArtMod[]; sets?: { mods: ArtMod[] }[] }
+/** A map's (or campaign's) object data file of one kind, as its project JSON. */
+export interface ObjectArt { kind: string; original?: ArtObject[]; custom?: ArtObject[] }
+
+/** The skins with the map's object data applied: custom objects get their base's entry with
+ *  the fields the map sets (model, scale, variations, texture, …), modified standard objects
+ *  their own. Later files win (campaign, then map, then the map's Skin files). */
+export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map<string, Skin> {
+  const out = new Map(skins);
+  for (const f of files) {
+    const fields = ART_FIELDS[f.kind];
+    if (!fields) continue;
+    for (const o of [...(f.original ?? []), ...(f.custom ?? [])]) {
+      const id = o.id ?? o.base;
+      const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((x) => x.mods)];
+      const art = mods.filter((m) => Object.values(fields).includes(m.field));
+      if (!art.length && o.id === undefined) continue;
+      const base = out.get(id) ?? out.get(o.base);
+      const skin: Skin = base ? { ...base } : { kind: f.kind, file: "", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null };
+      for (const [key, field] of Object.entries(fields) as [keyof Skin, string][]) {
+        const m = art.find((x) => x.field === field);
+        if (!m) continue;
+        const n = Number(m.value);
+        if (key === "file" || key === "texFile") skin[key] = String(m.value);
+        else if (key === "randScale") skin.randScale = n === 1;
+        else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
+        else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale") && Number.isFinite(n)) skin[key] = n;
+      }
+      if (skin.file) out.set(id, skin);
+    }
+  }
+  return out;
+}
+
 /** The skin's replaceable texture. Destructable skins give the extension
  *  (ReplaceableTextures\Cliff\Cliff1.blp), doodad skins don't. */
 function skinTextures(skin: Skin): Record<number, string> {
