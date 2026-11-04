@@ -165,6 +165,8 @@ export interface TerrainObjects {
   create(kind: string, id: string, at: { x: number; y: number; angle: number; player?: number }): PlacedEntry | string;
   /** Units and items, then doodads and destructables, as placed now. */
   list(): PlacedEntry[];
+  /** Redraws and marks for saving entries whose fields (position, …) were changed in place. */
+  update(entries: PlacedEntry[]): void;
   /** Puts created entries on the map / takes them off (no undo step; pair them in pushEdit). */
   insert(entries: PlacedEntry[]): void;
   remove(entries: PlacedEntry[]): void;

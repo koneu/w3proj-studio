@@ -54,6 +54,14 @@ export class EditorService {
   memory: { load(): OpenEditors | null; store(state: OpenEditors): void } | null = null;
   /** Off while tabs are closed for a project switch or restored. */
   private remembering = true;
+  /** From startup, and whenever a project opens, until its tabs are restored: tabs closed
+   *  meanwhile (the welcome page at startup) must not overwrite what is remembered. */
+  private awaitingRestore = true;
+
+  /** A project was opened: the next restore() brings its tabs back; until then nothing is stored. */
+  projectOpened() {
+    this.awaitingRestore = true;
+  }
 
   constructor(private io: DocumentIO) {
     this.content.append(this.empty);
@@ -169,6 +177,7 @@ export class EditorService {
   /** Reopens the tabs remembered for the current project (the active one is loaded, the
    *  others when they are first shown). Tabs already open stay. */
   async restore() {
+    this.awaitingRestore = false;
     const state = this.memory?.load();
     if (!state?.tabs.length) return;
     this.remembering = false;
@@ -185,7 +194,7 @@ export class EditorService {
   }
 
   private remember() {
-    if (!this.remembering || !this.memory) return;
+    if (!this.remembering || this.awaitingRestore || !this.memory) return;
     this.memory.store({ tabs: this.tabs.map((t) => ({ path: t.path, editor: t.providerId })), active: this.active?.path });
   }
 

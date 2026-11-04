@@ -34,8 +34,9 @@ const KINDS_OF_POSITION: Record<number, string[]> = { 0: ["w3u"], 1: ["w3u"], 2:
 /** An empty slot of a random group. */
 const NONE = "0x00000000";
 
+/** A section: title, a line of explanation, then its content (each child on its own line). */
 const section = (title: string, hint: string, ...children: Node[]) =>
-  h("section.form-section", {}, h("h3", {}, title), h("small.muted", {}, hint), ...children);
+  h("section.form-section.techtree-section", {}, h("h3", {}, title), h("p.muted.techtree-hint", {}, hint), ...children);
 const removeButton = (title: string, onclick: () => void) => h("button.icon-button", { title, onclick }, "×");
 
 /** An object id with its name (filled in when known) and a button to pick another. */
@@ -97,7 +98,7 @@ const select = <T extends number>(options: readonly (readonly [T, string])[], ge
 function upgrades(info: TechInfo, ctx: TechContext): HTMLElement {
   return section(`Upgrades (${info.upgrades.length})`,
     "Per player and upgrade level: unavailable, available (the default) or already researched.",
-    ctx.flag(CUSTOM_UPGRADES, "Use custom upgrades"),
+    h("div", {}, ctx.flag(CUSTOM_UPGRADES, "Use custom upgrades")),
     h("table.form-table", {},
       h("thead", {}, h("tr", {}, h("th", {}, "Players"), h("th", {}, "Upgrade"), h("th", {}, "Level"), h("th", {}, "State"), h("th", {}))),
       h("tbody", {}, ...info.upgrades.map((u) => h("tr", {},
@@ -118,7 +119,7 @@ function upgrades(info: TechInfo, ctx: TechContext): HTMLElement {
 function techs(info: TechInfo, ctx: TechContext): HTMLElement {
   return section(`Techtree (${info.techs.length} unavailable)`,
     "Units, buildings, items and abilities the players can't use (everything else is available).",
-    ctx.flag(CUSTOM_TECHTREE, "Use custom techtree"),
+    h("div", {}, ctx.flag(CUSTOM_TECHTREE, "Use custom techtree")),
     h("table.form-table", {},
       h("thead", {}, h("tr", {}, h("th", {}, "Players"), h("th", {}, "Object"), h("th", {}))),
       h("tbody", {}, ...info.techs.map((t) => h("tr", {},
@@ -150,7 +151,7 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
         removeButton("Remove the group", () => { info.unitTables.splice(info.unitTables.indexOf(g), 1); ctx.changed(true); })),
       h("table.form-table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "Chance %"),
-          ...g.positions.map((_, k) => h("th", {},
+          ...g.positions.map((_, k) => h("th.techtree-position", {},
             select(POSITION_TYPES, () => g.positions[k], (v) => { g.positions[k] = v; }, ctx),
             removeButton("Remove this position", () => { g.positions.splice(k, 1); for (const l of g.lines) l.ids.splice(k, 1); ctx.changed(true); }))),
           h("th", {}, h("button", { title: "Add a position", onclick: () => { g.positions.push(0); for (const l of g.lines) l.ids.push(NONE); ctx.changed(true); } }, "+")))),

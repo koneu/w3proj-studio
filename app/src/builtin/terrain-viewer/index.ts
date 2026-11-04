@@ -1116,6 +1116,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return entry;
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
+            update: () => {
+              objectsTouched = true;
+              void rebuildObjects();
+            },
             insert: (entries) => {
               for (const e of entries) { const f = entryFile.get(e as Placed); if (f && !f.list.includes(e as Placed)) f.list.push(e as Placed); }
               objectsTouched = true;

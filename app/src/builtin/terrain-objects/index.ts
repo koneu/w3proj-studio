@@ -10,6 +10,7 @@ import {
   type ObjectsService, type PlacedEntry, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance,
 } from "../../extensions/services";
 import { TEAM_COLORS } from "../../lib/model/renderer";
+import { heightAt } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 
 const NEUTRALS: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Extra", 26: "Neutral Victim", 27: "Neutral Passive" };
@@ -48,19 +49,23 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const START = { kind: "w3u", id: "sloc", name: "Start Location" };
   const isStart = () => placing?.id === START.id;
 
-  /** Places the owner's start location, or moves it there if it has one already (one undo step). */
+  /** Places the owner's start location, or moves the one it has (same entry, so the file keeps
+   *  its order and editor id); one undo step. Snapped to 64 like the game's maps' (730 of 732). */
   const placeStart = (pos: [number, number, number]) => {
     if (owner >= 24) { w3.window.showWarning("Start locations are for players 1–24, not neutral players."); return; }
-    const e = ed.objects.create(START.kind, START.id, { x: pos[0], y: pos[1], angle: deg(270), player: owner });
+    const x = Math.round(pos[0] / 64) * 64, y = Math.round(pos[1] / 64) * 64;
+    const old = ed.objects.list().find((o) => o.id === START.id && o.player === owner);
+    if (old) {
+      const before = [...old.position] as [number, number, number], after: [number, number, number] = [x, y, heightAt(ed.terrain, x, y)];
+      const set = (p: [number, number, number]) => { old.position = [...p]; ed.objects.update([old]); };
+      set(after);
+      ed.pushEdit({ undo: () => set(before), redo: () => set(after), terrain: false, objects: true });
+      return;
+    }
+    const e = ed.objects.create(START.kind, START.id, { x, y, angle: deg(270), player: owner });
     if (typeof e === "string") { w3.window.showError(e); return; }
-    const old = ed.objects.list().filter((o) => o.id === START.id && o.player === owner);
-    ed.objects.remove(old);
     ed.objects.insert([e]);
-    ed.pushEdit({
-      undo: () => { ed.objects.remove([e]); ed.objects.insert(old); },
-      redo: () => { ed.objects.remove(old); ed.objects.insert([e]); },
-      terrain: false, objects: true,
-    });
+    ed.pushEdit({ undo: () => ed.objects.remove([e]), redo: () => ed.objects.insert([e]), terrain: false, objects: true });
   };
 
   /** A scatter drag: everything it places is one undo step. */

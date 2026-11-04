@@ -155,13 +155,15 @@ export class Workbench {
     });
 
     // Projects can ship their own extensions in .w3proj/extensions. Then the project's tabs
-    // from last time are opened again.
+    // from last time are opened again. The last project may already be open (reopened by an
+    // extension during onStartup), so this also runs once now.
     let scannedRoot: string | null = null;
-    this.workspace.onDidChange.on(async () => {
+    const projectChanged = async () => {
       const root = this.workspace.project()?.root ?? null;
       if (root === scannedRoot) return;
       scannedRoot = root;
       if (!root) return;
+      this.editors.projectOpened();
       try {
         this.host.addExternal(await invoke("extensions_scan", { projectRoot: root }));
         await this.host.fire("onStartup");
@@ -170,7 +172,9 @@ export class Workbench {
         this.log.append(`could not scan project extensions: ${e}`);
       }
       if (this.workspace.project()?.root === root) await this.editors.restore().catch((e) => this.log.append(`could not restore tabs: ${e}`));
-    });
+    };
+    this.workspace.onDidChange.on(projectChanged);
+    void projectChanged();
   }
 
   run(command: string, ...args: unknown[]) {
