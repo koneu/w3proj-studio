@@ -18,8 +18,9 @@ const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
 const MAX_GROUND_TILES = 16;
 
 const TOOLS: [Tool, string, string][] = [
+  ["paint", "Paint", "Paint a ground texture"],
   ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
-  ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"], ["paint", "Paint", "Paint a ground texture"],
+  ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"],
   ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"],
   ["cliffUp2", "Cliff ↑↑", "Raise two cliff levels (two above where the stroke starts)"],
   ["cliffLevel", "Cliff level", "Bring everything to the cliff level where the stroke starts"],
@@ -51,7 +52,7 @@ const tileNames = (w3: W3Api) => (catalog ??= w3.game.readText("TerrainArt\\Terr
 
 function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const terrain = ed.terrain;
-  let tool: Tool = "raise", size = 2, strength = 16, paintTex = 0, square = false;
+  let tool: Tool = "paint", size = 2, strength = 16, paintTex = 0, square = false;
   /** Tile type chosen for painting (may not be in the map yet). */
   let paintTile = terrain.groundTiles[0] ?? "";
   let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
@@ -174,7 +175,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
     strengthWrap, texWrap, tilePanel,
   );
-  setTool("raise");
+  setTool("paint");
 
   return {
     toolbar,
