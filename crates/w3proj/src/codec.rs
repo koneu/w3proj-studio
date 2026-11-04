@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::format::{self, FormatCodec};
 use crate::triggerdata::TriggerData;
-use crate::{objdata, wct, wtg, Error, Result};
+use crate::{objdata, w3e, wct, wtg, Error, Result};
 
 pub trait Codec: Send + Sync {
     /// Stable identifier, e.g. `objdata-json`.
@@ -73,6 +73,27 @@ impl Codec for CustomTextCodec {
     }
 }
 
+/// Terrain as text grids (see `w3e`).
+pub struct TerrainText;
+
+impl Codec for TerrainText {
+    fn id(&self) -> &'static str {
+        "w3e-text"
+    }
+    fn suffix(&self) -> &'static str {
+        ".txt"
+    }
+    fn matches(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("war3map.w3e")
+    }
+    fn decode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        w3e::to_text(bytes)
+    }
+    fn encode(&self, _: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        w3e::from_text(bytes)
+    }
+}
+
 /// Where the GUI trigger codec gets the game's TriggerData.txt (asked on the first decode).
 pub type TriggerDataSource = Arc<dyn Fn() -> Option<Arc<TriggerData>> + Send + Sync>;
 
@@ -126,7 +147,7 @@ impl Default for Registry {
 impl Registry {
     /// Built-ins plus definitions from override folders (later folders win).
     pub fn with_formats(override_dirs: &[PathBuf]) -> Result<Self> {
-        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(CustomTextCodec), Box::new(TriggersJson::new(None))];
+        let mut codecs: Vec<Box<dyn Codec>> = vec![Box::new(ObjectDataJson), Box::new(CustomTextCodec), Box::new(TerrainText), Box::new(TriggersJson::new(None))];
         for def in format::load_definitions(override_dirs)? {
             codecs.push(Box::new(FormatCodec::new(def)));
         }

@@ -9,6 +9,7 @@ pub mod objdata;
 pub mod paths;
 pub mod project;
 pub mod triggerdata;
+pub mod w3e;
 pub mod wct;
 pub mod wtg;
 

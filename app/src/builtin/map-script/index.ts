@@ -5,6 +5,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { generateScript, parseSoundLabels, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
+import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
 
@@ -107,7 +108,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
     const wts = wtsText === null ? null : new StringTable(wtsText);
-    const w3e = await bytes("map/war3map.w3e");
+    const w3ePath = terrainPath(w3.workspace.files().map((f) => f.path));
+    const w3e = w3ePath ? await readTerrainBytes(w3ePath, { readText: () => w3.workspace.readText(w3ePath), readBytes: () => w3.workspace.readBytes(w3ePath) }).catch(() => null) : null;
     const terrain = w3e ? parseW3e(w3e) : null;
 
     // Custom objects: their base decides, unless the map sets "is a building" (ubdg).

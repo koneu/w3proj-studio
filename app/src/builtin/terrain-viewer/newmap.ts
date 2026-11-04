@@ -9,6 +9,7 @@
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { randomVariation, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { w3eToText } from "../../lib/terrain/w3etext";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { buildMinimap, minimapSettings } from "./minimapgen";
@@ -319,7 +320,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions & { tilesetInfo: Til
   await json("map/war3map.w3s.json", { format: "w3proj.sounds/1", version: 3, sounds: [] });
   await w3.workspace.writeText(WTG_JSON, writeWtgJson(defaultTriggerFile()));
   await writeWctFile(w3.workspace, parseWct(defaultWct(), 1), textTriggers(defaultTriggerFile()).map((t) => t.name));
-  await w3.workspace.writeBytes("map/war3map.w3e", writeW3e(t));
+  await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));
   await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", mapScript(o, t, lights));
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));
   await w3.workspace.refresh();
@@ -328,5 +329,5 @@ export async function createMap(w3: W3Api, o: NewMapOptions & { tilesetInfo: Til
   await w3.workspace.writeBytes("map/war3map.wpm", wpm);
   await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, t, [], read, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
   await w3.workspace.refresh();
-  await w3.editors.open("map/war3map.w3e", "w3.terrainViewer");
+  await w3.editors.open("map/war3map.w3e.txt", "w3.terrainViewer");
 }

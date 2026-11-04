@@ -19,9 +19,11 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
-const PATH = "map/war3map.w3e";
+/** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
+const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
 /** TEAM_COLORS index used for neutral players. */
 const NEUTRAL = 20;
 
@@ -93,8 +95,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
     w3.commands.register("w3.terrain.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
-      if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) throw new Error("This project has no war3map.w3e.");
-      await w3.editors.open(PATH, "w3.terrainViewer");
+      const path = projectTerrain(w3);
+      if (!path) throw new Error("This project has no war3map.w3e.");
+      await w3.editors.open(path, "w3.terrainViewer");
     }),
     // Shows a world point in the terrain editor (opening it first); used by the Object Manager.
     w3.commands.register("w3.terrain.showPoint", async (x?: number, y?: number) => {
@@ -122,7 +125,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(h("div.view-empty", {}, "Open or import a project to view its terrain."));
           return;
         }
-        if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) {
+        const path = projectTerrain(w3);
+        if (!path) {
           el.append(h("div.view-empty", {}, "This project has no war3map.w3e."));
           return;
         }
@@ -133,7 +137,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("span.tree-icon", {}, "›"), h("span.tree-label", {}, "Open 3D view"))),
           facts,
         );
-        w3.workspace.readBytes(PATH).then((buf) => {
+        readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }).then((buf) => {
           const t = parseW3e(buf);
           facts.replaceChildren(
             h("div", {}, TILESETS[t.tileset] ?? `Tileset ${t.tileset}`),
@@ -151,7 +155,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The terrain as last saved: the baseline for updating shadows. */
         let savedW3e: Uint8Array;
         try {
-          savedW3e = await doc.readBytes();
+          savedW3e = await readTerrainBytes(doc.path, doc);
           terrain = parseW3e(savedW3e);
         } catch (e) {
           el.append(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
@@ -1029,7 +1033,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             f.list.splice(0, f.list.length, ...keep);
             await savePlacedFile(w3, f);
           }
-          await doc.writeBytes(writeW3e(next));
+          await writeTerrainBytes(doc.path, writeW3e(next), doc);
           await editDoc("war3map.w3i", (info) => {
             info.cameraComplements = [...complements];
             info.cameraBounds = cameraBounds(next, complements);
@@ -1058,8 +1062,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
           // The editor opens again on the new terrain.
           void (async () => {
-            await w3.editors.close(PATH);
-            await w3.editors.open(PATH, "w3.terrainViewer");
+            await w3.editors.close(doc.path);
+            await w3.editors.open(doc.path, "w3.terrainViewer");
           })().catch((e) => w3.window.showError(String(e)));
           return { removed };
         };
@@ -1435,7 +1439,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const editorApi = {
           save: editable ? async () => {
             const w3e = writeW3e(terrain);
-            await doc.writeBytes(w3e);
+            await writeTerrainBytes(doc.path, w3e, doc);
             if (objectsTouched) {
               for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
             }
