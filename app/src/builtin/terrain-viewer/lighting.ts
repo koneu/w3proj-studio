@@ -12,7 +12,13 @@ export interface MapLighting {
   unit: LightModel | null;
   /** Where they come from, for the toolbar's tooltip. */
   source: string;
+  /** Map flags (war3map.w3i; 0 without) and the water tint (r, g, b, a in 0–255). */
+  flags: number;
+  waterTint: number[] | null;
 }
+
+/** Map flags for water: tinting, waves (shoreline foam) on cliff shores and on rolling shores. */
+export const WATER_TINTING = 0x10000, CLIFF_SHORE_WAVES = 0x0800, ROLLING_SHORE_WAVES = 0x1000;
 
 /** A map file in either project form (JSON, or the raw file decoded by its format definition). */
 async function readMapDoc<T>(w3: W3Api, name: string): Promise<T | null> {
@@ -29,7 +35,7 @@ interface Lights { terrainModel: string; unitModel: string; terrainEnabled: numb
 
 export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLighting> {
   const [info, lights, data] = await Promise.all([
-    readMapDoc<{ lightEnvironment?: string }>(w3, "war3map.w3i"),
+    readMapDoc<{ lightEnvironment?: string; flags?: number; waterTint?: number[] }>(w3, "war3map.w3i"),
     readMapDoc<Lights>(w3, "war3map.w3l"),
     w3.game.readText("UI\\WorldEditData.txt").then(parseIni).catch(() => null),
   ]);
@@ -54,5 +60,9 @@ export async function loadMapLighting(w3: W3Api, tileset: string): Promise<MapLi
     } catch { return null; }
   };
   const [terrain, unit] = await Promise.all([pick("terrain", "TerrainLights"), pick("unit", "UnitLights")]);
-  return { terrain, unit, source: notes.join(" · ") || "no lighting found (neutral light)" };
+  return {
+    terrain, unit, source: notes.join(" · ") || "no lighting found (neutral light)",
+    // Without map info (a game map viewed alone): the waves a new map has.
+    flags: info?.flags ?? CLIFF_SHORE_WAVES | ROLLING_SHORE_WAVES, waterTint: info?.waterTint ?? null,
+  };
 }

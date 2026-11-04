@@ -17,7 +17,9 @@ export interface ShoreModels { straight: string; outside: string; inside: string
 /** Corner offsets from a tile's centre, in the order bottom-left, bottom-right, top-right, top-left. */
 const CORNERS: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 
-export function planShoreline(t: Terrain, models: ShoreModels): ModelRequest[] {
+/** `cliffShores`/`rollingShores`: the map's "Show water waves on cliff / rolling shores" flags
+ *  (a shore tile on a cliff — corners on different layers — or not). */
+export function planShoreline(t: Terrain, models: ShoreModels, waves = { cliffShores: true, rollingShores: true }): ModelRequest[] {
   const req = (path: string): ModelRequest => ({ path, replaceable: {}, instances: [] });
   const straight = req(models.straight), outside = req(models.outside), inside = req(models.inside);
   const place = (r: ModelRequest, x: number, y: number, z: number, angle: number) => {
@@ -31,6 +33,8 @@ export function planShoreline(t: Terrain, models: ShoreModels): ModelRequest[] {
       const under = cs.map((c) => c.hasWater && c.water > c.height);
       const n = under.filter(Boolean).length;
       if (n === 0 || n === 4) continue;
+      const cliff = !cs.every((c) => c.layer === cs[0].layer);
+      if (cliff ? !waves.cliffShores : !waves.rollingShores) continue;
       const level = Math.max(...cs.filter((c) => c.hasWater).map((c) => c.water));
       const cx = t.offsetX + (x + 0.5) * 128, cy = t.offsetY + (y + 0.5) * 128;
       const land = CORNERS.filter((_, i) => !under[i]), water = CORNERS.filter((_, i) => under[i]);

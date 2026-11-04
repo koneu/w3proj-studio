@@ -45,3 +45,13 @@ test("a one-corner island in water gets outside corners; dry tiles and open wate
   assert.deepEqual(placed(map(() => false)), []);
   assert.deepEqual(placed(map(() => true)), []);
 });
+
+test("the map's wave flags: rolling shores (no cliff) and cliff shores separately", () => {
+  const lake = map((x, y) => x >= 2 && x <= 3 && y >= 2 && y <= 3);
+  assert.equal(planShoreline(lake, MODELS, { cliffShores: true, rollingShores: false }).length, 0);
+  assert.equal(planShoreline(lake, MODELS, { cliffShores: false, rollingShores: true }).flatMap((r) => r.instances).length, 8);
+  // The lake's land one layer up: cliff tiles now, so only "cliff shores" matters.
+  for (const c of lake.corners) if (!c.hasWater) c.layer = 3;
+  assert.equal(planShoreline(lake, MODELS, { cliffShores: false, rollingShores: true }).length, 0);
+  assert.equal(planShoreline(lake, MODELS, { cliffShores: true, rollingShores: false }).flatMap((r) => r.instances).length, 8);
+});

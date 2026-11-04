@@ -17,7 +17,7 @@ import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
-import { loadMapLighting, type MapLighting } from "./lighting";
+import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
@@ -217,6 +217,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           lightSelect.value = String(hour);
           lightSelect.disabled = !on;
           renderer.terrainLight = on && lighting?.terrain ? lightAt(lighting.terrain, hour) : null;
+          renderer.waterTint = lighting && lighting.flags & WATER_TINTING ? lighting.waterTint : null;
           renderer.unitLight = on && lighting?.unit ? lightAt(lighting.unit, hour) : null;
           redraw();
         };
@@ -230,6 +231,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           lightBox.title = `The map's day/night lighting (${l.source}); off: an even light`;
           lightSelect.title = "Time of day";
           applyLight();
+          // The map's wave flags decide where shoreline foam goes.
+          void replanShore();
         }, () => {});
         // Saved lighting, map properties (light environment) or lighting models change the light.
         const stopLightWatch = w3.workspace.onDidSave((p) => { if (/war3map\.w3[li](\.json)?$|\.mdl$/i.test(p)) reloadLighting(); });
@@ -494,7 +497,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         async function replanShore() {
           if (!shoreModels) return;
           const gen = ++shoreGen;
-          const { batches } = await loader.loadModels("shoreline", planShoreline(terrain, shoreModels));
+          const flags = lighting?.flags ?? CLIFF_SHORE_WAVES | ROLLING_SHORE_WAVES;
+          const waves = { cliffShores: (flags & CLIFF_SHORE_WAVES) !== 0, rollingShores: (flags & ROLLING_SHORE_WAVES) !== 0 };
+          const { batches } = await loader.loadModels("shoreline", planShoreline(terrain, shoreModels, waves));
           if (gen !== shoreGen) return;
           const others = renderer.batches.filter((b) => b.group !== "shoreline");
           renderer.batches.length = 0;

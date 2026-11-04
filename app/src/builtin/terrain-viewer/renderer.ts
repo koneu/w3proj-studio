@@ -70,13 +70,16 @@ const WATER_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv; in float vDepth;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
+// The map's water tint (white without) and the scene light on a flat surface.
+uniform vec4 uTint; uniform vec3 uLight;
 out vec4 outColor;
 void main() {
   const float minDepth = 10.0 / 128.0, deepLevel = 64.0 / 128.0, maxDepth = 72.0 / 128.0;
   vec4 c = vDepth <= deepLevel
     ? mix(uShallowMin, uShallowMax, clamp((vDepth - minDepth) / (deepLevel - minDepth), 0.0, 1.0))
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
-  outColor = texture(uTex, vUv) * c;
+  vec4 w = texture(uTex, vUv) * c * uTint;
+  outColor = vec4(w.rgb * uLight, w.a);
 }`;
 
 /** A tileset's water: animation frames (by index; null until loaded), frames per second and
@@ -189,6 +192,8 @@ export class TerrainRenderer {
   private waterFrameShown = -1;
   /** White texture for untextured water. */
   private waterWhite: WebGLTexture;
+  /** The map's water tint (r, g, b, a in 0–255) when tinting is on; null: none. */
+  waterTint: number[] | null = null;
   private overlayProg: WebGLProgram | null = null;
   private overlay: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
   private wire: Mesh;
@@ -821,6 +826,13 @@ export class TerrainRenderer {
       for (const [name, v] of [["uShallowMin", look.shallowMin], ["uShallowMax", look.shallowMax], ["uDeepMin", look.deepMin], ["uDeepMax", look.deepMax]] as const) {
         gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
       }
+      const tint = this.waterTint ?? [255, 255, 255, 255];
+      gl.uniform4f(gl.getUniformLocation(this.waterProg, "uTint"), tint[0] / 255, tint[1] / 255, tint[2] / 255, (tint[3] ?? 255) / 255);
+      // Lit like flat ground (normal straight up); the even light without the map's.
+      const sun = this.terrainLight;
+      const up = sun ? Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1)) : 0;
+      const lit = sun ? [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up) : [1, 1, 1];
+      gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, look.frames[frame] ?? look.frames.find((f) => f) ?? this.waterWhite);
       gl.enable(gl.BLEND);
