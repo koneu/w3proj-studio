@@ -1,7 +1,7 @@
 // A small live model view (object editor, the Problems view's model picker): a model's Stand
 // animation, turning slowly; drag to turn it. The map's imported file wins, else the game's:
-// through the graphics mode, or (`classic`) the Classic files exactly, as Classic graphics
-// shows them.
+// through the graphics mode, or (`prefer`) the Classic or the Reforged (DE, then HD) files
+// first, whatever the graphics mode is.
 
 import type { W3Api } from "../../extensions/api";
 import { toProjectPath } from "../formats/archivepath";
@@ -21,7 +21,7 @@ export class ModelPreview {
   private started = performance.now();
   private drag: number | null = null;
 
-  constructor(private w3: W3Api, private opts: { classic?: boolean } = {}) {
+  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" } = {}) {
     this.canvas = this.newCanvas();
     this.note = div("obj-preview-note muted");
     this.el = div("obj-preview");
@@ -69,8 +69,9 @@ export class ModelPreview {
       if (files.has(own.toLowerCase())) return this.w3.workspace.readBytes(own);
     }
     let last: unknown = new Error(`${path} not found`);
-    // Classic: the base folder exactly (not its Reforged versions), else as the game resolves it.
-    const tries = this.opts.classic ? variants.flatMap((v) => [`War3.w3mod:${v.replace(/\\/g, "/")}`, v]) : variants;
+    // Classic: the base folder exactly; Reforged: its DE, then HD folder; then as the game resolves it.
+    const layers = this.opts.prefer === "classic" ? ["War3.w3mod:"] : this.opts.prefer === "reforged" ? ["War3.w3mod:_DE.w3mod:", "War3.w3mod:_HD.w3mod:"] : [];
+    const tries = variants.flatMap((v) => [...layers.map((l) => l + v.replace(/\\/g, "/")), v]);
     for (const v of tries) {
       try { return await this.w3.game.read(v); } catch (e) { last = e; }
     }

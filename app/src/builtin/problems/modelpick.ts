@@ -13,8 +13,9 @@ const SHOWN = 300;
 
 export function pickClassicModel(w3: W3Api, opts: { title: string; current: string | null; choices: ModelChoice[] }): Promise<string | null> {
   return new Promise((resolve) => {
-    const now = new ModelPreview(w3);
-    const candidate = new ModelPreview(w3, { classic: true });
+    // The type's model as it is (only Reforged has it), the candidate as Classic shows it.
+    const now = new ModelPreview(w3, { prefer: "reforged" });
+    const candidate = new ModelPreview(w3, { prefer: "classic" });
     now.show(opts.current);
     const search = h("input.model-pick-search", { type: "search", placeholder: "Search Classic models…" }) as HTMLInputElement;
     const list = h("div.model-pick-list");
