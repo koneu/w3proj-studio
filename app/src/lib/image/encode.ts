@@ -144,30 +144,59 @@ export function encodeJpeg4(width: number, height: number, pixels: Uint8Array, q
   return { tables: Uint8Array.from(tables), frame: Uint8Array.from(frame) };
 }
 
-/** BLP1 with one JPEG mip level and no alpha, like the World Editor's
- *  minimaps. `rgba` rows run top to bottom. */
-export function encodeBlp1Jpeg(width: number, height: number, rgba: ArrayLike<number>, quality = 85): Uint8Array {
-  const bgra = new Uint8Array(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    bgra[i * 4] = rgba[i * 4 + 2];
-    bgra[i * 4 + 1] = rgba[i * 4 + 1];
-    bgra[i * 4 + 2] = rgba[i * 4];
-    bgra[i * 4 + 3] = 255;
+/** Half the size (box filter); odd sizes round down, never below 1. */
+function halve(width: number, height: number, px: Uint8Array): { width: number; height: number; px: Uint8Array } {
+  const w = Math.max(1, width >> 1), h = Math.max(1, height >> 1);
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 4; c++) {
+    let sum = 0, n = 0;
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const sx = Math.min(width - 1, x * 2 + dx), sy = Math.min(height - 1, y * 2 + dy);
+      sum += px[(sy * width + sx) * 4 + c];
+      n++;
+    }
+    out[(y * w + x) * 4 + c] = Math.round(sum / n);
   }
-  const { tables, frame } = encodeJpeg4(width, height, bgra, quality);
-  const out = new Uint8Array(160 + tables.length + frame.length);
+  return { width: w, height: h, px: out };
+}
+
+/** BLP1 with JPEG levels. `rgba` rows run top to bottom. Defaults as the World Editor's
+ *  minimaps: one level, no alpha; `alpha` keeps the alpha channel (8 bits), `mipmaps` adds the
+ *  smaller levels down to 1×1 (model textures). */
+export function encodeBlp1Jpeg(width: number, height: number, rgba: ArrayLike<number>, quality = 85, opts: { alpha?: boolean; mipmaps?: boolean } = {}): Uint8Array {
+  let level = { width, height, px: new Uint8Array(width * height * 4) };
+  for (let i = 0; i < width * height; i++) {
+    level.px[i * 4] = rgba[i * 4 + 2];
+    level.px[i * 4 + 1] = rgba[i * 4 + 1];
+    level.px[i * 4 + 2] = rgba[i * 4];
+    level.px[i * 4 + 3] = opts.alpha ? rgba[i * 4 + 3] : 255;
+  }
+  let tables = new Uint8Array(0);
+  const frames: Uint8Array[] = [];
+  for (let n = 0; n < 16; n++) {
+    const enc = encodeJpeg4(level.width, level.height, level.px, quality);
+    tables = enc.tables;
+    frames.push(enc.frame);
+    if (!opts.mipmaps || (level.width === 1 && level.height === 1)) break;
+    level = halve(level.width, level.height, level.px);
+  }
+  const out = new Uint8Array(160 + tables.length + frames.reduce((n, f) => n + f.length, 0));
   const v = new DataView(out.buffer);
   out.set([0x42, 0x4c, 0x50, 0x31]); // "BLP1"
   v.setUint32(4, 0, true); // JPEG
-  v.setUint32(8, 0, true); // alpha bits
+  v.setUint32(8, opts.alpha ? 8 : 0, true); // alpha bits
   v.setUint32(12, width, true);
   v.setUint32(16, height, true);
-  v.setUint32(20, 3, true); // picture type, as the World Editor writes it
-  v.setUint32(24, 0, true); // no mipmaps
-  v.setUint32(28, 160 + tables.length, true); // mip 0 offset
-  v.setUint32(92, frame.length, true); // mip 0 size
+  v.setUint32(20, opts.alpha ? 4 : 3, true); // picture type (4 with alpha, 3 without, as the game's files)
+  v.setUint32(24, frames.length > 1 ? 1 : 0, true); // mipmaps
   v.setUint32(156, tables.length, true);
   out.set(tables, 160);
-  out.set(frame, 160 + tables.length);
+  let at = 160 + tables.length;
+  frames.forEach((f, i) => {
+    v.setUint32(28 + i * 4, at, true); // offset
+    v.setUint32(92 + i * 4, f.length, true); // size
+    out.set(f, at);
+    at += f.length;
+  });
   return out;
 }

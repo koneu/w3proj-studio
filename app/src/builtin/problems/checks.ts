@@ -6,7 +6,10 @@
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck } from "../../extensions/services";
 import type { FileInfo } from "../../extensions/api";
-import { toArchiveName } from "../../lib/formats/archivepath";
+import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { encodeBlp1Jpeg } from "../../lib/image/encode";
+import { decodeImage } from "../../lib/image/index.ts";
+import { toClassicMdx } from "../../lib/model/classic";
 import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx } from "../../lib/model/mdx";
@@ -325,6 +328,15 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
         location: file.slice(4),
         reveal: { command: "w3.terrain.showPoint", args: [items[0].position[0], items[0].position[1]] },
         fixes: [{
+          label: "Convert to a Classic model",
+          title: "Writes a Classic copy of the Reforged model (and its colour textures) into the map and points the type at it: Classic shows the same object (without Reforged's extra maps and effects)",
+          run: async () => {
+            const model = value(id, kind, ART[kind].model) ?? "";
+            const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
+            const bytes = await convertToClassic(w3, kind, custom.get(id)?.base ?? id, id, model, variations);
+            void w3.window.showInfo(`Converted ${name} to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+          },
+        }, {
           label: "Use a Classic model instead…",
           title: "Pick one of the game's Classic models for this type; it's written into the map's object data (a modified standard object), so Classic graphics and the World Editor show it",
           run: () => useClassicModel(w3, kind, custom.get(id)?.base ?? id, id, name, [...(paths.get(id) ?? [])][0] ?? "", classicModels),
@@ -371,7 +383,12 @@ async function useClassicModel(w3: W3Api, kind: string, base: string, id: string
     })),
   });
   if (!pick) return;
-  const model = pick.replace(/\.mdx$/i, ".mdl");
+  await setModel(w3, kind, base, id, pick.replace(/\.mdx$/i, ".mdl"), 1);
+}
+
+/** Writes a model (and, for doodads/destructables, the variation count) into a type's object
+ *  data: a modified standard object, or the custom object's own entry. */
+async function setModel(w3: W3Api, kind: string, base: string, id: string, model: string, variations: number) {
   const fields = MODEL_FIELDS[kind];
   const path = `map/war3map.${kind}.json`;
   const text = await w3.workspace.readText(path).catch(() => null);
@@ -395,7 +412,69 @@ async function useClassicModel(w3: W3Api, kind: string, base: string, id: string
     o!.mods.push(levels ? { field, type, level: 0, data: 0, value } : { field, type, value });
   };
   set(fields.model, "string", model);
-  if (fields.variations) set(fields.variations, "int", 1);
+  if (fields.variations) set(fields.variations, "int", variations);
   await w3.workspace.writeText(path, await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(doc) }));
   await w3.workspace.refresh();
+}
+
+/** The game's Reforged copy of a file (DE, else HD), with the .dds the game ships for .tif/.blp names. */
+async function readReforged(w3: W3Api, path: string): Promise<Uint8Array> {
+  const p = path.replace(/\\/g, "/");
+  const names = /\.(blp|tif|tga)$/i.test(p) ? [p, p.replace(/\.\w+$/, ".dds")] : [p];
+  let last: unknown = new Error(`${path}: no Reforged copy`);
+  for (const layer of ["War3.w3mod:_DE.w3mod:", "War3.w3mod:_HD.w3mod:"]) {
+    for (const n of names) {
+      try { return await w3.game.read(layer + n); } catch (e) { last = e; }
+    }
+  }
+  throw last;
+}
+
+/** Converts the type's Reforged models (every variation) to Classic ones in the map
+ *  (war3mapImported\Classic\<name>\…: the model as MDX 800, its colour textures as BLP, at most
+ *  512 px), lists them as imports and points the type's model field at them. */
+async function convertToClassic(w3: W3Api, kind: string, base: string, id: string, model: string, variations: number): Promise<number> {
+  const stem = model.replace(/\.(mdl|mdx)$/i, "").replace(/\//g, "\\");
+  const name = stem.split("\\").pop()!;
+  const dir = `war3mapImported\\Classic\\${name}`;
+  const files = new Map<string, Uint8Array>();
+  const textures = new Map<string, string>();
+  for (let v = 0; v < Math.max(1, variations); v++) {
+    const suffix = variations > 1 ? String(v) : "";
+    const parsed = parseMdx(await readReforged(w3, `${stem}${suffix}.mdx`));
+    const mdx = toClassicMdx(parsed, (i) => {
+      const t = parsed.textures[i];
+      const target = `${dir}\\${t.path.split(/[\\/]/).pop()!.replace(/\.\w+$/, "")}.blp`;
+      textures.set(t.path, target);
+      return target;
+    });
+    files.set(`${dir}\\${name}${suffix}.mdx`, mdx);
+  }
+  for (const [source, target] of textures) {
+    if (files.has(target)) continue;
+    const img = decodeImage(await readReforged(w3, source), source);
+    // The first level at most 512 px wide and high (Reforged textures are 1–2k).
+    let k = 0;
+    while (k < img.mipCount - 1 && Math.max(img.mip(k).width, img.mip(k).height) > 512) k++;
+    const m = img.mip(k);
+    files.set(target, encodeBlp1Jpeg(m.width, m.height, m.rgba, 90, { alpha: true, mipmaps: true }));
+  }
+  for (const [archive, bytes] of files) await w3.workspace.writeBytes(`map/${toProjectPath(archive)}`, bytes);
+  await addImports(w3, [...files.keys()]);
+  await setModel(w3, kind, base, id, `${dir}\\${name}`, Math.max(1, variations));
+  return [...files.values()].reduce((n, b) => n + b.length, 0);
+}
+
+/** Adds archive names to war3map.imp (either project form; created when missing). */
+async function addImports(w3: W3Api, names: string[]) {
+  const root = w3.workspace.project()!.root;
+  type Imports = { format?: string; version: number; files: { flags: number; path: string }[] };
+  const json = await w3.workspace.readText("map/war3map.imp.json").catch(() => null);
+  const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" }).catch(() => null) : null;
+  const doc: Imports = JSON.parse(json ?? raw ?? '{"format":"w3proj.imports/1","version":1,"files":[]}');
+  const have = new Set(doc.files.map((f) => f.path.toLowerCase()));
+  // Flag 21 as the Import Manager writes new entries.
+  for (const n of names) if (!have.has(n.toLowerCase())) doc.files.push({ flags: 21, path: n });
+  if (raw !== null) await w3.backend.invoke("codec_write", { root, path: "map/war3map.imp", text: JSON.stringify(doc) });
+  else await w3.workspace.writeText("map/war3map.imp.json", await w3.backend.invoke<string>("codec_canonicalize", { root, path: "map/war3map.imp.json", text: JSON.stringify(doc) }));
 }
