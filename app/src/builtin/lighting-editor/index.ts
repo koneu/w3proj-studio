@@ -115,6 +115,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ]);
           // The map's light environment (Map Properties › Environment), else its tileset.
           const tileset = (info?.doc.lightEnvironment || info?.doc.tileset || "L").toUpperCase();
+          // The model name inside each of the map's own models (the game model it was copied from).
+          const ownNames = new Map(await Promise.all(KINDS.map(async ([kind]) => {
+            const file = lights?.doc[`${kind}Model`];
+            const text = file ? await w3.workspace.readText(`map/${file}`).catch(() => null) : null;
+            return [kind, text === null ? "missing file" : /^Model "([^"]*)"/m.exec(text)?.[1] ?? file] as const;
+          })));
           const sections = KINDS.map(([kind, title]) => {
             const fallback = models[kind].get(tileset) ?? [...models[kind].values()][0] ?? "";
             const own = lights?.doc[`${kind}Model`] ?? "";
@@ -128,6 +134,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 await writeMapDoc(w3, "war3map.w3l", lights.doc, lights.json);
               }) });
               rows.push(
+                h("div.lighting-row", { title: own }, `Map's own: ${ownNames.get(kind)}`),
                 h("label.lighting-row", { title: "Off: the tileset's lighting is used, the map's model stays" }, box, " Use the map's own lighting"),
                 h("div.lighting-row", {}, h("button.link-inline", { title: own, onclick: () => w3.editors.open(`map/${own}`, "w3.lightingEditor").catch(failed) }, "Edit"),
                   " ", h("button.link-inline", { onclick: run(() => remove(kind, lights)) }, "Remove")),
@@ -242,7 +249,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           l.rotation ? row("Direction", h("div", {},
             h("small.muted", {}, "Rotation of the light as a quaternion (x, y, z, w) per key."),
             h("table.form-table.lighting-keys", {}, h("tbody", {}, ...l.rotation.keys.map((k) => h("tr", {},
-              h("td.muted", {}, String(k.time)),
+              h("td.muted", {}, `${Number(toHour(k.time).toFixed(2))} h`),
               ...[0, 1, 2, 3].map((c) => h("td", {}, num(() => k.value[c], (v) => { k.value[c] = v; }, "0.01"))))))))) : null,
         );
 
