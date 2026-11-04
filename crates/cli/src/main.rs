@@ -1,6 +1,7 @@
 //! `w3proj` — unpack Warcraft III maps into git-friendly projects and pack
 //! them back.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, OnceLock};
@@ -44,6 +45,78 @@ fn game_names(game: &Option<LazyGame>) -> Option<w3proj::project::NameSource> {
 }
 
 /// Lets `codecs` read GUI triggers with the game's TriggerData.txt.
+/// Map name → (file → codec id or "raw").
+type Baseline = BTreeMap<String, BTreeMap<String, String>>;
+
+const BASELINE_HEADER: &str = "# w3proj verify --baseline: map, file, codec that reads it (\"raw\": a codec claims it but fell back)\n";
+
+fn read_baseline(path: &std::path::Path) -> Result<Baseline> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut base = Baseline::new();
+    for line in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        let mut cols = line.split('\t');
+        let (Some(map), Some(file), Some(codec)) = (cols.next(), cols.next(), cols.next()) else {
+            anyhow::bail!("{}: expected map, file and codec separated by tabs: {line}", path.display());
+        };
+        base.entry(map.to_string()).or_default().insert(file.to_string(), codec.to_string());
+    }
+    Ok(base)
+}
+
+fn write_baseline(path: &std::path::Path, base: &Baseline) -> Result<()> {
+    let mut out = String::from(BASELINE_HEADER);
+    for (map, files) in base {
+        for (file, codec) in files {
+            out.push_str(&format!("{map}\t{file}\t{codec}\n"));
+        }
+    }
+    std::fs::write(path, out).with_context(|| format!("writing {}", path.display()))
+}
+
+/// What changed from the baseline, one line per file.
+fn baseline_diffs(before: &BTreeMap<String, String>, now: &BTreeMap<String, String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for (file, old) in before {
+        match now.get(file) {
+            Some(new) if new == old => {}
+            Some(new) => out.push(format!("{file}: {old} → {new}")),
+            None => out.push(format!("{file}: {old} → no codec claims it")),
+        }
+    }
+    for (file, new) in now.iter().filter(|(f, _)| !before.contains_key(*f)) {
+        out.push(format!("{file}: not in the baseline → {new}"));
+    }
+    out
+}
+
+/// Maps given directly, plus the maps and campaigns found in given folders (sorted).
+fn expand_maps(args: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> Result<()> {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+            .with_context(|| format!("reading {}", dir.display()))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<_>>()?;
+        entries.sort();
+        for p in entries {
+            if p.is_dir() {
+                walk(&p, out)?;
+            } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["w3x", "w3m", "w3n"].contains(&e.to_ascii_lowercase().as_str())) {
+                out.push(p);
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    for a in args {
+        if a.is_dir() {
+            walk(a, &mut out)?;
+        } else {
+            out.push(a.clone());
+        }
+    }
+    Ok(out)
+}
+
 fn with_trigger_data(mut codecs: Registry, game: &Option<LazyGame>) -> Registry {
     if let Some(game) = game.clone() {
         codecs.set_trigger_data(Arc::new(move || {
@@ -85,7 +158,15 @@ enum Cmd {
     },
     /// Check that maps survive unpack → pack unchanged (in memory).
     Verify {
+        /// Maps and campaigns, or folders searched for .w3x/.w3m/.w3n files.
         maps: Vec<PathBuf>,
+        /// Also compare which codec reads each file with this file (tab-separated: map, file,
+        /// codec or "raw"); a codec that stops reading a file fails like a mismatch.
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        /// Write the checked maps' codec use into the baseline (other maps' lines stay).
+        #[arg(long, requires = "baseline")]
+        update_baseline: bool,
         /// Only print failures and a summary.
         #[arg(short, long)]
         quiet: bool,
@@ -211,13 +292,35 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 .with_context(|| format!("packing {}", project.display()))?;
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
-        Cmd::Verify { maps, quiet, game } => {
+        Cmd::Verify { maps, baseline, update_baseline, quiet, game } => {
+            let maps = expand_maps(&maps)?;
+            let mut base = match &baseline {
+                Some(path) if path.exists() => read_baseline(path)?,
+                _ => Baseline::new(),
+            };
+            let mut changed = 0;
             let game = lazy_game(&game);
             let codecs = with_trigger_data(Registry::with_formats(&extra)?, &game);
             let names = game_names(&game);
             let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
             for map in &maps {
-                match w3proj::verify(map, &codecs, names.as_ref()) {
+                let report = w3proj::verify(map, &codecs, names.as_ref());
+                if let (Some(_), Ok(r)) = (&baseline, &report) {
+                    let key = map.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let now: BTreeMap<String, String> = r.codec_use.iter().cloned().collect();
+                    if update_baseline {
+                        base.insert(key, now);
+                    } else if let Some(before) = base.get(&key) {
+                        let diffs = baseline_diffs(before, &now);
+                        changed += usize::from(!diffs.is_empty());
+                        for d in diffs {
+                            println!("CODEC {} — {d}", map.display());
+                        }
+                    } else {
+                        println!("new  {} — not in the baseline", map.display());
+                    }
+                }
+                match report {
                     Ok(r) if r.ok() => {
                         ok += 1;
                         let partial = r.unnamed + r.errors.len() > 0;
@@ -252,7 +355,15 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 }
             }
             println!("{ok} ok ({incomplete} incomplete), {failed} failed");
-            if failed > 0 {
+            if let Some(path) = &baseline {
+                if update_baseline {
+                    write_baseline(path, &base)?;
+                    println!("baseline written: {}", path.display());
+                } else {
+                    println!("{changed} with codec changes against the baseline");
+                }
+            }
+            if failed + changed > 0 {
                 return Ok(ExitCode::FAILURE);
             }
         }

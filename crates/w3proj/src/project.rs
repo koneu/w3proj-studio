@@ -721,6 +721,9 @@ pub struct VerifyReport {
     pub files: usize,
     pub codec_files: usize,
     pub codec_fallbacks: Vec<(String, String)>,
+    /// Every file a codec claims (chapter maps' files as `<chapter folder>/<name>`): the codec
+    /// that read it, or `raw` when it fell back.
+    pub codec_use: Vec<(String, String)>,
     pub mismatches: Vec<String>,
     pub unnamed: usize,
     pub errors: Vec<(String, String)>,
@@ -754,6 +757,21 @@ fn compare(original: &Archive, packed: &Archive, ex: &Extracted, at: &str, out: 
 }
 
 /// Unpacks and repacks a map in memory and checks every file survives.
+/// Codec per file that some codec claims, chapter maps included (see `VerifyReport::codec_use`).
+fn codec_use(ex: &Extracted, codecs: &Registry) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = ex
+        .report
+        .files
+        .iter()
+        .filter(|f| f.codec.is_some() || codecs.for_archive_name(&f.archive_name).next().is_some())
+        .map(|f| (f.archive_name.clone(), f.codec.clone().unwrap_or_else(|| "raw".into())))
+        .collect();
+    for (dir, chapter) in &ex.nested {
+        out.extend(codec_use(chapter, codecs).into_iter().map(|(name, c)| (format!("{dir}/{name}"), c)));
+    }
+    out
+}
+
 pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) -> Result<VerifyReport> {
     let archive = Archive::open(map)?;
     let ex = extract_named(&archive, codecs, more_names);
@@ -769,6 +787,7 @@ pub fn verify(map: &Path, codecs: &Registry, more_names: Option<&NameSource>) ->
             .iter()
             .filter_map(|f| Some((f.archive_name.clone(), f.note.clone()?)))
             .collect(),
+        codec_use: codec_use(&ex, codecs),
         mismatches,
         unnamed: ex.report.unnamed.len(),
         errors: ex.report.errors,

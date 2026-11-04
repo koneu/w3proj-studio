@@ -115,6 +115,25 @@ w3proj game --mode hd resolve Units/Human/Footman/Footman.mdx
 w3proj game cat Units/UnitMetaData.slk
 ```
 
+### Corpus checks (regression tests on real maps)
+
+Real maps aren't in the repository (`smoketest_maps/` is ignored: size and third-party
+content), so the conversions are checked against a local map folder:
+
+```sh
+# unpack→pack every map/campaign in the folder, and compare which codec reads each file
+# with tests/corpus-baseline.tsv (a codec that silently falls back to raw fails too)
+w3proj verify -q smoketest_maps --baseline tests/corpus-baseline.tsv
+# after an intended change (new codec, new maps): rewrite the checked maps' lines
+w3proj verify -q smoketest_maps --baseline tests/corpus-baseline.tsv --update-baseline
+
+# the TypeScript copies of the text codecs (w3e, wct, wtg) give the same text and bytes as Rust
+cd app && node scripts/twin-check.mjs ../smoketest_maps
+```
+
+Maps missing from the baseline are reported as new, not as failures. Both need the installed
+game for TriggerData.txt (`--game` / `W3PROJ_GAME`).
+
 ### Game data
 
 The app reads the game's files straight from the CASC storage in `Data/`:
