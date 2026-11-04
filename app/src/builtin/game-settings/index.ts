@@ -121,6 +121,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             view.saved();
           },
           focus: () => el.focus(),
+          watches: [WTS],
           // A file left empty (opened, nothing changed) isn't kept: the game's values apply anyway.
           dispose: () => {
             if (doc.readOnly) return;

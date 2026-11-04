@@ -112,6 +112,11 @@ export interface EditorInstance {
   save?(): Promise<void>;
   focus?(): void;
   dispose?(): void;
+  /** Other project files the editor shows (e.g. "map/war3map.wts" for TRIGSTR texts): when
+   *  something else saves one, the editor is opened again if it has no unsaved changes. (Its own
+   *  file always counts: saved by something else, it reopens, or asks when there are unsaved
+   *  changes.) */
+  watches?: string[];
 }
 
 export interface EditorProvider {

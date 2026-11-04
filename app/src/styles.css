@@ -69,6 +69,8 @@ code { font-family: var(--mono); font-size: 12px; }
 .view-body { padding: 2px 0 8px; }
 .view-empty { padding: 8px 14px; color: var(--fg-muted); }
 .view-error, .editor-error { padding: 12px; color: var(--error); }
+.editor-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(229, 192, 123, 0.14); border-bottom: 1px solid rgba(229, 192, 123, 0.5); }
+.editor-conflict span { flex: 1; min-width: 200px; }
 .editor-column { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 /* Tree */

@@ -140,7 +140,7 @@ async function renameReferences(w3: W3Api, renames: Map<string, string>) {
     for (const it of file.items) if ("ecas" in it) (it.ecas as E[]).forEach(walk);
     if (n) {
       await writeWtgFile(w3.workspace, wtg, file);
-      out.append(`renamed sounds in ${n} trigger parameter${n === 1 ? "" : "s"} (an open Trigger Editor with unsaved changes would overwrite this)`);
+      out.append(`renamed sounds in ${n} trigger parameter${n === 1 ? "" : "s"} (an open Trigger Editor reopens, or asks if it has unsaved changes)`);
     }
   }
 }

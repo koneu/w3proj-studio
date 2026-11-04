@@ -133,6 +133,9 @@ export class Workbench {
     await this.host.fire("*");
     await this.views.showContainer("explorer");
 
+    // A file saved inside the app reopens (or flags) other editors showing it.
+    this.workspace.onDidSave.on((p) => void this.editors.fileSaved(p));
+
     // Files changed outside the app (git checkout, another editor) are noticed when the window
     // gets the focus back: the file list refreshes and their open editors reload.
     let checking = false;

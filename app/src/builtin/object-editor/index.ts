@@ -807,6 +807,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           focus: () => search.focus(),
           dispose: () => { focusers.delete(doc.path); },
+          watches: ["map/war3map.wts"],
         };
       },
     }),

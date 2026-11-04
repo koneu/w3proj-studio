@@ -124,6 +124,8 @@ function loadGameLists(w3: W3Api): Promise<GameLists> {
 const PATH = "map/war3map.w3i.json";
 /** Section to show when an editor opens or is already open. */
 let requestedSection: SectionId | null = null;
+/** Section shown last (an editor opened again after another save keeps it). */
+let lastSection: SectionId = "description";
 const openEditors = new Set<(s: SectionId) => void>();
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -190,7 +192,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         /** After every change; `group` keeps typing in one field one undo step. */
         const update = (group?: unknown) => { history.commit(group); doc.setDirty(history.dirty); };
-        let section: SectionId = requestedSection ?? "description";
+        let section: SectionId = requestedSection ?? lastSection;
         requestedSection = null;
         let lists: GameLists | null = null;
 
@@ -411,7 +413,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const nav = h("nav.form-nav");
         const body = h("div.form-body");
         const show = (s: SectionId) => {
-          section = s;
+          section = lastSection = s;
           nav.replaceChildren(...SECTIONS.map((x) => h(`button.form-nav-item${x.id === section ? ".active" : ""}`, { onclick: () => show(x.id) }, x.label)),
             h("div.form-nav-sep", {}, "Advanced"),
             ...ADVANCED.map((a) => h("button.form-nav-item", { title: a.hint,
@@ -440,6 +442,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             doc.setDirty(false);
           },
           dispose: () => { openEditors.delete(show); unbindKeys(); },
+          // Strings shown here, and the start locations behind the player list.
+          watches: ["map/war3map.wts", "map/war3mapUnits.doo.json", "map/war3mapUnits.doo"],
         };
       },
     }),

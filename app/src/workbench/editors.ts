@@ -12,6 +12,10 @@ interface Tab {
   provider?: EditorProvider;
   /** Restored but not opened yet: the editor is created when the tab is first shown. */
   pending?: boolean;
+  /** Writes of its own in progress (its document's writes, its save): those aren't "someone else". */
+  writing: number;
+  /** The bar saying another writer saved the file while it had unsaved changes. */
+  conflict?: HTMLElement;
 }
 
 /** Open tabs as remembered per project (see EditorService.memory). */
@@ -143,7 +147,7 @@ export class EditorService {
     const title = path.startsWith("w3:")
       ? (about ? `${about.split("/").pop()} (${editorTitle})` : editorTitle)
       : path.split(/[/:]/).pop()!;
-    const tab: Tab = { path, providerId: id, el, dirty: false, tabEl: h("div.tab", { title: path }) };
+    const tab: Tab = { path, providerId: id, el, dirty: false, writing: 0, tabEl: h("div.tab", { title: path }) };
     const closeBtn = h("span.tab-close", { onclick: (e: MouseEvent) => { e.stopPropagation(); this.close(tab); } }, "×");
     tab.tabEl.append(h("span.tab-label", {}, title), closeBtn);
     tab.tabEl.addEventListener("mousedown", (e) => {
@@ -165,8 +169,8 @@ export class EditorService {
       readOnly: this.io.readOnly(path),
       readText: () => this.io.readText(path),
       readBytes: () => this.io.readBytes(path),
-      writeText: (text) => this.io.writeText(path, text),
-      writeBytes: (bytes) => this.io.writeBytes(path, bytes),
+      writeText: (text) => this.own(tab, () => this.io.writeText(path, text)),
+      writeBytes: (bytes) => this.own(tab, () => this.io.writeBytes(path, bytes)),
       setDirty: (d) => { tab.dirty = d; tab.tabEl.classList.toggle("dirty", d); },
     };
     tab.doc = doc;
@@ -213,19 +217,58 @@ export class EditorService {
     const kept: string[] = [];
     for (const t of this.tabs.filter((x) => paths.has(x.path.toLowerCase()) && x.provider)) {
       if (t.dirty) { kept.push(t.path); continue; }
-      t.instance?.dispose?.();
-      t.instance = undefined;
-      t.el.replaceChildren();
-      await this.load(t);
+      await this.reopen(t);
     }
     return kept;
+  }
+
+  /** Opens a tab's editor again in place (its file as it is now). */
+  private async reopen(t: Tab) {
+    t.conflict = undefined;
+    t.instance?.dispose?.();
+    t.instance = undefined;
+    t.el.replaceChildren();
+    t.doc?.setDirty(false);
+    await this.load(t);
+  }
+
+  /** Runs one of a tab's own writes (or its save): saves meanwhile aren't another writer's. */
+  private async own<T>(tab: Tab, f: () => Promise<T>): Promise<T> {
+    tab.writing++;
+    try { return await f(); } finally { tab.writing--; }
+  }
+
+  /** A project file was saved inside the app (another editor, a tool, a sync). Editors of it
+   *  other than the writer open it again, or, with unsaved changes, say so and offer to; editors
+   *  watching it (`EditorInstance.watches`) open again when they have no unsaved changes. */
+  async fileSaved(path: string) {
+    const key = path.replace(/\\/g, "/").toLowerCase();
+    for (const t of this.tabs.filter((x) => x.provider && x.instance && x.writing === 0)) {
+      const own = t.path.toLowerCase() === key;
+      if (!own && !t.instance!.watches?.some((w) => w.toLowerCase() === key)) continue;
+      if (!t.dirty) { await this.reopen(t); continue; }
+      if (!own || t.conflict) continue;
+      const bar: HTMLElement = h("div.editor-conflict", {},
+        h("span", {}, "This file was saved by another editor or tool while you have unsaved changes here."),
+        h("button", { onclick: () => void this.reopen(t) }, "Reload (discard mine)"),
+        h("button", { title: "Saving here overwrites the other save", onclick: () => { bar.remove(); t.conflict = undefined; } }, "Keep mine"));
+      t.conflict = bar;
+      t.el.prepend(bar);
+    }
   }
 
   async save() {
     const t = this.active;
     if (t?.instance?.save) {
-      await t.instance.save();
+      await this.own(t, () => t.instance!.save!());
+      this.resolved(t);
     }
+  }
+
+  /** After a tab's own save: its "saved elsewhere" bar is answered (the file is now its own). */
+  private resolved(t: Tab) {
+    t.conflict?.remove();
+    t.conflict = undefined;
   }
 
   async closeActive() {
@@ -241,7 +284,7 @@ export class EditorService {
   async saveAll(): Promise<number> {
     let n = 0;
     for (const t of this.tabs) {
-      if (t.dirty && t.instance?.save) { await t.instance.save(); n++; }
+      if (t.dirty && t.instance?.save) { await this.own(t, () => t.instance!.save!()); this.resolved(t); n++; }
     }
     return n;
   }
@@ -254,7 +297,7 @@ export class EditorService {
       const names = dirty.map((t) => t.path.split(/[/:]/).pop()).join(", ");
       const r = await this.confirm(`Unsaved changes in ${dirty.length === 1 ? names : `${dirty.length} files (${names})`}. Save before closing?`,
         "Save All", "Don't Save", "Cancel");
-      if (r === "Save All") { for (const t of dirty) await t.instance?.save?.(); }
+      if (r === "Save All") { for (const t of dirty) if (t.instance?.save) await this.own(t, () => t.instance!.save!()); }
       else if (r !== "Don't Save") return false;
     }
     await this.closeAll();
@@ -274,7 +317,7 @@ export class EditorService {
   private async close(tab: Tab, force = false) {
     if (tab.dirty && !force) {
       const r = await this.confirm(`Save changes to ${tab.path}?`, "Save", "Don't Save");
-      if (r === "Save") await tab.instance?.save?.();
+      if (r === "Save" && tab.instance?.save) await this.own(tab, () => tab.instance!.save!());
       else if (r !== "Don't Save") return;
     }
     tab.instance?.dispose?.();
