@@ -217,7 +217,7 @@ export class ObjectLoader {
    *  path, which keeps the classic models' scale and layout. */
   private effects(req: ModelRequest, gpu: ModelGpu): Promise<EffectSource | null> {
     const m = gpu.model;
-    if (m.particleEmitters2.length) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
+    if (m.particleEmitters2.length || m.ribbons.length) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
     if (!m.skipped.includes("CORN")) return Promise.resolve(null);
     const key = req.path.toLowerCase();
     let e = this.effectSources.get(key);
@@ -225,7 +225,7 @@ export class ObjectLoader {
       e = (async () => {
         let sd;
         try { sd = parseMdx(await this.readFile(`War3.w3mod:${req.path.replace(/\\/g, "/")}`)); } catch { return null; }
-        if (!sd.particleEmitters2.length) return null;
+        if (!sd.particleEmitters2.length && !sd.ribbons.length) return null;
         const clock = standClock(sd);
         const textures: (WebGLTexture | null)[] = sd.textures.map(() => null);
         sd.textures.forEach((t, i) => {

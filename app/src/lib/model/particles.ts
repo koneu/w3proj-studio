@@ -10,7 +10,7 @@
 // decay interval in the second. "Tail" particles are streaks along their motion.
 
 import { compile, sample, type Clock, type Mat4, type Vec3 } from "./renderer";
-import { PRE2_FLAGS, type Model, type ParticleEmitter2 } from "./mdx";
+import { PRE2_FLAGS, type Model, type ParticleEmitter2, type RibbonEmitter } from "./mdx";
 
 interface Particle {
   /** World position (or model space for ModelSpace emitters). */
@@ -26,6 +26,21 @@ interface EmitterState {
   carry: number;
   /** Frame at the last step, for squirt bursts. */
   lastFrame: number;
+}
+
+/** One cut across a ribbon: its top and bottom point (world), falling at `vz`. */
+interface RibbonSegment { a: Vec3; b: Vec3; vz: number; age: number }
+
+interface RibbonState {
+  r: RibbonEmitter;
+  /** Oldest first. */
+  segments: RibbonSegment[];
+  /** Where the ribbon starts now (the emitter), while it emits. */
+  head: { a: Vec3; b: Vec3 } | null;
+  carry: number;
+  /** Colour (r, g, b, a) and texture cell at the last step. */
+  color: [number, number, number, number];
+  cell: number;
 }
 
 /** Most particles one emitter of one instance keeps (a runaway emission rate stays bounded). */
@@ -48,16 +63,20 @@ const mul = (a: Mat4, b: Mat4): Mat4 => {
 /** The particles of one placed model. Step it with the model's pose, then hand it to a ParticleRenderer. */
 export class ParticleInstance {
   readonly emitters: EmitterState[];
+  readonly ribbons: RibbonState[];
 
   constructor(readonly model: Model, private random: () => number = Math.random) {
     this.emitters = model.particleEmitters2.map((e) => ({ e, particles: [], carry: 0, lastFrame: -1 }));
+    this.ribbons = model.ribbons.map((r) => ({ r, segments: [], head: null, carry: 0, color: [1, 1, 1, 1], cell: 0 }));
   }
 
-  get count() { return this.emitters.reduce((n, s) => n + s.particles.length, 0); }
+  /** Particles and ribbon segments alive now. */
+  get count() { return this.emitters.reduce((n, s) => n + s.particles.length, 0) + this.ribbons.reduce((n, s) => n + s.segments.length, 0); }
 
   /** Advances `dt` seconds. `nodeWorld`: the model's node matrices at `clock` (ModelGpu.nodeWorld);
    *  `world`: where the instance stands. */
   step(dt: number, clock: Clock, nodeWorld: Mat4[], world: Mat4) {
+    this.stepRibbons(dt, clock, nodeWorld, world);
     const m = this.model, gs = m.globalSequences, rnd = this.random;
     for (const s of this.emitters) {
       const e = s.e;
@@ -113,6 +132,40 @@ export class ParticleInstance {
         const d = transformDir(toWorld, Math.sin(polar) * Math.cos(azimuth), Math.sin(polar) * Math.sin(azimuth), Math.cos(polar));
         const dl = Math.hypot(d[0], d[1], d[2]) || 1;
         s.particles.push({ x, y, z, vx: (d[0] / dl) * sp, vy: (d[1] / dl) * sp, vz: (d[2] / dl) * sp, age: 0 });
+      }
+    }
+  }
+
+  /** Ribbons: segments age and fall; a visible emitter adds `emissionRate` segments a second
+   *  at its node (`heightAbove` up and `heightBelow` down its Y axis). */
+  stepRibbons(dt: number, clock: Clock, nodeWorld: Mat4[], world: Mat4) {
+    const m = this.model, gs = m.globalSequences;
+    for (const s of this.ribbons) {
+      const r = s.r;
+      let keep = 0;
+      for (const seg of s.segments) {
+        seg.age += dt;
+        if (seg.age >= r.lifespan) continue;
+        seg.vz -= r.gravity * dt;
+        seg.a[2] += seg.vz * dt; seg.b[2] += seg.vz * dt;
+        s.segments[keep++] = seg;
+      }
+      s.segments.length = keep;
+      const color = sample(r.colorTrack, clock, gs, r.color);
+      s.color = [color[0], color[1], color[2], sample(r.alphaTrack, clock, gs, [r.alpha])[0]];
+      s.cell = Math.round(sample(r.textureSlotTrack, clock, gs, [r.textureSlot])[0]);
+      const node = nodeWorld[r.node.objectId];
+      if (!node || sample(r.visibilityTrack, clock, gs, [1])[0] <= 0) { s.head = null; s.carry = 0; continue; }
+      const above = sample(r.heightAboveTrack, clock, gs, [r.heightAbove])[0];
+      const below = sample(r.heightBelowTrack, clock, gs, [r.heightBelow])[0];
+      const id = r.node.objectId, toWorld = mul(world, node);
+      const px = m.pivots[id * 3] ?? 0, py = m.pivots[id * 3 + 1] ?? 0, pz = m.pivots[id * 3 + 2] ?? 0;
+      s.head = { a: transformPoint(toWorld, px, py + above, pz), b: transformPoint(toWorld, px, py - below, pz) };
+      s.carry += r.emissionRate * dt;
+      if (s.carry >= 1 && s.segments.length < MAX_PER_EMITTER) {
+        // Segments spawned in one step would lie on top of each other: one is enough.
+        s.carry -= Math.floor(s.carry);
+        s.segments.push({ a: [...s.head.a], b: [...s.head.b], vz: 0, age: 0 });
       }
     }
   }
@@ -183,6 +236,20 @@ export class ParticleRenderer {
         let g = groups.get(key);
         if (!g) groups.set(key, (g = { tex, filter: e.filterMode, prio: e.priorityPlane, quads: [] }));
         this.quads(g.quads, s, eye, (e.node.flags & PRE2_FLAGS.modelSpace) !== 0 ? it.world : null);
+      }
+      for (const s of it.particles.ribbons) {
+        if (!s.segments.length) continue;
+        // A ribbon draws with its material's first layer; layer blend modes map onto the
+        // particles' (none/alpha key/blend/additive/add alpha/modulate/modulate 2x).
+        const mat = it.particles.model.materials[s.r.materialId];
+        const layer = mat?.layers[0];
+        const texId = layer?.textureIds[0] ?? -1;
+        const filter = [0, 4, 0, 1, 1, 2, 3][layer?.filterMode ?? 2] ?? 0;
+        const prio = mat?.priorityPlane ?? 0;
+        const key = `ribbon|${filter}|${prio}|${texId}|${it.particles.model.name}`;
+        let g = groups.get(key);
+        if (!g) groups.set(key, (g = { tex: it.textures[texId] ?? this.white, filter, prio, quads: [] }));
+        ribbonQuads(g.quads, s);
       }
     }
     if (!groups.size) return;
@@ -263,6 +330,23 @@ export class ParticleRenderer {
         }
       }
     }
+  }
+}
+
+/** A ribbon as quads from its head (the emitter) back through its segments, newest first;
+ *  the texture runs along it by age (u) and across from top to bottom (v), in its cell. */
+function ribbonQuads(out: number[], s: RibbonState) {
+  const r = s.r;
+  const cols = Math.max(1, r.columns), rows = Math.max(1, r.rows);
+  const cu = (s.cell % cols) / cols, cv = Math.floor(s.cell / cols) / rows;
+  const points = [...s.segments].reverse().map((seg) => ({ a: seg.a, b: seg.b, u: seg.age / r.lifespan }));
+  if (s.head) points.unshift({ a: s.head.a, b: s.head.b, u: 0 });
+  const c = s.color;
+  const v = (p: Vec3, u: number, across: number) => out.push(p[0], p[1], p[2], cu + (u / cols), cv + across / rows, c[0], c[1], c[2], c[3]);
+  for (let i = 0; i + 1 < points.length; i++) {
+    const p = points[i], q = points[i + 1];
+    v(p.a, p.u, 0); v(p.b, p.u, 1); v(q.b, q.u, 1);
+    v(p.a, p.u, 0); v(q.b, q.u, 1); v(q.a, q.u, 0);
   }
 }
 

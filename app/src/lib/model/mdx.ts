@@ -4,8 +4,8 @@
 // Versions: 800 (classic, map imports) and 1800 (all models shipped with 3.0;
 // adds geoset LODs, HD tangents/skin weights and multi-texture layers).
 // Chunks the renderer needs are parsed strictly (every byte accounted for);
-// particle emitters (PRE2) too; other effects (ribbons, lights, …) are only read
-// for their skeleton nodes and otherwise skipped.
+// particle emitters (PRE2) and ribbons (RIBB) too; other effects (lights, …) are
+// only read for their skeleton nodes and otherwise skipped.
 
 export type Interp = 0 | 1 | 2 | 3; // none, linear, hermite, bezier
 
@@ -151,6 +151,33 @@ export interface ParticleEmitter2 {
   visibilityTrack?: Track;
 }
 
+/** A ribbon emitter (RIBB): a strip left behind its node as it moves, one segment per spawn
+ *  from `heightAbove` to `heightBelow` along the node's Y axis, each living `lifespan` seconds,
+ *  drawn with a material of the model. */
+export interface RibbonEmitter {
+  node: Node;
+  heightAbove: number;
+  heightBelow: number;
+  alpha: number;
+  /** r, g, b in 0–1 (RGB: Mark of Chaos is red, Starfall purple). */
+  color: [number, number, number];
+  lifespan: number;
+  /** Sprite cell of the material's texture (rows × columns). */
+  textureSlot: number;
+  /** Segments per second. */
+  emissionRate: number;
+  rows: number;
+  columns: number;
+  materialId: number;
+  gravity: number;
+  heightAboveTrack?: Track;
+  heightBelowTrack?: Track;
+  alphaTrack?: Track;
+  colorTrack?: Track;
+  textureSlotTrack?: Track;
+  visibilityTrack?: Track;
+}
+
 /** Emitter flags in `ParticleEmitter2.node.flags`. */
 export const PRE2_FLAGS = { unshaded: 0x8000, sortPrimsFarZ: 0x10000, lineEmitter: 0x20000, unfogged: 0x40000, modelSpace: 0x80000, xyQuad: 0x100000 };
 
@@ -168,7 +195,8 @@ export interface Model {
   nodes: Node[];
   pivots: Float32Array;
   particleEmitters2: ParticleEmitter2[];
-  /** Chunks present but not rendered (ribbons, …). */
+  ribbons: RibbonEmitter[];
+  /** Chunks present but not rendered (lights, cameras, …). */
   skipped: string[];
   warnings: string[];
 }
@@ -292,6 +320,19 @@ function readParticleEmitter2(r: Reader, end: number): ParticleEmitter2 {
   };
 }
 
+function readRibbon(r: Reader, end: number): RibbonEmitter {
+  const node = readNode(r, "ribb");
+  const heightAbove = r.f32(), heightBelow = r.f32(), alpha = r.f32();
+  const color = [r.f32(), r.f32(), r.f32()] as [number, number, number];
+  const lifespan = r.f32(), textureSlot = r.u32(), emissionRate = r.u32(), rows = r.u32(), columns = r.u32(), materialId = r.u32();
+  const gravity = r.f32();
+  const t = readTracks(r, end);
+  return {
+    node, heightAbove, heightBelow, alpha, color, lifespan, textureSlot, emissionRate, rows, columns, materialId, gravity,
+    heightAboveTrack: t.KRHA, heightBelowTrack: t.KRHB, alphaTrack: t.KRAL, colorTrack: t.KRCO, textureSlotTrack: t.KRTX, visibilityTrack: t.KRVS,
+  };
+}
+
 function readGeoset(r: Reader, version: number): Geoset {
   const start = r.p;
   const size = r.u32();
@@ -400,7 +441,7 @@ export function parseMdx(buf: Uint8Array): Model {
   const model: Model = {
     version: 800, name: "", extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] },
     sequences: [], globalSequences: [], textures: [], materials: [], geosets: [], geosetAnims: [],
-    nodes: [], pivots: new Float32Array(0), particleEmitters2: [], skipped: [], warnings: [],
+    nodes: [], pivots: new Float32Array(0), particleEmitters2: [], ribbons: [], skipped: [], warnings: [],
   };
   const node = (n: Node) => { model.nodes[n.objectId] = n; };
   while (r.left >= 8) {
@@ -457,8 +498,16 @@ export function parseMdx(buf: Uint8Array): Model {
             model.particleEmitters2.push(e);
           }
           break;
+        case "RIBB":
+          while (r.p < end) {
+            const oStart = r.p;
+            const e = readRibbon(r, oStart + r.u32());
+            node(e.node);
+            model.ribbons.push(e);
+          }
+          break;
         // Objects with an outer size: only their node matters here.
-        case "ATCH": case "PREM": case "RIBB": case "LITE": case "CORN":
+        case "ATCH": case "PREM": case "LITE": case "CORN":
           while (r.p < end) {
             const oStart = r.p;
             const oSize = r.u32();

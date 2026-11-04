@@ -18,7 +18,7 @@ function model(over: Partial<ParticleEmitter2> = {}): Model {
     version: 800, name: "test", extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] },
     sequences: [{ name: "Stand", start: 0, end: 1000, moveSpeed: 0, flags: 0, rarity: 0, extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] } }],
     globalSequences: [], textures: [], materials: [], geosets: [], geosetAnims: [], nodes: [node],
-    pivots: new Float32Array([0, 0, 100]), particleEmitters2: [e], skipped: [], warnings: [],
+    pivots: new Float32Array([0, 0, 100]), particleEmitters2: [e], ribbons: [], skipped: [], warnings: [],
   };
 }
 const clock: Clock = { frame: 0, seqStart: 0, seqEnd: 1000, time: 0 };
@@ -66,4 +66,35 @@ test("sprite cells walk through the interval, repeating `repeat` times", () => {
   assert.equal(spriteCell([0, 3, 1], 0.99), 3);
   assert.equal(spriteCell([10, 13, 2], 0.5), 10);
   assert.equal(spriteCell([10, 13, 2], 0.25), 12);
+});
+
+/** The model above with a ribbon at the emitter's node instead of particles. */
+function ribbonModel(over: Partial<import("./mdx").RibbonEmitter> = {}): Model {
+  const m = model();
+  m.particleEmitters2 = [];
+  m.ribbons = [{
+    node: m.nodes[0], heightAbove: 10, heightBelow: 5, alpha: 1, color: [1, 0, 0], lifespan: 1, textureSlot: 0,
+    emissionRate: 8, rows: 1, columns: 1, materialId: 0, gravity: 0, ...over,
+  }];
+  return m;
+}
+
+test("ribbons: a segment per emission, from heightAbove to heightBelow along the node's Y, aging out", () => {
+  const p = run(ribbonModel(), 4, 0.125);
+  const s = p.ribbons[0];
+  assert.equal(s.segments.length, 4);
+  assert.deepEqual(s.head, { a: [0, 10, 100], b: [0, -5, 100] });
+  // The stream settles at rate × lifespan (8 per second, 1 s).
+  assert.equal(run(ribbonModel(), 40, 0.125).ribbons[0].segments.length, 8);
+  assert.deepEqual(s.color, [1, 0, 0, 1]);
+});
+
+test("ribbons: gravity pulls old segments down; hidden emitters stop and lose their head", () => {
+  const falling = run(ribbonModel({ gravity: 100, emissionRate: 1, lifespan: 10 }), 3, 1).ribbons[0].segments[0];
+  // Spawned in the first step, then two steps of 1 s: v = -200, z = 100 - 100 - 200.
+  assert.equal(falling.vz, -200);
+  assert.equal(falling.a[2], -200);
+  const hidden = run(ribbonModel({ visibilityTrack: track([0], [0]) }), 10, 0.125).ribbons[0];
+  assert.equal(hidden.segments.length, 0);
+  assert.equal(hidden.head, null);
 });

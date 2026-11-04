@@ -646,7 +646,7 @@ export class ModelRenderer {
     this.gpu = new ModelGpu(gl, model);
     this.lineProg = compile(gl, LINE_VS, LINE_FS);
     this.grid = this.makeGrid();
-    this.particles = model.particleEmitters2.length ? new ParticleInstance(model) : null;
+    this.particles = model.particleEmitters2.length || model.ribbons.length ? new ParticleInstance(model) : null;
     this.particleRenderer = this.particles ? new ParticleRenderer(gl) : null;
     const e = bounds(model);
     this.target = [(e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, (e.min[2] + e.max[2]) / 2];
