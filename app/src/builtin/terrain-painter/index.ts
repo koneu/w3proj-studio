@@ -84,7 +84,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     stroke = null;
     // Cliffs next to painted ground or new cliffs take the cliff type of their ground tile.
     const chosen = isLayerTool(s.label as Tool) && cliffType >= 0 ? cliffType : undefined;
-    const retyped = (s.label === "paint" || isLayerTool(s.label as Tool)) && matchCliffTypes(terrain, s.corners(), ed.cliffGroundTiles(), s, chosen);
+    const retyped = (s.label === "paint" || isLayerTool(s.label as Tool)) && matchCliffTypes(terrain, s.area(), ed.cliffGroundTiles(), s, chosen);
     if (!s.finish(terrain)) return;
     ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
   };

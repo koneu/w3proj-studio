@@ -1,0 +1,96 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { parseW3e, setGroundHeight, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
+import { applyLayer, matchCliffTypes, paintTexture, Stroke } from "./tools";
+
+/** A flat 32×32 Lordaeron Summer map covered in grass (Lgrs), cliff level 2, cliff types unset
+ *  (15), as the World Editor's New Map makes it. */
+function flatMap(): Terrain {
+  const width = 33, height = 33;
+  const groundTiles = ["Ldrt", "Ldro", "Ldrg", "Lrok", "Lgrs", "Lgrd"];
+  return {
+    version: 11, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles, cliffTiles: ["CLdi", "CLgr"],
+    width, height, offsetX: -16 * 128, offsetY: -16 * 128, trailer: new Uint8Array(0),
+    corners: Array.from({ length: width * height }, () => {
+      const c = {
+        height: 0, water: -89.6, texture: groundTiles.indexOf("Lgrs"), variation: 0, cliffVariation: 0, cliffTexture: 15, layer: 2,
+        ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0,
+      };
+      setGroundHeight(c, 0);
+      return c;
+    }),
+  };
+}
+/** The ground tile of each cliff type number on such a map (dirt cliff, grass cliff). */
+const CLIFF_GROUND = ["Ldrt", "Lgrs"];
+
+const centre = (t: Terrain) => ({ x: t.offsetX + 16 * 128, y: t.offsetY + 16 * 128 });
+/** Cliff layers of the 7×7 corners around the centre, one row per line (north first). */
+function layers(t: Terrain): string {
+  const rows: string[] = [];
+  for (let y = 19; y >= 13; y--) {
+    let r = "";
+    for (let x = 13; x <= 19; x++) r += t.corners[y * t.width + x].layer.toString(16);
+    rows.push(r);
+  }
+  return rows.join("\n");
+}
+
+test("square and round cliff brushes, and undo", () => {
+  const t = flatMap();
+  const s = new Stroke("cliffUp2");
+  applyLayer(t, { ...centre(t), radius: 2, square: true }, "cliffUp2", { layer: 4 }, s);
+  assert.equal(layers(t), ["2222222", "2444442", "2444442", "2444442", "2444442", "2444442", "2222222"].join("\n"));
+  assert.equal(s.finish(t), true);
+  s.undo(t);
+  assert.equal(layers(t), Array(7).fill("2222222").join("\n"));
+  applyLayer(t, { ...centre(t), radius: 2 }, "cliffUp2", { layer: 4 }, new Stroke("cliffUp2"));
+  assert.equal(layers(t), ["2222222", "2224222", "2244422", "2444442", "2244422", "2224222", "2222222"].join("\n"));
+});
+
+test("a cliff raised on grass becomes a grass cliff, on the cliff corners only", () => {
+  const t = flatMap();
+  const s = new Stroke("cliffUp");
+  applyLayer(t, { ...centre(t), radius: 2, square: true }, "cliffUp", { layer: 3 }, s);
+  assert.equal(matchCliffTypes(t, s.corners(), CLIFF_GROUND, s), true);
+  // The ring of the raised square and the ring around it form the cliff tiles; inside and outside stay 15.
+  const at = (x: number, y: number) => t.corners[y * t.width + x].cliffTexture;
+  assert.equal(at(14, 16), 1);
+  assert.equal(at(13, 16), 1);
+  assert.equal(at(16, 16), 15);
+  assert.equal(at(11, 16), 15);
+});
+
+test("a chosen cliff type wins over the ground", () => {
+  const t = flatMap();
+  const s = new Stroke("cliffUp");
+  applyLayer(t, { ...centre(t), radius: 2, square: true }, "cliffUp", { layer: 3 }, s);
+  matchCliffTypes(t, s.corners(), CLIFF_GROUND, s, 0);
+  assert.equal(t.corners[16 * t.width + 14].cliffTexture, 0);
+});
+
+test("painting grass at a dirt cliff makes it a grass cliff; flat ground keeps its cliff type", () => {
+  const t = flatMap();
+  const up = new Stroke("cliffUp");
+  applyLayer(t, { ...centre(t), radius: 2, square: true }, "cliffUp", { layer: 3 }, up);
+  matchCliffTypes(t, up.corners(), CLIFF_GROUND, up, 0);
+  // The ground is grass already (only the dirt cliff's rim looks like dirt): painting grass
+  // changes no texture, yet the cliff must follow (the area the brush covered counts).
+  const s = new Stroke("paint");
+  assert.equal(paintTexture(t, { ...centre(t), radius: 4 }, t.groundTiles.indexOf("Lgrs"), s), false);
+  assert.equal(matchCliffTypes(t, s.area(), CLIFF_GROUND, s), true);
+  assert.equal(t.corners[16 * t.width + 14].cliffTexture, 1);
+  assert.equal(s.finish(t), true);
+  const far = new Stroke("paint");
+  paintTexture(t, { x: t.offsetX + 4 * 128, y: t.offsetY + 4 * 128, radius: 1 }, t.groundTiles.indexOf("Ldrt"), far);
+  assert.equal(matchCliffTypes(t, far.area(), CLIFF_GROUND, far), false);
+});
+
+test("the terrain survives w3e and text round trips", () => {
+  const t = flatMap();
+  applyLayer(t, { ...centre(t), radius: 2 }, "cliffUp", { layer: 3 }, new Stroke("cliffUp"));
+  const bytes = writeW3e(t);
+  assert.deepEqual(writeW3e(parseW3e(bytes)), bytes);
+  assert.deepEqual(w3eFromText(w3eToText(bytes)), bytes);
+});

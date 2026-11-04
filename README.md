@@ -96,6 +96,8 @@ cargo build --release -p w3proj-cli        # → target/release/w3proj.exe
 
 cd app
 npm install
+npm run check                              # types (app and tests) and module boundaries
+npm test                                   # TypeScript unit tests (src/**/*.test.ts, node:test)
 npx tauri dev                              # run the editor
 npx tauri build                            # installer in target/release/bundle
 ```

@@ -1,0 +1,44 @@
+# Checks on every push and pull request: the TypeScript side (types, module boundaries, unit
+# tests, a production build) and the Rust workspace (tests, clippy without warnings).
+# Nothing here needs the game: tests that read game files or the map corpus stay local.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: App dependencies
+        working-directory: app
+        run: npm ci
+      - name: Types and module boundaries
+        working-directory: app
+        run: npm run check
+      - name: TypeScript unit tests
+        working-directory: app
+        run: npm test
+      # Also produces app/dist, which the Tauri crate needs to compile.
+      - name: App build
+        working-directory: app
+        run: npx vite build
+
+      # Version and components (clippy) come from rust-toolchain.toml.
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust tests
+        run: cargo test --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings

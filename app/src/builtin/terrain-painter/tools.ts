@@ -45,12 +45,20 @@ function cornersIn(t: Terrain, b: Brush): { i: number; w: number }[] {
 export class Stroke {
   private before = new Map<number, Corner>();
   private after = new Map<number, Corner>();
+  /** Corners the brush went over, changed or not. */
+  private covered = new Set<number>();
 
   constructor(readonly label: string) {}
 
   /** Indices of the corners the stroke changed (or touched). */
   corners(): number[] {
     return [...this.before.keys()];
+  }
+
+  cover(i: number) { this.covered.add(i); }
+  /** The changed corners and those the brush only went over (painting a tile already there). */
+  area(): number[] {
+    return [...new Set([...this.before.keys(), ...this.covered])];
   }
 
   touch(t: Terrain, i: number) {
@@ -137,6 +145,7 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
 export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke): boolean {
   let changed = false;
   for (const { i } of cornersIn(t, b)) {
+    stroke.cover(i);
     const c = t.corners[i];
     if (c.texture === tex) continue;
     stroke.touch(t, i);

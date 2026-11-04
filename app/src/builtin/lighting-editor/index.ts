@@ -169,6 +169,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let model: LightModel;
         try {
           model = readLightMdl(await doc.readText());
+          if (!model.lights.length) throw new Error("it has no lights");
         } catch (e) {
           el.append(h("div.view-empty", {}, `${doc.path} isn't a lighting model: ${(e as Error).message} `,
             h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.textEditor") }, "Open as text")));
