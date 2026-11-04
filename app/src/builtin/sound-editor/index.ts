@@ -58,17 +58,11 @@ function loadGameSounds(w3: W3Api): Promise<GameSounds> {
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.sounds.open", async () => {
-      const p = w3.workspace.project();
-      if (!p) throw new Error("Open or import a project first.");
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       // The JSON form, else the raw file (decoded by the format engine); a map without sounds
-      // gets an empty list.
+      // opens an empty list, and the file is created on the first save.
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.soundEditor"); return; }
-      if (!files.has(FILE)) {
-        const text = await w3.backend.invoke<string>("codec_canonicalize", { root: p.root, path: FILE, text: JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [] }) });
-        await w3.workspace.writeText(FILE, text);
-        await w3.workspace.refresh();
-      }
       await w3.editors.open(FILE, "w3.soundEditor");
     }),
     w3.editors.registerProvider("w3.soundEditor", {
@@ -76,7 +70,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // The raw file goes through the format engine both ways.
         const raw = !doc.path.toLowerCase().endsWith(".json");
         const root = w3.workspace.project()!.root;
-        const sounds: SoundsDoc = JSON.parse(raw ? await w3.backend.invoke<string>("codec_decode", { root, path: doc.path }) : await doc.readText());
+        const isNew = !raw && !w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
+        const sounds: SoundsDoc = isNew ? { format: "w3proj.sounds/1", version: 3, sounds: [] }
+          : JSON.parse(raw ? await w3.backend.invoke<string>("codec_decode", { root, path: doc.path }) : await doc.readText());
         sounds.sounds ??= [];
         let saved = JSON.stringify(sounds);
         // Names as last saved, to carry renames into triggers and regions.
@@ -88,6 +84,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           async save() {
             if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.sounds/1", ...sounds }) });
             else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(sounds) }));
+            if (isNew) await w3.workspace.refresh();
             const renames = new Map(sounds.sounds.filter((x) => savedName.has(x) && savedName.get(x) !== x.name).map((x) => [savedName.get(x)!, x.name]));
             if (renames.size) await renameReferences(w3, renames);
             for (const x of sounds.sounds) savedName.set(x, x.name);

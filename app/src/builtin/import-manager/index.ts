@@ -22,29 +22,26 @@ interface ImportsDoc { format?: string; version: number; files: ImportEntry[] }
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.imports.open", async () => {
-      const p = w3.workspace.project();
-      if (!p) throw new Error("Open or import a project first.");
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
       const { RAW, FILE } = lists(files.has("map/war3campaign.w3f.json") || files.has("map/war3campaign.w3f"));
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.importManager"); return; }
-      // A map without imports gets an empty list.
-      if (!files.has(FILE)) {
-        const text = await w3.backend.invoke<string>("codec_canonicalize", { root: p.root, path: FILE, text: JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [] }) });
-        await w3.workspace.writeText(FILE, text);
-        await w3.workspace.refresh();
-      }
+      // A map without imports opens an empty list; the file is written with the first import.
       await w3.editors.open(FILE, "w3.importManager");
     }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
         const raw = !doc.path.toLowerCase().endsWith(".json");
         const root = w3.workspace.project()!.root;
-        const list: ImportsDoc = JSON.parse(raw ? await w3.backend.invoke<string>("codec_decode", { root, path: doc.path }) : await doc.readText());
+        let isNew = !raw && !w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
+        const list: ImportsDoc = isNew ? { format: "w3proj.imports/1", version: 1, files: [] }
+          : JSON.parse(raw ? await w3.backend.invoke<string>("codec_decode", { root, path: doc.path }) : await doc.readText());
         list.files ??= [];
         // Written after every change (the files on disk have changed already).
         const write = async () => {
           if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.imports/1", ...list }) });
           else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(list) }));
+          if (isNew) { isNew = false; await w3.workspace.refresh(); }
           doc.setDirty(false);
         };
         const campaign = /war3campaign\.imp(\.json)?$/i.test(doc.path);
