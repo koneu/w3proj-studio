@@ -11,6 +11,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { parseIni } from "../../lib/formats/text";
 import { readLightMdl, readLightMdx, writeLightMdl, type Light, type LightModel, type Prop, type Track } from "../../lib/model/dnclight";
 import { TILESETS } from "../../lib/terrain/tilesets";
+import { bindUndoKeys, History } from "../../lib/undo";
 import { h } from "../../workbench/dom";
 
 const VIEW = "w3.lighting.overview";
@@ -173,8 +174,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.textEditor") }, "Open as text")));
           return {};
         }
-        let saved = JSON.stringify(model);
-        const changed = () => doc.setDirty(JSON.stringify(model) !== saved);
+        const history = new History(() => JSON.stringify(model), (state) => {
+          model = JSON.parse(state) as LightModel;
+          doc.setDirty(history.dirty);
+          render();
+        });
+        /** After every change; `group` keeps dragging in one colour picker one undo step. */
+        const changed = (group?: unknown) => { history.commit(group); doc.setDirty(history.dirty); };
         const seq = model.sequences[0] ?? { start: 0, end: 60000 };
         const span = Math.max(1, seq.end - seq.start);
         /** Animation time ↔ hour of the game day (the "Stand" sequence spans one day). */
@@ -182,6 +188,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const toTime = (hour: number) => Math.round(seq.start + (hour / 24) * span);
         const root = h("div.form-body.lighting-editor");
         el.append(root);
+        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
 
         const num = (get: () => number, set: (v: number) => void, step = "0.05") => {
           const input = h("input.form-input.form-num.lighting-num", { type: "number", step, value: String(Number(get().toPrecision(6))) });
@@ -224,14 +231,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** A colour over the day: gradient preview and keys, or one colour. */
         const colorProp = (p: Prop, redraw: () => void) => {
           if (!("track" in p)) {
-            const pick = h("input", { type: "color", value: hex(p.value), oninput: () => { p.value = unhex(pick.value); changed(); } });
+            const pick = h("input", { type: "color", value: hex(p.value), oninput: () => { p.value = unhex(pick.value); changed(pick); } });
             return pick;
           }
           const t = p.track;
           const stops = t.keys.map((k) => `${hex(k.value)} ${(toHour(k.time) / 24 * 100).toFixed(1)}%`).join(", ");
           return h("div", {},
             h("div.lighting-gradient", { style: { background: `linear-gradient(to right, ${stops})` }, title: "0:00 → 24:00" }),
-            trackEditor(t, 3, (k) => h("input", { type: "color", value: hex(k.value), oninput: (e: Event) => { k.value = unhex((e.target as HTMLInputElement).value); changed(); } }), true, redraw));
+            trackEditor(t, 3, (k) => h("input", { type: "color", value: hex(k.value), oninput: (e: Event) => { k.value = unhex((e.target as HTMLInputElement).value); changed(e.target); } }), true, redraw));
         };
 
         /** A number: fixed, or keys over the day. */
@@ -263,9 +270,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           async save() {
             await doc.writeText(writeLightMdl(model));
-            saved = JSON.stringify(model);
+            history.markSaved();
             doc.setDirty(false);
           },
+          dispose: unbindKeys,
         };
       },
     }),

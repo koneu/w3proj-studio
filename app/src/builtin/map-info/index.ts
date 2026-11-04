@@ -2,6 +2,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
+import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
@@ -171,8 +172,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           .catch(() => w3.backend.invoke<string>("codec_decode", { root, path: "map/war3mapUnits.doo" })).catch(() => null);
         const starts = startLocations(unitsText ? (JSON.parse(unitsText) as { units?: [] }).units ?? [] : []);
 
-        let saved = JSON.stringify(info);
-        const update = () => doc.setDirty(JSON.stringify(info) !== saved || !!strings?.dirty);
+        // Undo: the map info and the string table texts it refers to (the only ones edited here).
+        const snapshot = () => {
+          const json = JSON.stringify(info);
+          const refs = strings ? [...new Set([...json.matchAll(/TRIGSTR_(\d+)/g)].map((m) => Number(m[1])))].filter((n) => strings.has(n)) : [];
+          return JSON.stringify({ info, texts: refs.map((n) => [n, strings!.get(n)]) });
+        };
+        const history = new History(snapshot, (state) => {
+          const s = JSON.parse(state) as { info: MapInfo; texts: [number, string][] };
+          for (const k of Object.keys(info)) delete (info as unknown as Record<string, unknown>)[k];
+          Object.assign(info, s.info);
+          for (const [n, t] of s.texts) strings!.set(n, t);
+          doc.setDirty(history.dirty);
+          show(section);
+        });
+        /** After every change; `group` keeps typing in one field one undo step. */
+        const update = (group?: unknown) => { history.commit(group); doc.setDirty(history.dirty); };
         let section: SectionId = requestedSection ?? "description";
         requestedSection = null;
         let lists: GameLists | null = null;
@@ -189,11 +204,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const input = opts.multiline
             ? h("textarea.form-input", { rows: 6, value })
             : h("input.form-input", { value });
+          // One undo step per visit of the field.
+          let visit = {};
           input.addEventListener("input", () => {
             if (viaTable) strings!.set(ref!, input.value);
             else set(input.value);
-            update();
+            update(visit);
           });
+          input.addEventListener("blur", () => { visit = {}; });
           return viaTable
             ? h("div.form-stack", {}, input, h("small.muted", { title: "Stored in war3map.wts" }, `string table · ${get()}`))
             : input;
@@ -229,11 +247,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const color = (rgba: number[]) => {
           const hex = "#" + rgba.slice(0, 3).map((c) => c.toString(16).padStart(2, "0")).join("");
           const pick = h("input", { type: "color", value: hex });
+          // Dragging in the colour dialog is one undo step.
+          let visit = {};
           pick.addEventListener("input", () => {
             const m = /^#(..)(..)(..)$/.exec(pick.value)!;
             for (let i = 0; i < 3; i++) rgba[i] = parseInt(m[i + 1], 16);
-            update();
+            update(visit);
           });
+          pick.addEventListener("change", () => { visit = {}; });
           return h("div.form-inline", {}, pick, h("span.muted", {}, "alpha"), num(() => rgba[3], (n) => { rgba[3] = Math.max(0, Math.min(255, n)); }, { int: true }));
         };
         const section_ = (title: string, ...children: (Node | null)[]) => h("section.form-section", {}, h("h3", {}, title), ...children.filter((c): c is Node => c !== null));
@@ -396,6 +417,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           body.replaceChildren(h("h2", {}, SECTIONS.find((x) => x.id === section)!.label), ...renderers[section]());
         };
         el.append(h("div.map-info", {}, nav, body));
+        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
         show(section);
         openEditors.add(show);
         loadGameLists(w3).then((l) => { lists = l; show(section); }, () => {});
@@ -408,10 +430,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               await w3.workspace.writeText("map/war3map.wts", strings.serialize());
               strings.markSaved();
             }
-            saved = JSON.stringify(info);
+            history.markSaved();
             doc.setDirty(false);
           },
-          dispose: () => openEditors.delete(show),
+          dispose: () => { openEditors.delete(show); unbindKeys(); },
         };
       },
     }),

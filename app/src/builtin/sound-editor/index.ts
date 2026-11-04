@@ -10,6 +10,7 @@ import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, writeWtgFile, wtgPath, type Param } from "../../lib/triggers/wtg";
+import { bindUndoKeys, History } from "../../lib/undo";
 import { h } from "../../workbench/dom";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
@@ -74,11 +75,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const sounds: SoundsDoc = isNew ? { format: "w3proj.sounds/1", version: 3, sounds: [] }
           : JSON.parse(raw ? await w3.backend.invoke<string>("codec_decode", { root, path: doc.path }) : await doc.readText());
         sounds.sounds ??= [];
-        let saved = JSON.stringify(sounds);
         // Names as last saved, to carry renames into triggers and regions.
         const savedName = new Map(sounds.sounds.map((x) => [x, x.name]));
-        const changed = () => doc.setDirty(JSON.stringify(sounds) !== saved);
+        // Undo restores into the same sound objects (by a stable id), so the rename tracking holds.
+        const ids = new WeakMap<Sound, number>();
+        const byId = new Map<number, Sound>();
+        const idOf = (x: Sound) => {
+          let i = ids.get(x);
+          if (i === undefined) { ids.set(x, i = byId.size); byId.set(i, x); }
+          return i;
+        };
+        const history = new History(() => JSON.stringify(sounds.sounds.map((x) => [idOf(x), x])), (state) => {
+          sounds.sounds = (JSON.parse(state) as [number, Sound][]).map(([i, data]) => {
+            const x = byId.get(i)!;
+            for (const k of Object.keys(x)) delete (x as unknown as Record<string, unknown>)[k];
+            return Object.assign(x, data);
+          });
+          doc.setDirty(history.dirty);
+          editor.refresh();
+        });
+        const changed = () => { history.commit(); doc.setDirty(history.dirty); };
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly);
+        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
           async save() {
@@ -88,10 +106,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const renames = new Map(sounds.sounds.filter((x) => savedName.has(x) && savedName.get(x) !== x.name).map((x) => [savedName.get(x)!, x.name]));
             if (renames.size) await renameReferences(w3, renames);
             for (const x of sounds.sounds) savedName.set(x, x.name);
-            saved = JSON.stringify(sounds);
+            history.markSaved();
             doc.setDirty(false);
           },
-          dispose: () => editor.dispose(),
+          dispose: () => { editor.dispose(); unbindKeys(); },
         };
       },
     }),
@@ -154,6 +172,12 @@ class SoundEditor {
   setGame(g: GameSounds) { this.game = g; this.renderBrowser(); this.renderDetail(); }
   setGameError(msg: string) { this.browser.replaceChildren(h("p.muted", {}, `Game sounds unavailable: ${msg}`)); }
   dispose() { this.stop(); }
+  /** After undo/redo: the list and the selected sound (if it's still there). */
+  refresh() {
+    if (this.selected && !this.doc.sounds.includes(this.selected)) this.selected = null;
+    this.renderList();
+    this.renderDetail();
+  }
 
   // ---- playback ---------------------------------------------------------------------
   private stop() {
