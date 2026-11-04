@@ -36,6 +36,8 @@ export interface Skin {
   randScale: boolean;
   /** Fixed facing in degrees, or null for any. */
   fixedRot: number | null;
+  /** Ground mark (Splats\UberSplatData.slk name; buildings), "" for none. */
+  uberSplat: string;
 }
 
 const SKIN_FILES: [string, string][] = [
@@ -64,13 +66,14 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
         maxScale: Number(get("maxscale") ?? 1) || 1,
         randScale: get("canplacerandscale") === "1",
         fixedRot: Number(get("fixedrot") ?? -1) >= 0 ? Number(get("fixedrot")) : null,
+        uberSplat: get("ubersplat") ?? "",
       });
     }
   }
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
-    out.set("sloc", { kind: "w3u", file: "Objects\\StartLocation\\StartLocation.mdl", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null });
+    out.set("sloc", { kind: "w3u", file: "Objects\\StartLocation\\StartLocation.mdl", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
   }
   return out;
 }
@@ -78,7 +81,7 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
 /** Object data fields that change a skin entry, per kind (UnitMetaData & co., "Profile" fields;
  *  units' alternate models umd1/umd2 and selection scale aren't drawn). */
 const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
-  w3u: { file: "umdl", modelScale: "usca" },
+  w3u: { file: "umdl", modelScale: "usca", uberSplat: "uubs" },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr" },
   w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr" },
@@ -103,12 +106,12 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
       const art = mods.filter((m) => Object.values(fields).includes(m.field));
       if (!art.length && o.id === undefined) continue;
       const base = out.get(id) ?? out.get(o.base);
-      const skin: Skin = base ? { ...base } : { kind: f.kind, file: "", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null };
+      const skin: Skin = base ? { ...base } : { kind: f.kind, file: "", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" };
       for (const [key, field] of Object.entries(fields) as [keyof Skin, string][]) {
         const m = art.find((x) => x.field === field);
         if (!m) continue;
         const n = Number(m.value);
-        if (key === "file" || key === "texFile") skin[key] = String(m.value);
+        if (key === "file" || key === "texFile" || key === "uberSplat") skin[key] = String(m.value);
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale") && Number.isFinite(n)) skin[key] = n;

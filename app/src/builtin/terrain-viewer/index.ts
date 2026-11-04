@@ -19,6 +19,7 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
+import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
@@ -562,6 +563,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return null;
         };
         /** Models for the current entries (initially and after object edits). */
+        /** Splats\UberSplatData.slk, once read; splat textures asked for. */
+        let splatTable: Promise<Map<string, SplatDef>> | null = null;
+        const splatImages = new Set<string>();
         async function rebuildObjects() {
           if (!objCtx) return;
           const { skins, bases } = objCtx;
@@ -572,6 +576,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const others = renderer.batches.filter((b) => b.group !== "doodads" && b.group !== "units");
           renderer.batches.length = 0;
           renderer.batches.push(...others, ...d.batches, ...u.batches);
+          // Buildings' ground marks.
+          void (splatTable ??= loadSplatTable(w3).catch(() => new Map<string, SplatDef>())).then((table) => {
+            const splats = planSplats(units, skins, table, baseOf);
+            renderer.setSplats(splats.map((s) => ({ x: s.x, y: s.y, scale: s.def.scale, texture: s.def.texture, blend: s.def.blend, color: s.def.color })));
+            for (const tex of new Set(splats.map((s) => s.def.texture))) {
+              if (splatImages.has(tex.toLowerCase())) continue;
+              splatImages.add(tex.toLowerCase());
+              readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex).mip(0)); redraw(); }, () => {});
+            }
+            redraw();
+          });
           // Objects without a model (start locations, unknown ids) stay markers.
           renderer.setMarkers("doodads", d.unresolved.map((p) => marker(p, [90, 200, 90])));
           renderer.setMarkers("units", u.unresolved.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));

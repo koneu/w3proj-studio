@@ -96,6 +96,19 @@ const WATER_DEFAULT: WaterLook = {
   shallowMin: [0.12, 0.32, 0.5, 0.25], shallowMax: [0.12, 0.32, 0.5, 0.6], deepMin: [0.12, 0.32, 0.5, 0.6], deepMax: [0.1, 0.27, 0.45, 0.85],
 };
 
+// Building ground marks (splats): a texture draped over the ground, tinted, lit like the ground.
+const SPLAT_VS = `#version 300 es
+in vec3 aPos; in vec2 aUv;
+uniform mat4 uViewProj;
+out vec2 vUv;
+void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+const SPLAT_FS = `#version 300 es
+precision mediump float;
+in vec2 vUv;
+uniform sampler2D uTex; uniform vec4 uColor; uniform vec3 uLight;
+out vec4 outColor;
+void main() { vec4 c = texture(uTex, vUv) * uColor; outColor = vec4(c.rgb * uLight, c.a); }`;
+
 // Ground overlay: a texture spread over the map (one texel per 32×32 pathing
 // cell), e.g. the pathing editor's view.
 const OVERLAY_VS = `#version 300 es
@@ -194,6 +207,10 @@ export class TerrainRenderer {
   private waterWhite: WebGLTexture;
   /** The map's water tint (r, g, b, a in 0–255) when tinting is on; null: none. */
   waterTint: number[] | null = null;
+  private splatProg: WebGLProgram;
+  /** Splat meshes by texture path and blend mode. */
+  private splats: { texture: string; blend: number; color: number[]; vao: WebGLVertexArrayObject; count: number }[] = [];
+  private splatTextures = new Map<string, WebGLTexture>();
   private overlayProg: WebGLProgram | null = null;
   private overlay: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
   private wire: Mesh;
@@ -239,6 +256,7 @@ export class TerrainRenderer {
     this.groundProg = compile(gl, GROUND_VS, GROUND_FS);
     this.colorProg = compile(gl, COLOR_VS, COLOR_FS);
     this.waterProg = compile(gl, WATER_VS, WATER_FS);
+    this.splatProg = compile(gl, SPLAT_VS, SPLAT_FS);
     this.waterWhite = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.waterWhite);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
@@ -434,6 +452,55 @@ export class TerrainRenderer {
     attr("aPos", 3, 0); attr("aUv", 2, 3); attr("aDepth", 1, 5);
     gl.bindVertexArray(null);
     return { vao, count: out.length / 6 };
+  }
+
+  /** Building ground marks: squares (half-size `scale`) draped over the ground in 32-unit
+   *  cells, grouped by texture, blend mode and colour. */
+  setSplats(list: { x: number; y: number; scale: number; texture: string; blend: number; color: number[] }[]) {
+    const gl = this.gl, t = this.terrain;
+    for (const s of this.splats) gl.deleteVertexArray(s.vao);
+    const groups = new Map<string, { texture: string; blend: number; color: number[]; data: number[] }>();
+    for (const s of list) {
+      const key = `${s.texture}|${s.blend}|${s.color.join(",")}`;
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = { texture: s.texture, blend: s.blend, color: s.color, data: [] }));
+      const n = Math.max(1, Math.ceil((2 * s.scale) / 32)), size = 2 * s.scale;
+      const x0 = s.x - s.scale, y0 = s.y - s.scale;
+      const v = (i: number, j: number) => {
+        const x = x0 + (size * i) / n, y = y0 + (size * j) / n;
+        return [x, y, heightAt(t, x, y) + 2, i / n, 1 - j / n];
+      };
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        g.data.push(...v(i, j), ...v(i + 1, j), ...v(i + 1, j + 1), ...v(i, j), ...v(i + 1, j + 1), ...v(i, j + 1));
+      }
+    }
+    this.splats = [...groups.values()].map((g) => {
+      const vao = gl.createVertexArray()!;
+      gl.bindVertexArray(vao);
+      const vb = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(g.data), gl.STATIC_DRAW);
+      const attr = (name: string, size: number, offset: number) => {
+        const loc = gl.getAttribLocation(this.splatProg, name);
+        if (loc < 0) return;
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 20, offset * 4);
+      };
+      attr("aPos", 3, 0); attr("aUv", 2, 3);
+      gl.bindVertexArray(null);
+      return { texture: g.texture, blend: g.blend, color: g.color, vao, count: g.data.length / 5 };
+    });
+  }
+
+  setSplatTexture(path: string, img: DecodedTexture) {
+    const gl = this.gl, tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.splatTextures.set(path.toLowerCase(), tex);
   }
 
   /** The tileset's water (frames are filled in by setWaterFrame as they load). */
@@ -783,6 +850,33 @@ export class TerrainRenderer {
       gl.bindVertexArray(this.overlay.vao);
       gl.drawElements(gl.TRIANGLES, this.overlay.count, gl.UNSIGNED_INT, 0);
       gl.depthMask(true);
+    }
+
+    // Building ground marks, on the ground under the objects.
+    if (this.splats.length && !this.hiddenGroups.has("units")) {
+      gl.useProgram(this.splatProg);
+      gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
+      gl.uniform1i(gl.getUniformLocation(this.splatProg, "uTex"), 0);
+      const sun = this.terrainLight;
+      const up = sun ? Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1)) : 0;
+      const lit = sun ? [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up) : [1, 1, 1];
+      gl.uniform3f(gl.getUniformLocation(this.splatProg, "uLight"), lit[0], lit[1], lit[2]);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.enable(gl.BLEND);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      for (const s of this.splats) {
+        const tex = this.splatTextures.get(s.texture.toLowerCase());
+        if (!tex) continue;
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.uniform4fv(gl.getUniformLocation(this.splatProg, "uColor"), s.color);
+        gl.blendFunc(gl.SRC_ALPHA, s.blend === 1 ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+        gl.bindVertexArray(s.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, s.count);
+      }
+      gl.depthMask(true);
+      gl.enable(gl.CULL_FACE);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     // Placed objects: every opaque layer, then every blended one.
