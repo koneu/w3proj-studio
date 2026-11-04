@@ -488,3 +488,31 @@ export function parseMdx(buf: Uint8Array): Model {
   }
   return model;
 }
+
+/** A copy of an MDX file with texture paths renamed (`rename` returns the new path, or the
+ *  same one). Texture entries have a fixed size (id, 260-byte path, flags), so nothing else in
+ *  the file moves. Paths longer than 259 bytes are refused. */
+export function renameTextures(buf: Uint8Array, rename: (path: string, index: number) => string): Uint8Array {
+  const out = buf.slice();
+  const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  const tag = (p: number) => String.fromCharCode(out[p], out[p + 1], out[p + 2], out[p + 3]);
+  if (tag(0) !== "MDLX") throw new Error("not an MDX model (missing MDLX)");
+  for (let p = 4; p + 8 <= out.length;) {
+    const size = dv.getUint32(p + 4, true);
+    if (tag(p) === "TEXS") {
+      for (let e = p + 8, i = 0; e + 268 <= p + 8 + size; e += 268, i++) {
+        const raw = out.subarray(e + 4, e + 264);
+        const end = raw.indexOf(0);
+        const old = new TextDecoder("latin1").decode(end < 0 ? raw : raw.subarray(0, end));
+        const name = rename(old, i);
+        if (name === old) continue;
+        const bytes = new TextEncoder().encode(name);
+        if (bytes.length > 259) throw new Error(`texture path too long: ${name}`);
+        raw.fill(0);
+        raw.set(bytes);
+      }
+    }
+    p += 8 + size;
+  }
+  return out;
+}
