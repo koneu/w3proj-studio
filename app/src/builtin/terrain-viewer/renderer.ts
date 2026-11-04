@@ -399,11 +399,18 @@ export class TerrainRenderer {
         if (!cs.some((c) => c.hasWater) || cs.every((c) => c.water <= c.height)) continue;
         // Corners without water (the shore) keep the surface level: their stored level is
         // meaningless (often the default far below), which would tilt the water into the ground.
-        const level = Math.max(...cs.filter((c) => c.hasWater).map((c) => c.water));
+        const wet = cs.filter((c) => c.hasWater);
+        const level = Math.max(...wet.map((c) => c.water));
+        // On a cliff tile the dry corners are on the cliff top, but the wall goes down into the
+        // water: they keep the wet corners' depth (no fade to clear at the wall). On a slope the
+        // shallow edge fades out.
+        const cliff = !cs.every((c) => c.layer === cs[0].layer);
+        const wetDepth = Math.max(...wet.map((c) => c.water - c.height));
         const v = cs.map((c, i) => {
           const dx = i === 1 || i === 2 ? 1 : 0, dy = i >= 2 ? 1 : 0;
           const z = c.hasWater ? c.water : level;
-          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, z, dx, 1 - dy, (z - c.height) / 128];
+          const depth = !c.hasWater && cliff ? wetDepth : z - c.height;
+          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, z, dx, 1 - dy, depth / 128];
         });
         out.push(...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]);
       }
