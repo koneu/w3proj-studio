@@ -1,0 +1,24 @@
+// war3map.mmp — minimap icons (drawn over war3mapMap.blp in the game's lobby and minimap).
+// Checked on 505 files from the game's maps and others: the header u32 is 0 in all of them;
+// icon types 0, 1 and 2 seen; positions are minimap pixels (a few beyond 255).
+{
+  "name": "minimap",
+  "description": "Minimap icons: gold mines, neutral buildings, start locations",
+  "files": ["war3map.mmp"],
+  "jsonFormat": "w3proj.minimap/1",
+  "accept": "version == 0",
+  "fields": [
+    { "name": "version", "type": "u32", "doc": "0 in all samples" },
+    { "name": "icons", "type": "struct", "count": "u32", "fields": [
+      { "name": "type", "type": "u32", "doc": "0 gold mine, 1 neutral building, 2 player start location" },
+      { "name": "x", "type": "u32", "doc": "minimap pixel, from the left" },
+      { "name": "y", "type": "u32", "doc": "minimap pixel, from the top" },
+      { "name": "color", "type": "struct", "fields": [
+        { "name": "blue", "type": "u8" },
+        { "name": "green", "type": "u8" },
+        { "name": "red", "type": "u8" },
+        { "name": "alpha", "type": "u8", "default": 255 }
+      ] }
+    ] }
+  ]
+}

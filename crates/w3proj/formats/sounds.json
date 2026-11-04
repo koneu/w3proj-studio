@@ -36,12 +36,12 @@
       { "name": "dialogueText", "type": "cstring", "if": "version >= 3", "doc": "empty in all samples" },
       { "name": "speakerNameKey", "type": "i32", "if": "version >= 3", "doc": "TRIGSTR id of the speaker's name, -1 for none" },
       { "name": "speakerName", "type": "cstring", "if": "version >= 3" },
-      { "name": "unknown1", "type": "u32", "if": "version >= 3", "doc": "0 or 1" },
+      { "name": "unknown1", "type": "u32", "if": "version >= 3", "doc": "0 or 1; 1 only on dialogue sounds (36 of 4,305), no rule found" },
       { "name": "speakerUnitType", "type": "cstring", "if": "version >= 3", "doc": "unit type id (Hkal) or a script expression" },
       { "name": "facialAnimationLabel", "type": "cstring", "if": "version >= 3" },
       { "name": "facialAnimationGroupLabel", "type": "cstring", "if": "version >= 3" },
       { "name": "facialAnimationSetFile", "type": "cstring", "if": "version >= 3" },
-      { "name": "unknown2", "type": "u32", "if": "version >= 3", "doc": "0 or 1" }
+      { "name": "unknown2", "type": "u32", "if": "version >= 3", "doc": "0 or 1; mostly 1 without facial animation (3,157 of 3,163), 0 with (1,125 of 1,142)" }
     ] }
   ]
 }

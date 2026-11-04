@@ -89,8 +89,9 @@ fn baseline_diffs(before: &BTreeMap<String, String>, now: &BTreeMap<String, Stri
     out
 }
 
-/// Maps given directly, plus the maps and campaigns found in given folders (sorted).
-fn expand_maps(args: &[PathBuf]) -> Result<Vec<PathBuf>> {
+/// Maps given directly, plus the maps and campaigns found in given folders (sorted), each with
+/// its baseline key: the path below the given folder (`/`-separated), or the file name.
+fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
     fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
             .with_context(|| format!("reading {}", dir.display()))?
@@ -109,9 +110,15 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     for a in args {
         if a.is_dir() {
-            walk(a, &mut out)?;
+            let mut found = Vec::new();
+            walk(a, &mut found)?;
+            out.extend(found.into_iter().map(|p| {
+                let rel = p.strip_prefix(a).unwrap_or(&p);
+                let key = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+                (p, key)
+            }));
         } else {
-            out.push(a.clone());
+            out.push((a.clone(), a.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
         }
     }
     Ok(out)
@@ -303,14 +310,13 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let codecs = with_trigger_data(Registry::with_formats(&extra)?, &game);
             let names = game_names(&game);
             let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
-            for map in &maps {
+            for (map, key) in &maps {
                 let report = w3proj::verify(map, &codecs, names.as_ref());
                 if let (Some(_), Ok(r)) = (&baseline, &report) {
-                    let key = map.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     let now: BTreeMap<String, String> = r.codec_use.iter().cloned().collect();
                     if update_baseline {
-                        base.insert(key, now);
-                    } else if let Some(before) = base.get(&key) {
+                        base.insert(key.clone(), now);
+                    } else if let Some(before) = base.get(key) {
                         let diffs = baseline_diffs(before, &now);
                         changed += usize::from(!diffs.is_empty());
                         for d in diffs {
