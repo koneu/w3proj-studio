@@ -4,7 +4,7 @@
 // without a Classic model, and import list entries without their file.
 
 import type { W3Api } from "../../extensions/api";
-import type { Problem, ProblemCheck } from "../../extensions/services";
+import type { Problem, ProblemCheck, ProblemFix } from "../../extensions/services";
 import type { FileInfo } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
@@ -12,7 +12,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
 import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv } from "../../lib/jass/env";
-import { parseMdx } from "../../lib/model/mdx";
+import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { pickClassicModel } from "./modelpick";
 
@@ -214,7 +214,7 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
     },
     {
       id: "classicModels",
-      title: "Classic graphics",
+      title: "Graphics modes",
       run: () => classicModels(w3),
     },
     {
@@ -246,26 +246,34 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
 const ART: Record<string, { model: string; variations?: string }> = {
   w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
 };
-/** Game folders only Reforged graphics use. */
-const REFORGED_LAYER = /:_(hd|de)\.w3mod:/i;
 
 interface PlacedEntry { id: string; variation?: number; position: number[] }
 
-/** Placed objects whose model only exists in Reforged graphics: players with Classic graphics
- *  don't see them (World Editor 3.0.1 shows them in its Reforged view all the same). Skipped
- *  when the map doesn't support Classic graphics (map info, supported modes bit 1). */
+/** The graphics modes: the map info's supported-modes bit, and the game folder searched before
+ *  the Classic one (bits as the game's maps use them: Classic campaign 1, Reforged campaign 2,
+ *  melee 3, Forsaken Kingdom 4). */
+const MODES = [
+  { bit: 1, name: "Classic", layer: null },
+  { bit: 2, name: "Reforged (HD)", layer: "_hd" },
+  { bit: 4, name: "Reforged (DE)", layer: "_de" },
+] as const;
+
+/** Placed objects whose model is missing in a graphics mode the map supports (Classic falls
+ *  back to nothing, HD and DE each only to Classic, never to one another): players in that mode
+ *  don't see them. Maps without the supported-modes field (before 1.32) count as Classic only. */
 async function classicModels(w3: W3Api): Promise<Problem[]> {
   const info = await readJson<{ supportedModes?: number }>(w3, "map/war3map.w3i.json");
-  if (info?.supportedModes !== undefined && !(info.supportedModes & 1)) return [];
-  // Every game path a Classic game can load, without its folder prefix.
-  const classic = new Set<string>();
-  // And the Classic models (as stored, for the picker of the fix).
+  const supported = MODES.filter((m) => (info?.supportedModes ?? 1) & m.bit);
+  if (!supported.length) return [];
+  // Game paths (lowercase, without the folder prefix) per art folder: Classic, _hd, _de.
+  const stored = new Map<string | null, Set<string>>(MODES.map((m) => [m.layer, new Set()]));
+  // The Classic models (as stored, for the picker of the fix).
   const classicModels = new Set<string>();
   for (const full of await w3.game.list()) {
     const path = full.slice(full.lastIndexOf(":") + 1);
-    if (REFORGED_LAYER.test(full)) continue;
-    classic.add(path.replace(/\\/g, "/").toLowerCase());
-    if (/\.mdx$/i.test(path) && !/_portrait\.mdx$/i.test(path)) classicModels.add(path.replace(/\//g, "\\"));
+    const layer = /:_(hd|de)\.w3mod:/i.exec(full)?.[1].toLowerCase();
+    stored.get(layer ? `_${layer}` : null)!.add(path.replace(/\\/g, "/").toLowerCase());
+    if (!layer && /\.mdx$/i.test(path) && !/_portrait\.mdx$/i.test(path)) classicModels.add(path.replace(/\//g, "\\"));
   }
   const files = new FileLookup(w3);
   const kinds = new Map<string, Awaited<ReturnType<typeof loadKind>>>();
@@ -291,22 +299,25 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
     const k = kinds.get(kind), base = c?.base ?? id, f = k?.fieldById.get(field);
     return k && f ? k.defaultValue(base, f, 0) : undefined;
   };
-  const found = new Map<string, boolean>();
-  /** In the Classic game data, or imported into the map. */
-  const hasClassic = async (path: string): Promise<boolean> => {
+  const found = new Map<string, (typeof MODES)[number][]>();
+  /** The supported modes that can't load a model: not in the map (imports count for every
+   *  mode), nor in the mode's folder or the Classic one. */
+  const missingIn = async (path: string) => {
     const known = found.get(path);
-    if (known !== undefined) return known;
+    if (known) return known;
+    const key = path.replace(/\\/g, "/").toLowerCase();
     // exists() waits until the map's file list is read; only the map's own copy counts here.
-    const ok = classic.has(path.replace(/\\/g, "/").toLowerCase()) || ((await files.exists(path, "file")) && files.inMap(path));
-    found.set(path, ok);
-    return ok;
+    const imported = (await files.exists(path, "file")) && files.inMap(path);
+    const out = imported || stored.get(null)!.has(key) ? [] : supported.filter((m) => !m.layer || !stored.get(m.layer)!.has(key));
+    found.set(path, out);
+    return out;
   };
+  const inReforged = (path: string) => ["_de", "_hd"].some((l) => stored.get(l)!.has(path.replace(/\\/g, "/").toLowerCase()));
 
   const out: Problem[] = [];
   for (const [file, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
     const list = (await readJson<Record<string, PlacedEntry[]>>(w3, file))?.[key] ?? [];
-    const missing = new Map<string, PlacedEntry[]>();
-    const paths = new Map<string, Set<string>>();
+    const missing = new Map<string, { items: PlacedEntry[]; paths: Set<string>; modes: Set<string> }>();
     for (const p of list) {
       const kind = kindOf(p.id, key === "units");
       if (!kind) continue; // unknown types: the "Placed objects" check
@@ -315,40 +326,60 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
       const variations = Number(ART[kind].variations ? value(p.id, kind, ART[kind].variations!) : 1) || 1;
       const stem = model.replace(/\.(mdl|mdx)$/i, "");
       const path = `${stem}${variations > 1 ? p.variation ?? 0 : ""}.mdx`;
-      if (await hasClassic(path)) continue;
-      missing.set(p.id, [...(missing.get(p.id) ?? []), p]);
-      paths.set(p.id, (paths.get(p.id) ?? new Set()).add(path));
+      const modes = await missingIn(path);
+      if (!modes.length) continue;
+      const m = missing.get(p.id) ?? { items: [], paths: new Set(), modes: new Set() };
+      m.items.push(p);
+      m.paths.add(path);
+      for (const mode of modes) m.modes.add(mode.name);
+      missing.set(p.id, m);
     }
-    for (const [id, items] of missing) {
+    for (const [id, { items, paths, modes }] of missing) {
       const kind = kindOf(id, key === "units")!;
-      const name = kinds.get(kind)?.names.get(custom.get(id)?.base ?? id) ?? id;
+      const base = custom.get(id)?.base ?? id;
+      const name = kinds.get(kind)?.names.get(base) ?? id;
+      const where = MODES.filter((m) => modes.has(m.name)).map((m) => m.name).join(", ");
+      const reforged = [...paths].every(inReforged);
+      const fixes: ProblemFix[] = [];
+      if (reforged) fixes.push({
+        label: "Convert to a Classic model",
+        title: "Writes a Classic copy of the Reforged model (and its colour textures) into the map and points the type at it; every graphics mode shows it, with the Classic look (no Reforged extra maps or effects)",
+        run: async () => {
+          const model = value(id, kind, ART[kind].model) ?? "";
+          const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
+          const bytes = await convertToClassic(w3, kind, base, id, model, variations);
+          void w3.window.showInfo(`Converted ${name} to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+        },
+      });
+      // Without Classic, the Reforged model itself can be imported: both Reforged modes draw it.
+      if (reforged && !modes.has("Classic")) fixes.push({
+        label: "Import the Reforged model",
+        title: `Copies the model (and the textures ${where} lacks) from the other Reforged folder into the map, at the path the type names; the map doesn't support Classic, which couldn't draw it`,
+        run: async () => {
+          const lacking = supported.filter((m) => m.layer && modes.has(m.name)).map((m) => m.layer!);
+          const bytes = await importReforged(w3, [...paths], (p) => lacking.some((l) => !stored.get(null)!.has(p) && !stored.get(l)!.has(p)));
+          void w3.window.showInfo(`Imported ${name}'s Reforged model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+        },
+      });
+      fixes.push({
+        label: "Use a Classic model instead…",
+        title: "Pick one of the game's Classic models for this type (every graphics mode can load those); it's written into the map's object data (a modified standard object)",
+        run: () => useClassicModel(w3, kind, base, id, name, [...paths][0] ?? "", classicModels),
+      }, {
+        label: `Remove the ${items.length} placed`,
+        title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
+        run: () => removePlaced(w3, file, key, id),
+      });
       out.push({
         severity: "warning",
-        message: `${name} (${id}): no Classic model, invisible with Classic graphics; placed ${items.length}×`,
+        message: `${name} (${id}): no model in ${where} graphics, invisible there; placed ${items.length}×`,
         location: file.slice(4),
         reveal: { command: "w3.terrain.showPoint", args: [items[0].position[0], items[0].position[1]] },
-        fixes: [{
-          label: "Convert to a Classic model",
-          title: "Writes a Classic copy of the Reforged model (and its colour textures) into the map and points the type at it: Classic shows the same object (without Reforged's extra maps and effects)",
-          run: async () => {
-            const model = value(id, kind, ART[kind].model) ?? "";
-            const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
-            const bytes = await convertToClassic(w3, kind, custom.get(id)?.base ?? id, id, model, variations);
-            void w3.window.showInfo(`Converted ${name} to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
-          },
-        }, {
-          label: "Use a Classic model instead…",
-          title: "Pick one of the game's Classic models for this type; it's written into the map's object data (a modified standard object), so Classic graphics and the World Editor show it",
-          run: () => useClassicModel(w3, kind, custom.get(id)?.base ?? id, id, name, [...(paths.get(id) ?? [])][0] ?? "", classicModels),
-        }, {
-          label: `Remove the ${items.length} placed`,
-          title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
-          run: () => removePlaced(w3, file, key, id),
-        }],
+        fixes,
       });
     }
   }
-  return capped(out, "objects without a Classic model");
+  return capped(out, "objects with a missing model");
 }
 
 /** Deletes every placed object of a type from a placement file (JSON form or raw). */
@@ -417,17 +448,41 @@ async function setModel(w3: W3Api, kind: string, base: string, id: string, model
   await w3.workspace.refresh();
 }
 
-/** The game's Reforged copy of a file (DE, else HD), with the .dds the game ships for .tif/.blp names. */
-async function readReforged(w3: W3Api, path: string): Promise<Uint8Array> {
+/** The game's Reforged copy of a file (DE, else HD), with the .dds the game ships for .tif/.blp
+ *  names; `name` is the path it's stored under. */
+async function readReforged(w3: W3Api, path: string): Promise<{ name: string; bytes: Uint8Array }> {
   const p = path.replace(/\\/g, "/");
   const names = /\.(blp|tif|tga)$/i.test(p) ? [p, p.replace(/\.\w+$/, ".dds")] : [p];
   let last: unknown = new Error(`${path}: no Reforged copy`);
   for (const layer of ["War3.w3mod:_DE.w3mod:", "War3.w3mod:_HD.w3mod:"]) {
-    for (const n of names) {
-      try { return await w3.game.read(layer + n); } catch (e) { last = e; }
+    for (const name of names) {
+      try { return { name, bytes: await w3.game.read(layer + name) }; } catch (e) { last = e; }
     }
   }
   throw last;
+}
+
+/** Imports Reforged models as they are (from DE, else HD) at their own paths, with the textures
+ *  `lacks` (lowercase game path with /) says some mode doesn't have; a texture stored as .dds
+ *  under a .blp name is imported as .dds and the model renamed to it. Returns the bytes written. */
+async function importReforged(w3: W3Api, models: string[], lacks: (path: string) => boolean): Promise<number> {
+  const files = new Map<string, Uint8Array>();
+  for (const model of models) {
+    const { bytes } = await readReforged(w3, model);
+    const renamed = new Map<string, string>();
+    for (const t of parseMdx(bytes).textures) {
+      if (t.replaceableId || !t.path || !lacks(t.path.replace(/\\/g, "/").toLowerCase())) continue;
+      const tex = await readReforged(w3, t.path);
+      const archive = tex.name.replace(/\//g, "\\");
+      files.set(archive, tex.bytes);
+      if (archive.toLowerCase() !== t.path.replace(/\//g, "\\").toLowerCase()) renamed.set(t.path, archive);
+    }
+    files.set(model.replace(/\//g, "\\"), renamed.size ? renameTextures(bytes, (p) => renamed.get(p) ?? p) : bytes);
+  }
+  for (const [archive, bytes] of files) await w3.workspace.writeBytes(`map/${toProjectPath(archive)}`, bytes);
+  await addImports(w3, [...files.keys()]);
+  await w3.workspace.refresh();
+  return [...files.values()].reduce((n, b) => n + b.length, 0);
 }
 
 /** Converts the type's Reforged models (every variation) to Classic ones in the map
@@ -441,7 +496,7 @@ async function convertToClassic(w3: W3Api, kind: string, base: string, id: strin
   const textures = new Map<string, string>();
   for (let v = 0; v < Math.max(1, variations); v++) {
     const suffix = variations > 1 ? String(v) : "";
-    const parsed = parseMdx(await readReforged(w3, `${stem}${suffix}.mdx`));
+    const parsed = parseMdx((await readReforged(w3, `${stem}${suffix}.mdx`)).bytes);
     const mdx = toClassicMdx(parsed, (i) => {
       const t = parsed.textures[i];
       const target = `${dir}\\${t.path.split(/[\\/]/).pop()!.replace(/\.\w+$/, "")}.blp`;
@@ -452,7 +507,8 @@ async function convertToClassic(w3: W3Api, kind: string, base: string, id: strin
   }
   for (const [source, target] of textures) {
     if (files.has(target)) continue;
-    const img = decodeImage(await readReforged(w3, source), source);
+    const tex = await readReforged(w3, source);
+    const img = decodeImage(tex.bytes, tex.name);
     // The first level at most 512 px wide and high (Reforged textures are 1–2k).
     let k = 0;
     while (k < img.mipCount - 1 && Math.max(img.mip(k).width, img.mip(k).height) > 512) k++;
