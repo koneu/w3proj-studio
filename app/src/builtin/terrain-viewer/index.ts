@@ -1287,6 +1287,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("div.model-main", {},
             h("div.model-toolbar", {},
               toggle("Water", () => renderer.showWater, (v) => { renderer.showWater = v; }),
+              toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
@@ -1464,7 +1465,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let raf = 0, lastSize = "";
         const tick = () => {
           const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
-          if (canvas.clientWidth > 0 && (dirty || size !== lastSize)) {
+          // Particle effects move by themselves: then every frame is drawn.
+          if (canvas.clientWidth > 0 && (dirty || size !== lastSize || renderer.animating)) {
             renderer.render();
             dirty = false;
             lastSize = size;

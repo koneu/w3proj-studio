@@ -5,9 +5,9 @@
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
-import { bounds, ModelGpu, uploadTexture, type Mat4 } from "../../lib/model/renderer";
+import { bounds, ModelGpu, poseNodes, standClock, uploadTexture, type Mat4 } from "../../lib/model/renderer";
 import { parseIni } from "../../lib/formats/text";
-import type { ObjectBatch, ObjectInstance } from "./renderer";
+import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
 export interface Placed {
   id: string;
@@ -210,6 +210,34 @@ export class ObjectLoader {
    *  after an edit) doesn't load them again. */
   private models = new Map<string, Promise<ModelGpu>>();
 
+  private effectSources = new Map<string, Promise<EffectSource | null>>();
+
+  /** Particle effects of a model: its own emitters (PRE2), or for a Reforged model whose effects
+   *  are PopcornFX (CORN, not drawn here) the emitters of the game's classic model of the same
+   *  path, which keeps the classic models' scale and layout. */
+  private effects(req: ModelRequest, gpu: ModelGpu): Promise<EffectSource | null> {
+    const m = gpu.model;
+    if (m.particleEmitters2.length) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
+    if (!m.skipped.includes("CORN")) return Promise.resolve(null);
+    const key = req.path.toLowerCase();
+    let e = this.effectSources.get(key);
+    if (!e) {
+      e = (async () => {
+        let sd;
+        try { sd = parseMdx(await this.readFile(`War3.w3mod:${req.path.replace(/\\/g, "/")}`)); } catch { return null; }
+        if (!sd.particleEmitters2.length) return null;
+        const clock = standClock(sd);
+        const textures: (WebGLTexture | null)[] = sd.textures.map(() => null);
+        sd.textures.forEach((t, i) => {
+          if (t.replaceableId === 0 && t.path) void this.texture(t.path, t.flags).then((tex) => { textures[i] = tex; });
+        });
+        return { model: sd, textures, nodeWorld: poseNodes(sd, clock), clock, classic: true };
+      })();
+      this.effectSources.set(key, e);
+    }
+    return e;
+  }
+
   private model(req: ModelRequest): Promise<ModelGpu> {
     const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}`;
     let m = this.models.get(key);
@@ -262,7 +290,7 @@ export class ObjectLoader {
             Math.max(16, r * s),
           ];
         }
-        batches.push({ group, gpu, instances: req.instances });
+        batches.push({ group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined });
       } catch (e) {
         failed.push({ index, error: `${req.path}: ${(e as Error).message ?? e}` });
       }

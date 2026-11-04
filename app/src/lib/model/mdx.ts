@@ -4,8 +4,8 @@
 // Versions: 800 (classic, map imports) and 1800 (all models shipped with 3.0;
 // adds geoset LODs, HD tangents/skin weights and multi-texture layers).
 // Chunks the renderer needs are parsed strictly (every byte accounted for);
-// effects (particles, ribbons, lights, …) are only read for their skeleton
-// nodes and otherwise skipped.
+// particle emitters (PRE2) too; other effects (ribbons, lights, …) are only read
+// for their skeleton nodes and otherwise skipped.
 
 export type Interp = 0 | 1 | 2 | 3; // none, linear, hermite, bezier
 
@@ -97,6 +97,63 @@ export interface Node {
   scaling?: Track;
 }
 
+/** A particle emitter (PRE2, "ParticleEmitter2"): camera-facing sprites spawned from a
+ *  rectangle around its node, flying out in a cone, falling with gravity, changing colour,
+ *  opacity and size over their life in three segments (start, middle at `time`, end). */
+export interface ParticleEmitter2 {
+  /** The emitter's node (also in `Model.nodes`); its flags hold the emitter flags. */
+  node: Node;
+  speed: number;
+  /** Random speed change, as a fraction of `speed`. */
+  variation: number;
+  /** Half-angle of the emission cone, in degrees. */
+  latitude: number;
+  gravity: number;
+  /** Seconds. */
+  lifespan: number;
+  /** Particles per second. */
+  emissionRate: number;
+  /** Size of the spawn rectangle (x × y around the pivot). */
+  width: number;
+  length: number;
+  /** 0 blend, 1 additive, 2 modulate, 3 modulate 2×, 4 alpha key. */
+  filterMode: number;
+  /** Texture cells (sprite sheet). */
+  rows: number;
+  columns: number;
+  /** 0 head (a sprite), 1 tail (a streak along the motion), 2 both. */
+  headOrTail: number;
+  tailLength: number;
+  /** Where the middle segment sits in the life (0–1). */
+  time: number;
+  /** Start, middle, end colours (r, g, b in 0–1). */
+  segmentColor: [number, number, number][];
+  /** Start, middle, end opacity (0–255). */
+  segmentAlpha: [number, number, number];
+  segmentScaling: [number, number, number];
+  /** Sprite cells as [start, end, repeat]: head in the first and the second part of the life, tail the same. */
+  headIntervals: [number, number, number];
+  headDecayIntervals: [number, number, number];
+  tailIntervals: [number, number, number];
+  tailDecayIntervals: [number, number, number];
+  textureId: number;
+  /** Emits a burst when the emission rate track jumps (spell effects) instead of a stream. */
+  squirt: boolean;
+  priorityPlane: number;
+  replaceableId: number;
+  speedTrack?: Track;
+  variationTrack?: Track;
+  latitudeTrack?: Track;
+  gravityTrack?: Track;
+  emissionRateTrack?: Track;
+  widthTrack?: Track;
+  lengthTrack?: Track;
+  visibilityTrack?: Track;
+}
+
+/** Emitter flags in `ParticleEmitter2.node.flags`. */
+export const PRE2_FLAGS = { unshaded: 0x8000, sortPrimsFarZ: 0x10000, lineEmitter: 0x20000, unfogged: 0x40000, modelSpace: 0x80000, xyQuad: 0x100000 };
+
 export interface Model {
   version: number;
   name: string;
@@ -110,7 +167,8 @@ export interface Model {
   /** All nodes (bones, helpers, attachments, emitters, …) by object id. */
   nodes: Node[];
   pivots: Float32Array;
-  /** Chunks present but not rendered (particles, ribbons, …). */
+  particleEmitters2: ParticleEmitter2[];
+  /** Chunks present but not rendered (ribbons, …). */
   skipped: string[];
   warnings: string[];
 }
@@ -210,6 +268,28 @@ function readNode(r: Reader, kind: string): Node {
   const flags = r.u32();
   const tracks = readTracks(r, start + size);
   return { name, objectId, parentId, flags, kind, translation: tracks.KGTR, rotation: tracks.KGRT, scaling: tracks.KGSC };
+}
+
+function readParticleEmitter2(r: Reader, end: number): ParticleEmitter2 {
+  const node = readNode(r, "pre2");
+  const speed = r.f32(), variation = r.f32(), latitude = r.f32(), gravity = r.f32(), lifespan = r.f32(), emissionRate = r.f32();
+  const width = r.f32(), length = r.f32();
+  const filterMode = r.u32(), rows = r.u32(), columns = r.u32(), headOrTail = r.u32();
+  const tailLength = r.f32(), time = r.f32();
+  const segmentColor = [0, 1, 2].map(() => [r.f32(), r.f32(), r.f32()] as [number, number, number]);
+  const segmentAlpha = [r.u8[r.p++], r.u8[r.p++], r.u8[r.p++]] as [number, number, number];
+  const segmentScaling = [r.f32(), r.f32(), r.f32()] as [number, number, number];
+  const interval = () => [r.u32(), r.u32(), r.u32()] as [number, number, number];
+  const headIntervals = interval(), headDecayIntervals = interval(), tailIntervals = interval(), tailDecayIntervals = interval();
+  const textureId = r.u32(), squirt = r.u32() !== 0, priorityPlane = r.u32(), replaceableId = r.u32();
+  const t = readTracks(r, end);
+  return {
+    node, speed, variation, latitude, gravity, lifespan, emissionRate, width, length, filterMode, rows, columns, headOrTail,
+    tailLength, time, segmentColor, segmentAlpha, segmentScaling, headIntervals, headDecayIntervals, tailIntervals,
+    tailDecayIntervals, textureId, squirt, priorityPlane, replaceableId,
+    speedTrack: t.KP2S, variationTrack: t.KP2R, latitudeTrack: t.KP2L, gravityTrack: t.KP2G, emissionRateTrack: t.KP2E,
+    widthTrack: t.KP2W, lengthTrack: t.KP2N, visibilityTrack: t.KP2V,
+  };
 }
 
 function readGeoset(r: Reader, version: number): Geoset {
@@ -320,7 +400,7 @@ export function parseMdx(buf: Uint8Array): Model {
   const model: Model = {
     version: 800, name: "", extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] },
     sequences: [], globalSequences: [], textures: [], materials: [], geosets: [], geosetAnims: [],
-    nodes: [], pivots: new Float32Array(0), skipped: [], warnings: [],
+    nodes: [], pivots: new Float32Array(0), particleEmitters2: [], skipped: [], warnings: [],
   };
   const node = (n: Node) => { model.nodes[n.objectId] = n; };
   while (r.left >= 8) {
@@ -369,8 +449,16 @@ export function parseMdx(buf: Uint8Array): Model {
         case "BONE": while (r.p < end) { node(readNode(r, "bone")); r.p += 8; } break;
         case "HELP": while (r.p < end) node(readNode(r, "helper")); break;
         case "PIVT": model.pivots = r.f32s(size / 4); break;
+        case "PRE2":
+          while (r.p < end) {
+            const oStart = r.p;
+            const e = readParticleEmitter2(r, oStart + r.u32());
+            node(e.node);
+            model.particleEmitters2.push(e);
+          }
+          break;
         // Objects with an outer size: only their node matters here.
-        case "ATCH": case "PRE2": case "PREM": case "RIBB": case "LITE": case "CORN":
+        case "ATCH": case "PREM": case "RIBB": case "LITE": case "CORN":
           while (r.p < end) {
             const oStart = r.p;
             const oSize = r.u32();

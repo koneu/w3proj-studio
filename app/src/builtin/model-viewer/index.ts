@@ -119,6 +119,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div", {}, `${st.vertices.toLocaleString()} vertices · ${st.triangles.toLocaleString()} triangles`),
             h("div", {}, `${st.geosets} geosets · ${model.materials.length} materials · ${st.nodes} nodes`),
             h("div", {}, `${model.sequences.length} animations`),
+            model.particleEmitters2.length ? h("div", {}, `${model.particleEmitters2.length} particle emitter${model.particleEmitters2.length === 1 ? "" : "s"}`) : null,
             model.skipped.length ? h("div.muted", { title: "Present in the model but not drawn by this viewer" }, `not drawn: ${[...new Set(model.skipped)].join(", ")}`) : null,
             ...model.warnings.map((w) => h("div.model-warn", {}, w)),
           ),
@@ -131,6 +132,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.model-toolbar", {}, seqSelect, playBtn, speedSelect, scrub, frameLabel, teamSelect,
               toggle("Wireframe", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Grid", () => renderer.showGrid, (v) => { renderer.showGrid = v; }),
+              renderer.hasParticles ? toggle("Particles", () => renderer.showParticles, (v) => { renderer.showParticles = v; }) : null,
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲")),
             stage),
           side));

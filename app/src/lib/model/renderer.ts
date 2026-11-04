@@ -3,6 +3,7 @@
 // Particles, ribbons and texture animations are not drawn.
 
 import type { Extent, Model, Track } from "./mdx";
+import { ParticleInstance, ParticleRenderer } from "./particles";
 
 export type Vec3 = [number, number, number];
 export type Mat4 = Float32Array;
@@ -73,7 +74,7 @@ export interface Clock {
 }
 
 /** Samples a track; `fallback` when it has no key inside the interval. */
-function sample(track: Track | undefined, clock: Clock, globalSeqs: number[], fallback: number[]): number[] {
+export function sample(track: Track | undefined, clock: Clock, globalSeqs: number[], fallback: number[]): number[] {
   if (!track || track.times.length === 0) return fallback;
   let t = clock.frame, start = clock.seqStart, end = clock.seqEnd;
   if (track.globalSeq >= 0) {
@@ -108,6 +109,42 @@ function sample(track: Track | undefined, clock: Clock, globalSeqs: number[], fa
   // Bezier
   const iu = 1 - u;
   return va.map((v, k) => iu * iu * iu * v + 3 * iu * iu * u * ot[k] + 3 * iu * u * u * it[k] + u * u * u * vb[k]);
+}
+
+/** Nodes parents first (cached per model). */
+const nodeOrders = new WeakMap<Model, number[]>();
+function nodeOrder(model: Model): number[] {
+  let order = nodeOrders.get(model);
+  if (!order) {
+    const depth = (id: number, guard = 0): number => {
+      const n = model.nodes[id];
+      return !n || n.parentId < 0 || guard > 256 ? 0 : 1 + depth(n.parentId, guard + 1);
+    };
+    order = model.nodes.map((n, i) => (n ? i : -1)).filter((i) => i >= 0).sort((a, b) => depth(a) - depth(b));
+    nodeOrders.set(model, order);
+  }
+  return order;
+}
+
+/** Model-space matrix of every node (by object id) at a moment of an animation. */
+export function poseNodes(model: Model, clock: Clock): Mat4[] {
+  const world: Mat4[] = [];
+  for (const id of nodeOrder(model)) {
+    const n = model.nodes[id];
+    const pivot: Vec3 = [model.pivots[id * 3] ?? 0, model.pivots[id * 3 + 1] ?? 0, model.pivots[id * 3 + 2] ?? 0];
+    const t = sample(n.translation, clock, model.globalSequences, [0, 0, 0]) as Vec3;
+    const r = sample(n.rotation, clock, model.globalSequences, [0, 0, 0, 1]);
+    const s = sample(n.scaling, clock, model.globalSequences, [1, 1, 1]) as Vec3;
+    const local = mat4.node(pivot, t, r, s);
+    world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
+  }
+  return world;
+}
+
+/** The start of a model's first Stand animation (or its first one): how placed objects stand. */
+export function standClock(model: Model): Clock {
+  const stand = model.sequences.find((s) => /^stand/i.test(s.name)) ?? model.sequences[0];
+  return { frame: stand?.start ?? 0, seqStart: stand?.start ?? 0, seqEnd: stand?.end ?? 0, time: 0 };
 }
 
 // ------------------------------------------------------------------ team colours
@@ -354,6 +391,10 @@ export class ModelGpu {
   private geoAlpha = new Map<number, number>();
   private geoColor = new Map<number, number[]>();
   private clock: Clock = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
+  /** Model-space matrix of every node (by object id) at the last pose; emitters follow them. */
+  nodeWorld: Mat4[] = [];
+  /** The moment of the last pose. */
+  get poseClock(): Clock { return this.clock; }
 
   constructor(readonly gl: WebGL2RenderingContext, readonly model: Model) {
     this.sh = shared(gl);
@@ -368,12 +409,7 @@ export class ModelGpu {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
-    // Parents before children.
-    const depth = (id: number, guard = 0): number => {
-      const n = model.nodes[id];
-      return !n || n.parentId < 0 || guard > 256 ? 0 : 1 + depth(n.parentId, guard + 1);
-    };
-    this.nodeOrder = model.nodes.map((n, i) => (n ? i : -1)).filter((i) => i >= 0).sort((a, b) => depth(a) - depth(b));
+    this.nodeOrder = nodeOrder(model);
 
     let vertices = 0, triangles = 0;
     model.geosets.forEach((g, gi) => {
@@ -465,17 +501,10 @@ export class ModelGpu {
 
   /** Bone matrices and geoset animation state for a moment of an animation. */
   pose(clock: Clock) {
-    const m = this.model, world: Mat4[] = [];
+    const m = this.model;
     this.clock = clock;
-    for (const id of this.nodeOrder) {
-      const n = m.nodes[id];
-      const pivot: Vec3 = [m.pivots[id * 3] ?? 0, m.pivots[id * 3 + 1] ?? 0, m.pivots[id * 3 + 2] ?? 0];
-      const t = sample(n.translation, clock, m.globalSequences, [0, 0, 0]) as Vec3;
-      const r = sample(n.rotation, clock, m.globalSequences, [0, 0, 0, 1]);
-      const s = sample(n.scaling, clock, m.globalSequences, [1, 1, 1]) as Vec3;
-      const local = mat4.node(pivot, t, r, s);
-      world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
-    }
+    const world = poseNodes(m, clock);
+    this.nodeWorld = world;
     for (const id of this.nodeOrder) this.boneData.set(world[id], id * 16);
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
@@ -584,7 +613,13 @@ export class ModelRenderer {
   private lineProg: WebGLProgram;
   private grid: { vao: WebGLVertexArrayObject; count: number };
   private team = 0;
+  /** Particle emitters (none: null). */
+  private particles: ParticleInstance | null;
+  private particleRenderer: ParticleRenderer | null;
+  private lastTime = -1;
   wireframe = false;
+  /** Draw particle effects. */
+  showParticles = true;
   showGrid = true;
   /** Camera orbit around `target`. */
   yaw = -Math.PI / 2;
@@ -599,6 +634,8 @@ export class ModelRenderer {
     this.gpu = new ModelGpu(gl, model);
     this.lineProg = compile(gl, LINE_VS, LINE_FS);
     this.grid = this.makeGrid();
+    this.particles = model.particleEmitters2.length ? new ParticleInstance(model) : null;
+    this.particleRenderer = this.particles ? new ParticleRenderer(gl) : null;
     const e = bounds(model);
     this.target = [(e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, (e.min[2] + e.max[2]) / 2];
     this.distance = Math.max(80, Math.hypot(e.max[0] - e.min[0], e.max[1] - e.min[1], e.max[2] - e.min[2]) * 1.4);
@@ -664,8 +701,20 @@ export class ModelRenderer {
     }
 
     this.gpu.pose(clock);
-    this.gpu.draw(viewProj, mat4.identity(), { team: this.team, wireframe: this.wireframe });
+    const world = mat4.identity();
+    this.gpu.draw(viewProj, world, { team: this.team, wireframe: this.wireframe });
+    if (this.particles && this.particleRenderer) {
+      // Seconds since the last frame (a pause or a hidden tab doesn't burst particles).
+      const dt = this.lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, (clock.time - this.lastTime) / 1000));
+      this.lastTime = clock.time;
+      this.particles.step(dt, clock, this.gpu.nodeWorld, world);
+      if (this.showParticles && !this.wireframe) this.particleRenderer.draw(viewProj, eye, [{ particles: this.particles, textures: this.gpu.textures, world }]);
+    }
   }
+
+  /** Particles alive now (0 without emitters). */
+  get particleCount() { return this.particles?.count ?? 0; }
+  get hasParticles() { return this.particles !== null; }
 
   dispose() {
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();

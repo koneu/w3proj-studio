@@ -2,7 +2,9 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
-import { compile, mat4, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { compile, mat4, type Clock, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import type { Model } from "../../lib/model/mdx";
+import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import type { Placed } from "./objects";
 import { heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
 
@@ -103,10 +105,21 @@ export interface ObjectInstance {
 }
 
 /** One model placed any number of times; `group` is a toggle name (e.g. "doodads"). */
+/** Particle emitters drawn for a batch's instances: the model's own, or (`classic`) those of the
+ *  game's classic model for a Reforged one whose effects are PopcornFX. */
+export interface EffectSource {
+  model: Model;
+  textures: (WebGLTexture | null)[];
+  nodeWorld: Mat4[];
+  clock: Clock;
+  classic: boolean;
+}
+
 export interface ObjectBatch {
   group: string;
   gpu: ModelGpu;
   instances: ObjectInstance[];
+  effects?: EffectSource;
   /** Bend the model onto the ground height map (cliffs). */
   followGround?: boolean;
 }
@@ -135,6 +148,12 @@ export class TerrainRenderer {
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
   showWater = true;
+  /** Particle effects (fires, glows, …) of placed objects. */
+  showEffects = true;
+  private particleRenderer: ParticleRenderer | null = null;
+  /** Particles per placed object (new instances after a rebuild start fresh). */
+  private particleStates = new WeakMap<ObjectInstance, ParticleInstance>();
+  private lastParticleTime = -1;
   wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
   hiddenGroups = new Set<string>();
@@ -542,6 +561,35 @@ export class TerrainRenderer {
     return this.colorMesh(data);
   }
 
+  /** Whether the view changes by itself (particles): then it should be drawn every frame. */
+  get animating(): boolean {
+    return this.showEffects && this.batches.some((b) => b.instances.length && b.effects && !this.hiddenGroups.has(b.group));
+  }
+
+  /** Steps and draws the particles of placed objects near the view. */
+  private drawParticles(viewProj: Mat4, eye: Vec3) {
+    const now = performance.now();
+    const dt = this.lastParticleTime < 0 ? 0 : Math.min(0.1, (now - this.lastParticleTime) / 1000);
+    this.lastParticleTime = now;
+    // Far objects aren't simulated (they keep their particles until the view comes back).
+    const reach = this.distance * 2.5 + 1024;
+    const items: Parameters<ParticleRenderer["draw"]>[2] = [];
+    for (const b of this.batches) {
+      const fx = b.effects;
+      if (!fx || this.hiddenGroups.has(b.group)) continue;
+      for (const inst of b.instances) {
+        if (Math.hypot(inst.world[12] - this.target[0], inst.world[13] - this.target[1]) > reach) continue;
+        let p = this.particleStates.get(inst);
+        if (!p) this.particleStates.set(inst, (p = new ParticleInstance(fx.model)));
+        p.step(dt, fx.clock, fx.nodeWorld, inst.world);
+        items.push({ particles: p, textures: fx.textures, world: inst.world });
+      }
+    }
+    if (!items.length) return;
+    this.particleRenderer ??= new ParticleRenderer(this.gl);
+    this.particleRenderer.draw(viewProj, eye, items);
+  }
+
   render() {
     const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
@@ -596,6 +644,8 @@ export class TerrainRenderer {
         for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined });
       }
     }
+    if (this.showEffects) this.drawParticles(viewProj, this.eye());
+    else this.lastParticleTime = -1;
     // Placement preview: see-through, red where the object doesn't fit.
     if (this.ghost) {
       const g = this.ghost;

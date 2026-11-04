@@ -56,10 +56,12 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   const template = list.find((e) => e.id === id && simple(e)) ?? list.find((e) => e.id !== "sloc" && simple(e)) ?? list.find(simple);
   if (!template) return null;
   const e = structuredClone(template) as Entry;
-  const nextOf = (get: (x: Entry) => unknown) => 1 + Math.max(-1, ...list.map((x) => Number(get(x)) || 0));
+  // 0xFFFFFFFF marks an unset number (every v13 doodad's editorId; the number is the trailer's).
+  const UNSET = 0xffffffff;
+  const nextOf = (get: (x: Entry) => unknown) => 1 + Math.max(-1, ...list.map((x) => Number(get(x)) || 0).filter((n) => n < UNSET));
   Object.assign(e, { id, variation: 0, position, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });
   if ("skinId" in e) e.skinId = id;
-  if ("editorId" in e) e.editorId = nextOf((x) => x.editorId);
+  if ("editorId" in e && e.editorId !== UNSET) e.editorId = nextOf((x) => x.editorId);
   if ("itemTable" in e) e.itemTable = -1;
   if ("itemSets" in e) e.itemSets = [];
   if (f.key === "doodads") {
