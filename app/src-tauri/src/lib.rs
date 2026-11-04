@@ -383,12 +383,14 @@ fn fs_delete(root: String, path: String) -> CmdResult<()> {
     remove_empty_parents(&root, &p)
 }
 
-/// Removes the folders above `file` that are empty now (up to the project root).
+/// Removes the folders above `file` that are empty now (up to the project root; the project's
+/// `map` folder stays even when its last file goes).
 fn remove_empty_parents(root: &str, file: &Path) -> CmdResult<()> {
     let root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let map = root.join("map");
     let mut dir = file.parent().map(Path::to_path_buf);
     while let Some(d) = dir {
-        if d == root || std::fs::remove_dir(&d).is_err() {
+        if d == root || d == map || std::fs::remove_dir(&d).is_err() {
             break;
         }
         dir = d.parent().map(Path::to_path_buf);
