@@ -15,6 +15,7 @@ import { w3eToText } from "../../lib/terrain/w3etext";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { buildMinimap, minimapSettings } from "./minimapgen";
+import { minimapIcons } from "../../lib/terrain/minimapicons";
 import { buildPathingMap } from "./pathmap";
 import { terrainShadows } from "./shadows";
 import { defaultTriggerFile, defaultWct, MELEE_ACTIONS } from "./triggers";
@@ -282,15 +283,9 @@ function playableCentre(t: Terrain): [number, number] {
   return [t.offsetX + (l + (t.width - 1 - l - r) / 2) * 128, t.offsetY + (b + (t.height - 1 - b - top) / 2) * 128];
 }
 
-/** The minimap icon of a start location (war3map.mmp): its pixel on the 256×256 minimap of the
- *  playable area (scaled to fit, centred), red as player 1. Rounding as the World Editor's
- *  icons fit it best (x: 622 of 680 game map icons exact, y: 633; the rest 1 pixel off). */
+/** The minimap icon of a start location (war3map.mmp), player 1's colour. */
 export function startIcon(t: Terrain, x: number, y: number) {
-  const [ml, mr, mb, mt] = MARGINS;
-  const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt, s = 256 / Math.max(pw, ph);
-  const px = (256 - pw * s) / 2 + ((x - t.offsetX) / 128 - ml) * s;
-  const py = 256 - ((256 - ph * s) / 2 + ((y - t.offsetY) / 128 - mb) * s);
-  return { type: 2, x: Math.floor(px), y: Math.round(py + 0.38), color: { blue: 3, green: 3, red: 255, alpha: 255 } };
+  return minimapIcons({ width: t.width, height: t.height, offsetX: t.offsetX, offsetY: t.offsetY, margins: MARGINS }, [{ id: "sloc", player: 0, position: [x, y] }], () => null)[0];
 }
 
 export function mapInfo(o: NewMapOptions, t: Terrain): unknown {

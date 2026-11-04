@@ -9,11 +9,12 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, withObjectArt, type ObjectArt, type Placed } from "./objects";
-import { buildMinimap, minimapSettings } from "./minimapgen";
+import { buildMinimap, buildMinimapIcons, minimapSettings } from "./minimapgen";
+import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { askNewMap, createMap, loadTilesets, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
-import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
+import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
@@ -1159,6 +1160,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (json !== null) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
           else await w3.backend.invoke("codec_write", { root, path, text: JSON.stringify(d) });
         };
+        /** The minimap icons (war3map.mmp) of the placed units on a terrain, written only when they
+         *  differ from the stored ones by more than order and rounding. */
+        const updateMinimapIcons = async (t: Terrain) => {
+          if (!unitsFile) return;
+          try {
+            const icons = await buildMinimapIcons(w3, t, unitsFile.list);
+            const stored = await readMapJson<{ icons?: MinimapIcon[] }>(w3, "war3map.mmp").catch(() => null);
+            if (!stored) {
+              const text = JSON.stringify({ format: "w3proj.minimap/1", version: 0, icons });
+              const root = w3.workspace.project()!.root;
+              await w3.workspace.writeText("map/war3map.mmp.json", await w3.backend.invoke<string>("codec_canonicalize", { root, path: "map/war3map.mmp.json", text }));
+            } else if (!sameIcons(icons, stored.icons ?? [])) {
+              await editDoc("war3map.mmp", (d) => { d.icons = icons; });
+            }
+          } catch (e) {
+            w3.window.showError(`The minimap icons (war3map.mmp) couldn't be updated: ${(e as Error).message ?? e}`);
+          }
+        };
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         const resizeMap = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error("This map is read-only.");
@@ -1208,6 +1227,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (change.every((c) => c === 0)) filterPathing(wpm);
           await w3.workspace.writeBytes("map/war3map.wpm", wpm);
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
+          await updateMinimapIcons(next);
           // The editor opens again on the new terrain.
           void (async () => {
             await w3.editors.close(doc.path);
@@ -1671,6 +1691,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
               }
             }
+            // Its icons (gold mines, neutral buildings, start locations) follow the placed units;
+            // written only when they differ from the stored ones by more than order and rounding.
+            if (minimapMode !== "never") await updateMinimapIcons(terrain);
             savedW3e = w3e;
             savedDoodads = structuredClone(doodads);
             for (const g of groupInsts.values()) {

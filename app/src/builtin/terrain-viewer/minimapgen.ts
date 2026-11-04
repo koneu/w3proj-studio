@@ -7,7 +7,10 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseSlk } from "../../lib/formats/text";
 import { MINIMAP_SIZE, renderMinimap, type MinimapParams, type Rgb } from "./minimap";
 import type { Placed } from "./objects";
-import { pathOverrides, readMapJson } from "./pathmap";
+import { objectMods, pathOverrides, readMapJson } from "./pathmap";
+import { loadKind } from "../../lib/objects/metadata";
+import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
+import { maxPlayers } from "../../lib/terrain/startlocations";
 import type { Terrain } from "../../lib/terrain/w3e";
 
 /** Average colour of the first texture cell, by tile id (textures are shared). */
@@ -70,4 +73,32 @@ export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[
 
   const rgba = renderMinimap({ terrain, margins: [m[0], m[1], m[2], m[3]], tileColor: (id) => colors.get(id) ?? [128, 128, 128], waterColor, objects, params });
   return encodeBlp1Jpeg(MINIMAP_SIZE, MINIMAP_SIZE, rgba, quality);
+}
+
+const PLAYABLE_RACES = new Set(["human", "orc", "undead", "nightelf"]);
+const GOLD_MINE_ABILITIES = ["Agld", "Abgm", "Aegm"];
+
+/** The minimap icons (war3map.mmp) of the placed units, by the rules in lib/terrain/minimapicons
+ *  with the game's unit data and the map's object data (and skin) changes. */
+export async function buildMinimapIcons(w3: W3Api, terrain: Terrain, units: Placed[]): Promise<MinimapIcon[]> {
+  const w3i = await readMapJson<{ version: number; cameraComplements?: number[] }>(w3, "war3map.w3i");
+  const kind = await loadKind(w3, "w3u");
+  const mods = new Map([...await objectMods(w3, "war3map.w3u"), ...await objectMods(w3, "war3mapSkin.w3u")]);
+  const base = (id: string) => mods.get(id)?.base ?? id;
+  const value = (id: string, field: string): string => {
+    const own = mods.get(id)?.mods.get(field);
+    if (own !== undefined) return String(own);
+    const f = kind.fieldById.get(field);
+    return (f && kind.defaultValue(base(id), f, 0)) ?? "";
+  };
+  const ability = kind.fieldById.get("uabi");
+  // Neutral Passive: player 15 before 24 players (w3i version 31), else 27.
+  const neutralPassive = maxPlayers({ version: w3i?.version ?? 31 }) + 3;
+  const area = { width: terrain.width, height: terrain.height, offsetX: terrain.offsetX, offsetY: terrain.offsetY, margins: w3i?.cameraComplements ?? [0, 0, 0, 0] };
+  return minimapIcons(area, units, (u) => {
+    const abilities = ability ? kind.defaultValue(base(u.id), ability, 0) ?? "" : "";
+    if (GOLD_MINE_ABILITIES.some((a) => abilities.split(",").includes(a))) return 0;
+    if (u.player === neutralPassive && value(u.id, "unbm") === "1" && !PLAYABLE_RACES.has(value(u.id, "urac"))) return 1;
+    return null;
+  });
 }
