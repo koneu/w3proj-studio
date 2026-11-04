@@ -18,6 +18,7 @@ import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { loadMapLighting, type MapLighting } from "./lighting";
+import { planShoreline, type ShoreModels } from "./shoreline";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
@@ -284,7 +285,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             terrain: true, objects: moved,
           });
           if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); }
-          if (st.cliffs) replanCliffs();
+          if (st.cliffs) replanCliffs(); else void replanShore();
           renderer.terrainChanged();
           redraw();
         };
@@ -390,6 +391,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rows = parseSlk(text);
           const row = rows.find((r) => r.waterID === `${terrain.tileset}Sha`) ?? rows.find((r) => r.waterID?.toLowerCase() === `${terrain.tileset}sha`.toLowerCase());
           if (!row) return;
+          // Shoreline models: <shoreDir>\<file>\<file>0.mdx.
+          const shore = (file: string) => `${row.shoreDir}\\${file}\\${file}0.mdx`;
+          if (row.shoreDir && row.shoreSFile) {
+            shoreModels = { straight: shore(row.shoreSFile), outside: shore(row.shoreOCFile || row.shoreSFile), inside: shore(row.shoreICFile || row.shoreSFile) };
+            void replanShore();
+          }
           const argb = (k: string) => [`${k}_R`, `${k}_G`, `${k}_B`, `${k}_A`].map((c) => Number(row[c] ?? 255) / 255);
           const frames = Math.max(1, Number(row.numTex) || 1);
           renderer.setWaterLook({ rate: Number(row.texRate) || 1, shallowMin: argb("Smin"), shallowMax: argb("Smax"), deepMin: argb("Dmin"), deepMax: argb("Dmax") }, frames);
@@ -480,8 +487,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let cliffData: { types: Map<string, CliffType>; exists: (p: string) => boolean } | null = null;
         /** Bumped per re-plan so a slow older one can't overwrite a newer one. */
         let cliffGen = 0;
+        /** The tileset's shoreline models (from Water.slk), once known. */
+        let shoreModels: ShoreModels | null = null;
+        let shoreGen = 0;
+        /** Places shoreline foam where water meets the ground (initially and after edits). */
+        async function replanShore() {
+          if (!shoreModels) return;
+          const gen = ++shoreGen;
+          const { batches } = await loader.loadModels("shoreline", planShoreline(terrain, shoreModels));
+          if (gen !== shoreGen) return;
+          const others = renderer.batches.filter((b) => b.group !== "shoreline");
+          renderer.batches.length = 0;
+          renderer.batches.push(...others, ...batches);
+          redraw();
+        }
         /** Places cliff models for the current layers (initially and after edits). */
         async function replanCliffs() {
+          void replanShore();
           if (!cliffData) return;
           const gen = ++cliffGen;
           const { requests, groundOverrides } = planCliffs(terrain, cliffData.types, cliffData.exists);
@@ -1334,7 +1356,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.append(h("div.model-viewer", {},
           h("div.model-main", {},
             h("div.model-toolbar", {},
-              toggle("Water", () => renderer.showWater, (v) => { renderer.showWater = v; }),
+              toggle("Water", () => renderer.showWater, (v) => {
+                renderer.showWater = v;
+                // The shoreline foam goes with the water.
+                if (v) renderer.hiddenGroups.delete("shoreline"); else renderer.hiddenGroups.add("shoreline");
+              }),
               toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
               toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
               h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
