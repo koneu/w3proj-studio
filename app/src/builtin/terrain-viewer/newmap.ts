@@ -432,7 +432,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await writeWctFile(w3.workspace, parseWct(defaultWct(), 1), textTriggers(defaultTriggerFile(o.name)).map((t) => t.name));
   await w3.workspace.writeText("map/war3map.wts", "\uFEFFSTRING 1\r\n{\r\nPlayer 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nForce 1\r\n}\r\n\r\n");
   await json("map/war3map.mmp.json", { format: "w3proj.minimap/1", version: 0, icons: [startIcon(t, sx, sy)] });
-  await json("map/war3map.w3l.json", { format: "w3proj.lights/1", magic: "W3L!", version: 3, terrainModel: "", unitModel: "", unknown: [0, 0, 0] });
+  await json("map/war3map.w3l.json", { format: "w3proj.lights/1", magic: "W3L!", version: 3, terrainModel: "", unitModel: "", terrainEnabled: 0, unitEnabled: 0, unknown: 0 });
   await w3.workspace.writeBytes("map/war3map.w3grp", new Uint8Array(12));
   await w3.workspace.writeText("map/conversation.json", '{\n    "stringTablePath": "war3map.wts",\n    "conversation": {}\n}');
   await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));
