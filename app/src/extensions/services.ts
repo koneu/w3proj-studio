@@ -389,6 +389,15 @@ export interface Problem {
   location?: string;
   /** What a click does: a command with its arguments. */
   reveal?: { command: string; args?: unknown[] };
+  /** Ways to fix it, shown as buttons; the checks run again afterwards. */
+  fixes?: ProblemFix[];
+}
+
+export interface ProblemFix {
+  label: string;
+  /** What it does, in a tooltip. */
+  title?: string;
+  run(): Promise<void>;
 }
 
 export interface TriggerParamEditor {

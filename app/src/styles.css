@@ -775,6 +775,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .diff-old { color: var(--error); }
 .diff-new { color: #98c379; }
 .problem-text { overflow-wrap: anywhere; }
+.problem-fixes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.problem-fix { padding: 1px 8px; font-size: 11px; }
 .statusbar-item[data-id="w3.problems.status"] { white-space: pre; }
 .lighting-view { padding: 4px 12px; }
 .lighting-section { margin-bottom: 14px; }

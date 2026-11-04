@@ -89,7 +89,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             title: [p.message, p.location].filter(Boolean).join("\n"),
             onclick: p.reveal ? run(() => w3.commands.execute(p.reveal!.command, ...(p.reveal!.args ?? []))) : undefined,
           }, h("span.problem-icon", {}, p.severity === "error" ? "✕" : "⚠"),
-            h("span.problem-text", {}, p.message, p.location ? h("small.muted", {}, ` ${p.location}`) : null)))));
+            h("span.problem-text", {}, p.message, p.location ? h("small.muted", {}, ` ${p.location}`) : null,
+              ...(p.fixes?.length ? [h("span.problem-fixes", {}, ...p.fixes.map((f) => h("button.problem-fix", {
+                title: f.title ?? "",
+                onclick: (e: MouseEvent) => { e.stopPropagation(); run(async () => { await f.run(); await service.run(); })(); },
+              }, f.label)))] : []))))));
         }
       },
     }),

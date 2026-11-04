@@ -1,7 +1,7 @@
 // The built-in checks of the Problems view: the map script's JASS errors, file
 // paths in object data that don't exist (or point to someone's disk),
-// textures of imported models, placed objects of unknown types, and import list
-// entries without their file.
+// textures of imported models, placed objects of unknown types, placed objects
+// without a Classic model, and import list entries without their file.
 
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck } from "../../extensions/services";
@@ -209,6 +209,11 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       },
     },
     {
+      id: "classicModels",
+      title: "Classic graphics",
+      run: () => classicModels(w3),
+    },
+    {
       id: "imports",
       title: "Imported files",
       async run() {
@@ -231,4 +236,106 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       },
     },
   ];
+}
+
+/** Model field and variation count field per object kind. */
+const ART: Record<string, { model: string; variations?: string }> = {
+  w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
+};
+/** Game folders only Reforged graphics use. */
+const REFORGED_LAYER = /:_(hd|de)\.w3mod:/i;
+
+interface PlacedEntry { id: string; variation?: number; position: number[] }
+
+/** Placed objects whose model only exists in Reforged graphics: players with Classic graphics
+ *  don't see them (World Editor 3.0.1 shows them in its Reforged view all the same). Skipped
+ *  when the map doesn't support Classic graphics (map info, supported modes bit 1). */
+async function classicModels(w3: W3Api): Promise<Problem[]> {
+  const info = await readJson<{ supportedModes?: number }>(w3, "map/war3map.w3i.json");
+  if (info?.supportedModes !== undefined && !(info.supportedModes & 1)) return [];
+  // Every game path a Classic game can load, without its folder prefix.
+  const classic = new Set<string>();
+  for (const full of await w3.game.list()) {
+    if (REFORGED_LAYER.test(full)) continue;
+    classic.add(full.slice(full.lastIndexOf(":") + 1).replace(/\\/g, "/").toLowerCase());
+  }
+  const files = new FileLookup(w3);
+  const kinds = new Map<string, Awaited<ReturnType<typeof loadKind>>>();
+  for (const kind of Object.keys(ART)) { const k = await loadKind(w3, kind).catch(() => null); if (k) kinds.set(kind, k); }
+  // The map's own objects and skin changes: id → [kind, base, field → value].
+  const custom = new Map<string, { kind: string; base: string; mods: Map<string, string> }>();
+  for (const kind of Object.keys(ART)) {
+    for (const file of [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`]) {
+      const data = await readJson<{ custom?: Obj[]; original?: Obj[] }>(w3, file);
+      for (const o of [...(data?.original ?? []), ...(data?.custom ?? [])]) {
+        const id = o.id ?? o.base;
+        const c = custom.get(id) ?? { kind, base: o.base, mods: new Map() };
+        for (const m of o.mods ?? []) c.mods.set(m.field, String(m.value));
+        custom.set(id, c);
+      }
+    }
+  }
+  const kindOf = (id: string, fromUnits: boolean) => custom.get(id)?.kind
+    ?? (fromUnits ? ["w3u", "w3t"] : ["w3d", "w3b"]).find((k) => kinds.get(k)?.names.has(id));
+  const value = (id: string, kind: string, field: string): string | undefined => {
+    const c = custom.get(id);
+    if (c?.mods.has(field)) return c.mods.get(field);
+    const k = kinds.get(kind), base = c?.base ?? id, f = k?.fieldById.get(field);
+    return k && f ? k.defaultValue(base, f, 0) : undefined;
+  };
+  const found = new Map<string, boolean>();
+  /** In the Classic game data, or imported into the map. */
+  const hasClassic = async (path: string): Promise<boolean> => {
+    const known = found.get(path);
+    if (known !== undefined) return known;
+    // exists() waits until the map's file list is read; only the map's own copy counts here.
+    const ok = classic.has(path.replace(/\\/g, "/").toLowerCase()) || ((await files.exists(path, "file")) && files.inMap(path));
+    found.set(path, ok);
+    return ok;
+  };
+
+  const out: Problem[] = [];
+  for (const [file, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
+    const list = (await readJson<Record<string, PlacedEntry[]>>(w3, file))?.[key] ?? [];
+    const missing = new Map<string, PlacedEntry[]>();
+    for (const p of list) {
+      const kind = kindOf(p.id, key === "units");
+      if (!kind) continue; // unknown types: the "Placed objects" check
+      const model = value(p.id, kind, ART[kind].model);
+      if (!model || model === "_") continue;
+      const variations = Number(ART[kind].variations ? value(p.id, kind, ART[kind].variations!) : 1) || 1;
+      const stem = model.replace(/\.(mdl|mdx)$/i, "");
+      const path = `${stem}${variations > 1 ? p.variation ?? 0 : ""}.mdx`;
+      if (await hasClassic(path)) continue;
+      missing.set(p.id, [...(missing.get(p.id) ?? []), p]);
+    }
+    for (const [id, items] of missing) {
+      const kind = kindOf(id, key === "units")!;
+      const name = kinds.get(kind)?.names.get(custom.get(id)?.base ?? id) ?? id;
+      out.push({
+        severity: "warning",
+        message: `${name} (${id}): no Classic model, invisible with Classic graphics; placed ${items.length}×`,
+        location: file.slice(4),
+        reveal: { command: "w3.terrain.showPoint", args: [items[0].position[0], items[0].position[1]] },
+        fixes: [{
+          label: `Remove the ${items.length} placed`,
+          title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
+          run: () => removePlaced(w3, file, key, id),
+        }],
+      });
+    }
+  }
+  return capped(out, "objects without a Classic model");
+}
+
+/** Deletes every placed object of a type from a placement file (JSON form or raw). */
+async function removePlaced(w3: W3Api, file: string, key: string, id: string) {
+  const root = w3.workspace.project()!.root;
+  const raw = file.replace(/\.json$/, "");
+  const json = await w3.workspace.readText(file).catch(() => null);
+  const text = json ?? await w3.backend.invoke<string>("codec_decode", { root, path: raw });
+  const doc = JSON.parse(text) as Record<string, PlacedEntry[]>;
+  doc[key] = (doc[key] ?? []).filter((p) => p.id !== id);
+  if (json !== null) await w3.workspace.writeText(file, await w3.backend.invoke<string>("codec_canonicalize", { root, path: file, text: JSON.stringify(doc) }));
+  else await w3.backend.invoke("codec_write", { root, path: raw, text: JSON.stringify(doc) });
 }
