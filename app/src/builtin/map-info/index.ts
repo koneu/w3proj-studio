@@ -2,6 +2,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
+import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional
 // where the file version decides whether they exist.
@@ -162,6 +163,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
         const strings = wtsText !== null ? new StringTable(wtsText) : null;
         const v = info.version;
+        // Start locations (war3mapUnits.doo, either project form): players without one can't be added.
+        const root = w3.workspace.project()!.root;
+        const unitsText = await w3.workspace.readText("map/war3mapUnits.doo.json")
+          .catch(() => w3.backend.invoke<string>("codec_decode", { root, path: "map/war3mapUnits.doo" })).catch(() => null);
+        const starts = startLocations(unitsText ? (JSON.parse(unitsText) as { units?: [] }).units ?? [] : []);
 
         let saved = JSON.stringify(info);
         const update = () => doc.setDirty(JSON.stringify(info) !== saved || !!strings?.dirty);
@@ -320,20 +326,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...Object.keys(info.water).map((k) => row(k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
                 num(() => info.water![k], (n) => { info.water![k] = n; }, { int: true })))) : null,
           ].filter((x): x is HTMLElement => x !== null),
-          players: () => [
-            section_(`Players (${info.players.length})`,
-              h("table.form-table", {},
-                h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Name"), h("th", {}, "Controller"), h("th", {}, "Race"), h("th", {}, "Fixed start"), h("th", {}, "Start X"), h("th", {}, "Start Y"))),
-                h("tbody", {}, ...info.players.map((p) => h("tr", {},
-                  h("td.muted", {}, String(p.id + 1)),
-                  h("td", {}, text(() => p.name, (s) => { p.name = s; })),
-                  h("td", {}, select(CONTROLLERS, () => p.controller as 1 | 2 | 3 | 4, (n) => { p.controller = n; })),
-                  h("td", {}, select(RACES, () => p.race as 0 | 1 | 2 | 3 | 4, (n) => { p.race = n; })),
-                  h("td", {}, bit(() => p.fixedStart, (n) => { p.fixedStart = n; }, 1, "")),
-                  h("td", {}, num(() => p.start[0], (n) => { p.start[0] = n; })),
-                  h("td", {}, num(() => p.start[1], (n) => { p.start[1] = n; }))))))),
-            h("small.muted", {}, "Start locations are placed in the World Editor; adding or removing players is done there too."),
-          ],
+          players: () => {
+            const ids = [...new Set([...info.players.map((p) => p.id), ...[...starts.keys()].filter((id) => id < maxPlayers(info))])].sort((a, b) => a - b);
+            const controller = (id: number) => {
+              const p = info.players.find((x) => x.id === id);
+              return select<number>([[0, "None (not in the map)"], ...CONTROLLERS], () => p?.controller ?? 0, (n) => {
+                if (n === 0) removePlayer(info as unknown as PlayerInfo, id);
+                else if (p) p.controller = n;
+                else addPlayer(info as unknown as PlayerInfo, id, starts.get(id)!).controller = n;
+                if (!p || n === 0) queueMicrotask(() => show(section));
+              });
+            };
+            return [
+              section_(`Players (${info.players.length})`,
+                h("table.form-table", {},
+                  h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Name"), h("th", {}, "Controller"), h("th", {}, "Race"), h("th", {}, "Fixed start"), h("th", {}, "Start X"), h("th", {}, "Start Y"))),
+                  h("tbody", {}, ...ids.map((id) => {
+                    const p = info.players.find((x) => x.id === id);
+                    if (!p) {
+                      const at = starts.get(id)!;
+                      return h("tr.muted", {}, h("td", {}, String(id + 1)), h("td", {}, `Player ${id + 1}`), h("td", {}, controller(id)),
+                        h("td", {}), h("td", {}), h("td", {}, String(at[0])), h("td", {}, String(at[1])));
+                    }
+                    return h("tr", {},
+                      h("td.muted", {}, String(p.id + 1)),
+                      h("td", {}, text(() => p.name, (s) => { p.name = s; })),
+                      h("td", {}, controller(id)),
+                      h("td", {}, select(RACES, () => p.race as 0 | 1 | 2 | 3 | 4, (n) => { p.race = n; })),
+                      h("td", {}, bit(() => p.fixedStart, (n) => { p.fixedStart = n; }, 1, "")),
+                      h("td", {}, num(() => p.start[0], (n) => { p.start[0] = n; })),
+                      h("td", {}, num(() => p.start[1], (n) => { p.start[1] = n; })));
+                  })))),
+              h("small.muted", {}, "To add a player, place its start location in the terrain editor (Objects ▸ Start location) and save there. "
+                + "Players set to None keep their start location but aren't in the map. Saving the terrain editor moves each player's start to its start location."),
+            ];
+          },
           forces: () => [
             section_(`Forces (${info.forces.length})`,
               bit(() => info.flags, (n) => { info.flags = n >>> 0; }, 0x40, "Use custom forces"),

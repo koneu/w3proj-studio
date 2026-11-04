@@ -1,7 +1,8 @@
 // Object Placer: placing units, items, doodads and destructables as a tool
 // group of the terrain editor (service "w3.terrain"). One object per click,
 // or Scatter (forests): a click or drag fills the brush, spaced by the
-// objects' footprints, with random variation, facing and scale.
+// objects' footprints, with random variation, facing and scale. Start locations: one per
+// player, placing it again moves it; saving adds/moves/removes the map's players to match.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import {
@@ -44,12 +45,31 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     ed.objects.setGhost({ id, x: g[0], y: g[1], angle, player: kind === "w3u" ? owner : undefined, ok });
   };
 
+  const START = { kind: "w3u", id: "sloc", name: "Start Location" };
+  const isStart = () => placing?.id === START.id;
+
+  /** Places the owner's start location, or moves it there if it has one already (one undo step). */
+  const placeStart = (pos: [number, number, number]) => {
+    if (owner >= 24) { w3.window.showWarning("Start locations are for players 1–24, not neutral players."); return; }
+    const e = ed.objects.create(START.kind, START.id, { x: pos[0], y: pos[1], angle: deg(270), player: owner });
+    if (typeof e === "string") { w3.window.showError(e); return; }
+    const old = ed.objects.list().filter((o) => o.id === START.id && o.player === owner);
+    ed.objects.remove(old);
+    ed.objects.insert([e]);
+    ed.pushEdit({
+      undo: () => { ed.objects.remove([e]); ed.objects.insert(old); },
+      redo: () => { ed.objects.remove(old); ed.objects.insert([e]); },
+      terrain: false, objects: true,
+    });
+  };
+
   /** A scatter drag: everything it places is one undo step. */
   let drag: { entries: PlacedEntry[]; last: [number, number, number]; queue: Promise<void> } | null = null;
 
   /** Places the chosen object at `pos`, or (with `stroke`) fills the brush there. */
   const placeAt = async (pos: [number, number, number], stroke?: { entries: PlacedEntry[] }) => {
     if (!placing) return;
+    if (isStart()) { if (!stroke) placeStart(pos); return; }
     const { kind, id, name } = placing;
     const type = ed.objects.type(id);
     const occ = respect() || stroke ? await ed.objects.occupancy() : null;
@@ -122,9 +142,11 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("input", { type: "range", min: "10", max: "100", value: String(Math.round((w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1) * 100)),
       onchange: (e: Event) => { void w3.settings.set("terrain.placement.scatterDensity", Number((e.target as HTMLInputElement).value) / 100); ed.focus(); } }));
   const update = () => {
-    hint.textContent = placing ? `Placing ${placing.name} (${placing.id}): click the ground · Esc to stop` : "Choose what to place.";
+    hint.textContent = !placing ? "Choose what to place."
+      : isStart() ? "Placing the start location: click the ground (moves it if the player has one) · Esc to stop"
+      : `Placing ${placing.name} (${placing.id}): click the ground · Esc to stop`;
     ownerWrap.hidden = placing?.kind !== "w3u";
-    sizeWrap.hidden = densityWrap.hidden = !scatter;
+    sizeWrap.hidden = densityWrap.hidden = !scatter || isStart();
   };
   const choose = async () => {
     try {
@@ -139,6 +161,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   };
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "Choose a unit, item, doodad or destructable", onclick: () => void choose() }, "Place…"),
+    h("button", { title: "Place or move a player's start location; saving adds, moves or removes the map's players to match",
+      onclick: () => { placing = START; update(); ed.focus(); } }, "Start location"),
     hint, ownerWrap,
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
       () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
@@ -154,14 +178,14 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     deactivate() { ed.setBrush(null); void showGhost(null); },
     pointerDown(p) {
       if (!ed.editable || !placing || !p.ground) return false;
-      if (!scatter) { void placeAt(p.ground); return true; }
+      if (!scatter || isStart()) { void placeAt(p.ground); return true; }
       const d = { entries: [] as PlacedEntry[], last: p.ground, queue: Promise.resolve() };
       d.queue = placeAt(p.ground, d);
       drag = d;
       return true;
     },
     pointerMove(p) {
-      ed.setBrush(scatter && placing && p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: [140, 230, 140] } : null);
+      ed.setBrush(scatter && placing && !isStart() && p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: [140, 230, 140] } : null);
       void showGhost(p.ground);
       const d = drag;
       // Fills again once the pointer moved half a brush radius.

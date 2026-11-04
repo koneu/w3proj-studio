@@ -163,6 +163,8 @@ export interface TerrainObjects {
   type(id: string): TerrainObjectType | null;
   /** A new entry of `kind`/`id` (not yet on the map), or an error message. */
   create(kind: string, id: string, at: { x: number; y: number; angle: number; player?: number }): PlacedEntry | string;
+  /** Units and items, then doodads and destructables, as placed now. */
+  list(): PlacedEntry[];
   /** Puts created entries on the map / takes them off (no undo step; pair them in pushEdit). */
   insert(entries: PlacedEntry[]): void;
   remove(entries: PlacedEntry[]): void;

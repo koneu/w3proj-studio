@@ -20,6 +20,7 @@ import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./pla
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
+import { startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
@@ -436,6 +437,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         // ---- placed objects -----------------------------------------------------------
         let dooFile: PlacedFile | null = null, unitsFile: PlacedFile | null = null;
+        /** Start locations as last saved: the map's players follow their changes (see syncPlayers). */
+        let savedStarts = new Map<number, number[]>();
         /** Doodads as last saved (shadow baseline, like savedW3e). */
         let savedDoodads: Placed[] | null = null;
         let objCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
@@ -499,6 +502,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;
+            savedStarts = startLocations(uf?.list ?? []);
             objCtx = { skins, bases };
             await rebuildObjects();
           });
@@ -706,7 +710,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const iconEl = h("img.terrain-sel-icon", { alt: "", hidden: true });
           void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.icon(p.kind, p.id))
             .then((src) => { if (src) { iconEl.src = src; iconEl.hidden = false; } }).catch(() => { /* no icon */ });
-          const nameEl = h("div.terrain-sel-name", {}, p.id);
+          const nameEl = h("div.terrain-sel-name", {}, p.id === "sloc" ? "Start location" : p.id);
           loadKind(w3, p.kind).then((k) => {
             const base = k.names.get(p.base ?? p.id);
             if (base) nameEl.textContent = p.base ? `${p.id} (custom, based on ${base})` : base;
@@ -1001,13 +1005,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** File each created entry goes to (set by objects.create). */
         const entryFile = new WeakMap<Placed, PlacedFile>();
         /** Rewrites a project JSON document of the format engine (or its raw file when the project keeps it raw). */
-        const editDoc = async (name: string, change: (d: Record<string, unknown>) => void) => {
+        /** Edits a JSON-backed map file in either project form; `change` returning false skips the write. */
+        const editDoc = async (name: string, change: (d: Record<string, unknown>) => void | boolean) => {
           const root = w3.workspace.project()!.root, path = `map/${name}`;
           const json = await w3.workspace.readText(`${path}.json`).catch(() => null);
           const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path }).catch(() => null) : null;
           if (json === null && raw === null) return;
           const d = JSON.parse((json ?? raw)!) as Record<string, unknown>;
-          change(d);
+          if (change(d) === false) return;
           if (json !== null) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
           else await w3.backend.invoke("codec_write", { root, path, text: JSON.stringify(d) });
         };
@@ -1110,6 +1115,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               entryFile.set(entry, f);
               return entry;
             },
+            list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
             insert: (entries) => {
               for (const e of entries) { const f = entryFile.get(e as Placed); if (f && !f.list.includes(e as Placed)) f.list.push(e as Placed); }
               objectsTouched = true;
@@ -1442,6 +1448,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await writeTerrainBytes(doc.path, w3e, doc);
             if (objectsTouched) {
               for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
+              // Placed, moved or deleted start locations add, move or remove the map's players.
+              if (unitsFile) {
+                const starts = startLocations(unitsFile.list);
+                let changes: string[] = [];
+                await editDoc("war3map.w3i", (info) => {
+                  changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
+                  return changes.length > 0;
+                });
+                savedStarts = starts;
+                if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
+              }
             }
             savedAt = at;
             doc.setDirty(false);

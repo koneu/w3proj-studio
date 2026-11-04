@@ -67,6 +67,11 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
       });
     }
   }
+  // Start locations have no skin entry; the World Editor draws them with this model
+  // (WorldEditData.txt, StartLocation), which also makes them selectable here.
+  if (!out.has("sloc")) {
+    out.set("sloc", { kind: "w3u", file: "Objects\\StartLocation\\StartLocation.mdl", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null });
+  }
   return out;
 }
 
