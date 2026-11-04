@@ -202,8 +202,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           return input;
         };
-        const hex = (c: number[]) => "#" + c.slice(0, 3).map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, "0")).join("");
-        const unhex = (s: string) => [1, 3, 5].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
+        // Light colours are stored blue, green, red (the game's night colour reads as blue that way).
+        const hex = (c: number[]) => "#" + [c[2], c[1], c[0]].map((v) => Math.round(Math.min(1, Math.max(0, v ?? 0)) * 255).toString(16).padStart(2, "0")).join("");
+        const unhex = (s: string) => [5, 3, 1].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
         const row = (label: string, ...control: (Node | string)[]) => h("div.form-row", {}, h("span.form-label", {}, label), h("div.form-control", {}, ...control));
 
         /** Keyframe table of a track: hour (for day tracks), value editor, remove; plus "Add key". */

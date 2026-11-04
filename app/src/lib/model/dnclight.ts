@@ -325,3 +325,57 @@ export function readLightMdl(text: string): LightModel {
   }
   return m;
 }
+
+// ---- lighting at a time of day ----------------------------------------------------------
+
+/** Light for shading: `dir` points toward the light; colours are RGB, already scaled by intensity. */
+export interface SceneLight {
+  dir: [number, number, number];
+  diffuse: [number, number, number];
+  ambient: [number, number, number];
+}
+
+/** A track's value at `time` (keys in order; Hermite/Bezier use their tangents). */
+export function sampleTrack(t: Track, time: number): Vec {
+  const keys = t.keys;
+  if (!keys.length) return [];
+  if (time <= keys[0].time) return keys[0].value;
+  const last = keys[keys.length - 1];
+  if (time >= last.time) return last.value;
+  let i = 0;
+  while (i < keys.length - 2 && keys[i + 1].time <= time) i++;
+  const a = keys[i], b = keys[i + 1];
+  if (t.interp === 0 || b.time === a.time) return a.value;
+  const u = (time - a.time) / (b.time - a.time);
+  if (t.interp === 1 || !a.outTan || !b.inTan) return a.value.map((v, k) => v + (b.value[k] - v) * u);
+  if (t.interp === 2) {
+    const u2 = u * u, u3 = u2 * u;
+    const h1 = 2 * u3 - 3 * u2 + 1, h2 = -2 * u3 + 3 * u2, h3 = u3 - 2 * u2 + u, h4 = u3 - u2;
+    return a.value.map((v, k) => h1 * v + h2 * b.value[k] + h3 * a.outTan![k] + h4 * b.inTan![k]);
+  }
+  const iu = 1 - u;
+  return a.value.map((v, k) => iu * iu * iu * v + 3 * iu * iu * u * a.outTan![k] + 3 * iu * u * u * b.inTan![k] + u * u * u * b.value[k]);
+}
+
+const propAt = (p: Prop, time: number): Vec => ("track" in p ? sampleTrack(p.track, time) : p.value);
+
+/** The model's first directional light at `hour` (0–24 over its first sequence, the game day).
+ *  Colours are stored BGR (night is blue). The direction is the light's +Z axis turned by its
+ *  rotation (the classic models: from the south-west, about 38° up, all day). Null without a
+ *  directional light. */
+export function lightAt(m: LightModel, hour: number): SceneLight | null {
+  const l = m.lights.find((x) => x.type === 1) ?? m.lights[0];
+  if (!l) return null;
+  const seq = m.sequences[0] ?? { start: 0, end: 60000 };
+  const time = seq.start + (((hour % 24) + 24) % 24 / 24) * (seq.end - seq.start);
+  const rgb = (bgr: Vec, k: number): [number, number, number] => [(bgr[2] ?? 1) * k, (bgr[1] ?? 1) * k, (bgr[0] ?? 1) * k];
+  const q = l.rotation ? sampleTrack(l.rotation, time) : [0, 0, 0, 1];
+  const [x, y, z, w] = q.length === 4 ? q : [0, 0, 0, 1];
+  // +Z rotated by q: the third column of the rotation matrix.
+  const dir: [number, number, number] = [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)];
+  return {
+    dir,
+    diffuse: rgb(propAt(l.color, time), propAt(l.intensity, time)[0] ?? 1),
+    ambient: rgb(propAt(l.ambColor, time), propAt(l.ambIntensity, time)[0] ?? 0),
+  };
+}

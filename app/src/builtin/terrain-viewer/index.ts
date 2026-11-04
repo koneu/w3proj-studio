@@ -17,6 +17,8 @@ import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { loadMapLighting, type MapLighting } from "./lighting";
+import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -116,6 +118,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   return { buf: await w3.game.read(path), name: path };
 }
 
+/** Hour of the game day the terrain view is lit at (null: a neutral light); kept between editors. */
+let lightHour: number | null = 12;
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   ctx.subscriptions.push(
@@ -199,6 +204,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         let dirty = true;
         const redraw = () => { dirty = true; };
+
+        // ---- day/night lighting ---------------------------------------------------------
+        let lighting: MapLighting | null = null;
+        const lightSelect = h("select", {
+          onchange: () => { lightHour = lightSelect.value === "" ? null : Number(lightSelect.value); applyLight(); },
+        }, h("option", { value: "", selected: lightHour === null }, "Neutral"),
+          ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour === hr }, `${hr}:00`)));
+        const applyLight = () => {
+          renderer.terrainLight = lightHour !== null && lighting?.terrain ? lightAt(lighting.terrain, lightHour) : null;
+          renderer.unitLight = lightHour !== null && lighting?.unit ? lightAt(lighting.unit, lightHour) : null;
+          redraw();
+        };
+        const reloadLighting = () => void loadMapLighting(w3, terrain.tileset).then((l) => {
+          lighting = l;
+          lightSelect.title = `Time of day for the map's day/night lighting (${l.source}); Neutral: an even light`;
+          applyLight();
+        }, () => {});
+        // Saved lighting, map properties (light environment) or lighting models change the light.
+        const stopLightWatch = w3.workspace.onDidSave((p) => { if (/war3map\.w3[li](\.json)?$|\.mdl$/i.test(p)) reloadLighting(); });
+        reloadLighting();
 
         // ---- editing ------------------------------------------------------------------
         const editable = !doc.readOnly;
@@ -1288,6 +1313,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.model-toolbar", {},
               toggle("Water", () => renderer.showWater, (v) => { renderer.showWater = v; }),
               toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
+              h("label.model-toggle", {}, "Light ", lightSelect),
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
@@ -1544,6 +1570,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.look === look) toolGroups.look = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
+            stopLightWatch.dispose();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
             renderer.dispose();

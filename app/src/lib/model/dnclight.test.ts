@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fmt, readLightMdl, writeLightMdl, type LightModel } from "./dnclight";
+import { fmt, lightAt, readLightMdl, writeLightMdl, type LightModel } from "./dnclight";
 
 test("fmt prints numbers like C's %g (6 significant digits, 3-digit exponent)", () => {
   assert.equal(fmt(0), "0");
@@ -64,4 +64,19 @@ test("a model without lights reads as one without lights (the editor refuses it)
   const m = readLightMdl("Model \"Footman\" {\n\tBlendTime 150,\n}\n");
   assert.equal(m.name, "Footman");
   assert.deepEqual(m.lights, []);
+});
+
+test("lighting at an hour: colours BGR → RGB times intensity, hours over the day sequence, +Z turned", () => {
+  const m = sample();
+  const near = (a: number[], b: number[]) => assert.ok(a.every((v, i) => Math.abs(v - b[i]) < 1e-6), `${a} ≉ ${b}`);
+  // The sample's sequence runs 0–60000: 12:00 is time 30000, the white key.
+  const noon = lightAt(m, 12)!;
+  near(noon.diffuse, [1.95, 1.95, 1.95]);
+  // Midnight: stored (0.5, 0.25, 0.125) as blue, green, red.
+  const night = lightAt(m, 0)!;
+  near(night.diffuse, [0.125 * 1.95, 0.25 * 1.95, 0.5 * 1.95]);
+  near(night.ambient, [0.6 * 0.3, 0.4 * 0.3, 0.2 * 0.3]);
+  // A light turned 90° about X shines from -Y.
+  m.lights[0].rotation = { interp: 0, globalSeq: -1, keys: [{ time: 0, value: [Math.SQRT1_2, 0, 0, Math.SQRT1_2] }] };
+  near(lightAt(m, 6)!.dir, [0, -1, 0]);
 });

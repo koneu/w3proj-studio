@@ -4,6 +4,10 @@
 
 import type { Extent, Model, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
+import type { SceneLight } from "./dnclight";
+
+/** Shading without a scene light (model viewer): soft ambient plus a light from the front left. */
+export const DEFAULT_LIGHT: SceneLight = { dir: [0.4, -0.3, 0.85], diffuse: [0.7, 0.7, 0.7], ambient: [0.45, 0.45, 0.45] };
 
 export type Vec3 = [number, number, number];
 export type Mat4 = Float32Array;
@@ -210,13 +214,15 @@ in vec3 vNormal; in vec2 vUV;
 uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform float uUnshaded;
 // HD materials: the ORM texture's alpha masks where team colour goes.
 uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix;
+// Scene light: direction toward it, diffuse and ambient colour (intensity included).
+uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
 void main() {
   vec4 c = texture(uTex, vUV);
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c *= uColor;
   if (c.a < uAlphaTest) discard;
-  float light = uUnshaded > 0.5 ? 1.0 : 0.45 + 0.7 * max(dot(normalize(vNormal), normalize(vec3(0.4, -0.3, 0.85))), 0.0);
+  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
   outColor = vec4(mix(c.rgb * light, uMix.rgb, uMix.a), c.a);
 }`;
 
@@ -285,7 +291,7 @@ export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
 }
 
-const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix"] as const;
+const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uLightDir", "uDiffuse", "uAmbient"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -360,6 +366,8 @@ export interface DrawOptions {
   mix?: [number, number, number, number];
   /** Draw over everything (no depth test), e.g. a preview that must stay visible. */
   onTop?: boolean;
+  /** Scene light (default: DEFAULT_LIGHT). */
+  light?: SceneLight;
 }
 
 export interface HeightMap {
@@ -551,6 +559,10 @@ export class ModelGpu {
     gl.uniform3f(u.uTeam, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
     const mx = opts.mix ?? [0, 0, 0, 0];
     gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
+    const light = opts.light ?? DEFAULT_LIGHT;
+    gl.uniform3fv(u.uLightDir, light.dir);
+    gl.uniform3fv(u.uDiffuse, light.diffuse);
+    gl.uniform3fv(u.uAmbient, light.ambient);
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);
 

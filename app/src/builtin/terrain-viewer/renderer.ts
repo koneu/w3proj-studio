@@ -4,6 +4,10 @@
 
 import { compile, mat4, type Clock, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
+import type { SceneLight } from "../../lib/model/dnclight";
+
+/** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
+const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import type { Placed } from "./objects";
 import { heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
@@ -37,10 +41,11 @@ const GROUND_FS = `#version 300 es
 precision mediump float;
 in vec2 vUV; in vec3 vNormal; in float vShade;
 uniform sampler2D uTex;
+uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
 void main() {
   vec4 c = texture(uTex, vUV);
-  float light = 0.45 + 0.65 * max(dot(normalize(vNormal), normalize(vec3(-0.3, -0.4, 0.85))), 0.0);
+  vec3 light = uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
   outColor = vec4(c.rgb * light * vShade, c.a);
 }`;
 
@@ -148,6 +153,10 @@ export class TerrainRenderer {
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
   showWater = true;
+  /** The map's day/night lighting at the chosen hour: terrain (ground, cliffs, doodads) and
+   *  units; null: a neutral default light. */
+  terrainLight: SceneLight | null = null;
+  unitLight: SceneLight | null = null;
   /** Particle effects (fires, glows, …) of placed objects. */
   showEffects = true;
   private particleRenderer: ParticleRenderer | null = null;
@@ -609,6 +618,10 @@ export class TerrainRenderer {
     // Ground: lowest texture first, the others blend over it.
     gl.useProgram(this.groundProg);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.groundProg, "uViewProj"), false, viewProj);
+    const groundLight = this.terrainLight ?? GROUND_DEFAULT;
+    gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uLightDir"), groundLight.dir);
+    gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uDiffuse"), groundLight.diffuse);
+    gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uAmbient"), groundLight.ambient);
     gl.uniform1i(gl.getUniformLocation(this.groundProg, "uTex"), 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.enable(gl.BLEND);
@@ -641,7 +654,8 @@ export class TerrainRenderer {
     for (const pass of ["opaque", "blended"] as const) {
       for (const b of this.batches) {
         if (this.hiddenGroups.has(b.group)) continue;
-        for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined });
+        const light = (b.group === "units" ? this.unitLight : this.terrainLight) ?? undefined;
+        for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined, light });
       }
     }
     if (this.showEffects) this.drawParticles(viewProj, this.eye());
