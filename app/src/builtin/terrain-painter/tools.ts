@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
 // painting, applied to the corners inside a circular brush, with undo.
 
-import { groundHeight, randomVariation, setGroundHeight, setLayer, WATER_OFFSET, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
 /** Cliff layer up/down; water: shallow (one layer down), deep (two), dry. */
@@ -129,17 +129,6 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
   return changed;
 }
 
-/** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
-function setWaterLevel(c: Corner, level: number) {
-  c.hasWater = true;
-  c.rawWater = (c.rawWater & 0xc000) | (level & 0x3fff);
-  c.water = (level - 0x2000) / 4 - WATER_OFFSET;
-}
-
-/** The stored water level word that puts the surface at world height `z`. */
-export function waterLevelAt(z: number): number {
-  return Math.max(0, Math.min(0x3fff, Math.round((z + WATER_OFFSET) * 4) + 0x2000));
-}
 
 /** Paints ground texture `tex` (index into terrain.groundTiles) under the brush. */
 export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke): boolean {

@@ -440,6 +440,12 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .cm-editor { isolation: isolate; }
 .newmap-error { color: var(--error); min-height: 1em; }
 .newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.newmap-tiles { display: flex; flex-direction: column; gap: 6px; margin-left: 98px; }
+.newmap-tiles[hidden] { display: none; }
+.newmap-tiles > button { align-self: flex-start; }
+.newmap-tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); max-height: 180px; overflow-y: auto;
+  border: 1px solid var(--border); padding: 4px 6px; }
+.newmap-tile { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trig-editor { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; height: 100%; overflow: hidden; }
 .trig-loading { padding: 16px; }
 .trig-tree { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); user-select: none; }

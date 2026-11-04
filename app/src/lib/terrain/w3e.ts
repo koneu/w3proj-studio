@@ -142,6 +142,18 @@ export function setLayer(c: Corner, layer: number) {
   c.height = ground + (c.layer - 2) * 128;
 }
 
+/** The stored water level word that puts the surface at world height `z`. */
+export function waterLevelAt(z: number): number {
+  return Math.max(0, Math.min(0x3fff, Math.round((z + WATER_OFFSET) * 4) + 0x2000));
+}
+
+/** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
+export function setWaterLevel(c: Corner, level: number) {
+  c.hasWater = true;
+  c.rawWater = (c.rawWater & 0xc000) | (level & 0x3fff);
+  c.water = (level - 0x2000) / 4 - WATER_OFFSET;
+}
+
 /** Ground height of a corner without its cliff layer. */
 export function groundHeight(c: Corner): number {
   return (c.rawHeight - 0x2000) / 4;

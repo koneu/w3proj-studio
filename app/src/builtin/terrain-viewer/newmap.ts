@@ -1,5 +1,6 @@
-// New Map: asks for name, size, tileset, base tile and script language, then
-// writes a project folder with a flat map in it, as the World Editor 2.0 makes
+// New Map: asks for name, size, tileset, ground tiles, base tile, initial cliff level,
+// water and random hills, and script language, then writes a project folder with
+// the map in it, as the World Editor 2.0 makes
 // one: map info (w3i v33), terrain (w3e v12, centred on the origin, camera
 // margins 6/6/4/8 tiles), one player with a start location, no doodads, the
 // default melee trigger (wtg/wct) and the map script it compiles to, and the
@@ -8,7 +9,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { randomVariation, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { heightAt, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -27,10 +28,25 @@ export interface NewMapOptions {
   width: number;
   height: number;
   tileset: string;
-  /** Ground tile the map is covered with (one of the tileset's tiles). */
+  /** Ground tiles (at most 16: the tileset's own, or a custom list) and the cliff types standing on them. */
+  groundTiles: string[];
+  cliffTiles: string[];
+  /** The tile list differs from the tileset's. */
+  customTiles: boolean;
+  /** Ground tile the map is covered with (one of groundTiles). */
   baseTile: string;
+  /** Cliff level of the ground (0–15; the World Editor starts at 2). */
+  layer: number;
+  /** Water over the whole map, as the painter's water tools make it: the ground one level
+   *  (shallow) or two (deep) below `layer`, the surface just under `layer`'s ground. */
+  water: "none" | "shallow" | "deep";
+  /** Gentle random hills. */
+  noise: boolean;
   lua: boolean;
 }
+
+/** Levels the ground goes down for water. */
+const WATER_DROP = { none: 0, shallow: 1, deep: 2 } as const;
 
 /** Camera margins (tiles): left, right, bottom, top, as the World Editor sets them. */
 const MARGINS = [6, 6, 4, 8] as const;
@@ -46,12 +62,20 @@ const AMBIENCE: Record<string, string> = {
 };
 const SIZES = Array.from({ length: 15 }, (_, i) => 32 * (i + 1));
 
-interface Tileset { id: string; name: string; tiles: { id: string; name: string }[]; cliffs: string[] }
+interface Tile { id: string; name: string }
+interface Tileset { id: string; name: string; tiles: Tile[]; cliffs: string[] }
+interface TileData {
+  sets: Tileset[];
+  /** Every ground tile (Terrain.slk order), for custom tile lists. */
+  all: Tile[];
+  /** Cliff types standing on the given ground tiles. */
+  cliffsOn(tiles: string[]): string[];
+}
 
 /** Tilesets with their ground tiles (Terrain.slk ids start with the tileset
  *  letter; that list, in table order, is what new maps get) and the cliff
  *  types standing on those tiles. */
-async function loadTilesets(w3: W3Api): Promise<Tileset[]> {
+async function loadTilesets(w3: W3Api): Promise<TileData> {
   const strings = new Map<string, string>();
   for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
     for (const sec of parseIni(await w3.game.readText(f).catch(() => "")).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
@@ -62,19 +86,15 @@ async function loadTilesets(w3: W3Api): Promise<Tileset[]> {
   const entries = [...section.matchAll(/^(\w)=([^,\r\n]*)/gm)].map((m) => [m[1], m[2]] as const);
   const tiles = parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk")).filter((r) => r.tileID);
   const cliffs = parseSlk(await w3.game.readText("TerrainArt\\CliffTypes.slk")).filter((r) => r.cliffID);
+  const cliffsOn = (ids: string[]) => cliffs.filter((r) => ids.includes(r.groundTile)).map((r) => r.cliffID);
+  const tile = (r: Record<string, string>): Tile => ({ id: r.tileID, name: r.comment || r.tileID });
   const out: Tileset[] = [];
   for (const [id, label] of entries) {
     const own = tiles.filter((r) => r.tileID[0] === id).slice(0, 16);
     if (!own.length) continue;
-    const ids = new Set(own.map((r) => r.tileID));
-    out.push({
-      id,
-      name: (strings.get(label.toUpperCase()) ?? id).replace(/&/g, ""),
-      tiles: own.map((r) => ({ id: r.tileID, name: r.comment || r.tileID })),
-      cliffs: cliffs.filter((r) => ids.has(r.groundTile)).map((r) => r.cliffID),
-    });
+    out.push({ id, name: (strings.get(label.toUpperCase()) ?? id).replace(/&/g, ""), tiles: own.map(tile), cliffs: cliffsOn(own.map((r) => r.tileID)) });
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  return { sets: out.sort((a, b) => a.name.localeCompare(b.name)), all: tiles.map(tile), cliffsOn };
 }
 
 /** The New Map dialog; resolves with the choices, or null when cancelled. */
@@ -82,8 +102,9 @@ async function loadTilesets(w3: W3Api): Promise<Tileset[]> {
  *  name (".w3x": chapter projects are named like their map file), dialog title. */
 export interface NewMapPreset { parent?: string; suffix?: string; title?: string }
 
-export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(NewMapOptions & { tilesetInfo: Tileset }) | null> {
-  const tilesets = await loadTilesets(w3);
+export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<NewMapOptions | null> {
+  const data = await loadTilesets(w3);
+  const tilesets = data.sets;
   if (!tilesets.length) throw new Error("No tilesets found in the game data.");
   return new Promise((resolve) => {
     let parent = preset.parent ?? "";
@@ -95,15 +116,50 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(
     const playable = h("span.muted");
     const tileset = h("select", {}, ...tilesets.map((t) => h("option", { value: t.id, selected: t.id === "L" }, t.name)));
     const base = h("select");
+    const layer = h("select", {}, ...Array.from({ length: 15 }, (_, i) => h("option", { value: String(i), selected: i === 2 }, String(i))));
+    const water = h("select", {}, h("option", { value: "none" }, "None"), h("option", { value: "shallow" }, "Shallow water"), h("option", { value: "deep" }, "Deep water"));
+    const noise = h("input", { type: "checkbox" });
     const script = h("select", {}, h("option", { value: "jass" }, "JASS"), h("option", { value: "lua" }, "Lua"));
     const folder = h("span.newmap-folder.muted", {}, "Choose a parent folder…");
     const error = h("div.newmap-error");
     const current = () => tilesets.find((t) => t.id === tileset.value)!;
+    /** The ground tile list: the tileset's, until edited. */
+    let tiles: string[] = current().tiles.map((x) => x.id);
+    let custom = false;
+    const tileName = (id: string) => data.all.find((x) => x.id === id)?.name ?? id;
+    const tilesSummary = h("span.muted");
     const fillTiles = () => {
-      const t = current();
-      // Grass where the tileset has one (as the World Editor's default), else the first tile.
-      const pick = t.tiles.find((x) => /^grass$/i.test(x.name)) ?? t.tiles.find((x) => /grass/i.test(x.name)) ?? t.tiles[0];
-      base.replaceChildren(...t.tiles.map((x) => h("option", { value: x.id, selected: x === pick }, `${x.name} (${x.id})`)));
+      if (!custom) tiles = current().tiles.map((x) => x.id);
+      // Grass where the list has one (as the World Editor's default), else the first tile.
+      const keep = tiles.includes(base.value) ? base.value : null;
+      const pick = keep ?? tiles.find((x) => /^grass$/i.test(tileName(x))) ?? tiles.find((x) => /grass/i.test(tileName(x))) ?? tiles[0];
+      base.replaceChildren(...tiles.map((x) => h("option", { value: x, selected: x === pick }, `${tileName(x)} (${x})`)));
+      tilesSummary.textContent = `${tiles.length} tiles${custom ? " (custom)" : ""} `;
+    };
+    // Custom tile list: up to 16 ground tiles from any tileset.
+    const tileList = h("div.newmap-tiles", { hidden: true });
+    const editTiles = () => {
+      const count = h("div.muted");
+      const boxes = data.all.map((t) => {
+        const box = h("input", { type: "checkbox", checked: tiles.includes(t.id) });
+        return { t, box, label: h("label.newmap-tile", {}, box, ` ${t.name} (${t.id})`) };
+      });
+      const sync = () => {
+        const picked = boxes.filter((b) => b.box.checked).map((b) => b.t.id);
+        for (const b of boxes) b.box.disabled = !b.box.checked && picked.length >= 16;
+        count.textContent = `${picked.length} of at most 16 tiles`;
+        if (picked.length) {
+          tiles = picked;
+          custom = picked.join() !== current().tiles.map((x) => x.id).join();
+          fillTiles();
+        }
+      };
+      for (const b of boxes) b.box.addEventListener("change", sync);
+      tileList.replaceChildren(count,
+        h("div.newmap-tile-grid", {}, ...boxes.map((b) => b.label)),
+        h("button", { onclick: (e: Event) => { e.preventDefault(); custom = false; fillTiles(); editTiles(); } }, "Tileset's tiles"));
+      tileList.hidden = false;
+      sync();
     };
     const folderName = () => name.value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled";
     const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName()}${preset.suffix ?? ""}` : "");
@@ -114,7 +170,7 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(
       folder.title = target();
       folder.classList.toggle("muted", !parent);
     };
-    tileset.addEventListener("change", fillTiles);
+    tileset.addEventListener("change", () => { fillTiles(); if (!tileList.hidden) editTiles(); });
     for (const el of [name, width, height]) el.addEventListener("input", update);
     fillTiles();
     update();
@@ -123,10 +179,13 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(
     const create = () => {
       if (!parent) { error.textContent = "Choose where to create the project."; return; }
       if (!name.value.trim()) { error.textContent = "The map needs a name."; return; }
+      const w = water.value as NewMapOptions["water"];
+      if (Number(layer.value) < WATER_DROP[w]) { error.textContent = `${w === "deep" ? "Deep" : "Shallow"} water needs cliff level ${WATER_DROP[w]} or higher.`; return; }
       close({
         dir: target(), name: name.value.trim(), author: author.value.trim(), description: description.value.trim(),
-        width: Number(width.value), height: Number(height.value), tileset: tileset.value, baseTile: base.value,
-        lua: script.value === "lua", tilesetInfo: current(),
+        width: Number(width.value), height: Number(height.value), tileset: tileset.value,
+        groundTiles: tiles, cliffTiles: data.cliffsOn(tiles), customTiles: custom, baseTile: base.value,
+        layer: Number(layer.value), water: w, noise: noise.checked, lua: script.value === "lua",
       });
     };
     const row = (label: string, ...content: (HTMLElement | string)[]) => h("label.newmap-row", {}, h("span.newmap-label", {}, label), ...content);
@@ -144,7 +203,13 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(
       row("Description", description),
       row("Size", width, " × ", height, playable),
       row("Tileset", tileset),
+      h("div.newmap-row", {}, h("span.newmap-label", {}, "Ground tiles"), tilesSummary,
+        h("button", { title: "Choose up to 16 ground tiles from any tileset", onclick: (e: Event) => { e.preventDefault(); if (tileList.hidden) editTiles(); else tileList.hidden = true; } }, "Edit…")),
+      tileList,
       row("Base tile", base),
+      row("Cliff level", layer, h("span.muted", {}, " initial ground height")),
+      row("Water", water),
+      row("Random hills", noise),
       row("Script", script),
       row("Folder", h("button", { onclick: async (e: Event) => {
         e.preventDefault();
@@ -161,16 +226,42 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<(
   });
 }
 
-/** A flat terrain of `o.width` × `o.height` tiles, centred on the origin. */
-export function newTerrain(o: NewMapOptions, tiles: string[], cliffs: string[]): Terrain {
+/** Gentle random hills (world units, about ±50): smooth value noise over two grid sizes. */
+function hills(width: number, height: number): (x: number, y: number) => number {
+  const octave = (cell: number, amp: number) => {
+    const gw = Math.ceil(width / cell) + 2, gh = Math.ceil(height / cell) + 2;
+    const g = Float32Array.from({ length: gw * gh }, () => (Math.random() * 2 - 1) * amp);
+    const smooth = (t: number) => t * t * (3 - 2 * t);
+    return (x: number, y: number) => {
+      const fx = x / cell, fy = y / cell, ix = Math.floor(fx), iy = Math.floor(fy);
+      const u = smooth(fx - ix), v = smooth(fy - iy), at = (i: number, j: number) => g[(iy + j) * gw + ix + i];
+      return (at(0, 0) * (1 - u) + at(1, 0) * u) * (1 - v) + (at(0, 1) * (1 - u) + at(1, 1) * u) * v;
+    };
+  };
+  const big = octave(8, 40), small = octave(3, 12);
+  return (x, y) => big(x, y) + small(x, y);
+}
+
+/** The terrain of `o.width` × `o.height` tiles, centred on the origin. */
+export function newTerrain(o: NewMapOptions): Terrain {
   const width = o.width + 1, height = o.height + 1;
-  const texture = Math.max(0, tiles.indexOf(o.baseTile));
-  const corners: Corner[] = Array.from({ length: width * height }, () => ({
-    height: 0, water: -89.6, texture, variation: randomVariation(), cliffVariation: 0, cliffTexture: 15, layer: 2,
-    ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0,
-  }));
+  const texture = Math.max(0, o.groundTiles.indexOf(o.baseTile));
+  const layer = Math.max(0, Math.min(15, o.layer - WATER_DROP[o.water]));
+  // The surface sits where the painter's water tools put it: just under the ground of `o.layer`.
+  const level = o.water === "none" ? null : waterLevelAt((o.layer - 2) * 128 - 8);
+  const lift = o.noise ? hills(width, height) : () => 0;
+  const corners: Corner[] = Array.from({ length: width * height }, (_, i) => {
+    const c: Corner = {
+      height: 0, water: -89.6, texture, variation: randomVariation(), cliffVariation: 0, cliffTexture: 15, layer,
+      ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0,
+    };
+    setGroundHeight(c, lift(i % width, Math.floor(i / width)));
+    if (level !== null) setWaterLevel(c, level);
+    return c;
+  });
   return {
-    version: 12, tileset: o.tileset, customTilesets: false, customTilesetsRaw: 0, groundTiles: tiles, cliffTiles: cliffs,
+    version: 12, tileset: o.tileset, customTilesets: o.customTiles, customTilesetsRaw: o.customTiles ? 1 : 0,
+    groundTiles: o.groundTiles, cliffTiles: o.cliffTiles,
     width, height, offsetX: -o.width * 64, offsetY: -o.height * 64, corners, trailer: new Uint8Array(0),
   };
 }
@@ -220,7 +311,7 @@ function placements(t: Terrain): { doodads: unknown; units: unknown } {
     doodads: { format: "w3proj.doodads/1", ...head, doodads: [], specialVersion: 0, specials: [] },
     units: {
       format: "w3proj.units/1", ...head, units: [{
-        id: "sloc", variation: 0, position: [sx, sy, 0], angle: 4.712389, scale: [1, 1, 1], skinId: "sloc", flags: 2, player: 0,
+        id: "sloc", variation: 0, position: [sx, sy, heightAt(t, sx, sy)], angle: 4.712389, scale: [1, 1, 1], skinId: "sloc", flags: 2, player: 0,
         unknown1: 0, unknown2: 0, hp: -1, mana: -1, itemTable: -1, itemSets: [], gold: 0, targetAcquisition: 0, level: 0,
         strength: 0, agility: 0, intelligence: 0, inventory: [], abilities: [], randomType: 0, randomLevel: "010000",
         randomClass: 0, color: -1, waygate: -1, editorId: 0,
@@ -296,8 +387,8 @@ export function mapScript(o: NewMapOptions, t: Terrain, lights: { terrain: strin
 }
 
 /** Writes the project for `o` and opens it in the terrain editor. */
-export async function createMap(w3: W3Api, o: NewMapOptions & { tilesetInfo: Tileset }): Promise<void> {
-  const t = newTerrain(o, o.tilesetInfo.tiles.map((x) => x.id), o.tilesetInfo.cliffs);
+export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
+  const t = newTerrain(o);
   const data = parseIni(await w3.game.readText("UI\\WorldEditData.txt"));
   const light = (section: string, kind: string) => data.get(section)?.get(o.tileset.toLowerCase())
     ?? `Environment\\DNC\\DNCLordaeron\\DNCLordaeron${kind}\\DNCLordaeron${kind}.mdl`;
