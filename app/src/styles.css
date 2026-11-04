@@ -422,6 +422,15 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .pathing-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .terrain-group-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .terrain-group-tools button.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+/* Terrain painter: tool sections in one row, the active tool's options below. */
+.terrain-group-tools.painter-bar { flex-direction: column; align-items: stretch; gap: 6px; flex: 1; }
+.painter-sections { display: flex; flex-wrap: wrap; gap: 6px 0; }
+.painter-section { display: flex; flex-direction: column; gap: 3px; padding: 0 12px; border-left: 1px solid var(--border); }
+.painter-section:first-child { padding-left: 0; border-left: none; }
+.painter-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); }
+.painter-section-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+.painter-section-buttons .tool-button { padding: 3px 7px; }
+.painter-options { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; min-height: 28px; }
 .terrain-tabs { align-items: flex-end; }
 .terrain-tabs-gap { flex: 1; }
 .terrain-tabs > button:not(.terrain-tab) { margin-bottom: 3px; }

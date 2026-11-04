@@ -17,19 +17,27 @@ const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
 /** Maps hold at most this many ground tile types (World Editor limit). */
 const MAX_GROUND_TILES = 16;
 
-const TOOLS: [Tool, string, string][] = [
-  ["paint", "Paint", "Paint a ground texture"],
-  ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
-  ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"],
-  ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"],
-  ["cliffUp2", "Cliff ↑↑", "Raise two cliff levels (two above where the stroke starts)"],
-  ["cliffLevel", "Cliff level", "Bring everything to the cliff level where the stroke starts"],
-  ["cliffDown", "Cliff ↓", "Lower a cliff level (one below where the stroke starts)"],
-  ["cliffDown2", "Cliff ↓↓", "Lower two cliff levels (two below where the stroke starts)"],
-  ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
-  ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
-  ["blight", "Blight +", "Paint Undead blight"], ["unblight", "Blight −", "Remove blight"],
-  ["ramp", "Ramp", "Click a one-level cliff edge to build a ramp (Size sets its width); click a ramp to remove it"],
+/** The toolbar's sections and their tools: [tool, label, tooltip]. */
+const SECTIONS: [string, [Tool, string, string][]][] = [
+  ["Paint", [
+    ["paint", "Paint", "Paint a ground texture"],
+    ["blight", "Blight", "Paint Undead blight"], ["unblight", "Unblight", "Remove blight"],
+  ]],
+  ["Cliffs", [
+    ["cliffUp", "+1", "Raise a cliff level (one above where the stroke starts)"],
+    ["cliffUp2", "+2", "Raise two cliff levels (two above where the stroke starts)"],
+    ["cliffLevel", "Level", "Bring everything to the cliff level where the stroke starts"],
+    ["cliffDown", "−1", "Lower a cliff level (one below where the stroke starts)"],
+    ["cliffDown2", "−2", "Lower two cliff levels (two below where the stroke starts)"],
+    ["ramp", "Ramp", "Click a one-level cliff edge to build a ramp (Size sets its width); click a ramp to remove it"],
+    ["shallow", "Shallow", "Shallow water: one level below where the stroke starts"],
+    ["deep", "Deep", "Deep water: two levels below where the stroke starts"],
+    ["dry", "Dry", "Remove water (use Cliffs +1 to raise the ground again)"],
+  ]],
+  ["Terrain", [
+    ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
+    ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"],
+  ]],
 ];
 
 const BRUSH_COLORS: Record<Tool, [number, number, number]> = {
@@ -178,18 +186,22 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     ed.setBrush(null);
     ed.focus();
   };
-  const toolbar = h("div.terrain-group-tools", {},
-    ...TOOLS.map(([t, label, title]) => {
-      const b = h("button.tool-button", { title, onclick: () => setTool(t) }, toolIcon(t), label);
-      buttons.set(t, b);
-      return b;
-    }),
-    h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
+  // Row 1: the tools in sections; row 2: the active tool's options.
+  const toolbar = h("div.terrain-group-tools.painter-bar", {},
+    h("div.painter-sections", {}, ...SECTIONS.map(([name, tools]) => h("div.painter-section", {},
+      h("span.painter-section-title", {}, name),
+      h("div.painter-section-buttons", {}, ...tools.map(([t, label, title]) => {
+        const b = h("button.tool-button", { title, onclick: () => setTool(t) }, toolIcon(t), label);
+        buttons.set(t, b);
+        return b;
+      }))))),
+    h("div.painter-options", {}, h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
       h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
     h("label.terrain-tool-opt", { title: "Brush shape (not for ramps)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
-    strengthWrap, cliffWrap, texWrap, tilePanel,
+    strengthWrap, cliffWrap, texWrap),
+    tilePanel,
   );
   setTool("paint");
 
