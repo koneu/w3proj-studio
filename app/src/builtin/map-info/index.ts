@@ -2,6 +2,8 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
+import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional
@@ -373,15 +375,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               )),
             ),
           ],
-          techtree: () => [
-            section_("Techtree & tables",
-              row("Upgrade availability overrides", h("span", {}, String(info.upgrades.length))),
-              row("Tech availability overrides", h("span", {}, String(info.techs.length))),
-              row("Random unit tables", h("span", {}, String(info.unitTables.length))),
-              row("Random item tables", h("span", {}, String(info.itemTables.length))),
-              h("p.muted", {}, "These lists are stored in the JSON; edit them with “Reopen Editor With… → Text Editor” until a dedicated editor exists."),
-            ),
-          ],
+          techtree: () => renderTechtree(info as unknown as TechInfo, {
+            players: info.players.map((p) => ({ id: p.id, label: `Player ${p.id + 1}: ${StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name}` })),
+            pick: async (title, kinds) => (await (await w3.services.get<ObjectsService>(OBJECTS_SERVICE)).pick(el, { title, kinds }))?.id,
+            name: async (id) => (await w3.services.get<ObjectsService>(OBJECTS_SERVICE)).name(id),
+            changed: (rerender) => { update(); if (rerender) show(section); },
+            flag: (mask, label) => bit(() => info.flags, (n) => { info.flags = n >>> 0; }, mask, label),
+            setFlag: (mask) => { info.flags = (info.flags | mask) >>> 0; },
+          }),
         };
 
         const nav = h("nav.form-nav");

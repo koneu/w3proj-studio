@@ -302,6 +302,17 @@ textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .form-table th { text-align: left; font-size: 11px; color: var(--fg-muted); font-weight: 600; padding: 4px 6px; }
 .form-table td { padding: 2px 6px; }
 .form-table .form-num { width: 100px; }
+.techtree-object { display: inline-flex; align-items: center; gap: 4px; }
+.form-input.techtree-id { width: 90px; font-family: var(--mono, monospace); }
+.form-table .form-num.techtree-num, .techtree-num { width: 64px; }
+.techtree-players { display: inline-flex; flex-wrap: wrap; gap: 2px 6px; }
+.techtree-player { display: inline-flex; align-items: center; gap: 1px; font-size: 11px; color: var(--fg-muted); }
+.techtree-table { border: 1px solid var(--border); padding: 6px 8px; margin: 8px 0; }
+.techtree-table-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.techtree-table-head .form-input { max-width: 260px; }
+.techtree-set { margin: 6px 0 6px 12px; }
+.techtree-row { display: flex; align-items: center; gap: 4px; margin: 2px 0; }
+.techtree-warn { color: var(--warning, #d7a03a); }
 .force { border-top: 1px solid #2a2c30; padding: 6px 0; }
 input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var(--bg); }
 .ext-item.is-disabled { opacity: 0.55; }

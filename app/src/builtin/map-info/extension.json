@@ -2,7 +2,8 @@
   "id": "w3.mapInfo",
   "name": "Map Properties",
   "version": "0.1.0",
-  "description": "Edits war3map.w3i: description, loading screen, prologue, options, environment, players, forces — like the World Editor's Scenario menu.",
+  "description": "Edits war3map.w3i: description, loading screen, prologue, options, environment, players, forces, techtree, random groups and item tables — like the World Editor's Scenario menu.",
+  "extensionDependencies": ["w3.objectEditor"],
   "contributes": {
     "viewContainers": [{ "id": "scenario", "title": "Scenario", "icon": "⚑", "order": 4 }],
     "views": [{ "id": "w3.scenario.sections", "title": "Map Properties", "container": "scenario" }],
