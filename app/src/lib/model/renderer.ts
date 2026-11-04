@@ -2,7 +2,7 @@
 // float texture), keyframe animation, Warcraft blend modes, team colour.
 // Particles, ribbons and texture animations are not drawn.
 
-import type { Extent, Model, Track } from "./mdx";
+import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
 import type { SceneLight } from "./dnclight";
 
@@ -115,6 +115,23 @@ export function sample(track: Track | undefined, clock: Clock, globalSeqs: numbe
   return va.map((v, k) => iu * iu * iu * v + 3 * iu * iu * u * ot[k] + 3 * iu * u * u * it[k] + u * u * u * vb[k]);
 }
 
+const IDENTITY3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+
+/** A layer's texture coordinate transform (column-major 3×3) at a moment: scaled and turned
+ *  about the texture's centre, then moved; identity without an animation. */
+export function textureMatrix(anim: TextureAnim | undefined, clock: Clock, globalSeqs: number[]): Float32Array {
+  if (!anim) return IDENTITY3;
+  const [tx, ty] = sample(anim.translation, clock, globalSeqs, [0, 0, 0]);
+  const q = sample(anim.rotation, clock, globalSeqs, [0, 0, 0, 1]);
+  const [sx, sy] = sample(anim.scaling, clock, globalSeqs, [1, 1, 1]);
+  // Only the turn about Z applies to a 2D texture.
+  const angle = 2 * Math.atan2(q[2], q[3]);
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const ax = c * sx, ay = s * sx, bx = -s * sy, by = c * sy;
+  // uv' = centre + R·S·(uv − centre) + t
+  return new Float32Array([ax, ay, 0, bx, by, 0, 0.5 + tx - (ax + bx) * 0.5, 0.5 + ty - (ay + by) * 0.5, 1]);
+}
+
 /** Nodes parents first (cached per model). */
 const nodeOrders = new WeakMap<Model, number[]>();
 function nodeOrder(model: Model): number[] {
@@ -180,6 +197,8 @@ const VS = `#version 300 es
 precision highp float;
 in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec4 aBones; in vec4 aWeights;
 uniform mat4 uViewProj; uniform mat4 uWorld;
+// Texture animation (TXAN) of the layer: identity without one.
+uniform mat3 uTexMatrix;
 uniform highp sampler2D uBones;
 // Optional ground height map (R32F, one texel per terrain corner): cliff models
 // follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
@@ -202,7 +221,7 @@ void main() {
   mat4 m = aWeights.x * bone(aBones.x) + aWeights.y * bone(aBones.y) + aWeights.z * bone(aBones.z) + aWeights.w * bone(aBones.w);
   if (aWeights.x + aWeights.y + aWeights.z + aWeights.w < 0.001) m = mat4(1.0);
   vNormal = mat3(uWorld) * mat3(m) * aNormal;
-  vUV = aUV;
+  vUV = (uTexMatrix * vec3(aUV, 1.0)).xy;
   vec4 world = uWorld * m * vec4(aPos, 1.0);
   if (uUseHeight > 0.5) world.z += groundAt(world.xy);
   gl_Position = uViewProj * world;
@@ -291,7 +310,7 @@ export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
 }
 
-const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uLightDir", "uDiffuse", "uAmbient"] as const;
+const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -575,6 +594,7 @@ export class ModelGpu {
       const tint = opts.tint ?? [1, 1, 1, 1];
       gl.uniform4f(u.uColor, color[2] * tint[0], color[1] * tint[1], color[0] * tint[2], alpha * tint[3]);
 
+      gl.uniformMatrix3fv(u.uTexMatrix, false, textureMatrix(m.textureAnims[layer.textureAnimId], clock, m.globalSequences));
       const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
       const tex = m.textures[texIndex];
       gl.bindTexture(gl.TEXTURE_2D, tex?.replaceableId === 1 ? sh.team[team] ?? sh.white : tex?.replaceableId === 2 ? sh.glow[team] ?? sh.white : this.textures[texIndex] ?? sh.white);

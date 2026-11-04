@@ -181,6 +181,14 @@ export interface RibbonEmitter {
 /** Emitter flags in `ParticleEmitter2.node.flags`. */
 export const PRE2_FLAGS = { unshaded: 0x8000, sortPrimsFarZ: 0x10000, lineEmitter: 0x20000, unfogged: 0x40000, modelSpace: 0x80000, xyQuad: 0x100000 };
 
+/** A texture animation (TXAN): moves, turns and scales a layer's texture coordinates. */
+export interface TextureAnim {
+  translation?: Track;
+  /** Quaternion; only the turn about Z matters for texture coordinates. */
+  rotation?: Track;
+  scaling?: Track;
+}
+
 export interface Model {
   version: number;
   name: string;
@@ -196,6 +204,8 @@ export interface Model {
   pivots: Float32Array;
   particleEmitters2: ParticleEmitter2[];
   ribbons: RibbonEmitter[];
+  /** By `Layer.textureAnimId` (-1: none). */
+  textureAnims: TextureAnim[];
   /** Chunks present but not rendered (lights, cameras, …). */
   skipped: string[];
   warnings: string[];
@@ -441,7 +451,7 @@ export function parseMdx(buf: Uint8Array): Model {
   const model: Model = {
     version: 800, name: "", extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] },
     sequences: [], globalSequences: [], textures: [], materials: [], geosets: [], geosetAnims: [],
-    nodes: [], pivots: new Float32Array(0), particleEmitters2: [], ribbons: [], skipped: [], warnings: [],
+    nodes: [], pivots: new Float32Array(0), particleEmitters2: [], ribbons: [], textureAnims: [], skipped: [], warnings: [],
   };
   const node = (n: Node) => { model.nodes[n.objectId] = n; };
   while (r.left >= 8) {
@@ -490,6 +500,13 @@ export function parseMdx(buf: Uint8Array): Model {
         case "BONE": while (r.p < end) { node(readNode(r, "bone")); r.p += 8; } break;
         case "HELP": while (r.p < end) node(readNode(r, "helper")); break;
         case "PIVT": model.pivots = r.f32s(size / 4); break;
+        case "TXAN":
+          while (r.p < end) {
+            const aStart = r.p;
+            const t = readTracks(r, aStart + r.u32());
+            model.textureAnims.push({ translation: t.KTAT, rotation: t.KTAR, scaling: t.KTAS });
+          }
+          break;
         case "PRE2":
           while (r.p < end) {
             const oStart = r.p;

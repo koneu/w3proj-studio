@@ -18,7 +18,7 @@ function model(over: Partial<ParticleEmitter2> = {}): Model {
     version: 800, name: "test", extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] },
     sequences: [{ name: "Stand", start: 0, end: 1000, moveSpeed: 0, flags: 0, rarity: 0, extent: { radius: 0, min: [0, 0, 0], max: [0, 0, 0] } }],
     globalSequences: [], textures: [], materials: [], geosets: [], geosetAnims: [], nodes: [node],
-    pivots: new Float32Array([0, 0, 100]), particleEmitters2: [e], ribbons: [], skipped: [], warnings: [],
+    pivots: new Float32Array([0, 0, 100]), particleEmitters2: [e], ribbons: [], textureAnims: [], skipped: [], warnings: [],
   };
 }
 const clock: Clock = { frame: 0, seqStart: 0, seqEnd: 1000, time: 0 };
