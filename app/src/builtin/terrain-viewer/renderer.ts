@@ -397,9 +397,13 @@ export class TerrainRenderer {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
         if (!cs.some((c) => c.hasWater) || cs.every((c) => c.water <= c.height)) continue;
+        // Corners without water (the shore) keep the surface level: their stored level is
+        // meaningless (often the default far below), which would tilt the water into the ground.
+        const level = Math.max(...cs.filter((c) => c.hasWater).map((c) => c.water));
         const v = cs.map((c, i) => {
           const dx = i === 1 || i === 2 ? 1 : 0, dy = i >= 2 ? 1 : 0;
-          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, c.water, dx, 1 - dy, (c.water - c.height) / 128];
+          const z = c.hasWater ? c.water : level;
+          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, z, dx, 1 - dy, (z - c.height) / 128];
         });
         out.push(...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]);
       }

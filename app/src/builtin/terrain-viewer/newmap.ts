@@ -10,7 +10,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { heightAt, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { heightAt, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -247,8 +247,8 @@ export function newTerrain(o: NewMapOptions): Terrain {
   const width = o.width + 1, height = o.height + 1;
   const texture = Math.max(0, o.groundTiles.indexOf(o.baseTile));
   const layer = Math.max(0, Math.min(15, o.layer - WATER_DROP[o.water]));
-  // The surface sits where the painter's water tools put it: just under the ground of `o.layer`.
-  const level = o.water === "none" ? null : waterLevelAt((o.layer - 2) * 128 - 8);
+  // The surface sits where the painter's water tools put it: the water offset under the ground of `o.layer`.
+  const level = o.water === "none" ? null : waterLevelAt((o.layer - 2) * 128 - WATER_OFFSET);
   const lift = o.noise ? hills(width, height) : () => 0;
   const corners: Corner[] = Array.from({ length: width * height }, (_, i) => {
     const c: Corner = {
