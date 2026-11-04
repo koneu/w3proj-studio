@@ -8,6 +8,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { pickFile, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType } from "./fields";
+import { ModelPreview } from "./preview";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -494,6 +495,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             detailEl.focus({ preventScroll: true });
           }
         };
+        // A live view of the selected object's model (units, items, doodads, destructables).
+        const MODEL_FIELD: Record<string, { model: string; variations?: string }> = {
+          w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
+        };
+        const preview = MODEL_FIELD[kind] ? new ModelPreview(w3) : null;
+        /** The model the object shows (its first variation). */
+        const modelOf = (o: Obj): string | null => {
+          const mf = MODEL_FIELD[kind], f = kd?.fieldById.get(mf.model);
+          if (!f) return null;
+          const path = effective(o, f, 0).split(",")[0]?.trim();
+          if (!path || path === "_") return null;
+          const vf = mf.variations ? kd!.fieldById.get(mf.variations) : undefined;
+          const variations = vf ? Number(effective(o, vf, 0)) || 1 : 1;
+          return variations > 1 ? `${path.replace(/\.(mdl|mdx)$/i, "")}0` : path;
+        };
         const renderDetailInner = () => {
           // Edits can change names and the clean-up count in the list too.
           renderList();
@@ -541,6 +557,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           sections.push(rawTable(o, other, kd ? "Other modifications" : "Modifications"));
 
           const parts: (HTMLElement | null)[] = [
+            preview && kd ? (preview.show(modelOf(o)), preview.el) : null,
             h("div.obj-detail-header", {},
               h("h2", {}, nameOf(o) || "(unnamed)"),
               h("code", {}, o.id ? `${o.id} (based on ${o.base}${baseName(o) ? ` · ${stripColors(baseName(o))}` : ""})` : o.base),
@@ -806,7 +823,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             w3.views.refresh("w3.objects.kinds");
           },
           focus: () => search.focus(),
-          dispose: () => { focusers.delete(doc.path); },
+          dispose: () => { focusers.delete(doc.path); preview?.dispose(); },
           watches: ["map/war3map.wts"],
         };
       },
