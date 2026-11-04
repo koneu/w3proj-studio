@@ -1562,3 +1562,12 @@ campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3h	objdata-j
 campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3q	objdata-json
 campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3t	objdata-json
 campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3u	objdata-json
+empty_map_on_newest_world_editor.w3m	war3map.doo	format:doodads
+empty_map_on_newest_world_editor.w3m	war3map.mmp	format:minimap
+empty_map_on_newest_world_editor.w3m	war3map.w3c	format:cameras
+empty_map_on_newest_world_editor.w3m	war3map.w3e	w3e-text
+empty_map_on_newest_world_editor.w3m	war3map.w3i	format:w3i
+empty_map_on_newest_world_editor.w3m	war3map.w3r	format:regions
+empty_map_on_newest_world_editor.w3m	war3map.wct	wct-text
+empty_map_on_newest_world_editor.w3m	war3map.wtg	wtg-json
+empty_map_on_newest_world_editor.w3m	war3mapUnits.doo	format:units
