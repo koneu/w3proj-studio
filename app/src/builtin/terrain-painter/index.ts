@@ -11,7 +11,7 @@ import { toolIcon } from "./toolicons";
 import { applyHeight, applyLayer, paintBlight, paintTexture, Stroke, toggleRamp, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
 type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
-const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffDown", "shallow", "deep", "dry"];
+const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
 const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
 
 /** Maps hold at most this many ground tile types (World Editor limit). */
@@ -20,7 +20,11 @@ const MAX_GROUND_TILES = 16;
 const TOOLS: [Tool, string, string][] = [
   ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
   ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"], ["paint", "Paint", "Paint a ground texture"],
-  ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"], ["cliffDown", "Cliff ↓", "Lower a cliff level"],
+  ["cliffUp", "Cliff ↑", "Raise a cliff level (one above where the stroke starts)"],
+  ["cliffUp2", "Cliff ↑↑", "Raise two cliff levels (two above where the stroke starts)"],
+  ["cliffLevel", "Cliff level", "Bring everything to the cliff level where the stroke starts"],
+  ["cliffDown", "Cliff ↓", "Lower a cliff level (one below where the stroke starts)"],
+  ["cliffDown2", "Cliff ↓↓", "Lower two cliff levels (two below where the stroke starts)"],
   ["shallow", "Shallow water", "Water one level below where the stroke starts"], ["deep", "Deep water", "Water two levels below where the stroke starts"],
   ["dry", "Dry", "Remove water (use Cliff ↑ to raise the ground again)"],
   ["blight", "Blight +", "Paint Undead blight"], ["unblight", "Blight −", "Remove blight"],
@@ -29,7 +33,7 @@ const TOOLS: [Tool, string, string][] = [
 
 const BRUSH_COLORS: Record<Tool, [number, number, number]> = {
   raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
-  cliffUp: [255, 200, 120], cliffDown: [220, 140, 80], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
+  cliffUp: [255, 200, 120], cliffUp2: [255, 180, 90], cliffLevel: [240, 220, 160], cliffDown: [220, 140, 80], cliffDown2: [200, 110, 60], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
   ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160],
 };
 
@@ -47,7 +51,7 @@ const tileNames = (w3: W3Api) => (catalog ??= w3.game.readText("TerrainArt\\Terr
 
 function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const terrain = ed.terrain;
-  let tool: Tool = "raise", size = 2, strength = 16, paintTex = 0;
+  let tool: Tool = "raise", size = 2, strength = 16, paintTex = 0, square = false;
   /** Tile type chosen for painting (may not be in the map yet). */
   let paintTile = terrain.groundTiles[0] ?? "";
   let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
@@ -55,7 +59,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   /** One brush application at a ground point. */
   const applyAt = (p: [number, number, number]) => {
     if (!stroke) return;
-    const brush = { x: p[0], y: p[1], radius: size };
+    const brush = { x: p[0], y: p[1], radius: size, square };
     const did = tool === "paint"
       ? paintTexture(terrain, brush, paintTex, stroke.s)
       : tool === "blight" || tool === "unblight"
@@ -163,6 +167,9 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     }),
     h("label.terrain-tool-opt", { title: "Brush radius in tiles" }, "Size ",
       h("input", { type: "range", min: "1", max: "10", value: String(size), oninput: (e: Event) => { size = Number((e.target as HTMLInputElement).value); } })),
+    h("label.terrain-tool-opt", { title: "Brush shape (not for ramps)" }, "Shape ",
+      h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
+        h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
     strengthWrap, texWrap, tilePanel,
   );
   setTool("raise");
@@ -190,7 +197,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const c = terrain.corners[Math.round((g[1] - terrain.offsetY) / 128) * terrain.width + Math.round((g[0] - terrain.offsetX) / 128)];
         // Cliff tools step one level from the start point; water goes one or
         // two levels below it, with the surface at its original height.
-        const step = tool === "cliffUp" ? 1 : tool === "cliffDown" ? -1 : tool === "shallow" ? -1 : tool === "deep" ? -2 : 0;
+        const step = ({ cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 } as Partial<Record<Tool, number>>)[tool] ?? 0;
         const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - 8) } : { layer: 2 };
         stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
         applyAt(g);
@@ -199,7 +206,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       return true;
     },
     pointerMove(p) {
-      ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool] } : null);
+      ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
       // Re-apply while held, a few times per second.
       if (p.down && stroke && p.ground && performance.now() - stroke.last > 40) {
         stroke.last = performance.now();

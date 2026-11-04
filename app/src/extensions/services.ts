@@ -99,7 +99,7 @@ export interface TerrainEditorHandle {
   /** Adds an undo step (and marks the document modified). */
   pushEdit(e: { undo(): void; redo(): void; terrain: boolean; objects: boolean }): void;
   /** Brush outline on the ground; null hides it. */
-  setBrush(ring: { x: number; y: number; r: number; rgb: [number, number, number] } | null): void;
+  setBrush(ring: { x: number; y: number; r: number; rgb: [number, number, number]; square?: boolean } | null): void;
   /** RGBA texture over the whole map (rows from the south); null removes it. */
   setGroundOverlay(rgba: Uint8Array | null, width?: number, height?: number): void;
   /** The pathing map as generated from terrain and doodads; `filtered` applies the groups' filterPathing. */

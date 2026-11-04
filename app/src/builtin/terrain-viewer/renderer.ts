@@ -68,6 +68,8 @@ export interface Ring {
   y: number;
   r: number;
   rgb: Vec3;
+  /** A square outline (half side `r`) instead of a circle. */
+  square?: boolean;
 }
 
 export interface Marker {
@@ -530,7 +532,11 @@ export class TerrainRenderer {
   private ring(r: Ring, segments = 64): Mesh {
     const data: number[] = [];
     for (let i = 0; i < segments; i++) {
-      const a = (i / segments) * Math.PI * 2, x = r.x + Math.cos(a) * r.r, y = r.y + Math.sin(a) * r.r;
+      const a = (i / segments) * Math.PI * 2;
+      let dx = Math.cos(a), dy = Math.sin(a);
+      // Square: the same directions pushed out to the square's edge.
+      if (r.square) { const m = Math.max(Math.abs(dx), Math.abs(dy)); dx /= m; dy /= m; }
+      const x = r.x + dx * r.r, y = r.y + dy * r.r;
       data.push(x, y, this.groundHeight(x, y) + 4, r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255, 1);
     }
     return this.colorMesh(data);

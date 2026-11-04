@@ -1,11 +1,12 @@
 // Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
-// painting, applied to the corners inside a circular brush, with undo.
+// painting, applied to the corners inside a round or square brush, with undo.
 
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
-/** Cliff layer up/down; water: shallow (one layer down), deep (two), dry. */
-export type LayerTool = "cliffUp" | "cliffDown" | "shallow" | "deep" | "dry";
+/** Cliff layer up/down by one or two, level (the start's layer); water: shallow (one layer
+ *  down), deep (two), dry. */
+export type LayerTool = "cliffUp" | "cliffUp2" | "cliffDown" | "cliffDown2" | "cliffLevel" | "shallow" | "deep" | "dry";
 
 /** What a layer stroke sets, decided where the stroke starts: the cliff
  *  layer, and for new water its stored level word (low 14 bits). */
@@ -18,8 +19,9 @@ export interface Brush {
   /** World position of the brush centre. */
   x: number;
   y: number;
-  /** Radius in tiles. */
+  /** Radius in tiles (half the side of a square brush). */
   radius: number;
+  square?: boolean;
 }
 
 /** Corners inside the brush with a weight (1 in the middle, 0 at the rim). */
@@ -29,7 +31,8 @@ function cornersIn(t: Terrain, b: Brush): { i: number; w: number }[] {
   const x0 = Math.max(0, Math.floor((b.x - r - t.offsetX) / 128)), x1 = Math.min(t.width - 1, Math.ceil((b.x + r - t.offsetX) / 128));
   const y0 = Math.max(0, Math.floor((b.y - r - t.offsetY) / 128)), y1 = Math.min(t.height - 1, Math.ceil((b.y + r - t.offsetY) / 128));
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const d = Math.hypot(t.offsetX + x * 128 - b.x, t.offsetY + y * 128 - b.y);
+    const dx = t.offsetX + x * 128 - b.x, dy = t.offsetY + y * 128 - b.y;
+    const d = b.square ? Math.max(Math.abs(dx), Math.abs(dy)) : Math.hypot(dx, dy);
     if (d > r) continue;
     // Smooth falloff so repeated strokes don't leave terraces.
     const w = Math.cos((d / r) * (Math.PI / 2)) ** 2;
