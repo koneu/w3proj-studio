@@ -16,6 +16,14 @@ interface Obj { base: string; id?: string; end?: string; sets?: ObjSet[]; mods?:
 interface ObjectFile { format: string; version: number; original: Obj[]; custom: Obj[] }
 
 const FORMAT = "w3proj.objects/1";
+
+/** An object data file without objects, in the version of the map's other object data (else
+ *  Reforged's). */
+async function emptyFile(w3: W3Api): Promise<ObjectFile> {
+  const sibling = w3.workspace.files().find((f) => /^map\/war3map\.w3[utabdhq]\.json$/i.test(f.path));
+  const version = sibling ? JSON.parse(await w3.workspace.readText(sibling.path)).version ?? 3 : 3;
+  return { format: FORMAT, version, original: [], custom: [] };
+}
 /** Path field types (UnitMetaData & co.) that get a file browser. */
 const PATH_KIND: Record<string, FileKind> = { model: "model", modelList: "model", icon: "image", texture: "image" };
 const KINDS: { ext: string; label: string; singular: string }[] = [
@@ -98,17 +106,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       ext ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: k.label, description: `war3map.${k.ext}`, value: k.ext })), { placeholder: "Which object data?" }))?.value;
       if (!ext) return;
+      // A kind the map has no file for opens empty; the file is created on the first save.
       const path = `map/war3map.${ext}.json`;
-      if (!w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase())) {
-        // Match the version of the map's other object data, else Reforged's.
-        let version = 3;
-        const sibling = w3.workspace.files().find((f) => /^map\/war3map\.w3[utabdhq]\.json$/i.test(f.path));
-        if (sibling) version = JSON.parse(await w3.workspace.readText(sibling.path)).version ?? 3;
-        const empty: ObjectFile = { format: FORMAT, version, original: [], custom: [] };
-        const text = await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(empty) });
-        await w3.workspace.writeText(path, text);
-        await w3.workspace.refresh();
-      }
       const open = w3.workspace.files().find((f) => f.path.toLowerCase() === path.toLowerCase())?.path ?? path;
       if (focusId) pendingFocus = { path: open, id: focusId };
       await w3.editors.open(open, "w3.objectEditor");
@@ -121,7 +120,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
     w3.editors.registerProvider("w3.objectEditor", {
       async resolve(el, doc) {
-        const file: ObjectFile = JSON.parse(await doc.readText());
+        const exists = () => w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
+        const isNew = !exists();
+        const file: ObjectFile = isNew ? await emptyFile(w3) : JSON.parse(await doc.readText());
         if (file.format !== FORMAT) throw new Error(`unsupported format ${file.format}`);
         const kind = doc.path.replace(/\.json$/, "").split(".").pop()!.toLowerCase();
         const kindInfo = KINDS.find((k) => k.ext === kind);
@@ -789,6 +790,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // it in canonical formatting, so diffs stay minimal.
             const text = await w3.backend.invoke<string>("objects_canonicalize", { name: doc.path, text: serialize() });
             await doc.writeText(text);
+            if (isNew && !exists()) await w3.workspace.refresh();
             // Edited strings go to war3map.wts (only changed blocks are rewritten).
             const wts = table.serialize();
             if (savedWts !== null && wts !== savedWts) {
