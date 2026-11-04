@@ -5,6 +5,7 @@ import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } f
 import { pickBaseObject } from "./picker";
 import { iconLoader, imageLoader, objectsService, stripColors } from "./service";
 import { toProjectPath } from "../../lib/formats/archivepath";
+import { pickFile, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType } from "./fields";
 
@@ -15,6 +16,8 @@ interface Obj { base: string; id?: string; end?: string; sets?: ObjSet[]; mods?:
 interface ObjectFile { format: string; version: number; original: Obj[]; custom: Obj[] }
 
 const FORMAT = "w3proj.objects/1";
+/** Path field types (UnitMetaData & co.) that get a file browser. */
+const PATH_KIND: Record<string, FileKind> = { model: "model", modelList: "model", icon: "image", texture: "image" };
 const KINDS: { ext: string; label: string; singular: string }[] = [
   { ext: "w3u", label: "Units", singular: "unit" },
   { ext: "w3t", label: "Items", singular: "item" },
@@ -352,6 +355,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return null;
         };
+        /** "Browse…" for path fields: a file from the map's imports or the game. List fields
+         *  (modelList) get the file added to the list. */
+        const browseButton = (metaType: string, value: string, onCommit: (v: number | string) => void): HTMLElement | null => {
+          const kind: FileKind | undefined = PATH_KIND[metaType];
+          if (!kind) return null;
+          const list = metaType.endsWith("List");
+          return h("button.obj-art-view", {
+            title: list ? "Add a file to the list" : "Choose a file from the map's imports or the game",
+            onclick: async () => {
+              const path = await pickFile(w3, el, { title: list ? "Add a model" : kind === "model" ? "Choose a model" : "Choose an image", kind, current: value, thumb: images });
+              if (path === null) return;
+              const rest = value.split(",").map((x) => x.trim()).filter((x) => x && x !== "_");
+              onCommit(list && rest.length ? [...rest, path].join(",") : path);
+            },
+          }, "Browse…");
+        };
         /** Editor for one field value. `mixed` lists differing values (multi-selection). */
         const valueEditor = (type: ValueType, metaType: string, current: number | string, inherited: boolean, onCommit: (v: number | string) => void, mixed?: string[]) => {
           if (metaType === "bool") {
@@ -389,7 +408,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onCommit(v);
             },
           });
-          return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null, mixed ? null : artPreview(metaType, String(current)));
+          return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null,
+            mixed ? null : browseButton(metaType, String(current), onCommit), mixed ? null : artPreview(metaType, String(current)));
         };
 
         const fieldRow = (o: Obj, f: FieldMeta, level: number, levels: number) => {
