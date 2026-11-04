@@ -55,6 +55,8 @@ MyMap/
   unnamed/          files of protected maps whose names can't be recovered (not packed)
   build/            pack output (git-ignored)
   .w3proj/extensions/   optional project-local extensions
+  .gitattributes    map files byte-exact, text formats diffable, imported assets
+                    (models, textures, sounds, videos, fonts) via Git LFS where installed
 ```
 
 ## Repository layout

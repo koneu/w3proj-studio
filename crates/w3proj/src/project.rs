@@ -443,6 +443,41 @@ const GITATTRIBUTES: &str = "\
 *.wts diff
 *.fdf diff
 *.toc diff
+# Imported assets (models, textures, sounds, videos, fonts) go to Git LFS where it is
+# installed; without it git stores them as usual.
+*.mdx filter=lfs diff=lfs merge=lfs -text
+*.blp filter=lfs diff=lfs merge=lfs -text
+*.dds filter=lfs diff=lfs merge=lfs -text
+*.tga filter=lfs diff=lfs merge=lfs -text
+*.tif filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.wav filter=lfs diff=lfs merge=lfs -text
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+*.ogg filter=lfs diff=lfs merge=lfs -text
+*.flac filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
+*.avi filter=lfs diff=lfs merge=lfs -text
+*.bik filter=lfs diff=lfs merge=lfs -text
+*.ttf filter=lfs diff=lfs merge=lfs -text
+*.otf filter=lfs diff=lfs merge=lfs -text
+# The map's own images (minimap, preview) are small and regenerated: plain git.
+/map/war3map*.blp !filter !diff !merge
+/map/war3map*.tga !filter !diff !merge
+";
+
+/// The default `.gitattributes` before the LFS rules: replaced by the current one on the next
+/// sync (a changed file is left alone).
+const GITATTRIBUTES_V1: &str = "\
+# Keep every map file byte-exact; text files still diff normally.
+* -text
+*.j diff
+*.lua diff
+*.json diff
+*.txt diff
+*.wts diff
+*.fdf diff
+*.toc diff
 ";
 
 const GITIGNORE: &str = "build/\n";
@@ -477,7 +512,8 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
     }
     for (name, text) in [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)] {
         let p = project.join(name);
-        if top && !p.exists() {
+        let outdated = name == ".gitattributes" && fs::read(&p).is_ok_and(|old| old == GITATTRIBUTES_V1.as_bytes());
+        if top && (!p.exists() || outdated) {
             fs::write(p, text)?;
         }
     }
