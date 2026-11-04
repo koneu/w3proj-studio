@@ -75,7 +75,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const s = stroke.s;
     stroke = null;
     // Cliffs next to painted ground or new cliffs take the cliff type of their ground tile.
-    const retyped = (s.label === "paint" || isLayerTool(s.label as Tool)) && matchCliffTypes(terrain, s.corners(), ed.cliffGroundTiles(), s);
+    const chosen = isLayerTool(s.label as Tool) && cliffType >= 0 ? cliffType : undefined;
+    const retyped = (s.label === "paint" || isLayerTool(s.label as Tool)) && matchCliffTypes(terrain, s.corners(), ed.cliffGroundTiles(), s, chosen);
     if (!s.finish(terrain)) return;
     ed.commitTerrain({ corners: s.corners(), undo: () => s.undo(terrain), redo: () => s.redo(terrain), cliffs: retyped || isLayerTool(s.label as Tool) || s.label === "ramp" });
   };
@@ -151,6 +152,19 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     void renderTiles();
   } }, "Tiles…");
   const texWrap = h("span.terrain-tool-opt", {}, thumbs, texSelect, tilesButton);
+  // Cliff type for the cliff and water tools (the World Editor's cliff palette choice): a cliff
+  // type number, or -1 to match the ground under the cliff.
+  let cliffType = -1;
+  const cliffSelect = h("select", { onchange: () => { cliffType = Number(cliffSelect.value); ed.focus(); } });
+  const fillCliffTypes = async () => {
+    const names = await tileNames(w3);
+    const grounds = ed.cliffGroundTiles();
+    if (cliffType >= grounds.length) cliffType = -1;
+    cliffSelect.replaceChildren(
+      h("option", { value: "-1", selected: cliffType < 0, title: "The cliff type of the ground tile under the cliff, where it has one" }, "Match the ground"),
+      ...grounds.map((g, i) => h("option", { value: String(i), selected: cliffType === i }, `${names.get(g) ?? g} cliff`)));
+  };
+  const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
   const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
     h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
   const setTool = (t: Tool) => {
@@ -159,6 +173,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     texWrap.hidden = t !== "paint";
     if (t !== "paint") { tilePanel.hidden = true; tilesButton.classList.remove("active"); }
     strengthWrap.hidden = t !== "raise" && t !== "lower";
+    cliffWrap.hidden = !isLayerTool(t) || t === "dry";
+    if (!cliffWrap.hidden) void fillCliffTypes();
     ed.setBrush(null);
     ed.focus();
   };
@@ -173,7 +189,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("label.terrain-tool-opt", { title: "Brush shape (not for ramps)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
-    strengthWrap, texWrap, tilePanel,
+    strengthWrap, cliffWrap, texWrap, tilePanel,
   );
   setTool("paint");
 
@@ -225,6 +241,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       if (!terrain.groundTiles.includes(paintTile)) paintTile = terrain.groundTiles[0] ?? "";
       void fillPalette();
       void renderTiles();
+      void fillCliffTypes();
     },
   };
 }

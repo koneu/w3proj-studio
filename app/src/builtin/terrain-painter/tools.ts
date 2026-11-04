@@ -147,12 +147,13 @@ export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke):
   return changed;
 }
 
-/** Corners of cliff tiles whose ground tile has a cliff version take that cliff type, so painting
- *  grass next to a cliff, or raising a cliff on grass, gives a grass cliff. That's what the World
+/** Corners of cliff tiles get the cliff type `fixed` (a cliff type number, as chosen in the World
+ *  Editor's cliff palette), or without it the cliff type of their ground tile where it has one,
+ *  so painting grass next to a cliff, or raising a cliff on grass, gives a grass cliff. That's what the World
  *  Editor's maps show: on cliff corners the ground tile and the cliff type agree in 85–100 % (12
  *  maps), on flat ground they don't. `cliffGround`: the ground tile of each cliff type number;
  *  corners next to `around` are checked too (a cliff's type comes from its bottom-left corner). */
-export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: Stroke): boolean {
+export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: Stroke, fixed?: number): boolean {
   if (!cliffGround.length) return false;
   const W = t.width, H = t.height;
   const layer = (x: number, y: number) => t.corners[y * W + x].layer;
@@ -171,7 +172,7 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
     const x = i % W, y = Math.floor(i / W);
     if (!(cliffTile(x - 1, y - 1) || cliffTile(x, y - 1) || cliffTile(x - 1, y) || cliffTile(x, y))) continue;
     const c = t.corners[i];
-    const type = cliffGround.indexOf(t.groundTiles[c.texture]);
+    const type = fixed ?? cliffGround.indexOf(t.groundTiles[c.texture]);
     if (type < 0 || c.cliffTexture === type) continue;
     stroke.touch(t, i);
     c.cliffTexture = type;
