@@ -74,8 +74,8 @@ export function w3eToText(buf: Uint8Array): string {
     if (p + n * 4 > buf.length) fail("truncated tile list");
     for (let i = 0; i < n; i++, p += 4) {
       const id = buf.subarray(p, p + 4);
-      if (!id.every(printable)) fail(`tile id ${[...id]} isn't printable`);
-      ids.push(String.fromCharCode(...id));
+      // Unprintable ids (e.g. four zero bytes in (10)DustwallowKeys) as hex: always 12 characters.
+      ids.push(id.every(printable) ? String.fromCharCode(...id) : `hex:${[...id].map((b) => b.toString(16).padStart(2, "0")).join("")}`);
     }
     return ids.join(" ");
   };
@@ -148,7 +148,11 @@ export function w3eFromText(text: string): Uint8Array {
   if (tileset.length !== 1) fail("tileset must be one character");
   const uint = (s: string, what: string) => /^\d+$/.test(s) && Number(s) <= 0xffffffff ? Number(s) : fail(`bad ${what}`);
   const customTilesets = uint(key("custom-tilesets"), "custom-tilesets");
-  const ids = (k: string) => key(k).split(/\s+/).filter(Boolean).map((id) => id.length === 4 ? id : fail(`tile id "${id}" isn't 4 characters`));
+  const ids = (k: string) => key(k).split(/\s+/).filter(Boolean).map((id) => {
+    if (id.length === 4) return id;
+    const hex = /^hex:([0-9a-f]{8})$/i.exec(id);
+    return hex ? String.fromCharCode(...hex[1].match(/../g)!.map((b) => parseInt(b, 16))) : fail(`tile id "${id}" isn't 4 characters or hex:XXXXXXXX`);
+  });
   const ground = ids("ground"), cliffs = ids("cliffs");
   const size = key("corners").split(/\s+/);
   if (size.length !== 2) fail('"corners" needs width and height');

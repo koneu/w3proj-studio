@@ -26,6 +26,7 @@
 //! unknown), `texture`, `variation`, `cliff-variation`, `cliff-texture`, `layer`, `flags`
 //! (1 ramp, 2 blight, 4 water, 8 boundary), and for version 12 `texture-bits` (bits 10–15
 //! of the texture word) when any is set. Bytes after the corners go into `[trailer]` as hex.
+//! Tile ids that aren't printable ASCII are written as `hex:XXXXXXXX` (their 4 bytes).
 
 use crate::{Error, Result};
 
@@ -190,12 +191,27 @@ fn number_range(name: &str) -> (i32, i32) {
     }
 }
 
+/// Unprintable ids (e.g. four zero bytes in (10)DustwallowKeys) as `hex:XXXXXXXX`: always 12
+/// characters, so never mistaken for a 4-character id.
 fn id_text(id: &[u8; 4]) -> Result<String> {
     if id.iter().all(|c| c.is_ascii_graphic()) {
         Ok(String::from_utf8(id.to_vec()).unwrap())
     } else {
-        Err(err(format!("tile id {id:?} isn't printable")))
+        Ok(format!("hex:{}", id.iter().map(|b| format!("{b:02x}")).collect::<String>()))
     }
+}
+
+fn id_parse(id: &str) -> Result<[u8; 4]> {
+    if let Ok(b) = id.as_bytes().try_into() {
+        return Ok(b);
+    }
+    let bad = || err(format!("tile id \"{id}\" isn't 4 characters or hex:XXXXXXXX"));
+    let hex = id.strip_prefix("hex:").filter(|h| h.len() == 8).ok_or_else(bad)?;
+    let mut out = [0u8; 4];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| bad())?;
+    }
+    Ok(out)
 }
 
 /// Offsets are written as integers when they are whole numbers, otherwise as their bits.
@@ -301,7 +317,7 @@ pub fn from_text(bytes: &[u8]) -> Result<Vec<u8>> {
     let ids = |k: &str| -> Result<Vec<[u8; 4]>> {
         key(k)?
             .split_whitespace()
-            .map(|id| id.as_bytes().try_into().map_err(|_| err(format!("tile id \"{id}\" isn't 4 characters"))))
+            .map(id_parse)
             .collect()
     };
     let (ground, cliffs) = (ids("ground")?, ids("cliffs")?);
@@ -431,6 +447,16 @@ mod tests {
             let crlf = String::from_utf8(t).unwrap().replace('\n', "\r\n");
             assert_eq!(from_text(crlf.as_bytes()).unwrap(), b);
         }
+    }
+
+    #[test]
+    fn unprintable_tile_ids_as_hex() {
+        let mut b = sample(12, &[]);
+        b[13 + 4 + 4..13 + 4 + 8].copy_from_slice(&[0, 0, 0, 0]);
+        let t = String::from_utf8(to_text(&b).unwrap()).unwrap();
+        assert!(t.contains("ground Ldrt hex:00000000 Lrok\n"), "{t}");
+        assert_eq!(from_text(t.as_bytes()).unwrap(), b);
+        assert!(from_text(t.replace("hex:00000000", "hex:0000000g").as_bytes()).is_err());
     }
 
     #[test]
