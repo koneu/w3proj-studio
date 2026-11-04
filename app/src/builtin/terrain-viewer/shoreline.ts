@@ -2,11 +2,12 @@
 // shoreline models (TerrainArt\Water.slk: shoreDir, shoreSFile / shoreOCFile / shoreICFile),
 // which are only flat particle emitters. A corner is underwater when it has water above its
 // ground; a tile with both kinds of corners gets one model at its centre, at the water level:
-//   two land corners side by side → the straight piece (its foam runs along +X: land at +X),
-//   one land corner → the outside corner (made for land at +X −Y),
+//   two land corners side by side → the straight piece (made for land at −X),
+//   one land corner → the outside corner (made for land at −X +Y),
 //   one underwater corner → the inside corner (made for water at −X +Y),
 // turned so its made-for side points at the tile's. Two diagonal land corners get nothing.
-// The orientations are read off the models' emitters, not confirmed against the game.
+// The orientations are read off the models' emitters: their waves roll from the water toward
+// the land (Shoreline0: from x = 80 toward −X). Not compared with the game.
 
 import type { Terrain } from "../../lib/terrain/w3e";
 import type { ModelRequest } from "./objects";
@@ -37,9 +38,9 @@ export function planShoreline(t: Terrain, models: ShoreModels): ModelRequest[] {
         // Side by side (not diagonal): the land side's direction.
         const dx = land[0][0] + land[1][0], dy = land[0][1] + land[1][1];
         if (dx === 0 && dy === 0) continue;
-        place(straight, cx, cy, level, Math.atan2(dy, dx));
+        place(straight, cx, cy, level, Math.atan2(dy, dx) - Math.PI);
       } else if (n === 3) {
-        place(outside, cx, cy, level, Math.atan2(land[0][1], land[0][0]) - Math.atan2(-1, 1));
+        place(outside, cx, cy, level, Math.atan2(land[0][1], land[0][0]) - Math.atan2(1, -1));
       } else {
         place(inside, cx, cy, level, Math.atan2(water[0][1], water[0][0]) - Math.atan2(1, -1));
       }

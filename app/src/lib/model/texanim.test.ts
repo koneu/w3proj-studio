@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Track } from "./mdx";
-import { textureMatrix, type Clock } from "./renderer";
+import { sample, textureMatrix, type Clock } from "./renderer";
 
 const clock: Clock = { frame: 0, seqStart: 0, seqEnd: 1000, time: 0 };
 const still = (values: number[]): Track => ({ interp: 0, globalSeq: -1, times: new Uint32Array([0]), values: new Float32Array(values), size: values.length });
@@ -19,4 +19,9 @@ test("translation moves, rotation and scaling turn about the texture's centre", 
   assert.deepEqual(apply(quarter, 1, 0.5), [0.5, 1]);
   assert.deepEqual(apply(quarter, 0.5, 0.5), [0.5, 0.5]);
   assert.deepEqual(apply(textureMatrix({ scaling: still([2, 2, 1]) }, clock, []), 1, 1), [1.5, 1.5]);
+});
+
+test("a track on a global sequence of length 0 is constant: its first key, wherever it sits", () => {
+  const turned: Track = { interp: 0, globalSeq: 0, times: new Uint32Array([3633]), values: new Float32Array([0, 0.698, 0, -0.716]), size: 4 };
+  assert.deepEqual(sample(turned, clock, [0], [0, 0, 0, 1]).map((v) => +v.toFixed(3)), [0, 0.698, 0, -0.716]);
 });

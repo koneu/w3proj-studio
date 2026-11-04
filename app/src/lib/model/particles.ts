@@ -309,7 +309,13 @@ export class ParticleRenderer {
       // Camera-facing axes at the particle (or flat on the ground for XYQuad emitters).
       const toEye: Vec3 = [eye[0] - pos[0], eye[1] - pos[1], eye[2] - pos[2]];
       let right: Vec3, up: Vec3;
-      if (xy) { right = [1, 0, 0]; up = [0, 1, 0]; } else {
+      if (xy) {
+        // Flat on the ground, the texture's up along the particle's motion (waves face the way
+        // they roll); straight up or still: the world's axes.
+        const len = Math.hypot(vel[0], vel[1]);
+        up = len > 1e-6 ? [vel[0] / len, vel[1] / len, 0] : [0, 1, 0];
+        right = [up[1], -up[0], 0];
+      } else {
         right = norm(cross([0, 0, 1], toEye));
         up = norm(cross(toEye, right));
       }

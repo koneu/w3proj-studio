@@ -83,7 +83,10 @@ export function sample(track: Track | undefined, clock: Clock, globalSeqs: numbe
   let t = clock.frame, start = clock.seqStart, end = clock.seqEnd;
   if (track.globalSeq >= 0) {
     const dur = globalSeqs[track.globalSeq] ?? 0;
-    start = 0; end = dur; t = dur > 0 ? clock.time % dur : 0;
+    // A global sequence of length 0 holds a constant: the first key, wherever it sits
+    // (e.g. shoreline emitters keep their sideways turn there).
+    if (dur <= 0) return Array.from(track.values.subarray(0, track.size));
+    start = 0; end = dur; t = clock.time % dur;
   }
   const { times, values, size } = track;
   let first = -1, last = -1;

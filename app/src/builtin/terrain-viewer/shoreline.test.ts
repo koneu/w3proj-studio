@@ -32,8 +32,8 @@ test("a square lake: straight pieces face the land, inside corners face the wate
   assert.deepEqual(placed(t), [
     // Inside corners on the diagonal tiles, each turned so its water corner (made for −X +Y) points at the lake.
     "I@1,1:-90", "I@1,3:180", "I@3,1:0", "I@3,3:90",
-    // Straight pieces on the side tiles, land (made for +X) pointing away from the lake.
-    "S@1,2:180", "S@2,1:-90", "S@2,3:90", "S@3,2:0",
+    // Straight pieces on the side tiles, land (made for −X) pointing away from the lake.
+    "S@1,2:0", "S@2,1:90", "S@2,3:-90", "S@3,2:180",
   ].sort());
   // At the water level.
   assert.equal(planShoreline(t, MODELS)[0].instances[0].world[14], 40);
@@ -41,7 +41,7 @@ test("a square lake: straight pieces face the land, inside corners face the wate
 
 test("a one-corner island in water gets outside corners; dry tiles and open water nothing", () => {
   const t = map((x, y) => !(x === 2 && y === 2), true);
-  assert.deepEqual(placed(t), ["O@1,1:90", "O@1,2:0", "O@2,1:180", "O@2,2:-90"].sort());
+  assert.deepEqual(placed(t), ["O@1,1:-90", "O@1,2:180", "O@2,1:0", "O@2,2:90"].sort());
   assert.deepEqual(placed(map(() => false)), []);
   assert.deepEqual(placed(map(() => true)), []);
 });
