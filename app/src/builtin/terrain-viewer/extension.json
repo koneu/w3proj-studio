@@ -17,6 +17,7 @@
     "configuration": {
       "title": "Terrain",
       "properties": {
+        "terrain.animate": { "type": "boolean", "default": true, "description": "Placed objects play their Stand animation in the terrain view (off: they stand still)." },
         "terrain.lighting.enabled": { "type": "boolean", "default": true, "description": "Light the terrain view with the map's day/night lighting (off: an even light, e.g. when the map's lighting is very dark)." },
         "terrain.lighting.hour": { "type": "number", "default": 12, "minimum": 0, "maximum": 23, "description": "Hour of the game day the terrain view is lit at." },
         "terrain.pathing.regenerate": { "type": "boolean", "default": true, "description": "Rewrite the pathing map (war3map.wpm) from terrain and doodads on every save." },

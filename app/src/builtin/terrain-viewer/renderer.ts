@@ -2,7 +2,7 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
-import { compile, mat4, type Clock, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { compile, mat4, poseNodes, standClock, type Clock, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 
@@ -663,9 +663,43 @@ export class TerrainRenderer {
     return this.colorMesh(data);
   }
 
-  /** Whether the view changes by itself (particles): then it should be drawn every frame. */
+  /** Placed objects play their Stand animation (see setAnimate). */
+  private animate = true;
+  private animStart = performance.now();
+  /** When the last frame with animated objects was drawn (they redraw about 30 times a second). */
+  private lastAnimFrame = 0;
+
+  /** Placed objects play their Stand animation in a loop, or stand still at its start. */
+  setAnimate(on: boolean) {
+    this.animate = on;
+    if (!on) for (const gpu of new Set(this.batches.map((b) => b.gpu))) gpu.pose(standClock(gpu.model));
+  }
+
+  /** Poses every placed model at the current moment of its Stand animation (one pose per
+   *  model, shared by its instances), and the classic models whose effects stand in. */
+  private poseAnimated() {
+    const t = performance.now() - this.animStart;
+    const at = (c: Clock): Clock => ({ ...c, frame: c.seqStart + (t % Math.max(1, c.seqEnd - c.seqStart)), time: t });
+    const posed = new Set<ModelGpu>();
+    for (const b of this.batches) {
+      if (this.hiddenGroups.has(b.group)) continue;
+      if (!posed.has(b.gpu) && b.gpu.model.sequences.length) {
+        posed.add(b.gpu);
+        b.gpu.pose(at(standClock(b.gpu.model)));
+      }
+      const fx = b.effects;
+      if (fx?.classic) {
+        fx.clock = at(standClock(fx.model));
+        fx.nodeWorld = poseNodes(fx.model, fx.clock);
+      }
+    }
+  }
+
+  /** Whether the view changes by itself (animation, particles, water): then it's redrawn. */
   get animating(): boolean {
     if (this.showWater && this.water.count && this.waterLook.frames.length > 1 && this.waterFrame() !== this.waterFrameShown) return true;
+    if (this.animate && performance.now() - this.lastAnimFrame > 33
+      && this.batches.some((b) => b.instances.length && b.gpu.model.sequences.length && !this.hiddenGroups.has(b.group))) return true;
     return this.showEffects && this.batches.some((b) => b.instances.length && b.effects && !this.hiddenGroups.has(b.group));
   }
 
@@ -684,7 +718,8 @@ export class TerrainRenderer {
         if (Math.hypot(inst.world[12] - this.target[0], inst.world[13] - this.target[1]) > reach) continue;
         let p = this.particleStates.get(inst);
         if (!p) this.particleStates.set(inst, (p = new ParticleInstance(fx.model)));
-        p.step(dt, fx.clock, fx.nodeWorld, inst.world);
+        // A model's own emitters follow its current pose; a classic stand-in has its own.
+        p.step(dt, fx.classic ? fx.clock : b.gpu.poseClock, fx.classic ? fx.nodeWorld : b.gpu.nodeWorld, inst.world);
         items.push({ particles: p, textures: fx.textures, world: inst.world });
       }
     }
@@ -695,6 +730,7 @@ export class TerrainRenderer {
 
   render() {
     const gl = this.gl;
+    if (this.animate) { this.poseAnimated(); this.lastAnimFrame = performance.now(); }
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);

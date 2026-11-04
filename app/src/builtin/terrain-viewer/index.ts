@@ -219,7 +219,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.unitLight = on && lighting?.unit ? lightAt(lighting.unit, hour) : null;
           redraw();
         };
-        const stopLightSettings = w3.settings.onDidChange((key) => { if (key.startsWith("terrain.lighting.")) applyLight(); });
+        const stopLightSettings = w3.settings.onDidChange((key) => {
+          if (key.startsWith("terrain.lighting.")) applyLight();
+          if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
+        });
+        renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false);
         const reloadLighting = () => void loadMapLighting(w3, terrain.tileset).then((l) => {
           lighting = l;
           lightBox.title = `The map's day/night lighting (${l.source}); off: an even light`;
@@ -1332,6 +1336,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.model-toolbar", {},
               toggle("Water", () => renderer.showWater, (v) => { renderer.showWater = v; }),
               toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
+              toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
               h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
