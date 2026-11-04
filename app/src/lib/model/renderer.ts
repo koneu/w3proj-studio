@@ -628,6 +628,9 @@ export class ModelRenderer {
   /** Particle emitters (none: null). */
   private particles: ParticleInstance | null;
   private particleRenderer: ParticleRenderer | null;
+  /** Effects from another model (see setEffectModel), with its own textures. */
+  private effectModel: Model | null = null;
+  private effectTextures: (WebGLTexture | null)[] = [];
   private lastTime = -1;
   wireframe = false;
   /** Draw particle effects. */
@@ -719,9 +722,35 @@ export class ModelRenderer {
       // Seconds since the last frame (a pause or a hidden tab doesn't burst particles).
       const dt = this.lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, (clock.time - this.lastTime) / 1000));
       this.lastTime = clock.time;
-      this.particles.step(dt, clock, this.gpu.nodeWorld, world);
-      if (this.showParticles && !this.wireframe) this.particleRenderer.draw(viewProj, eye, [{ particles: this.particles, textures: this.gpu.textures, world }]);
+      const fx = this.effectModel;
+      if (fx) {
+        // The effect model's own animation of the same name, at the same point in it.
+        const name = this.model.sequences.find((s) => s.start === clock.seqStart && s.end === clock.seqEnd)?.name;
+        const s = fx.sequences.find((x) => x.name === name) ?? fx.sequences[0];
+        const at = s ? Math.min(s.end, s.start + (clock.frame - clock.seqStart)) : 0;
+        const fxClock: Clock = { frame: at, seqStart: s?.start ?? 0, seqEnd: s?.end ?? 0, time: clock.time };
+        this.particles.step(dt, fxClock, poseNodes(fx, fxClock), world);
+      } else {
+        this.particles.step(dt, clock, this.gpu.nodeWorld, world);
+      }
+      if (this.showParticles && !this.wireframe) {
+        this.particleRenderer.draw(viewProj, eye, [{ particles: this.particles, textures: fx ? this.effectTextures : this.gpu.textures, world }]);
+      }
     }
+  }
+
+  /** Draws another model's particle emitters and ribbons instead of this one's: for a Reforged
+   *  model whose effects are PopcornFX (not drawn), its classic copy's. Its textures come by
+   *  setEffectTexture. */
+  setEffectModel(m: Model) {
+    this.effectModel = m;
+    this.effectTextures = m.textures.map(() => null);
+    this.particles = new ParticleInstance(m);
+    this.particleRenderer ??= new ParticleRenderer(this.gl);
+  }
+
+  setEffectTexture(i: number, img: DecodedTexture) {
+    if (this.effectModel) this.effectTextures[i] = uploadTexture(this.gl, img, this.effectModel.textures[i].flags);
   }
 
   /** Particles alive now (0 without emitters). */

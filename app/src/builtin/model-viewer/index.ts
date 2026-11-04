@@ -51,6 +51,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return {};
         }
 
+        // Reforged copies (_DE/_HD) have PopcornFX effects (CORN, not drawn): show the classic
+        // model's particles and ribbons instead, as the terrain view does.
+        let classicFx = false;
+        const gamePath = doc.path.startsWith("game:") ? doc.path.slice(5) : null;
+        if (gamePath && /:_(hd|de)\.w3mod:/i.test(gamePath) && !model.particleEmitters2.length && !model.ribbons.length && model.skipped.includes("CORN")) {
+          try {
+            const sd = parseMdx(await w3.game.read(`War3.w3mod:${gamePath.slice(gamePath.lastIndexOf(":") + 1)}`));
+            if (sd.particleEmitters2.length || sd.ribbons.length) {
+              renderer.setEffectModel(sd);
+              classicFx = true;
+              const load = textureLoader(w3, { path: "game:War3.w3mod:" } as EditorDocument);
+              sd.textures.forEach((t, i) => {
+                if (t.replaceableId !== 0 || !t.path) return;
+                load(t.path).then((buf) => renderer.setEffectTexture(i, decodeImage(buf, t.path).mip(0)), () => {});
+              });
+            }
+          } catch { /* no classic copy */ }
+        }
+
         // ---- animation state ----------------------------------------------------
         let seqIndex = model.sequences.findIndex((s) => /^stand/i.test(s.name));
         if (seqIndex < 0) seqIndex = model.sequences.length ? 0 : -1;
@@ -121,6 +140,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div", {}, `${model.sequences.length} animations`),
             model.particleEmitters2.length ? h("div", {}, `${model.particleEmitters2.length} particle emitter${model.particleEmitters2.length === 1 ? "" : "s"}`) : null,
             model.ribbons.length ? h("div", {}, `${model.ribbons.length} ribbon${model.ribbons.length === 1 ? "" : "s"}`) : null,
+            classicFx ? h("div.muted", { title: "This Reforged model's own effects are PopcornFX (CORN), which this viewer can't draw; the effects shown are the classic model's" }, "effects: the classic model's (PopcornFX not drawn)") : null,
             model.skipped.length ? h("div.muted", { title: "Present in the model but not drawn by this viewer" }, `not drawn: ${[...new Set(model.skipped)].join(", ")}`) : null,
             ...model.warnings.map((w) => h("div.model-warn", {}, w)),
           ),
