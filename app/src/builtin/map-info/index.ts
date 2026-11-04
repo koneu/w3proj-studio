@@ -6,6 +6,8 @@ import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { parseW3e } from "../../lib/terrain/w3e";
+import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional
 // where the file version decides whether they exist.
@@ -263,6 +265,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const section_ = (title: string, ...children: (Node | null)[]) => h("section.form-section", {}, h("h3", {}, title), ...children.filter((c): c is Node => c !== null));
 
+        /** The terrain file's tileset (it has its own entry), null without a terrain. */
+        const terrainTileset = async (): Promise<string | null> => {
+          const path = terrainPath(w3.workspace.files().map((f) => f.path));
+          if (!path) return null;
+          const bytes = await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) });
+          return parseW3e(bytes).tileset;
+        };
+        /** "The terrain uses …" with a button to take it, when the two differ. */
+        const tilesetSync = () => {
+          const slot = h("div.form-inline");
+          void terrainTileset().then((id) => {
+            if (!id || id === info.tileset) return;
+            const name = lists?.tilesets.find(([k]) => k === id)?.[1] ?? id;
+            slot.replaceChildren(h("small.muted", {}, `The terrain uses ${name}.`),
+              h("button", { title: "Set this tileset to the terrain's", onclick: () => { info.tileset = id; update(); show(section); } }, "Use the terrain's"));
+          }, () => {});
+          return slot;
+        };
+
         // ---- sections --------------------------------------------------------------
         const renderers: Record<SectionId, () => Node[]> = {
           description: () => [
@@ -273,8 +294,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Description", text(() => info.description, (s) => { info.description = s; }, { multiline: true })),
             ),
             section_("Map facts",
-              row("Tileset", lists ? select(lists.tilesets, () => info.tileset, (t) => { info.tileset = t; }) : h("code", {}, info.tileset),
-                "The terrain itself is changed in the World Editor."),
+              row("Tileset", h("div.form-stack", {},
+                lists ? select(lists.tilesets, () => info.tileset, (t) => { info.tileset = t; }) : h("code", {}, info.tileset),
+                tilesetSync()),
+                "The terrain's own tileset and ground tiles are changed in the terrain editor (Terrain › Tiles…)."),
               row("Playable area", h("span", {}, `${info.playableWidth} × ${info.playableHeight}`)),
               row("Saved", h("span", {}, `${info.saves} times · editor ${info.editorVersion}${info.gameVersion ? ` · game ${info.gameVersion.join(".")}` : ""} · format v${v}`)),
             ),
@@ -443,7 +466,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           dispose: () => { openEditors.delete(show); unbindKeys(); },
           // Strings shown here, and the start locations behind the player list.
-          watches: ["map/war3map.wts", "map/war3mapUnits.doo.json", "map/war3mapUnits.doo"],
+          watches: ["map/war3map.wts", "map/war3mapUnits.doo.json", "map/war3mapUnits.doo", "map/war3map.w3e", "map/war3map.w3e.txt"],
         };
       },
     }),

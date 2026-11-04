@@ -131,7 +131,28 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const usage = ed.groundTileUsage();
     const total = usage.reduce((a, b) => a + b, 0) || 1;
     const t = terrain.groundTiles;
+    const [sets, mapSet] = await Promise.all([ed.tilesets().catch(() => []), ed.mapTileset().catch(() => null)]);
+    const nameOf = (id: string) => sets.find((s) => s.id === id)?.name ?? id;
+    // Tileset (water, lighting, blight) and tile templates: a tileset's own tile list.
+    const tilesetSelect = h("select", { title: "The terrain's tileset: water, default lighting and blight follow (the ground tiles stay; see Template)",
+      onchange: () => ed.setTileset(tilesetSelect.value) },
+      ...(sets.some((s) => s.id === terrain.tileset) ? [] : [h("option", { value: terrain.tileset, selected: true }, terrain.tileset)]),
+      ...sets.map((s) => h("option", { value: s.id, selected: s.id === terrain.tileset }, s.name)));
+    const templateSelect = h("select", { title: "A tileset's own ground tiles" },
+      ...sets.map((s) => h("option", { value: s.id, selected: s.id === terrain.tileset }, s.name)));
+    const applyTemplate = h("button", {
+      title: "Replace the map's ground tiles with this tileset's own, slot by slot (painted ground keeps its slot; cliffs follow); one undo step",
+      onclick: () => { const s = sets.find((x) => x.id === templateSelect.value); if (s) ed.replaceGroundTiles(s.tiles); },
+    }, "Use its tiles");
+    // Map Properties keeps its own tileset entry: offer to line the two up when they differ.
+    const sync = mapSet && mapSet !== terrain.tileset ? h("div.terrain-tilemgr-sync", {},
+      h("span", {}, `Map Properties says ${nameOf(mapSet)}.`),
+      h("button", { title: "Switch the terrain to Map Properties' tileset", onclick: () => ed.setTileset(mapSet) }, "Use it here"),
+      h("button", { title: "Write the terrain's tileset into Map Properties (war3map.w3i)", onclick: () => { void ed.setMapTileset(terrain.tileset).then(() => renderTiles()); } }, `Set Map Properties to ${nameOf(terrain.tileset)}`)) : null;
     tilePanel.replaceChildren(
+      h("div.terrain-tilemgr-row", {}, h("span.terrain-tilemgr-name", {}, "Tileset"), tilesetSelect),
+      h("div.terrain-tilemgr-row", {}, h("span.terrain-tilemgr-name", {}, "Template"), templateSelect, applyTemplate),
+      ...(sync ? [sync] : []),
       h("div.muted", {}, "Draw order: tiles further down are drawn over the ones above them where they meet. Changes are one undo step each."),
       ...t.map((id, i) => {
         const img = h("img", { alt: id });

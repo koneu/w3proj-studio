@@ -120,6 +120,16 @@ export interface TerrainEditorHandle {
   commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): void;
   /** The ground tile of each cliff type number a corner can have (empty until the game's cliff types are read). */
   cliffGroundTiles(): string[];
+  /** The game's tilesets with their own ground tiles (the tile list New Map gives them). */
+  tilesets(): Promise<{ id: string; name: string; tiles: string[] }[]>;
+  /** Changes the terrain's tileset (water, lighting, blight follow); one undo step. */
+  setTileset(id: string): void;
+  /** Replaces the ground tile list slot by slot (corners keep their slot; slots beyond the new
+   *  list take its last tile); cliffs follow; one undo step. */
+  replaceGroundTiles(tiles: string[]): void;
+  /** The tileset Map Properties (war3map.w3i) names (null without map info), and setting it there. */
+  mapTileset(): Promise<string | null>;
+  setMapTileset(id: string): Promise<void>;
   /** Index of a ground tile type in the map's list, adding it if needed (null when the list is full). */
   ensureGroundTile(id: string): Promise<number | null>;
   /** Corners using each ground tile (by index). */

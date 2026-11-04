@@ -75,7 +75,7 @@ interface TileData {
 /** Tilesets with their ground tiles (Terrain.slk ids start with the tileset
  *  letter; that list, in table order, is what new maps get) and the cliff
  *  types standing on those tiles. */
-async function loadTilesets(w3: W3Api): Promise<TileData> {
+export async function loadTilesets(w3: W3Api): Promise<TileData> {
   const strings = new Map<string, string>();
   for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
     for (const sec of parseIni(await w3.game.readText(f).catch(() => "")).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);

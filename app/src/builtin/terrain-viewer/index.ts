@@ -10,7 +10,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, withObjectArt, type ObjectArt, type Placed } from "./objects";
 import { buildMinimap, minimapSettings } from "./minimapgen";
-import { askNewMap, createMap, type NewMapPreset } from "./newmap";
+import { askNewMap, createMap, loadTilesets, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
@@ -377,6 +377,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           minimapStale = true;
           redraw();
         };
+        /** What the tileset decides besides the tiles: blight, water, shoreline, default lighting. */
+        const loadTilesetArt = () => {
         // The tileset's blight texture (UI\WorldEditData.txt, [TileSets]: name,texture).
         w3.game.readText("UI\\WorldEditData.txt").then(async (text) => {
           const entry = parseIni(text).get("TileSets")?.get(terrain.tileset.toLowerCase());
@@ -408,6 +410,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             readFile(w3, doc, path).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path).mip(0)); redraw(); }, () => {});
           }
         }).catch(() => { /* the default water colour */ });
+        };
+        loadTilesetArt();
         const thumbCache = new Map<string, Promise<string | null>>();
         /** Data URL of a ground texture's first cell (the plain tile). */
         const tileThumb = (path: string) => {
@@ -1177,6 +1181,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           terrain, editable, redraw, host: el, resizeMap,
           terrainChanged: () => { renderer.terrainChanged(); doc.setDirty(true); redraw(); },
           commitTerrain,
+          tilesets: () => loadTilesets(w3).then((d) => d.sets.map((s) => ({ id: s.id, name: s.name, tiles: s.tiles.map((t) => t.id) }))),
+          setTileset: (id) => {
+            if (id === terrain.tileset) return;
+            const set = (v: string) => { terrain.tileset = v; loadTilesetArt(); reloadLighting(); };
+            const before = terrain.tileset;
+            pushEdit({ undo: () => set(before), redo: () => set(id), terrain: true, objects: false });
+            set(id);
+            redraw();
+          },
+          replaceGroundTiles: (tiles) => {
+            if (!tiles.length) return;
+            changeTileList(tiles.slice(0, MAX_GROUND_TILES), (old) => Math.min(old, Math.min(tiles.length, MAX_GROUND_TILES) - 1));
+          },
+          mapTileset: async () => {
+            let id: string | null = null;
+            await editDoc("war3map.w3i", (d) => { id = typeof d.tileset === "string" ? d.tileset : null; return false; }).catch(() => {});
+            return id;
+          },
+          setMapTileset: (id) => editDoc("war3map.w3i", (d) => { if (d.tileset === id) return false; d.tileset = id; }),
           ensureGroundTile: (id) => ensureTile(id),
           groundTileUsage: () => {
             const n = terrain.groundTiles.map(() => 0);
