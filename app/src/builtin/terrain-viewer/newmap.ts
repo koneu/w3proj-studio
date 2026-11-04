@@ -1,7 +1,8 @@
 // New Map: asks for name, size, tileset, ground tiles, base tile, initial cliff level,
 // water and random hills, and script language, then writes a project folder with
 // the map in it, as the World Editor 2.0 makes
-// one: map info (w3i v33), terrain (w3e v12, centred on the origin, camera
+// one (World Editor 3.0.1, editor 7003; checked against a new map it saved): no
+// map header, map info (w3i v39), terrain (w3e v12, centred on the origin, camera
 // margins 6/6/4/8 tiles), one player with a start location, no doodads, the
 // default melee trigger (wtg/wct) and the map script it compiles to, and the
 // derived files (pathing, shadows, minimap). The project is opened in the
@@ -50,10 +51,9 @@ const WATER_DROP = { none: 0, shallow: 1, deep: 2 } as const;
 
 /** Camera margins (tiles): left, right, bottom, top, as the World Editor sets them. */
 const MARGINS = [6, 6, 4, 8] as const;
-/** Map flags of a fresh melee map: melee, masked areas partially visible, water
- *  waves on cliff and rolling shores, item classification, water tinting,
- *  accurate random. */
-const FLAGS = 0x2d814;
+/** Map flags of a fresh melee map (World Editor 3.0.1): melee, masked areas partially
+ *  visible, 0x400, water waves on cliff and rolling shores, item classification. */
+const FLAGS = 0x9c14;
 /** Ambient sound sets (UI\SoundInfo\AmbientMusic.slk, "<name>Day"/"<name>Night") by tileset. */
 const AMBIENCE: Record<string, string> = {
   A: "Ashenvale", B: "Barrens", C: "Felwood", D: "Dungeon", F: "LordaeronFall", G: "DungeonCave", I: "IceCrown",
@@ -282,39 +282,56 @@ function playableCentre(t: Terrain): [number, number] {
   return [t.offsetX + (l + (t.width - 1 - l - r) / 2) * 128, t.offsetY + (b + (t.height - 1 - b - top) / 2) * 128];
 }
 
-function mapInfo(o: NewMapOptions, t: Terrain): unknown {
+/** The minimap icon of a start location (war3map.mmp): its pixel on the 256×256 minimap of the
+ *  playable area (scaled to fit, centred), red as player 1. Rounding as the World Editor's
+ *  icons fit it best (x: 622 of 680 game map icons exact, y: 633; the rest 1 pixel off). */
+export function startIcon(t: Terrain, x: number, y: number) {
+  const [ml, mr, mb, mt] = MARGINS;
+  const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt, s = 256 / Math.max(pw, ph);
+  const px = (256 - pw * s) / 2 + ((x - t.offsetX) / 128 - ml) * s;
+  const py = 256 - ((256 - ph * s) / 2 + ((y - t.offsetY) / 128 - mb) * s);
+  return { type: 2, x: Math.floor(px), y: Math.round(py + 0.38), color: { blue: 3, green: 3, red: 255, alpha: 255 } };
+}
+
+export function mapInfo(o: NewMapOptions, t: Terrain): unknown {
   const c = cameraBounds(t), [sx, sy] = playableCentre(t);
   return {
-    format: "w3proj.mapinfo/1", version: 33, saves: 1, editorVersion: 6116, gameVersion: [2, 0, 3, 23101],
+    format: "w3proj.mapinfo/1", version: 39, saves: 1, editorVersion: 7003, gameVersion: [3, 0, 1, 24371],
     name: o.name, author: o.author, description: o.description, suggestedPlayers: "Any",
     cameraBounds: [c.left, c.bottom, c.right, c.top, c.left, c.top, c.right, c.bottom],
     cameraComplements: [...MARGINS],
     playableWidth: t.width - 1 - MARGINS[0] - MARGINS[1], playableHeight: t.height - 1 - MARGINS[2] - MARGINS[3],
     flags: FLAGS, tileset: o.tileset,
-    loadingScreen: { number: -1, model: "", text: "", title: "", subtitle: "" },
-    gameDataSet: 0,
+    loadingScreen: { number: -1, crestRace: 64, model: "", text: "", title: "", subtitle: "" },
+    gameDataSet: 0xffffffff,
     prologue: { path: "", text: "", title: "", subtitle: "" },
     fog: { style: 0, start: 3000, end: 5000, density: 0.5, color: [0, 0, 0, 255] },
+    terrainFog: { style: 0, overSky: 0, linearStart: 10000, linearEnd: 10000, maxOpacity: 1, height: 0 },
     weather: "0x00000000", soundEnvironment: "", lightEnvironment: "", waterTint: [255, 255, 255, 255],
-    scriptType: o.lua ? 1 : 0, supportedModes: 3, gameDataVersion: 1,
-    cameraZoom: { default: 1250, max: 1250, min: 1250 },
-    players: [{ id: 0, controller: 1, race: 0, fixedStart: 0, name: "Player 1", start: [sx, sy], allyLow: 0, allyHigh: 0, enemyLow: 0, enemyHigh: 0 }],
-    forces: [{ flags: 0, players: 0xffffffff, name: "Force 1" }],
+    scriptType: o.lua ? 1 : 0, supportedModes: 3, gameDataVersion: 2,
+    cameraZoom: { default: 0, max: 0, min: 0 },
+    water: {
+      minOpacity: 0, maxOpacity: 100, reflectivity: 10, emissivity: 0, edgeSoftness: 50, wavesVertexDisplacement: 20,
+      wavesNormalMapStrength: 100, overrideColor: 0, environmentMapReflectivity: 100, unknown: -1,
+    },
+    playerHudSkins: true,
+    // Names live in war3map.wts (STRINGS), as the World Editor keeps them.
+    players: [{ id: 0, controller: 1, race: 1, hudSkin: 32759, fixedStart: 0, name: "TRIGSTR_001", start: [sx, sy], allyLow: 0, allyHigh: 0, enemyLow: 0, enemyHigh: 0 }],
+    forces: [{ flags: 0, players: 0xffffffff, name: "TRIGSTR_002" }],
     upgrades: [], techs: [], unitTables: [], itemTables: [],
   };
 }
 
-function placements(t: Terrain): { doodads: unknown; units: unknown } {
+export function placements(t: Terrain): { doodads: unknown; units: unknown } {
   const [sx, sy] = playableCentre(t);
-  const head = { magic: "W3do", version: 8, subversion: 11, skinIds: true };
   return {
-    doodads: { format: "w3proj.doodads/1", ...head, doodads: [], specialVersion: 0, specials: [] },
+    doodads: { format: "w3proj.doodads/1", magic: "W3do", version: 13, subversion: 11, doodads: [], specialVersion: 0, specials: [] },
     units: {
-      format: "w3proj.units/1", ...head, units: [{
-        id: "sloc", variation: 0, position: [sx, sy, heightAt(t, sx, sy)], angle: 4.712389, scale: [1, 1, 1], skinId: "sloc", flags: 2, player: 0,
-        unknown1: 0, unknown2: 0, hp: -1, mana: -1, itemTable: -1, itemSets: [], gold: 0, targetAcquisition: 0, level: 0,
-        strength: 0, agility: 0, intelligence: 0, inventory: [], abilities: [], randomType: 0, randomLevel: "010000",
-        randomClass: 0, color: -1, waygate: -1, editorId: 0,
+      format: "w3proj.units/1", magic: "W3do", version: 13, subversion: 9, units: [{
+        id: "sloc", variation: 0, position: [sx, sy, heightAt(t, sx, sy)], angle: 4.712389, scale: [1, 1, 1], skinId: "sloc",
+        preFlags: 0xffffffff, flags: 2, player: 0, unknown1: 0, unknown2: 0, hp: 0, mana: 0, itemSets: [], gold: 0,
+        targetAcquisition: 0, level: 0, inventory: [], abilities: [], randomType: 0, randomLevel: "010000", randomClass: 0,
+        color: -1, waygate: -1, editorId: 0, trailer: [0, 0], extras: [],
       }],
     },
   };
@@ -394,7 +411,7 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
     ?? `Environment\\DNC\\DNCLordaeron\\DNCLordaeron${kind}\\DNCLordaeron${kind}.mdl`;
   const lights = { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") };
 
-  await w3.backend.invoke("project_create", { dir: o.dir, name: o.name, flags: FLAGS, maxPlayers: 1 });
+  await w3.backend.invoke("project_create", { dir: o.dir, name: o.name, flags: FLAGS, maxPlayers: 1, header: false });
   // Switching projects closes the other project's editors (as Open Project does).
   await w3.editors.closeAll();
   await w3.workspace.open(o.dir);
@@ -402,15 +419,22 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   const json = async (path: string, value: unknown) =>
     w3.workspace.writeText(path, await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(value) }));
   const { doodads, units } = placements(t);
+  const [sx, sy] = playableCentre(t);
   await json("map/war3map.w3i.json", mapInfo(o, t));
   await json("map/war3map.doo.json", doodads);
   await json("map/war3mapUnits.doo.json", units);
-  // Empty regions, cameras and sounds, and the default trigger (the World Editor needs the trigger files).
-  await json("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 5, regions: [] });
-  await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 0, cameras: [] });
-  await json("map/war3map.w3s.json", { format: "w3proj.sounds/1", version: 3, sounds: [] });
-  await w3.workspace.writeText(WTG_JSON, writeWtgJson(defaultTriggerFile()));
-  await writeWctFile(w3.workspace, parseWct(defaultWct(), 1), textTriggers(defaultTriggerFile()).map((t) => t.name));
+  // Empty regions and cameras, the default trigger (the World Editor needs the trigger files),
+  // the player and force names, the start location's minimap icon, and the empty lights, object
+  // groups and conversation files World Editor 3.0.1 writes (their formats aren't known yet).
+  await json("map/war3map.w3r.json", { format: "w3proj.regions/1", version: 7, regions: [] });
+  await json("map/war3map.w3c.json", { format: "w3proj.cameras/1", version: 3, cameras: [] });
+  await w3.workspace.writeText(WTG_JSON, writeWtgJson(defaultTriggerFile(o.name)));
+  await writeWctFile(w3.workspace, parseWct(defaultWct(), 1), textTriggers(defaultTriggerFile(o.name)).map((t) => t.name));
+  await w3.workspace.writeText("map/war3map.wts", "\uFEFFSTRING 1\r\n{\r\nPlayer 1\r\n}\r\n\r\nSTRING 2\r\n{\r\nForce 1\r\n}\r\n\r\n");
+  await json("map/war3map.mmp.json", { format: "w3proj.minimap/1", version: 0, icons: [startIcon(t, sx, sy)] });
+  await w3.workspace.writeBytes("map/war3map.w3l", Uint8Array.from([0x57, 0x33, 0x4c, 0x21, 3, ...new Array<number>(17).fill(0)]));
+  await w3.workspace.writeBytes("map/war3map.w3grp", new Uint8Array(12));
+  await w3.workspace.writeText("map/conversation.json", '{\n    "stringTablePath": "war3map.wts",\n    "conversation": {}\n}');
   await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));
   await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", mapScript(o, t, lights));
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));
@@ -420,5 +444,8 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await w3.workspace.writeBytes("map/war3map.wpm", wpm);
   await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, t, [], read, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
   await w3.workspace.refresh();
+  // The map script from the files above, by the same generator as on save (the simple script
+  // written above stays if the Map Script extension is off).
+  await w3.commands.execute("w3.script.generate", { quiet: true }).catch(() => {});
   await w3.editors.open("map/war3map.w3e.txt", "w3.terrainViewer");
 }

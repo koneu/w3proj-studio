@@ -9,6 +9,8 @@
 //      u32 2, variable count, item count, items. Item ids carry the type in
 //      the high byte (category 0x02…, trigger 0x03…).
 // wct: marker, version 1, comment, custom script length, trigger text count.
+// World Editor 3.0.1's new map (editor 7003) names the root after the map file
+// ("Untitled"), leaves the category collapsed and writes the comment below.
 
 import type { TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, type TriggerFile } from "../../lib/triggers/wtg";
@@ -21,6 +23,9 @@ export const MELEE_ACTIONS = [
 
 const MARKER = 0x80000004;
 
+/** The custom script comment a new map gets (the same text in every game language). */
+const WCT_COMMENT = "Enter map-specific custom script code below.  This text will be included in the map script after variables are declared and before any trigger code except Custom Script Item. Custom Script Item will merge into map script after globals variables declaration with the list order in trigger view.";
+
 class Writer {
   private bytes: number[] = [];
   u32(v: number) { this.bytes.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff); return this; }
@@ -29,16 +34,17 @@ class Writer {
   done() { return new Uint8Array(this.bytes); }
 }
 
-export function defaultWtg(): Uint8Array {
+/** `root`: the trigger tree's root, named after the map file. */
+export function defaultWtg(root = "Untitled"): Uint8Array {
   const w = new Writer().raw("WTG!").u32(MARKER).u32(7);
   // Items per type: the map itself, one category, one trigger.
   for (const count of [1, 0, 1, 1, 0, 0, 0, 0]) w.u32(count).u32(0);
   w.u32(2).u32(0).u32(3);
   const category = 0x02000000, trigger = 0x03000000;
   // The map (root): id, name, two flags, no parent.
-  w.u32(1).u32(0).str("").u32(0).u32(0).u32(0xffffffff);
+  w.u32(1).u32(0).str(root).u32(0).u32(0).u32(0xffffffff);
   // Category: id, name, is comment, expanded, parent.
-  w.u32(4).u32(category).str("Initialization").u32(0).u32(1).u32(0);
+  w.u32(4).u32(category).str("Initialization").u32(0).u32(0).u32(0);
   // Trigger: name, description, is comment, id, enabled, custom text,
   // initially off, run on init, parent, then its events/conditions/actions.
   w.u32(8).str("Melee Initialization").str("Default melee game initialization for all players")
@@ -51,12 +57,12 @@ export function defaultWtg(): Uint8Array {
 }
 
 export function defaultWct(): Uint8Array {
-  return new Writer().u32(MARKER).u32(1).str("").u32(0).u32(0).done();
+  return new Writer().u32(MARKER).u32(1).str(WCT_COMMENT).u32(0).u32(0).done();
 }
 
 /** The default trigger file as the project keeps it (war3map.wtg.json). Its functions take no
  *  arguments, so it is read without the game's TriggerData. */
-export function defaultTriggerFile(): TriggerFile {
+export function defaultTriggerFile(root?: string): TriggerFile {
   const noArgs = { find: () => ({ args: [] }) } as unknown as TriggerData;
-  return parseWtg(defaultWtg(), noArgs);
+  return parseWtg(defaultWtg(root), noArgs);
 }

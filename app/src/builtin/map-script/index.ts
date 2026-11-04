@@ -213,9 +213,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       clearTimeout(timer);
       timer = setTimeout(() => void write(`saved ${path}`).catch(() => {}), 800);
     }),
-    w3.commands.register("w3.script.generate", async () => {
+    // `quiet` (other extensions, e.g. New Map): no message afterwards.
+    w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean }) => {
       await write("command");
-      w3.window.showInfo("Map script generated (see the Map Script output).");
+      if (!opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
     }),
     { dispose: () => clearTimeout(timer) },
   );
