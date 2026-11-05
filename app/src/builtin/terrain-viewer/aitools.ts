@@ -508,7 +508,7 @@ export function swapTiles(current: readonly string[], oldOwn: readonly string[],
   const kept = current.filter((tile) => !oldOwn.includes(tile));
   // A tile that stays takes its slot already: it mustn't get a second one.
   const free = newOwn.filter((tile) => !kept.includes(tile));
-  const tiles = current.map((tile) => (oldOwn.includes(tile) ? free[next++] ?? tile : tile));
+  const tiles = current.map((tile) => (oldOwn.includes(tile) ? free[Math.min(next++, free.length - 1)] ?? tile : tile));
   return { tiles, kept };
 }
 

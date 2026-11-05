@@ -292,7 +292,7 @@ test("wrong unit choices are refused before anything changes", () => {
 });
 
 test("a tile that stays doesn't get a second slot when a tileset changes", () => {
-  const { tiles, kept } = swapTiles(["Ldrt", "Lgrs", "Alvd", "Lrok"], ["Ldrt", "Lgrs", "Lrok"], ["Alvd", "Adrt", "Agrs"]);
+  const { tiles, kept } = swapTiles(["Ldrt", "Lgrs", "Alvd", "Lrok"], ["Ldrt", "Lgrs", "Lrok"], ["Alvd", "Adrt", "Agrs", "Arok"]);
   assert.deepEqual(kept, ["Alvd"]);
   assert.equal(new Set(tiles).size, tiles.length, tiles.join());
   assert.equal(tiles[2], "Alvd", "it stays in its slot");
