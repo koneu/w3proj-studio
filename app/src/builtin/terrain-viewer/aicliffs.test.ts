@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isBackdrop } from "../../lib/terrain/area";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
-import { groundSlot, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind } from "./aitools";
+import { groundSlot, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
 
@@ -147,6 +147,78 @@ test("widening a lake keeps its surface and doesn't dig deeper", () => {
   assert.deepEqual(setWater(t, block, "box", "shallow", kinds), [], "all water already: nothing to do");
 });
 
+test("a ford slopes in on one cliff level, shallow enough to walk", () => {
+  const t = flat();
+  setWater(t, { left: 8 * 128, bottom: 8 * 128, right: 24 * 128, top: 24 * 128 }, "ellipse", "ford", kinds);
+  const middle = corner(t, 16, 16);
+  assert.equal(middle.layer, 2, "no cliff level changes");
+  assert.equal(middle.hasWater, true);
+  assert.ok(Math.abs(middle.water - middle.height - 38) < 1, `${middle.water - middle.height}`);
+  assert.ok(t.corners.every((c) => c.layer === 2), "so no cliff anywhere");
+  assert.ok(t.corners.every((c) => !c.hasWater || c.water - c.height <= 52), "units can walk all of it");
+  assert.equal(corner(t, 2, 2).hasWater, false);
+  const inward = [8, 10, 12, 14, 16].map((x) => corner(t, x, 16).height);
+  assert.deepEqual(inward, [...inward].sort((a, b) => b - a), "it slopes down towards the middle");
+  assert.ok(inward[0] - inward[1] < 47 * 2, "as gently as real banks, measured per tile");
+});
+
+test("a lake is deep in the middle and walkable at its edge", () => {
+  const t = flat();
+  setWater(t, { left: 8 * 128, bottom: 8 * 128, right: 24 * 128, top: 24 * 128 }, "ellipse", "lake", kinds);
+  const depth = (x: number, y: number) => corner(t, x, y).water - corner(t, x, y).height;
+  assert.ok(depth(16, 16) > 100);
+  assert.ok(depth(9, 16) > 0 && depth(9, 16) <= 52, `${depth(9, 16)}`);
+  assert.equal(corner(t, 16, 16).layer, 2);
+});
+
+test("a river runs at any angle", () => {
+  const t = flat();
+  const changed = setWater(t, { points: [[4 * 128, 4 * 128], [28 * 128, 28 * 128]], width: 512 }, "ellipse", "ford", kinds);
+  assert.ok(changed.length > 40);
+  assert.equal(corner(t, 16, 16).hasWater, true);
+  assert.equal(corner(t, 12, 12).hasWater, true);
+  assert.equal(corner(t, 8, 24).hasWater, false);
+});
+
+test("widening a ford keeps its surface and doesn't raise the ground", () => {
+  const t = flat();
+  const first = { left: 8 * 128, bottom: 8 * 128, right: 16 * 128, top: 16 * 128 };
+  setWater(t, first, "ellipse", "ford", kinds);
+  const surface = corner(t, 12, 12).water, ground = corner(t, 12, 12).height;
+  setWater(t, { ...first, right: 22 * 128 }, "ellipse", "ford", kinds);
+  assert.equal(corner(t, 12, 12).water, surface);
+  assert.ok(corner(t, 12, 12).height <= ground);
+});
+
+test("a ford leaves ground on other cliff levels alone", () => {
+  const t = flat();
+  setCliffs(t, { left: 0, bottom: 0, right: 12 * 128, top: 32 * 128 }, "box", { level: 3 }, kinds);
+  setWater(t, { left: 8 * 128, bottom: 8 * 128, right: 24 * 128, top: 24 * 128 }, "ellipse", "ford", kinds);
+  assert.equal(corner(t, 10, 16).hasWater, false);
+  assert.equal(corner(t, 16, 16).hasWater, true);
+});
+
+test("the reason something can't stand somewhere names the cause", () => {
+  const p = { cells: new Uint8Array(132 * 132), width: 132, height: 132 };
+  const open = flat();
+  assert.match(whyNoRoom(open, p, { id: "LTlt", position: [320, 300, 0] }, 300, 300), /LTlt stands there, at 320, 300/);
+  assert.match(whyNoRoom(open, p, null, 300, 300), /footprint/);
+  const cliffs = flat();
+  setCliffs(cliffs, block, "box", { level: 3 }, kinds);
+  assert.match(whyNoRoom(cliffs, p, null, 7.5 * 128, 12 * 128), /cliff/);
+  const wet = flat();
+  setWater(wet, { ...block, right: 24 * 128, top: 24 * 128 }, "ellipse", "ford", kinds);
+  assert.match(whyNoRoom(wet, p, null, 16 * 128 + 20, 16 * 128 + 20), /water/);
+  const blocked = { ...p, cells: new Uint8Array(132 * 132).fill(0x02) };
+  assert.match(whyNoRoom(open, blocked, null, 300, 300), /can't be walked/);
+  assert.match(whyNoRoom(open, { ...p, cells: new Uint8Array(132 * 132).fill(0x08) }, null, 300, 300), /can't be built on/);
+});
+
+test("a twin stands turned 180° around the middle of the map", () => {
+  assert.deepEqual(twinOf(1000, -500, { left: -4096, bottom: -4096, right: 4096, top: 4096 }), [-1000, 500]);
+  assert.deepEqual(twinOf(1000, 500, { left: 0, bottom: 0, right: 8192, top: 4096 }), [7192, 3596]);
+});
+
 test("low ground has no room for water", () => {
   const t = flat();
   setCliffs(t, block, "box", { level: 1 }, kinds);
@@ -217,6 +289,13 @@ test("wrong unit choices are refused before anything changes", () => {
   assert.throws(() => setUnitChoices({ drops: [{ level: 9 }] }), /level goes from 1 to 8/);
   assert.throws(() => setUnitChoices({ drops: [{ level: 2, kind: "epic" }] }), /kind is one of any, permanent/);
   assert.throws(() => setUnitChoices({ drops: "YiI2" }), /must be a list/);
+});
+
+test("a tile that stays doesn't get a second slot when a tileset changes", () => {
+  const { tiles, kept } = swapTiles(["Ldrt", "Lgrs", "Alvd", "Lrok"], ["Ldrt", "Lgrs", "Lrok"], ["Alvd", "Adrt", "Agrs"]);
+  assert.deepEqual(kept, ["Alvd"]);
+  assert.equal(new Set(tiles).size, tiles.length, tiles.join());
+  assert.equal(tiles[2], "Alvd", "it stays in its slot");
 });
 
 test("trees and doodads may stand in the border, units and items may not", () => {

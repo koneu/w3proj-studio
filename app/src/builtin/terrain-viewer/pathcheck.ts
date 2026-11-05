@@ -104,6 +104,7 @@ export function findPockets(g: Grid, unitSize: number, within: Area | null, smal
     .sort((a, b) => b.cells - a.cells);
   return {
     unitSize, mainGround: main?.cells ?? 0,
+    ...(main ? { mainAt: [g.offsetX + (main.sample % w + 0.5) * CELL, g.offsetY + (Math.floor(main.sample / w) + 0.5) * CELL] as [number, number] } : {}),
     pockets: pockets.slice(0, 50).map((p) => ({ cells: p.cells, box: worldBox(p), somewhereInside: [g.offsetX + (p.sample % w + 0.5) * CELL, g.offsetY + (Math.floor(p.sample / w) + 0.5) * CELL] as [number, number] })),
     ...(pockets.length > 50 ? { morePockets: pockets.length - 50 } : {}),
   };

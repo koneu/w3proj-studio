@@ -3,6 +3,7 @@
 
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
+import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
 import { groundHeight, heightAt, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
@@ -185,14 +186,56 @@ export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string,
   return [...log.corners];
 }
 
-export type WaterMode = "shallow" | "deep" | "dry";
+export type WaterMode = "shallow" | "deep" | "dry" | "ford" | "lake";
 
-/** Puts water on an area as the brushes do: the ground one level down for shallow, two for deep,
- *  the surface just below where the ground was. Goes by dry ground in the area, so widening a lake
- *  keeps its surface. `dry` only takes the water away: the ground stays down. The changed corners. */
-export function setWater(t: Terrain, area: Area, shape: Shape, mode: WaterMode, kinds: readonly CliffKind[]) {
-  const inside = cornersIn(t, area, shape);
+/** Depth in the middle of sloped water. Units walk through up to 52 (the game's limit in this app's
+ *  pathing); 38 is what the game's shallow water has, 102 the usual depth of Echo Isles' sea. */
+const SLOPED_DEPTH = { ford: 38, lake: 102 } as const;
+/** How far in from its rim, as part of the way to the middle, a slope takes to reach full depth. */
+const BANK = 0.45;
+
+/** Corners within `width` of a line, as cornersIn gives them: r is 0 on the line, 1 at its edge. */
+function cornersAlong(t: Terrain, points: readonly [number, number][], width: number) {
+  const out: { i: number; r: number }[] = [];
+  for (let y = 0; y < t.height; y++) {
+    for (let x = 0; x < t.width; x++) {
+      const i = y * t.width + x, r = distanceToLine(t.offsetX + x * TILE, t.offsetY + y * TILE, points) / (width / 2);
+      if (r <= 1 && !t.corners[i].boundary) out.push({ i, r });
+    }
+  }
+  return out;
+}
+
+/** Water with no cliff around it, as real maps mostly have: on one cliff level, the ground slopes
+ *  down under the surface, so units can walk in. The surface goes by dry ground, or by water that's
+ *  there already. Ground only goes down. Corners on other cliff levels stay. */
+function slopedWater(t: Terrain, inside: readonly { i: number; r: number }[], depth: number) {
+  const showing = inside.filter(({ i }) => t.corners[i].hasWater && t.corners[i].water > t.corners[i].height);
+  const from = t.corners[middleOf(inside).i];
+  const surface = showing.length ? t.corners[middleOf(showing).i].water : from.height - 8;
+  const level = waterLevelAt(surface), changed: number[] = [];
+  for (const { i, r } of inside) {
+    const c = t.corners[i];
+    if (c.layer !== from.layer) continue;
+    const k = Math.min(1, (1 - r) / BANK), s = k * k * (3 - 2 * k);
+    const bottom = surface - depth, target = c.height + (bottom - c.height) * s;
+    const before = c.rawHeight, wet = c.hasWater;
+    if (target < c.height) setGroundHeight(c, target - (c.layer - 2) * TILE);
+    c.ramp = false;
+    setWaterLevel(c, level);
+    if (c.rawHeight !== before || !wet) changed.push(i);
+  }
+  return changed;
+}
+
+/** Puts water on an area or along a line. `ford` and `lake` slope in with no cliff around them.
+ *  `shallow` and `deep` are the brushes': the ground one or two levels down, the surface just below
+ *  where the ground was, so a cliff goes all round. They go by dry ground in the area, so widening
+ *  a lake keeps its surface. `dry` only takes the water away: the ground stays down. The changed corners. */
+export function setWater(t: Terrain, place: Area | { points: readonly [number, number][]; width: number }, shape: Shape, mode: WaterMode, kinds: readonly CliffKind[]) {
+  const inside = "points" in place ? cornersAlong(t, place.points, place.width) : cornersIn(t, place, shape);
   if (!inside.length) throw new Error("That area has no ground in the map.");
+  if (mode === "ford" || mode === "lake") return slopedWater(t, inside, SLOPED_DEPTH[mode]);
   const changed: number[] = [];
   if (mode === "dry") {
     for (const { i } of inside) if (t.corners[i].hasWater) { t.corners[i].hasWater = false; changed.push(i); }
@@ -213,6 +256,23 @@ export function setWater(t: Terrain, area: Area, shape: Shape, mode: WaterMode, 
   }
   return changed.length ? withCliffTypes(t, changed, kinds) : changed;
 }
+
+/** Why something can't stand at a place, as far as can be told from what's known there. */
+export function whyNoRoom(t: Terrain, p: Pathing, standing: { id: string; position: readonly number[] } | null, x: number, y: number) {
+  if (standing) return `${standing.id} stands there, at ${Math.round(standing.position[0])}, ${Math.round(standing.position[1])}`;
+  const tx = Math.floor((x - t.offsetX) / TILE), ty = Math.floor((y - t.offsetY) / TILE);
+  const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : undefined);
+  const q = [at(tx, ty), at(tx + 1, ty), at(tx, ty + 1), at(tx + 1, ty + 1)].filter((c): c is NonNullable<typeof c> => !!c);
+  if (new Set(q.map((c) => c.layer)).size > 1) return "a cliff runs through there";
+  if (q.some((c) => c.hasWater && c.water > c.height)) return "there's water there";
+  const cell = p.cells[Math.floor((y - t.offsetY) / 32) * p.width + Math.floor((x - t.offsetX) / 32)] ?? 0;
+  if (cell & CELL_NO_WALK) return "the ground there can't be walked or built on, so it's the tile, or an object's pathing";
+  if (cell & CELL_NO_BUILD) return "the ground there can't be built on, so it's the tile, or water close by";
+  return "the spot itself is free, but this object's footprint reaches something beside it";
+}
+
+/** A place's twin on the other side of the map: turned 180° around the middle. */
+export const twinOf = (x: number, y: number, whole: Area): [number, number] => [whole.left + whole.right - x, whole.bottom + whole.top - y];
 
 /** Builds a ramp on the cliff edge at a place, or takes one away. `width` is in tiles. The changed
  *  corners. Throws what's in the way. */
@@ -445,8 +505,11 @@ export function outsideAfterResize(list: readonly { position: readonly number[] 
  *  one's, and a tile from elsewhere, added on purpose, stays. No corner changes slot. */
 export function swapTiles(current: readonly string[], oldOwn: readonly string[], newOwn: readonly string[]) {
   let next = 0;
-  const tiles = current.map((tile) => (oldOwn.includes(tile) ? newOwn[Math.min(next++, newOwn.length - 1)] : tile));
-  return { tiles, kept: current.filter((tile) => !oldOwn.includes(tile)) };
+  const kept = current.filter((tile) => !oldOwn.includes(tile));
+  // A tile that stays takes its slot already: it mustn't get a second one.
+  const free = newOwn.filter((tile) => !kept.includes(tile));
+  const tiles = current.map((tile) => (oldOwn.includes(tile) ? free[next++] ?? tile : tile));
+  return { tiles, kept };
 }
 
 /** Swaps placed objects for other types, keeping where they stand. A variation the new type

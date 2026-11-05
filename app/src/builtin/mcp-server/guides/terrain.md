@@ -47,6 +47,16 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
   high ground.
 - Keep ground level where a base has to stand; buildings need room.
 
+## Water
+
+- Most water on real maps has no cliff round it: on Echo Isles 1,588 of 1,604 water edges are on one cliff
+  level, with the ground sloping under the surface. Corners at the bank are about 20 deep.
+- Units walk through water up to about 52 deep. Use set_water with mode ford for what people cross, and lake
+  for water with a deep middle. Rivers can run at any angle with points.
+- shallow and deep put a cliff all round the water, so units can't get in without a ramp. That suits a sunken
+  pool or a moat, not a river to wade through.
+- Run check_path after any water: it can split a map in two.
+
 ## Cliffs
 
 - A tileset has two kinds of cliff, usually dirt and grass, and only those two ground tiles have one. Other

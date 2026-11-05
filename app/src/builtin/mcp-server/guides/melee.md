@@ -42,7 +42,9 @@ a range as a mistake to explain, not as a style. Sizes are for 1v1; scale the co
 - Playable size 84 × 84 to 108 × 88. Small is better; smaller maps get played more.
 - Bases opposite each other, 10,000 to 12,000 apart in a straight line.
 - Distances between each start and its mines, trees, shops and expansions must match. Rotating one half
-  by 180° around the map's centre gives that, and (x, y) becomes (-x, -y) on a map centred on 0.
+  by 180° around the map's centre gives that, and (x, y) becomes (-x, -y) on a map centred on 0. Use mirror on
+  place_objects, fill_rows, place_line and scatter_objects: it places both sides or neither. Without it, one
+  skipped object breaks the symmetry unseen. Terrain and start locations have to be done for each side.
 - Give every start room for a whole base, and the same number of ways in. Test it with place_objects
   and dryRun, using a town hall and some large buildings.
 - Offer more than one way between the bases, so a player can flank or dodge an army. Camps, distance and
@@ -153,6 +155,12 @@ Read the terrain guide too, for how to make all this look good. This part is abo
 - 1,700 to 6,300 doodads and destructables, of which 340 to 3,400 are decoration. Put detail where the
   camera spends time: bases, shops, camps and crossroads, not spread evenly.
 - Give each area its own landmark, like a ruin, an old camp or a broken bridge, built from several objects.
+
+## When a rule can't be met
+
+Say so instead of quietly bending it. In order: move the object along the edge of its pocket, then shrink or
+reshape what's in the way with cliffs or trees, then change that part of the plan on both sides. Don't give
+one player a worse deal to keep a number. Numbers outside the measured ranges need a reason you can state.
 
 ## Order of work
 

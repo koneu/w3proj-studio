@@ -74,6 +74,37 @@ A dummy is an invisible unit that carries a missile model or casts a real spell 
 - A missile that passes over units must remember whom it already hit, with a group of its own, or it hits
   them each step.
 
+## A pattern that holds up
+
+One missile per cast, with its data on its own timer, so casts can't disturb each other. Needs a hashtable
+variable, spellData, from add_trigger_variable, so it's udg_spellData in the script, set once with
+InitHashtable. Check it with build_script, and change what it does, not how it's kept.
+
+```
+function Missile_Step takes nothing returns nothing
+    local timer t = GetExpiredTimer()
+    local integer id = GetHandleId(t)
+    local unit missile = LoadUnitHandle(udg_spellData, id, 0)
+    local real angle = LoadReal(udg_spellData, id, 1)
+    local real left = LoadReal(udg_spellData, id, 2) - 30.0
+    call SetUnitX(missile, GetUnitX(missile) + 30.0 * Cos(angle))
+    call SetUnitY(missile, GetUnitY(missile) + 30.0 * Sin(angle))
+    if left <= 0.0 then
+        call RemoveUnit(missile)
+        call FlushChildHashtable(udg_spellData, id)
+        call DestroyTimer(t)
+    else
+        call SaveReal(udg_spellData, id, 2, left)
+    endif
+    set t = null
+    set missile = null
+endfunction
+```
+
+The caster's trigger makes the missile and the timer, saves the unit and the angle and the distance left under
+GetHandleId of the timer, and starts it with TimerStart(t, 0.03, true, function Missile_Step). The missile must
+also stop at the map's edge: see Positions and direction.
+
 ## Leaks and cleanup
 
 Small leaks add up: two a second are 7,200 an hour.

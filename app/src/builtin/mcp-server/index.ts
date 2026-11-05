@@ -215,7 +215,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return [{ path: file, text: next }];
       });
       return isTerrainText(file)
-        ? `Changed ${file}. Objects, pathing, shadows and the minimap don't follow an edit like this: paint_terrain and sculpt_terrain do.`
+        ? `Changed ${file}. Objects, pathing, shadows and the minimap don't follow an edit like this: use rebuild_map after it.`
         : `Changed ${file}.`;
     }),
     w3.commands.register("w3.mcp.toggle", async () => {

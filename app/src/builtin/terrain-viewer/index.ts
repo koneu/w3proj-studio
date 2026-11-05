@@ -23,7 +23,7 @@ import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { checkMelee } from "./meleecheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -161,7 +161,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let opened: {
     handle: TerrainEditorHandle; ready: () => Promise<void>;
     screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => Promise<string>;
-    derive: (before: { terrain: Terrain; doodads: Placed[] }) => Promise<void>;
+    /** Rebuilds the derived files; without `before` shadows stay, as nothing is known to have changed. */
+    derive: (before?: { terrain: Terrain; doodads: Placed[] }) => Promise<void>;
   } | null = null;
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
   let lastView: { key: string; view: TerrainView } | null = null;
@@ -311,8 +312,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   const askUser = async (question: string, yes: string) => {
     requireSaved();
+    const asked = Date.now();
     const agreed = await w3.window.confirm(`AI request: ${question}`, yes, CONFIRM_TIME);
-    if (!agreed) throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
+    if (agreed) return;
+    if (Date.now() - asked >= CONFIRM_TIME - 500) throw new Error("Nobody answered in Studio within 90 seconds, so nothing changed. Tell the user to look there, and try again.");
+    throw new Error("The user said no in Studio, so nothing changed. Ask them what they'd like instead.");
   };
   const withConsent = async (question: string, yes: string, setting: string) => {
     // The user can drop the question. What stays is what protects their work.
@@ -453,7 +457,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!inArea(grid.offsetX + (x + 0.5) * 32, grid.offsetY + (y + 0.5) * 32, bounds)) grid.blocked[y * grid.width + x] = 1;
       }
       const size = typeof args.unitSize === "number" && args.unitSize >= 0 ? args.unitSize : 32;
-      return findPockets(grid, size, await readArea(w3, args), typeof args.smallest === "number" ? args.smallest : 16);
+      const found = findPockets(grid, size, await readArea(w3, args), typeof args.smallest === "number" ? args.smallest : 16);
+      const t = handle.terrain;
+      const levelAt = ([x, y]: readonly number[]) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer;
+      const main = found.mainAt ? levelAt(found.mainAt) : undefined;
+      return {
+        ...found,
+        pockets: found.pockets.map((p) => {
+          const level = levelAt(p.somewhereInside);
+          return { ...p, cliffLevel: level, ...(main !== undefined && level > main ? { highGround: true, note: "Above the main ground with no way up: fine for a mesa, or give it a ramp." } : {}) };
+        }),
+      };
     }),
     w3.mcp.registerTool("reserve_area", async (args) => {
       const { name } = args;
@@ -478,7 +492,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const seed = seedOf(args.seed), keep = await readReserved();
       const spots = rowSpots(area, spacingX, spacingY, typeof jitter === "number" ? jitter : 0, seededRandom(seed)).filter((s) => !isKeptClear(s.x, s.y, keep));
       const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(typeof facing === "number" ? { facing } : {}) }));
-      return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed })) as object };
+      return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror })) as object };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
       const { handle } = await liveEditor();
@@ -547,12 +561,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, (t) => setCliffType(t, area, args.shape === "box" ? "box" : "ellipse", tile, kinds));
     }),
     w3.mcp.registerTool("set_water", async (args) => {
-      const { mode } = args;
-      if (mode !== "shallow" && mode !== "deep" && mode !== "dry") throw new Error("mode must be shallow, deep or dry.");
-      const area = await readArea(w3, args);
-      if (!area) throw new Error("set_water needs a region, or left, bottom, right and top.");
+      const { mode, points, width } = args;
+      if (mode !== "ford" && mode !== "lake" && mode !== "shallow" && mode !== "deep" && mode !== "dry") throw new Error("mode must be ford, lake, shallow, deep or dry.");
+      const line = points !== undefined;
+      if (line && !(Array.isArray(points) && points.length >= 2 && points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number")))) throw new Error("points must be at least two [x, y].");
+      if (width !== undefined && !(typeof width === "number" && width >= 128)) throw new Error("width must be at least 128.");
+      const area = line ? null : await readArea(w3, args);
+      if (!line && !area) throw new Error("set_water needs points, a region, or left, bottom, right and top.");
+      const place = area ?? { points: points as [number, number][], width: typeof width === "number" ? width : 384 };
       const kinds = await cliffKinds();
-      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${area.name ?? "an area"}`, (t) => setWater(t, area, args.shape === "box" ? "box" : "ellipse", mode, kinds));
+      const where = area ? area.name ?? "an area" : "a line";
+      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds));
+    }),
+    w3.mcp.registerTool("rebuild_map", async () => {
+      const editor = await liveEditor();
+      await editor.derive();
+      return "Pathing and the minimap are rebuilt from the map as it is. Shadows only follow the edits that make them.";
     }),
     w3.mcp.registerTool("set_ramp", async ({ at, width, remove }) => {
       const [x, y] = await readPlace(at, "at");
@@ -618,7 +642,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
       };
     }),
-    w3.mcp.registerTool("place_line", async ({ kind, id, from, to, spacing, facingOffset, ignoreRoom, dryRun }) => {
+    w3.mcp.registerTool("place_line", async ({ kind, id, from, to, spacing, facingOffset, ignoreRoom, dryRun, mirror }) => {
       if (typeof id !== "string" || id.length !== 4) throw new Error("id must be four characters, like LTlt.");
       const [start, end] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const { handle } = await liveEditor();
@@ -632,10 +656,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // Turned by the model's own long side.
       const turn = typeof facingOffset === "number" ? facingOffset : shape && !shape.alongX ? 90 : 0;
       const objects = lineSpots(start, end, step, turn).map((s) => ({ id, x: s.x, y: s.y, facing: s.facing }));
-      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun, ownPieces: step });
+      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun, ownPieces: step, mirror });
       return { spacing: step, facingOffset: turn, ...(report as object) };
     }),
-    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces }) => {
+    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces, mirror }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
       const wanted = objects as ({ id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number } & UnitChoices)[];
       const { handle } = await liveEditor();
@@ -651,6 +675,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
       const edge = await playable().catch(() => null);
       const whole = wholeMap(handle);
+      const pathing = await handle.pathing();
+      const why = (x: number, y: number) => whyNoRoom(handle.terrain, pathing, nearestObject(handle.objects.list(), [x, y]), x, y);
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
@@ -675,17 +701,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const s of spotsAround(x, y)) if (await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
-              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : "something stands there, or the ground doesn't allow it" });
+              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y) });
               continue;
             }
             shifted.push({ index: i, id, from: [x, y], to: spot });
+          }
+          // Both sides or neither, or a skipped object would break the symmetry unseen.
+          const twin = mirror === true ? twinOf(spot[0], spot[1], whole) : null;
+          const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
+          const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
+          if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await room.fits(kindOf, id, twin[0], twin[1], twinAngle))) {
+            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1])}` });
+            continue;
           }
           if (place) {
             place(o, i, spot[0], spot[1], facing);
             // A line's pieces touch each other on purpose.
             if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
+            if (paired) {
+              place(o, i, twin[0], twin[1], twinFacing);
+              if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
+            }
           }
-          placed++;
+          placed += paired ? 2 : 1;
         }
         return placed;
       };
@@ -737,9 +775,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const { id, type } = types[Math.floor(random() * types.length)];
           const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
           if (!isBackdrop(type.kind, spot.x, spot.y, edge, whole) && !(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
+          const twin = args.mirror === true ? twinOf(spot.x, spot.y, whole) : null;
+          const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
+          if (twin) {
+            if (isKeptClear(twin[0], twin[1], keep)) { keptClear++; continue; }
+            if (!isBackdrop(type.kind, twin[0], twin[1], edge, whole) && !(await room.fits(type.kind, id, twin[0], twin[1], twinAngle))) { noRoom++; continue; }
+          }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
           add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random);
-          counts.set(id, (counts.get(id) ?? 0) + 1);
+          if (twin) {
+            await room.mark(type.kind, id, twin[0], twin[1], twinAngle);
+            add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random);
+          }
+          counts.set(id, (counts.get(id) ?? 0) + (twin ? 2 : 1));
         }
         if (!counts.size) throw new Error("There's no free ground there for these.");
       });
@@ -2439,7 +2487,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           derive: async (from) => {
             await ready();
             minimapStale = true;
-            await updateDerived(dooFile?.list ?? [], from.terrain, from.doodads);
+            await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
           },
         };
         /** A change from outside, in place: nothing is torn down, so what's loaded stays. Only a
