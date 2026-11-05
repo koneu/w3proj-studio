@@ -20,13 +20,15 @@ None of this can be tested in the game from here: say so, and ask the user to pl
 
 ## How to build one
 
-1. create_object: an ability based on one with no effect of its own. Channel (ANcl) is the usual choice, as
-   its target type, cast time and icon can all be set. Search with list_objects.
+1. create_object: an ability based on one with no effect of its own. Channel (ANcl) is a handy choice, as its
+   target type, cast time and icon can all be set, but not the only one: a real ability is better when its
+   behaviour is what you want. Search with list_objects.
 2. A trigger on EVENT_PLAYER_UNIT_SPELL_EFFECT, with create_script_trigger, that checks GetSpellAbilityId.
    Use the effect event, not the cast one: SPELL_CAST fires before mana is spent, so it can be dodged.
 3. Read the event's values right away: GetTriggerUnit, GetSpellTargetX and GetSpellTargetY. They're gone
    after a wait, and timers don't have them. Store what later steps need.
-4. build_script after each change. It checks grammar and types, not whether the spell works.
+4. build_script after each change. A build that passes means it compiles. Whether it works when run, stays in
+   sync in multiplayer, and is balanced are three more questions, and only playing answers them.
 
 Use search_script_api for exact names, and search_game_files for effect models: Abilities\Spells and
 Abilities\Weapons. Use read_game_file on the game's own scripts when unsure how something is called.
@@ -40,6 +42,7 @@ Abilities\Weapons. Use read_game_file on the game's own scripts when unsure how 
 - Don't use SetUnitX or SetUnitY outside the map's bounds: that can crash the game. Clamp to the playable
   area, or stop the missile there.
 - SetUnitX and SetUnitY ignore pathing, which suits missiles; use IsTerrainPathable if it has to stop at walls.
+  Moving a unit, hitting things and showing an effect are separate jobs: keep them apart in the script.
 
 ## Several casts at once
 
@@ -48,9 +51,10 @@ several units.
 
 - Never keep a cast's data in a global. A second cast overwrites it.
 - For something that takes time, make a timer per cast and store its data in a hashtable under
-  GetHandleId of the timer, or use one timer over a list of running casts.
+  GetHandleId of the timer. With many missiles at once, one shared timer over a list of them is cheaper.
+- Allow for the same unit casting again while the first cast runs, if the ability's cooldown permits it.
 - Avoid TriggerSleepAction for timing: it's imprecise, and it loses the event's values.
-- Moving things look smooth at about 0.03 seconds per step.
+- Moving things look smooth at about 0.03 seconds per step. That's a starting value: slower is cheaper.
 
 ## Dummy units
 
@@ -111,8 +115,11 @@ Small leaks add up: two a second are 7,200 an hour.
 
 - DestroyGroup, DestroyTimer, and RemoveLocation or better plain x and y instead of locations.
 - DestroyEffect after AddSpecialEffect. It still plays out.
-- Set local variables of handle types to null at the end of a function.
-- Every path out of a timer's function must clean up, not only the usual one.
+- Set local variables of handle types to null at the end of a function. That only drops the reference: it doesn't
+  replace destroying what the function owns.
+- Decide who owns each timer, group, effect and dummy. Every one needs a place where it ends.
+- Every path out of a timer's function must clean up, not only the usual one: when the caster dies, when the target
+  is gone, and when the missile gets there.
 
 ## Numbers and balance
 
@@ -124,4 +131,5 @@ cooldown and range. Read damage from a level-based formula, not one fixed number
 - Cast at close range, long range, at the map's edge, and into a cliff or trees.
 - Cast from several units at once, and cast again while it runs.
 - Kill the caster while it runs.
-- Does it hit allies, buildings or flyers when it shouldn't?
+- Does it hit allies, buildings or flyers when it shouldn't? Try invulnerable and magic-immune units too.
+- In multiplayer, if the spell is used there: do both players see the same?

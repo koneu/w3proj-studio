@@ -350,16 +350,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
     const starts = units.filter((u) => u.id === "sloc"), mines = units.filter((u) => u.id === "ngol"), taverns = units.filter((u) => u.id === "ntav");
     const routes: { name: string; to?: [number, number]; points?: [number, number][]; problem?: string }[] = [];
-    const way = (name: string, from: [number, number], to: [number, number], target?: [number, number]) => {
+    const way = (name: string, from: [number, number], to: [number, number], target?: [number, number], owner?: number) => {
       let report = checkPath(grid, from, to, size, 200);
       // A mine or a building at the end stands in its own way.
       if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
-      routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route } : { name, problem: report.problem ?? "no way through" });
+      routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route, ...(owner === undefined ? {} : { from: owner, length: report.length }) } : { name, problem: report.problem ?? "no way through" });
     };
     for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
     for (const [i, s] of starts.entries()) {
       const gap = (m: typeof s) => Math.hypot(m.x - s.x, m.y - s.y);
-      for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m));
+      for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m), i);
       for (const t of taverns.slice(0, 1)) way(`Start ${i + 1} to the tavern`, at(s), at(t), at(t));
     }
     const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);

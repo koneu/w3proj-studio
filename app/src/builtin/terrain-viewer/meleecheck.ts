@@ -23,7 +23,7 @@ export interface MeleeFacts {
   level(id: string): number | undefined;
   sight(id: string): number | undefined;
   /** Ways units walk, as points along them. */
-  routes: readonly { name: string; to?: Point; points?: readonly Point[]; problem?: string }[];
+  routes: readonly { name: string; to?: Point; points?: readonly Point[]; problem?: string; from?: number; length?: number }[];
   /** How wide the widest way from a start to a place is. */
   widestTo?(x: number, y: number): number;
   /** Stray narrow paths, as narrowStrips gives them. */
@@ -68,6 +68,8 @@ const TREE_NEAR = [500, 750] as const, TREES_1000 = [30, 60] as const;
 /** Ladder camps have at most 6 creeps, reach 364 from their middle, keep creeps 100 apart and other
  *  camps 1,047; these leave a little room. */
 const MOST_CREEPS = 6, CAMP_RADIUS = 400, CREEP_GAP = 80, CAMP_GAP = 1000;
+/** How much walks to a mine may differ between starts. */
+const WALK_GAP = 400;
 /** Real maps are symmetric to within about this. */
 const FAIR = 300;
 
@@ -215,6 +217,13 @@ export function checkMelee(f: MeleeFacts) {
   compare("The nearest expansion's distance", "nearestExpansion", FAIR);
   if (spread(perStart.map((m) => m.treesWithin1000)) > 15) add("balance", "warning", `Trees near the start differ by ${spread(perStart.map((m) => m.treesWithin1000))} between starts.`);
 
+  // Real walking, which straight lines can hide. Each start's ways to the mines, shortest first.
+  const walks = starts.map((_, i) => f.routes.filter((r) => r.from === i && r.length !== undefined).map((r) => r.length as number).sort((a, b) => a - b));
+  for (let k = 0; k < Math.min(...walks.map((w) => w.length)); k++) {
+    const gap = spread(walks.map((w) => w[k]));
+    if (gap > WALK_GAP) add("balance", "warning", `Walking to the ${k === 0 ? "nearest" : "next"} mine differs by ${gap} between starts, though it may look even on the map.`);
+  }
+
   // Routes: who wakes.
   let camped = 0;
   for (const r of f.routes) {
@@ -243,7 +252,9 @@ export function checkMelee(f: MeleeFacts) {
 
   notes.push(
     "Normal sight comes from the game data, per creep. How far Camp mode shortens it isn't in the game's files, so a route within normal sight of a camped creep is a warning: it's the worst case, and the true range is shorter. Ladder maps pass this close too.",
-    "A route inside the sight of creeps not on Camp mode is reported as a sure thing, which is true by day: creeps sleep at night, and then they don't react to this at all.",
+    "A route inside the sight of creeps not on Camp mode is reported as a sure thing, which holds by day: nearly all creeps sleep at night, though some never do, and wake the others.",
+    "Numbers from ladder maps describe six maps, and aren't laws of the game: a warning asks for a reason, not always for a change. Game facts in here come from the game's files.",
+    "Camps are judged by levels, Camp mode and distance, not by their creeps' spells, damage or experience. Whether they're fair to fight only a match can show.",
     `One creep that wakes calls others within ${f.callForHelp} (the game's CreepCallForHelp), so a whole camp comes, even though only one saw the unit.`,
     "Routes are the shortest ways on this app's pathing grid, for one size of unit, not the paths the game picks. Players also walk elsewhere; a route passing clear says nothing about the rest of the map.",
     "Widths and narrow strips come from this app's pathing grid, in steps of 64, with every tree and doodad as it stands. A wide way can still be a long detour.",

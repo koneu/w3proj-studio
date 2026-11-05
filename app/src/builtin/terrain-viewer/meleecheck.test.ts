@@ -167,6 +167,14 @@ test("stray narrow paths are reported only past what ladder maps have", () => {
   assert.ok(checkMelee({ ...map(), narrow: { percent: 9, strips: [strip] } }).findings.some((x) => x.rule === "narrow path" && x.at?.[0] === 100));
 });
 
+test("unequal walks show, however even the map looks", () => {
+  const walk = (from: number, length: number) => ({ name: `Start ${from + 1} to a mine`, points: [] as Point[], from, length });
+  const even = { ...map(), routes: [walk(0, 5000), walk(1, 5200), walk(0, 7000), walk(1, 7100)] };
+  assert.ok(!checkMelee(even).findings.some((x) => x.rule === "balance"));
+  const uneven = { ...map(), routes: [walk(0, 5000), walk(1, 6200)] };
+  assert.ok(checkMelee(uneven).findings.some((x) => x.rule === "balance" && /differs by 1200/.test(x.message)));
+});
+
 test("findings say what to do about them", () => {
   const f = checkMelee(map(camp(-3900, 0))).findings.find((x) => x.rule === "camp distance")!;
   assert.match(f.fix ?? "", /find_spots/);

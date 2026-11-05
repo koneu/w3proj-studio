@@ -24,14 +24,19 @@ Our own judgement, not sourced: the Landmarks section, and how the tips map onto
 Good terrain looks untidy on purpose. An AI's first attempt tends to be clean: flat ground, smooth patches
 of one tile, evenly spread objects of one size. That reads as artificial at once.
 
-Numbers are measured on eight ladder maps. They're there to show how far from tidy a good map is.
+Numbers are measured on eight ladder maps. They show how far from tidy a good map is; they aren't targets, and
+reaching one doesn't make a map good. A thousand well-placed objects beat five thousand scattered ones.
+
+Terrain also has a job: it tells players where they can go. A road should stand out from the ground beside it, a
+camp should be visible as a place, a cliff should say where movement stops, and an expansion should look open.
 
 ## Work in this order
 
 1. Shape: cliffs and water, then the height of the ground.
 2. Tiles, by what the ground is and how it's used.
-3. Big things: tree walls, large rocks, buildings, ruins.
-4. Small things last: shrubs, flowers, stones, to fill gaps and hide seams.
+3. Structure: tree walls, large rocks, water's edge, big ruins.
+4. Regions: what makes each area its own, like its growth, landmarks and buildings.
+5. Detail last: shrubs, flowers, stones, to fill gaps and hide seams.
 
 Going in another order means redoing work: objects follow the ground, but a tile plan doesn't survive new
 cliffs. Look at each stage with terrain_screenshot before the next, using view angled or low, not only top.
@@ -105,7 +110,9 @@ Each part of the map should have something to remember it by, so players can say
 
 ## Gameplay comes first
 
-Never make a map worse to play for the sake of its looks. Block paths permanently with cliffs or water, not
+Never make a map worse to play for the sake of its looks. What looks walkable and what is walkable are separate:
+the map stores terrain, objects and pathing apart, so a gap that looks open can be blocked, and a slope that looks
+fine can stop units. Trust check_path, not the picture, and check again after decorating. Block paths permanently with cliffs or water, not
 with trees, since trees can be cut down. Doodads that block pathing change routes: use check_path after
 decorating, and overlay pathing on terrain_screenshot to see what's blocked.
 
@@ -115,3 +122,5 @@ decorating, and overlay pathing on terrain_screenshot to see what's blocked.
 - terrain_screenshot with overlay heights: is the ground uneven everywhere it should be?
 - Is any patch edge straight or smooth? Is any area just one tile?
 - Does each area look different from the others?
+- Does anything suggest a way that isn't one, or hide a way that is?
+- Can you pick out roads, camps, shops and expansions from the picture alone?
