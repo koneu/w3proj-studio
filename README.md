@@ -54,6 +54,7 @@ MyMap/
   map/              one file per archive file (object data as *.json)
   unnamed/          files of protected maps whose names can't be recovered (not packed)
   build/            pack output (git-ignored)
+  build/checkpoints/  automatic packed copies (Restore Checkpoint…)
   .w3proj/extensions/   optional project-local extensions
   .w3proj/generated-script   hash of the map script the app wrote last (a script without
                     it isn't replaced if that would lose functions the triggers don't make)
