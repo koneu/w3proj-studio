@@ -55,6 +55,8 @@ MyMap/
   unnamed/          files of protected maps whose names can't be recovered (not packed)
   build/            pack output (git-ignored)
   .w3proj/extensions/   optional project-local extensions
+  .w3proj/generated-script   hash of the map script the app wrote last (a script without
+                    it isn't replaced if that would lose functions the triggers don't make)
   .gitattributes    map files byte-exact, text formats diffable, imported assets
                     (models, textures, sounds, videos, fonts) via Git LFS where installed
 ```
