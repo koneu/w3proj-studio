@@ -139,7 +139,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.commands.register("w3.mcp.copySetup", async () => {
       const bridge = await w3.backend.invoke<string | null>("mcp_bridge_path");
-      if (!bridge) throw new Error("w3proj.exe isn't next to this program, so there's nothing for a client to start.");
+      if (!bridge) throw new Error("There's no w3proj.exe next to this program, or it's from before MCP. Build it with: cargo build --release -p w3proj-cli");
       await navigator.clipboard.writeText(JSON.stringify({ mcpServers: { w3proj: { command: bridge, args: ["mcp"] } } }, null, 2));
       void w3.window.showInfo("Copied the MCP client setup. Paste it into your client's configuration.");
     }),

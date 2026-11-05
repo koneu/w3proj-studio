@@ -27,13 +27,21 @@ struct Client {
     typed: bool,
 }
 
-/// The Microsoft Store's Claude Desktop keeps its folder inside its package.
+/// The first folder in `dir` whose name starts with `prefix`.
+fn folder_starting(dir: &Path, prefix: &str) -> Option<PathBuf> {
+    let found = std::fs::read_dir(dir).ok()?.flatten().find(|d| d.file_name().to_string_lossy().starts_with(prefix))?;
+    Some(found.path()).filter(|p| p.is_dir())
+}
+
+/// Where Claude Desktop keeps its settings. The Microsoft Store version has moved twice: into
+/// its package, and from there to Claude-Data, leaving a `.user-data-left` file behind.
 fn claude_desktop(appdata: &Path, local: &Path) -> PathBuf {
-    let packaged = std::fs::read_dir(local.join("Packages")).ok().and_then(|dirs| {
-        dirs.flatten()
-            .find(|d| d.file_name().to_string_lossy().starts_with("Claude_"))
-            .map(|d| d.path().join(r"LocalCache\Roaming\Claude"))
-            .filter(|p| p.is_dir())
+    if let Some(data) = folder_starting(&local.join("Claude-Data"), "claude_") {
+        return data;
+    }
+    let packaged = folder_starting(&local.join("Packages"), "Claude_").map(|p| p.join(r"LocalCache\Roaming\Claude")).filter(|p| {
+        let left = std::fs::read_dir(p).map(|d| d.flatten().any(|f| f.file_name().to_string_lossy().starts_with(".user-data-left")));
+        p.is_dir() && !left.unwrap_or(false)
     });
     packaged.unwrap_or_else(|| appdata.join("Claude"))
 }
@@ -163,12 +171,44 @@ pub fn mcp_clients() -> Vec<ClientInfo> {
     known_clients().iter().map(info).collect()
 }
 
+/// Claude Code's own `claude` command, without a console window. A running Claude Code rewrites
+/// its `.claude.json` from memory, so a change from outside can be lost; through this it can't.
+fn claude(args: &[&str]) -> std::io::Result<std::process::Output> {
+    let mut command = std::process::Command::new("claude");
+    command.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command.output()
+}
+
+/// Through the `claude` command; None if it isn't there.
+fn set_up_with_claude_command(client: &Client, bridge: &str) -> Option<CmdResult<SetupResult>> {
+    // Not found first: nothing to replace yet, and an entry with an old path would make add fail.
+    let _ = claude(&["mcp", "remove", "--scope", "user", SERVER]).ok()?;
+    let added = claude(&["mcp", "add", "--scope", "user", SERVER, "--", bridge, "mcp"]).ok()?;
+    let path = client.config.to_string_lossy().into_owned();
+    Some(if added.status.success() {
+        Ok(SetupResult { path, changed: true, backup: None })
+    } else {
+        Err(format!("claude mcp add failed: {}", String::from_utf8_lossy(&added.stderr).trim()))
+    })
+}
+
 /// Adds the server to one client's configuration.
 #[tauri::command]
 pub fn mcp_client_setup(id: String) -> CmdResult<SetupResult> {
-    let bridge = crate::mcp::mcp_bridge_path().ok_or("w3proj.exe isn't next to this program, so there's nothing for a client to start.")?;
+    let bridge = crate::mcp::mcp_bridge_path().ok_or(crate::mcp::NO_BRIDGE)?;
     let all = known_clients();
     let client = all.iter().find(|c| c.id == id).ok_or_else(|| format!("unknown client {id}"))?;
+    if client.id == "claudeCode" && std::env::var_os("W3PROJ_TEST_CLIENT_HOME").is_none() {
+        if let Some(done) = set_up_with_claude_command(client, &bridge) {
+            return done;
+        }
+    }
     set_up(client, &bridge)
 }
 
@@ -280,6 +320,18 @@ mod tests {
         let packaged = home.0.join(r"local\Packages\Claude_abc123\LocalCache\Roaming\Claude");
         std::fs::create_dir_all(&packaged).unwrap();
         assert_eq!(home.client("claudeDesktop").config, packaged.join("claude_desktop_config.json"));
+    }
+
+    #[test]
+    fn claude_desktop_moved_out_of_its_package() {
+        let home = Home::new();
+        let packaged = home.0.join(r"local\Packages\Claude_abc123\LocalCache\Roaming\Claude");
+        std::fs::create_dir_all(&packaged).unwrap();
+        std::fs::write(packaged.join(".user-data-left.claude_abc123"), "{}").unwrap();
+        assert_eq!(home.client("claudeDesktop").config, home.0.join(r"roaming\Claude\claude_desktop_config.json"), "what it left isn't read");
+        let data = home.0.join(r"local\Claude-Data\claude_abc123");
+        std::fs::create_dir_all(&data).unwrap();
+        assert_eq!(home.client("claudeDesktop").config, data.join("claude_desktop_config.json"));
     }
 
     #[test]

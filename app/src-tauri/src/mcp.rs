@@ -130,10 +130,21 @@ pub fn mcp_respond(state: State<'_, Mcp>, key: u64, message: String) {
     }
 }
 
-/// The bridge next to this program, for the client setup; None if it isn't there.
+pub const NO_BRIDGE: &str = "There's no w3proj.exe next to this program, or it's from before MCP. Build it with: cargo build --release -p w3proj-cli";
+
+/// The bridge next to this program, for the client setup; None if it isn't there or can't serve:
+/// an older build has no `mcp` command, and a client would only say the server failed.
 #[tauri::command]
 pub fn mcp_bridge_path() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let bridge = exe.parent()?.join(if cfg!(windows) { "w3proj.exe" } else { "w3proj" });
-    bridge.is_file().then(|| bridge.to_string_lossy().into_owned())
+    let mut asks = std::process::Command::new(&bridge);
+    asks.args(["mcp", "--help"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        asks.creation_flags(CREATE_NO_WINDOW);
+    }
+    asks.output().ok()?.status.success().then(|| bridge.to_string_lossy().into_owned())
 }
