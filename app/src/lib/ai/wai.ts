@@ -5,6 +5,7 @@
 // files. Conditions are function trees like trigger parameters; their
 // argument counts come from TriggerData plus AIEditorData's [AIFunctions].
 
+import { decodeLossless, encodeLossless } from "../formats/lossless";
 import { CALL, CONDITION, type TriggerData, type TriggerFunction } from "../triggers/triggerdata";
 import type { Param } from "../triggers/wtg";
 
@@ -63,7 +64,7 @@ export function embeddedObjectData(f: AiFile): { path: string; date: string } | 
   const b = f.extra;
   if (f.trailer !== 1 || !b.length) return null;
   const e1 = b.indexOf(0), e2 = e1 < 0 ? -1 : b.indexOf(0, e1 + 1);
-  return e2 < 0 ? null : { path: td.decode(b.subarray(0, e1)), date: td.decode(b.subarray(e1 + 1, e2)) };
+  return e2 < 0 ? null : { path: decodeLossless(b.subarray(0, e1)), date: decodeLossless(b.subarray(e1 + 1, e2)) };
 }
 
 /** Option bits of the options field. */
@@ -75,7 +76,6 @@ export const AI_OPTIONS: [number, string][] = [
   [0x10000, "Buy items"],
 ];
 
-const td = new TextDecoder(), te = new TextEncoder();
 
 class Reader {
   o = 0;
@@ -83,8 +83,8 @@ class Reader {
   constructor(private b: Uint8Array) { this.v = new DataView(b.buffer, b.byteOffset, b.byteLength); }
   u32() { const x = this.v.getUint32(this.o, true); this.o += 4; return x; }
   i32() { const x = this.v.getInt32(this.o, true); this.o += 4; return x; }
-  id() { const s = td.decode(this.b.subarray(this.o, this.o + 4)); this.o += 4; return s; }
-  str() { const e = this.b.indexOf(0, this.o); if (e < 0) throw new Error("unterminated string"); const s = td.decode(this.b.subarray(this.o, e)); this.o = e + 1; return s; }
+  id() { const s = decodeLossless(this.b.subarray(this.o, this.o + 4)); this.o += 4; return s; }
+  str() { const e = this.b.indexOf(0, this.o); if (e < 0) throw new Error("unterminated string"); const s = decodeLossless(this.b.subarray(this.o, e)); this.o = e + 1; return s; }
   get done() { return this.o >= this.b.length; }
 }
 
@@ -92,8 +92,8 @@ class Writer {
   private parts: number[] = [];
   u32(x: number) { this.parts.push(x & 255, (x >>> 8) & 255, (x >>> 16) & 255, (x >>> 24) & 255); return this; }
   i32(x: number) { return this.u32(x >>> 0); }
-  id(s: string) { const b = te.encode(s.padEnd(4, "\0").slice(0, 4)); this.parts.push(...b.subarray(0, 4)); return this; }
-  str(s: string) { this.parts.push(...te.encode(s), 0); return this; }
+  id(s: string) { this.parts.push(...encodeLossless(s.padEnd(4, "\0")).subarray(0, 4)); return this; }
+  str(s: string) { this.parts.push(...encodeLossless(s), 0); return this; }
   done() { return new Uint8Array(this.parts); }
 }
 

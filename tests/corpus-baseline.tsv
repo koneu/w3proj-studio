@@ -244,20 +244,22 @@ build_1/4_w3c_251104_0950_NorthernIsles/build/4_w3c_251104_0950_NorthernIsles.w3
 build_1/4_w3c_251104_0950_NorthernIsles/build/4_w3c_251104_0950_NorthernIsles.w3x	war3mapSkin.w3t	objdata-json
 build_1/4_w3c_251104_0950_NorthernIsles/build/4_w3c_251104_0950_NorthernIsles.w3x	war3mapUnits.doo	format:units
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.doo	format:doodads
+build_1/NewTest2/build/NewTest2.edit.w3x	war3map.mmp	format:minimap
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.w3c	format:cameras
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.w3e	w3e-text
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.w3i	format:w3i
+build_1/NewTest2/build/NewTest2.edit.w3x	war3map.w3l	format:lights
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.w3r	format:regions
-build_1/NewTest2/build/NewTest2.edit.w3x	war3map.w3s	format:sounds
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.wct	wct-text
 build_1/NewTest2/build/NewTest2.edit.w3x	war3map.wtg	wtg-json
 build_1/NewTest2/build/NewTest2.edit.w3x	war3mapUnits.doo	format:units
 build_1/NewTest2/build/NewTest2.w3x	war3map.doo	format:doodads
+build_1/NewTest2/build/NewTest2.w3x	war3map.mmp	format:minimap
 build_1/NewTest2/build/NewTest2.w3x	war3map.w3c	format:cameras
 build_1/NewTest2/build/NewTest2.w3x	war3map.w3e	w3e-text
 build_1/NewTest2/build/NewTest2.w3x	war3map.w3i	format:w3i
+build_1/NewTest2/build/NewTest2.w3x	war3map.w3l	format:lights
 build_1/NewTest2/build/NewTest2.w3x	war3map.w3r	format:regions
-build_1/NewTest2/build/NewTest2.w3x	war3map.w3s	format:sounds
 build_1/NewTest2/build/NewTest2.w3x	war3map.wct	wct-text
 build_1/NewTest2/build/NewTest2.w3x	war3map.wtg	wtg-json
 build_1/NewTest2/build/NewTest2.w3x	war3mapUnits.doo	format:units
@@ -1578,6 +1580,17 @@ campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3h	objdata-j
 campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3q	objdata-json
 campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3t	objdata-json
 campaign/The Chosen Ones 1.0/The Chosen Ones 1.1a.w3n	war3campaign.w3u	objdata-json
+cliff.w3m	war3map.doo	format:doodads
+cliff.w3m	war3map.imp	format:imports
+cliff.w3m	war3map.mmp	format:minimap
+cliff.w3m	war3map.w3c	format:cameras
+cliff.w3m	war3map.w3e	w3e-text
+cliff.w3m	war3map.w3i	format:w3i
+cliff.w3m	war3map.w3l	format:lights
+cliff.w3m	war3map.w3r	format:regions
+cliff.w3m	war3map.wct	wct-text
+cliff.w3m	war3map.wtg	wtg-json
+cliff.w3m	war3mapUnits.doo	format:units
 empty_map_on_newest_world_editor.w3m	war3map.doo	format:doodads
 empty_map_on_newest_world_editor.w3m	war3map.mmp	format:minimap
 empty_map_on_newest_world_editor.w3m	war3map.w3c	format:cameras
@@ -1588,6 +1601,17 @@ empty_map_on_newest_world_editor.w3m	war3map.w3r	format:regions
 empty_map_on_newest_world_editor.w3m	war3map.wct	wct-text
 empty_map_on_newest_world_editor.w3m	war3map.wtg	wtg-json
 empty_map_on_newest_world_editor.w3m	war3mapUnits.doo	format:units
+light_map - Kopie.w3m	war3map.doo	format:doodads
+light_map - Kopie.w3m	war3map.imp	format:imports
+light_map - Kopie.w3m	war3map.mmp	format:minimap
+light_map - Kopie.w3m	war3map.w3c	format:cameras
+light_map - Kopie.w3m	war3map.w3e	w3e-text
+light_map - Kopie.w3m	war3map.w3i	format:w3i
+light_map - Kopie.w3m	war3map.w3l	format:lights
+light_map - Kopie.w3m	war3map.w3r	format:regions
+light_map - Kopie.w3m	war3map.wct	wct-text
+light_map - Kopie.w3m	war3map.wtg	wtg-json
+light_map - Kopie.w3m	war3mapUnits.doo	format:units
 light_map.w3m	war3map.doo	format:doodads
 light_map.w3m	war3map.imp	format:imports
 light_map.w3m	war3map.mmp	format:minimap
@@ -1599,6 +1623,30 @@ light_map.w3m	war3map.w3r	format:regions
 light_map.w3m	war3map.wct	wct-text
 light_map.w3m	war3map.wtg	wtg-json
 light_map.w3m	war3mapUnits.doo	format:units
+light_map/build/light_map.edit.w3x	war3map.doo	format:doodads
+light_map/build/light_map.edit.w3x	war3map.imp	format:imports
+light_map/build/light_map.edit.w3x	war3map.mmp	format:minimap
+light_map/build/light_map.edit.w3x	war3map.w3c	format:cameras
+light_map/build/light_map.edit.w3x	war3map.w3d	objdata-json
+light_map/build/light_map.edit.w3x	war3map.w3e	w3e-text
+light_map/build/light_map.edit.w3x	war3map.w3i	format:w3i
+light_map/build/light_map.edit.w3x	war3map.w3l	format:lights
+light_map/build/light_map.edit.w3x	war3map.w3r	format:regions
+light_map/build/light_map.edit.w3x	war3map.wct	wct-text
+light_map/build/light_map.edit.w3x	war3map.wtg	wtg-json
+light_map/build/light_map.edit.w3x	war3mapUnits.doo	format:units
+light_map/build/light_map.w3x	war3map.doo	format:doodads
+light_map/build/light_map.w3x	war3map.imp	format:imports
+light_map/build/light_map.w3x	war3map.mmp	format:minimap
+light_map/build/light_map.w3x	war3map.w3c	format:cameras
+light_map/build/light_map.w3x	war3map.w3d	objdata-json
+light_map/build/light_map.w3x	war3map.w3e	w3e-text
+light_map/build/light_map.w3x	war3map.w3i	format:w3i
+light_map/build/light_map.w3x	war3map.w3l	format:lights
+light_map/build/light_map.w3x	war3map.w3r	format:regions
+light_map/build/light_map.w3x	war3map.wct	wct-text
+light_map/build/light_map.w3x	war3map.wtg	wtg-json
+light_map/build/light_map.w3x	war3mapUnits.doo	format:units
 new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.doo	format:doodads
 new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3a	objdata-json
 new(er)_maps/CrazyHeroSiegeAI_v2.0.w3x	war3map.w3e	w3e-text
@@ -1836,7 +1884,7 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.doo	format:doodads
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.mmp	format:minimap
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3a	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3c	format:cameras
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TIOKAllMaps.w3n	Orc08.w3m/war3map.w3r	format:regions
@@ -2105,7 +2153,7 @@ new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.doo	format:doodads
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.mmp	format:minimap
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3a	objdata-json
-new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3c	raw
+new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3c	format:cameras
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3e	w3e-text
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3i	format:w3i
 new(er)_maps/The Invasion of Kalimdor Reworked/The Invasion of Kalimdor Reworked/TheInvasionOfKalimdorReworked.w3n	Orc08.w3m/war3map.w3r	format:regions

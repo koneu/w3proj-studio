@@ -160,7 +160,7 @@ impl Reader<'_> {
         let rest = &self.b[self.o.min(self.b.len())..];
         let n = rest.iter().position(|&c| c == 0).ok_or_else(|| err("unterminated string"))?;
         self.o += n + 1;
-        String::from_utf8(rest[..n].to_vec()).map_err(|_| err("string isn't UTF-8"))
+        Ok(crate::lossless::decode(&rest[..n]))
     }
     fn list<T>(&mut self, mut f: impl FnMut(&mut Self) -> Result<T>) -> Result<Vec<T>> {
         let n = self.u32()? as usize;
@@ -332,7 +332,7 @@ impl Writer {
         self.u32(v as u32);
     }
     fn str(&mut self, s: &str) {
-        self.out.extend_from_slice(s.as_bytes());
+        self.out.extend_from_slice(&crate::lossless::encode(s));
         self.out.push(0);
     }
     fn param(&mut self, p: &Param) {

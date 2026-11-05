@@ -4,6 +4,7 @@
 pub mod codec;
 pub mod format;
 pub mod header;
+pub mod lossless;
 pub mod names;
 pub mod objdata;
 pub mod paths;

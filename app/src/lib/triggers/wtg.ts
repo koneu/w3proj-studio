@@ -24,6 +24,7 @@
 // (length + text), then length + text for each GUI trigger (no count).
 // Classic: version (0/1), [comment, header script,] count, texts.
 
+import { decodeLossless, encodeLossless } from "../formats/lossless";
 import type { TriggerData } from "./triggerdata";
 
 export interface Param {
@@ -80,7 +81,6 @@ export interface TriggerFile {
 }
 
 const MARKER = 0x80000004;
-const td = new TextDecoder();
 const te = new TextEncoder();
 
 class Reader {
@@ -92,7 +92,8 @@ class Reader {
   str() {
     const e = this.b.indexOf(0, this.o);
     if (e < 0) throw new Error(`unterminated string at ${this.o}`);
-    const s = td.decode(this.b.subarray(this.o, e));
+    // Old maps' text may not be UTF-8; it has to survive being saved again.
+    const s = decodeLossless(this.b.subarray(this.o, e));
     this.o = e + 1;
     return s;
   }
@@ -106,7 +107,7 @@ class Writer {
   private push(p: Uint8Array) { this.parts.push(p); this.len += p.length; }
   u32(v: number) { const p = new Uint8Array(4); new DataView(p.buffer).setUint32(0, v >>> 0, true); this.push(p); return this; }
   i32(v: number) { const p = new Uint8Array(4); new DataView(p.buffer).setInt32(0, v, true); this.push(p); return this; }
-  str(s: string) { this.push(te.encode(s)); this.push(new Uint8Array(1)); return this; }
+  str(s: string) { this.push(encodeLossless(s)); this.push(new Uint8Array(1)); return this; }
   bytes(b: Uint8Array) { this.push(b); return this; }
   done() { const out = new Uint8Array(this.len); let o = 0; for (const p of this.parts) { out.set(p, o); o += p.length; } return out; }
 }
@@ -139,7 +140,7 @@ function readEca(r: Reader, data: TriggerData, v7: boolean, child: boolean): Eca
 
 export function parseWtg(buf: Uint8Array, data: TriggerData): TriggerFile {
   const r = new Reader(buf);
-  if (td.decode(r.bytes(4)) !== "WTG!") throw new Error("not a trigger file (missing WTG! header)");
+  if (decodeLossless(r.bytes(4)) !== "WTG!") throw new Error("not a trigger file (missing WTG! header)");
   const first = r.u32();
   if (first === MARKER) {
     const version = r.u32();
@@ -269,11 +270,11 @@ function readText(r: Reader): string | null {
   const n = r.u32();
   if (!n) return null;
   const b = r.bytes(n);
-  return td.decode(b[n - 1] === 0 ? b.subarray(0, n - 1) : b);
+  return decodeLossless(b[n - 1] === 0 ? b.subarray(0, n - 1) : b);
 }
 function writeText(w: Writer, s: string | null) {
   if (s === null) { w.u32(0); return; }
-  const b = te.encode(s);
+  const b = encodeLossless(s);
   w.u32(b.length + 1).bytes(b).bytes(new Uint8Array(1));
 }
 

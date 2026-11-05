@@ -94,6 +94,23 @@ test("a function TriggerData doesn't know stops reading (extended editors)", () 
   assert.throws(() => parseWtg(writeWtg(f), data), /unknown trigger function "YDWESetAnyTypeLocal"/);
 });
 
+test("names and text in old code pages survive reading and writing", () => {
+  const korean = new Uint8Array([0xc7, 0xd1, 0xb1, 0xb9]), name = new TextDecoder("latin1").decode(korean);
+  const f = reforged(), plain = writeWtg(f);
+  // The same file with the trigger's name replaced by CP949 bytes of the same length.
+  (f.items[3] as { name: string }).name = "KORE";
+  const b = writeWtg(f), at = Buffer.from(b).indexOf("KORE");
+  b.set(korean, at);
+  const back = parseWtg(b, data);
+  assert.notEqual((back.items[3] as { name: string }).name, name);
+  assert.deepEqual(writeWtg(back), b);
+  assert.deepEqual(writeWtg(parseWtgJson(writeWtgJson(back))), b);
+  assert.equal(plain.length, b.length + "Start".length - 4);
+  const c: CustomTextFile = { reforged: true, version: 1, comment: "", header: null, texts: [] };
+  const wct = writeWct(c), withText = new Uint8Array([...wct.subarray(0, wct.length - 4), 3, 0, 0, 0, 0xc7, 0xd1, 0]);
+  assert.deepEqual(writeWct(parseWct(withText, 0)), withText);
+});
+
 test("text triggers: in item order, only those with text", () => {
   assert.deepEqual(textTriggers(reforged()).map((t) => t.name), ["Start", "Script"]);
 });

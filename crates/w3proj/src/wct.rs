@@ -48,7 +48,7 @@ impl<'a> Reader<'a> {
         let rest = &self.b[self.o..];
         let n = rest.iter().position(|&c| c == 0).ok_or_else(|| err("unterminated string"))?;
         self.o += n + 1;
-        String::from_utf8(rest[..n].to_vec()).map_err(|_| err("comment isn't UTF-8"))
+        Ok(crate::lossless::decode(&rest[..n]))
     }
     /// Length-prefixed text; the length counts the terminating zero, which must be there.
     fn text(&mut self) -> Result<Option<String>> {
@@ -61,7 +61,7 @@ impl<'a> Reader<'a> {
         if s[n - 1] != 0 || s[..n - 1].contains(&0) {
             return Err(err("text without its terminating zero"));
         }
-        String::from_utf8(s[..n - 1].to_vec()).map(Some).map_err(|_| err("text isn't UTF-8"))
+        Ok(Some(crate::lossless::decode(&s[..n - 1])))
     }
     fn done(&self) -> bool {
         self.o >= self.b.len()
@@ -103,8 +103,9 @@ fn write(w: &Wct) -> Vec<u8> {
     let text = |out: &mut Vec<u8>, t: &Option<String>| match t {
         None => out.extend_from_slice(&0u32.to_le_bytes()),
         Some(s) => {
-            out.extend_from_slice(&(s.len() as u32 + 1).to_le_bytes());
-            out.extend_from_slice(s.as_bytes());
+            let bytes = crate::lossless::encode(s);
+            out.extend_from_slice(&(bytes.len() as u32 + 1).to_le_bytes());
+            out.extend_from_slice(&bytes);
             out.push(0);
         }
     };
@@ -113,7 +114,7 @@ fn write(w: &Wct) -> Vec<u8> {
     }
     out.extend_from_slice(&w.version.to_le_bytes());
     if w.reforged || w.version >= 1 {
-        out.extend_from_slice(w.comment.as_bytes());
+        out.extend_from_slice(&crate::lossless::encode(&w.comment));
         out.push(0);
     }
     if let Some(h) = &w.header {
@@ -306,5 +307,21 @@ mod tests {
         // A text containing a marker line can't be told apart: the codec check then keeps the file raw.
         let b = bin(true, 1, Some(Some("")), &[Some("a\n//== trigger 1 ==\nb")]);
         assert!(from_text(&to_text(&b).unwrap()).map_or(true, |x| x != b));
+    }
+
+    #[test]
+    fn code_pages_stay_in_the_text_form() {
+        // Comment, header and a trigger text with CP949 bytes.
+        let mut b = Vec::new();
+        b.extend_from_slice(&0x8000_0004u32.to_le_bytes());
+        b.extend_from_slice(&1u32.to_le_bytes());
+        b.extend_from_slice(b"c \xC7\xD1\0");
+        for text in [&b"// \xC7\xD1\xB1\xB9\0"[..], b"x\xFF\0"] {
+            b.extend_from_slice(&(text.len() as u32).to_le_bytes());
+            b.extend_from_slice(text);
+        }
+        let t = to_text(&b).unwrap();
+        assert!(std::str::from_utf8(&t).is_ok());
+        assert_eq!(from_text(&t).unwrap(), b);
     }
 }

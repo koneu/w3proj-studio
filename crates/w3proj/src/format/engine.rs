@@ -107,7 +107,7 @@ fn read_prim(p: Prim, r: &mut Reader) -> Result<Value> {
         Prim::CString => {
             let rest = &r.d[r.p..];
             let n = rest.iter().position(|&b| b == 0).ok_or_else(|| Error::Format("unterminated string".into()))?;
-            let s = std::str::from_utf8(&rest[..n]).map_err(|_| Error::Format("string is not UTF-8".into()))?.to_string();
+            let s = crate::lossless::decode(&rest[..n]);
             r.p += n + 1;
             Value::String(s)
         }
@@ -314,7 +314,7 @@ fn write_prim(p: Prim, v: &Value, out: &mut Vec<u8>, what: &str) -> Result<()> {
             if s.contains('\0') {
                 return Err(bad());
             }
-            out.extend(s.as_bytes());
+            out.extend(crate::lossless::encode(s));
             out.push(0);
         }
         Prim::Char => match v.as_str().ok_or_else(bad)?.as_bytes() {

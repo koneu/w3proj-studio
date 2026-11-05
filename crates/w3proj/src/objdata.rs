@@ -159,9 +159,7 @@ impl<'a> Reader<'a> {
             .iter()
             .position(|&b| b == 0)
             .ok_or_else(|| Error::Format("unterminated string".into()))?;
-        let s = std::str::from_utf8(&rest[..n])
-            .map_err(|_| Error::Format("string is not UTF-8".into()))?
-            .to_string();
+        let s = crate::lossless::decode(&rest[..n]);
         self.p += n + 1;
         Ok(s)
     }
@@ -323,7 +321,7 @@ fn write_mods(out: &mut Vec<u8>, mods: &[Mod], end: Id, opt_ints: bool) -> Resul
                 out.extend(v.to_bits().to_le_bytes());
             }
             ValueType::String => {
-                out.extend(m.value.as_str().ok_or_else(bad)?.as_bytes());
+                out.extend(crate::lossless::encode(m.value.as_str().ok_or_else(bad)?));
                 out.push(0);
             }
         }
