@@ -151,6 +151,3 @@ In order of what I'd do next.
 5. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist
    is all there is. Saved-by-World-Editor samples of each file version would at least pin the
    formats, and could settle the unknown fields listed in `openpoints/test.md`.
-6. **CI has never run.** The workflow is active on GitHub with no runs yet. It was registered just
-   after the last push, so the next push should start it; it can also be started by hand from the
-   Actions tab. Until it has run once, `node tests/gate.mjs` is the only proof.
