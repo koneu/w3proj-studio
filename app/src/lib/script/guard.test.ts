@@ -8,6 +8,10 @@ test("code that isn't made from the triggers is noticed, in JASS and Lua", () =>
   assert.deepEqual(lostFunctions("function main()\nend\nlocal function hidden()\nend\nfunction Reader.prototype.read(self)\nend\n", "function main()\nend\n"), ["hidden", "Reader.prototype.read"]);
 });
 
+test("Lua functions kept in variables count too", () => {
+  assert.deepEqual(lostFunctions("function main()\nend\nHelper = function()\nend\nlocal api = function(x)\nend\nM.run = function()\nend\n", "function main()\nend\n"), ["Helper", "api", "M.run"]);
+});
+
 test("what the generator writes may come and go", () => {
   const current = ["main", "config", "InitTrig_Foo", "Trig_Foo_Actions", "CreateRegions", "CreateUnitsForPlayer3", "CreateNeutralPassive",
     "Unit000012_DropItems", "ItemTable000001_DropItems", "InitUpgrades_Player2", "InitTechTree"].map((f) => `function ${f}()\nend`).join("\n");

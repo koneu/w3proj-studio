@@ -10,6 +10,9 @@ const mod = (p: string) => import(pathToFileURL(L + p).href);
 const { parseTriggerData } = await mod("/triggers/triggerdata.ts");
 const W = await mod("/triggers/wtg.ts");
 const J = await mod("/script/jass.ts");
+const G = await mod("/script/guard.ts");
+const R = await mod("/triggers/refs.ts");
+const { checkLua } = await mod("/lua/check.ts");
 const { StringTable } = await mod("/formats/wts.ts");
 const T = await mod("/terrain/w3e.ts");
 const { parseIni, parseSlk } = await mod("/formats/text.ts");
@@ -29,6 +32,16 @@ const labels = existsSync("soundinfo") ? J.parseSoundLabels(readdirSync("soundin
 for (const f of readdirSync("abil")) for (const [id, sec] of parseIni(read("abil/" + f))) { const on = sec.get("orderon"), off = sec.get("orderoff"); if (on && off && !orders.has(id)) orders.set(id, { on, off }); }
 
 const stats: Record<string, [number, number]> = {};
+// lib/script/guard: maps the World Editor made must not look as if they had code of their own.
+const guarded: [string, string[]][] = [];
+// The Problems view's trigger references and Lua check: what the World Editor made has no such problems.
+const broken: string[] = [];
+for (const m of readdirSync("ws")) {
+  const f = `ws/${m}/map/war3map.lua`;
+  if (!existsSync(f)) continue;
+  const p = checkLua(read(f));
+  if (p.length) broken.push(`${m} lua: ${p[0].message}`);
+}
 let shown = 0;
 const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
 const norm = (x: string) => x.replace(/SetSoundDuration\( (\w+), \d+ \)/g, "SetSoundDuration( $1, 0 )").replace(/\s+$/g, "");
@@ -75,6 +88,17 @@ for (const m of readdirSync("ws")) {
   const gen = J.generateSections(input), orig = J.splitSections(read(`${d}/war3map.j`));
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
   const whole = J.generateScript(input), file = read(`${d}/war3map.j`);
+  const inList = (a: any[] | undefined, f: (x: any) => string) => (a ?? []).map(f);
+  const units = json(d, "war3mapUnits.doo")?.units ?? [], doodads = json(d, "war3map.doo")?.doodads ?? [];
+  const known = new Set<string>([
+    ...triggers.items.filter((i: any) => "ecas" in i && i.type !== 16).map((i: any) => `gg_trg_${J.ident(i.name)}`),
+    ...inList(json(d, "war3map.w3r")?.regions, (r) => `gg_rct_${J.ident(r.name)}`), ...inList(json(d, "war3map.w3c")?.cameras, (c) => `gg_cam_${J.ident(c.name)}`),
+    ...inList(json(d, "war3map.w3s")?.sounds, (s) => s.name),
+    ...units.flatMap((p: any) => [J.placedName(p, "unit"), J.placedName(p, "item")]), ...doodads.flatMap((p: any) => [J.placedName(p, "dest"), J.placedName(p, "doodad")]),
+  ]);
+  for (const x of R.missingRefs(R.triggerRefs(triggers), known, triggers.variables)) broken.push(`${m} ${x.ref} (${x.triggers[0]})`);
+  const lost = G.lostFunctions(file, whole);
+  if (lost.length) guarded.push([m, lost]);
   const fs = (stats["(whole file)"] ??= [0, 0]); fs[1]++; if (norm(whole) === norm(file)) fs[0]++;
   if (only === "(whole file)" && norm(whole) !== norm(file) && shown < showN) {
     const a = norm(whole).split(/\r?\n/), b = norm(file).split(/\r?\n/);
@@ -95,3 +119,7 @@ for (const m of readdirSync("ws")) {
   }
 }
 for (const [k, [ok, n]] of Object.entries(stats)) console.log(`${(k || "(header)").padEnd(20)} ${ok}/${n}`);
+console.log(`problems: ${broken.length} in the game's maps`);
+for (const b of broken.slice(0, 20)) console.log(`  ${b}`);
+console.log(`guard: ${guarded.length} of ${stats["(whole file)"]?.[1] ?? 0} maps would keep their script`);
+for (const [m, lost] of guarded) console.log(`  ${m}: ${lost.length} (${lost.slice(0, 6).join(", ")})`);

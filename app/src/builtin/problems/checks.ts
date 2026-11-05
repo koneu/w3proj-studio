@@ -1,4 +1,4 @@
-// The built-in checks of the Problems view: the map script's JASS errors, file
+// The built-in checks of the Problems view (more in mapchecks.ts): the map script's errors, file
 // paths in object data that don't exist (or point to someone's disk),
 // textures of imported models, placed objects of unknown types, placed objects
 // without a Classic model, and import list entries without their file.
@@ -11,6 +11,7 @@ import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
 import { checkJass } from "../../lib/jass/check";
+import { checkLua } from "../../lib/lua/check";
 import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
@@ -88,11 +89,15 @@ export class FileLookup {
   }
 }
 
-const readJson = async <T>(w3: W3Api, path: string): Promise<T | null> => {
-  const text = await w3.workspace.readText(path).catch(() => null);
+/** A map file's JSON document ("map/x.json"), also from the raw file of older projects. */
+export const readMapDoc = async <T>(w3: W3Api, path: string): Promise<T | null> => {
+  const root = w3.workspace.project()?.root;
+  const text = await w3.workspace.readText(path).catch(() =>
+    (root ? w3.backend.invoke<string>("codec_decode", { root, path: path.replace(/\.json$/, "") }).catch(() => null) : null));
   if (text === null) return null;
   try { return JSON.parse(text) as T; } catch { return null; }
 };
+const readJson = readMapDoc;
 const capped = (list: Problem[], what: string): Problem[] =>
   list.length > LIMIT ? [...list.slice(0, LIMIT), { severity: "warning", message: `… and ${list.length - LIMIT} more ${what}` }] : list;
 
@@ -100,11 +105,19 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
   return [
     {
       id: "jass",
-      title: "Map script (war3map.j)",
+      title: "Map script",
       async run() {
         const path = "map/war3map.j";
         const src = await w3.workspace.readText(path).catch(() => null);
-        if (src === null) return [];
+        if (src === null) {
+          const lua = await w3.workspace.readText("map/war3map.lua").catch(() => null);
+          if (lua === null) return [];
+          const lineAt = (at: number) => lua.slice(0, at).split("\n").length;
+          return capped(checkLua(lua).map((d): Problem => ({
+            severity: "error", message: d.message, location: `war3map.lua:${lineAt(d.from)}`,
+            reveal: { command: "w3.text.revealAt", args: ["map/war3map.lua", lua.slice(0, d.from).replace(/\r\n/g, "\n").length] },
+          })), "script problems");
+        }
         const env = await gameJassEnv((p) => w3.game.readText(p));
         const lineOf = (at: number) => src.slice(0, at).split("\n").length;
         // The text editor counts a line break as one character, also in CRLF files.

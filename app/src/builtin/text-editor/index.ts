@@ -10,6 +10,7 @@ import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutt
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, type CompletionItem, type CompletionProvider, type CompletionRequest, type FileLanguage } from "../../extensions/services";
 import { checkJass, envWithout } from "../../lib/jass/check";
+import { checkLua } from "../../lib/lua/check";
 import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
 import { linter } from "./lint";
@@ -201,7 +202,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const claim = claimOf(doc.path, text);
         const jass = claim ? claim.base === "jass" : /\.j$/i.test(doc.path);
         const problems = h("div.cm-diag-list", { hidden: true });
-        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t)) : undefined;
+        const lua = !claim && /\.lua$/i.test(doc.path);
+        const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t))
+          : lua ? (t: string) => checkLua(t).map((d) => ({ ...d, severity: "error" as const })) : undefined;
         const lint = check ? linter(check, problems) : null;
         if (lint) el.classList.add("text-with-problems");
         const view = new EditorView({

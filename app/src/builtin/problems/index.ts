@@ -9,6 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
+import { mapChecks } from "./mapchecks";
 
 interface Group { check: ProblemCheck; problems: Problem[]; error?: string }
 
@@ -58,7 +59,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     problems: all,
   };
   ctx.subscriptions.push(w3.services.provide(PROBLEMS_SERVICE, service));
-  for (const c of builtinChecks(w3)) ctx.subscriptions.push(service.registerCheck(c));
+  for (const c of [...builtinChecks(w3), ...mapChecks(w3)]) ctx.subscriptions.push(service.registerCheck(c));
 
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
   ctx.subscriptions.push(

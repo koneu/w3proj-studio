@@ -21,6 +21,10 @@ Also needed in that folder for `sections.mts`: `WorldEditData.txt`, `UnitBalance
 `ItemData.slk`, `AbilityData.slk` (from `UI\` and `Units\`), `abil/*.txt` (the `Units\*AbilityFunc.txt`
 files) and `soundinfo/*.slk` (the `UI\SoundInfo\*.slk` tables, for labelled sounds).
 
+It also reports what must stay silent on maps the World Editor made: `lib/script/guard.ts`
+(`guard:`, scripts that would be kept) and the Problems view's trigger references and Lua check
+(`problems:`, one known dead reference in a disabled trigger of map 436).
+
 `sections.mts` also counts whole files that come out identical, `(whole file)`; pass that as the
 section to see where a file whose sections all match still differs. Sound durations are compared
 as 0 (they come from the sound files).

@@ -2,7 +2,7 @@
 // triggers use each thing (generated globals gg_…, object codes, variables).
 
 import { placedName, ident, type PlacedJson } from "../../lib/script/jass";
-import type { Param, TriggerFile } from "../../lib/triggers/wtg";
+import type { TriggerFile } from "../../lib/triggers/wtg";
 
 /** Where a double-click goes. */
 export type Target =
@@ -31,25 +31,6 @@ type Placed = PlacedJson & { position: number[]; player?: number };
 const NEUTRAL: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Victim", 26: "Neutral Extra", 27: "Neutral Passive" };
 const owner = (p?: number) => (p === undefined ? "" : NEUTRAL[p] ?? `Player ${p + 1}`);
 const at = (p: Placed) => `(${Math.round(p.position[0])}, ${Math.round(p.position[1])})`;
-
-/** Triggers by what they refer to: gg_ globals, 4-character object codes, udg:<variable>. */
-export function triggerRefs(file: TriggerFile): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
-  const add = (key: string, t: string) => { let s = out.get(key); if (!s) out.set(key, (s = new Set())); s.add(t); };
-  for (const it of file.items) {
-    if (!("ecas" in it) || it.type === 16) continue;
-    const visitP = (p: Param) => {
-      if (p.type === 1 && p.value) add(p.value.startsWith("gg_") ? p.value : `udg:${p.value}`, it.name);
-      if (p.type === 3 && /^.{4}$/.test(p.value)) add(p.value, it.name);
-      p.call?.params.forEach(visitP);
-      if (p.index) visitP(p.index);
-    };
-    type E = { params: Param[]; children: E[] };
-    const walk = (e: E) => { e.params.forEach(visitP); e.children.forEach(walk); };
-    (it.ecas as E[]).forEach(walk);
-  }
-  return out;
-}
 
 /** What object data holds per object (field values are strings, ints, reals). */
 export interface ObjectEntry { id?: string; base: string; mods?: { value: unknown }[]; sets?: { mods: { value: unknown }[] }[] }

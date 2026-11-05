@@ -2,9 +2,9 @@
 // only in war3map.j / war3map.lua (W3Champions' maps: 800 injected functions), and regenerating
 // the script from the triggers would drop it without a trace.
 
-/** Top-level functions of a JASS or Lua script. */
+/** Top-level functions of a JASS or Lua script ("function f", also Lua's "f = function"). */
 function functionsOf(script: string): Set<string> {
-  return new Set([...script.matchAll(/^(?:local )?function ([\w.:]+)/gm)].map((m) => m[1]));
+  return new Set([...script.matchAll(/^(?:local )?(?:function ([\w.:]+)|([\w.]+) *= *function\b)/gm)].map((m) => m[1] ?? m[2]));
 }
 
 /** Functions the generator itself writes, which come and go with the map's contents (a deleted

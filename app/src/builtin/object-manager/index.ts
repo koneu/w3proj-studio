@@ -6,10 +6,11 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { loadKind } from "../../lib/objects/metadata";
+import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
-import { buildTree, idsInText, markUnused, objectRefs, triggerRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
+import { buildTree, idsInText, markUnused, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
 
 const VIEW = "w3.objectManager.tree";
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
