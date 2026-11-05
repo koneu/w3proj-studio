@@ -4,3 +4,4 @@ node_modules/
 /app/src-tauri/gen/
 *.w3proj-test/
 /smoketest_maps/**
+/openpoints/

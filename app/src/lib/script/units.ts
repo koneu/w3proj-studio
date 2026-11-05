@@ -91,7 +91,7 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
 /** The "Items" section body: items placed on the map (war3mapUnits.doo), or "". */
 export function itemsSection(i: UnitsInput): string {
   // Items are created by type id (character codes), then by creation number (not exact for
-  // every map, see openpoints/test.md).
+  // every map).
   const items = i.units.filter((u) => i.kindOf(u.id) === "item")
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.editorId - b.editorId));
   if (!items.length) return "";
