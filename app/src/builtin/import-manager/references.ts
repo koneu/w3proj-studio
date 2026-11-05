@@ -24,7 +24,8 @@ const RAW_DATA = /^map\/war3(map|mapskin|campaign)\.(w3[utbdahqis]|wtg|wct|w3f)$
  *  moved file itself). */
 export async function findPathRefs(w3: W3Api, from: string, skip: string): Promise<PathRefs> {
   const out: PathRefs = { files: [], raw: [] };
-  const needle = new TextEncoder().encode(from.toLowerCase());
+  // Without a model's extension: object data can name it either way, or not at all.
+  const needle = new TextEncoder().encode(from.toLowerCase().replace(/\.(mdx|mdl)$/, ""));
   for (const f of w3.workspace.files()) {
     const p = f.path;
     if (!p.toLowerCase().startsWith("map/") || IMPORT_LISTS.test(p) || p.toLowerCase() === skip.toLowerCase()) continue;

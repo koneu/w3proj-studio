@@ -621,7 +621,9 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 /* Import Manager */
 .imp-editor { display: flex; height: 100%; overflow: hidden; }
 .imp-main { flex: 1; overflow: auto; padding: 8px 12px; min-width: 0; }
-.imp-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.imp-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.imp-toolbar button { flex: none; width: auto; white-space: nowrap; }
+.imp-toolbar .muted { white-space: nowrap; }
 .imp-search { font: inherit; padding: 2px 6px; width: 260px; }
 .imp-table { border-collapse: collapse; width: 100%; }
 .imp-table th, .imp-table td { text-align: left; padding: 2px 12px 2px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }

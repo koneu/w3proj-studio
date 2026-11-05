@@ -24,6 +24,24 @@ test("only whole paths: no longer names, no other folders", () => {
   assert.equal(countPathRefs("Hero.blp Hero.blp.bak xHero.blp", "Hero.blp"), 1);
 });
 
+test("models without an extension (doodad and destructable object data)", () => {
+  const model = "war3mapImported\\Fx\\Chest.mdx";
+  const json = '{"field":"bfil","value":"war3mapImported\\\\Fx\\\\Chest"}';
+  assert.equal(countPathRefs(json, model), 1);
+  assert.equal(replacePathRefs(json, model, "Art\\Box.mdx"), '{"field":"bfil","value":"Art\\\\Box"}');
+  assert.equal(countPathRefs("Art=war3mapImported/Fx/Chest\r\nNext=1", model), 1);
+  assert.equal(countPathRefs("Art=war3mapImported/Fx/Chest", model), 1);
+  // A folder of that name and longer names aren't that model.
+  for (const other of ["Chest\\\\Lid.blp", "Chest_portrait", "Chest-2", "Chest 2", "Chest.blp"]) {
+    assert.equal(countPathRefs(`"war3mapImported\\\\Fx\\\\${other}"`, model), 0, other);
+  }
+  // A model at the archive root: its bare name is only a word.
+  assert.equal(countPathRefs('"Chest" Chest', "Chest.mdx"), 0);
+  assert.equal(countPathRefs('"Chest.mdl"', "Chest.mdx"), 1);
+  // Textures have no such form.
+  assert.equal(countPathRefs('"war3mapImported\\\\Fx\\\\Chest"', "war3mapImported\\Fx\\Chest.blp"), 0);
+});
+
 test("samePathRef", () => {
   assert.ok(samePathRef("war3mapImported/Hero.MDL", "War3mapImported\\hero.mdx"));
   assert.ok(!samePathRef("a\\b.blp", "a\\c.blp"));
