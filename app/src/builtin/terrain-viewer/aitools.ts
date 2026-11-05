@@ -3,7 +3,8 @@
 
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
-import { groundHeight, heightAt, randomVariation, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
+import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
+import { groundHeight, heightAt, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -119,8 +120,103 @@ function cornersIn(t: Terrain, area: Area, shape: Shape) {
   return out;
 }
 
-/** The slot of a ground tile, added to the map's list if needed. */
-export function groundSlot(t: Terrain, tile: string): number {
+/** A cliff type of the game (CliffTypes.slk) and the ground tile it belongs to. */
+export interface CliffKind { cliffID: string; groundTile: string }
+
+/** Remembers which corners shared terrain code changed. */
+class Touched {
+  readonly corners = new Set<number>();
+  touch(_t: Terrain, i: number) { this.corners.add(i); }
+}
+
+/** What a corner's cliff type number means: the map's ground tiles that have a cliff version,
+ *  in order (see cliffList). */
+function cliffGrounds(t: Terrain, kinds: readonly CliffKind[]) {
+  return t.groundTiles.filter((g) => kinds.some((k) => k.groundTile === g));
+}
+
+/** Cliffs next to changed corners take the type of their ground, as after a brush stroke. All the
+ *  corners changed, those of the cliffs included. */
+export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly CliffKind[], cliffTile?: string) {
+  const grounds = cliffGrounds(t, kinds), log = new Touched();
+  for (const i of changed) log.corners.add(i);
+  let fixed: number | undefined;
+  if (cliffTile !== undefined) {
+    fixed = grounds.indexOf(cliffTile);
+    if (fixed < 0) throw new Error(`The map has no cliff of "${cliffTile}". It has those of: ${grounds.join(", ") || "none"}.`);
+  }
+  matchCliffTypes(t, changed, grounds, log, fixed);
+  return [...log.corners];
+}
+
+/** The corner nearest the middle of those given. */
+const middleOf = (corners: readonly { i: number; r: number }[]) => corners.reduce((a, b) => (b.r < a.r ? b : a));
+
+/** Brings the ground of an area to one cliff level: `level`, or `by` levels from where the middle
+ *  of the area is. The changed corners, with their ramps gone: a ramp needs the levels it was
+ *  built on. */
+export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?: number; by?: number }, kinds: readonly CliffKind[], cliffTile?: string) {
+  const inside = cornersIn(t, area, shape);
+  if (!inside.length) throw new Error("That area has no ground in the map.");
+  const level = target.level ?? t.corners[middleOf(inside).i].layer + (target.by ?? 0);
+  if (level < 0 || level > 15) throw new Error(`Cliff levels go from 0 to 15, and this would be ${level}.`);
+  const changed: number[] = [];
+  for (const { i } of inside) {
+    const c = t.corners[i];
+    if (c.layer === level) continue;
+    setLayer(c, level);
+    c.ramp = false;
+    changed.push(i);
+  }
+  return changed.length ? withCliffTypes(t, changed, kinds, cliffTile) : changed;
+}
+
+export type WaterMode = "shallow" | "deep" | "dry";
+
+/** Puts water on an area as the brushes do: the ground one level down for shallow, two for deep,
+ *  the surface just below where the ground was. Goes by dry ground in the area, so widening a lake
+ *  keeps its surface. `dry` only takes the water away: the ground stays down. The changed corners. */
+export function setWater(t: Terrain, area: Area, shape: Shape, mode: WaterMode, kinds: readonly CliffKind[]) {
+  const inside = cornersIn(t, area, shape);
+  if (!inside.length) throw new Error("That area has no ground in the map.");
+  const changed: number[] = [];
+  if (mode === "dry") {
+    for (const { i } of inside) if (t.corners[i].hasWater) { t.corners[i].hasWater = false; changed.push(i); }
+    return changed;
+  }
+  const dry = inside.filter(({ i }) => !t.corners[i].hasWater);
+  const from = t.corners[middleOf(dry.length ? dry : inside).i];
+  const layer = dry.length ? from.layer - (mode === "deep" ? 2 : 1) : from.layer;
+  if (layer < 0) throw new Error(`The ground here is at cliff level ${from.layer}, too low for ${mode} water. Raise it with set_cliff_level first.`);
+  const surface = dry.length ? waterLevelAt(from.height - WATER_OFFSET) : from.rawWater & 0x3fff;
+  for (const { i } of inside) {
+    const c = t.corners[i];
+    if (c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface) continue;
+    setLayer(c, layer);
+    c.ramp = false;
+    setWaterLevel(c, surface);
+    changed.push(i);
+  }
+  return changed.length ? withCliffTypes(t, changed, kinds) : changed;
+}
+
+/** Builds a ramp on the cliff edge at a place, or takes one away. `width` is in tiles. The changed
+ *  corners. Throws what's in the way. */
+export function setRamp(t: Terrain, x: number, y: number, width: number, remove: boolean) {
+  const tx = Math.floor((x - t.offsetX) / TILE), ty = Math.floor((y - t.offsetY) / TILE);
+  const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : undefined);
+  const onRamp = [at(tx, ty), at(tx + 1, ty), at(tx, ty + 1), at(tx + 1, ty + 1)].some((c) => c?.ramp);
+  if (onRamp && !remove) throw new Error("There's a ramp here already. Use remove to take it away.");
+  if (!onRamp && remove) throw new Error("There's no ramp here.");
+  const log = new Touched();
+  const problem = toggleRamp(t, x, y, Math.round(width / 2), log);
+  if (problem) throw new Error(`${problem.replace(/^Click (a|the)/, "It needs $1").replace("(try a smaller Size)", "(try a smaller width)")} terrain_info shows the cliff levels.`);
+  return [...log.corners];
+}
+
+/** The slot of a ground tile, added to the map's list if needed, with its cliff type if it has one
+ *  (`kinds`), as painting with the brush does. */
+export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[] = []): number {
   const at = t.groundTiles.indexOf(tile);
   if (at >= 0) return at;
   if (t.groundTiles.length >= 16) throw new Error(`This map already has 16 ground tiles (${t.groundTiles.join(", ")}). Use one of those.`);
@@ -128,6 +224,8 @@ export function groundSlot(t: Terrain, tile: string): number {
   // The list no longer matches the tileset's own: the game goes by this flag.
   t.customTilesets = true;
   t.customTilesetsRaw = 1;
+  const cliff = kinds.find((k) => k.groundTile === tile);
+  if (cliff && !t.cliffTiles.includes(cliff.cliffID)) t.cliffTiles.push(cliff.cliffID);
   return t.groundTiles.length - 1;
 }
 

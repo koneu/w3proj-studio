@@ -22,7 +22,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setRamp, setWater, withCliffTypes, type CliffKind } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -312,6 +312,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${e}).`); });
   };
 
+  let cliffKindsRead: Promise<CliffKind[]> | null = null;
+  const cliffKinds = () => (cliffKindsRead ??= w3.game.readText("TerrainArt\\CliffTypes.slk").then((slk) => parseSlk(slk).filter((r) => r.cliffID).map((r) => ({ cliffID: r.cliffID, groundTile: r.groundTile }))));
+
   let placeObjects: McpToolHandler = () => undefined;
   const RESERVED = ".w3proj/reserved-areas.json";
   type Reserved = KeepClear & { name: string };
@@ -487,7 +490,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const across = typeof width === "number" && width > 0 ? width : 256;
       const fray = typeof edge === "number" ? Math.min(1, Math.max(0, edge)) : 0.4;
       const seed = seedOf(args.seed), random = seededRandom(seed);
-      return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => paintPath(t, points as [number, number][], across, groundSlot(t, tile), fray, flatten === true, random)) };
+      const kinds = await cliffKinds();
+      return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => withCliffTypes(t, paintPath(t, points as [number, number][], across, groundSlot(t, tile, kinds), fray, flatten === true, random), kinds)) };
     }),
     w3.mcp.registerTool("paint_terrain", async (args) => {
       const { tile } = args;
@@ -499,7 +503,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const edge = typeof args.edge === "number" ? Math.min(1, Math.max(0, args.edge)) : 0.3;
       const shape = args.shape === "box" ? "box" : "ellipse";
       const seed = seedOf(args.seed), random = seededRandom(seed);
-      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => paintCorners(t, area, shape, groundSlot(t, tile), edge, random)) };
+      const kinds = await cliffKinds();
+      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => withCliffTypes(t, paintCorners(t, area, shape, groundSlot(t, tile, kinds), edge, random), kinds)) };
     }),
     w3.mcp.registerTool("sculpt_terrain", async (args) => {
       const { mode, amount } = args;
@@ -510,6 +515,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!area) throw new Error("sculpt_terrain needs a region, or left, bottom, right and top.");
       const shape = args.shape === "box" ? "box" : "ellipse";
       return editGround(`${mode[0].toUpperCase()}${mode.slice(1)} ground in ${area.name ?? "an area"}`, (t) => sculptCorners(t, area, shape, mode, typeof amount === "number" ? amount : undefined));
+    }),
+    w3.mcp.registerTool("set_cliff_level", async (args) => {
+      const { level, by, cliffTile } = args;
+      if ((level === undefined) === (by === undefined)) throw new Error("Give level, or by: one of them.");
+      for (const n of [level, by]) if (n !== undefined && !Number.isInteger(n)) throw new Error("level and by must be whole numbers.");
+      if (cliffTile !== undefined && typeof cliffTile !== "string") throw new Error("cliffTile must be a ground tile, like Lrok.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("set_cliff_level needs a region, or left, bottom, right and top.");
+      const kinds = await cliffKinds();
+      const target = { level: level as number | undefined, by: by as number | undefined };
+      return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile));
+    }),
+    w3.mcp.registerTool("set_water", async (args) => {
+      const { mode } = args;
+      if (mode !== "shallow" && mode !== "deep" && mode !== "dry") throw new Error("mode must be shallow, deep or dry.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("set_water needs a region, or left, bottom, right and top.");
+      const kinds = await cliffKinds();
+      return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${area.name ?? "an area"}`, (t) => setWater(t, area, args.shape === "box" ? "box" : "ellipse", mode, kinds));
+    }),
+    w3.mcp.registerTool("set_ramp", async ({ at, width, remove }) => {
+      const [x, y] = await readPlace(at, "at");
+      const wide = width === undefined ? 2 : width;
+      if (!Number.isInteger(wide) || (wide as number) < 2 || (wide as number) > 16 || (wide as number) % 2) throw new Error("width must be an even number of tiles, from 2 to 16.");
+      return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
       const editor = await liveEditor();
