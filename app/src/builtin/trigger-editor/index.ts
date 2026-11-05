@@ -12,7 +12,7 @@ import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
-import { addScriptTrigger, addVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -110,6 +110,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (typeof type !== "string" || !types.has(type)) throw new Error(`"${String(type)}" isn't a trigger type. Some are: integer, real, boolean, string, unit, group, location, timer, hashtable, effect.`);
       await editTriggers(`Add variable ${name}`, (file) => addVariable(file, { name, type, isArray: array === true, arraySize: typeof size === "number" ? size : 1, initialValue: typeof initialValue === "string" ? initialValue : "" }));
       return `Added the variable; scripts call it udg_${name}.`;
+    }),
+    w3.mcp.registerTool("remove_trigger_variable", async ({ name }) => {
+      if (typeof name !== "string" || !name.trim()) throw new Error("remove_trigger_variable needs a name.");
+      let removed = "";
+      await editTriggers(`Remove variable ${name}`, (file, scripts) => { removed = removeVariable(file, scripts, name.trim().replace(/^udg_/, "")); });
+      return `Removed the variable ${removed}.`;
     }),
     w3.mcp.registerTool("set_script_header", async ({ script }) => {
       if (typeof script !== "string" || script.includes("\0")) throw new Error("script must be text.");

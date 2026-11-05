@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { DisplayContext } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT, type TriggerData } from "../../lib/triggers/triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "../../lib/triggers/wtg";
-import { addScriptTrigger, addVariable, findTrigger, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, findTrigger, removeTrigger, removeVariable, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 
 // No TriggerData here: functions show as name(arguments).
 const ctx = { data: { find: () => undefined, categories: new Map() } as unknown as TriggerData } as DisplayContext;
@@ -104,6 +104,32 @@ test("removing a trigger takes its text along, not another's", () => {
   assert.deepEqual(scripts.texts, ["a", "c"]);
   assert.equal(findTrigger(f, "Script"), null);
   assert.equal(findTrigger(f, "Lost")?.name, "Lost");
+});
+
+test("a variable in use stays, and the answer says where", () => {
+  const v = { name: "Heat", type: "real", isArray: false, arraySize: 1, initialValue: "" };
+  const f = structuredClone(file), scripts = { header: "", texts: [] as string[] } as unknown as Parameters<typeof removeVariable>[1];
+  addVariable(f, v);
+  addScriptTrigger(f, scripts, "Burn", "call BJDebugMsg(R2S(udg_Heat))", undefined);
+  assert.throws(() => removeVariable(f, scripts, "Heat"), /Heat is still used by: Burn/);
+  (scripts as { texts: string[] }).texts.fill("call DoNothing()");
+  (scripts as { header: string }).header = "// udg_Heat";
+  assert.throws(() => removeVariable(f, scripts, "Heat"), /custom script/);
+  (scripts as { header: string }).header = "// udg_Heater is another";
+  assert.equal(removeVariable(f, scripts, "heat"), "Heat", "any case, and only the whole name counts");
+  assert.ok(!f.variables.some((x) => x.name === "Heat"));
+  assert.throws(() => removeVariable(f, scripts, "Heat"), /no variable/);
+  f.variables.forEach((x, i) => assert.equal(x.id, i));
+});
+
+test("a Reforged variable leaves its category, and its number isn't used again", () => {
+  const v = { name: "Heat", type: "real", isArray: false, arraySize: 1, initialValue: "" };
+  const r = { reforged: true, counts: Array.from({ length: 8 }, () => ({ count: 0, deleted: [] as number[] })), variables: [], items: [{ type: 4, id: 2 << 24, name: "Home", isComment: 0, expanded: 1, parent: -1 }] } as unknown as TriggerFile;
+  addVariable(r, v);
+  const id = r.variables[0].id;
+  removeVariable(r, { header: "", texts: [] } as unknown as Parameters<typeof removeVariable>[1], "Heat");
+  assert.equal(r.items.length, 1);
+  assert.deepEqual(r.counts[6].deleted, [id]);
 });
 
 test("variables: names are unique; Reforged lists them in a category and counts them", () => {

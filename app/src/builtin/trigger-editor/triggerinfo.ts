@@ -69,6 +69,33 @@ export function addVariable(file: TriggerFile, v: Pick<Variable, "name" | "type"
   file.variables.push(made);
 }
 
+/** Where a variable is used: names of triggers, and the map's custom script. */
+export function variableUses(file: TriggerFile, scripts: CustomTextFile, name: string) {
+  const inScript = new RegExp(`\\budg_${name}\\b`);
+  const texts = textTriggers(file);
+  const uses = file.items.filter((i): i is TriggerItem => i.type !== 64 && "ecas" in i).filter((t) => {
+    const k = texts.indexOf(t);
+    return (k >= 0 && inScript.test(scripts.texts[k] ?? "")) || JSON.stringify({ ...t, name: "", description: "" }).includes(`"${name}"`);
+  }).map((t) => t.name);
+  for (const [k, t] of texts.entries()) if (inScript.test(scripts.texts[k] ?? "") && !uses.includes(t.name)) uses.push(t.name);
+  return inScript.test(scripts.header ?? "") ? [...uses, "the map's custom script"] : uses;
+}
+
+/** A global variable, if nothing uses it: a script that names a lost one doesn't compile. */
+export function removeVariable(file: TriggerFile, scripts: CustomTextFile, name: string) {
+  const at = file.variables.findIndex((v) => v.name.toLowerCase() === name.toLowerCase());
+  if (at < 0) throw new Error(`There's no variable "${name}".`);
+  const v = file.variables[at], uses = variableUses(file, scripts, v.name);
+  if (uses.length) throw new Error(`${v.name} is still used by: ${uses.join(", ")}. Change those first.`);
+  file.variables.splice(at, 1);
+  if (file.reforged) {
+    const item = file.items.findIndex((i) => i.type === 64 && i.id === v.id);
+    if (item >= 0) file.items.splice(item, 1);
+    file.counts[TYPE_INDEX[64]]?.deleted.push(v.id);
+  } else file.variables.forEach((x, i) => { x.id = i; });
+  return v.name;
+}
+
 /** Categories with their triggers, and the variables if asked for. */
 export function triggerList(file: TriggerFile, withVariables: boolean) {
   const categories = file.items.filter((i) => i.type === 4);

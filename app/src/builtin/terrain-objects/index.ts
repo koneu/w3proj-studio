@@ -21,7 +21,7 @@ const ownerName = (n: number) => (n < 24 ? `Player ${n + 1} (${TEAM_COLORS[n]?.[
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(w3.mcp.registerTool("list_placed", async (args) => {
-    const { kind, id, player, limit } = args;
+    const { kind, id, player, limit, all: everything } = args;
     requireProject(w3);
     const key = kind === "doodads" ? "doodads" : "units";
     const file = await readMapDoc<Record<string, PlacedThing[]>>(w3, key === "units" ? "map/war3mapUnits.doo.json" : "map/war3map.doo.json");
@@ -30,8 +30,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const names = new Map<string, string | undefined>();
     for (const type of new Set(all.map((p) => p.id))) names.set(type, await objects.name(type).catch(() => undefined));
     const area = await readArea(w3, args);
-    if (typeof id === "string" || typeof player === "number" || area) {
-      return capped(placedList(all, names, typeof id === "string" ? id : undefined, typeof player === "number" ? player : undefined, area), limit, 200);
+    if (everything === true || typeof id === "string" || typeof player === "number" || area) {
+      return capped(placedList(all, names, typeof id === "string" ? id : undefined, typeof player === "number" ? player : undefined, area), limit, everything === true ? 20000 : 200);
     }
     return { placed: all.length, types: capped(placedTypes(all, names), limit, 200) };
   }));

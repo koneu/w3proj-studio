@@ -24,7 +24,7 @@ import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStr
 import { campsOf, checkMelee } from "./meleecheck";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -572,12 +572,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("sculpt_terrain", async (args) => {
       const { mode, amount } = args;
-      if (mode !== "raise" && mode !== "lower" && mode !== "flatten" && mode !== "smooth") throw new Error("mode must be raise, lower, flatten or smooth.");
+      if (mode !== "raise" && mode !== "lower" && mode !== "flatten" && mode !== "smooth" && mode !== "roughen") throw new Error("mode must be raise, lower, flatten, smooth or roughen.");
       if (amount !== undefined && (typeof amount !== "number" || !Number.isFinite(amount))) throw new Error("amount must be a number.");
       if (typeof amount === "number" && mode !== "flatten" && (amount <= 0 || amount > 1000)) throw new Error("amount must be above 0, at most 1000.");
       const area = await readArea(w3, args);
       if (!area) throw new Error("sculpt_terrain needs a region, or left, bottom, right and top.");
       const shape = args.shape === "box" ? "box" : "ellipse";
+      if (mode === "roughen") {
+        const seed = seedOf(args.seed), random = seededRandom(seed);
+        return { seed, ...await editGround(`Roughen ground in ${area.name ?? "an area"}`, (t) => roughenCorners(t, area, shape, typeof amount === "number" ? amount : 24, random)) };
+      }
       return editGround(`${mode[0].toUpperCase()}${mode.slice(1)} ground in ${area.name ?? "an area"}`, (t) => sculptCorners(t, area, shape, mode, typeof amount === "number" ? amount : undefined));
     }),
     w3.mcp.registerTool("set_cliff_level", async (args) => {

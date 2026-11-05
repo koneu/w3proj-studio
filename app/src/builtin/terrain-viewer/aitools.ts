@@ -151,6 +151,20 @@ export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly Cl
   return [...log.corners];
 }
 
+/** Takes away the whole ramp a corner belongs to: part of one is no way up. The corners go on `changed`. */
+function dropRamp(t: Terrain, i: number, changed: number[]) {
+  if (!t.corners[i].ramp) return;
+  const todo = [i];
+  while (todo.length) {
+    const k = todo.pop() as number;
+    if (!t.corners[k]?.ramp) continue;
+    t.corners[k].ramp = false;
+    changed.push(k);
+    const x = k % t.width;
+    todo.push(...(x > 0 ? [k - 1] : []), ...(x < t.width - 1 ? [k + 1] : []), k - t.width, k + t.width);
+  }
+}
+
 /** The corner nearest the middle of those given. */
 const middleOf = (corners: readonly { i: number; r: number }[]) => corners.reduce((a, b) => (b.r < a.r ? b : a));
 
@@ -167,7 +181,7 @@ export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?
     const c = t.corners[i];
     if (c.layer === level) continue;
     setLayer(c, level);
-    c.ramp = false;
+    dropRamp(t, i, changed);
     changed.push(i);
   }
   if (changed.length) return withCliffTypes(t, changed, kinds, cliffTile);
@@ -221,7 +235,7 @@ function slopedWater(t: Terrain, inside: readonly { i: number; r: number }[], de
     const bottom = surface - depth, target = c.height + (bottom - c.height) * s;
     const before = c.rawHeight, wet = c.hasWater;
     if (target < c.height) setGroundHeight(c, target - (c.layer - 2) * TILE);
-    c.ramp = false;
+    dropRamp(t, i, changed);
     setWaterLevel(c, level);
     if (c.rawHeight !== before || !wet) changed.push(i);
   }
@@ -250,7 +264,7 @@ export function setWater(t: Terrain, place: Area | { points: readonly [number, n
     const c = t.corners[i];
     if (c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface) continue;
     setLayer(c, layer);
-    c.ramp = false;
+    dropRamp(t, i, changed);
     setWaterLevel(c, surface);
     changed.push(i);
   }
@@ -397,7 +411,41 @@ export function paintPath(t: Terrain, points: readonly [number, number][], width
   return [...changed];
 }
 
-export type SculptMode = "raise" | "lower" | "flatten" | "smooth";
+export type SculptMode = "raise" | "lower" | "flatten" | "smooth" | "roughen";
+
+/** Smooth random height, from about -1 to 1: broad swells with smaller bumps on them. */
+function bumps(random: () => number) {
+  const layer = (size: number) => {
+    const grid = new Map<string, number>();
+    const at = (x: number, y: number) => {
+      const key = `${x},${y}`;
+      if (!grid.has(key)) grid.set(key, random() * 2 - 1);
+      return grid.get(key) as number;
+    };
+    const ease = (k: number) => k * k * (3 - 2 * k);
+    return (x: number, y: number) => {
+      const gx = Math.floor(x / size), gy = Math.floor(y / size), fx = ease(x / size - gx), fy = ease(y / size - gy);
+      const bottom = at(gx, gy) + (at(gx + 1, gy) - at(gx, gy)) * fx, top = at(gx, gy + 1) + (at(gx + 1, gy + 1) - at(gx, gy + 1)) * fx;
+      return bottom + (top - bottom) * fy;
+    };
+  };
+  const wide = layer(6), middle = layer(3), small = layer(2);
+  return (x: number, y: number) => wide(x, y) * 0.6 + middle(x, y) * 0.3 + small(x, y) * 0.1;
+}
+
+/** Makes ground uneven as real maps are, up to `amount` up or down, fading to nothing at the edge.
+ *  Ramps and water stay: bumps there would break a way up or a ford's depth. The changed corners. */
+export function roughenCorners(t: Terrain, area: Area, shape: Shape, amount: number, random: () => number) {
+  const noise = bumps(random), changed: number[] = [];
+  for (const { i, r } of cornersIn(t, area, shape)) {
+    const c = t.corners[i];
+    if (c.ramp || c.hasWater) continue;
+    const before = c.rawHeight, fade = Math.min(1, (1 - r) / 0.25);
+    setGroundHeight(c, groundHeight(c) + noise(i % t.width, Math.floor(i / t.width)) * amount * fade);
+    if (c.rawHeight !== before) changed.push(i);
+  }
+  return changed;
+}
 
 /** Reshapes the ground, strongest in the middle and fading to nothing at the edge, so it makes no
  *  steps. flatten goes towards `amount`, or the area's average; smooth stays within a cliff level. */

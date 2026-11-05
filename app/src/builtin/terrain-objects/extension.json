@@ -11,7 +11,7 @@
         "name": "list_placed",
         "description": "What's placed on the open map. Without id, player or an area: how many of each type. With one of them: each object with its number (for move_object and remove_objects) and position. Start locations are the id sloc.",
         "readOnly": true,
-        "inputSchema": { "type": "object", "properties": {
+        "inputSchema": { "type": "object", "properties": {"all":{"type":"boolean","description":"List every object of the kind one by one, for whole-map checks, up to 20000. Without a filter you get a count per type."},
           "kind": { "type": "string", "enum": ["units", "doodads"], "description": "units (default) also has items and start locations; doodads also has destructables." },
           "id": { "type": "string", "description": "Only this type, like hfoo." },
           "player": { "type": "integer", "description": "Only this owner, counted from 1 (units)." },

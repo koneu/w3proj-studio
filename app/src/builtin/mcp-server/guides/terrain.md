@@ -46,8 +46,9 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
 - Flat ground looks dead. Only about 8% of the corners are at plain height on these maps, 30% at most.
 - Heights on a map span about 300 to 600, on top of the cliff levels. Hills have to be gentle: both a flat
   map and a jagged one look bad.
-- With sculpt_terrain, many small overlapping raises and lowers in different sizes, then smooth where units
-  walk. One big hill over a whole area looks like a blister. Raise under trees and beside cliffs.
+- Start with sculpt_terrain mode roughen on the whole map, then add hills with raise and lower in different
+  sizes, and smooth where units walk. One big hill over an area looks like a blister. Raise under trees and
+  beside cliffs.
 - Rock tiles want raised ground, because rock isn't flat. Dirt suits low ground, grass normal ground, rock
   high ground.
 - Keep ground level where a base has to stand; buildings need room.

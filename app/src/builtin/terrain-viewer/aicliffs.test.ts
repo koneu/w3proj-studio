@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isBackdrop } from "../../lib/terrain/area";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
-import { groundSlot, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
+import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
 
@@ -264,13 +264,59 @@ test("a ramp wider than the edge is refused in tool words", () => {
   assert.throws(() => setRamp(t, 7.5 * 128, 9 * 128, 8, false), (e: Error) => !/Click|Size\b/.test(e.message) && /terrain_info/.test(e.message));
 });
 
-test("raising the ground over a ramp removes the ramp", () => {
+test("changing the ground under part of a ramp removes all of it", () => {
   const t = flat();
   setCliffs(t, block, "box", { level: 3 }, kinds);
   setRamp(t, 7.5 * 128, 12 * 128, 2, false);
+  const elsewhere = flat();
   setCliffs(t, block, "box", { level: 4 }, kinds);
-  assert.equal(corner(t, 8, 12).ramp, false);
-  assert.equal(corner(t, 6, 12).ramp, true, "outside the area it stays: set_ramp remove takes that away");
+  assert.equal(t.corners.filter((c) => c.ramp).length, 0, "no half ramp stays behind");
+  assert.equal(elsewhere.corners.filter((c) => c.ramp).length, 0);
+  const wet = flat();
+  setCliffs(wet, block, "box", { level: 3 }, kinds);
+  setRamp(wet, 7.5 * 128, 12 * 128, 2, false);
+  const changed = setWater(wet, { left: 2 * 128, bottom: 11 * 128, right: 7 * 128, top: 13 * 128 }, "box", "ford", kinds);
+  assert.equal(wet.corners.filter((c) => c.ramp).length, 0);
+  assert.ok(changed.length > 0);
+});
+
+test("two ramps apart: only the one touched goes", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  setRamp(t, 7.5 * 128, 10 * 128, 2, false);
+  setRamp(t, 7.5 * 128, 14 * 128, 2, false);
+  setCliffs(t, { left: 8 * 128, bottom: 9 * 128, right: 8 * 128 + 1, top: 11 * 128 }, "box", { level: 4 }, kinds);
+  assert.equal(corner(t, 8, 10).ramp, false);
+  assert.equal(corner(t, 8, 14).ramp, true);
+});
+
+test("roughen makes ground uneven, gently, and repeats by seed", () => {
+  const random = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const whole = { left: 0, bottom: 0, right: 32 * 128, top: 32 * 128 };
+  const t = flat(), again = flat(), other = flat();
+  const changed = roughenCorners(t, whole, "box", 24, random(7));
+  roughenCorners(again, whole, "box", 24, random(7));
+  roughenCorners(other, whole, "box", 24, random(8));
+  assert.ok(changed.length > 900, String(changed.length));
+  assert.deepEqual(t.corners.map((c) => c.rawHeight), again.corners.map((c) => c.rawHeight));
+  assert.notDeepEqual(t.corners.map((c) => c.rawHeight), other.corners.map((c) => c.rawHeight));
+  const heights = t.corners.map((c) => c.height);
+  assert.ok(Math.max(...heights.map(Math.abs)) <= 24);
+  assert.ok(t.corners.every((c) => c.layer === 2), "no cliffs");
+  let step = 0;
+  for (let y = 0; y < t.height; y++) for (let x = 0; x + 1 < t.width; x++) step = Math.max(step, Math.abs(corner(t, x, y).height - corner(t, x + 1, y).height));
+  assert.ok(step < 16, `neighbours stay close: ${step}`);
+});
+
+test("roughen leaves ramps and water alone", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  setRamp(t, 7.5 * 128, 12 * 128, 2, false);
+  setWater(t, { left: 20 * 128, bottom: 20 * 128, right: 30 * 128, top: 30 * 128 }, "ellipse", "ford", kinds);
+  const ramp = corner(t, 7, 12).rawHeight, water = corner(t, 25, 25).rawHeight;
+  roughenCorners(t, { left: 0, bottom: 0, right: 32 * 128, top: 32 * 128 }, "box", 40, () => 0.9);
+  assert.equal(corner(t, 7, 12).rawHeight, ramp);
+  assert.equal(corner(t, 25, 25).rawHeight, water);
 });
 
 test("a unit takes camp mode, gold and random drops", () => {
