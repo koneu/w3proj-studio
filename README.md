@@ -13,7 +13,7 @@ It's a work in progress. Plenty of it hasn't been checked against the game yet.
 This is an unofficial project, not affiliated with or endorsed by Blizzard Entertainment.
 Warcraft is a trademark of Blizzard Entertainment. You need your own installed copy of the game.
 
-## How the World Editor stores a map (and what we do with it)
+## How a map is stored
 
 A `.w3x` is a 512-byte `HM3W` header (name, flags, max players) followed by an
 MPQ archive. The archive holds files like:
@@ -130,7 +130,7 @@ w3proj game --mode hd resolve Units/Human/Footman/Footman.mdx
 w3proj game cat Units/UnitMetaData.slk
 ```
 
-### Corpus checks (regression tests on real maps)
+### Corpus checks
 
 Real maps aren't in the repository (`smoketest_maps/` is ignored: size and third-party
 content), so the conversions are checked against a local map folder:
