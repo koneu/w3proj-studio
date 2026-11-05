@@ -74,6 +74,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       project: project ? { name: project.name, folder: project.root, files: w3.workspace.files().length } : null,
       activeFile: w3.editors.activePath(), unsaved,
       may: { edit: setting("mcp.writeTools"), save: setting("mcp.saveTool") },
+      ...(setting("mcp.ignoreUndoSteps") ? { undo: "The user doesn't need undo steps for this work: don't plan around them." } : {}),
       undoableEdits: log.list().length,
       // A client that stopped halfway leaves one open: its edits still undo as one.
       ...(log.openGroup ? { openGroup: log.openGroup } : {}),
@@ -109,7 +110,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.views.register("w3.mcp.status", {
       render(el) {
-        const on = enabled(), writing = setting("mcp.writeTools"), saving = setting("mcp.saveTool");
+        const on = enabled(), writing = setting("mcp.writeTools"), saving = setting("mcp.saveTool"), loose = setting("mcp.ignoreUndoSteps");
         const asks = (key: string) => w3.settings.get<boolean>(key, true) !== false;
         /** A big change an AI asks about first, unless the user would rather it didn't. */
         const askRow = (key: string, what: string) => h("div.ext-item", {},
@@ -128,6 +129,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ...(writing ? [h("div.ext-item", {},
             h("div.ext-desc", {}, saving ? "AI tools may save everything unsaved, your own work too." : "AI tools ask you to save."),
             h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.saveTool", !saving) }, saving ? "Stop saving" : "Allow saving")))] : []),
+          ...(writing ? [h("div.ext-item", {},
+            h("div.ext-desc", {}, loose ? "AI tools work however is quickest, without planning around undo steps." : "AI tools group their work into undo steps."),
+            h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.ignoreUndoSteps", !loose) }, loose ? "Keep undo steps" : "Don't care about undo")))] : []),
           ...(writing ? [askRow("mcp.confirmTileset", "changing the tileset"), askRow("mcp.confirmResize", "resizing the map")] : []),
           ...(writing ? [editList] : []),
           h("div.ext-section-title", {}, "CLIENTS"),

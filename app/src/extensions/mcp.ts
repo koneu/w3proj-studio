@@ -15,6 +15,8 @@ export interface McpHostHooks {
   activate(event: string): Promise<void>;
   /** Whether a tool may be used now (settings: project extensions' tools, writing tools). */
   allowed(declared: { source: string; readOnly: boolean; needs?: string }): boolean;
+  /** What the user wants a tool's description to say besides, right now. */
+  note?(name: string): string | undefined;
   /** Why an extension can't answer, if it's known. */
   whyUnavailable(extensionId: string): string | undefined;
   log(line: string): void;
@@ -72,7 +74,7 @@ export class McpTools {
   list() {
     return [...this.declared.values()].filter((d) => this.usable(d)).map(({ tool }) => ({
       name: tool.name,
-      description: tool.description,
+      description: [tool.description, this.hooks.note?.(tool.name)].filter(Boolean).join(" "),
       inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
       annotations: { readOnlyHint: tool.readOnly === true },
     }));

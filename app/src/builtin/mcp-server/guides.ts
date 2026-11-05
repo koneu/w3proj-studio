@@ -156,7 +156,7 @@ Read the terrain guide too, for how to make all this look good. This part is abo
 ## Order of work
 
 1. Plan one half on paper first: bases, mines, ways between them, pockets for camps.
-2. terrain_info, then set_cliff_level and set_water, so the shape comes first. Use begin_edit.
+2. terrain_info, then set_cliff_level and set_water, so the shape comes first.
 3. Trees as walls, with scatter_objects or fill_rows. reserve_area first for bases, mines and shops.
 4. paint_path and paint_terrain for roads and ground.
 5. Start locations (sloc), mines, shops. Then camps, then decoration last.

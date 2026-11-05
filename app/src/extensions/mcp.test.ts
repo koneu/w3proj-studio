@@ -9,6 +9,18 @@ function tools(over: Partial<McpHostHooks> = {}) {
 }
 const read = { name: "look", description: "Looks", readOnly: true };
 
+test("a note from the user joins a tool's description, and the client hears of it", () => {
+  let note: string | undefined;
+  const t = new McpTools({ activate: async () => {}, allowed: () => true, whyUnavailable: () => undefined, log: () => {}, note: (name) => (name === "one" ? note : undefined) });
+  t.declare("x", "builtin", [{ name: "one", description: "Does a thing." }, { name: "two", description: "Another." }]);
+  const before = t.revision();
+  assert.equal(t.list()[0].description, "Does a thing.");
+  note = "Don't plan around undo.";
+  assert.equal(t.list()[0].description, "Does a thing. Don't plan around undo.");
+  assert.equal(t.list()[1].description, "Another.");
+  assert.notEqual(t.revision(), before);
+});
+
 test("a declared tool is listed before its extension runs, which activates on the first call", async () => {
   let activated = "";
   const { t } = tools({ activate: async (e) => { activated = e; t.registerTool("look", () => "seen"); } });

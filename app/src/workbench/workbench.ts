@@ -19,6 +19,9 @@ const showCursor = () => invoke("ui_show_cursor").catch(() => {});
 
 const TEXT_EXT = /\.(j|lua|ai|txt|wts|json|toml|fdf|toc|slk|md|csv|ini|xml|html|css|js|ts|gitignore|gitattributes)$/i;
 
+/** What the user's "don't care about undo steps" tells AI clients. */
+const UNDO_NOTE = "The user doesn't need undo steps for this work: don't plan around them, skip begin_edit unless it helps you, split the work however is quickest, and don't mention undo.";
+
 export class Workbench {
   readonly commands = new CommandService();
   readonly views = new ViewService();
@@ -28,6 +31,7 @@ export class Workbench {
   readonly game = new GameService(this.settings);
   readonly mcp = new McpTools({
     activate: (event) => this.host.fire(event),
+    note: (name) => (name === "begin_edit" && this.settings.get<boolean>("mcp.ignoreUndoSteps", false) === true ? UNDO_NOTE : undefined),
     allowed: ({ source, readOnly, needs }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
       && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true)
       && (!needs || this.settings.get<boolean>(needs, false) === true),
