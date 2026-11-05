@@ -23,7 +23,7 @@ import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { checkMelee } from "./meleecheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -486,9 +486,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const seen = new Map<string, string[]>();
       for (const s of await handle.tilesets()) for (const id of s.tiles) seen.set(id, [...(seen.get(id) ?? []), s.name]);
       const inMap = handle.terrain.groundTiles;
+      const cliffs = new Set((await cliffKinds()).map((k) => k.groundTile));
       return {
         inMap, free: 16 - inMap.length,
-        tiles: [...seen].filter(([id, sets]) => !wanted || id.toLowerCase().includes(wanted) || sets.some((n) => n.toLowerCase().includes(wanted))).map(([id, tilesets]) => ({ id, tilesets, ...(inMap.includes(id) ? { inMap: true } : {}) })),
+        tiles: [...seen].filter(([id, sets]) => !wanted || id.toLowerCase().includes(wanted) || sets.some((n) => n.toLowerCase().includes(wanted))).map(([id, tilesets]) => ({ id, ...(cliffs.has(id) ? { cliff: true } : {}), tilesets, ...(inMap.includes(id) ? { inMap: true } : {}) })),
       };
     }),
     w3.mcp.registerTool("paint_path", async (args) => {
@@ -536,6 +537,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const kinds = await cliffKinds();
       const target = { level: level as number | undefined, by: by as number | undefined };
       return editGround(`Cliffs in ${area.name ?? "an area"}`, (t) => setCliffs(t, area, args.shape === "box" ? "box" : "ellipse", target, kinds, cliffTile));
+    }),
+    w3.mcp.registerTool("set_cliff_type", async (args) => {
+      const { tile } = args;
+      if (typeof tile !== "string" || tile.length !== 4) throw new Error("tile must be four characters, like Ldrt. list_ground_tiles marks those with a cliff.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("set_cliff_type needs a region, or left, bottom, right and top.");
+      const kinds = await cliffKinds();
+      return editGround(`Cliffs of ${tile} in ${area.name ?? "an area"}`, (t) => setCliffType(t, area, args.shape === "box" ? "box" : "ellipse", tile, kinds));
     }),
     w3.mcp.registerTool("set_water", async (args) => {
       const { mode } = args;

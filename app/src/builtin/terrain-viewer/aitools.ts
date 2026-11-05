@@ -142,8 +142,9 @@ export function withCliffTypes(t: Terrain, changed: number[], kinds: readonly Cl
   for (const i of changed) log.corners.add(i);
   let fixed: number | undefined;
   if (cliffTile !== undefined) {
+    if (kinds.some((k) => k.groundTile === cliffTile)) { groundSlot(t, cliffTile, kinds); grounds.splice(0, grounds.length, ...cliffGrounds(t, kinds)); }
     fixed = grounds.indexOf(cliffTile);
-    if (fixed < 0) throw new Error(`The map has no cliff of "${cliffTile}". It has those of: ${grounds.join(", ") || "none"}.`);
+    if (fixed < 0) throw new Error(`"${cliffTile}" has no cliff. The map's cliffs are those of: ${grounds.join(", ") || "none"}. list_ground_tiles marks the tiles that have one.`);
   }
   matchCliffTypes(t, changed, grounds, log, fixed);
   return [...log.corners];
@@ -168,7 +169,20 @@ export function setCliffs(t: Terrain, area: Area, shape: Shape, target: { level?
     c.ramp = false;
     changed.push(i);
   }
-  return changed.length ? withCliffTypes(t, changed, kinds, cliffTile) : changed;
+  if (changed.length) return withCliffTypes(t, changed, kinds, cliffTile);
+  return cliffTile === undefined ? changed : setCliffType(t, area, shape, cliffTile, kinds);
+}
+
+/** Gives the cliffs of an area the look of a ground tile's cliff, adding that tile to the map's list
+ *  if needed: any tileset's cliffs work. The changed corners. */
+export function setCliffType(t: Terrain, area: Area, shape: Shape, tile: string, kinds: readonly CliffKind[]) {
+  const inside = cornersIn(t, area, shape);
+  if (!inside.length) throw new Error("That area has no ground in the map.");
+  if (!kinds.some((k) => k.groundTile === tile)) throw new Error(`"${tile}" has no cliff. list_ground_tiles marks the tiles that have one.`);
+  groundSlot(t, tile, kinds);
+  const grounds = cliffGrounds(t, kinds), log = new Touched();
+  matchCliffTypes(t, inside.map(({ i }) => i), grounds, log, grounds.indexOf(tile));
+  return [...log.corners];
 }
 
 export type WaterMode = "shallow" | "deep" | "dry";

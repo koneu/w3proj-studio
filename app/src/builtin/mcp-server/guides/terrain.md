@@ -47,6 +47,13 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
   high ground.
 - Keep ground level where a base has to stand; buildings need room.
 
+## Cliffs
+
+- A tileset has two kinds of cliff, usually dirt and grass, and only those two ground tiles have one. Other
+  ground beside a cliff doesn't change it, so a map that never chooses gets one look everywhere.
+- Mix them with set_cliff_type: grass cliffs where a meadow ends, dirt ones in worn or rocky places. It
+  takes any tileset's cliffs, which can make a corner of the map feel different. Keep that to a few.
+
 ## Tiles
 
 - Natural ground uses at least 3 tiles. These maps use 6 to 12, with one covering 40 to 70%.

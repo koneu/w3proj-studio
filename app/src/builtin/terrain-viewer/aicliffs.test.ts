@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isBackdrop } from "../../lib/terrain/area";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
-import { groundSlot, setCliffs, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind } from "./aitools";
+import { groundSlot, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind } from "./aitools";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
 
@@ -58,7 +58,40 @@ test("cliffs take the look of their ground, or the one asked for", () => {
   const rock = flat();
   setCliffs(rock, block, "box", { level: 3 }, kinds, "Lrok");
   assert.equal(corner(rock, 8, 12).cliffTexture, 2);
-  assert.throws(() => setCliffs(flat(), block, "box", { level: 3 }, kinds, "Ldro"), /no cliff of "Ldro".*Ldrt, Lgrs, Lrok/);
+  assert.throws(() => setCliffs(flat(), block, "box", { level: 3 }, kinds, "Ldro"), /"Ldro" has no cliff.*Ldrt, Lgrs, Lrok/);
+});
+
+test("existing cliffs can change their look", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  assert.equal(corner(t, 8, 12).cliffTexture, 1);
+  const changed = setCliffType(t, block, "box", "Ldrt", kinds);
+  assert.ok(changed.length > 0);
+  assert.equal(corner(t, 8, 12).cliffTexture, 0);
+  assert.equal(corner(t, 12, 12).cliffTexture, 15, "flat ground isn't a cliff");
+  assert.deepEqual(setCliffType(t, block, "box", "Ldrt", kinds), [], "already so");
+});
+
+test("asking for the level it's at still changes the look", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  setCliffs(t, block, "box", { level: 3 }, kinds, "Ldrt");
+  assert.equal(corner(t, 8, 12).cliffTexture, 0);
+});
+
+test("another tileset's cliff joins the map, and the numbers in use stay", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  const more = [...kinds, { cliffID: "CVgr", groundTile: "Vgrt" }];
+  setCliffType(t, { ...block, right: 10 * 128 }, "box", "Vgrt", more);
+  assert.ok(t.groundTiles.includes("Vgrt") && t.cliffTiles.includes("CVgr"));
+  assert.equal(corner(t, 8, 12).cliffTexture, 3);
+  assert.equal(corner(t, 16, 12).cliffTexture, 1, "the far side stays grass");
+});
+
+test("a tile without a cliff is refused, and says how to find one", () => {
+  assert.throws(() => setCliffType(flat(), block, "box", "Lgrd", kinds), /"Lgrd" has no cliff.*list_ground_tiles/);
+  assert.throws(() => setCliffType(flat(), { left: 9000, bottom: 9000, right: 9500, top: 9500 }, "box", "Ldrt", kinds), /no ground in the map/);
 });
 
 test("the numbers count only tiles with a cliff of their own", () => {
