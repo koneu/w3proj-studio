@@ -179,7 +179,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Projects already told that their vJASS script isn't regenerated. */
   const warned = new Set<string>();
   const write = (reason: string) => {
-    running = running.then(async () => {
+    // The queue goes on after a failed run (the caller of that run has its error).
+    running = running.catch(() => {}).then(async () => {
       try {
         const { path, text, vjass, language } = await generate();
         const file = path.slice(4);
@@ -211,7 +212,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.workspace.onDidSave((path) => {
       if (!INPUTS.test(path) || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
       clearTimeout(timer);
-      timer = setTimeout(() => void write(`saved ${path}`).catch(() => {}), 800);
+      timer = setTimeout(() => void write(`saved ${path}`).catch((e) => {
+        // Nobody is watching a save's script run, and saving goes on working: say so once.
+        const key = `failed:${w3.workspace.project()?.root ?? ""}`;
+        if (warned.has(key)) return;
+        warned.add(key);
+        void w3.window.showWarning(`The map script couldn't be regenerated, so saved changes don't reach it: ${e instanceof Error ? e.message : String(e)}`);
+      }), 800);
     }),
     // `quiet` (other extensions, e.g. New Map): no message afterwards.
     w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean }) => {
