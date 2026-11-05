@@ -34,6 +34,7 @@ for (const f of readdirSync("abil")) for (const [id, sec] of parseIni(read("abil
 const stats: Record<string, [number, number]> = {};
 // lib/script/guard: maps the World Editor made must not look as if they had code of their own.
 const guarded: [string, string[]][] = [];
+let checked = 0;
 // The Problems view's trigger references and Lua check: what the World Editor made has no such problems.
 const broken: string[] = [];
 for (const m of readdirSync("ws")) {
@@ -48,7 +49,8 @@ const norm = (x: string) => x.replace(/SetSoundDuration\( (\w+), \d+ \)/g, "SetS
 
 for (const m of readdirSync("ws")) {
   const d = `ws/${m}/map`;
-  if (!existsSync(`${d}/war3map.j`) || !existsSync(`${d}/war3map.wtg`)) continue;
+  const scriptFile = existsSync(`${d}/war3map.j`) ? `${d}/war3map.j` : `${d}/war3map.lua`;
+  if (!existsSync(scriptFile) || !existsSync(`${d}/war3map.wtg`)) continue;
   const info = json(d, "war3map.w3i");
   if (!info) continue;
   let triggers, custom;
@@ -56,6 +58,17 @@ for (const m of readdirSync("ws")) {
     triggers = W.parseWtg(new Uint8Array(readFileSync(`${d}/war3map.wtg`)), data);
     custom = existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
   } catch { continue; }
+  // The trigger files read and written again, byte for byte.
+  const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const wtgBytes = new Uint8Array(readFileSync(`${d}/war3map.wtg`));
+  const rt = (stats["(wtg byte-exact)"] ??= [0, 0]); rt[1]++; if (same(W.writeWtg(triggers), wtgBytes)) rt[0]++;
+  if (custom) {
+    const wctBytes = new Uint8Array(readFileSync(`${d}/war3map.wct`));
+    const rc = (stats["(wct byte-exact)"] ??= [0, 0]); rc[1]++; if (same(W.writeWct(custom), wctBytes)) rc[0]++;
+    const rx = (stats["(wct via text)"] ??= [0, 0]); rx[1]++;
+    try { if (same(W.writeWct(W.parseWctText(W.writeWctText(custom))), wctBytes)) rx[0]++; } catch { /* counted as different */ }
+  }
+  const wj = (stats["(wtg via JSON)"] ??= [0, 0]); wj[1]++; if (same(W.writeWtg(W.parseWtgJson(W.writeWtgJson(triggers))), wtgBytes)) wj[0]++;
   const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
@@ -85,9 +98,8 @@ for (const m of readdirSync("ws")) {
     regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras, sounds: json(d, "war3map.w3s")?.sounds,
     soundDuration: () => 0, soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
   };
-  const gen = J.generateSections(input), orig = J.splitSections(read(`${d}/war3map.j`));
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
-  const whole = J.generateScript(input), file = read(`${d}/war3map.j`);
+  const whole = J.generateScript(input), file = read(scriptFile);
   const inList = (a: any[] | undefined, f: (x: any) => string) => (a ?? []).map(f);
   const units = json(d, "war3mapUnits.doo")?.units ?? [], doodads = json(d, "war3map.doo")?.doodads ?? [];
   const known = new Set<string>([
@@ -99,6 +111,10 @@ for (const m of readdirSync("ws")) {
   for (const x of R.missingRefs(R.triggerRefs(triggers), known, triggers.variables)) broken.push(`${m} ${x.ref} (${x.triggers[0]})`);
   const lost = G.lostFunctions(file, whole);
   if (lost.length) guarded.push([m, lost]);
+  checked++;
+  // Sections are compared for JASS only (the World Editor's Lua comes with other spacing).
+  if (scriptFile.endsWith(".lua")) continue;
+  const gen = J.generateSections(input), orig = J.splitSections(file);
   const fs = (stats["(whole file)"] ??= [0, 0]); fs[1]++; if (norm(whole) === norm(file)) fs[0]++;
   if (only === "(whole file)" && norm(whole) !== norm(file) && shown < showN) {
     const a = norm(whole).split(/\r?\n/), b = norm(file).split(/\r?\n/);
@@ -121,5 +137,5 @@ for (const m of readdirSync("ws")) {
 for (const [k, [ok, n]] of Object.entries(stats)) console.log(`${(k || "(header)").padEnd(20)} ${ok}/${n}`);
 console.log(`problems: ${broken.length} in the game's maps`);
 for (const b of broken.slice(0, 20)) console.log(`  ${b}`);
-console.log(`guard: ${guarded.length} of ${stats["(whole file)"]?.[1] ?? 0} maps would keep their script`);
+console.log(`guard: ${guarded.length} of ${checked} maps would keep their script`);
 for (const [m, lost] of guarded) console.log(`  ${m}: ${lost.length} (${lost.slice(0, 6).join(", ")})`);

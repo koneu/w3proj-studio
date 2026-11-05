@@ -10,6 +10,7 @@ import { goToNextChunk, goToPreviousChunk, MergeView, getChunks } from "@codemir
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView, lineNumbers } from "@codemirror/view";
+import { lfsSize } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { loadKind } from "../../lib/objects/metadata";
@@ -169,7 +170,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Binary files (terrain, models, …): sizes only.
           if ("error" in before && before.error || "error" in after && after.error) {
             const [a, b] = await Promise.all([
-              w3.backend.invoke<number | null>("git_size", { root: r, path }),
+              // An LFS file is a small pointer in the commit, which names the real size.
+              lfsSize(before.text) ?? w3.backend.invoke<number | null>("git_size", { root: r, path }),
               w3.workspace.readBytes(path).then((x) => x.length, () => null),
             ]);
             el.replaceChildren(head, h("div.view-empty", {}, `Binary file: ${a === null ? "not in the last commit" : formatBytes(a)} → ${b === null ? "deleted" : formatBytes(b)}.`));
