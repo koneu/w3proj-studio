@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, rowSpots, seededRandom, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -172,6 +172,40 @@ test("a path paints along its line, frays at its sides and ends, and leaves the 
   assert.ok(changed.length > 8 && changed.length < 40);
   const hard = field();
   assert.ok(paintPath(hard, [[256, 1024], [1792, 1024]], 256, 1, 0, false, seeded()).length >= changed.length);
+});
+
+test("a thin path stays in one piece, whatever the fraying does", () => {
+  const t = field();
+  paintPath(t, [[100, 180], [1900, 1770]], 90, 1, 1, false, () => 0.99);
+  for (let n = 0; n <= 40; n++) {
+    const x = Math.round((100 + 45 * n) / 128), y = Math.round((180 + 39.75 * n) / 128);
+    assert.equal(t.corners[y * 17 + x].texture, 1, `${x},${y}`);
+  }
+});
+
+test("a seed repeats a layout, and another seed doesn't", () => {
+  const spots = (seed: number) => scatterSpots(box, 96, "ellipse", seededRandom(seed));
+  assert.deepEqual(spots(7), spots(7));
+  assert.notDeepEqual(spots(7), spots(8));
+  const r = seededRandom(1), all = Array.from({ length: 1000 }, r);
+  assert.ok(all.every((v) => v >= 0 && v < 1) && Math.abs(all.reduce((a, b) => a + b) / 1000 - 0.5) < 0.05);
+});
+
+test("rows cover an area evenly, stay in it, and can be loosened", () => {
+  const spots = rowSpots({ left: 0, bottom: 0, right: 400, top: 200 }, 100, 100, 0, seededRandom(1));
+  assert.deepEqual(spots.map((s) => [s.x, s.y]), [[50, 50], [150, 50], [250, 50], [350, 50], [50, 150], [150, 150], [250, 150], [350, 150]]);
+  const loose = rowSpots({ left: 0, bottom: 0, right: 400, top: 200 }, 100, 100, 10, seededRandom(1));
+  assert.ok(loose.every((s, i) => Math.abs(s.x - spots[i].x) <= 10) && loose.some((s, i) => s.x !== spots[i].x));
+});
+
+test("the pathing picture tells free, cliffs, water and what stands there apart", () => {
+  const free = 0x40, cliff = 0x40 | 0x02, water = 0;
+  const rgba = pathingColors(new Uint8Array([free, cliff, water, free]), new Uint8Array([0, 0, 0, 1]));
+  const px = (i: number) => [...rgba.slice(i * 4, i * 4 + 4)];
+  assert.equal(px(0)[3], 0);
+  assert.deepEqual(px(1), [230, 30, 30, 170]);
+  assert.deepEqual(px(2), [60, 150, 255, 90]);
+  assert.deepEqual(px(3), [255, 150, 0, 170]);
 });
 
 test("a flattened path levels the ground across it towards its middle", () => {

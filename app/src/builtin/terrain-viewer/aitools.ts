@@ -89,6 +89,17 @@ export function textMap(t: Terrain, p: Pathing, area: Area) {
 
 export type Shape = "ellipse" | "box";
 
+/** Numbers in 0..1 from a seed: the same seed gives the same layout. */
+export function seededRandom(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** How far a point is from the middle of an area: 0 there, 1 at its edge, more outside. */
 function reach(area: Area, shape: Shape, x: number, y: number) {
   const dx = Math.abs(x - (area.left + area.right) / 2) / ((area.right - area.left) / 2);
@@ -164,6 +175,20 @@ export function paintPath(t: Terrain, points: readonly [number, number][], width
         if (c.rawHeight !== raw) changed.add(i);
       }
       if ((edge > 0 && r > 1 - edge && random() > (1 - r) / edge) || c.texture === slot) continue;
+      c.texture = slot;
+      c.variation = randomVariation();
+      changed.add(i);
+    }
+  }
+  // Ground has a tile per corner, 128 apart: a thin line can pass between them and break up. The
+  // corners nearest the line itself are always painted, so it stays in one piece.
+  for (let k = 0; k + 1 < points.length; k++) {
+    const [ax, ay] = points[k], [bx, by] = points[k + 1], steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 32));
+    for (let n = 0; n <= steps; n++) {
+      const x = Math.round((ax + ((bx - ax) * n) / steps - t.offsetX) / TILE), y = Math.round((ay + ((by - ay) * n) / steps - t.offsetY) / TILE);
+      if (x < 0 || y < 0 || x >= t.width || y >= t.height) continue;
+      const i = y * t.width + x, c = t.corners[i];
+      if (c.boundary || c.texture === slot) continue;
       c.texture = slot;
       c.variation = randomVariation();
       changed.add(i);
@@ -283,6 +308,30 @@ export function lineSpots(from: [number, number], to: [number, number], spacing:
   const count = Math.max(1, Math.round(length / spacing));
   const facing = (((Math.atan2(dy, dx) * 180) / Math.PI + facingOffset) % 360 + 360) % 360;
   return Array.from({ length: count + 1 }, (_, i) => ({ x: from[0] + (dx * i) / count, y: from[1] + (dy * i) / count, facing }));
+}
+
+/** Rows across an area, for fields and orchards; `jitter` (units) keeps them from looking ruled. */
+export function rowSpots(area: Area, spacingX: number, spacingY: number, jitter: number, random: () => number) {
+  const out: { x: number; y: number }[] = [];
+  for (let y = area.bottom + spacingY / 2; y < area.top; y += spacingY) {
+    for (let x = area.left + spacingX / 2; x < area.right; x += spacingX) {
+      out.push({ x: x + (random() - 0.5) * 2 * jitter, y: y + (random() - 0.5) * 2 * jitter });
+    }
+  }
+  return out;
+}
+
+/** A colour for every pathing cell (rows from the south), for a picture of what stops a unit:
+ *  red for cliffs and the like, orange for what stands there, blue for water, clear for free. */
+export function pathingColors(cells: Uint8Array, blockers: Uint8Array) {
+  const rgba = new Uint8Array(cells.length * 4);
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (blockers[i] && !(c & NO_WALK)) rgba.set([255, 150, 0, 170], i * 4);
+    else if (c & NO_WALK) rgba.set(c & NO_WATER ? [230, 30, 30, 170] : [30, 90, 240, 170], i * 4);
+    else if (!(c & NO_WATER)) rgba.set([60, 150, 255, 90], i * 4);
+  }
+  return rgba;
 }
 
 /** Where to look for room when a spot is taken: rings around it, nearest first, on the pathing grid. */

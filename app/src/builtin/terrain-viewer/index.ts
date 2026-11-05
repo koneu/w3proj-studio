@@ -20,9 +20,9 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
-import { checkPath, type Grid } from "./pathcheck";
+import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, rowSpots, scatterSpots, seededRandom, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
 import { changesImports } from "./filewatch";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -158,7 +158,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   let opened: {
     handle: TerrainEditorHandle; ready: () => Promise<void>;
-    screenshot: (size: number, area: Area | null, angle: ViewAngle, heights: boolean) => Promise<string>;
+    screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null) => Promise<string>;
     derive: (before: { terrain: Terrain; doodads: Placed[] }) => Promise<void>;
   } | null = null;
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
@@ -266,6 +266,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }));
   };
 
+  /** What stands by the tight or stuck place of a report: usually the reason. */
+  const withNeighbour = <T extends { narrowest?: { at: [number, number] }; stuckAt?: [number, number] }>(handle: TerrainEditorHandle, report: T) => {
+    const place = report.stuckAt ?? report.narrowest?.at;
+    const near = place ? nearestObject(handle.objects.list(), place) : null;
+    return near ? { ...report, standingNearby: { id: near.id, position: near.position } } : report;
+  };
+
   /** The map's playable part, null if it can't be read. */
   const playable = async () => {
     const [info, facts] = await Promise.all([readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json"), terrainFacts(w3)]);
@@ -293,10 +300,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   let placeObjects: McpToolHandler = () => undefined;
-  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean) => {
+  const RESERVED = ".w3proj/reserved-areas.json";
+  type Reserved = KeepClear & { name: string };
+  const readReserved = async () => JSON.parse(await w3.workspace.readText(RESERVED).catch(() => "[]")) as Reserved[];
+  /** The seed a tool was given, or a new one: the answer says it, so any result can be repeated. */
+  const seedOf = (seed: unknown) => (typeof seed === "number" ? seed : Math.floor(Math.random() * 1e9));
+
+  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random) => {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
     if (!entry) throw new Error(`${f.name} has nothing placed yet to take the layout from.`);
-    dress(entry, handle.objects.type(id), asked, vary, Math.random);
+    dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
   };
 
@@ -306,7 +319,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const area = await readArea(w3, args);
       const size = typeof args.maxSize === "number" && args.maxSize > 0 ? args.maxSize : 1280;
       const angle = args.view === "angled" || args.view === "low" ? args.view : "top";
-      const data = await editor.screenshot(size, area, angle, args.heights === true);
+      let colors = null;
+      if (args.overlay === "heights") colors = heightColors(editor.handle.terrain);
+      if (args.overlay === "pathing") {
+        const [pathing, blockers] = await Promise.all([editor.handle.pathing(), editor.handle.objects.blockers()]);
+        colors = { rgba: pathingColors(pathing.cells, blockers), width: pathing.width, height: pathing.height };
+      }
+      const data = await editor.screenshot(size, area, angle, colors);
       const image = { type: "image", data, mimeType: "image/png" };
       return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
     }),
@@ -351,7 +370,49 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
-      return checkPath(await walkGrid((await liveEditor()).handle), start, goal, size);
+      const { handle } = await liveEditor();
+      return withNeighbour(handle, checkPath(await walkGrid(handle), start, goal, size));
+    }),
+    w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
+      if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
+      const { handle } = await liveEditor();
+      const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32, wide = typeof corridorWidth === "number" && corridorWidth > 0 ? corridorWidth : 400;
+      return withNeighbour(handle, checkRoute(await walkGrid(handle), points as [number, number][], size, wide));
+    }),
+    w3.mcp.registerTool("find_pockets", async (args) => {
+      const { handle } = await liveEditor();
+      const grid = await walkGrid(handle), bounds = await playable().catch(() => null);
+      // What's past the playable part isn't ground anyone walks on.
+      if (bounds) for (let y = 0; y < grid.height; y++) for (let x = 0; x < grid.width; x++) {
+        if (!inArea(grid.offsetX + (x + 0.5) * 32, grid.offsetY + (y + 0.5) * 32, bounds)) grid.blocked[y * grid.width + x] = 1;
+      }
+      const size = typeof args.unitSize === "number" && args.unitSize >= 0 ? args.unitSize : 32;
+      return findPockets(grid, size, await readArea(w3, args), typeof args.smallest === "number" ? args.smallest : 16);
+    }),
+    w3.mcp.registerTool("reserve_area", async (args) => {
+      const { name } = args;
+      if (typeof name !== "string" || !name.trim()) throw new Error("reserve_area needs a name.");
+      const [place] = await readKeepClear([args]);
+      const rest = (await readReserved()).filter((r) => r.name !== name.trim());
+      await w3.workspace.writeText(RESERVED, JSON.stringify([...rest, { ...place, name: name.trim() }], null, 2));
+      return `"${name.trim()}" stays free from now on.`;
+    }),
+    w3.mcp.registerTool("release_area", async ({ name }) => {
+      const all = await readReserved(), rest = all.filter((r) => r.name !== name);
+      if (rest.length === all.length) throw new Error(`No area is reserved as "${String(name)}".`);
+      await w3.workspace.writeText(RESERVED, JSON.stringify(rest, null, 2));
+      return `Released "${String(name)}".`;
+    }),
+    w3.mcp.registerTool("list_reserved_areas", readReserved),
+    w3.mcp.registerTool("fill_rows", async (args) => {
+      const { id, spacingX, spacingY, jitter, facing } = args;
+      if (typeof spacingX !== "number" || typeof spacingY !== "number" || spacingX <= 0 || spacingY <= 0) throw new Error("spacingX and spacingY must be above 0.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("fill_rows needs a region, or left, bottom, right and top.");
+      const seed = seedOf(args.seed), keep = await readReserved();
+      const spots = rowSpots(area, spacingX, spacingY, typeof jitter === "number" ? jitter : 0, seededRandom(seed)).filter((s) => !isKeptClear(s.x, s.y, keep));
+      const objects = spots.map((s) => ({ id, x: s.x, y: s.y, ...(typeof facing === "number" ? { facing } : {}) }));
+      return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed })) as object };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
       const { handle } = await liveEditor();
@@ -364,14 +425,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         tiles: [...seen].filter(([id, sets]) => !wanted || id.toLowerCase().includes(wanted) || sets.some((n) => n.toLowerCase().includes(wanted))).map(([id, tilesets]) => ({ id, tilesets, ...(inMap.includes(id) ? { inMap: true } : {}) })),
       };
     }),
-    w3.mcp.registerTool("paint_path", async ({ tile, points, width, edge, flatten }) => {
+    w3.mcp.registerTool("paint_path", async (args) => {
+      const { tile, points, width, edge, flatten } = args;
       if (typeof tile !== "string" || tile.length !== 4) throw new Error("tile must be four characters, like Ldrt. terrain_info lists them.");
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
       const known = (await (await liveEditor()).handle.tilesets()).flatMap((s) => s.tiles);
       if (!known.includes(tile)) throw new Error(`"${tile}" isn't one of the game's ground tiles. terrain_info lists them.`);
       const across = typeof width === "number" && width > 0 ? width : 256;
       const fray = typeof edge === "number" ? Math.min(1, Math.max(0, edge)) : 0.4;
-      return editGround(`Paint a path of ${tile}`, (t) => paintPath(t, points as [number, number][], across, groundSlot(t, tile), fray, flatten === true, Math.random));
+      const seed = seedOf(args.seed), random = seededRandom(seed);
+      return { seed, ...await editGround(`Paint a path of ${tile}`, (t) => paintPath(t, points as [number, number][], across, groundSlot(t, tile), fray, flatten === true, random)) };
     }),
     w3.mcp.registerTool("paint_terrain", async (args) => {
       const { tile } = args;
@@ -382,7 +445,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!known.includes(tile)) throw new Error(`"${tile}" isn't one of the game's ground tiles. terrain_info lists them.`);
       const edge = typeof args.edge === "number" ? Math.min(1, Math.max(0, args.edge)) : 0.3;
       const shape = args.shape === "box" ? "box" : "ellipse";
-      return editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => paintCorners(t, area, shape, groundSlot(t, tile), edge, Math.random));
+      const seed = seedOf(args.seed), random = seededRandom(seed);
+      return { seed, ...await editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => paintCorners(t, area, shape, groundSlot(t, tile), edge, random)) };
     }),
     w3.mcp.registerTool("sculpt_terrain", async (args) => {
       const { mode, amount } = args;
@@ -427,7 +491,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const report = await placeObjects({ kind, objects, ignoreRoom, dryRun });
       return { spacing: step, ...(report as object) };
     }),
-    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun }) => {
+    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
       const wanted = objects as { id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number }[];
       const key = fileKey(kind);
@@ -438,6 +502,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
       const { handle } = await liveEditor();
       const bounds = await playable().catch(() => null);
+      const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
       /** Works out what fits; `place` then puts it there. A dry run doesn't mark what it finds, since
@@ -450,7 +515,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
           if (!type) { skipped.push({ index: i, id, x, y, reason: "no such object type here" }); continue; }
           // Decided here: a footprint is checked at the facing the object ends up with.
-          const facing = type.fixedRot ?? o.facing ?? (key === "doodads" ? Math.random() * 360 : 270);
+          const facing = type.fixedRot ?? o.facing ?? (key === "doodads" ? random() * 360 : 270);
           const angle = (facing * Math.PI) / 180;
           let spot: [number, number] | null = [x, y];
           if (room && !(await room.fits(kindOf, id, x, y, angle))) {
@@ -475,7 +540,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
       let placed = 0;
       await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
-        placed = await plan((o, i, x, y, facing) => add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads"));
+        placed = await plan((o, i, x, y, facing) => add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random));
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
       });
       return { placed, shifted, skipped };
@@ -490,7 +555,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const range = args.scaleRange;
       if (range !== undefined && !(Array.isArray(range) && range.length === 2 && range.every((n) => typeof n === "number" && n > 0) && range[0] <= range[1])) throw new Error("scaleRange must be [smallest, biggest].");
       const scaleRange = range as [number, number] | undefined;
-      const keep = await readKeepClear(args.avoid);
+      const keep = [...await readKeepClear(args.avoid), ...(args.ignoreReserved === true ? [] : await readReserved())];
+      const seed = seedOf(args.seed), random = seededRandom(seed);
       const { handle } = await liveEditor();
       const key = fileKey(args.kind ?? "doodads");
       const counts = new Map<string, number>();
@@ -507,19 +573,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // doesn't fit at a spot is left out there.
         const smallest = Math.min(...sizes.map((fp) => (fp ? Math.max(fp.width, fp.height) * 32 : 128)));
         const spacing = Math.max(64, smallest) / Math.sqrt(density);
-        for (const spot of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", Math.random)) {
+        for (const spot of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", random)) {
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
           if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
-          const { id, type } = types[Math.floor(Math.random() * types.length)];
-          const facing = type.fixedRot ?? Math.random() * 360, angle = (facing * Math.PI) / 180;
+          const { id, type } = types[Math.floor(random() * types.length)];
+          const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
           if (!(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
-          add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true);
+          add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random);
           counts.set(id, (counts.get(id) ?? 0) + 1);
         }
         if (!counts.size) throw new Error("There's no free ground there for these.");
       });
-      return { placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, spotsKeptClear: keptClear, area };
+      return { placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, spotsKeptClear: keptClear, seed, area };
     }),
     w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
       if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
@@ -2140,7 +2206,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const ready = () => objectsPlaced.catch(() => {});
-        const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, heights: boolean) => {
+        const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null) => {
           await ready();
           await loader.settled();
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
@@ -2150,7 +2216,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             handle.setView(viewOfArea(area, middle, canvas.clientWidth / canvas.clientHeight, renderer.fov, angle));
           }
           const restore = renderer.showEverything();
-          if (heights) { const c = heightColors(terrain); handle.setGroundOverlay(c.rgba, c.width, c.height); }
+          if (colors) handle.setGroundOverlay(colors.rgba, colors.width, colors.height);
           try {
             // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.
             renderer.render();

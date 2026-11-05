@@ -53,8 +53,38 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     });
   };
 
+  /** Replaces the project's map files with a checkpoint's; what's there now is kept as one first. */
+  const restore = async (root: string, name: string) => {
+    await create();
+    await w3.commands.execute("w3.project.syncFromMap", `${root}\\${FOLDER.replace("/", "\\")}\\${name}`);
+  };
+
   const timer = setInterval(() => void tick().catch(() => {}), POLL);
   ctx.subscriptions.push(
+    w3.mcp.registerTool("list_checkpoints", async () => {
+      const project = w3.workspace.project();
+      if (!project) throw new Error("No project is open in W3Proj Studio.");
+      return newestFirst(await list(project.root)).map((c) => ({ name: c.name, at: new Date(c.time).toLocaleString() }));
+    }),
+    w3.mcp.registerTool("create_checkpoint", async () => {
+      if (!w3.workspace.project()) throw new Error("No project is open in W3Proj Studio.");
+      return { name: await create() };
+    }),
+    w3.mcp.registerTool("restore_checkpoint", async ({ name }) => {
+      const project = w3.workspace.project();
+      if (!project) throw new Error("No project is open in W3Proj Studio.");
+      const found = newestFirst(await list(project.root)).find((c) => c.name === name);
+      if (!found) throw new Error(`There's no checkpoint "${String(name)}". list_checkpoints gives them.`);
+      const unsaved = w3.editors.unsavedPaths();
+      if (unsaved.length) throw new Error(`Not restored: ${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Ask the user to save or discard them first.`);
+      const when = new Date(found.time).toLocaleString();
+      if (!(await w3.window.confirm(`AI request: restore the map to the checkpoint of ${when}? Its files are replaced; a checkpoint of what's there now is made first.`, "Restore", 90_000))) {
+        throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
+      }
+      await w3.editors.closeAll();
+      await restore(project.root, found.name);
+      return `Restored the checkpoint of ${when}. undo_last_edit can't go back past this.`;
+    }),
     { dispose: () => clearInterval(timer) },
     // `quiet` (other extensions, before something drastic): no message afterwards.
     w3.commands.register("w3.checkpoints.create", async (opts?: { quiet?: boolean }) => {
@@ -73,8 +103,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const c = await w3.window.showWarning(`Restore the project to ${pick.label}? Its map files are replaced by that version; a checkpoint of what's there now is made first. Unsaved edits are asked about.`, "Restore", "Cancel");
       if (c !== "Restore") return;
       if (!(await w3.editors.closeAllAsking())) return;
-      await create();
-      await w3.commands.execute("w3.project.syncFromMap", `${project.root}\\${FOLDER.replace("/", "\\")}\\${pick.value}`);
+      await restore(project.root, pick.value);
     }),
   );
 }

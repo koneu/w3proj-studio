@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkPath, clearance, type Grid } from "./pathcheck";
+import { checkPath, checkRoute, clearance, findPockets, nearestObject, type Grid } from "./pathcheck";
 
 /** A grid from rows, north last in the text order given: "#" is blocked. Row 0 is the south. */
 function grid(rows: string[]): Grid {
@@ -90,6 +90,61 @@ test("the biggest maps work: too many cells to pass as arguments", () => {
   const r = checkPath({ blocked, width: size, height: size, offsetX: 0, offsetY: 0 }, at(10, 10), at(1900, 1900), 32);
   assert.equal(r.walkable, true);
   assert.ok((r.route?.length ?? 0) <= 14);
+});
+
+test("a fenced-in field is a pocket; open ground isn't", () => {
+  const rows = open(40, 40).map((row, y) => {
+    if (y < 10 || y > 20) return row;
+    const wall = y === 10 || y === 20;
+    return `${row.slice(0, 10)}${wall ? "#".repeat(11) : `#${".".repeat(9)}#`}${row.slice(21)}`;
+  });
+  const got = findPockets(grid(rows), 16, null);
+  assert.equal(got.pockets.length, 1);
+  assert.equal(got.pockets[0].cells, 81);
+  assert.deepEqual(got.pockets[0].box, { left: 11 * 32, right: 20 * 32, bottom: 11 * 32, top: 20 * 32 });
+  assert.equal(findPockets(grid(open(30, 30)), 16, null).pockets.length, 0);
+});
+
+test("a gate only big units can't use makes a pocket for them alone", () => {
+  const rows = open(41, 41).map((row, y) => (Math.abs(y - 20) < 2 ? row : `${row.slice(0, 20)}#${row.slice(21)}`));
+  assert.equal(findPockets(grid(rows), 16, null).pockets.length, 0);
+  assert.equal(findPockets(grid(rows), 64, null).pockets.length, 1);
+});
+
+test("tiny gaps and pockets elsewhere stay out", () => {
+  const rows = open(40, 40).map((row, y) => (y >= 5 && y <= 8 ? `${row.slice(0, 5)}#..#${row.slice(9)}` : y === 4 || y === 9 ? `${row.slice(0, 5)}####${row.slice(9)}` : row));
+  assert.equal(findPockets(grid(rows), 16, null, 16).pockets.length, 0);
+  assert.equal(findPockets(grid(rows), 16, null, 4).pockets.length, 1);
+  assert.equal(findPockets(grid(rows), 16, { left: 800, bottom: 800, right: 1000, top: 1000 }, 4).pockets.length, 0);
+});
+
+test("a route stays in its corridor, and fails where it would have to leave", () => {
+  const rows = open(41, 21).map((row, y) => (y === 15 ? row : `${row.slice(0, 20)}#${row.slice(21)}`));
+  const line: [number, number][] = [at(2, 10), at(38, 10)];
+  const narrow = checkRoute(grid(rows), line, 16, 200);
+  assert.equal(narrow.walkable, false);
+  assert.equal(narrow.failedLeg, 0);
+  assert.equal(narrow.stuckAt?.[0], at(19, 10)[0]);
+  const wide = checkRoute(grid(rows), line, 16, 500);
+  assert.equal(wide.walkable, true);
+  assert.equal(wide.narrowest?.width, 32);
+});
+
+test("a route goes through all its points, and a blocked one is named", () => {
+  const free = checkRoute(grid(open(30, 30)), [at(2, 2), at(20, 2), at(20, 20)], 16, 128);
+  assert.equal(free.walkable, true);
+  assert.ok((free.length ?? 0) >= 36 * 32);
+  const rows = open(10, 10).map((row, y) => (y === 5 ? "#####.....".slice(0, 10) : row));
+  const closed = checkRoute(grid(rows), [at(1, 1), at(2, 5), at(1, 9)], 16, 200);
+  assert.match(closed.problem ?? "", /Point 1 is inside/);
+  assert.equal(closed.failedLeg, 0);
+  assert.match(checkRoute(grid(open(5, 5)), [at(1, 1), [9000, 0]], 16, 100).problem ?? "", /Point 1 is outside/);
+});
+
+test("the object nearest a tight spot is found, if there's one close", () => {
+  const list = [{ id: "a", position: [0, 0, 0] }, { id: "b", position: [100, 0, 0] }];
+  assert.equal(nearestObject(list, [90, 0])?.id, "b");
+  assert.equal(nearestObject(list, [900, 0]), null);
 });
 
 test("offsets are the map's", () => {

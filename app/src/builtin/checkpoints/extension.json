@@ -6,6 +6,11 @@
   "activationEvents": ["onStartup"],
   "extensionDependencies": ["w3.mapProject"],
   "contributes": {
+    "mcpTools": [
+      {"name":"list_checkpoints","description":"The project's checkpoints, newest first. Studio makes them every few minutes while there are saved changes, and before big changes.","readOnly":true,"inputSchema":{"type":"object","required":[],"properties":{}}},
+      {"name":"create_checkpoint","description":"Packs the project as it's saved now, as a checkpoint to come back to. Needs the setting mcp.writeTools.","inputSchema":{"type":"object","required":[],"properties":{}}},
+      {"name":"restore_checkpoint","description":"Puts the whole map back as it was at a checkpoint, unsaved work excluded. The way back after a restart, when undo_last_edit has nothing left. The user has to confirm it in Studio, within about 90 seconds, so tell them to look there first. A checkpoint of the current state is made first. Refused while anything is unsaved. Needs the setting mcp.writeTools.","inputSchema":{"type":"object","required":["name"],"properties":{"name":{"type":"string","description":"As list_checkpoints gives it."}}}}
+    ],
     "commands": [
       { "id": "w3.checkpoints.create", "title": "Create Checkpoint", "category": "Project" },
       { "id": "w3.checkpoints.restore", "title": "Restore Checkpoint…", "category": "Project" }
