@@ -101,7 +101,8 @@ export function checkPath(g: Grid, start: [number, number], goal: [number, numbe
     return { walkable: false, unitSize, problem: `${blockedEnd === from ? "The start" : "The end"} is inside something that blocks, or on ground that can't be walked: that says nothing about the way to it.`, ...(free ? { nearestFree: free } : {}) };
   }
   // Both ends count as wide enough: a unit can stand beside a tree, and the way to it isn't blocked.
-  const ends = [from, to], saved = ends.map((i) => c[i]), top = Math.max(...c);
+  // A loop: a big map's cells are too many to pass as arguments.
+  const ends = [from, to], saved = ends.map((i) => c[i]), top = c.reduce((a, b) => Math.max(a, b), 0);
   for (const i of ends) c[i] = top;
   let low = 0, high = top;
   while (low < high) {
@@ -119,7 +120,7 @@ export function checkPath(g: Grid, start: [number, number], goal: [number, numbe
   way.reverse();
   const inner = way.slice(1, -1).filter((i) => c[i] > 0);
   // The middle of the tightest stretch, not where it starts.
-  const least = Math.min(...inner.map((i) => c[i]));
+  const least = inner.reduce((a, i) => Math.min(a, c[i]), Infinity);
   const tightest = inner.filter((i) => c[i] === least);
   const tight = tightest[Math.floor(tightest.length / 2)] ?? from;
   let length = 0;

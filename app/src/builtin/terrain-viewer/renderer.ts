@@ -540,8 +540,18 @@ export class TerrainRenderer {
   /** Shows an RGBA texture over the ground (`width` × `height` texels, rows from
    *  the south, covering the whole map); null removes it. Re-calling with the
    *  same size only re-uploads the pixels. */
-  get hasGroundOverlay() {
-    return this.overlay !== null;
+  /** Everything the user switched off or on, as a tool's picture needs it, until `done` runs:
+   *  a tool sees the map, not this person's way of looking at it. */
+  showEverything() {
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay } = this;
+    this.hiddenGroups = new Set();
+    this.showWater = this.showEffects = true;
+    this.wireframe = false;
+    this.overlay = null;
+    return () => {
+      this.setGroundOverlay(null);
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay });
+    };
   }
 
   setGroundOverlay(rgba: Uint8Array | null, width = 0, height = 0) {

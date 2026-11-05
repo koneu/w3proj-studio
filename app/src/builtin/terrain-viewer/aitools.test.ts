@@ -102,7 +102,9 @@ test("painting a patch: its middle is solid and its edge frays", () => {
 test("a tile not in the map's list gets a slot, while there's room", () => {
   const t = field();
   assert.equal(groundSlot(t, "Agrs"), 1);
+  assert.notEqual(t.customTilesetsRaw, 1, "a tile it has changes nothing");
   assert.equal(groundSlot(t, "Lgrs"), 2);
+  assert.deepEqual([t.customTilesets, t.customTilesetsRaw], [true, 1]);
   t.groundTiles = Array.from({ length: 16 }, (_, i) => `T${i}`);
   assert.throws(() => groundSlot(t, "Lgrs"), /already has 16/);
 });

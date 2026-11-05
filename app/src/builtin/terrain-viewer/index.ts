@@ -274,9 +274,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** What a unit can't walk on: the pathing map, and what stands there, which it leaves out. */
   const walkGrid = async (handle: TerrainEditorHandle): Promise<Grid> => {
-    const [pathing, room] = await Promise.all([handle.pathing(), handle.objects.occupancy()]);
+    const [pathing, blockers] = await Promise.all([handle.pathing(), handle.objects.blockers()]);
     const t = handle.terrain;
-    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || room.blocked[i] ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
+    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || blockers[i] ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
   };
 
   /** How long Studio waits for a yes. Less than a tool call may take, or the answer goes nowhere. */
@@ -352,6 +352,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
       return checkPath(await walkGrid((await liveEditor()).handle), start, goal, size);
+    }),
+    w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
+      const { handle } = await liveEditor();
+      const wanted = typeof filter === "string" ? filter.toLowerCase() : "";
+      const seen = new Map<string, string[]>();
+      for (const s of await handle.tilesets()) for (const id of s.tiles) seen.set(id, [...(seen.get(id) ?? []), s.name]);
+      const inMap = handle.terrain.groundTiles;
+      return {
+        inMap, free: 16 - inMap.length,
+        tiles: [...seen].filter(([id, sets]) => !wanted || id.toLowerCase().includes(wanted) || sets.some((n) => n.toLowerCase().includes(wanted))).map(([id, tilesets]) => ({ id, tilesets, ...(inMap.includes(id) ? { inMap: true } : {}) })),
+      };
     }),
     w3.mcp.registerTool("paint_path", async ({ tile, points, width, edge, flatten }) => {
       if (typeof tile !== "string" || tile.length !== 4) throw new Error("tile must be four characters, like Ldrt. terrain_info lists them.");
@@ -680,7 +691,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const changed = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
-          occupancyPromise = null;
+          occupancyPromise = walkPromise = null;
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
@@ -691,7 +702,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pushEdit = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
-          occupancyPromise = null;
+          occupancyPromise = walkPromise = null;
           history.length = at;
           history.push(e);
           at = history.length;
@@ -1253,6 +1264,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Blocked ground and object footprints, built when placing needs it
          *  and dropped after any edit. */
         let occupancyPromise: Promise<Occupancy> | null = null;
+        /** What stops a walking unit; dropped with the above. */
+        let walkPromise: Promise<Uint8Array> | null = null;
         let pathingData: Promise<PathingData> | null = null;
         const occupancy = () => {
           occupancyPromise ??= (async () => {
@@ -1749,6 +1762,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 redraw();
               }).catch(() => { renderer.ghost = null; redraw(); });
             },
+            blockers: () => (walkPromise ??= (async () => {
+              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+              const data = await pathingData;
+              // Units walk off and items are walked over: of those, only buildings stay in the way.
+              const buildings = (unitsFile?.list ?? []).filter((e) => data.unitShape(e.id)?.path).map((entry) => ({ entry, kind: "w3u" }));
+              const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
+              return (await Occupancy.build(terrain, data, placed)).blocked;
+            })()),
             occupancy: async () => {
               const occ = await occupancy();
               return {
@@ -2128,9 +2149,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const middle = heightAt(terrain, (area.left + area.right) / 2, (area.bottom + area.top) / 2);
             handle.setView(viewOfArea(area, middle, canvas.clientWidth / canvas.clientHeight, renderer.fov, angle));
           }
-          // Another tool's overlay stays: taking it away would change what the user is doing.
-          const coloured = heights && !renderer.hasGroundOverlay;
-          if (coloured) { const c = heightColors(terrain); handle.setGroundOverlay(c.rgba, c.width, c.height); }
+          const restore = renderer.showEverything();
+          if (heights) { const c = heightColors(terrain); handle.setGroundOverlay(c.rgba, c.width, c.height); }
           try {
             // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.
             renderer.render();
@@ -2157,8 +2177,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             return copy.toDataURL("image/png").split(",")[1];
           } finally {
-            if (coloured) handle.setGroundOverlay(null);
+            restore();
             handle.setView(before);
+            redraw();
           }
         };
         opened = {
@@ -2174,7 +2195,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {
           const reopenInstead = () => { opened = null; return false; };
-          occupancyPromise = null;
+          occupancyPromise = walkPromise = null;
           minimapStale = true;
           // The editor's undo steps were for the map as it was.
           history.length = 0;

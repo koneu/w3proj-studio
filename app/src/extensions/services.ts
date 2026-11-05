@@ -207,6 +207,9 @@ export interface TerrainObjects {
   remove(entries: PlacedEntry[]): void;
   /** Footprints against blocked ground and placed objects (rebuilt after edits). */
   occupancy(): Promise<TerrainOccupancy>;
+  /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a
+   *  walking unit. Unlike occupancy(), units and items don't count. */
+  blockers(): Promise<Uint8Array>;
   /** A see-through preview of an object at a spot (red when `ok` is false); null hides it. */
   setGhost(ghost: { id: string; x: number; y: number; angle: number; variation?: number; player?: number; ok: boolean } | null): void;
 }

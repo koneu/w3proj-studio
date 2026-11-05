@@ -114,6 +114,9 @@ export function groundSlot(t: Terrain, tile: string): number {
   if (at >= 0) return at;
   if (t.groundTiles.length >= 16) throw new Error(`This map already has 16 ground tiles (${t.groundTiles.join(", ")}). Use one of those.`);
   t.groundTiles.push(tile);
+  // The list no longer matches the tileset's own: the game goes by this flag.
+  t.customTilesets = true;
+  t.customTilesetsRaw = 1;
   return t.groundTiles.length - 1;
 }
 
@@ -209,12 +212,13 @@ interface Follower { position: number[]; flags?: number }
  *  items, and doodads unless they have a fixed height (flag 4). How many moved. */
 export function followGround(list: Follower[], t: Terrain, corners: number[], doodads: boolean) {
   if (!corners.length) return 0;
-  const xs = corners.map((i) => i % t.width), ys = corners.map((i) => Math.floor(i / t.width));
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const i of corners) {
+    const x = i % t.width, y = Math.floor(i / t.width);
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
   // Tiles next to a changed corner change too.
-  const near = {
-    left: t.offsetX + (Math.min(...xs) - 1) * TILE, right: t.offsetX + (Math.max(...xs) + 1) * TILE,
-    bottom: t.offsetY + (Math.min(...ys) - 1) * TILE, top: t.offsetY + (Math.max(...ys) + 1) * TILE,
-  };
+  const near = { left: t.offsetX + (x0 - 1) * TILE, right: t.offsetX + (x1 + 1) * TILE, bottom: t.offsetY + (y0 - 1) * TILE, top: t.offsetY + (y1 + 1) * TILE };
   let moved = 0;
   for (const p of list) {
     if ((doodads && (p.flags ?? 0) & 4) || !inArea(p.position[0], p.position[1], near)) continue;

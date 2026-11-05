@@ -85,6 +85,13 @@ test("standing right beside something still counts as a start", () => {
   assert.equal(r.walkable, true);
 });
 
+test("the biggest maps work: too many cells to pass as arguments", () => {
+  const size = 1920, blocked = new Uint8Array(size * size);
+  const r = checkPath({ blocked, width: size, height: size, offsetX: 0, offsetY: 0 }, at(10, 10), at(1900, 1900), 32);
+  assert.equal(r.walkable, true);
+  assert.ok((r.route?.length ?? 0) <= 14);
+});
+
 test("offsets are the map's", () => {
   const g = { ...grid(open(10, 10)), offsetX: -160, offsetY: -160 };
   assert.equal(checkPath(g, [-140, -140], [130, 130], 16).walkable, true);
