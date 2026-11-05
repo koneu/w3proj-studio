@@ -9,6 +9,7 @@
     "check": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && node scripts/check-imports.mjs",
     "test": "node scripts/test.mjs",
     "coverage": "node scripts/coverage.mjs",
+    "ui-smoke": "node scripts/ui-smoke.mjs",
     "tauri": "tauri",
     "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png"
   },
