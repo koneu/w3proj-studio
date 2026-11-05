@@ -27,7 +27,7 @@ export interface MapInfoJson {
 export interface RegionJson { left: number; bottom: number; right: number; top: number; name: string; index: number; weather: string; sound: string }
 export interface CameraJson {
   targetX: number; targetY: number; zOffset: number; rotation: number; angleOfAttack: number; distance: number; roll: number;
-  fieldOfView: number; farZ: number; nearZ: number; localPitch: number; localYaw: number; localRoll: number;
+  fieldOfView: number; farZ: number; nearZ: number; localPitch?: number; localYaw?: number; localRoll?: number;
   unknown?: number[]; name: string; trailer?: number;
 }
 export interface SoundJson {
@@ -338,7 +338,7 @@ export function cameras(i: ScriptInput): string {
     lines.push(`    set ${n} = CreateCameraSetup(  )`,
       field("ZOFFSET", c.zOffset), field("ROTATION", c.rotation), field("ANGLE_OF_ATTACK", c.angleOfAttack),
       field("TARGET_DISTANCE", c.distance), field("ROLL", c.roll), field("FIELD_OF_VIEW", c.fieldOfView), field("FARZ", c.farZ),
-      field("NEARZ", c.nearZ), field("LOCAL_PITCH", c.localPitch), field("LOCAL_YAW", c.localYaw), field("LOCAL_ROLL", c.localRoll),
+      field("NEARZ", c.nearZ), field("LOCAL_PITCH", c.localPitch ?? 0), field("LOCAL_YAW", c.localYaw ?? 0), field("LOCAL_ROLL", c.localRoll ?? 0),
       field("DEPTH_OF_FIELD_DISTANCE", extra[0]), field("DEPTH_OF_FIELD_SCALE", extra[1]), field("ZABSOLUTE", extra[2]),
       `    call CameraSetupSetDestPosition( ${n}, ${r1(c.targetX)}, ${r1(c.targetY)}, 0.0 )`,
       `    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ?? 0} )`, "");

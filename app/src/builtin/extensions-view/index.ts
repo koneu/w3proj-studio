@@ -1,4 +1,5 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { blockedBy, neededBy, requires } from "../../extensions/graph";
 import { h } from "../../workbench/dom";
 
 const SAMPLE_MANIFEST = {
@@ -96,16 +97,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const disabledIds = w3.settings.get<string[]>("extensions.disabled", []);
         // The setting may differ from the loaded state until the window is reloaded.
         const pending = all.some((e) => e.disabled !== disabledIds.includes(e.manifest.id));
+        const manifests = all.map((e) => e.manifest);
+        const nameOf = (id: string) => manifests.find((m) => m.id === id)?.name ?? id;
+        const names = (ids: string[]) => ids.map(nameOf).sort((a, b) => a.localeCompare(b)).join(", ");
         const toggle = async (id: string, disable: boolean) => {
           if (disable && id === ctx.extensionId) {
             const c = await w3.window.showWarning("Disabling this view hides these buttons; re-enable via Preferences: Open Settings (JSON). Continue?", "Disable", "Cancel");
             if (c !== "Disable") return;
+          }
+          // What rests on it stops working; better said now than found out later.
+          const users = disable ? neededBy(id, manifests).filter((x) => !disabledIds.includes(x)) : [];
+          if (disable && users.length) {
+            const c = await w3.window.showWarning(`${nameOf(id)} is needed by ${names(users)}. Without it ${users.length === 1 ? "that stops" : "they stop"} working.`, "Disable anyway", "Cancel");
+            if (c !== "Disable anyway") return;
           }
           const next = disable ? [...new Set([...disabledIds, id])] : disabledIds.filter((x) => x !== id);
           await w3.settings.set("extensions.disabled", next);
           w3.views.refresh("w3.extensions.installed");
           const c = await w3.window.showInfo(`${id} will be ${disable ? "disabled" : "enabled"} after a reload.`, "Reload now");
           if (c === "Reload now") location.reload();
+        };
+        /** What it needs, what needs it, and what's keeping it from working. */
+        const depends = (id: string) => {
+          const needs = requires(id, manifests), by = neededBy(id, manifests);
+          const blocked = disabledIds.includes(id) ? [] : blockedBy(id, manifests, new Set(disabledIds));
+          return [
+            needs.length ? h("div.ext-deps", {}, `Needs ${names(needs)}`) : null,
+            by.length ? h("div.ext-deps", { title: by.map(nameOf).join("\n") }, `Needed by ${by.length <= 3 ? names(by) : `${by.length} extensions`}`) : null,
+            blocked.length ? h("div.ext-blocked", {}, `Can't work: ${names(blocked)} is off or missing`) : null,
+          ];
         };
         if (pending) el.append(h("div.ext-pending", {}, "Changes apply after reloading.", h("button.link-inline", { onclick: () => location.reload() }, "Reload")));
         el.append(
@@ -122,6 +142,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 ),
                 h("div.ext-id", {}, e.manifest.id),
                 e.manifest.description ? h("div.ext-desc", {}, e.manifest.description) : null,
+                ...depends(e.manifest.id),
                 h("div.ext-actions", {},
                   h("button", { onclick: () => toggle(e.manifest.id, !willDisable) }, willDisable ? "Enable" : "Disable"),
                   willDisable !== e.disabled ? h("small.muted", {}, willDisable ? "disabled after reload" : "enabled after reload") : null),

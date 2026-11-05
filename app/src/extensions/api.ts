@@ -300,6 +300,9 @@ export interface W3Api {
     invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
     listen<T = unknown>(event: string, handler: (payload: T) => void): Promise<Disposable>;
   };
+  /** The parsers, writers and checks the built-ins use (see extensions/lib.ts), loaded on first
+   *  use: `const { terrain } = await w3.lib(); terrain.parseW3e(bytes)`. Check `version`. */
+  lib(): Promise<typeof import("./lib")>;
   extensions: {
     all(): { manifest: ExtensionManifest; source: string; active: boolean; disabled: boolean; error?: string }[];
   };

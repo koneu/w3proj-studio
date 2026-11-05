@@ -310,7 +310,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Screen", lists
                 ? select<number>([[-1, "None / custom model"], ...lists.loadingScreens], () => info.loadingScreen.number, (n) => { info.loadingScreen.number = n; })
                 : num(() => info.loadingScreen.number, (n) => { info.loadingScreen.number = n; }, { int: true })),
-              row("Custom model", text(() => info.loadingScreen.model, (s) => { info.loadingScreen.model = s; })),
+              v >= 25 ? row("Custom model", text(() => info.loadingScreen.model, (s) => { info.loadingScreen.model = s; })) : null,
               row("Title", text(() => info.loadingScreen.title, (s) => { info.loadingScreen.title = s; })),
               row("Subtitle", text(() => info.loadingScreen.subtitle, (s) => { info.loadingScreen.subtitle = s; })),
               row("Text", text(() => info.loadingScreen.text, (s) => { info.loadingScreen.text = s; }, { multiline: true })),
@@ -321,7 +321,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ],
           prologue: () => [
             section_("Prologue screen",
-              row("Screen path", text(() => info.prologue.path, (s) => { info.prologue.path = s; })),
+              v >= 25 ? row("Screen path", text(() => info.prologue.path, (s) => { info.prologue.path = s; })) : null,
               row("Title", text(() => info.prologue.title, (s) => { info.prologue.title = s; })),
               row("Subtitle", text(() => info.prologue.subtitle, (s) => { info.prologue.subtitle = s; })),
               row("Text", text(() => info.prologue.text, (s) => { info.prologue.text = s; }, { multiline: true })),
@@ -338,7 +338,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ),
               section_("Game data",
                 info.scriptType !== undefined ? row("Script language", select([[0, "JASS"], [1, "Lua"]], () => info.scriptType!, (n) => { info.scriptType = n; }), "Changing this needs the script itself to be converted.") : null,
-                row("Game data set", num(() => info.gameDataSet, (n) => { info.gameDataSet = n; }, { int: true }), "0 = default"),
+                v >= 25
+                  ? row("Game data set", num(() => info.gameDataSet, (n) => { info.gameDataSet = n; }, { int: true }), "0 = default")
+                  : row("Loading screen number", num(() => info.gameDataSet, (n) => { info.gameDataSet = n; }, { int: true })),
                 info.gameDataVersion !== undefined ? row("Game data version", num(() => info.gameDataVersion!, (n) => { info.gameDataVersion = n; }, { int: true })) : null,
                 // Not row(): that wraps its content in one label, and these are labelled checkboxes.
                 info.supportedModes !== undefined ? h("div.form-row", {}, h("span.form-label", {}, "Supported graphics modes"), h("div.form-control", {},
@@ -353,7 +355,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ) : null,
             ].filter((x): x is HTMLElement => x !== null);
           },
-          environment: () => [
+          // Reign of Chaos maps (format 18) store none of this.
+          environment: () => v < 25 ? [h("p.muted", {}, `This map's format (v${v}) has no weather, sound, fog or water settings.`)] : [
             section_("Weather & sound",
               row("Global weather", lists
                 ? select<string>([["0x00000000", "None"], ...lists.weather], () => info.weather, (s) => { info.weather = s; })

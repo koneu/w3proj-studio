@@ -9,7 +9,7 @@ export interface Upgrade { players: number; id: string; level: number; availabil
 export interface Tech { players: number; id: string }
 export interface UnitTable { number: number; name: string; positions: number[]; lines: { chance: number; ids: string[] }[] }
 export interface ItemTable { number: number; name: string; sets: { chance: number; id: string }[][] }
-export interface TechInfo { upgrades: Upgrade[]; techs: Tech[]; unitTables: UnitTable[]; itemTables: ItemTable[] }
+export interface TechInfo { upgrades: Upgrade[]; techs: Tech[]; unitTables: UnitTable[]; itemTables?: ItemTable[] }
 
 export interface TechContext {
   /** Players of the map (id, label), for the per-player columns. */
@@ -166,7 +166,7 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
     } }, "Add random group"));
 }
 
-function itemTables(info: TechInfo, ctx: TechContext): HTMLElement {
+function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
   return section(`Item tables (${info.itemTables.length})`,
     "Items dropped by units that use the table: one item is chosen from each set by its chance.",
     ...info.itemTables.map((t) => h("div.techtree-table", {},
@@ -192,5 +192,6 @@ function itemTables(info: TechInfo, ctx: TechContext): HTMLElement {
 }
 
 export function renderTechtree(info: TechInfo, ctx: TechContext): Node[] {
-  return [upgrades(info, ctx), techs(info, ctx), unitTables(info, ctx), itemTables(info, ctx)];
+  // Reign of Chaos maps have no item tables.
+  return [upgrades(info, ctx), techs(info, ctx), unitTables(info, ctx), ...(info.itemTables ? [itemTables(info as Required<TechInfo>, ctx)] : [])];
 }

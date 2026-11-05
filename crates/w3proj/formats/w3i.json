@@ -1,4 +1,7 @@
-// war3map.w3i — map info. Versions 25 (The Frozen Throne) to 39 (3.0).
+// war3map.w3i — map info. Versions 18 (Reign of Chaos), 25 (The Frozen Throne) to 39 (3.0).
+// Version 18 stops short: no custom loading model or prologue path, no fog, weather, sound or
+// light environment, water tint or item tables. Its one number after the loading screen is
+// the loading screen number, in the place 25 has the game data set.
 // Sources: WC3MapSpecification, War3Net, wc3libs "warcraft-iii-3.0-map-formats";
 // v39 verified byte-exact against the game's own 3.0 campaign maps.
 {
@@ -6,7 +9,7 @@
   "description": "Map info: name, author, players, forces, options, fog, loading screen",
   "files": ["war3map.w3i"],
   "jsonFormat": "w3proj.mapinfo/1",
-  "accept": "version >= 25 && version <= 39",
+  "accept": "version == 18 || (version >= 25 && version <= 39)",
   "fields": [
     { "name": "version", "type": "u32" },
     { "name": "saves", "type": "u32" },
@@ -25,19 +28,19 @@
     { "name": "loadingScreen", "type": "struct", "fields": [
       { "name": "number", "type": "i32", "doc": "-1 = none / custom model" },
       { "name": "crestRace", "type": "u32", "if": "version >= 39" },
-      { "name": "model", "type": "cstring" },
+      { "name": "model", "type": "cstring", "if": "version >= 25" },
       { "name": "text", "type": "cstring" },
       { "name": "title", "type": "cstring" },
       { "name": "subtitle", "type": "cstring" }
     ] },
     { "name": "gameDataSet", "type": "u32" },
     { "name": "prologue", "type": "struct", "fields": [
-      { "name": "path", "type": "cstring" },
+      { "name": "path", "type": "cstring", "if": "version >= 25" },
       { "name": "text", "type": "cstring" },
       { "name": "title", "type": "cstring" },
       { "name": "subtitle", "type": "cstring" }
     ] },
-    { "name": "fog", "type": "struct", "fields": [
+    { "name": "fog", "type": "struct", "if": "version >= 25", "fields": [
       { "name": "style", "type": "u32" },
       { "name": "start", "type": "f32" },
       { "name": "end", "type": "f32" },
@@ -52,10 +55,10 @@
       { "name": "maxOpacity", "type": "f32" },
       { "name": "height", "type": "f32" }
     ] },
-    { "name": "weather", "type": "id" },
-    { "name": "soundEnvironment", "type": "cstring" },
-    { "name": "lightEnvironment", "type": "char" },
-    { "name": "waterTint", "type": "rgba" },
+    { "name": "weather", "type": "id", "if": "version >= 25" },
+    { "name": "soundEnvironment", "type": "cstring", "if": "version >= 25" },
+    { "name": "lightEnvironment", "type": "char", "if": "version >= 25" },
+    { "name": "waterTint", "type": "rgba", "if": "version >= 25" },
     { "name": "scriptType", "type": "u32", "if": "version >= 28", "doc": "0 JASS, 1 Lua" },
     { "name": "supportedModes", "type": "u32", "if": "version >= 31" },
     { "name": "gameDataVersion", "type": "u32", "if": "version >= 31" },
@@ -117,7 +120,7 @@
         { "name": "ids", "type": "id", "count": "len(positions)" }
       ] }
     ] },
-    { "name": "itemTables", "type": "struct", "count": "u32", "fields": [
+    { "name": "itemTables", "type": "struct", "count": "u32", "if": "version >= 25", "fields": [
       { "name": "number", "type": "u32" },
       { "name": "name", "type": "cstring" },
       { "name": "sets", "type": "list", "count": "u32", "item":

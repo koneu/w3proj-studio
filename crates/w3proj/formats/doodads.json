@@ -1,5 +1,5 @@
 // war3map.doo — doodads and destructables placed on the map.
-// Versions 8 (Reforged 1.32+), 12 and 13 (3.0). The 3.0 additions were worked out
+// Versions 7 (Reign of Chaos), 8 (The Frozen Throne to Reforged), 12 and 13 (3.0). The 3.0 additions were worked out
 // against the game's own 3.0 campaign maps (all round-trip byte-exact); their
 // meaning is not known yet, so they keep neutral names.
 {
@@ -7,7 +7,7 @@
   "description": "Placed doodads and destructables: type, position, rotation, scale, life, item drops",
   "files": ["war3map.doo"],
   "jsonFormat": "w3proj.doodads/1",
-  "accept": "version == 8 || version == 12 || version == 13",
+  "accept": "version == 7 || version == 8 || version == 12 || version == 13",
   "fields": [
     { "name": "magic", "type": "id", "doc": "\"W3do\"" },
     { "name": "version", "type": "u32" },

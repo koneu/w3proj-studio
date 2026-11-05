@@ -2,6 +2,10 @@
 // Version 0 (classic) and 3 (Reforged: three more floats and a u32 after the
 // name). Worked out from the game's maps and 46 others; the extra floats are
 // zero except one 0.01, the trailer is zero in all samples.
+// Version 0 comes in two layouts with nothing to tell them apart but the bytes:
+// the Reign of Chaos campaign's files stop after nearZ. Both readings are tried. A long name
+// fits the longer layout too, its first 12 letters read as three floats, and it would still
+// write back exactly: the range checks are what reject that reading.
 {
   "name": "cameras",
   "description": "Cameras: target, rotation, distance, field of view, clipping, name",
@@ -10,6 +14,7 @@
   "accept": "version == 0 || version == 3",
   "fields": [
     { "name": "version", "type": "u32" },
+    { "name": "localAngles", "type": "variant", "if": "version == 0", "prefer": "true" },
     { "name": "cameras", "type": "struct", "count": "u32", "fields": [
       { "name": "targetX", "type": "f32" },
       { "name": "targetY", "type": "f32" },
@@ -21,9 +26,9 @@
       { "name": "fieldOfView", "type": "f32", "doc": "degrees" },
       { "name": "farZ", "type": "f32" },
       { "name": "nearZ", "type": "f32" },
-      { "name": "localPitch", "type": "f32" },
-      { "name": "localYaw", "type": "f32" },
-      { "name": "localRoll", "type": "f32" },
+      { "name": "localPitch", "type": "f32", "if": "version >= 3 || localAngles", "check": "value > -1000000 && value < 1000000" },
+      { "name": "localYaw", "type": "f32", "if": "version >= 3 || localAngles", "check": "value > -1000000 && value < 1000000" },
+      { "name": "localRoll", "type": "f32", "if": "version >= 3 || localAngles", "check": "value > -1000000 && value < 1000000" },
       { "name": "unknown", "type": "f32", "count": 3, "if": "version >= 3", "doc": "zero in nearly all samples" },
       { "name": "name", "type": "cstring" },
       { "name": "trailer", "type": "u32", "if": "version >= 3", "doc": "zero in all samples" }

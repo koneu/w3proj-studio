@@ -226,6 +226,11 @@ export function activate(w3, ctx) {
 }
 ```
 
+**The built-ins' code.** Extensions have no build step, so they can't import `src/lib`. They get
+the same parsers, writers and checks from `await w3.lib()` (`app/src/extensions/lib.ts`):
+`const { terrain, version } = await w3.lib();` Check `version`: it goes up when something there
+changes in a way that breaks extensions.
+
 **Replacing built-ins.** Every built-in can be turned off: `"extensions.disabled": ["w3.objectEditor"]`
 in settings (or the Disable button in the Extensions view; applies after a reload). To make a
 different editor the default for some files without disabling anything, map a glob to an editor

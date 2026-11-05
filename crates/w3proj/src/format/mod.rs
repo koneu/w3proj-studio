@@ -555,3 +555,85 @@ mod w3i_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+/// The oldest layouts, as the Reign of Chaos campaign writes them.
+#[cfg(test)]
+mod classic_tests {
+    use super::*;
+
+    fn def(name: &str) -> Arc<Definition> {
+        load_definitions(&[]).unwrap().into_iter().find(|d| d.name == name).unwrap()
+    }
+    fn u(v: u32) -> Vec<u8> {
+        v.to_le_bytes().to_vec()
+    }
+    fn f(n: usize) -> Vec<u8> {
+        (0..n).flat_map(|i| (i as f32 + 1.5).to_le_bytes()).collect()
+    }
+    fn z(s: &str) -> Vec<u8> {
+        [s.as_bytes(), &[0]].concat()
+    }
+    fn exact(name: &str, bytes: &[u8]) -> Value {
+        let d = def(name);
+        let got = decode(&d, bytes).unwrap().value;
+        assert_eq!(encode(&d, &got).unwrap(), bytes, "{name} round trip");
+        got
+    }
+
+    #[test]
+    fn version_0_cameras_with_and_without_local_angles() {
+        for (floats, angles) in [(13, true), (10, false)] {
+            let one = |name: &str| [f(floats), z(name)].concat();
+            let got = exact("cameras", &[u(0), u(2), one("First"), one("Second")].concat());
+            assert_eq!(got["localAngles"], angles);
+            assert_eq!(got["cameras"][1]["name"], "Second");
+            assert_eq!(got["cameras"][0].get("localPitch").is_some(), angles);
+        }
+    }
+
+    /// Long names fit the longer layout as well: letters read as floats, and shifted names.
+    #[test]
+    fn long_camera_names_are_not_read_as_angles() {
+        let one = |name: &str| [f(10), z(name)].concat();
+        let got = exact("cameras", &[u(0), u(2), one("Camera 01 Opening Shot"), one("Camera 02 Teleport In")].concat());
+        assert_eq!(got["localAngles"], false);
+        assert_eq!(got["cameras"][0]["name"], "Camera 01 Opening Shot");
+        assert_eq!(got["cameras"][1]["name"], "Camera 02 Teleport In");
+    }
+
+    #[test]
+    fn version_7_doodads_have_no_item_drops() {
+        let one = [b"ATtr".to_vec(), u(2), f(7), vec![2, 100], u(9)].concat();
+        let got = exact("doodads", &[b"W3do".to_vec(), u(7), u(9), u(1), one, u(0), u(0)].concat());
+        assert_eq!(got["doodads"][0]["editorId"], 9);
+        assert_eq!(got["doodads"][0]["life"], 100);
+    }
+
+    #[test]
+    fn version_7_units() {
+        let one = [b"hfoo".to_vec(), u(0), f(7), vec![2], u(1), vec![0, 0], u(u32::MAX), u(u32::MAX), u(0), u(0), (-1f32).to_le_bytes().to_vec(), u(1),
+            u(0), u(0), u(0), vec![1, 0, 0, 0], u(u32::MAX), u(u32::MAX), u(13)].concat();
+        let got = exact("units", &[b"W3do".to_vec(), u(7), u(9), u(1), one].concat());
+        assert_eq!(got["units"][0]["player"], 1);
+        assert_eq!(got["units"][0]["editorId"], 13);
+    }
+
+    #[test]
+    fn version_18_map_info_stops_short() {
+        let bytes = [
+            u(18), u(3), u(6060), z("Name"), z("Author"), z("About"), z("1"), f(8), u(6), u(6), u(4), u(8), u(52), u(52), u(0xc61), b"A".to_vec(),
+            u(29), z("Text"), z(""), z("Subtitle"), // loading screen
+            u(0), z(""), z(""), z(""), // its number, prologue
+            u(1), u(0), u(1), u(1), u(1), z("Player"), f(2), u(0), u(0), // one player
+            u(1), u(0), u(u32::MAX), z("Force"), // one force
+            u(0), u(0), u(0), // upgrades, techs, unit tables
+        ].concat();
+        let got = exact("w3i", &bytes);
+        assert_eq!(got["loadingScreen"]["subtitle"], "Subtitle");
+        assert_eq!(got["players"][0]["name"], "Player");
+        assert_eq!(got["forces"][0]["name"], "Force");
+        for absent in ["fog", "weather", "waterTint", "itemTables"] {
+            assert!(got.get(absent).is_none(), "{absent}");
+        }
+    }
+}

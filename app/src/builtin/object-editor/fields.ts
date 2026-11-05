@@ -42,7 +42,9 @@ export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
       for (const [k, v] of sec) {
         if (!/^\d+$/.test(k)) continue;
         const [value, label] = v.split(",");
-        entries.push({ value, label: label ? westring(strings, label) : value, alts: (sec.get(`${k}_alt`) ?? "").split(",").filter(Boolean) });
+        // A few labels name strings the game no longer has: the value says more than the key.
+        const text = label ? westring(strings, label) : value;
+        entries.push({ value, label: text.startsWith("WESTRING_") ? value : text, alts: (sec.get(`${k}_alt`) ?? "").split(",").filter(Boolean) });
       }
       if (!entries.length) continue;
       // unitClass is stored as a comma list too ("giant,undead"), though its name doesn't say so.

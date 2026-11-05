@@ -1,5 +1,5 @@
 // war3mapUnits.doo — units, buildings, items and start locations placed on the map.
-// Versions 8 (Reforged 1.32+), 12 and 13 (3.0). The 3.0 additions were worked out
+// Versions 7 (Reign of Chaos), 8 (The Frozen Throne to Reforged), 12 and 13 (3.0). The 3.0 additions were worked out
 // against the game's own 3.0 campaign maps (all round-trip byte-exact); their
 // meaning is not known yet, so they keep neutral names.
 // Subversion 9 (pre-1.32 layout) has no item table and no hero attributes.
@@ -8,7 +8,7 @@
   "description": "Placed units, items and start locations: owner, stats, inventory, abilities, random units",
   "files": ["war3mapUnits.doo"],
   "jsonFormat": "w3proj.units/1",
-  "accept": "version == 8 || version == 12 || version == 13",
+  "accept": "version == 7 || version == 8 || version == 12 || version == 13",
   "fields": [
     { "name": "magic", "type": "id", "doc": "\"W3do\"" },
     { "name": "version", "type": "u32" },

@@ -266,6 +266,7 @@ export class Workbench {
         readText: (p, o) => wb.game.readText(p, o?.tileset),
       },
       backend: { invoke, listen },
+      lib: () => import("../extensions/lib"),
       extensions: {
         all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, disabled: e.disabled, error: e.error })),
       },
