@@ -17,6 +17,10 @@ test("guides only name tools that exist", () => {
   }
 });
 
+test("the guides a client is pointed at exist", () => {
+  for (const topic of ["melee", "terrain", "spells"]) assert.ok(GUIDES[topic], topic);
+});
+
 test("read_guide is offered, and every guide says what it's for", () => {
   assert.ok(tools.has("read_guide"));
   for (const guide of Object.values(GUIDES)) assert.ok(guide.summary.length > 20 && guide.text.startsWith("# "));
