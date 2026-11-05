@@ -1,7 +1,8 @@
-// Runs the TypeScript unit tests (src/**/*.test.ts) with Node's test runner: each test file
-// is bundled with esbuild (the app's imports are extensionless TypeScript) into
-// node_modules/.cache/w3-tests and run with `node --test`. Extra arguments go to node
-// (e.g. `npm test -- --test-name-pattern=undo`).
+// Runs the TypeScript unit tests (src/**/*.test.ts, and scripts/*.test.mjs for the tooling) with
+// Node's test runner: each test file is bundled with esbuild (the app's imports are extensionless
+// TypeScript) into node_modules/.cache/w3-tests, or W3_TEST_OUT (coverage needs them outside
+// node_modules), and run with `node --test`. Extra arguments go to node (e.g. `npm test --
+// --test-name-pattern=undo`).
 
 import { build } from "esbuild";
 import { spawnSync } from "node:child_process";
@@ -10,24 +11,25 @@ import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
-const out = join(app, "node_modules", ".cache", "w3-tests");
+const out = process.env.W3_TEST_OUT ?? join(app, "node_modules", ".cache", "w3-tests");
 
 const tests = [];
 const walk = (dir) => {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
     if (e.isDirectory()) walk(p);
-    else if (e.name.endsWith(".test.ts")) tests.push(p);
+    else if (/\.test\.m?ts$/.test(e.name) || e.name.endsWith(".test.mjs")) tests.push(p);
   }
 };
 walk(join(app, "src"));
+walk(join(app, "scripts"));
 if (!tests.length) { console.log("no tests"); process.exit(0); }
 
 rmSync(out, { recursive: true, force: true });
 await build({
   entryPoints: tests,
   outdir: out,
-  outbase: join(app, "src"),
+  outbase: app,
   bundle: true,
   platform: "node",
   format: "esm",
@@ -43,6 +45,6 @@ await build({
     },
   }],
 });
-const bundles = tests.map((t) => join(out, relative(join(app, "src"), t)).replace(/\.ts$/, ".mjs"));
+const bundles = tests.map((t) => join(out, relative(app, t)).replace(/\.m?ts$|\.mjs$/, ".mjs"));
 const run = spawnSync(process.execPath, ["--enable-source-maps", "--test", ...process.argv.slice(2), ...bundles], { stdio: "inherit" });
 process.exit(run.status ?? 1);
