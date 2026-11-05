@@ -22,7 +22,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
 import { changesImports } from "./filewatch";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -158,7 +158,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   let opened: {
     handle: TerrainEditorHandle; ready: () => Promise<void>;
-    screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null) => Promise<string>;
+    screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => Promise<string>;
     derive: (before: { terrain: Terrain; doodads: Placed[] }) => Promise<void>;
   } | null = null;
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
@@ -315,6 +315,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   ctx.subscriptions.push(
     w3.mcp.registerTool("terrain_screenshot", async (args) => {
+      const hide = hiddenInPicture(args.hide);
       const editor = await liveEditor();
       const area = await readArea(w3, args);
       const size = typeof args.maxSize === "number" && args.maxSize > 0 ? args.maxSize : 1280;
@@ -325,7 +326,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const [pathing, blockers, destructables] = await Promise.all([editor.handle.pathing(), editor.handle.objects.blockers(), editor.handle.objects.destructables()]);
         colors = { rgba: pathingColors(pathing.cells, blockers, destructables), width: pathing.width, height: pathing.height };
       }
-      const data = await editor.screenshot(size, area, angle, colors);
+      const data = await editor.screenshot(size, area, angle, colors, hide);
       const image = { type: "image", data, mimeType: "image/png" };
       return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
     }),
@@ -2233,7 +2234,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const ready = () => objectsPlaced.catch(() => {});
-        const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null) => {
+        const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => {
           await ready();
           await loader.settled();
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
@@ -2242,7 +2243,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const middle = heightAt(terrain, (area.left + area.right) / 2, (area.bottom + area.top) / 2);
             handle.setView(viewOfArea(area, middle, canvas.clientWidth / canvas.clientHeight, renderer.fov, angle));
           }
-          const restore = renderer.showEverything();
+          const restore = renderer.showEverything(hide);
           if (colors) handle.setGroundOverlay(colors.rgba, colors.width, colors.height);
           try {
             // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.

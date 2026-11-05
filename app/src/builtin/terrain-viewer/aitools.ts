@@ -404,6 +404,17 @@ export function terrainSummary(t: Terrain, p: Pathing, area: Area) {
   };
 }
 
+const HIDEABLE = ["doodads", "units", "cliffs", "water"];
+
+/** What a picture leaves out, as the renderer knows it. Throws for anything else. */
+export function hiddenInPicture(hide: unknown) {
+  const list = hide === undefined ? [] : hide;
+  if (!Array.isArray(list) || !list.every((h) => HIDEABLE.includes(h))) throw new Error(`hide lists any of: ${HIDEABLE.join(", ")}.`);
+  const water = list.includes("water");
+  // Waves along the shore belong to the water.
+  return { groups: [...list.filter((h) => h !== "water"), ...(water ? ["shoreline"] : [])] as string[], water };
+}
+
 const PITCH = { top: 1.5, angled: 0.95, low: 0.42 };
 export type ViewAngle = keyof typeof PITCH;
 

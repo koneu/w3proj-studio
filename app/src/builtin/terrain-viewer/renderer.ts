@@ -540,12 +540,13 @@ export class TerrainRenderer {
   /** Shows an RGBA texture over the ground (`width` × `height` texels, rows from
    *  the south, covering the whole map); null removes it. Re-calling with the
    *  same size only re-uploads the pixels. */
-  /** Everything the user switched off or on, as a tool's picture needs it, until `done` runs:
-   *  a tool sees the map, not this person's way of looking at it. */
-  showEverything() {
+  /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
+   *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
+  showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
     const { hiddenGroups, showWater, showEffects, wireframe, overlay } = this;
-    this.hiddenGroups = new Set();
-    this.showWater = this.showEffects = true;
+    this.hiddenGroups = new Set(hide.groups);
+    this.showWater = !hide.water;
+    this.showEffects = true;
     this.wireframe = false;
     this.overlay = null;
     return () => {

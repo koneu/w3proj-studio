@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, seededRandom, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, seededRandom, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -253,6 +253,14 @@ test("objects swap types where they stand, in an area if given", () => {
   assert.equal(list[1].variation, 1);
   assert.equal("skinId" in list[1], false);
   assert.equal(list[2].id, "ARrk");
+});
+
+test("a picture can leave things out, water with its shoreline", () => {
+  assert.deepEqual(hiddenInPicture(undefined), { groups: [], water: false });
+  assert.deepEqual(hiddenInPicture(["doodads", "units"]), { groups: ["doodads", "units"], water: false });
+  assert.deepEqual(hiddenInPicture(["water"]), { groups: ["shoreline"], water: true });
+  assert.throws(() => hiddenInPicture(["terrain"]), /hide lists any of/);
+  assert.throws(() => hiddenInPicture("doodads"), /hide lists any of/);
 });
 
 test("a line is even from end to end, and turned along itself", () => {
