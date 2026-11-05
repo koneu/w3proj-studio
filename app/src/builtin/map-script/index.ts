@@ -3,11 +3,16 @@ import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesServ
 import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
+import { lostFunctions, scriptHash } from "../../lib/script/guard";
 import { generateScript, parseSoundLabels, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
+
+/** Hash of the script this app wrote last: a script that still has it holds nothing but what the
+ *  map's triggers made, so it's replaced without looking (see lib/script/guard). */
+const STAMP = ".w3proj/generated-script";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
 const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
@@ -82,12 +87,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const generate = async (): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
     // Read directly rather than from the file list, which lags behind fresh saves (New Map).
     const json = async <T>(p: string): Promise<T | null> => {
-      const text = await w3.workspace.readText(`${p}.json`).catch(() => null);
+      // Projects made before a format got its JSON form keep the raw file until they're re-synced.
+      const text = await w3.workspace.readText(`${p}.json`).catch(() =>
+        w3.backend.invoke<string>("codec_decode", { root: w3.workspace.project()?.root, path: p }).catch(() => null));
       return text === null ? null : JSON.parse(text) as T;
     };
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
-    if (!info) throw new Error("map/war3map.w3i.json is missing");
+    if (!info) throw new Error("map/war3map.w3i is missing or couldn't be read");
     const path = scriptPath(info.scriptType === 1);
     const g = await gameTables();
 
@@ -175,15 +182,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return out;
   };
 
-  let running: Promise<void> = Promise.resolve();
+  let running: Promise<boolean> = Promise.resolve(true);
   /** Projects already told that their vJASS script isn't regenerated. */
   const warned = new Set<string>();
-  const write = (reason: string) => {
+  /** Writes the script; false when it stays as it is. `force`: also over code of its own. */
+  const write = (reason: string, force = false): Promise<boolean> => {
     // The queue goes on after a failed run (the caller of that run has its error).
-    running = running.catch(() => {}).then(async () => {
+    running = running.catch(() => true).then(async () => {
       try {
+        const root = w3.workspace.project()?.root;
         const { path, text, vjass, language } = await generate();
         const file = path.slice(4);
+        // Generating can take a while: this script must not land in another project.
+        if (w3.workspace.project()?.root !== root) { out.append(`${reason}: ${file} not written: the project was changed meanwhile`); return false; }
         if (vjass) {
           out.append(`${reason}: ${file} not written: ${vjass}, and no script language extension compiles it (vJASS: enable "vJASS (JassHelper)"); the script stays as it is.`);
           const root = w3.workspace.project()?.root ?? "";
@@ -192,12 +203,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             void w3.window.showWarning(`This map uses vJASS (${vjass}), so ${file} isn't regenerated from the triggers: changed triggers don't reach the map script. ` +
               "Enable the vJASS (JassHelper) extension, or compile it in the World Editor.");
           }
-          return;
+          return false;
         }
         const current = await w3.workspace.readText(path).catch(() => null);
-        if (current === text) { out.append(`${reason}: ${file} up to date`); return; }
+        if (current === text) { out.append(`${reason}: ${file} up to date`); return true; }
+        const stamp = await w3.workspace.readText(STAMP).catch(() => null);
+        if (!force && current !== null && stamp?.trim() !== scriptHash(current)) {
+          const lost = lostFunctions(current, text);
+          if (lost.length) {
+            out.append(`${reason}: ${file} not written: it has ${lost.length} functions the triggers don't make (${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ", …" : ""}); the script stays as it is.`);
+            // Once per project on saves; asked for by name, always.
+            const key = `custom:${w3.workspace.project()?.root ?? ""}`;
+            if (reason !== "command" && warned.has(key)) return false;
+            warned.add(key);
+            void w3.window.showWarning(`${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} that the map's triggers don't make (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""}), so it isn't regenerated and changed triggers don't reach it. Replacing it deletes that code.`,
+              "Replace the script", "Keep it").then((c) => { if (c === "Replace the script") void write("replaced on request", true).catch(() => {}); });
+            return false;
+          }
+        }
         await w3.workspace.writeText(path, text);
+        await w3.workspace.writeText(STAMP, `${scriptHash(text)}
+`);
         out.append(`${reason}: ${file} written (${text.length} chars${language ? `, compiled with ${language}` : ""})`);
+        return true;
       } catch (e) {
         out.append(`${reason}: map script not written: ${e instanceof Error ? e.message : String(e)}`);
         throw e;
@@ -222,8 +250,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // `quiet` (other extensions, e.g. New Map): no message afterwards.
     w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean }) => {
-      await write("command");
-      if (!opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
+      const written = await write("command");
+      if (written && !opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
     }),
     { dispose: () => clearTimeout(timer) },
   );

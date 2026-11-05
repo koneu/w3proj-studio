@@ -6,6 +6,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
+import { weatherName } from "../../lib/terrain/weather";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3r";
@@ -44,7 +45,7 @@ const weatherList = (w3: W3Api) => (weathers ??= (async () => {
   for (const sec of parseIni(await w3.game.readText("UI\\WorldEditStrings.txt").catch(() => "")).values()) {
     for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
   }
-  return rows.filter((r) => r.effectID).map((r) => [r.effectID, (strings.get((r.name ?? "").toUpperCase()) ?? r.name ?? r.effectID).replace(/&/g, "")] as [string, string]);
+  return rows.filter((r) => r.effectID).map((r) => [r.effectID, weatherName(r.name, r.effectID, strings)] as [string, string]);
 })().catch(() => []));
 
 function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {

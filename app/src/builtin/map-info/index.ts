@@ -7,6 +7,7 @@ import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services"
 import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { parseW3e } from "../../lib/terrain/w3e";
+import { weatherName } from "../../lib/terrain/weather";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional
@@ -118,7 +119,7 @@ function loadGameLists(w3: W3Api): Promise<GameLists> {
       .map(([k, v]) => [Number(k), westring(we, v.split(",")[1] ?? k)] as [number, string]);
     const weather = parseSlk(await w3.game.readText("TerrainArt\\Weather.slk").catch(() => ""))
       .filter((r) => r.effectID)
-      .map((r) => [r.effectID, westring(we, r.name ?? r.effectID)] as [string, string]);
+      .map((r) => [r.effectID, weatherName(r.name, r.effectID, we)] as [string, string]);
     return { tilesets, weather, loadingScreens };
   })();
   gameLists.catch(() => { gameLists = null; });
