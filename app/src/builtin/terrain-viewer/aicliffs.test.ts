@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { isBackdrop } from "../../lib/terrain/area";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import { groundSlot, setCliffs, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind } from "./aitools";
 
@@ -183,4 +184,15 @@ test("wrong unit choices are refused before anything changes", () => {
   assert.throws(() => setUnitChoices({ drops: [{ level: 9 }] }), /level goes from 1 to 8/);
   assert.throws(() => setUnitChoices({ drops: [{ level: 2, kind: "epic" }] }), /kind is one of any, permanent/);
   assert.throws(() => setUnitChoices({ drops: "YiI2" }), /must be a list/);
+});
+
+test("trees and doodads may stand in the border, units and items may not", () => {
+  const playable = { left: 0, bottom: 0, right: 1000, top: 1000 }, whole = { left: -500, bottom: -500, right: 1500, top: 1500 };
+  assert.equal(isBackdrop("w3b", -100, 500, playable, whole), true);
+  assert.equal(isBackdrop("w3d", 1200, 1200, playable, whole), true);
+  assert.equal(isBackdrop("w3u", -100, 500, playable, whole), false);
+  assert.equal(isBackdrop("w3t", -100, 500, playable, whole), false);
+  assert.equal(isBackdrop("w3b", 500, 500, playable, whole), false, "inside, the ground still decides");
+  assert.equal(isBackdrop("w3b", -900, 500, playable, whole), false, "off the map altogether");
+  assert.equal(isBackdrop("w3b", -100, 500, null, whole), false, "bounds unknown: no exception");
 });

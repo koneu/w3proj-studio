@@ -242,6 +242,8 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
 - Trees stand in solid walls, 128 apart. Use fill_rows with a spacing of 128 for that. Most of a map's trees
   are one kind, with a second one as an accent; a forest of equal mixes looks wrong.
 - Bare singles look lost. Set a rock beside a tree, and scrub and vines around rocks and trees.
+- Fill the border too. Past the playable map is the backdrop players see at the edge: 7 of 8 ladder maps
+  have trees and doodads out there, up to a fifth of all they have. Units and items can't stand there.
 - Don't overfill. Packing an area looks terrible and slows the game. Leave open ground where units fight.
 - Everything should have a reason to be there: treasure beside a Goblin Merchant, cages by dangerous creeps,
   no torches in the snow, no cage in the middle of nowhere. Keep to the tileset's theme.

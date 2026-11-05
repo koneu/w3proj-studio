@@ -20,7 +20,14 @@ export function playableArea(info: { cameraComplements?: number[] }, t: { offset
 /** Says when an area reaches past the playable part; null when it doesn't. */
 export function beyondPlayable(area: Area, playable: Area): string | null {
   const sides = [area.left < playable.left && "west", area.right > playable.right && "east", area.bottom < playable.bottom && "south", area.top > playable.top && "north"].filter(Boolean);
-  return sides.length ? `This area runs past the playable map to the ${sides.join(" and ")}: nothing can stand there.` : null;
+  return sides.length ? `This area runs past the playable map to the ${sides.join(" and ")}. Units and items can't stand there, and nobody walks there; trees and doodads can, as the map's backdrop.` : null;
+}
+
+/** Whether a placed object may stand here regardless of what the ground says, since the border
+ *  counts as blocked in the pathing map: trees and doodads past the playable map, within the whole
+ *  map. Ladder maps keep up to a fifth of their doodads out there, and no units. */
+export function isBackdrop(kind: string, x: number, y: number, playable: Area | null, whole: Area) {
+  return (kind === "w3d" || kind === "w3b") && !!playable && !inArea(x, y, playable) && inArea(x, y, whole);
 }
 
 /** A place to keep free: an area, or a line of points with a width. */

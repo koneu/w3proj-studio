@@ -19,7 +19,7 @@ import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
-import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
+import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { checkMelee } from "./meleecheck";
 import { resizedSize } from "../../lib/terrain/resize";
@@ -283,6 +283,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const near = place ? nearestObject(handle.objects.list(), place) : null;
     return near ? { ...report, standingNearby: { id: near.id, position: near.position } } : report;
   };
+
+  /** All of the map, the border included. */
+  const wholeMap = ({ terrain: t }: TerrainEditorHandle) => ({ left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 });
 
   /** The map's playable part, null if it can't be read. */
   const playable = async () => {
@@ -638,6 +641,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try { setUnitChoices(o); } catch (e) { throw new Error(`objects[${i}]: ${(e as Error).message}`); }
       }
       const edge = await playable().catch(() => null);
+      const whole = wholeMap(handle);
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
@@ -656,13 +660,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let spot: [number, number] | null = [x, y];
           // At a corner a line runs into the end of the last one, of the same fence: that's meant.
           const joins = typeof ownPieces === "number" && handle.objects.list().some((p) => p.id === id && Math.hypot(p.position[0] - x, p.position[1] - y) <= ownPieces * 0.75);
-          if (room && !joins && !(await room.fits(kindOf, id, x, y, angle))) {
+          if (room && !joins && !isBackdrop(kindOf, x, y, edge, whole) && !(await room.fits(kindOf, id, x, y, angle))) {
             spot = null;
             if (nearest === true) {
               for (const s of spotsAround(x, y)) if (await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
-              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "outside the playable map" : "something stands there, or the ground doesn't allow it" });
+              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : "something stands there, or the ground doesn't allow it" });
               continue;
             }
             shifted.push({ index: i, id, from: [x, y], to: spot });
@@ -702,6 +706,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { handle } = await liveEditor();
       const files = new Set((ids as string[]).map((i) => fileOfType(handle, i, args.kind)).filter(Boolean));
       if (files.size > 1) throw new Error("ids mixes units and doodads: scatter each in its own call.");
+      const edge = await playable().catch(() => null), whole = wholeMap(handle);
       const key = [...files][0] ?? fileKey(args.kind ?? "doodads");
       const counts = new Map<string, number>();
       let noRoom = 0, keptClear = 0;
@@ -722,7 +727,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
           const { id, type } = types[Math.floor(random() * types.length)];
           const facing = type.fixedRot ?? random() * 360, angle = (facing * Math.PI) / 180;
-          if (!(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
+          if (!isBackdrop(type.kind, spot.x, spot.y, edge, whole) && !(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
           add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random);
           counts.set(id, (counts.get(id) ?? 0) + 1);
