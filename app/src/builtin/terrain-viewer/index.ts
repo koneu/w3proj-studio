@@ -21,6 +21,7 @@ import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./pla
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
+import { checkMelee } from "./meleecheck";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
@@ -301,14 +302,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** What big changes share, which undo_last_edit doesn't cover: nothing unsaved of the user's,
    *  their yes in Studio, and a checkpoint to go back to. */
-  const askUser = async (question: string, yes: string) => {
+  const requireSaved = () => {
     const unsaved = w3.editors.unsavedPaths();
     if (unsaved.length) throw new Error(`Not changed: ${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Ask the user to save or discard them first.`);
+  };
+  const askUser = async (question: string, yes: string) => {
+    requireSaved();
     const agreed = await w3.window.confirm(`AI request: ${question}`, yes, CONFIRM_TIME);
     if (!agreed) throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
   };
-  const withConsent = async (question: string, yes: string) => {
-    await askUser(`${question} This can't be undone with AI undo; a checkpoint is made first.`, yes);
+  const withConsent = async (question: string, yes: string, setting: string) => {
+    // The user can drop the question. What stays is what protects their work.
+    if (w3.settings.get<boolean>(setting, true) === false) requireSaved();
+    else await askUser(`${question} This can't be undone with AI undo; a checkpoint is made first.`, yes);
     await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${e}).`); });
   };
 
@@ -389,7 +395,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const plan = { tileset: set.id, name: set.name, tiles: before.map((from, i) => ({ from, to: tiles[i] })), keptFromOtherTilesets: kept };
       if (dryRun === true) return plan;
       const stays = kept.length ? `, keeping ${kept.join(", ")}` : "";
-      await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset");
+      await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset", "mcp.confirmTileset");
       handle.setTileset(set.id);
       if (swap) handle.replaceGroundTiles(tiles);
       // Exactly the tileset's own list again: nothing is custom about it any more.
@@ -420,7 +426,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(grows ? { note: "New ground continues the map's edge: the same tile and height as far as it reaches, and the tiles repeat. Paint it afterwards to hide that." } : {}),
       };
       if (dryRun === true) return result;
-      await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}?`, "Resize map");
+      await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}?`, "Resize map", "mcp.confirmResize");
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
       return { ...result, objectsRemoved: done.removed };
     }),
@@ -541,6 +547,45 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const wide = width === undefined ? 2 : width;
       if (!Number.isInteger(wide) || (wide as number) < 2 || (wide as number) > 16 || (wide as number) % 2) throw new Error("width must be an even number of tiles, from 2 to 16.");
       return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
+    }),
+    w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
+      const { handle } = await liveEditor();
+      const size = typeof unitSize === "number" && unitSize > 0 ? unitSize : 32;
+      const [balance, weapons, destructables, game, data, grid] = await Promise.all([
+        w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
+        w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle),
+      ]);
+      const levels = new Map(parseSlk(balance).map((r) => [r.unitBalanceID, Number(r.level)]));
+      const sights = new Map(parseSlk(weapons).map((r) => [r.unitWeaponID, Number(r.acquire)]));
+      const isTree = new Set(parseSlk(destructables).filter((r) => r.targType === "tree").map((r) => r.DestructableID));
+      const lookup = <T,>(map: Map<string, T>, id: string) => map.get(id) ?? map.get(handle.objects.baseOf(id) ?? "");
+      const placed = handle.objects.list() as unknown as (Placed & { player?: number; targetAcquisition?: number; itemTable?: number; itemSets?: unknown[]; randomLevel?: string })[];
+      const units = placed.filter((e) => e.player !== undefined).map((e) => ({
+        id: e.id, x: e.position[0], y: e.position[1], player: e.player as number, acquisition: e.targetAcquisition ?? -1,
+        drops: (e.itemTable ?? -1) >= 0 || (e.itemSets ?? []).length > 0,
+        ...(e.id.startsWith("Y") ? { randomLevel: parseInt((e.randomLevel ?? "").slice(0, 2), 16) || 0 } : {}),
+      }));
+      const trees = placed.filter((e) => e.player === undefined && (isTree.has(e.id) || isTree.has(handle.objects.baseOf(e.id) ?? ""))).map((e) => [e.position[0], e.position[1]] as [number, number]);
+      const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
+      const starts = units.filter((u) => u.id === "sloc"), mines = units.filter((u) => u.id === "ngol"), taverns = units.filter((u) => u.id === "ntav");
+      const routes: { name: string; to?: [number, number]; points?: [number, number][]; problem?: string }[] = [];
+      const way = (name: string, from: [number, number], to: [number, number], target?: [number, number]) => {
+        let report = checkPath(grid, from, to, size, 200);
+        // A mine or a building at the end stands in its own way.
+        if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
+        routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route } : { name, problem: report.problem ?? "no way through" });
+      };
+      for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
+      for (const [i, s] of starts.entries()) {
+        const gap = (m: typeof s) => Math.hypot(m.x - s.x, m.y - s.y);
+        for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m));
+        for (const t of taverns.slice(0, 1)) way(`Start ${i + 1} to the tavern`, at(s), at(t), at(t));
+      }
+      const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);
+      return checkMelee({
+        units, trees, routes, level: (id) => lookup(levels, id), sight: (id) => lookup(sights, id),
+        callForHelp: number(game, "CreepCallForHelp", 600), shopNotify: number(data, "NeutralUseNotifyRadius", 900),
+      });
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
       const editor = await liveEditor();
@@ -1946,6 +1991,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ];
               return Occupancy.mask(terrain, data, placed);
             })()),
+            baseOf: (id) => objCtx?.bases.get(id),
             modelShape: async (id) => {
               const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
               if (!skin) return null;

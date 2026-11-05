@@ -213,6 +213,8 @@ export interface TerrainObjects {
   /** How long a type's model is, in world units, and whether that's along x at facing 0, so which
    *  way it has to turn to run along a line. Null without a model. */
   modelShape(id: string): Promise<{ length: number; alongX: boolean } | null>;
+  /** The game's type a type of this map is based on. */
+  baseOf(id: string): string | undefined;
   /** Per pathing cell (rows from the south), 1 where doodads or buildings stand: what's there
    *  apart from the ground, and from destructables, which can go. */
   standing(): Promise<Uint8Array>;

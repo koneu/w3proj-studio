@@ -33,3 +33,10 @@ test("the place_objects options the melee guide relies on are declared", () => {
   for (const option of ["camp", "gold", "drops"]) assert.ok(option in tool.inputSchema.properties.objects.items.properties, option);
   assert.ok(new RegExp("camp true").test(GUIDES.melee.text) && GUIDES.melee.text.includes("drops on place_objects"));
 });
+
+test("no MCP setting can come from a project: a map from someone else mustn't open the door", () => {
+  const manifest = JSON.parse(readFileSync(join(builtin, "mcp-server", "extension.json"), "utf8")) as { contributes: { configuration: { properties: Record<string, { scope?: string }> } } };
+  const settings = Object.entries(manifest.contributes.configuration.properties);
+  assert.ok(settings.length >= 6);
+  for (const [key, value] of settings) assert.equal(value.scope, "user", key);
+});

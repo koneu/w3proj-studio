@@ -110,6 +110,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.views.register("w3.mcp.status", {
       render(el) {
         const on = enabled(), writing = setting("mcp.writeTools"), saving = setting("mcp.saveTool");
+        const asks = (key: string) => w3.settings.get<boolean>(key, true) !== false;
+        /** A big change an AI asks about first, unless the user would rather it didn't. */
+        const askRow = (key: string, what: string) => h("div.ext-item", {},
+          h("div.ext-desc", {}, asks(key) ? `AI tools ask you before ${what}.` : `AI tools can go ahead with ${what}, after a checkpoint.`),
+          h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set(key, !asks(key)) }, asks(key) ? "Stop asking" : "Ask first")));
         showEdits();
         el.append(
           h("div.ext-item", {},
@@ -123,6 +128,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ...(writing ? [h("div.ext-item", {},
             h("div.ext-desc", {}, saving ? "AI tools may save everything unsaved, your own work too." : "AI tools ask you to save."),
             h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.saveTool", !saving) }, saving ? "Stop saving" : "Allow saving")))] : []),
+          ...(writing ? [askRow("mcp.confirmTileset", "changing the tileset"), askRow("mcp.confirmResize", "resizing the map")] : []),
           ...(writing ? [editList] : []),
           h("div.ext-section-title", {}, "CLIENTS"),
           h("div.ext-desc.ext-formats-hint", {}, "Looks where a standard installation keeps its settings, so this can fail. Copy client setup always works."));

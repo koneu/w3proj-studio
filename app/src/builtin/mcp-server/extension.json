@@ -16,10 +16,12 @@
     "configuration": {
       "title": "MCP Server",
       "properties": {
-        "mcp.enabled": { "type": "boolean", "default": false, "description": "Serve the MCP tools to AI clients on this computer. Clients start `w3proj mcp`, which connects to this app." },
-        "mcp.projectTools": { "type": "boolean", "default": false, "description": "Also offer tools from the open project's own extensions (.w3proj/extensions). A map you got from someone else could bring any tool." },
-        "mcp.writeTools": { "type": "boolean", "default": false, "description": "Also offer tools that change the project. Each change can be undone, and none is made while something is unsaved." },
-        "mcp.saveTool": { "type": "boolean", "default": false, "description": "Also let AI tools save everything unsaved in the editors, your own work included. Off, they ask you to save." }
+        "mcp.enabled": { "type": "boolean", "scope": "user", "default": false, "description": "Serve the MCP tools to AI clients on this computer. Clients start `w3proj mcp`, which connects to this app." },
+        "mcp.projectTools": { "type": "boolean", "scope": "user", "default": false, "description": "Also offer tools from the open project's own extensions (.w3proj/extensions). A map you got from someone else could bring any tool." },
+        "mcp.writeTools": { "type": "boolean", "scope": "user", "default": false, "description": "Also offer tools that change the project. Each change can be undone, and none is made while something is unsaved." },
+        "mcp.saveTool": { "type": "boolean", "scope": "user", "default": false, "description": "Also let AI tools save everything unsaved in the editors, your own work included. Off, they ask you to save." },
+        "mcp.confirmTileset": { "type": "boolean", "scope": "user", "default": true, "description": "Ask in Studio before an AI tool changes the map's tileset. Off, it just happens, after a checkpoint." },
+        "mcp.confirmResize": { "type": "boolean", "scope": "user", "default": true, "description": "Ask in Studio before an AI tool resizes the map. Off, it just happens, after a checkpoint." }
       }
     },
     "mcpTools": [

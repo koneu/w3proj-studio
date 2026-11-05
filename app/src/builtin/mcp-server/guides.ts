@@ -108,6 +108,8 @@ By distance from the nearest start, the typical total level:
   to 24, usually 14. Keep them close to the mine, under 750.
 - Creep sight is 500 to 800, usually 600. Keep every route at least 800 from any camp that isn't meant
   to be walked into.
+- The game's own numbers: a creep that wakes calls others within 600. Placing a building alerts creeps
+  within 600, and using a shop alerts those within 900, which is how a shop gets guarded by a nearby camp.
 - The strongest creep is usually level 5, sometimes up to 9. No creep of level 6 or above in the first
   camps a player can reach.
 - Mix melee, ranged and casters, and let each camp be able to hit air. An all-ranged camp favours Human,
@@ -162,6 +164,8 @@ Read the terrain guide too, for how to make all this look good. This part is abo
 
 ## Checks before calling it finished
 
+- check_melee, and read its accuracy notes. All six ladder maps pass it without errors, so an error is
+  worth fixing. Its warnings about camps on Camp mode are the worst case: those maps have them too.
 - check_path between the bases, and from each base to every mine and shop, for units of size 32 and 72.
 - check_route along the main routes, then compare with list_placed: nothing hostile within 800 of a
   route unless meant.

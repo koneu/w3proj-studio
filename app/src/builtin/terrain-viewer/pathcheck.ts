@@ -213,7 +213,7 @@ export interface PathReport {
 }
 
 /** Whether a unit of `unitSize` (the game's collision size, a radius) can walk from one point to another. */
-export function checkPath(g: Grid, start: [number, number], goal: [number, number], unitSize: number): PathReport {
+export function checkPath(g: Grid, start: [number, number], goal: [number, number], unitSize: number, points = 12): PathReport {
   const { width: w, height: h } = g;
   const cell = ([x, y]: [number, number]) => {
     const cx = Math.floor((x - g.offsetX) / CELL), cy = Math.floor((y - g.offsetY) / CELL);
@@ -254,7 +254,7 @@ export function checkPath(g: Grid, start: [number, number], goal: [number, numbe
   const tight = tightest[Math.floor(tightest.length / 2)] ?? from;
   let length = 0;
   for (let k = 1; k < way.length; k++) length += Math.hypot(world(way[k])[0] - world(way[k - 1])[0], world(way[k])[1] - world(way[k - 1])[1]);
-  const every = Math.max(1, Math.ceil(way.length / 12));
+  const every = Math.max(1, Math.ceil(way.length / points));
   return {
     walkable: true, unitSize, length: Math.round(length),
     narrowest: { width: (Math.max(1, c[tight]) * 2 - 1) * CELL, at: world(tight) },
