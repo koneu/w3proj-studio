@@ -32,7 +32,7 @@ const deg = (rad: number) => fixed(Math.fround(Math.fround(rad) * Math.fround(18
 
 /** The section body (without banner), or "" when no destructable is needed. */
 export function destructablesSection(i: DestructablesInput): string {
-  // By object id; ties keep the file order (not always the World Editor's, see OPEN_POINTS.md).
+  // By object id; ties keep the file order (not always the World Editor's, see openpoints/test.md).
   const placed = i.doodads.map((d, index) => ({ d, index }))
     .filter(({ d, index }) => !(d.flags & GAME_PLACED) && (i.referenced.has(i.globalName(d)) || dropFunctionOf("Doodad", d, index)))
     .sort((a, b) => (a.d.id < b.d.id ? -1 : a.d.id > b.d.id ? 1 : a.index - b.index));

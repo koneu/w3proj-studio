@@ -173,7 +173,7 @@ game does (corner-mask tile atlas with variations), cliff models, water, and pla
 destructables, units and items as models (from the game's skin tables; player colours for
 units). Drag or arrow keys pan, right-drag rotates, the wheel zooms. Reads `w3e` v11 (classic)
 and v12 (2.0). Raw `war3map.doo` / `war3mapUnits.doo` are decoded through the format engine
-(`codec_decode`) when the project doesn't have them as JSON. See OPEN_POINTS for what's
+(`codec_decode`) when the project doesn't have them as JSON. See `openpoints/` for what's
 approximated.
 
 ### Map properties
