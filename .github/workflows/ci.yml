@@ -1,5 +1,5 @@
-# Checks on every push and pull request: the TypeScript side (types, module boundaries, unit
-# tests, a production build) and the Rust workspace (tests, clippy without warnings).
+# Checks on every push and pull request: the same steps as `node tests/gate.mjs` (TESTING.md):
+# types, module boundaries, unit and system tests, clippy, and the app starting in headless Edge.
 # Nothing here needs the game: tests that read game files or the map corpus stay local.
 name: CI
 
@@ -33,6 +33,9 @@ jobs:
       - name: App build
         working-directory: app
         run: npx vite build
+      - name: UI smoke test
+        working-directory: app
+        run: npm run ui-smoke
 
       # Version and components (clippy) come from rust-toolchain.toml.
       - name: Rust toolchain

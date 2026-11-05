@@ -133,6 +133,31 @@ mod tests {
     }
 
     #[test]
+    fn decrypt_bytes_decrypts_whole_words_and_keeps_the_tail() {
+        let mut words = vec![0x0403_0201u32, 0x0807_0605];
+        encrypt(&mut words, 77);
+        let mut bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        bytes.extend_from_slice(&[9, 10, 11]);
+        decrypt_bytes(&mut bytes, 77);
+        assert_eq!(bytes, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    }
+
+    #[test]
+    fn a_file_key_comes_from_the_base_name() {
+        let key = hash_string("war3map.j", HASH_FILE_KEY);
+        assert_eq!(file_key("war3map.j", 0x100, 0x200, false), key);
+        assert_eq!(file_key(r"scripts\war3map.j", 0x100, 0x200, false), key);
+        assert_eq!(file_key("scripts/war3map.j", 0x100, 0x200, false), key);
+    }
+
+    #[test]
+    fn a_fixed_file_key_also_uses_position_and_size() {
+        let key = hash_string("war3map.j", HASH_FILE_KEY);
+        assert_eq!(file_key("war3map.j", 0x100, 0x200, true), key.wrapping_add(0x100) ^ 0x200);
+        assert_eq!(file_key("war3map.j", 0, u32::MAX, true), !key);
+    }
+
+    #[test]
     fn case_and_slash_insensitive() {
         assert_eq!(
             hash_string("war3map.j", HASH_NAME_A),

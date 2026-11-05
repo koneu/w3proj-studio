@@ -1,1 +1,15 @@
-{ "ts": {}, "rust": {} }
+{
+  "ts": {
+    "extensions": 40,
+    "lib/formats": 68,
+    "lib/image": 81,
+    "lib/lua": 90,
+    "lib/terrain": 60,
+    "lib/triggers": 67
+  },
+  "rust": {
+    "mpq": 88,
+    "w3proj": 75,
+    "cli": 50
+  }
+}

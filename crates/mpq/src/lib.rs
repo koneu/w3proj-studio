@@ -80,6 +80,49 @@ mod tests {
         assert_eq!(a.read("war3map.j").unwrap(), vec![7; 5000]);
     }
 
+    /// An uncompressed archive of one file, encrypted afterwards as protected maps have it (the
+    /// writer never encrypts). Every sector has its own key.
+    fn encrypted_archive(name: &str, data: &[u8], fix_key: bool) -> Vec<u8> {
+        let options = WriteOptions { compress: false, listfile: false, ..WriteOptions::default() };
+        let sector = 512 << options.sector_size_shift;
+        let mut b = ArchiveBuilder::new(options);
+        b.add(name, data.to_vec());
+        let mut bytes = b.write(b"HM3W").unwrap();
+
+        let u32_at = |b: &[u8], at: usize| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let block_table = 512 + u32_at(&bytes, 512 + 20) as usize;
+        let table_key = crypto::hash_string("(block table)", crypto::HASH_FILE_KEY);
+        let mut block: Vec<u32> = (0..4).map(|i| u32_at(&bytes, block_table + i * 4)).collect();
+        crypto::decrypt(&mut block, table_key);
+        let (pos, size) = (block[0], block[2]);
+        block[3] |= flags::ENCRYPTED | if fix_key { flags::FIX_KEY } else { 0 };
+        crypto::encrypt(&mut block, table_key);
+        for (i, w) in block.iter().enumerate() {
+            bytes[block_table + i * 4..block_table + i * 4 + 4].copy_from_slice(&w.to_le_bytes());
+        }
+
+        let key = crypto::file_key(name, pos, size, fix_key);
+        let body = 512 + pos as usize;
+        for (i, chunk) in bytes[body..body + data.len()].chunks_mut(sector).enumerate() {
+            let mut words: Vec<u32> = chunk.chunks_exact(4).map(|w| u32::from_le_bytes(w.try_into().unwrap())).collect();
+            crypto::encrypt(&mut words, key.wrapping_add(i as u32));
+            for (at, w) in words.iter().enumerate() {
+                chunk[at * 4..at * 4 + 4].copy_from_slice(&w.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn encrypted_files_are_read_back() {
+        // Two and a bit sectors, so that the per-sector key and the tail both matter.
+        let data: Vec<u8> = (0..8195u32).map(|i| (i % 251) as u8).collect();
+        for fix_key in [false, true] {
+            let a = Archive::from_bytes(encrypted_archive(r"scripts\war3map.j", &data, fix_key)).unwrap();
+            assert_eq!(a.read(r"scripts\war3map.j").unwrap(), data, "fix_key {fix_key}");
+        }
+    }
+
     #[test]
     fn deterministic() {
         let make = || {
