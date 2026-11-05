@@ -90,7 +90,7 @@ fn tmp(name: &str) -> PathBuf {
     dir.join(name)
 }
 
-/// The fixture as a map.
+/// The fixture as a map. Tests run in parallel: each passes its own name.
 fn map_bytes(name: &str) -> Vec<u8> {
     let out = tmp(name);
     w3proj::pack(&fixture(), Some(&out), &Registry::default()).unwrap();
@@ -98,8 +98,8 @@ fn map_bytes(name: &str) -> Vec<u8> {
 }
 
 /// Files of the map that a codec reads.
-fn codec_files() -> Vec<(String, Vec<u8>)> {
-    let archive = Archive::from_bytes(map_bytes("codec-files.w3x")).unwrap();
+fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
+    let archive = Archive::from_bytes(map_bytes(&format!("{test}.w3x"))).unwrap();
     let codecs = Registry::default();
     archive
         .read("(listfile)")
@@ -165,7 +165,7 @@ fn codecs_survive_damaged_files() {
     let mut failures = BTreeMap::new();
     let mut lost = Vec::new();
     let (mut accepted, mut rejected) = (0, 0);
-    for (name, bytes) in codec_files() {
+    for (name, bytes) in codec_files("codecs") {
         for seed in 0..rounds() {
             let bad = damage(&bytes, &mut Rng::new(seed + 1));
             for codec in codecs.for_archive_name(&name) {
@@ -200,7 +200,7 @@ fn codecs_survive_damaged_files() {
 fn damaged_project_files_are_errors() {
     let codecs = Registry::default();
     let mut failures = BTreeMap::new();
-    for (name, bytes) in codec_files() {
+    for (name, bytes) in codec_files("project-files") {
         let codec = codecs.for_archive_name(&name).next().unwrap();
         let project = codec.decode(&name, &bytes).unwrap();
         for seed in 0..rounds() {

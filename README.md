@@ -130,6 +130,10 @@ w3proj game --mode hd resolve Units/Human/Footman/Footman.mdx
 w3proj game cat Units/UnitMetaData.slk
 ```
 
+### Tests
+
+[TESTING.md](TESTING.md) has the test process. `node tests/gate.mjs` runs the checks for a commit.
+
 ### Corpus checks
 
 Real maps aren't in the repository (`smoketest_maps/` is ignored: size and third-party
