@@ -107,9 +107,11 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
         if (src === null) return [];
         const env = await gameJassEnv((p) => w3.game.readText(p));
         const lineOf = (at: number) => src.slice(0, at).split("\n").length;
+        // The text editor counts a line break as one character, also in CRLF files.
+        const editorOffset = (at: number) => src.slice(0, at).replace(/\r\n/g, "\n").length;
         return capped(checkJass(src, env).map((d): Problem => ({
           severity: d.severity, message: d.message, location: `war3map.j:${lineOf(d.from)}`,
-          reveal: { command: "w3.text.revealAt", args: [path, d.from] },
+          reveal: { command: "w3.text.revealAt", args: [path, editorOffset(d.from)] },
         })), "script problems");
       },
     },
