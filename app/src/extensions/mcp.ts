@@ -14,7 +14,7 @@ export interface McpHostHooks {
   /** Activates the extensions answering an event ("onMcpTool:<name>"). */
   activate(event: string): Promise<void>;
   /** Whether a tool may be used now (settings: project extensions' tools, writing tools). */
-  allowed(declared: { source: string; readOnly: boolean }): boolean;
+  allowed(declared: { source: string; readOnly: boolean; needs?: string }): boolean;
   /** Why an extension can't answer, if it's known. */
   whyUnavailable(extensionId: string): string | undefined;
   log(line: string): void;
@@ -66,7 +66,7 @@ export class McpTools {
   }
 
   private usable(d: Declared) {
-    return this.hooks.allowed({ source: d.source, readOnly: d.tool.readOnly === true });
+    return this.hooks.allowed({ source: d.source, readOnly: d.tool.readOnly === true, needs: d.tool.needs });
   }
 
   list() {

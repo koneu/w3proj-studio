@@ -55,6 +55,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   log.onChange = () => w3.views.refresh("w3.mcp.status");
   let root: string | null = w3.workspace.project()?.root ?? null;
 
+  const setting = (key: string) => w3.settings.get<boolean>(key, false) === true;
+  /** What's going on, for an AI that can't see the window. Never fails: it's how to find out. */
+  const appState = () => {
+    const project = w3.workspace.project(), unsaved = w3.editors.unsavedPaths();
+    return {
+      project: project ? { name: project.name, folder: project.root, files: w3.workspace.files().length } : null,
+      activeFile: w3.editors.activePath(), unsaved,
+      may: { edit: setting("mcp.writeTools"), save: setting("mcp.saveTool") },
+      undoableEdits: log.list().length,
+      ...(unsaved.length ? { note: "Reading tools see the last save, not these changes, and edits are refused until they're saved." } : {}),
+    };
+  };
+
   const undo = async () => {
     const title = await log.undo();
     return title ? `Undone: ${title}` : "There's no AI edit to undo.";
@@ -83,7 +96,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.views.register("w3.mcp.status", {
       render(el) {
-        const on = enabled(), writing = w3.settings.get<boolean>("mcp.writeTools", false) === true, edits = log.list();
+        const on = enabled(), writing = setting("mcp.writeTools"), saving = setting("mcp.saveTool"), edits = log.list();
         el.append(
           h("div.ext-item", {},
             h("div.ext-desc", {}, on ? "On: AI clients on this computer can use the open project." : "Off: AI clients can't reach this app."),
@@ -93,6 +106,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("div.ext-item", {},
             h("div.ext-desc", {}, writing ? "AI tools may change this project. Each change can be undone." : "AI tools can only read this project."),
             h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.writeTools", !writing) }, writing ? "Read only" : "Allow edits"))),
+          ...(writing ? [h("div.ext-item", {},
+            h("div.ext-desc", {}, saving ? "AI tools may save everything unsaved, your own work too." : "AI tools ask you to save."),
+            h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.saveTool", !saving) }, saving ? "Stop saving" : "Allow saving")))] : []),
           ...(edits.length ? [
             h("div.ext-section-title", {}, "AI EDITS"),
             ...edits.slice(-8).reverse().map((e) => h("div.ext-item", { title: e.files.map((f) => f.path).join("\n") }, h("div.ext-desc", {}, e.title))),
@@ -156,9 +172,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (key.startsWith("mcp.")) w3.views.refresh("w3.mcp.status");
     }),
 
-    w3.mcp.registerTool("project_info", () => {
-      const project = open();
-      return { name: project.name, folder: project.root, files: w3.workspace.files().length, activeFile: w3.editors.activePath() };
+    w3.mcp.registerTool("project_info", appState),
+    w3.mcp.registerTool("studio_status", appState),
+    w3.mcp.registerTool("save_project", async () => ({ saved: await w3.editors.saveAll(), stillUnsaved: w3.editors.unsavedPaths() })),
+    w3.mcp.registerTool("begin_edit", async ({ title }) => {
+      if (typeof title !== "string" || !title.trim()) throw new Error("begin_edit needs a title.");
+      open();
+      await log.beginGroup(title.trim());
+      return `Until end_edit, edits count as "${title.trim()}".`;
+    }),
+    w3.mcp.registerTool("end_edit", async () => {
+      const ended = await log.endGroup();
+      return ended ? `"${ended.title}" is one edit now, with ${ended.files} file${ended.files === 1 ? "" : "s"} changed.` : "No group was open.";
     }),
     w3.mcp.registerTool("list_files", ({ filter, limit }) => {
       open();

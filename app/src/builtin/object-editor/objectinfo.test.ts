@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { changedFields, gameFields, gameObjectList, mapObjectList, objectName, type MapObjects } from "./objectinfo";
+import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, objectName, type MapObjects } from "./objectinfo";
 
 const field = (id: string, label: string, repeat = 0) => ({ id, label, repeat }) as FieldMeta;
 const kind = { names: new Map([["hfoo", "Footman"], ["AHbz", "Blizzard"]]), fieldById: new Map([["unam", field("unam", "Name")], ["uhpm", field("uhpm", "Hit Points")]]) };
@@ -25,6 +25,31 @@ test("game objects can be narrowed to a tileset and a category", () => {
   assert.deepEqual(ids("F"), ["LTlt", "YTct"]);
   assert.deepEqual(ids("A", "tree"), ["ATtr"]);
   assert.deepEqual(gameObjectList(game, (s) => s, "A")[0], { id: "ATtr", name: "Tree", category: "Trees" });
+});
+
+test("objects say what their model means in the game", () => {
+  const stored = modelPacks([
+    "War3.w3mod:Doodads/Tree/Tree.mdx", "War3.w3mod:Doodads/Rock/Rock0.mdx", "War3.w3mod:_DE.w3mod:Doodads/Lantern/Lantern.mdx", "War3.w3mod:_HD.w3mod:Doodads/Lantern/Lantern.mdx",
+  ]);
+  const paths: Record<string, string> = { a: "Doodads\\Tree\\Tree", b: "Doodads\\Rock\\Rock", c: "Doodads\\Lantern\\Lantern.mdl", d: "Doodads\\Gone\\Gone", e: "_" };
+  const game = {
+    baseIds: Object.keys(paths), names: new Map<string, string>(), facets: () => ({}),
+    fieldById: new Map([["dfil", field("dfil", "Model")]]), defaultValue: (id: string) => paths[id],
+  };
+  assert.deepEqual(gameObjectList(game, (s) => s, undefined, undefined, stored).map(({ id, name, ...rest }) => rest), [
+    {}, {}, { modelOnlyIn: ["DE", "HD"] }, { noModel: true }, { noModel: true },
+  ]);
+});
+
+test("objects say their size and whether they take up ground", () => {
+  const values: Record<string, string> = { dmis: "0.8", dmas: "1.2", dptx: "PathTextures\\4x4Default.tga" };
+  const game = {
+    baseIds: ["a"], names: new Map<string, string>(), facets: () => ({}),
+    fieldById: new Map(["dmis", "dmas", "dptx"].map((f) => [f, field(f, f)])), defaultValue: (_: string, f: FieldMeta) => values[f.id],
+  };
+  assert.deepEqual(gameObjectList(game, (s) => s)[0], { id: "a", name: "a", sizeRange: [0.8, 1.2], takesRoom: true });
+  values.dptx = "_";
+  assert.equal(gameObjectList(game, (s) => s)[0].takesRoom, false);
 });
 
 test("names: the map's own, without colour codes, else the base's", () => {

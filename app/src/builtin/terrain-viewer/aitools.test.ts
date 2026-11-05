@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, scatterSpots, sculptCorners, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
 const seeded = (seed = 1) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -139,6 +140,53 @@ test("height colours run from blue to red, with lines between levels", () => {
   assert.ok(px(1, 1)[2] > px(1, 1)[0], "low is blue");
   assert.ok(px(32, 32)[0] > px(32, 32)[2], "high is red");
   assert.ok(Array.from({ length: 64 }, (_, x) => px(x, 32)).some((p) => p[0] === 0 && p[3] === 220), "a line crosses the slope");
+});
+
+test("the playable area comes from the map's border, and leaving it is said", () => {
+  const t = { offsetX: -4096, offsetY: -4096, width: 65, height: 65 };
+  const p = playableArea({ cameraComplements: [6, 6, 4, 8] }, t);
+  assert.deepEqual(p, { left: -3328, right: 3328, bottom: -3584, top: 3072 });
+  assert.equal(beyondPlayable({ left: 0, bottom: 0, right: 100, top: 100 }, p), null);
+  assert.match(beyondPlayable({ left: -3500, bottom: 0, right: 100, top: 3200 }, p) ?? "", /west and north/);
+});
+
+test("keep-clear places: areas, and lines with a width", () => {
+  assert.equal(distanceToLine(5, 3, [[0, 0], [10, 0]]), 3);
+  assert.equal(distanceToLine(13, 4, [[0, 0], [10, 0]]), 5);
+  assert.equal(distanceToLine(1, 1, [[1, 1]]), 0);
+  const keep = [{ left: 0, bottom: 0, right: 10, top: 10 }, { points: [[100, 0], [200, 0]] as [number, number][], width: 40 }];
+  assert.equal(isKeptClear(5, 5, keep), true);
+  assert.equal(isKeptClear(150, 19, keep), true);
+  assert.equal(isKeptClear(150, 21, keep), false);
+});
+
+test("a path paints along its line, frays at its sides and ends, and leaves the rest", () => {
+  const t = field();
+  const changed = paintPath(t, [[256, 1024], [1792, 1024]], 256, 1, 0.5, false, seeded());
+  assert.equal(t.corners[8 * 17 + 8].texture, 1);
+  assert.equal(t.corners[2 * 17 + 8].texture, 0);
+  assert.equal(t.corners[0].texture, 0);
+  assert.ok(changed.includes(8 * 17 + 8));
+  assert.ok(changed.length > 8 && changed.length < 40);
+  const hard = field();
+  assert.ok(paintPath(hard, [[256, 1024], [1792, 1024]], 256, 1, 0, false, seeded()).length >= changed.length);
+});
+
+test("a flattened path levels the ground across it towards its middle", () => {
+  const t = field();
+  for (let i = 8 * 17; i < 9 * 17; i++) t.corners[i].rawHeight += 400;
+  for (let i = 0; i < 289; i++) if (i % 17 === 8 && i !== 8 * 17 + 8) t.corners[i].rawHeight += 0;
+  const crown = at(t, 8, 8);
+  paintPath(t, [[0, 896], [2048, 896]], 512, 1, 0, true, seeded());
+  assert.ok(at(t, 8, 8) < crown, "a bump beside the line is brought down");
+  assert.equal(t.corners[0].rawHeight, 0x2000);
+});
+
+test("looking for room goes outwards, on the pathing grid", () => {
+  const spots = spotsAround(320, 320);
+  assert.ok(spots.every(([x, y]) => x % 32 === 0 && y % 32 === 0));
+  const d = (s: [number, number]) => Math.hypot(s[0] - 320, s[1] - 320);
+  assert.ok(d(spots[0]) < 50 && d(spots.at(-1)!) > 250);
 });
 
 test("a size range is used instead of the type's", () => {

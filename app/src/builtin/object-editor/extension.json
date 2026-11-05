@@ -10,7 +10,7 @@
       {"name":"delete_object","description":"Removes a custom object, or what the map changes in a game object. Anything placed or using it stays and must be fixed too. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["kind","id"],"properties":{"kind":{"type":"string","enum":["units","items","abilities","buffs","destructables","doodads","upgrades"]},"id":{"type":"string"}}}},
       {
         "name": "list_objects",
-        "description": "Object data of the open map: the objects it adds or changes, or with scope \"game\" the game's own. Gives ids for get_object.",
+        "description": "Object data of the open map: the objects it adds or changes, or with scope \"game\" the game's own. Gives ids for get_object. Game objects say when they have no model, or one only in some graphics modes (they'd be invisible otherwise), their size range, and whether they take up ground.",
         "readOnly": true,
         "inputSchema": { "type": "object", "required": ["kind"], "properties": {
           "kind": { "type": "string", "enum": ["units", "items", "abilities", "buffs", "destructables", "doodads", "upgrades"] },

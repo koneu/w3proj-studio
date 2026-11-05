@@ -9,7 +9,7 @@
 import { projectPath } from "../../extensions/mcp";
 
 export interface EditFile { path: string; text: string }
-export interface EditRecord { id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[]; follow?: EditFollow }
+export interface EditRecord { id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[]; follows: EditFollow[] }
 /** Work derived from the files, after an edit and after its undo: their change is done by then. */
 export type EditFollow = (undoing: boolean) => Promise<void>;
 
@@ -36,6 +36,8 @@ export class EditLog {
   private queue: Promise<unknown> = Promise.resolve();
   private checkpointed = false;
   private next = 1;
+  /** Open group: edits go into this record, which is the newest one. */
+  private group: EditRecord | null = null;
   /** After an edit or an undo. */
   onChange: () => void = () => {};
 
@@ -48,6 +50,7 @@ export class EditLog {
   /** Another project: its edits and its checkpoint are its own. */
   reset() {
     this.records = [];
+    this.group = null;
     this.checkpointed = false;
     this.onChange();
   }
@@ -69,8 +72,24 @@ export class EditLog {
   }
 
   /** A failure here doesn't take the edit back: files derived from it are only out of date. */
-  private async followUp(r: { title: string; follow?: EditFollow }, undoing: boolean) {
-    await r.follow?.(undoing).catch((e) => this.io.log(`after "${r.title}": ${String(e)}`));
+  private async followUp(title: string, follow: EditFollow | undefined, undoing: boolean) {
+    await follow?.(undoing).catch((e) => this.io.log(`after "${title}": ${String(e)}`));
+  }
+
+  /** The edits from here until endGroup are one: one entry, one undo. Ends any group still open. */
+  beginGroup(title: string): Promise<void> {
+    return this.inTurn(async () => {
+      this.group = { id: this.next++, title, at: Date.now(), files: [], follows: [] };
+    });
+  }
+
+  /** The group's title and how many files it changed, or null if none is open. */
+  endGroup(): Promise<{ title: string; files: number } | null> {
+    return this.inTurn(async () => {
+      const g = this.group;
+      this.group = null;
+      return g ? { title: g.title, files: g.files.length } : null;
+    });
   }
 
   /** `change` reads what it needs and gives the new texts. False if nothing changed. */
@@ -96,11 +115,21 @@ export class EditLog {
         await this.restore(done).catch((e2) => this.io.log(`couldn't put files back: ${String(e2)}`));
         throw e;
       }
-      const record: EditRecord = { id: this.next++, title, at: Date.now(), files, follow };
-      this.records.push(record);
+      const g = this.group;
+      if (g) {
+        // First in the group: it joins the list only now, so an empty group leaves no trace.
+        if (!this.records.includes(g)) this.records.push(g);
+        for (const f of files) {
+          const known = g.files.find((x) => x.path === f.path);
+          if (known) known.after = f.after; else g.files.push({ ...f });
+        }
+        if (follow) g.follows.push(follow);
+      } else {
+        this.records.push({ id: this.next++, title, at: Date.now(), files, follows: follow ? [follow] : [] });
+      }
       if (this.records.length > this.keep) this.records.shift();
       this.io.log(`AI edit: ${title} (${files.map((f) => f.path).join(", ")})`);
-      await this.followUp(record, false);
+      await this.followUp(title, follow, false);
       this.onChange();
       return true;
     });
@@ -112,13 +141,15 @@ export class EditLog {
       const last = this.records.at(-1);
       if (!last) return null;
       this.refuseUnsaved();
+      // Undoing closes a group: edits after this one wouldn't belong to anything.
+      this.group = null;
       for (const f of last.files) {
         if ((await this.io.read(f.path)) !== f.after) throw new Error(`Not undone: ${f.path} changed after "${last.title}".`);
       }
       await this.restore(last.files);
       this.records.pop();
       this.io.log(`AI edit undone: ${last.title}`);
-      await this.followUp(last, true);
+      for (const follow of [...last.follows].reverse()) await this.followUp(last.title, follow, true);
       this.onChange();
       return last.title;
     });

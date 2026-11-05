@@ -129,6 +129,52 @@ test("follow-up work runs after an edit and after its undo, and can't take eithe
   assert.equal(seen.length, 2, "nothing changed, nothing follows");
 });
 
+test("a group is one entry and one undo, whatever it changed", async () => {
+  const { log, files } = setup({ "map/a": "1", "map/b": "1" });
+  await log.edit("Before", put("map/a", "2"));
+  await log.beginGroup("Forest");
+  await log.edit("Trees", put("map/a", "3"));
+  await log.edit("Paint", put("map/b", "2"));
+  await log.edit("More trees", put("map/a", "4"));
+  assert.deepEqual(await log.endGroup(), { title: "Forest", files: 2 });
+  assert.deepEqual(log.list().map((e) => e.title), ["Before", "Forest"]);
+  assert.equal(await log.undo(), "Forest");
+  assert.deepEqual([files.get("map/a"), files.get("map/b")], ["2", "1"]);
+  assert.equal(await log.undo(), "Before");
+});
+
+test("a group's follow-up work runs each time, and backwards on undo", async () => {
+  const { log } = setup({ "map/a": "1" });
+  const seen: string[] = [];
+  await log.beginGroup("G");
+  await log.edit("One", put("map/a", "2"), async (u) => { seen.push(`one ${u}`); });
+  await log.edit("Two", put("map/a", "3"), async (u) => { seen.push(`two ${u}`); });
+  await log.endGroup();
+  await log.undo();
+  assert.deepEqual(seen, ["one false", "two false", "two true", "one true"]);
+});
+
+test("an empty group leaves nothing, and ending none is harmless", async () => {
+  const { log } = setup();
+  await log.beginGroup("Nothing");
+  assert.deepEqual(await log.endGroup(), { title: "Nothing", files: 0 });
+  assert.equal(log.list().length, 0);
+  assert.equal(await log.endGroup(), null);
+});
+
+test("undo closes an open group, and a failed edit doesn't end it", async () => {
+  const { log, files } = setup({ "map/a": "1" });
+  await log.beginGroup("G");
+  await log.edit("One", put("map/a", "2"));
+  await assert.rejects(log.edit("Bad", async () => { throw new Error("no"); }));
+  await log.edit("Two", put("map/a", "3"));
+  assert.equal(log.list().length, 1);
+  await log.undo();
+  assert.equal(files.get("map/a"), "1");
+  await log.edit("After", put("map/a", "5"));
+  assert.deepEqual(log.list().map((e) => e.title), ["After"]);
+});
+
 test("old edits drop off", async () => {
   const { log } = setup({ "map/a": "0" });
   for (let i = 1; i <= 35; i++) await log.edit(`E${i}`, put("map/a", String(i)));

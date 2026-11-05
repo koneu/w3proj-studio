@@ -63,6 +63,17 @@ test("settings can hide a tool from the list and from calls", async () => {
   assert.equal((await t.call("look", {})).isError, true);
 });
 
+test("a tool can need a setting of its own", () => {
+  let on = false;
+  const { t } = tools({ allowed: ({ needs }) => !needs || on });
+  t.declare("ext.a", "builtin", [read, { name: "save", description: "Saves", needs: "mcp.saveTool" }]);
+  assert.deepEqual(t.list().map((x) => x.name), ["look"]);
+  const closed = t.revision();
+  on = true;
+  assert.deepEqual(t.list().map((x) => x.name), ["look", "save"]);
+  assert.notEqual(t.revision(), closed);
+});
+
 test("the revision follows the list", () => {
   const { t } = tools();
   const empty = t.revision();

@@ -2,6 +2,8 @@
 
 import type { W3Api } from "../../extensions/api";
 import { StringTable } from "./wts";
+import { parseW3e } from "../terrain/w3e";
+import { readTerrainBytes, terrainPath } from "../terrain/w3etext";
 
 /** A map file as its JSON: the project's .json, or the raw file through its codec; null if there's neither. */
 export const readMapDoc = async <T>(w3: W3Api, path: string): Promise<T | null> => {
@@ -25,6 +27,15 @@ export function jsonPathOf(w3: W3Api, name: string): string {
   const path = `map/${name}.json`, files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   if (!files.has(path.toLowerCase()) && files.has(`map/${name}`.toLowerCase())) throw new Error(`${name} is kept raw in this project, so it can't be edited here.`);
   return path;
+}
+
+/** What the terrain file says about the map: its own tileset, which is the one that counts, and
+ *  its grid. Null without a terrain file. */
+export async function terrainFacts(w3: W3Api): Promise<{ tileset: string; offsetX: number; offsetY: number; width: number; height: number } | null> {
+  const path = terrainPath(w3.workspace.files().map((f) => f.path));
+  if (!path) return null;
+  const t = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
+  return { tileset: t.tileset, offsetX: t.offsetX, offsetY: t.offsetY, width: t.width, height: t.height };
 }
 
 /** For tools: the project, or a clear failure. */

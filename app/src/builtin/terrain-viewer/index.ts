@@ -18,9 +18,10 @@ import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from 
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
-import { jsonPathOf, requireProject } from "../../lib/formats/mapdoc";
-import { inArea, readArea, type Area } from "../../lib/terrain/area";
-import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, scatterSpots, sculptCorners, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
+import { checkPath, type Grid } from "./pathcheck";
+import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK } from "../../lib/terrain/pathing";
 import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainView } from "../../extensions/services";
@@ -205,6 +206,45 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { changed, corners, objectsMoved: moved };
   };
 
+  /** A place a tool names: [x, y], or a region's middle. */
+  const readPlace = async (place: unknown, name: string): Promise<[number, number]> => {
+    if (Array.isArray(place) && place.length === 2 && place.every((n) => typeof n === "number")) return [place[0], place[1]];
+    if (typeof place === "string") {
+      const a = (await readArea(w3, { region: place }))!;
+      return [(a.left + a.right) / 2, (a.bottom + a.top) / 2];
+    }
+    throw new Error(`${name} must be [x, y], or a region's name.`);
+  };
+
+  /** The places scatter_objects should leave free. */
+  const readKeepClear = async (avoid: unknown): Promise<KeepClear[]> => {
+    if (avoid === undefined) return [];
+    if (!Array.isArray(avoid)) throw new Error("avoid must be a list of places.");
+    return Promise.all(avoid.map(async (item: Record<string, unknown>) => {
+      if (Array.isArray(item?.points)) {
+        const points = item.points as [number, number][];
+        if (!points.length || typeof item.width !== "number") throw new Error("A path in avoid needs points and a width.");
+        return { points, width: item.width };
+      }
+      const a = await readArea(w3, item ?? {});
+      if (!a) throw new Error("Each place in avoid is a region, a rectangle, or points with a width.");
+      return a;
+    }));
+  };
+
+  /** The map's playable part, null if it can't be read. */
+  const playable = async () => {
+    const [info, facts] = await Promise.all([readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json"), terrainFacts(w3)]);
+    return info && facts ? playableArea(info, facts) : null;
+  };
+
+  /** What a unit can't walk on: the pathing map, and what stands there, which it leaves out. */
+  const walkGrid = async (handle: TerrainEditorHandle): Promise<Grid> => {
+    const [pathing, room] = await Promise.all([handle.pathing(), handle.objects.occupancy()]);
+    const t = handle.terrain;
+    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || room.blocked[i] ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
+  };
+
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean) => {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
     if (!entry) throw new Error(`${f.name} has nothing placed yet to take the layout from.`);
@@ -221,6 +261,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const data = await editor.screenshot(size, area, angle, args.heights === true);
       const image = { type: "image", data, mimeType: "image/png" };
       return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
+    }),
+    w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
+      const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
+      const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
+      return checkPath(await walkGrid((await liveEditor()).handle), start, goal, size);
+    }),
+    w3.mcp.registerTool("paint_path", async ({ tile, points, width, edge, flatten }) => {
+      if (typeof tile !== "string" || tile.length !== 4) throw new Error("tile must be four characters, like Ldrt. terrain_info lists them.");
+      if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
+      const known = (await (await liveEditor()).handle.tilesets()).flatMap((s) => s.tiles);
+      if (!known.includes(tile)) throw new Error(`"${tile}" isn't one of the game's ground tiles. terrain_info lists them.`);
+      const across = typeof width === "number" && width > 0 ? width : 256;
+      const fray = typeof edge === "number" ? Math.min(1, Math.max(0, edge)) : 0.4;
+      return editGround(`Paint a path of ${tile}`, (t) => paintPath(t, points as [number, number][], across, groundSlot(t, tile), fray, flatten === true, Math.random));
     }),
     w3.mcp.registerTool("paint_terrain", async (args) => {
       const { tile } = args;
@@ -252,13 +306,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const cells = pathing.cells.map((c, i) => (room.blocked[i] ? c | NO_WALK : c));
       const area = (await readArea(w3, args)) ?? whole;
       const tiles = (await editor.handle.tilesets()).find((s) => s.id === t.tileset)?.tiles ?? [];
+      const bounds = await playable().catch(() => null);
+      const past = bounds && beyondPlayable(area, bounds);
       return {
         ...terrainSummary(t, { ...pathing, cells }, area),
+        ...(bounds ? { playable: bounds } : {}), ...(past ? { warning: past } : {}),
         tilesInMap: t.groundTiles, otherTilesOfTheTileset: tiles.filter((id) => !t.groundTiles.includes(id)),
         ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
       };
     }),
-    w3.mcp.registerTool("place_objects", async ({ kind, objects, ignoreRoom }) => {
+    w3.mcp.registerTool("place_objects", async ({ kind, objects, ignoreRoom, nearest, dryRun }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
       const wanted = objects as { id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number }[];
       const key = fileKey(kind);
@@ -268,22 +325,48 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (key === "units" && (!Number.isInteger(owners[i]) || owners[i] < 0 || owners[i] > 27)) throw new Error(`objects[${i}]: player counts from 1.`);
       }
       const { handle } = await liveEditor();
-      let placed = 0, noRoom = 0;
-      await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
+      const bounds = await playable().catch(() => null);
+      const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
+      const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
+      /** Works out what fits; `place` then puts it there. A dry run doesn't mark what it finds, since
+       *  that would stay in the editor's map of what's taken: objects in it can overlap each other. */
+      const plan = async (place: ((o: typeof wanted[number], i: number, x: number, y: number, facing: number) => void) | null) => {
+        skipped.length = shifted.length = 0;
         const room = ignoreRoom === true ? null : await handle.objects.occupancy();
+        let placed = 0;
         for (const [i, o] of wanted.entries()) {
-          const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id);
+          const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
+          if (!type) { skipped.push({ index: i, id, x, y, reason: "no such object type here" }); continue; }
           // Decided here: a footprint is checked at the facing the object ends up with.
-          const facing = type?.fixedRot ?? o.facing ?? (key === "doodads" ? Math.random() * 360 : 270);
+          const facing = type.fixedRot ?? o.facing ?? (key === "doodads" ? Math.random() * 360 : 270);
           const angle = (facing * Math.PI) / 180;
-          if (room && !(await room.fits(type?.kind ?? "w3u", id, x, y, angle))) { noRoom++; continue; }
-          add(f, handle, id, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads");
-          await room?.mark(type?.kind ?? "w3u", id, x, y, angle);
+          let spot: [number, number] | null = [x, y];
+          if (room && !(await room.fits(kindOf, id, x, y, angle))) {
+            spot = null;
+            if (nearest === true) {
+              for (const s of spotsAround(x, y)) if (await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
+            }
+            if (!spot) {
+              skipped.push({ index: i, id, x, y, reason: bounds && !inArea(x, y, bounds) ? "outside the playable map" : "something stands there, or the ground doesn't allow it" });
+              continue;
+            }
+            shifted.push({ index: i, id, from: [x, y], to: spot });
+          }
+          if (place) {
+            place(o, i, spot[0], spot[1], facing);
+            await room?.mark(kindOf, id, spot[0], spot[1], angle);
+          }
           placed++;
         }
-        if (!placed) throw new Error("There's no room at any of those points.");
+        return placed;
+      };
+      if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
+      let placed = 0;
+      await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
+        placed = await plan((o, i, x, y, facing) => add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads"));
+        if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
       });
-      return { placed, noRoom };
+      return { placed, shifted, skipped };
     }),
     w3.mcp.registerTool("scatter_objects", async (args) => {
       const ids = args.ids;
@@ -295,9 +378,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const range = args.scaleRange;
       if (range !== undefined && !(Array.isArray(range) && range.length === 2 && range.every((n) => typeof n === "number" && n > 0) && range[0] <= range[1])) throw new Error("scaleRange must be [smallest, biggest].");
       const scaleRange = range as [number, number] | undefined;
+      const keep = await readKeepClear(args.avoid);
       const { handle } = await liveEditor();
       const key = fileKey(args.kind ?? "doodads");
       const counts = new Map<string, number>();
+      let noRoom = 0, keptClear = 0;
       await editPlaced(`Scatter ${(ids as string[]).join(", ")} in ${area.name ?? "an area"}`, key, async (f) => {
         const room = await handle.objects.occupancy();
         const types = (ids as string[]).map((id) => {
@@ -312,16 +397,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const spacing = Math.max(64, smallest) / Math.sqrt(density);
         for (const spot of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", Math.random)) {
           if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
+          if (isKeptClear(spot.x, spot.y, keep)) { keptClear++; continue; }
           const { id, type } = types[Math.floor(Math.random() * types.length)];
           const facing = type.fixedRot ?? Math.random() * 360, angle = (facing * Math.PI) / 180;
-          if (!(await room.fits(type.kind, id, spot.x, spot.y, angle))) continue;
+          if (!(await room.fits(type.kind, id, spot.x, spot.y, angle))) { noRoom++; continue; }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
           add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true);
           counts.set(id, (counts.get(id) ?? 0) + 1);
         }
         if (!counts.size) throw new Error("There's no free ground there for these.");
       });
-      return { placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), area };
+      return { placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), spotsWithoutRoom: noRoom, spotsKeptClear: keptClear, area };
     }),
     w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
       if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");

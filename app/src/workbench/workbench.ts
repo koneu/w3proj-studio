@@ -28,8 +28,9 @@ export class Workbench {
   readonly game = new GameService(this.settings);
   readonly mcp = new McpTools({
     activate: (event) => this.host.fire(event),
-    allowed: ({ source, readOnly }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
-      && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true),
+    allowed: ({ source, readOnly, needs }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
+      && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true)
+      && (!needs || this.settings.get<boolean>(needs, false) === true),
     whyUnavailable: (id) => {
       const e = this.host.extensions.find((x) => x.manifest.id === id);
       return e?.error ? `${e.manifest.name} ${e.error}.` : undefined;

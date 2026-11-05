@@ -26,9 +26,37 @@ export function objectName(o: MapObject, kind: Kind, resolve: Resolve): string {
 /** Where a kind says which tilesets an object is made for. */
 const TILESET_FIELDS = ["btil", "dtil"];
 
+const MODEL_FIELDS = ["umdl", "ifil", "bfil", "dfil"];
+const SCALE_FIELDS = [["bmis", "bmas"], ["dmis", "dmas"]];
+const PATH_FIELDS = ["bptx", "dptx", "upat"];
+
+/** Stored model → the graphics packs it's only in; empty when the base game has it. */
+export function modelPacks(all: readonly string[]): Map<string, string[]> {
+  const out = new Map<string, Set<string>>();
+  for (const full of all) {
+    if (!/\.mdx$/i.test(full)) continue;
+    const key = full.slice(full.lastIndexOf(":") + 1).replace(/\.mdx$/i, "").replace(/\//g, "\\").toLowerCase();
+    const set = out.get(key) ?? new Set<string>();
+    const pack = /^War3\.w3mod:_(HD|DE|Teen)\b/i.exec(full)?.[1].toUpperCase();
+    set.add(pack ?? "");
+    out.set(key, set);
+  }
+  return new Map([...out].map(([k, v]) => [k, v.has("") ? [] : [...v].sort()]));
+}
+
+/** What a model file means for an object: nothing to report, or that it won't show everywhere.
+ *  Types with variations name their files without the number. */
+function modelNote(path: string | undefined, stored: ReadonlyMap<string, string[]>) {
+  const key = (path ?? "").replace(/\.md[lx]$/i, "").replace(/\//g, "\\").toLowerCase();
+  if (!key || key === "_" ) return { noModel: true };
+  const packs = stored.get(key) ?? stored.get(`${key}0`) ?? stored.get(`${key}1`);
+  if (!packs) return { noModel: true };
+  return packs.length ? { modelOnlyIn: packs } : {};
+}
+
 /** The game's objects of a kind, with what sets them apart. `tileset`: its letter; objects for
- *  all tilesets have "*". */
-export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue">, clean: (s: string) => string, tileset?: string, category?: string) {
+ *  all tilesets have "*". `stored`: from modelPacks, to check models. */
+export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue">, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>) {
   const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
   const fits = (id: string) => {
     if (!tileset || !field) return true;
@@ -36,9 +64,20 @@ export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facet
     return list.includes("*") || list.includes(tileset.toUpperCase());
   };
   const wanted = category?.toLowerCase();
+  const value = (id: string, fieldId: string) => { const f = kind.fieldById.get(fieldId); return f ? kind.defaultValue(id, f, 0) : undefined; };
+  const model = MODEL_FIELDS.find((f) => kind.fieldById.has(f));
+  const scale = SCALE_FIELDS.find(([low]) => kind.fieldById.has(low));
+  const room = PATH_FIELDS.find((f) => kind.fieldById.has(f));
   return kind.baseIds.filter(fits).map((id) => {
     const facets = kind.facets(id);
-    return { id, name: clean(kind.names.get(id) ?? id), ...(facets.category ? { category: facets.category } : {}) };
+    const low = scale && Number(value(id, scale[0])), high = scale && Number(value(id, scale[1]));
+    const path = room && value(id, room);
+    return {
+      id, name: clean(kind.names.get(id) ?? id), ...(facets.category ? { category: facets.category } : {}),
+      ...(stored && model ? modelNote(value(id, model), stored) : {}),
+      ...(low && high ? { sizeRange: [low, high] } : {}),
+      ...(room ? { takesRoom: !!path && path !== "_" } : {}),
+    };
   }).filter((o) => !wanted || o.category?.toLowerCase().includes(wanted));
 }
 

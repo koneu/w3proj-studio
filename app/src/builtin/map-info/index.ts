@@ -4,7 +4,8 @@ import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
-import { jsonPathOf, mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
 import { mapSummary } from "./summary";
@@ -142,7 +143,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     requireProject(w3);
     const info = await readMapDoc<Parameters<typeof mapSummary>[0]>(w3, PATH);
     if (!info) throw new Error("This map's war3map.w3i can't be read (missing, or damaged by a map protector).");
-    return mapSummary(info, await mapStrings(w3));
+    const facts = await terrainFacts(w3).catch(() => null);
+    return {
+      ...mapSummary(info, await mapStrings(w3)),
+      ...(facts ? { terrainTileset: facts.tileset, playable: playableArea(info as { cameraComplements?: number[] }, facts) } : {}),
+      ...(facts && facts.tileset !== info.tileset ? { tilesetNote: "The terrain's tileset differs from the one in the map's properties. The terrain's is what shows on the ground." } : {}),
+    };
   }));
   ctx.subscriptions.push(w3.mcp.registerTool("set_map_text", async ({ field, text }) => {
     const { root } = requireProject(w3);

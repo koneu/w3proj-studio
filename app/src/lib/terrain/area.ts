@@ -8,6 +8,39 @@ interface AreaArgs { region?: unknown; left?: unknown; bottom?: unknown; right?:
 
 export const inArea = (x: number, y: number, a: Area) => x >= a.left && x <= a.right && y >= a.bottom && y <= a.top;
 
+/** The playable part of a map: what's inside its border of unplayable tiles. */
+export function playableArea(info: { cameraComplements?: number[] }, t: { offsetX: number; offsetY: number; width: number; height: number }): Area {
+  const [left, right, bottom, top] = info.cameraComplements ?? [0, 0, 0, 0];
+  return {
+    left: t.offsetX + left * 128, right: t.offsetX + (t.width - 1 - right) * 128,
+    bottom: t.offsetY + bottom * 128, top: t.offsetY + (t.height - 1 - top) * 128,
+  };
+}
+
+/** Says when an area reaches past the playable part; null when it doesn't. */
+export function beyondPlayable(area: Area, playable: Area): string | null {
+  const sides = [area.left < playable.left && "west", area.right > playable.right && "east", area.bottom < playable.bottom && "south", area.top > playable.top && "north"].filter(Boolean);
+  return sides.length ? `This area runs past the playable map to the ${sides.join(" and ")}: nothing can stand there.` : null;
+}
+
+/** A place to keep free: an area, or a line of points with a width. */
+export type KeepClear = Area | { points: [number, number][]; width: number };
+
+/** Shortest distance from a point to a line of points. */
+export function distanceToLine(x: number, y: number, points: readonly [number, number][]): number {
+  let best = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const [ax, ay] = points[i], [bx, by] = points[Math.min(i + 1, points.length - 1)];
+    const dx = bx - ax, dy = by - ay, span = dx * dx + dy * dy;
+    const k = span ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / span)) : 0;
+    best = Math.min(best, Math.hypot(x - (ax + k * dx), y - (ay + k * dy)));
+  }
+  return best;
+}
+
+export const isKeptClear = (x: number, y: number, keep: readonly KeepClear[]) =>
+  keep.some((k) => ("points" in k ? distanceToLine(x, y, k.points) <= k.width / 2 : inArea(x, y, k)));
+
 /** Null when `args` name no area. */
 export function parseArea(args: AreaArgs, regions: readonly Area[]): Area | null {
   if (typeof args.region === "string") {

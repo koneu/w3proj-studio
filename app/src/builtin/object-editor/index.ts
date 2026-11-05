@@ -9,8 +9,8 @@ import { pickFile, pickLabel, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
-import { capped, mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
-import { changedFields, gameFields, gameObjectList, mapObjectList, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
+import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { addCustomObject, fieldLevel, fieldValue, objectToEdit, removeObject, setObjectField, type EditFile } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -79,8 +79,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { data, file, resolve } = await toolKind(kind);
       const text = typeof filter === "string" ? filter.toLowerCase() : "";
       const hit = (o: { id: string; name: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text);
-      const wantTileset = tileset === "map" ? (await readMapDoc<{ tileset: string }>(w3, "map/war3map.w3i.json"))?.tileset : typeof tileset === "string" ? tileset : undefined;
-      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined);
+      const wantTileset = tileset === "map" ? (await terrainFacts(w3))?.tileset : typeof tileset === "string" ? tileset : undefined;
+      const stored = scope === "game" ? modelPacks(await w3.game.list()) : null;
+      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined);
       return capped<{ id: string; name: string }>((scope === "game" ? game() : mapObjectList(file, data, resolve)).filter(hit), limit, 200);
     }),
     w3.mcp.registerTool("get_object", async ({ kind, id, gameValues }) => {

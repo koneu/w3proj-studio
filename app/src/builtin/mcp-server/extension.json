@@ -18,14 +18,19 @@
       "properties": {
         "mcp.enabled": { "type": "boolean", "default": false, "description": "Serve the MCP tools to AI clients on this computer. Clients start `w3proj mcp`, which connects to this app." },
         "mcp.projectTools": { "type": "boolean", "default": false, "description": "Also offer tools from the open project's own extensions (.w3proj/extensions). A map you got from someone else could bring any tool." },
-        "mcp.writeTools": { "type": "boolean", "default": false, "description": "Also offer tools that change things. All built-in tools only read so far." }
+        "mcp.writeTools": { "type": "boolean", "default": false, "description": "Also offer tools that change the project. Each change can be undone, and none is made while something is unsaved." },
+        "mcp.saveTool": { "type": "boolean", "default": false, "description": "Also let AI tools save everything unsaved in the editors, your own work included. Off, they ask you to save." }
       }
     },
     "mcpTools": [
       { "name": "list_edits", "description": "The AI edits made to this project since it was opened, oldest first.", "readOnly": true },
       { "name": "undo_last_edit", "description": "Takes back the newest AI edit, unless its files changed since. Can be repeated. Needs the setting mcp.writeTools." },
       {"name":"edit_text_file","description":"Replaces one exact piece of a text file under map/, such as war3map.wts. The piece must occur exactly once. Prefer the specific tools: map/war3map.j is rebuilt from triggers and objects, so changes to it can be lost, and for the ground use paint_terrain and sculpt_terrain. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["path","find","replace"],"properties":{"path":{"type":"string"},"find":{"type":"string","description":"The text to replace, with enough around it to be unique."},"replace":{"type":"string"}}}},
-      { "name": "project_info", "description": "The open map project: name, folder, number of files, the file open in the editor.", "readOnly": true },
+      { "name": "project_info", "description": "What W3Proj Studio has open now: the project, the file in the editor, what's unsaved, and what you may do. Reading tools see the last save, and edits are refused while anything is unsaved, so check this when a thing seems missing.", "readOnly": true },
+      { "name": "studio_status", "description": "Whether W3Proj Studio is reachable, and what it has open. If this is your only tool, list the tools again once it runs.", "readOnly": true },
+      {"name":"save_project","description":"Saves everything unsaved in the editors, the user's own work too. Only offered if they allow it in the MCP panel; otherwise ask them to save.","needs":"mcp.saveTool","inputSchema":{"type":"object","required":[],"properties":{}}},
+      {"name":"begin_edit","description":"Starts a group: the edits until end_edit become one entry and one undo_last_edit. Use it for one job made of many edits, like a forest. Needs the setting mcp.writeTools.","inputSchema":{"type":"object","required":["title"],"properties":{"title":{"type":"string","description":"What the job is, like \"Forest in Region 001\"."}}}},
+      {"name":"end_edit","description":"Ends the group begun with begin_edit. Needs the setting mcp.writeTools.","inputSchema":{"type":"object","required":[],"properties":{}}},
       {
         "name": "list_files",
         "description": "Files of the open project, with sizes.",

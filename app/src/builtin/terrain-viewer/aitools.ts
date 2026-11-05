@@ -2,7 +2,7 @@
 // a tool passes what it read, and `random` so that tests can repeat a result.
 
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import { inArea, type Area } from "../../lib/terrain/area";
+import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { groundHeight, heightAt, randomVariation, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
@@ -132,6 +132,43 @@ export function paintCorners(t: Terrain, area: Area, shape: Shape, slot: number,
   return changed;
 }
 
+/** Paints a trail along points, frayed along its sides and at its ends. With `flatten` the ground
+ *  across it is levelled towards the height along its middle. The changed corners. */
+export function paintPath(t: Terrain, points: readonly [number, number][], width: number, slot: number, edge: number, flatten: boolean, random: () => number) {
+  const half = width / 2, changed = new Set<number>();
+  const middle = (x: number, y: number) => {
+    let best: [number, number] = points[0], gap = Infinity;
+    for (let i = 0; i + 1 < points.length; i++) {
+      const [ax, ay] = points[i], [bx, by] = points[i + 1], dx = bx - ax, dy = by - ay, span = dx * dx + dy * dy || 1;
+      const k = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / span)), px = ax + k * dx, py = ay + k * dy, d = Math.hypot(x - px, y - py);
+      if (d < gap) { gap = d; best = [px, py]; }
+    }
+    return best;
+  };
+  // Heights are read before any changes, and along the way, or the path would dig into itself.
+  const before = flatten ? { ...t, corners: t.corners.map((c) => ({ ...c })) } : t;
+  for (let y = 0; y < t.height; y++) {
+    for (let x = 0; x < t.width; x++) {
+      const i = y * t.width + x, c = t.corners[i], wx = t.offsetX + x * TILE, wy = t.offsetY + y * TILE;
+      if (c.boundary) continue;
+      const r = distanceToLine(wx, wy, points) / half;
+      if (r > 1) continue;
+      if (flatten) {
+        const [mx, my] = middle(wx, wy), raw = c.rawHeight;
+        const w = 0.5 + 0.5 * Math.cos(Math.PI * r), layerLift = (c.layer - 2) * TILE;
+        const g = groundHeight(c), target = heightAt(before, mx, my) - layerLift;
+        setGroundHeight(c, g + (target - g) * w);
+        if (c.rawHeight !== raw) changed.add(i);
+      }
+      if ((edge > 0 && r > 1 - edge && random() > (1 - r) / edge) || c.texture === slot) continue;
+      c.texture = slot;
+      c.variation = randomVariation();
+      changed.add(i);
+    }
+  }
+  return [...changed];
+}
+
 export type SculptMode = "raise" | "lower" | "flatten" | "smooth";
 
 /** Reshapes the ground, strongest in the middle and fading to nothing at the edge, so it makes no
@@ -225,6 +262,18 @@ export function heightColors(t: Terrain, step = 32) {
     }
   }
   return { rgba, width, height };
+}
+
+/** Where to look for room when a spot is taken: rings around it, nearest first, on the pathing grid. */
+export function spotsAround(x: number, y: number, reach = 320): [number, number][] {
+  const out: [number, number][] = [];
+  for (let d = 32; d <= reach; d += 32) {
+    for (let a = 0; a < 8 + d / 16; a++) {
+      const angle = (a / (8 + d / 16)) * Math.PI * 2;
+      out.push([Math.round((x + Math.cos(angle) * d) / 32) * 32, Math.round((y + Math.sin(angle) * d) / 32) * 32]);
+    }
+  }
+  return out;
 }
 
 /** What the ground in an area is like. */

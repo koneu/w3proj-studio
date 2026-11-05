@@ -70,6 +70,8 @@ export interface McpToolContribution {
   inputSchema?: Record<string, unknown>;
   /** Changes nothing. Other tools are only offered with the setting "mcp.writeTools". */
   readOnly?: boolean;
+  /** A boolean setting that must be on as well, for what asks for more trust than editing. */
+  needs?: string;
 }
 
 export type McpContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
