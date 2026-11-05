@@ -98,6 +98,50 @@ export async function loadTilesets(w3: W3Api): Promise<TileData> {
   return { sets: out.sort((a, b) => a.name.localeCompare(b.name)), all: tiles.map(tile), cliffsOn };
 }
 
+/** The folder a map of this name gets. */
+const folderName = (name: string) => name.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled";
+/** Grass where the list has one (as the World Editor's default), else the first tile. */
+const defaultBase = (tiles: string[], nameOf: (id: string) => string) =>
+  tiles.find((x) => /^grass$/i.test(nameOf(x))) ?? tiles.find((x) => /grass/i.test(nameOf(x))) ?? tiles[0];
+
+/** The choices of a new map from a tool's arguments, with the dialog's defaults. Throws what's
+ *  wrong. Tiles aren't chosen here: the tileset's own, and painting adds others. */
+export function mapChoices(a: Record<string, unknown>, data: Pick<TileData, "sets" | "all" | "cliffsOn">, fallbackParent: string | null): NewMapOptions {
+  if (typeof a.name !== "string" || !a.name.trim()) throw new Error("The map needs a name.");
+  const parent = typeof a.folder === "string" && a.folder.trim() ? a.folder.trim() : fallbackParent;
+  if (!parent) throw new Error("No project is open to put it next to: give folder, the parent folder of the new map's project.");
+  if (!/^(?:[A-Za-z]:[\\/]|\\\\)/.test(parent)) throw new Error(`folder must be a full path, not "${parent}".`);
+  const size = (v: unknown, what: string) => {
+    if (v === undefined) return 96;
+    if (!SIZES.includes(v as number)) throw new Error(`${what} must be one of ${SIZES.join(", ")} tiles.`);
+    return v as number;
+  };
+  const width = size(a.width, "width"), height = size(a.height, "height");
+  const tileset = a.tileset === undefined ? "L" : a.tileset;
+  const set = data.sets.find((s) => s.id === tileset);
+  if (!set) throw new Error(`"${String(tileset)}" isn't a tileset. They are: ${data.sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
+  const tiles = set.tiles.map((t) => t.id);
+  const nameOf = (id: string) => data.all.find((x) => x.id === id)?.name ?? id;
+  const baseTile = a.baseTile === undefined ? defaultBase(tiles, nameOf) : a.baseTile;
+  if (typeof baseTile !== "string" || !tiles.includes(baseTile)) throw new Error(`${set.name} has no ground tile "${String(baseTile)}". It has: ${tiles.map((t) => `${t} (${nameOf(t)})`).join(", ")}. Paint others on afterwards.`);
+  const layer = a.cliffLevel === undefined ? 2 : a.cliffLevel;
+  if (!Number.isInteger(layer) || (layer as number) < 0 || (layer as number) > 14) throw new Error("cliffLevel must be a whole number from 0 to 14.");
+  const water = a.water === undefined ? "none" : a.water;
+  if (water !== "none" && water !== "shallow" && water !== "deep") throw new Error("water must be none, shallow or deep.");
+  if ((layer as number) < WATER_DROP[water]) throw new Error(`${water === "deep" ? "Deep" : "Shallow"} water needs cliffLevel ${WATER_DROP[water]} or higher.`);
+  const script = a.script === undefined ? "jass" : a.script;
+  if (script !== "jass" && script !== "lua") throw new Error("script must be jass or lua.");
+  const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  return {
+    dir: `${parent.replace(/[\\/]+$/, "")}\\${folderName(a.name)}`, name: a.name.trim(), author: text(a.author), description: text(a.description),
+    width, height, tileset: set.id, groundTiles: tiles, cliffTiles: data.cliffsOn(tiles), customTiles: false, baseTile,
+    layer: layer as number, water, noise: a.hills === true, lua: script === "lua",
+  };
+}
+
+/** What can be played of a map of that size, past the camera margins. */
+export const playableOf = (width: number, height: number) => [width - MARGINS[0] - MARGINS[1], height - MARGINS[2] - MARGINS[3]] as const;
+
 /** The New Map dialog; resolves with the choices, or null when cancelled. */
 /** Preset for the dialog (e.g. a campaign's chapter map): parent folder, a suffix for the folder
  *  name (".w3x": chapter projects are named like their map file), dialog title. */
@@ -131,9 +175,8 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
     const tilesSummary = h("span.muted");
     const fillTiles = () => {
       if (!custom) tiles = current().tiles.map((x) => x.id);
-      // Grass where the list has one (as the World Editor's default), else the first tile.
       const keep = tiles.includes(base.value) ? base.value : null;
-      const pick = keep ?? tiles.find((x) => /^grass$/i.test(tileName(x))) ?? tiles.find((x) => /grass/i.test(tileName(x))) ?? tiles[0];
+      const pick = keep ?? defaultBase(tiles, tileName);
       base.replaceChildren(...tiles.map((x) => h("option", { value: x, selected: x === pick }, `${tileName(x)} (${x})`)));
       tilesSummary.textContent = `${tiles.length} tiles${custom ? " (custom)" : ""} `;
     };
@@ -162,10 +205,10 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       tileList.hidden = false;
       sync();
     };
-    const folderName = () => name.value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled";
-    const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName()}${preset.suffix ?? ""}` : "");
+    const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName(name.value)}${preset.suffix ?? ""}` : "");
     const update = () => {
-      playable.textContent = `playable ${Number(width.value) - MARGINS[0] - MARGINS[1]} × ${Number(height.value) - MARGINS[2] - MARGINS[3]}`;
+      const [w, h] = playableOf(Number(width.value), Number(height.value));
+      playable.textContent = `playable ${w} × ${h}`;
       // Shown right-aligned to clip the start of long paths; the mark keeps them left-to-right.
       folder.textContent = parent ? `‎${target()}` : "Choose a parent folder…";
       folder.title = target();

@@ -11,7 +11,7 @@ import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, placement, withObjectArt, type ObjectArt, type Placed } from "./objects";
 import { buildMinimap, buildMinimapIcons, minimapSettings } from "./minimapgen";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
-import { askNewMap, createMap, loadTilesets, type NewMapPreset } from "./newmap";
+import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from "./pathmap";
@@ -301,11 +301,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** What big changes share, which undo_last_edit doesn't cover: nothing unsaved of the user's,
    *  their yes in Studio, and a checkpoint to go back to. */
-  const withConsent = async (question: string, yes: string) => {
+  const askUser = async (question: string, yes: string) => {
     const unsaved = w3.editors.unsavedPaths();
     if (unsaved.length) throw new Error(`Not changed: ${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Ask the user to save or discard them first.`);
-    const agreed = await w3.window.confirm(`AI request: ${question} This can't be undone with AI undo; a checkpoint is made first.`, yes, CONFIRM_TIME);
+    const agreed = await w3.window.confirm(`AI request: ${question}`, yes, CONFIRM_TIME);
     if (!agreed) throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
+  };
+  const withConsent = async (question: string, yes: string) => {
+    await askUser(`${question} This can't be undone with AI undo; a checkpoint is made first.`, yes);
     await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${e}).`); });
   };
 
@@ -352,6 +355,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!changed) throw new Error("Nothing placed matches that.");
       });
       return { changed };
+    }),
+    w3.mcp.registerTool("new_map", async (args) => {
+      const open = w3.workspace.project()?.root.replace(/[\\/]+$/, "") ?? null;
+      const here = open?.includes("\\") || open?.includes("/") ? open.replace(/[\\/][^\\/]*$/, "") : null;
+      const data = await loadTilesets(w3);
+      const o = mapChoices(args, data, here);
+      if (await w3.backend.invoke<boolean>("fs_exists", { path: o.dir })) throw new Error(`${o.dir} already exists. Give another name or folder.`);
+      const [playableWidth, playableHeight] = playableOf(o.width, o.height);
+      const plan = {
+        name: o.name, folder: o.dir, width: o.width, height: o.height, playableWidth, playableHeight, tileset: o.tileset, baseTile: o.baseTile,
+        cliffLevel: o.layer, water: o.water, hills: o.noise, script: o.lua ? "lua" : "jass",
+      };
+      if (args.dryRun === true) return plan;
+      await askUser(`create the map "${o.name}" (${o.width} × ${o.height}) in ${o.dir} and switch to it?${open ? " The open project closes, and stays as it was saved." : ""}`, "Create map");
+      await w3.window.withProgress(`Creating ${o.name}…`, () => createMap(w3, o));
+      return { ...plan, opened: w3.workspace.project()?.root ?? null };
     }),
     w3.mcp.registerTool("set_tileset", async ({ tileset, replaceTiles, dryRun }) => {
       if (typeof tileset !== "string") throw new Error("tileset must be a letter; terrain_info lists them.");
