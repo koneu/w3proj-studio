@@ -5,6 +5,8 @@ project folders**, and packing to `.w3x` is a release step. Binary map data
 (terrain, doodads, regions…) is still edited in Blizzard's World Editor, which
 this tool launches and syncs back from.
 
+Unofficial project, not affiliated with or endorsed by Blizzard Entertainment. Warcraft is a trademark of Blizzard Entertainment. You need your own installed copy of the game.
+
 ## How the World Editor stores a map (and what we do with it)
 
 A `.w3x` is a 512-byte `HM3W` header (name, flags, max players) followed by an
