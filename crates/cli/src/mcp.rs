@@ -31,7 +31,7 @@ fn initialize(params: &Value) -> Value {
         "protocolVersion": PROTOCOLS.iter().find(|p| **p == asked).unwrap_or(&PROTOCOLS[0]),
         "capabilities": { "tools": { "listChanged": true } },
         "serverInfo": { "name": "w3proj-studio", "version": env!("CARGO_PKG_VERSION") },
-        "instructions": "Tools of W3Proj Studio, a Warcraft III map editor. They work on the project open in the running app, and read it as last saved; only terrain_screenshot shows unsaved changes. read_guide explains kinds of work, such as terrain, melee maps and spells: read it before you start on one.",
+        "instructions": "Tools of W3Proj Studio, a Warcraft III map editor. They work on the project open in the running app, and read it as last saved; only terrain_screenshot shows unsaved changes. read_guide explains kinds of work, such as terrain, melee maps and spells: read it before you start on one. Plan a big job before building, check after each stage, and fix what's wrong instead of rebuilding what works.",
     })
 }
 

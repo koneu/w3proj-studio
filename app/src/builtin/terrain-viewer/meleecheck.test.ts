@@ -16,7 +16,7 @@ function map(extra: MeleeUnit[] = []): MeleeFacts {
   const half = (k: number): MeleeUnit[] => [
     unit("sloc", -5000 * k, 0, { player: 0, acquisition: 0, drops: false }), neutral("ngol", -5000 * k, 776 * k),
     neutral("ngol", 0, 3000 * k), ...camp(-100, 3300 * k, { acquisition: -1 }),
-    ...Array.from({ length: 9 }, (_, i) => camp(-4000 * k + 900 * i * k, -4800 * k)).flat(),
+    ...Array.from({ length: 9 }, (_, i) => camp(-4400 * k + 1100 * i * k, -4800 * k)).flat(),
   ];
   return {
     units: [...half(1), ...half(-1), ...extra],
@@ -139,6 +139,38 @@ test("using a shop: which camps it alerts", () => {
   assert.ok(f.findings.some((x) => x.rule === "shop" && /alerts 1 camp within 900/.test(x.message)));
   const free = checkMelee(map([neutral("ngme", 0, 0)]));
   assert.ok(free.findings.some((x) => x.rule === "shop" && /free to use/.test(x.message)));
+});
+
+test("camps on top of each other are found, however they overlap", () => {
+  const close = checkMelee(map([...camp(0, 600), ...camp(0, 1300)]));
+  assert.ok(close.findings.some((x) => x.rule === "camp overlap" && /Two camps stand/.test(x.message)));
+  const merged = checkMelee(map([...camp(0, 0), ...camp(300, 0), ...camp(150, 200)]));
+  assert.ok(merged.findings.some((x) => x.rule === "camp overlap" && x.severity === "error" && /run into each other/.test(x.message)));
+  const stacked = checkMelee(map([unit("nogr", 0, 0), unit("nogr", 30, 0, { drops: false })]));
+  assert.ok(stacked.findings.some((x) => /on top of each other/.test(x.message)));
+  assert.ok(checkMelee(map([unit("nogr", 0, 0), unit("nogr", 440, 0), unit("nogr", 880, 0), unit("nogr", 1320, 0)])).findings.some((x) => /spreads/.test(x.message)));
+});
+
+test("a narrow way to a camp is an error, a tight one a warning, and guards don't count", () => {
+  const at = (way: number) => ({ ...map(camp(0, 0)), widestTo: (x: number, y: number) => (Math.hypot(x, y) < 200 ? way : 480) });
+  assert.ok(checkMelee(at(96)).findings.some((x) => x.rule === "camp access" && x.severity === "error"));
+  assert.ok(checkMelee(at(192)).findings.some((x) => x.rule === "camp access" && x.severity === "warning"));
+  assert.ok(!checkMelee(at(480)).findings.some((x) => x.rule === "camp access"));
+  assert.ok(!checkMelee({ ...map(), widestTo: () => 32 }).findings.some((x) => x.rule === "camp access" && /3300/.test(x.message)));
+});
+
+test("stray narrow paths are reported only past what ladder maps have", () => {
+  const strip = { cells: 60, at: [100, 200] as const };
+  assert.ok(!checkMelee({ ...map(), narrow: { percent: 2, strips: [strip] } }).findings.some((x) => x.rule === "narrow path"));
+  const many = checkMelee({ ...map(), narrow: { percent: 2, strips: Array(12).fill(strip) } });
+  assert.ok(many.findings.some((x) => x.rule === "narrow path" && x.severity === "warning" && /12 stray/.test(x.message)));
+  assert.ok(checkMelee({ ...map(), narrow: { percent: 9, strips: [strip] } }).findings.some((x) => x.rule === "narrow path" && x.at?.[0] === 100));
+});
+
+test("findings say what to do about them", () => {
+  const f = checkMelee(map(camp(-3900, 0))).findings.find((x) => x.rule === "camp distance")!;
+  assert.match(f.fix ?? "", /find_spots/);
+  assert.ok(checkMelee(map([neutral("ngme", 0, 0)])).findings.filter((x) => x.severity === "info").every((x) => !x.fix));
 });
 
 test("types the game doesn't know are named, not guessed at silently", () => {

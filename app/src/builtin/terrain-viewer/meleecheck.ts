@@ -24,13 +24,37 @@ export interface MeleeFacts {
   sight(id: string): number | undefined;
   /** Ways units walk, as points along them. */
   routes: readonly { name: string; to?: Point; points?: readonly Point[]; problem?: string }[];
+  /** How wide the widest way from a start to a place is. */
+  widestTo?(x: number, y: number): number;
+  /** Stray narrow paths, as narrowStrips gives them. */
+  narrow?: { percent: number; strips: readonly { cells: number; at: readonly [number, number] }[] };
   /** War3's own numbers (Units/MiscGame.txt, MiscData.txt). */
   callForHelp: number;
   shopNotify: number;
 }
 
 export type Severity = "error" | "warning" | "info";
-export interface MeleeFinding { rule: string; severity: Severity; message: string; at?: [number, number] }
+export interface MeleeFinding { rule: string; severity: Severity; message: string; at?: [number, number]; fix?: string }
+
+/** What to do about a finding, by rule. */
+const FIX: Record<string, string> = {
+  starts: "place_objects with sloc, one for each player.",
+  mine: "move_object: a town hall goes right beside its mine, 771 to 781 from the start.",
+  expansion: "find_spots with kind expansion.",
+  guard: "place_objects: creeps within 750 of the mine, without camp.",
+  camps: "find_spots with kind camp, and mirror.",
+  "camp distance": "move_object or remove_objects, then find_spots with kind camp.",
+  "camp overlap": "Move one camp away: find_spots with kind camp gives free places.",
+  "camp strength": "Replace the strongest creep with a weaker one, or move the camp further out.",
+  "camp mode": "remove_objects and place again with camp set, or not.",
+  "camp access": "Open the way with remove_objects on trees, or move the camp: find_spots checks the way in.",
+  "narrow path": "Close it with fill_rows, or widen it with remove_objects. A path should be wide enough for an army, or not exist.",
+  drops: "Give its strongest creep drops, by the table in the melee guide.",
+  lumber: "Trees as walls with fill_rows, then compare both starts.",
+  balance: "Use mirror when placing, so both sides match.",
+  aggro: "Move the camp off the route, or the route off the camp: find_spots keeps 800 clear.",
+  route: "check_path shows where it stops.",
+};
 
 const HOSTILE = 24, MINE = "ngol", START = "sloc";
 /** Mines this far from a start belong to it. Measured: 771 to 781. */
@@ -41,6 +65,9 @@ const NEAREST_CAMP = 1750;
 const SAME_CAMP = 450, GUARD = 750;
 /** Measured over the ladder maps, with a little room. */
 const TREE_NEAR = [500, 750] as const, TREES_1000 = [30, 60] as const;
+/** Ladder camps have at most 6 creeps, reach 364 from their middle, keep creeps 100 apart and other
+ *  camps 1,047; these leave a little room. */
+const MOST_CREEPS = 6, CAMP_RADIUS = 400, CREEP_GAP = 80, CAMP_GAP = 1000;
 /** Real maps are symmetric to within about this. */
 const FAIR = 300;
 
@@ -81,7 +108,7 @@ export function campsOf(units: readonly MeleeUnit[], facts: Pick<MeleeFacts, "le
 
 export function checkMelee(f: MeleeFacts) {
   const findings: MeleeFinding[] = [];
-  const add = (rule: string, severity: Severity, message: string, at?: Point) => findings.push({ rule, severity, message, ...(at ? { at: round(at) } : {}) });
+  const add = (rule: string, severity: Severity, message: string, at?: Point) => findings.push({ rule, severity, message, ...(at ? { at: round(at) } : {}), ...(severity !== "info" && FIX[rule] ? { fix: FIX[rule] } : {}) });
   const place = (u: MeleeUnit): Point => [u.x, u.y];
   const starts = f.units.filter((u) => u.id === START).map(place);
   const mines = f.units.filter((u) => u.id === MINE).map(place);
@@ -143,6 +170,29 @@ export function checkMelee(f: MeleeFacts) {
     if (isGuard(c) && camped === c.creeps.length) add("camp mode", "warning", "This camp guards a mine but is all on Camp mode, so a player could expand beside it. None of the 23 measured guards is.", c.centre);
     if (!isGuard(c) && camped < c.creeps.length) add("camp mode", "error", `${c.creeps.length - camped} of ${c.creeps.length} creeps here aren't on Camp mode, and the camp guards no mine. All 92 such camps measured are.`, c.centre);
     if (c.creeps.length === 1 && c.level > 4) add("camp strength", "info", "A lone strong creep: measured camps have 2 to 6.", c.centre);
+    if (c.creeps.length > MOST_CREEPS) add("camp overlap", "error", `${c.creeps.length} creeps stand together here. Ladder camps have at most ${MOST_CREEPS}, so these are camps run into each other.`, c.centre);
+    const spread = Math.max(...c.creeps.map((u) => dist([u.x, u.y], c.centre)));
+    if (c.creeps.length <= MOST_CREEPS && spread > CAMP_RADIUS) add("camp overlap", "warning", `This camp spreads ${Math.round(spread)} from its middle. Ladder camps reach at most 364.`, c.centre);
+    const crowded = c.creeps.some((a, i) => c.creeps.slice(i + 1).some((b) => dist([a.x, a.y], [b.x, b.y]) < CREEP_GAP));
+    if (crowded) add("camp overlap", "error", `Creeps here stand under ${CREEP_GAP} apart, on top of each other. In ladder camps they're at least 100 apart.`, c.centre);
+    if (f.widestTo && !isGuard(c)) {
+      const way = f.widestTo(c.centre[0], c.centre[1]);
+      if (way < 160) add("camp access", "error", `The widest way to this camp is ${way}. On ladder maps it's usually 480 and never under 160: a group can't fight here.`, c.centre);
+      else if (way < 224) add("camp access", "warning", `The widest way to this camp is ${way}. On ladder maps it's usually 480.`, c.centre);
+    }
+  }
+  field.forEach((c, i) => {
+    for (const o of field.slice(i + 1)) {
+      const gap = dist(c.centre, o.centre);
+      if (gap < CAMP_GAP) add("camp overlap", "error", `Two camps stand ${Math.round(gap)} apart. On ladder maps the nearest other camp is usually 1,900 away, and never under 1,047, so these wake each other.`, c.centre);
+    }
+  });
+
+  // Paths.
+  if (f.narrow) {
+    if (f.narrow.percent > 5) add("narrow path", "warning", `${f.narrow.percent.toFixed(1)}% of the walkable ground is narrow strips. Ladder maps have 1.3 to 3.2%.`);
+    if (f.narrow.strips.length > 10) add("narrow path", "warning", `${f.narrow.strips.length} stray narrow paths. Ladder maps have 2 to 8.`);
+    for (const s of f.narrow.strips.slice(0, 5)) if (f.narrow.percent > 5 || f.narrow.strips.length > 10) add("narrow path", "info", `A narrow strip of ${s.cells} pathing cells starts near here.`, s.at);
   }
 
   // Lumber.
@@ -196,6 +246,7 @@ export function checkMelee(f: MeleeFacts) {
     "A route inside the sight of creeps not on Camp mode is reported as a sure thing, which is true by day: creeps sleep at night, and then they don't react to this at all.",
     `One creep that wakes calls others within ${f.callForHelp} (the game's CreepCallForHelp), so a whole camp comes, even though only one saw the unit.`,
     "Routes are the shortest ways on this app's pathing grid, for one size of unit, not the paths the game picks. Players also walk elsewhere; a route passing clear says nothing about the rest of the map.",
+    "Widths and narrow strips come from this app's pathing grid, in steps of 64, with every tree and doodad as it stands. A wide way can still be a long detour.",
     "Camps are worked out by distance: creeps within 450 of each other count as one, and a camp within 750 of an expansion's mine counts as its guard.",
     "Levels and ranges of map-made units come from the unit they're based on, so changes to those aren't seen.",
   );

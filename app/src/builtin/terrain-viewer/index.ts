@@ -20,15 +20,16 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
-import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
-import { checkMelee } from "./meleecheck";
+import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
+import { campsOf, checkMelee } from "./meleecheck";
+import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
-import { NO_WALK } from "../../lib/terrain/pathing";
+import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
 import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
@@ -328,6 +329,44 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let cliffKindsRead: Promise<CliffKind[]> | null = null;
   const cliffKinds = () => (cliffKindsRead ??= w3.game.readText("TerrainArt\\CliffTypes.slk").then((slk) => parseSlk(slk).filter((r) => r.cliffID).map((r) => ({ cliffID: r.cliffID, groundTile: r.groundTile }))));
 
+  /** What the melee tools go by: units, trees, routes, and how wide things are. */
+  const meleeFacts = async (size: number) => {
+    const { handle } = await liveEditor();
+    const [balance, weapons, destructables, game, data, grid] = await Promise.all([
+      w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
+      w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle),
+    ]);
+    const levels = new Map(parseSlk(balance).map((r) => [r.unitBalanceID, Number(r.level)]));
+    const sights = new Map(parseSlk(weapons).map((r) => [r.unitWeaponID, Number(r.acquire)]));
+    const isTree = new Set(parseSlk(destructables).filter((r) => r.targType === "tree").map((r) => r.DestructableID));
+    const lookup = <T,>(map: Map<string, T>, id: string) => map.get(id) ?? map.get(handle.objects.baseOf(id) ?? "");
+    const placed = handle.objects.list() as unknown as (Placed & { player?: number; targetAcquisition?: number; itemTable?: number; itemSets?: unknown[]; randomLevel?: string })[];
+    const units = placed.filter((e) => e.player !== undefined).map((e) => ({
+      id: e.id, x: e.position[0], y: e.position[1], player: e.player as number, acquisition: e.targetAcquisition ?? -1,
+      drops: (e.itemTable ?? -1) >= 0 || (e.itemSets ?? []).length > 0,
+      ...(e.id.startsWith("Y") ? { randomLevel: parseInt((e.randomLevel ?? "").slice(0, 2), 16) || 0 } : {}),
+    }));
+    const trees = placed.filter((e) => e.player === undefined && (isTree.has(e.id) || isTree.has(handle.objects.baseOf(e.id) ?? ""))).map((e) => [e.position[0], e.position[1]] as [number, number]);
+    const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
+    const starts = units.filter((u) => u.id === "sloc"), mines = units.filter((u) => u.id === "ngol"), taverns = units.filter((u) => u.id === "ntav");
+    const routes: { name: string; to?: [number, number]; points?: [number, number][]; problem?: string }[] = [];
+    const way = (name: string, from: [number, number], to: [number, number], target?: [number, number]) => {
+      let report = checkPath(grid, from, to, size, 200);
+      // A mine or a building at the end stands in its own way.
+      if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
+      routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route } : { name, problem: report.problem ?? "no way through" });
+    };
+    for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
+    for (const [i, s] of starts.entries()) {
+      const gap = (m: typeof s) => Math.hypot(m.x - s.x, m.y - s.y);
+      for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m));
+      for (const t of taverns.slice(0, 1)) way(`Start ${i + 1} to the tavern`, at(s), at(t), at(t));
+    }
+    const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);
+    const widest = starts.map((s) => widestFrom(grid, at(s)));
+    return { handle, grid, widest, units, trees, routes, levels: (id: string) => lookup(levels, id), sights: (id: string) => lookup(sights, id), number, game, data };
+  };
+
   let placeObjects: McpToolHandler = () => undefined;
   const RESERVED = ".w3proj/reserved-areas.json";
   type Reserved = KeepClear & { name: string };
@@ -585,43 +624,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(remove === true ? "Remove a ramp" : "Build a ramp", (t) => setRamp(t, x, y, wide as number, remove === true));
     }),
     w3.mcp.registerTool("check_melee", async ({ unitSize }) => {
-      const { handle } = await liveEditor();
-      const size = typeof unitSize === "number" && unitSize > 0 ? unitSize : 32;
-      const [balance, weapons, destructables, game, data, grid] = await Promise.all([
-        w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
-        w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle),
-      ]);
-      const levels = new Map(parseSlk(balance).map((r) => [r.unitBalanceID, Number(r.level)]));
-      const sights = new Map(parseSlk(weapons).map((r) => [r.unitWeaponID, Number(r.acquire)]));
-      const isTree = new Set(parseSlk(destructables).filter((r) => r.targType === "tree").map((r) => r.DestructableID));
-      const lookup = <T,>(map: Map<string, T>, id: string) => map.get(id) ?? map.get(handle.objects.baseOf(id) ?? "");
-      const placed = handle.objects.list() as unknown as (Placed & { player?: number; targetAcquisition?: number; itemTable?: number; itemSets?: unknown[]; randomLevel?: string })[];
-      const units = placed.filter((e) => e.player !== undefined).map((e) => ({
-        id: e.id, x: e.position[0], y: e.position[1], player: e.player as number, acquisition: e.targetAcquisition ?? -1,
-        drops: (e.itemTable ?? -1) >= 0 || (e.itemSets ?? []).length > 0,
-        ...(e.id.startsWith("Y") ? { randomLevel: parseInt((e.randomLevel ?? "").slice(0, 2), 16) || 0 } : {}),
-      }));
-      const trees = placed.filter((e) => e.player === undefined && (isTree.has(e.id) || isTree.has(handle.objects.baseOf(e.id) ?? ""))).map((e) => [e.position[0], e.position[1]] as [number, number]);
-      const at = (u: { x: number; y: number }): [number, number] => [u.x, u.y];
-      const starts = units.filter((u) => u.id === "sloc"), mines = units.filter((u) => u.id === "ngol"), taverns = units.filter((u) => u.id === "ntav");
-      const routes: { name: string; to?: [number, number]; points?: [number, number][]; problem?: string }[] = [];
-      const way = (name: string, from: [number, number], to: [number, number], target?: [number, number]) => {
-        let report = checkPath(grid, from, to, size, 200);
-        // A mine or a building at the end stands in its own way.
-        if (!report.walkable && report.nearestFree) report = checkPath(grid, from, report.nearestFree, size, 200);
-        routes.push(report.route ? { name, ...(target ? { to: target } : {}), points: report.route } : { name, problem: report.problem ?? "no way through" });
-      };
-      for (let i = 0; i < starts.length; i++) for (let j = i + 1; j < starts.length; j++) way(`Start ${i + 1} to start ${j + 1}`, at(starts[i]), at(starts[j]));
-      for (const [i, s] of starts.entries()) {
-        const gap = (m: typeof s) => Math.hypot(m.x - s.x, m.y - s.y);
-        for (const m of mines.filter((x) => gap(x) > 1150).sort((a, b) => gap(a) - gap(b)).slice(0, 3)) way(`Start ${i + 1} to the mine at ${Math.round(m.x)}, ${Math.round(m.y)}`, at(s), at(m), at(m));
-        for (const t of taverns.slice(0, 1)) way(`Start ${i + 1} to the tavern`, at(s), at(t), at(t));
-      }
-      const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);
+      const f = await meleeFacts(typeof unitSize === "number" && unitSize > 0 ? unitSize : 32);
       return checkMelee({
-        units, trees, routes, level: (id) => lookup(levels, id), sight: (id) => lookup(sights, id),
-        callForHelp: number(game, "CreepCallForHelp", 600), shopNotify: number(data, "NeutralUseNotifyRadius", 900),
+        units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,
+        callForHelp: f.number(f.game, "CreepCallForHelp", 600), shopNotify: f.number(f.data, "NeutralUseNotifyRadius", 900),
+        narrow: narrowStrips(f.grid),
+        widestTo: (x, y) => {
+          // Creeps and what stands by a camp fill its middle: the way to the place beside it counts.
+          let best = 0;
+          const { width: w, height: h, offsetX, offsetY } = f.grid;
+          const cx = Math.floor((x - offsetX) / 32), cy = Math.floor((y - offsetY) / 32);
+          for (let b = -3; b <= 3; b++) for (let a = -3; a <= 3; a++) {
+            if (cx + a < 0 || cy + b < 0 || cx + a >= w || cy + b >= h) continue;
+            for (const field of f.widest) best = Math.max(best, field[(cy + b) * w + cx + a]);
+          }
+          return widthOf(best);
+        },
       });
+    }),
+    w3.mcp.registerTool("find_spots", async ({ kind, count, mirror }) => {
+      if (kind !== "camp" && kind !== "expansion") throw new Error("kind must be camp or expansion.");
+      const f = await meleeFacts(32);
+      const starts = f.units.filter((u) => u.id === "sloc").map((u) => [u.x, u.y] as [number, number]);
+      if (!starts.length) throw new Error("Place the start locations (sloc) first: spots go by them.");
+      const pathing = await f.handle.pathing(), t = f.handle.terrain;
+      const combined = new Uint16Array(f.grid.width * f.grid.height);
+      for (const field of f.widest) for (let i = 0; i < combined.length; i++) combined[i] = Math.max(combined[i], field[i]);
+      return findSpots(kind, {
+        grid: f.grid, widest: combined, starts, whole: wholeMap(f.handle),
+        mines: f.units.filter((u) => u.id === "ngol").map((u) => [u.x, u.y] as [number, number]),
+        camps: campsOf(f.units, { level: f.levels }).map((c) => c.centre),
+        routes: f.routes.flatMap((r) => (r.points ? [r.points] : [])),
+        noBuild: (x, y) => ((pathing.cells[Math.floor((y - t.offsetY) / 32) * pathing.width + Math.floor((x - t.offsetX) / 32)] ?? NO_BUILD) & NO_BUILD) !== 0,
+      }, typeof count === "number" ? Math.max(1, Math.min(30, count)) : 12, mirror === true);
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
       const editor = await liveEditor();

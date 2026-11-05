@@ -191,6 +191,75 @@ export function nearestObject<T extends { position: readonly number[] }>(list: r
   return best;
 }
 
+/** How wide a way a cell's clearance leaves. */
+export const widthOf = (c: number) => Math.max(0, c * 2 - 1) * CELL;
+
+/** For every cell, the clearance of the widest way there from `start`: one pass, however many
+ *  places are asked about, by taking the widest ground first. */
+export function widestFrom(g: Grid, start: [number, number]): Uint16Array {
+  const { width: w, height: h } = g, c = clearance(g), best = new Uint16Array(w * h);
+  let top = 0;
+  for (let i = 0; i < c.length; i++) if (c[i] > top) top = c[i];
+  const from = Math.floor((start[1] - g.offsetY) / CELL) * w + Math.floor((start[0] - g.offsetX) / CELL);
+  if (from < 0 || from >= w * h) return best;
+  const levels: number[][] = Array.from({ length: top + 1 }, () => []);
+  best[from] = top;
+  levels[top].push(from);
+  for (let level = top; level > 0; level--) {
+    const todo = levels[level];
+    while (todo.length) {
+      const i = todo.pop() as number;
+      if (best[i] !== level) continue;
+      const x = i % w;
+      for (const o of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+        if (o < 0 || o >= w * h) continue;
+        const v = Math.min(level, c[o]);
+        if (v > best[o]) { best[o] = v; levels[v].push(o); }
+      }
+    }
+  }
+  return best;
+}
+
+/** Walkable ground no wide stretch reaches: stray little paths between trees and cliffs. */
+export function narrowStrips(g: Grid, smallest = 40) {
+  const { width: w, height: h, blocked } = g, c = clearance(g), wide = 7;
+  const open = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    if (c[i] < wide) continue;
+    const x = i % w, y = Math.floor(i / w);
+    for (let b = -wide; b <= wide; b++) {
+      for (let a = -wide; a <= wide; a++) {
+        const k = (y + b) * w + x + a;
+        if (a * a + b * b <= wide * wide && x + a >= 0 && x + a < w && k >= 0 && k < w * h) open[k] = 1;
+      }
+    }
+  }
+  const usable = (i: number) => !blocked[i] && c[i] >= 2;
+  const seen = new Uint8Array(w * h), strips: { cells: number; at: [number, number] }[] = [];
+  let walkable = 0, thin = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (!usable(i)) continue;
+    walkable++;
+    if (open[i]) continue;
+    thin++;
+    if (seen[i]) continue;
+    seen[i] = 1;
+    const stack = [i];
+    let cells = 0;
+    while (stack.length) {
+      const k = stack.pop() as number;
+      cells++;
+      const x = k % w;
+      for (const o of [x > 0 ? k - 1 : -1, x < w - 1 ? k + 1 : -1, k - w, k + w]) {
+        if (o >= 0 && o < w * h && !seen[o] && !open[o] && usable(o)) { seen[o] = 1; stack.push(o); }
+      }
+    }
+    if (cells >= smallest) strips.push({ cells, at: [g.offsetX + (i % w + 0.5) * CELL, g.offsetY + (Math.floor(i / w) + 0.5) * CELL] });
+  }
+  return { percent: walkable ? (100 * thin) / walkable : 0, strips: strips.sort((a, b) => b.cells - a.cells) };
+}
+
 export interface PathReport {
   /** A unit of this collision size gets through. */
   walkable: boolean;

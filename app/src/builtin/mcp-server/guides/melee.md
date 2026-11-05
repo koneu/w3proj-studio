@@ -28,6 +28,8 @@ a range as a mistake to explain, not as a style. Sizes are for 1v1; scale the co
 
 ## The mistakes to avoid first
 
+- Coordinates made up on the spot. Use find_spots with kind camp and mirror: it gives sheltered pockets that
+  meet these rules, and you choose among them. Run it again after placing.
 - Camps beside the routes. A scout walking across the map must not wake anything. Camps go in corners,
   pockets and dead ends, off the way. Of the measured camps 94% are over 800 from the straight line
   between the bases, typically 2,800.
@@ -81,7 +83,8 @@ a range as a mistake to explain, not as a style. Sizes are for 1v1; scale the co
 
 ## Creeps
 
-18 to 20 camps on a map, 66 to 84 creeps, with 2 to 6 creeps in each, usually 4.
+18 to 20 camps on a map, 66 to 84 creeps, with 2 to 6 creeps in each, usually 4. Creeps stand at least 100 apart,
+all within 364 of the camp's middle. The nearest other camp is usually 1,900 away, and never under 1,047.
 Owner is Neutral Hostile, player 25.
 
 Colour by the sum of the creeps' levels:
@@ -137,6 +140,13 @@ item changes per game and stays within what the game allows. Never hand-pick a s
 Powerups exist at levels 1 and 2 only. Give the best drop to the camp's strongest creep, so nobody can
 snipe it from a weak one and run. Spread two drops over two creeps, so players finish the fight.
 
+## Paths
+
+- Every way in the map should be wide enough for an army, or not exist. Stray little paths between trees look
+  like a mistake, and trap units. Narrow strips are only 1.3 to 3.2% of the walkable ground on ladder maps.
+- The widest way to a camp is usually 480, and hardly ever under 224. Players fight there with a whole group.
+- Close a gap with trees or widen it; don't leave it in between. A camp isn't reached through a crack.
+
 ## Terrain
 
 Read the terrain guide too, for how to make all this look good. This part is about what a melee map needs.
@@ -156,6 +166,11 @@ Read the terrain guide too, for how to make all this look good. This part is abo
   camera spends time: bases, shops, camps and crossroads, not spread evenly.
 - Give each area its own landmark, like a ruin, an old camp or a broken bridge, built from several objects.
 
+## When a check fails
+
+Fix that one thing, then run the check again. Don't rebuild what passed. Moving something can break what
+passed before, so after moving camps or trees run check_melee and check_path again.
+
 ## When a rule can't be met
 
 Say so instead of quietly bending it. In order: move the object along the edge of its pocket, then shrink or
@@ -173,7 +188,7 @@ one player a worse deal to keep a number. Numbers outside the measured ranges ne
 
 ## Checks before calling it finished
 
-- check_melee, and read its accuracy notes. All six ladder maps pass it without errors, so an error is
+- check_melee, and follow each finding's fix. Read its accuracy notes. All six ladder maps pass it without errors, so an error is
   worth fixing. Its warnings about camps on Camp mode are the worst case: those maps have them too.
 - check_path between the bases, and from each base to every mine and shop, for units of size 32 and 72.
 - check_route along the main routes, then compare with list_placed: nothing hostile within 800 of a
