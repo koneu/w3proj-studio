@@ -21,7 +21,8 @@ import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./pla
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, type Grid } from "./pathcheck";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { resizedSize } from "../../lib/terrain/resize";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
 import { changesImports } from "./filewatch";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -278,6 +279,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || room.blocked[i] ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
   };
 
+  /** How long Studio waits for a yes. Less than a tool call may take, or the answer goes nowhere. */
+  const CONFIRM_TIME = 90_000;
+
+  /** What big changes share, which undo_last_edit doesn't cover: nothing unsaved of the user's,
+   *  their yes in Studio, and a checkpoint to go back to. */
+  const withConsent = async (question: string, yes: string) => {
+    const unsaved = w3.editors.unsavedPaths();
+    if (unsaved.length) throw new Error(`Not changed: ${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Ask the user to save or discard them first.`);
+    const agreed = await w3.window.confirm(`AI request: ${question} This can't be undone with AI undo; a checkpoint is made first.`, yes, CONFIRM_TIME);
+    if (!agreed) throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
+    await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${e}).`); });
+  };
+
   let placeObjects: McpToolHandler = () => undefined;
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean) => {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
@@ -295,6 +309,44 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const data = await editor.screenshot(size, area, angle, args.heights === true);
       const image = { type: "image", data, mimeType: "image/png" };
       return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
+    }),
+    w3.mcp.registerTool("set_tileset", async ({ tileset, replaceTiles }) => {
+      if (typeof tileset !== "string") throw new Error("tileset must be a letter; terrain_info lists them.");
+      requireProject(w3);
+      const { handle } = await liveEditor();
+      const sets = await handle.tilesets();
+      const set = sets.find((s) => s.id === tileset);
+      if (!set) throw new Error(`"${tileset}" isn't a tileset. They are: ${sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
+      const tiles = replaceTiles !== false;
+      const from = sets.find((s) => s.id === handle.terrain.tileset)?.name ?? handle.terrain.tileset;
+      await withConsent(`change the tileset from ${from} to ${set.name}${tiles ? ", replacing the ground tiles" : ""}?`, "Change tileset");
+      handle.setTileset(set.id);
+      if (tiles) handle.replaceGroundTiles(set.tiles);
+      await handle.setMapTileset(set.id);
+      await w3.editors.saveAll();
+      return { tileset: set.id, name: set.name, groundTiles: handle.terrain.groundTiles };
+    }),
+    w3.mcp.registerTool("resize_map", async ({ left, right, bottom, top, border, dryRun }) => {
+      const side = (n: unknown) => (n === undefined ? 0 : n);
+      const change = [left, right, bottom, top].map(side) as Sides;
+      if (!change.every((n) => Number.isInteger(n))) throw new Error("left, right, bottom and top must be whole numbers of tiles.");
+      if (border !== undefined && !(Array.isArray(border) && border.length === 4 && border.every((n) => Number.isInteger(n) && n >= 0))) throw new Error("border must be [left, right, bottom, top].");
+      requireProject(w3);
+      const { handle } = await liveEditor();
+      const t = handle.terrain;
+      const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
+      const complements = (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides;
+      const same = change.every((n) => n === 0) && complements.every((n, k) => n === info?.cameraComplements?.[k]);
+      if (same) throw new Error("That changes nothing.");
+      const problem = resizeProblem(t, change, complements);
+      if (problem) throw new Error(problem);
+      const [width, height] = resizedSize(t, change);
+      const removed = outsideAfterResize(handle.objects.list(), t, change);
+      const result = { width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed };
+      if (dryRun === true) return result;
+      await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}?`, "Resize map");
+      const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
+      return { ...result, objectsRemoved: done.removed };
     }),
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
@@ -346,6 +398,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...terrainSummary(t, { ...pathing, cells }, area),
         ...(bounds ? { playable: bounds } : {}), ...(past ? { warning: past } : {}),
         tilesInMap: t.groundTiles, otherTilesOfTheTileset: tiles.filter((id) => !t.groundTiles.includes(id)),
+        tilesets: (await editor.handle.tilesets()).map((s) => ({ id: s.id, name: s.name })),
         ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
       };
     }),

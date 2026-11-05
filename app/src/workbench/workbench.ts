@@ -236,6 +236,7 @@ export class Workbench {
       window: {
         showInfo: (m, ...a) => wb.notifications.show("info", m, a),
         showWarning: (m, ...a) => wb.notifications.show("warning", m, a),
+        confirm: async (m, yes, expires) => (await wb.notifications.show("warning", m, [yes, "Cancel"], expires)) === yes,
         showError: (m, ...a) => wb.notifications.show("error", m, a),
         quickPick: (items, opts) => wb.quickInput.pick(items, opts),
         inputBox: (opts) => wb.quickInput.ask(opts),

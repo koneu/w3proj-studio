@@ -9,7 +9,8 @@ export class Notifications {
     host.append(this.root);
   }
 
-  show(severity: Severity, message: string, actions: string[] = []): Promise<string | undefined> {
+  /** `expires`: the question goes away after this many ms, answered with nothing. */
+  show(severity: Severity, message: string, actions: string[] = [], expires?: number): Promise<string | undefined> {
     return new Promise((resolve) => {
       let timer = 0;
       const close = (result?: string) => {
@@ -31,7 +32,8 @@ export class Notifications {
       );
       this.root.append(toast);
       // Toasts that ask something stay until answered.
-      if (!actions.length) timer = window.setTimeout(() => close(), severity === "error" ? 12000 : 6000);
+      if (expires) timer = window.setTimeout(() => close(), expires);
+      else if (!actions.length) timer = window.setTimeout(() => close(), severity === "error" ? 12000 : 6000);
     });
   }
 }

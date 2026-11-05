@@ -264,6 +264,14 @@ export function heightColors(t: Terrain, step = 32) {
   return { rgba, width, height };
 }
 
+/** How many objects fall outside a map after adding (or cutting, negative) tiles per side:
+ *  left, right, bottom, top. */
+export function outsideAfterResize(list: readonly { position: readonly number[] }[], t: Terrain, change: readonly [number, number, number, number]) {
+  const left = t.offsetX - change[0] * TILE, right = t.offsetX + (t.width - 1 + change[1]) * TILE;
+  const bottom = t.offsetY - change[2] * TILE, top = t.offsetY + (t.height - 1 + change[3]) * TILE;
+  return list.filter((p) => p.position[0] < left || p.position[0] > right || p.position[1] < bottom || p.position[1] > top).length;
+}
+
 /** Evenly along a line, from end to end, turned to run along it. `facingOffset` is the facing
  *  (degrees) that makes the model's long side follow the line. */
 export function lineSpots(from: [number, number], to: [number, number], spacing: number, facingOffset: number) {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -180,6 +180,17 @@ test("a flattened path levels the ground across it towards its middle", () => {
   paintPath(t, [[0, 896], [2048, 896]], 512, 1, 0, true, seeded());
   assert.ok(at(t, 8, 8) < crown, "a bump beside the line is brought down");
   assert.equal(t.corners[0].rawHeight, 0x2000);
+});
+
+test("resizing counts what ends up outside, on the sides that are cut", () => {
+  const t = field(); // 0 to 2048 on both axes
+  const at2 = (x: number, y: number) => ({ position: [x, y, 0] });
+  const list = [at2(100, 100), at2(1000, 1000), at2(2000, 100), at2(100, 2000)];
+  assert.equal(outsideAfterResize(list, t, [0, 0, 0, 0]), 0);
+  assert.equal(outsideAfterResize(list, t, [-4, 0, 0, 0]), 2, "cut from the left");
+  assert.equal(outsideAfterResize(list, t, [0, -4, 0, 0]), 1);
+  assert.equal(outsideAfterResize(list, t, [0, 0, 0, -4]), 1);
+  assert.equal(outsideAfterResize(list, t, [8, 8, 8, 8]), 0, "growing removes nothing");
 });
 
 test("a line is even from end to end, and turned along itself", () => {

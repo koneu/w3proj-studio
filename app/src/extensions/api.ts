@@ -253,6 +253,9 @@ export interface W3Api {
     showInfo(message: string, ...actions: string[]): Promise<string | undefined>;
     showWarning(message: string, ...actions: string[]): Promise<string | undefined>;
     showError(message: string, ...actions: string[]): Promise<string | undefined>;
+    /** Asks with buttons `yes` and Cancel. After `expires` ms the question disappears, so nobody
+     *  can answer one that's no longer being waited for. True only if `yes` was pressed. */
+    confirm(message: string, yes: string, expires: number): Promise<boolean>;
     quickPick<T>(items: QuickPickItem<T>[], opts?: { placeholder?: string }): Promise<QuickPickItem<T> | undefined>;
     inputBox(opts?: { prompt?: string; value?: string; placeholder?: string }): Promise<string | undefined>;
     pickFile(opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
