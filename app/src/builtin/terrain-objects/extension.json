@@ -9,12 +9,17 @@
     "mcpTools": [
       {
         "name": "list_placed",
-        "description": "What's placed on the open map. Without id or player: how many of each type. With them: each placed object with its position. Start locations are the id sloc.",
+        "description": "What's placed on the open map. Without id, player or an area: how many of each type. With one of them: each object with its number (for move_object and remove_objects) and position. Start locations are the id sloc.",
         "readOnly": true,
         "inputSchema": { "type": "object", "properties": {
           "kind": { "type": "string", "enum": ["units", "doodads"], "description": "units (default) also has items and start locations; doodads also has destructables." },
           "id": { "type": "string", "description": "Only this type, like hfoo." },
           "player": { "type": "integer", "description": "Only this owner, counted from 1 (units)." },
+          "region": {"type":"string","description":"A region of the map, by name."},
+          "left": {"type":"number"},
+          "bottom": {"type":"number"},
+          "right": {"type":"number"},
+          "top": {"type":"number"},
           "limit": { "type": "integer", "description": "At most this many (default 200)." }
         } }
       }

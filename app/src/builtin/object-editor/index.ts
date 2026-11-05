@@ -10,7 +10,7 @@ import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
-import { changedFields, gameFields, mapObjectList, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
+import { changedFields, gameFields, gameObjectList, mapObjectList, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { addCustomObject, fieldLevel, fieldValue, objectToEdit, removeObject, setObjectField, type EditFile } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -75,11 +75,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { data, file: file ?? {}, resolve };
   };
   ctx.subscriptions.push(
-    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit }) => {
+    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category }) => {
       const { data, file, resolve } = await toolKind(kind);
       const text = typeof filter === "string" ? filter.toLowerCase() : "";
       const hit = (o: { id: string; name: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text);
-      const game = () => data.baseIds.map((id) => ({ id, name: stripColors(data.names.get(id) ?? id) }));
+      const wantTileset = tileset === "map" ? (await readMapDoc<{ tileset: string }>(w3, "map/war3map.w3i.json"))?.tileset : typeof tileset === "string" ? tileset : undefined;
+      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined);
       return capped<{ id: string; name: string }>((scope === "game" ? game() : mapObjectList(file, data, resolve)).filter(hit), limit, 200);
     }),
     w3.mcp.registerTool("get_object", async ({ kind, id, gameValues }) => {
@@ -112,15 +113,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     });
   };
   ctx.subscriptions.push(
-    w3.mcp.registerTool("set_object_field", async ({ kind, id, field, level, value }) => {
-      const changed = await editObjects(`Set ${String(field)} of ${String(id)}`, kind, (file, _, data) => {
+    w3.mcp.registerTool("set_object_fields", async ({ kind, id, changes }) => {
+      if (!Array.isArray(changes) || !changes.length) throw new Error("changes must list what to change.");
+      const list = changes as { field: string; level?: unknown; value: unknown }[];
+      const changed = await editObjects(`Set ${list.length} field${list.length === 1 ? "" : "s"} of ${String(id)}`, kind, (file, ext, data) => {
         const o = objectToEdit(file, String(id), data.baseIds.includes(String(id)));
-        const f = data.fieldsFor(o.base).find((x) => x.id === field);
-        if (!f) throw new Error(`${String(field)} isn't a field of ${o.base}. get_object with gameValues lists them.`);
-        const at = fieldLevel(f, level);
-        setObjectField(o, OBJECT_KINDS[String(kind)], f, at, value === null ? null : fieldValue(f, value), data.defaultValue(o.base, f, at));
+        // Runs on a parsed copy: a throw here leaves the file as it was.
+        for (const c of list) {
+          const f = data.fieldsFor(o.base).find((x) => x.id === c.field);
+          if (!f) throw new Error(`${String(c.field)} isn't a field of ${o.base}. get_object with gameValues lists them.`);
+          const at = fieldLevel(f, c.level);
+          setObjectField(o, ext, f, at, c.value === null ? null : fieldValue(f, c.value), data.defaultValue(o.base, f, at));
+        }
       });
-      return changed ? `Changed ${String(field)} of ${String(id)}.` : "It already had that value.";
+      return changed ? `Changed ${list.length} field${list.length === 1 ? "" : "s"} of ${String(id)}.` : "It already had those values.";
     }),
     w3.mcp.registerTool("create_object", async ({ kind, base, name }) => {
       let made = "";
@@ -128,6 +134,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const from = String(base);
         if (!data.baseIds.includes(from)) throw new Error(`There's no game object "${from}" of that kind.`);
         const taken = new Set([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...data.baseIds]);
+        // Ids should be unique over all kinds: scripts name them without saying which.
+        for (const other of Object.values(OBJECT_KINDS).filter((k) => k !== ext)) {
+          const known = await readMapDoc<MapObjects>(w3, `map/war3map.${other}.json`);
+          for (const o of known?.custom ?? []) if (o.id) taken.add(o.id);
+          for (const b of (await loadKind(w3, other)).baseIds) taken.add(b);
+        }
         made = nextFreeId(ext, from, taken);
         const o = addCustomObject(file, from, made);
         if (typeof name === "string" && name) {

@@ -4,6 +4,11 @@ import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { lostFunctions, scriptHash } from "../../lib/script/guard";
+import { capped, requireProject } from "../../lib/formats/mapdoc";
+import { checkJass } from "../../lib/jass/check";
+import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env";
+import { checkLua } from "../../lib/lua/check";
+import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
@@ -239,6 +244,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   // Saves come in bursts (a map save writes several files): wait for the last one.
   let timer: ReturnType<typeof setTimeout> | undefined;
   ctx.subscriptions.push(
+    w3.mcp.registerTool("build_script", async () => {
+      requireProject(w3);
+      clearTimeout(timer);
+      const built = await write("build_script");
+      const lua = await w3.workspace.readText("map/war3map.lua").catch(() => null);
+      const path = lua !== null ? "map/war3map.lua" : "map/war3map.j";
+      const text = lua ?? await w3.workspace.readText(path);
+      const found = lua !== null ? checkLua(text).map((d) => ({ ...d, severity: "error" })) : checkJass(text, await gameJassEnv((p) => w3.game.readText(p)));
+      return {
+        // Not rebuilt: what's checked is the old script, so it can't say anything about the latest change.
+        rebuilt: built, ...(built ? {} : { note: "The script wasn't rebuilt: it has code the triggers don't make, or a language no extension compiles. See the Map Script output in the app. What follows is about the old script." }),
+        language: lua !== null ? "lua" : "jass", lines: text.split("\n").length, ...describeProblems(text, found, triggerOfFunctions(text)),
+      };
+    }),
+    w3.mcp.registerTool("search_script_api", async ({ filter, kind, limit }) => {
+      if (typeof filter !== "string" || !filter) throw new Error("search_script_api needs a filter.");
+      const env = await gameJassEnv((p) => w3.game.readText(p));
+      return capped(findSymbols(jassSymbols(env, ""), filter, typeof kind === "string" ? kind : undefined), limit, 80);
+    }),
     w3.workspace.onDidSave((path) => {
       if (!INPUTS.test(path) || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
       clearTimeout(timer);

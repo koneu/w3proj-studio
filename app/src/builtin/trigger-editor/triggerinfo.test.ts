@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { DisplayContext } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT, type TriggerData } from "../../lib/triggers/triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "../../lib/triggers/wtg";
-import { addScriptTrigger, findTrigger, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, findTrigger, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 
 // No TriggerData here: functions show as name(arguments).
 const ctx = { data: { find: () => undefined, categories: new Map() } as unknown as TriggerData } as DisplayContext;
@@ -84,12 +84,40 @@ test("a new script trigger goes last in its category, with its text at the same 
   assert.throws(() => addScriptTrigger(made(), scripts, "X", "x", "Nowhere"), /no category/);
 });
 
-test("reforged files get their own script type and count it", () => {
+test("a script without its init function is said to be a library", () => {
+  assert.equal(scriptWarning("Flame Wall", "function InitTrig_Flame_Wall takes nothing returns nothing"), null);
+  assert.match(scriptWarning("Flame Wall", "function Other takes nothing returns nothing") ?? "", /InitTrig_Flame_Wall/);
+});
+
+test("reforged files get a real trigger too, not a script item, and count it", () => {
   const f = { reforged: true, counts: Array.from({ length: 8 }, () => ({ count: 0, deleted: [] })), variables: [], items: [{ type: 4, id: 2 << 24, name: "C", isComment: 0, expanded: 1, parent: -1 }] } as unknown as TriggerFile;
   const t = addScriptTrigger(f, { reforged: true, version: 1, comment: "", header: "", texts: [] }, "New", "code");
-  assert.equal(t.type, 32);
-  assert.equal(t.id, 5 << 24);
-  assert.equal(f.counts[5].count, 1);
+  assert.equal(t.type, 8);
+  assert.equal(t.isCustom, true);
+  assert.equal(t.id, 3 << 24);
+  assert.equal(f.counts[3].count, 1);
+});
+
+test("removing a trigger takes its text along, not another's", () => {
+  const f = structuredClone(file), scripts = { reforged: false, version: 1, comment: "", header: "", texts: ["a", "b", "c"] };
+  removeTrigger(f, scripts, findTrigger(f, "Script")!);
+  assert.deepEqual(scripts.texts, ["a", "c"]);
+  assert.equal(findTrigger(f, "Script"), null);
+  assert.equal(findTrigger(f, "Lost")?.name, "Lost");
+});
+
+test("variables: names are unique; Reforged lists them in a category and counts them", () => {
+  const v = { name: "Heat", type: "real", isArray: false, arraySize: 1, initialValue: "" };
+  const f = structuredClone(file);
+  addVariable(f, v);
+  assert.deepEqual([f.variables[1].name, f.variables[1].parent, f.variables[1].id], ["Heat", -1, 1]);
+  assert.throws(() => addVariable(f, { ...v, name: "heat" }), /already a variable/);
+  assert.equal(f.variables[1].initialized, false);
+  const r = { reforged: true, counts: Array.from({ length: 8 }, () => ({ count: 0, deleted: [] })), variables: [], items: [{ type: 4, id: 2 << 24, name: "C", isComment: 0, expanded: 1, parent: -1 }] } as unknown as TriggerFile;
+  addVariable(r, { ...v, initialValue: "1.0" });
+  assert.deepEqual([r.variables[0].id, r.variables[0].parent, r.variables[0].initialized], [6 << 24, 2 << 24, true]);
+  assert.equal(r.items[1].type, 64);
+  assert.equal(r.counts[6].count, 1);
 });
 
 test("a trigger in script gives its text", () => {

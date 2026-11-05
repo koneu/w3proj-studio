@@ -1,8 +1,9 @@
 // Triggers as the MCP tools tell about them: the World Editor's sentences, indented.
 
 import { branchLabels, ecaText, type DisplayContext } from "../../lib/triggers/display";
+import { ident as triggerIdent } from "../../lib/script/jass";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
-import { allocItemId, textTriggers, type CustomTextFile, type Eca, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
+import { allocItemId, textTriggers, TYPE_INDEX, type CustomTextFile, type Eca, type TriggerFile, type TriggerItem, type Variable } from "../../lib/triggers/wtg";
 
 const INDENT = "    ";
 
@@ -30,15 +31,42 @@ export function addScriptTrigger(file: TriggerFile, scripts: CustomTextFile, nam
   const categories = file.items.filter((i) => i.type === 4);
   const home = category === undefined ? categories[0] : categories.find((c) => c.name.toLowerCase() === category.toLowerCase());
   if (!home) throw new Error(category === undefined ? "This map has no trigger category to put it in." : `There's no category "${category}".`);
-  const type = file.reforged ? 32 : 8;
+  // Type 8 in every format: a Reforged script item (32) is code without a trigger, never started.
   const t: TriggerItem = {
-    type, id: allocItemId(file, type), name, description: "", isComment: 0, enabled: true, isCustom: true, initiallyOff: false, runOnInit: false, parent: home.id, ecas: [],
+    type: 8, id: allocItemId(file, 8), name, description: "", isComment: 0, enabled: true, isCustom: true, initiallyOff: false, runOnInit: false, parent: home.id, ecas: [],
   };
   const last = file.items.reduce((at, it, i) => (it.parent === home.id ? i : at), file.items.indexOf(home));
   file.items.splice(last + 1, 0, t);
   // Texts go by the triggers' order.
   scripts.texts.splice(textTriggers(file).indexOf(t), 0, script);
   return t;
+}
+
+/** What the game needs for a script to run at all. Null when it's there. */
+export function scriptWarning(name: string, script: string): string | null {
+  const init = `InitTrig_${triggerIdent(name)}`;
+  return script.includes(init) ? null : `It defines no ${init}, so it's only a library: nothing starts it at map start.`;
+}
+
+/** A trigger and its text. */
+export function removeTrigger(file: TriggerFile, scripts: CustomTextFile, t: TriggerItem) {
+  scripts.texts.splice(textTriggers(file).indexOf(t), 1);
+  file.items.splice(file.items.indexOf(t), 1);
+  if (file.reforged) file.counts[TYPE_INDEX[t.type]]?.deleted.push(t.id);
+}
+
+/** A global variable. Reforged files also list it as an item of a category. */
+export function addVariable(file: TriggerFile, v: Pick<Variable, "name" | "type" | "isArray" | "arraySize" | "initialValue">) {
+  if (file.variables.some((x) => x.name.toLowerCase() === v.name.toLowerCase())) throw new Error(`There's already a variable "${v.name}".`);
+  const made: Variable = { ...v, unknown: 1, initialized: v.initialValue !== "", id: file.variables.length, parent: -1 };
+  if (file.reforged) {
+    const home = file.items.find((i) => i.type === 4) ?? file.items.find((i) => i.type === 1);
+    if (!home) throw new Error("This map has no trigger category to put it in.");
+    made.id = allocItemId(file, 64);
+    made.parent = home.id;
+    file.items.splice(file.items.indexOf(home) + 1, 0, { type: 64, id: made.id, name: v.name, parent: home.id });
+  }
+  file.variables.push(made);
 }
 
 /** Categories with their triggers, and the variables if asked for. */

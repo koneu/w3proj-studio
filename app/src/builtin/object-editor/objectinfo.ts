@@ -23,6 +23,25 @@ export function objectName(o: MapObject, kind: Kind, resolve: Resolve): string {
   return plain(own ? resolve(own.value as string) : kind.names.get(o.base) ?? o.base);
 }
 
+/** Where a kind says which tilesets an object is made for. */
+const TILESET_FIELDS = ["btil", "dtil"];
+
+/** The game's objects of a kind, with what sets them apart. `tileset`: its letter; objects for
+ *  all tilesets have "*". */
+export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue">, clean: (s: string) => string, tileset?: string, category?: string) {
+  const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
+  const fits = (id: string) => {
+    if (!tileset || !field) return true;
+    const list = (kind.defaultValue(id, field, 0) ?? "*").toUpperCase();
+    return list.includes("*") || list.includes(tileset.toUpperCase());
+  };
+  const wanted = category?.toLowerCase();
+  return kind.baseIds.filter(fits).map((id) => {
+    const facets = kind.facets(id);
+    return { id, name: clean(kind.names.get(id) ?? id), ...(facets.category ? { category: facets.category } : {}) };
+  }).filter((o) => !wanted || o.category?.toLowerCase().includes(wanted));
+}
+
 /** One line per object the map adds or changes. */
 export function mapObjectList(file: MapObjects, kind: Kind, resolve: Resolve) {
   const line = (o: MapObject, custom: boolean) => ({

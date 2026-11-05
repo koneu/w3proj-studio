@@ -1,3 +1,5 @@
+import { capped } from "../../lib/formats/mapdoc";
+import { findGameFiles } from "./filesearch";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { CATEGORIES, categoryOf, LAYERS } from "./filters";
@@ -40,7 +42,23 @@ function buildTree(paths: string[]): Node {
 
 const MAX_RESULTS = 500;
 
+/** One read_game_file answer; `offset` gets the rest. */
+const READ_LIMIT = 200_000;
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("search_game_files", async ({ filter, extension, limit }) => {
+      if (typeof filter !== "string" || !filter.trim()) throw new Error("search_game_files needs a filter.");
+      return capped(findGameFiles(await w3.game.list(), filter, typeof extension === "string" ? extension : undefined), limit, 80);
+    }),
+    w3.mcp.registerTool("read_game_file", async ({ path, offset }) => {
+      if (typeof path !== "string") throw new Error("read_game_file needs a path.");
+      const text = await w3.game.readText(path).catch((e) => { throw new Error(`Can't read ${path}: ${e}`); });
+      const start = typeof offset === "number" && offset > 0 ? offset : 0;
+      const part = text.slice(start, start + READ_LIMIT), rest = text.length - start - part.length;
+      return rest > 0 ? `${part}\n\n[${rest} more characters: read on with offset ${start + part.length}]` : part;
+    }),
+  );
   let paths: string[] = [];
   let loadError: string | null = null;
   let loaded = false;

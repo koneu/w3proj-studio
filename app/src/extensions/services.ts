@@ -209,6 +209,8 @@ export interface TerrainObjects {
 }
 
 export interface TerrainOccupancy {
+  /** Per pathing cell (rows from the south), 1 where cliffs or placed objects stand. */
+  readonly blocked: Uint8Array;
   /** Footprint size in pathing cells, or null when the type takes no room. */
   footprint(kind: string, id: string): Promise<{ width: number; height: number } | null>;
   fits(kind: string, id: string, x: number, y: number, angle: number): Promise<boolean>;

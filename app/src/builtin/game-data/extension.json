@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "description": "Browse and open the installed game's files (models, textures, SLKs, scripts) read-only.",
   "contributes": {
+    "mcpTools": [
+      {"name":"search_game_files","description":"Finds files in the installed game, by the path object data and scripts use: models for effects and missiles, icons, sounds. Spell effects are under Abilities\\Spells and Abilities\\Weapons. A file with `only` is missing in the other graphics modes, where a model simply doesn't show: prefer those without.","readOnly":true,"inputSchema":{"type":"object","required":["filter"],"properties":{"filter":{"type":"string","description":"Parts of the path, separated by spaces, not case sensitive: fire missile."},"extension":{"type":"string","description":"Only these, like mdx, blp or txt."},"limit":{"type":"integer","description":"At most this many (default 80)."}}}},
+      {"name":"read_game_file","description":"A text file of the installed game, like Scripts\\Blizzard.j, or UI\\TriggerData.txt.","readOnly":true,"inputSchema":{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"Start at this character (for files too long for one read)."}}}}
+    ],
     "viewContainers": [{ "id": "game", "title": "Game Data", "icon": "⛁", "order": 10 }],
     "views": [{ "id": "w3.game.files", "title": "Stored Files", "container": "game" }],
     "commands": [

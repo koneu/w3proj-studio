@@ -12,7 +12,7 @@ import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
-import { addScriptTrigger, findTrigger, isScript, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -102,13 +102,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!isScript(t)) throw new Error(`${t.name} is a GUI trigger. Only triggers in script can take a script.`);
         scripts.texts[textTriggers(file).indexOf(t)] = script;
       });
-      return changed ? `Changed the script of ${String(name)}.` : "It already had that script.";
+      return [changed ? `Changed the script of ${String(name)}.` : "It already had that script.", scriptWarning(String(name), script)].filter(Boolean).join(" ");
+    }),
+    w3.mcp.registerTool("add_trigger_variable", async ({ name, type, array, size, initialValue }) => {
+      if (typeof name !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) throw new Error("name must be letters, digits and _, starting with a letter.");
+      const types = (await triggerData(w3)).types;
+      if (typeof type !== "string" || !types.has(type)) throw new Error(`"${String(type)}" isn't a trigger type. Some are: integer, real, boolean, string, unit, group, location, timer, hashtable, effect.`);
+      await editTriggers(`Add variable ${name}`, (file) => addVariable(file, { name, type, isArray: array === true, arraySize: typeof size === "number" ? size : 1, initialValue: typeof initialValue === "string" ? initialValue : "" }));
+      return `Added the variable; scripts call it udg_${name}.`;
+    }),
+    w3.mcp.registerTool("set_script_header", async ({ script }) => {
+      if (typeof script !== "string" || script.includes("\0")) throw new Error("script must be text.");
+      const changed = await editTriggers("Change the custom script", (_, scripts) => { scripts.header = script; });
+      return changed ? "Changed the custom script." : "It already said that.";
+    }),
+    w3.mcp.registerTool("remove_trigger", async ({ name }) => {
+      await editTriggers(`Remove trigger ${String(name)}`, (file, scripts) => removeTrigger(file, scripts, named(file, name)));
+      return `Removed ${String(name)}.`;
     }),
     w3.mcp.registerTool("create_script_trigger", async ({ name, script, category }) => {
       if (typeof name !== "string" || !name.trim()) throw new Error("create_script_trigger needs a name.");
       if (typeof script !== "string" || script.includes("\0")) throw new Error("script must be text.");
       await editTriggers(`Create trigger ${name}`, (file, scripts) => addScriptTrigger(file, scripts, name.trim(), script, typeof category === "string" ? category : undefined));
-      return `Created the trigger ${name.trim()}.`;
+      return [`Created the trigger ${name.trim()}.`, scriptWarning(name.trim(), script)].filter(Boolean).join(" ");
     }),
   );
   const kinds = new KindRegistry();

@@ -19,7 +19,10 @@ import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { jsonPathOf, requireProject } from "../../lib/formats/mapdoc";
-import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
+import { inArea, readArea, type Area } from "../../lib/terrain/area";
+import { dress, scatterSpots, terrainSummary, viewOfArea, type Dressing } from "./aitools";
+import { NO_WALK } from "../../lib/terrain/pathing";
+import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
@@ -127,38 +130,159 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
-  /** The open terrain editor's picture as PNG data, longest side at most `size`. */
-  let screenshot: ((size: number) => Promise<string>) | null = null;
+  /** The open terrain editor, for tools. */
+  let opened: { handle: TerrainEditorHandle; ready: () => Promise<void>; screenshot: (size: number, area: Area | null, top: boolean) => Promise<string> } | null = null;
+  /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
+  let lastView: { key: string; view: TerrainView } | null = null;
+
+  /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
+  const liveEditor = async () => {
+    await w3.commands.execute("w3.terrain.open");
+    for (let n = 0; n < 200 && !opened; n++) await new Promise((done) => setTimeout(done, 100));
+    if (!opened) throw new Error("The terrain editor couldn't start (see its tab).");
+    await opened.ready();
+    return opened;
+  };
+  const fileKey = (kind: unknown) => (kind === "doodads" ? "doodads" as const : "units" as const);
+
+  /** One edit of a placement file. */
+  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
+    const { root } = requireProject(w3);
+    const name = key === "units" ? "war3mapUnits.doo" : "war3map.doo", path = jsonPathOf(w3, name);
+    const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    return edits.edit(title, async (read) => {
+      const text = await read(path);
+      if (text === null) throw new Error(`This project has no ${name}.`);
+      const doc = JSON.parse(text) as Record<string, unknown>;
+      const list = (doc[key] ??= []) as Placed[];
+      await change({ name, key, doc, list, json: true, dirty: false });
+      return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+    });
+  };
+
+  const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean) => {
+    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
+    if (!entry) throw new Error(`${f.name} has nothing placed yet to take the layout from.`);
+    dress(entry, handle.objects.type(id), asked, vary, Math.random);
+    f.list.push(entry);
+  };
+
   ctx.subscriptions.push(
-    w3.mcp.registerTool("place_object", async ({ kind, id, x, y, player, facing }) => {
-      const { root } = requireProject(w3);
-      if (typeof id !== "string" || id.length !== 4) throw new Error("id must be four characters, like hfoo.");
-      if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
-      const key = kind === "doodads" ? "doodads" : "units", name = key === "units" ? "war3mapUnits.doo" : "war3map.doo";
-      const path = jsonPathOf(w3, name), ground = projectTerrain(w3);
-      if (!ground) throw new Error("This project has no war3map.w3e.");
-      const owner = typeof player === "number" ? player - 1 : 0;
-      if (key === "units" && (!Number.isInteger(owner) || owner < 0 || owner > 27)) throw new Error("player counts from 1.");
-      const terrain = parseW3e(await readTerrainBytes(ground, { readText: () => w3.workspace.readText(ground), readBytes: () => w3.workspace.readBytes(ground) }));
-      const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
-      await edits.edit(`Place ${id}`, async (read) => {
-        const text = await read(path);
-        if (text === null) throw new Error(`This project has no ${name}.`);
-        const doc = JSON.parse(text) as Record<string, unknown>;
-        const list = (doc[key] ??= []) as Placed[];
-        const entry = newEntry({ name, key, doc, list, json: true, dirty: false }, id, [x, y, heightAt(terrain, x, y)], key === "units" ? owner : undefined);
-        if (!entry) throw new Error(`${name} has nothing placed yet to take the layout from.`);
-        if (typeof facing === "number") entry.angle = (facing * Math.PI) / 180;
-        list.push(entry);
-        return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
-      });
-      return `Placed ${id} at ${x}, ${y}.`;
+    w3.mcp.registerTool("terrain_screenshot", async (args) => {
+      const editor = await liveEditor();
+      const area = await readArea(w3, args);
+      const size = typeof args.maxSize === "number" && args.maxSize > 0 ? args.maxSize : 1280;
+      const data = await editor.screenshot(size, area, args.view !== "angled");
+      const image = { type: "image", data, mimeType: "image/png" };
+      return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
     }),
-    w3.mcp.registerTool("terrain_screenshot", async ({ maxSize }) => {
-      await w3.commands.execute("w3.terrain.open");
-      if (!screenshot) throw new Error("The terrain editor couldn't start (see its tab).");
-      const size = typeof maxSize === "number" && maxSize > 0 ? maxSize : 1280;
-      return { type: "image", data: await screenshot(size), mimeType: "image/png" };
+    w3.mcp.registerTool("terrain_info", async (args) => {
+      const editor = await liveEditor();
+      const t = editor.handle.terrain;
+      const whole = { left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 };
+      // The game's pathing file leaves out trees and other destructables: what stands there counts.
+      const [pathing, room] = await Promise.all([editor.handle.pathing(), editor.handle.objects.occupancy()]);
+      const cells = pathing.cells.map((c, i) => (room.blocked[i] ? c | NO_WALK : c));
+      return terrainSummary(t, { ...pathing, cells }, (await readArea(w3, args)) ?? whole);
+    }),
+    w3.mcp.registerTool("place_objects", async ({ kind, objects, ignoreRoom }) => {
+      if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
+      const wanted = objects as { id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number }[];
+      const key = fileKey(kind);
+      const owners = wanted.map((o) => (typeof o.player === "number" ? o.player - 1 : 0));
+      for (const [i, o] of wanted.entries()) {
+        if (typeof o.id !== "string" || o.id.length !== 4 || typeof o.x !== "number" || typeof o.y !== "number") throw new Error(`objects[${i}] needs an id of four characters, and x and y.`);
+        if (key === "units" && (!Number.isInteger(owners[i]) || owners[i] < 0 || owners[i] > 27)) throw new Error(`objects[${i}]: player counts from 1.`);
+      }
+      const { handle } = await liveEditor();
+      let placed = 0, noRoom = 0;
+      await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
+        const room = ignoreRoom === true ? null : await handle.objects.occupancy();
+        for (const [i, o] of wanted.entries()) {
+          const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id);
+          // Decided here: a footprint is checked at the facing the object ends up with.
+          const facing = type?.fixedRot ?? o.facing ?? (key === "doodads" ? Math.random() * 360 : 270);
+          const angle = (facing * Math.PI) / 180;
+          if (room && !(await room.fits(type?.kind ?? "w3u", id, x, y, angle))) { noRoom++; continue; }
+          add(f, handle, id, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads");
+          await room?.mark(type?.kind ?? "w3u", id, x, y, angle);
+          placed++;
+        }
+        if (!placed) throw new Error("There's no room at any of those points.");
+      });
+      return { placed, noRoom };
+    }),
+    w3.mcp.registerTool("scatter_objects", async (args) => {
+      const ids = args.ids;
+      if (!Array.isArray(ids) || !ids.length || !ids.every((i) => typeof i === "string" && i.length === 4)) throw new Error("ids must list object types of four characters.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("scatter_objects needs a region, or left, bottom, right and top.");
+      const density = typeof args.density === "number" ? Math.min(1, Math.max(0.05, args.density)) : 0.7;
+      const limit = typeof args.limit === "number" && args.limit > 0 ? args.limit : 3000;
+      const { handle } = await liveEditor();
+      const key = fileKey(args.kind ?? "doodads");
+      const counts = new Map<string, number>();
+      await editPlaced(`Scatter ${(ids as string[]).join(", ")} in ${area.name ?? "an area"}`, key, async (f) => {
+        const room = await handle.objects.occupancy();
+        const types = (ids as string[]).map((id) => {
+          const type = handle.objects.type(id);
+          if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
+          return { id, type };
+        });
+        const sizes = await Promise.all(types.map(({ id, type }) => room.footprint(type.kind, id)));
+        // The smallest sets the spacing: a rock among trees shouldn't thin out the trees. Whatever
+        // doesn't fit at a spot is left out there.
+        const smallest = Math.min(...sizes.map((fp) => (fp ? Math.max(fp.width, fp.height) * 32 : 128)));
+        const spacing = Math.max(64, smallest) / Math.sqrt(density);
+        for (const spot of scatterSpots(area, spacing, args.shape === "box" ? "box" : "ellipse", Math.random)) {
+          if ([...counts.values()].reduce((a, b) => a + b, 0) >= limit) break;
+          const { id, type } = types[Math.floor(Math.random() * types.length)];
+          const facing = type.fixedRot ?? Math.random() * 360, angle = (facing * Math.PI) / 180;
+          if (!(await room.fits(type.kind, id, spot.x, spot.y, angle))) continue;
+          await room.mark(type.kind, id, spot.x, spot.y, angle);
+          add(f, handle, id, spot.x, spot.y, undefined, { facing }, true);
+          counts.set(id, (counts.get(id) ?? 0) + 1);
+        }
+        if (!counts.size) throw new Error("There's no free ground there for these.");
+      });
+      return { placed: [...counts.values()].reduce((a, b) => a + b, 0), byType: Object.fromEntries(counts), area };
+    }),
+    w3.mcp.registerTool("move_object", async ({ kind, index, id, x, y, facing, scale }) => {
+      if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
+      const { handle } = await liveEditor();
+      await editPlaced(`Move ${String(id)}`, fileKey(kind), (f) => {
+        const e = f.list[Number(index)];
+        if (!e || e.id !== id) throw new Error(`Number ${String(index)} isn't a ${String(id)} any more. list_placed gives the numbers.`);
+        e.position = [x, y, heightAt(handle.terrain, x, y)];
+        if (typeof facing === "number") e.angle = (facing * Math.PI) / 180;
+        if (typeof scale === "number") e.scale = [scale, scale, scale];
+      });
+      return `Moved ${String(id)} to ${x}, ${y}.`;
+    }),
+    w3.mcp.registerTool("remove_objects", async (args) => {
+      const { items, id, player } = args;
+      const area = await readArea(w3, args);
+      const listed = Array.isArray(items) ? items as { index: number; id: string }[] : null;
+      if (!listed && !area && typeof id !== "string" && typeof player !== "number") throw new Error("Say what to remove: items, or an area, id or player.");
+      let removed = 0;
+      await editPlaced(`Remove objects${area?.name ? ` in ${area.name}` : ""}`, fileKey(args.kind), (f) => {
+        const gone = new Set<Placed>();
+        for (const it of listed ?? []) {
+          const e = f.list[it.index];
+          if (!e || e.id !== it.id) throw new Error(`Number ${it.index} isn't a ${it.id} any more. list_placed gives the numbers.`);
+          gone.add(e);
+        }
+        if (!listed) {
+          for (const e of f.list) {
+            if ((typeof id !== "string" || e.id === id) && (typeof player !== "number" || (e as Placed & { player?: number }).player === player - 1)
+              && (!area || inArea(e.position[0], e.position[1], area))) gone.add(e);
+          }
+        }
+        if (!gone.size) throw new Error("Nothing matches that.");
+        removed = gone.size;
+        f.list.splice(0, f.list.length, ...f.list.filter((e) => !gone.has(e)));
+      });
+      return { removed };
     }),
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
     w3.commands.register("w3.terrain.open", async () => {
@@ -1365,6 +1489,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             occupancy: async () => {
               const occ = await occupancy();
               return {
+                blocked: occ.blocked,
                 footprint: async (kind, id) => { const fp = await occ.footprint(id, kind); return fp && { width: fp.width, height: fp.height }; },
                 fits: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); return !fp || occ.fits(fp, x, y, angle); },
                 mark: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); if (fp) occ.mark(fp, x, y, angle); },
@@ -1396,6 +1521,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             redraw();
           },
         };
+        const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
+        if (lastView?.key === viewKey) handle.setView(lastView.view);
         const tabsEl = h("div.terrain-tabs");
         const builtinBar = selectBar();
         const groupBar = h("div.model-toolbar.terrain-tools", {}, builtinBar);
@@ -1688,18 +1815,46 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         raf = requestAnimationFrame(tick);
 
-        const takeScreenshot = async (size: number) => {
-          await objectsPlaced.catch(() => {});
+        const ready = () => objectsPlaced.catch(() => {});
+        const takeScreenshot = async (size: number, area: Area | null, top: boolean) => {
+          await ready();
           await loader.settled();
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
-          // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.
-          renderer.render();
-          const scale = Math.min(1, size / Math.max(canvas.width, canvas.height));
-          const copy = h("canvas", { width: Math.round(canvas.width * scale), height: Math.round(canvas.height * scale) });
-          copy.getContext("2d")!.drawImage(canvas, 0, 0, copy.width, copy.height);
-          return copy.toDataURL("image/png").split(",")[1];
+          const before = handle.view();
+          if (area) {
+            const middle = heightAt(terrain, (area.left + area.right) / 2, (area.bottom + area.top) / 2);
+            handle.setView(viewOfArea(area, middle, canvas.clientWidth / canvas.clientHeight, renderer.fov, top));
+          }
+          try {
+            // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.
+            renderer.render();
+            const scale = Math.min(1, size / Math.max(canvas.width, canvas.height));
+            const copy = h("canvas", { width: Math.round(canvas.width * scale), height: Math.round(canvas.height * scale) });
+            const g = copy.getContext("2d")!;
+            g.drawImage(canvas, 0, 0, copy.width, copy.height);
+            if (area) {
+              const per = copy.width / canvas.clientWidth;
+              const at = (x: number, y: number) => renderer.project([x, y, heightAt(terrain, x, y)])?.map((n) => n * per) ?? null;
+              const corners = [[area.left, area.top], [area.right, area.top], [area.right, area.bottom], [area.left, area.bottom]];
+              const points = corners.map(([x, y]) => at(x, y));
+              g.strokeStyle = "#ffe14d";
+              g.lineWidth = 2;
+              g.beginPath();
+              points.forEach((p) => { if (p) g.lineTo(p[0], p[1]); });
+              g.closePath();
+              g.stroke();
+              g.font = "bold 13px sans-serif";
+              g.fillStyle = "#ffe14d";
+              g.shadowColor = "#000";
+              g.shadowBlur = 3;
+              points.forEach((p, i) => { if (p) g.fillText(`${corners[i][0]}, ${corners[i][1]}`, p[0] + 4, p[1] + (i < 2 ? -6 : 16)); });
+            }
+            return copy.toDataURL("image/png").split(",")[1];
+          } finally {
+            handle.setView(before);
+          }
         };
-        screenshot = takeScreenshot;
+        opened = { handle, ready, screenshot: takeScreenshot };
 
         const editorApi = {
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
@@ -1775,7 +1930,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.look === look) toolGroups.look = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
-            if (screenshot === takeScreenshot) screenshot = null;
+            if (opened?.screenshot === takeScreenshot) opened = null;
+            lastView = { key: viewKey, view: handle.view() };
             stopLightWatch.dispose();
             stopObjectWatch.dispose();
             clearTimeout(objectReload);

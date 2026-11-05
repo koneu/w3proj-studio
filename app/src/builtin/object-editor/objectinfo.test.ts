@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { changedFields, gameFields, mapObjectList, objectName, type MapObjects } from "./objectinfo";
+import { changedFields, gameFields, gameObjectList, mapObjectList, objectName, type MapObjects } from "./objectinfo";
 
 const field = (id: string, label: string, repeat = 0) => ({ id, label, repeat }) as FieldMeta;
 const kind = { names: new Map([["hfoo", "Footman"], ["AHbz", "Blizzard"]]), fieldById: new Map([["unam", field("unam", "Name")], ["uhpm", field("uhpm", "Hit Points")]]) };
@@ -11,6 +11,21 @@ const file: MapObjects = {
   custom: [{ base: "hfoo", id: "h000", mods: [{ field: "unam", value: "TRIGSTR_001" }, { field: "uhpm", value: 500 }] }],
   original: [{ base: "hfoo", mods: [{ field: "uhpm", value: 450 }] }],
 };
+
+test("game objects can be narrowed to a tileset and a category", () => {
+  const tiles: Record<string, string> = { ATtr: "A", LTlt: "L,F", YTct: "*" };
+  const kinds = { ATtr: "Trees", LTlt: "Trees", YTct: "Other" } as Record<string, string>;
+  const game = {
+    baseIds: ["ATtr", "LTlt", "YTct"], names: new Map([["ATtr", "Tree"]]), facets: (id: string) => ({ category: kinds[id] }),
+    fieldById: new Map([["btil", field("btil", "Tilesets")]]), defaultValue: (id: string) => tiles[id],
+  };
+  const ids = (t?: string, c?: string) => gameObjectList(game, (s) => s, t, c).map((o) => o.id);
+  assert.deepEqual(ids(), ["ATtr", "LTlt", "YTct"]);
+  assert.deepEqual(ids("a"), ["ATtr", "YTct"]);
+  assert.deepEqual(ids("F"), ["LTlt", "YTct"]);
+  assert.deepEqual(ids("A", "tree"), ["ATtr"]);
+  assert.deepEqual(gameObjectList(game, (s) => s, "A")[0], { id: "ATtr", name: "Tree", category: "Trees" });
+});
 
 test("names: the map's own, without colour codes, else the base's", () => {
   assert.equal(objectName(file.custom![0], kind, resolve), "Red Guard");

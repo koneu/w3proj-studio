@@ -21,6 +21,12 @@ test("players count from 1 in and out", () => {
   assert.equal(placedList(all, names, "hfoo").length, 3);
 });
 
+test("an area narrows it down, and numbers stay those of the file", () => {
+  const spread = [{ ...at("a"), position: [0, 0, 0] }, { ...at("b"), position: [500, 500, 0] }, { ...at("c"), position: [600, 600, 0] }];
+  const got = placedList(spread, names, undefined, undefined, { left: 400, bottom: 400, right: 700, top: 700 });
+  assert.deepEqual(got.map((p) => [p.id, p.index]), [["b", 1], ["c", 2]]);
+});
+
 test("doodads have no owner, and don't get one", () => {
   const got = placedList([at("ATtr")], names, "ATtr");
   assert.equal("player" in got[0], false);

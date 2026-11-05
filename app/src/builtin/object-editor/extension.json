@@ -5,7 +5,7 @@
   "description": "Table editor for unit, item, ability, buff, doodad, destructable and upgrade data.",
   "contributes": {
     "mcpTools": [
-      {"name":"set_object_field","description":"Changes one field of an object, in the object data of the map. Find fields with get_object and gameValues. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["kind","id","field","value"],"properties":{"kind":{"type":"string","enum":["units","items","abilities","buffs","destructables","doodads","upgrades"]},"id":{"type":"string"},"field":{"type":"string","description":"Four letters, like uhpm."},"level":{"type":"integer","description":"For fields with levels, from 1."},"value":{"description":"The new value. null takes it back to the game's."}}}},
+      {"name":"set_object_fields","description":"Changes fields of an object in the object data of the map, as one edit. Find fields with get_object and gameValues. All of them are checked first: if one is wrong, none changes. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["kind","id","changes"],"properties":{"kind":{"type":"string","enum":["units","items","abilities","buffs","destructables","doodads","upgrades"]},"id":{"type":"string"},"changes":{"type":"array","items":{"type":"object","required":["field","value"],"properties":{"field":{"type":"string","description":"Four letters, like uhpm."},"level":{"type":"integer","description":"For fields with levels, from 1."},"value":{"description":"The new value. null takes it back to the game's."}}}}}}},
       {"name":"create_object","description":"Adds a custom object based on a game object. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["kind","base"],"properties":{"kind":{"type":"string","enum":["units","items","abilities","buffs","destructables","doodads","upgrades"]},"base":{"type":"string","description":"The game object to start from, like hfoo."},"name":{"type":"string"}}}},
       {"name":"delete_object","description":"Removes a custom object, or what the map changes in a game object. Anything placed or using it stays and must be fixed too. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["kind","id"],"properties":{"kind":{"type":"string","enum":["units","items","abilities","buffs","destructables","doodads","upgrades"]},"id":{"type":"string"}}}},
       {
@@ -16,6 +16,8 @@
           "kind": { "type": "string", "enum": ["units", "items", "abilities", "buffs", "destructables", "doodads", "upgrades"] },
           "scope": { "type": "string", "enum": ["map", "game"], "description": "map (default): what the map adds or changes. game: everything in the game." },
           "filter": { "type": "string", "description": "Only ids or names containing this text (not case sensitive). Game names are in the installed language." },
+          "tileset": { "type": "string", "description": "scope game, doodads and destructables: only those made for this tileset. \"map\" means the open map's, or give its letter." },
+          "category": { "type": "string", "description": "scope game: only this category, as the entries show it (not case sensitive). Trees are destructables in the category of trees." },
           "limit": { "type": "integer", "description": "At most this many (default 200)." }
         } }
       },
