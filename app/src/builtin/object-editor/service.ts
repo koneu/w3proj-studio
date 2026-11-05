@@ -89,6 +89,17 @@ export function iconLoader(w3: W3Api) {
 
 export function objectsService(w3: W3Api): ObjectsService {
   const icons = iconLoader(w3);
+  // Callers ask for names one by one, a whole map's worth at once: the files are read once per
+  // kind until something is saved or changes on disk.
+  const parsed = new Map<string, ReturnType<typeof customObjects>>();
+  const forget = () => parsed.clear();
+  w3.workspace.onDidChange(forget);
+  w3.workspace.onDidSave(forget);
+  const customOf = (kind: string, kd: KindData) => {
+    let list = parsed.get(kind);
+    if (!list) parsed.set(kind, (list = customObjects(w3, kind, kd).catch(() => [])));
+    return list;
+  };
   /** Tab last used per set of kinds, so the browser reopens where it was. */
   const lastTab = new Map<string, number>();
   return {
@@ -96,7 +107,7 @@ export function objectsService(w3: W3Api): ObjectsService {
       for (const kind of kinds) {
         const kd = await loadKind(w3, kind).catch(() => null);
         if (!kd) continue;
-        const custom = (await customObjects(w3, kind, kd).catch(() => [])).find((c) => c.id === id);
+        const custom = (await customOf(kind, kd)).find((c) => c.id === id);
         if (custom) return custom.name;
         const n = kd.names.get(id);
         if (n) return stripColors(n);
@@ -106,7 +117,7 @@ export function objectsService(w3: W3Api): ObjectsService {
     async icon(kind, id) {
       if (!ICON_FIELDS[kind]) return null;
       const kd = await loadKind(w3, kind);
-      const custom = (await customObjects(w3, kind, kd).catch(() => [])).find((c) => c.id === id);
+      const custom = (await customOf(kind, kd)).find((c) => c.id === id);
       return icons(kd, kind, id, custom?.base, custom?.icon);
     },
     async pick(host, opts): Promise<PickedObject | undefined> {
@@ -115,7 +126,7 @@ export function objectsService(w3: W3Api): ObjectsService {
       for (;;) {
         const kind = opts.kinds[tab];
         const kd = await loadKind(w3, kind);
-        const custom = await customObjects(w3, kind, kd).catch(() => []);
+        const custom = await customOf(kind, kd);
         const r = await pickObject(host, kd, {
           title: opts.title, custom, query,
           iconOf: (id, base) => icons(kd, kind, id, base, custom.find((c) => c.id === id)?.icon),

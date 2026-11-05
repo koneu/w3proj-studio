@@ -9,13 +9,17 @@ import { loadKind } from "../../lib/objects/metadata";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
-import { buildTree, triggerRefs, type MapContents, type Node as TreeNode, type Target } from "./data";
+import { buildTree, idsInText, markUnused, objectRefs, triggerRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
 
 const VIEW = "w3.objectManager.tree";
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   let tree: TreeNode[] | null = null, refs = new Map<string, Set<string>>(), loading: Promise<void> | null = null, error = "";
+  /** Objects using an id, and how many custom objects nothing uses. */
+  let users = new Map<string, Map<string, Target>>(), unusedCount = 0;
+  /** Show only what nothing uses. */
+  let unusedOnly = false;
   /** Expanded nodes by their path of labels (kept across refreshes). */
   const open = new Set<string>();
   let query = "", selected = "";
@@ -27,6 +31,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const c = await contents(w3);
         tree = buildTree(c);
         refs = c.triggers ? triggerRefs(c.triggers) : new Map();
+        const customIds = new Set(c.custom.flatMap((k) => k.ids.map((o) => o.id)));
+        users = objectRefs(c.objects, customIds, c.nameOf);
+        const mentioned = new Set(c.texts.flatMap((t) => idsInText(t, customIds)));
+        unusedCount = markUnused(tree, (id) => mentioned.has(id) || users.has(id) || refs.has(id));
       } catch (e) {
         error = String((e as Error).message ?? e);
       }
@@ -62,16 +70,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const rows = h("div.tree.om-tree");
         const info = h("div.om-info");
         const q = () => query.trim().toLowerCase();
-        const matches = (n: TreeNode): boolean => `${n.label} ${n.detail ?? ""}`.toLowerCase().includes(q()) || (n.children ?? []).some(matches);
+        const matches = (n: TreeNode): boolean => (!unusedOnly || n.unused === true) && `${n.label} ${n.detail ?? ""}`.toLowerCase().includes(q()) || (n.children ?? []).some(matches);
+        const filtering = () => !!q() || unusedOnly;
         const draw = () => {
           const out: HTMLElement[] = [];
           const walk = (nodes: TreeNode[], depth: number, path: string) => {
             for (const n of nodes) {
-              if (q() && !matches(n)) continue;
+              if (filtering() && !matches(n)) continue;
               const key = `${path}/${n.label}`;
               const kids = n.children ?? [];
               // While filtering, groups open by themselves.
-              const isOpen = open.has(key) || (!!q() && kids.length > 0 && depth < 2);
+              const isOpen = open.has(key) || (filtering() && kids.length > 0 && depth < 2);
               const used = n.ref ? refs.get(n.ref)?.size ?? 0 : 0;
               out.push(h(`div.tree-row.om-row${selected === key ? ".active" : ""}`, {
                 style: { paddingLeft: `${6 + depth * 14}px` }, title: n.detail ?? "",
@@ -86,6 +95,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("span.tree-icon", {}, kids.length ? (isOpen ? "▾" : "▸") : ""),
               h("span.tree-label", {}, n.label),
               n.detail ? h("span.om-detail", {}, n.detail) : null,
+              n.unused ? h("span.om-unused", { title: "Nothing uses it: no placed object, other object, trigger or script" }, "unused") : null,
               used ? h("span.om-used", { title: "Triggers using it" }, `ϟ${used}`) : null));
               if (kids.length && isOpen) walk(kids, depth + 1, key);
             }
@@ -95,16 +105,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The selected entry: what it is and the triggers that use it (click to open). */
         const showInfo = (n: TreeNode) => {
-          const users = n.ref ? [...(refs.get(n.ref) ?? [])].sort() : [];
+          const inTriggers = n.ref ? [...(refs.get(n.ref) ?? [])].sort() : [];
+          const inObjects = n.ref ? [...(users.get(n.ref) ?? [])].sort((a, b) => a[0].localeCompare(b[0])) : [];
           const parts = [h("div.om-info-title", {}, n.label),
             n.detail ? h("div.muted", {}, n.detail) : null,
-            ...(n.ref ? [h("div.om-info-sub", {}, users.length ? `Used in ${users.length} trigger${users.length === 1 ? "" : "s"}:` : "Not used in triggers."),
-              ...users.map((t) => h("div.om-trigger", { onclick: () => void w3.commands.execute("w3.triggers.reveal", t) }, `ϟ ${t}`))] : []),
+            ...(n.ref ? [h("div.om-info-sub", {}, inTriggers.length ? `Used in ${inTriggers.length} trigger${inTriggers.length === 1 ? "" : "s"}:` : "Not used in triggers."),
+              ...inTriggers.map((t) => h("div.om-trigger", { onclick: () => void w3.commands.execute("w3.triggers.reveal", t) }, `ϟ ${t}`))] : []),
+            ...(inObjects.length ? [h("div.om-info-sub", {}, `Used by ${inObjects.length} object${inObjects.length === 1 ? "" : "s"}:`),
+              ...inObjects.map(([label, target]) => h("div.om-trigger", { onclick: () => void go(target).catch((e) => w3.window.showError(String(e))) }, label))] : []),
             n.target ? h("div.muted.om-hint", {}, "Double-click the entry to go to it.") : null];
           info.replaceChildren(...parts.filter((x): x is HTMLDivElement => x !== null));
         };
         draw();
+        const unusedBox = h("input", { type: "checkbox", checked: unusedOnly, onchange: () => { unusedOnly = unusedBox.checked; draw(); } });
         el.append(h("div.om-view", {}, h("div.om-toolbar", {}, search, h("button.icon-button", { title: "Refresh", onclick: () => void load() }, "⟳")),
+          h("label.om-filter", { title: "Custom objects no placed object, other object, trigger or script uses" }, unusedBox, ` Unused only (${unusedCount})`),
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },
     }),
@@ -123,10 +138,12 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
   // Kinds: game ids plus the map's custom ids per object type.
   const custom: MapContents["custom"] = [];
+  const objectData: MapContents["objects"] = [];
   const kindIds = new Map<string, Set<string>>();
   for (const [ext, label] of KINDS) {
-    const file = await json<{ custom: { id: string; base: string }[] }>(`war3map.${ext}`);
+    const file = await json<{ custom: { id: string; base: string }[]; original?: ObjectEntry[] }>(`war3map.${ext}`);
     const ids = (file?.custom ?? []).map((o) => ({ id: o.id, base: o.base }));
+    objectData.push({ ext, label: label.replace(/s$/, ""), objects: [...(file?.original ?? []), ...(file?.custom ?? [])] });
     custom.push({ ext, label, ids });
     const kd = await loadKind(w3, ext).catch(() => null);
     kindIds.set(ext, new Set([...(kd?.baseIds ?? []), ...ids.map((o) => o.id)]));
@@ -141,11 +158,14 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const wtg = wtgPath(w3.workspace.files());
   const triggers = wtg ? await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"))).catch(() => null) : null;
   const imp = await json<{ files: { path: string }[] }>("war3map.imp");
+  const script = await w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => "");
   return {
     units, doodads, kindOf, nameOf: (id) => names.get(id) ?? id, custom,
     regions: (await json<{ regions: MapContents["regions"] }>("war3map.w3r"))?.regions ?? [],
     cameras: (await json<{ cameras: MapContents["cameras"] }>("war3map.w3c"))?.cameras ?? [],
     sounds: (await json<{ sounds: MapContents["sounds"] }>("war3map.w3s"))?.sounds ?? [],
-    triggers, imports: (imp?.files ?? []).map((f) => f.path),
+    triggers, imports: (imp?.files ?? []).map((f) => f.path), objects: objectData,
+    // Item drops of placed objects and the map's item tables and techtree name ids too.
+    texts: [script, JSON.stringify(units), JSON.stringify(doodads), JSON.stringify(await json("war3map.w3i"))],
   };
 }

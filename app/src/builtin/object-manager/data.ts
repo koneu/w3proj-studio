@@ -20,6 +20,10 @@ export interface Node {
   ref?: string;
   target?: Target;
   children?: Node[];
+  /** A custom object: tells whether it's used anywhere (see markUnused). */
+  custom?: boolean;
+  /** Nothing uses it. */
+  unused?: boolean;
 }
 
 type Placed = PlacedJson & { position: number[]; player?: number };
@@ -47,6 +51,46 @@ export function triggerRefs(file: TriggerFile): Map<string, Set<string>> {
   return out;
 }
 
+/** What object data holds per object (field values are strings, ints, reals). */
+export interface ObjectEntry { id?: string; base: string; mods?: { value: unknown }[]; sets?: { mods: { value: unknown }[] }[] }
+
+/** Which object uses which of `ids`: values of its fields ("Y01q,Y01w" for abilities and the
+ *  like). Key: the id used; value: the users' labels with where they go. */
+export function objectRefs(kinds: { ext: string; label: string; objects: ObjectEntry[] }[], ids: ReadonlySet<string>, nameOf: (id: string) => string): Map<string, Map<string, Target>> {
+  const out = new Map<string, Map<string, Target>>();
+  for (const { ext, label, objects } of kinds) {
+    for (const o of objects) {
+      const self = o.id ?? o.base;
+      for (const m of [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)]) {
+        if (typeof m.value !== "string") continue;
+        for (const token of m.value.split(/[,;\s]+/)) {
+          if (token === self || !ids.has(token)) continue;
+          let users = out.get(token);
+          if (!users) out.set(token, (users = new Map()));
+          users.set(`${label}: ${nameOf(self)}`, { kind: "object", ext, id: self });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Those of `ids` that a text mentions as a whole word: JASS 'h000', Lua FourCC("h000"), JSON "h000". */
+export function idsInText(text: string, ids: ReadonlySet<string>): string[] {
+  return [...new Set(text.match(/(?<![A-Za-z0-9])[A-Za-z0-9]{4}(?![A-Za-z0-9])/g) ?? [])].filter((t) => ids.has(t));
+}
+
+/** Marks custom objects nothing uses, returning how many. `isUsed` should rather say yes: this
+ *  invites deleting what it lists. */
+export function markUnused(nodes: Node[], isUsed: (ref: string) => boolean): number {
+  let n = 0;
+  for (const node of nodes) {
+    if (node.custom && node.ref) { node.unused = !isUsed(node.ref); if (node.unused) n++; }
+    if (node.children) n += markUnused(node.children, isUsed);
+  }
+  return n;
+}
+
 export interface MapContents {
   units: Placed[];
   doodads: Placed[];
@@ -59,6 +103,10 @@ export interface MapContents {
   sounds: { name: string; file: string; flags: number }[];
   triggers: TriggerFile | null;
   imports: string[];
+  /** Object data of every type (standard objects' changes too). */
+  objects: { ext: string; label: string; objects: ObjectEntry[] }[];
+  /** Texts that can mention object ids: the map script, placed objects, map info. */
+  texts: string[];
 }
 
 /** The tree: groups by type, with counts. */
@@ -89,7 +137,7 @@ export function buildTree(c: MapContents): Node[] {
     { label: `Start locations (${starts.length})`, children: starts.map((s): Node => ({ label: owner(s.player) || "Start location", detail: at(s), target: { kind: "point", x: s.position[0], y: s.position[1] } })) },
     { label: `Custom objects (${c.custom.reduce((n, k) => n + k.ids.length, 0)})`, children: c.custom.filter((k) => k.ids.length).map((k): Node => ({
       label: `${k.label} (${k.ids.length})`,
-      children: k.ids.map((o): Node => ({ label: `${c.nameOf(o.id)}`, detail: `${o.id} ← ${o.base}`, ref: o.id, target: { kind: "object", ext: k.ext, id: o.id } })),
+      children: k.ids.map((o): Node => ({ label: `${c.nameOf(o.id)}`, detail: `${o.id} ← ${o.base}`, ref: o.id, custom: true, target: { kind: "object", ext: k.ext, id: o.id } })),
     })) },
     { label: `Regions (${c.regions.length})`, children: c.regions.map((r): Node => ({
       label: r.name, ref: `gg_rct_${ident(r.name)}`, target: { kind: "point", x: (r.left + r.right) / 2, y: (r.bottom + r.top) / 2 },

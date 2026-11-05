@@ -673,6 +673,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .om-row { cursor: pointer; white-space: nowrap; }
 .om-row.active { background: #37414f; }
 .om-detail { margin-left: 8px; color: var(--fg-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.om-filter { display: block; padding: 0 8px 4px; color: var(--fg-muted); }
+.om-unused { margin-left: 8px; padding: 0 4px; border-radius: 3px; background: #4a3f1c; color: #e0c060; font-size: 10px; }
 .om-used { margin-left: auto; padding-left: 8px; color: #cca700; font-size: 11px; }
 .om-info { border-top: 1px solid var(--border); padding: 6px 8px; max-height: 40%; overflow: auto; }
 .om-info:empty { display: none; }
