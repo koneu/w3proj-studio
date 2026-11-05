@@ -5,7 +5,7 @@
 // 4 tiles inside the unplayable border horizontally and 2 vertically (also
 // all 116 maps).
 
-import type { Corner, Terrain } from "./w3e";
+import { randomVariation, type Corner, type Terrain } from "./w3e";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -30,7 +30,8 @@ export function resizeProblem(t: Terrain, change: Sides, complements: Sides): st
 }
 
 /** The terrain with `change` applied: new corners continue the nearest edge (same ground and
- *  height, no ramps), removed ones are dropped; world positions stay. */
+ *  height, no ramps, a variation of their own: copied ones repeat the edge in stripes), removed
+ *  ones are dropped; world positions stay. */
 export function resizeTerrain(t: Terrain, change: Sides): Terrain {
   const [l, , b] = change;
   const [w, h] = resizedSize(t, change);
@@ -41,7 +42,7 @@ export function resizeTerrain(t: Terrain, change: Sides): Terrain {
       const ox = Math.min(Math.max(x - l, 0), t.width - 1);
       const src = t.corners[oy * t.width + ox];
       const inside = x - l === ox && y - b === oy;
-      corners[y * (w + 1) + x] = inside ? { ...src } : { ...src, ramp: false, blight: false };
+      corners[y * (w + 1) + x] = inside ? { ...src } : { ...src, ramp: false, blight: false, variation: randomVariation() };
     }
   }
   return { ...t, width: w + 1, height: h + 1, offsetX: t.offsetX - l * 128, offsetY: t.offsetY - b * 128, corners };
