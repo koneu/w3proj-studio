@@ -6,6 +6,7 @@
   "extensionDependencies": ["w3.objectEditor"],
   "contributes": {
     "mcpTools": [
+      {"name":"set_map_text","description":"Changes a text of the map's properties. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["field","text"],"properties":{"field":{"type":"string","enum":["name","author","description","suggestedPlayers","loadingTitle","loadingSubtitle","loadingText"]},"text":{"type":"string"}}}},
       { "name": "map_info", "description": "The open map's properties: name, author, description, tileset, size, players, forces, loading screen, script language.", "readOnly": true }
     ],
     "viewContainers": [{ "id": "scenario", "title": "Scenario", "icon": "⚑", "order": 4 }],

@@ -7,7 +7,8 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { weatherName } from "../../lib/terrain/weather";
-import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3r";
@@ -32,7 +33,47 @@ interface RegionsDoc { format?: string; version: number; regions: Region[] }
 const PALETTE: [number, number, number][] = [[255, 128, 128], [128, 192, 255], [128, 255, 128], [255, 224, 128], [224, 128, 255], [128, 255, 224]];
 const NO_WEATHER = "0x00000000";
 
+/** One edit of the map's regions. */
+async function editRegions(w3: W3Api, title: string, change: (doc: RegionsDoc) => void) {
+  const { root } = requireProject(w3);
+  const path = jsonPathOf(w3, "war3map.w3r");
+  const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+  return edits.edit(title, async (read) => {
+    const text = await read(path);
+    const doc: RegionsDoc = text === null ? { format: "w3proj.regions/1", version: 5, regions: [] } : JSON.parse(text);
+    change(doc);
+    return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+  });
+}
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("add_region", async ({ name, left, bottom, right, top }) => {
+      if (typeof name !== "string" || !name.trim()) throw new Error("add_region needs a name.");
+      const box = [left, bottom, right, top];
+      if (!box.every((n) => typeof n === "number" && Number.isFinite(n)) || Number(left) >= Number(right) || Number(bottom) >= Number(top)) {
+        throw new Error("left, bottom, right and top must be numbers, with left below right and bottom below top.");
+      }
+      await editRegions(w3, `Add region ${name}`, (doc) => {
+        if (doc.regions.some((r) => r.name.toLowerCase() === name.trim().toLowerCase())) throw new Error(`There's already a region "${name}".`);
+        const [red, green, blue] = PALETTE[doc.regions.length % PALETTE.length];
+        doc.regions.push({
+          left: Number(left), bottom: Number(bottom), right: Number(right), top: Number(top), name: name.trim(),
+          index: 1 + Math.max(-1, ...doc.regions.map((r) => r.index)), weather: NO_WEATHER, sound: "",
+          color: { red, green, blue, alpha: 255 }, ...(doc.version >= 7 ? { trailer: [0, 0] } : {}),
+        });
+      });
+      return `Added the region ${name.trim()}.`;
+    }),
+    w3.mcp.registerTool("remove_region", async ({ name }) => {
+      await editRegions(w3, `Remove region ${String(name)}`, (doc) => {
+        const at = doc.regions.findIndex((r) => r.name.toLowerCase() === String(name).toLowerCase());
+        if (at < 0) throw new Error(`There's no region "${String(name)}".`);
+        doc.regions.splice(at, 1);
+      });
+      return `Removed the region ${String(name)}. list_problems shows triggers still using it.`;
+    }),
+  );
   ctx.subscriptions.push(w3.mcp.registerTool("list_regions", async () => {
     requireProject(w3);
     const file = await readMapDoc<{ regions: { name: string; left: number; bottom: number; right: number; top: number; weather: string; sound: string }[] }>(w3, "map/war3map.w3r.json");

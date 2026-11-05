@@ -12,11 +12,12 @@ import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
-import { findTrigger, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, findTrigger, isScript, triggerDetail, triggerList } from "./triggerinfo";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
-  readWctFile, readWtgFile, textTriggers, writeWctFile, writeWtgFile, wtgPath,
+  allocItemId, parseWctText, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWctFile, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -27,8 +28,6 @@ import { deleteVariable, newVariable, variablesTable, type VariableHost } from "
 
 /** The project's trigger file (war3map.wtg.json, or a raw war3map.wtg), or null. */
 const triggerFile = (w3: W3Api) => wtgPath(w3.workspace.files());
-/** Item type → index in the per-type counts (and the high byte of its ids). */
-const TYPE_INDEX: Record<number, number> = { 1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6 };
 
 class KindRegistry implements TriggersService {
   private kinds: TriggerKind[] = [];
@@ -70,6 +69,46 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const scripts = await readWctFile(w3.workspace, all.length);
       const resolve = await mapStrings(w3);
       return triggerDetail(found, scripts?.texts[all.indexOf(found)] ?? null, { data: await triggerData(w3), string: resolve }, resolve);
+    }),
+  );
+  /** Changes the trigger files as they are on disk: a GUI file kept raw can't take a text edit. */
+  const editTriggers = async (title: string, change: (file: ReturnType<typeof parseWtgJson>, scripts: ReturnType<typeof parseWctText>) => void) => {
+    requireProject(w3);
+    const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    return edits.edit(title, async (read) => {
+      const [wtg, wct] = await Promise.all([read(WTG_JSON), read(WCT_TEXT)]);
+      if (wtg === null) throw new Error("This project keeps its triggers raw, or has none, so they can't be edited here.");
+      if (wct === null) throw new Error("This project keeps its trigger scripts raw, or has none, so they can't be edited here.");
+      const file = parseWtgJson(wtg), scripts = parseWctText(wct);
+      change(file, scripts);
+      return [{ path: WTG_JSON, text: writeWtgJson(file) }, { path: WCT_TEXT, text: writeWctText(scripts, textTriggers(file).map((t) => t.name)) }];
+    });
+  };
+  const named = (file: ReturnType<typeof parseWtgJson>, name: unknown) => {
+    const found = findTrigger(file, String(name));
+    if (!found) throw new Error(`There's no trigger "${String(name)}".`);
+    return found;
+  };
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("set_trigger_enabled", async ({ name, enabled }) => {
+      if (typeof enabled !== "boolean") throw new Error("enabled must be true or false.");
+      const changed = await editTriggers(`${enabled ? "Enable" : "Disable"} trigger ${String(name)}`, (file) => { named(file, name).enabled = enabled; });
+      return changed ? `${String(name)} is now ${enabled ? "enabled" : "disabled"}.` : "It already was.";
+    }),
+    w3.mcp.registerTool("set_trigger_script", async ({ name, script }) => {
+      if (typeof script !== "string" || script.includes("\0")) throw new Error("script must be text.");
+      const changed = await editTriggers(`Change the script of trigger ${String(name)}`, (file, scripts) => {
+        const t = named(file, name);
+        if (!isScript(t)) throw new Error(`${t.name} is a GUI trigger. Only triggers in script can take a script.`);
+        scripts.texts[textTriggers(file).indexOf(t)] = script;
+      });
+      return changed ? `Changed the script of ${String(name)}.` : "It already had that script.";
+    }),
+    w3.mcp.registerTool("create_script_trigger", async ({ name, script, category }) => {
+      if (typeof name !== "string" || !name.trim()) throw new Error("create_script_trigger needs a name.");
+      if (typeof script !== "string" || script.includes("\0")) throw new Error("script must be text.");
+      await editTriggers(`Create trigger ${name}`, (file, scripts) => addScriptTrigger(file, scripts, name.trim(), script, typeof category === "string" ? category : undefined));
+      return `Created the trigger ${name.trim()}.`;
     }),
   );
   const kinds = new KindRegistry();
@@ -388,15 +427,7 @@ class TriggerView {
   }
   /** A new id for an item of `type` (Reforged: type index in the high byte, counted per type). */
   private allocId(type: number): number {
-    if (this.file.reforged) {
-      // Past the stored count and every id in use (category ids exceed the count in some maps).
-      const idx = TYPE_INDEX[type], c = this.file.counts[idx];
-      const used = this.file.items.filter((i) => TYPE_INDEX[i.type] === idx).map((i) => (i.id & 0xffffff) + 1);
-      const n = Math.max(c.count, ...used);
-      c.count = n + 1;
-      return (idx << 24) | n;
-    }
-    return 1 + Math.max(-1, ...this.file.items.filter((i) => (type === 4 ? i.type === 4 : i.type !== 4)).map((i) => i.id));
+    return allocItemId(this.file, type);
   }
   /** Where a new item goes: into the selected category, or after the selected item. */
   private insertionPoint(category: boolean): { parent: number; index: number } {

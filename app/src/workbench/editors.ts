@@ -103,6 +103,10 @@ export class EditorService {
   }
 
   /** Whether an editor of the file has unsaved changes. */
+  unsavedPaths(): string[] {
+    return [...new Set(this.tabs.filter((t) => t.dirty).map((t) => t.path))];
+  }
+
   isDirty(path: string): boolean {
     return this.tabs.some((t) => t.path.toLowerCase() === path.toLowerCase() && t.dirty);
   }

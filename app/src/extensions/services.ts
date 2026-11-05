@@ -1,6 +1,16 @@
 // Contracts of the services built-in extensions provide (w3.services). Only
 // types live here: users depend on the contract, not on the provider's code.
 
+/** "w3.mcpEdits", provided by the MCP Server: how AI tools change a project. An edit can be undone,
+ *  is refused while anything is unsaved, and only reaches files under map/. */
+export interface McpEditsService {
+  /** `change` reads what it needs through `read` and gives the new texts of the files. Nothing
+   *  else runs between the reads and the write. Resolves false if that changed nothing. */
+  edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<{ path: string; text: string }[]>): Promise<boolean>;
+}
+
+export const MCP_EDITS_SERVICE = "w3.mcpEdits";
+
 /** "w3.objects", provided by the Object Editor. */
 export interface ObjectsService {
   /** The object browser (search, facets, field filters) over one or more

@@ -11,6 +11,9 @@ import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, ty
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { changedFields, gameFields, mapObjectList, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
+import { addCustomObject, fieldLevel, fieldValue, objectToEdit, removeObject, setObjectField, type EditFile } from "./objectedit";
+import { jsonPathOf } from "../../lib/formats/mapdoc";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -84,12 +87,61 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const custom = file.custom?.find((o) => o.id === id);
       const changed = custom ?? file.original?.find((o) => o.base === id);
       const base = changed?.base ?? String(id);
-      if (!changed && !data.names.has(base)) throw new Error(`There's no ${String(kind)} object "${String(id)}" in this map or the game.`);
+      if (!changed && !data.baseIds.includes(base)) throw new Error(`There's no ${String(kind)} object "${String(id)}" in this map or the game.`);
       return {
         id, name: objectName(changed ?? { base }, data, resolve), ...(custom ? { base } : {}), custom: !!custom,
         changes: changed ? changedFields(changed, data, resolve) : [],
         ...(gameValues === true ? { gameValues: gameFields(base, data) } : {}),
       };
+    }),
+  );
+  /** One edit of a kind's object data. Files without changes to game objects stay tidy, as the editor keeps them. */
+  const editObjects = async (title: string, kindName: unknown, change: (file: EditFile, kind: string, data: KindData) => void | Promise<void>) => {
+    requireProject(w3);
+    const kind = OBJECT_KINDS[String(kindName)];
+    if (!kind) throw new Error(`kind must be one of: ${Object.keys(OBJECT_KINDS).join(", ")}.`);
+    const path = jsonPathOf(w3, `war3map.${kind}`);
+    const [data, edits] = await Promise.all([loadKind(w3, kind), w3.services.get<McpEditsService>(MCP_EDITS_SERVICE)]);
+    return edits.edit(title, async (read) => {
+      const text = await read(path);
+      const file: EditFile = text === null ? await emptyFile(w3) as EditFile : JSON.parse(text);
+      await change(file, kind, data);
+      const tidy = { ...file, original: file.original.filter((o) => (o.sets ?? [{ mods: o.mods ?? [] }]).some((s) => s.mods.length)) };
+      // Encodes it too: what can't be packed doesn't get written.
+      return [{ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(tidy) }) }];
+    });
+  };
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("set_object_field", async ({ kind, id, field, level, value }) => {
+      const changed = await editObjects(`Set ${String(field)} of ${String(id)}`, kind, (file, _, data) => {
+        const o = objectToEdit(file, String(id), data.baseIds.includes(String(id)));
+        const f = data.fieldsFor(o.base).find((x) => x.id === field);
+        if (!f) throw new Error(`${String(field)} isn't a field of ${o.base}. get_object with gameValues lists them.`);
+        const at = fieldLevel(f, level);
+        setObjectField(o, OBJECT_KINDS[String(kind)], f, at, value === null ? null : fieldValue(f, value), data.defaultValue(o.base, f, at));
+      });
+      return changed ? `Changed ${String(field)} of ${String(id)}.` : "It already had that value.";
+    }),
+    w3.mcp.registerTool("create_object", async ({ kind, base, name }) => {
+      let made = "";
+      await editObjects(`Create an object from ${String(base)}`, kind, async (file, ext, data) => {
+        const from = String(base);
+        if (!data.baseIds.includes(from)) throw new Error(`There's no game object "${from}" of that kind.`);
+        const taken = new Set([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...data.baseIds]);
+        made = nextFreeId(ext, from, taken);
+        const o = addCustomObject(file, from, made);
+        if (typeof name === "string" && name) {
+          const f = data.fieldsFor(from).find((x) => /nam$/.test(x.id) && x.valueType === "string");
+          if (f) setObjectField(o, ext, f, f.repeat > 0 ? 1 : 0, name, undefined);
+        }
+      });
+      return { id: made };
+    }),
+    w3.mcp.registerTool("delete_object", async ({ kind, id }) => {
+      await editObjects(`Delete object ${String(id)}`, kind, (file) => {
+        if (!removeObject(file, String(id))) throw new Error(`The map has no object or change "${String(id)}".`);
+      });
+      return `Removed ${String(id)}. Anything placed or using it isn't changed: list_problems shows what's left.`;
     }),
   );
   const icons = iconLoader(w3);

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { DisplayContext } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT, type TriggerData } from "../../lib/triggers/triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "../../lib/triggers/wtg";
-import { findTrigger, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, findTrigger, triggerDetail, triggerList } from "./triggerinfo";
 
 // No TriggerData here: functions show as name(arguments).
 const ctx = { data: { find: () => undefined, categories: new Map() } as unknown as TriggerData } as DisplayContext;
@@ -63,6 +63,33 @@ test("a GUI trigger reads as its events, conditions and actions, nested and with
     "    Else - Actions",
     "        Lose()",
   ]);
+});
+
+test("a new script trigger goes last in its category, with its text at the same place", () => {
+  const made = () => {
+    const f = structuredClone(file);
+    f.items.splice(1, 0, { type: 4, id: 2, name: "Later", isComment: 0, expanded: 1, parent: -1 });
+    return f;
+  };
+  const f = made(), scripts = { reforged: false, version: 1, comment: "", header: "", texts: ["a", "b", "c"] };
+  const t = addScriptTrigger(f, scripts, "New", "code");
+  assert.equal(f.items[f.items.indexOf(t) - 1].name, "A note");
+  assert.deepEqual([t.type, t.isCustom, t.parent], [8, true, 1]);
+  const order = f.items.filter((i) => i.type === 8).map((i) => i.name);
+  assert.deepEqual(order, ["Init", "Script", "Lost", "New"].filter((n) => order.includes(n)));
+  assert.equal(scripts.texts[order.indexOf("New")], "code");
+  assert.equal(scripts.texts.length, 4);
+  assert.equal(addScriptTrigger(made(), { ...scripts, texts: [] }, "Inside", "", "later").parent, 2);
+  assert.throws(() => addScriptTrigger(made(), scripts, "init", "x"), /already something named/);
+  assert.throws(() => addScriptTrigger(made(), scripts, "X", "x", "Nowhere"), /no category/);
+});
+
+test("reforged files get their own script type and count it", () => {
+  const f = { reforged: true, counts: Array.from({ length: 8 }, () => ({ count: 0, deleted: [] })), variables: [], items: [{ type: 4, id: 2 << 24, name: "C", isComment: 0, expanded: 1, parent: -1 }] } as unknown as TriggerFile;
+  const t = addScriptTrigger(f, { reforged: true, version: 1, comment: "", header: "", texts: [] }, "New", "code");
+  assert.equal(t.type, 32);
+  assert.equal(t.id, 5 << 24);
+  assert.equal(f.counts[5].count, 1);
 });
 
 test("a trigger in script gives its text", () => {

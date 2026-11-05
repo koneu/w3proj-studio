@@ -4,7 +4,9 @@ import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
-import { mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
+import { setMapText } from "./summary";
 import { mapSummary } from "./summary";
 import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
@@ -141,6 +143,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const info = await readMapDoc<Parameters<typeof mapSummary>[0]>(w3, PATH);
     if (!info) throw new Error("This map's war3map.w3i can't be read (missing, or damaged by a map protector).");
     return mapSummary(info, await mapStrings(w3));
+  }));
+  ctx.subscriptions.push(w3.mcp.registerTool("set_map_text", async ({ field, text }) => {
+    const { root } = requireProject(w3);
+    if (typeof text !== "string") throw new Error("text must be text.");
+    const path = jsonPathOf(w3, "war3map.w3i");
+    const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    const changed = await edits.edit(`Change the map's ${String(field)}`, async (read) => {
+      const info = await read(path), wts = await read("map/war3map.wts");
+      if (info === null) throw new Error("This map has no war3map.w3i.");
+      const doc = JSON.parse(info);
+      const table = wts === null ? null : new StringTable(wts);
+      setMapText(doc, String(field), text, table);
+      return [
+        { path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) },
+        ...(table ? [{ path: "map/war3map.wts", text: table.serialize() }] : []),
+      ];
+    });
+    return changed ? `Changed ${String(field)}.` : "It already said that.";
   }));
   const openAt = async (section?: SectionId) => {
     if (!w3.workspace.project()) throw new Error("Open or import a project first.");

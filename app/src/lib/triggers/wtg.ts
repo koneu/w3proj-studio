@@ -68,6 +68,22 @@ export type Item =
   | { type: 64; id: number; name: string; parent: number };
 export type TriggerItem = Extract<Item, { type: 8 | 16 | 32 }>;
 
+/** Item type → index in the per-type counts (and the high byte of its ids). */
+export const TYPE_INDEX: Record<number, number> = { 1: 0, 2: 1, 4: 2, 8: 3, 16: 4, 32: 5, 64: 6 };
+
+/** A free id for a new item of a type; Reforged files also count it. */
+export function allocItemId(file: Pick<TriggerFile, "reforged" | "counts" | "items">, type: number): number {
+  if (file.reforged) {
+    // Past the stored count and every id in use (category ids exceed the count in some maps).
+    const idx = TYPE_INDEX[type], c = file.counts[idx];
+    const used = file.items.filter((i) => TYPE_INDEX[i.type] === idx).map((i) => (i.id & 0xffffff) + 1);
+    const n = Math.max(c.count, ...used);
+    c.count = n + 1;
+    return (idx << 24) | n;
+  }
+  return 1 + Math.max(-1, ...file.items.filter((i) => (type === 4 ? i.type === 4 : i.type !== 4)).map((i) => i.id));
+}
+
 export interface TriggerFile {
   reforged: boolean;
   version: number;

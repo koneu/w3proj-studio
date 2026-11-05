@@ -1,5 +1,24 @@
-// war3map.w3i as the MCP tool tells about it: texts instead of string table keys, words instead of
+// war3map.w3i as the MCP tools tell about it: texts instead of string table keys, words instead of
 // numbers. What an old format doesn't store is left out.
+
+import { StringTable } from "../../lib/formats/wts";
+
+/** The texts set_map_text can change: where they are in war3map.w3i. */
+const TEXTS: Record<string, string[]> = {
+  name: ["name"], author: ["author"], description: ["description"], suggestedPlayers: ["suggestedPlayers"],
+  loadingTitle: ["loadingScreen", "title"], loadingSubtitle: ["loadingScreen", "subtitle"], loadingText: ["loadingScreen", "text"],
+};
+
+/** A text in the string table stays there, under its key; others are in the file itself. */
+export function setMapText(doc: Record<string, unknown>, field: string, text: string, strings: Pick<StringTable, "has" | "set"> | null) {
+  const path = TEXTS[field];
+  if (!path) throw new Error(`field must be one of: ${Object.keys(TEXTS).join(", ")}.`);
+  const owner = path.slice(0, -1).reduce<Record<string, unknown>>((o, key) => o[key] as Record<string, unknown>, doc);
+  const key = path[path.length - 1];
+  const n = StringTable.ref(String(owner[key]));
+  if (n !== null && strings?.has(n)) strings.set(n, text);
+  else owner[key] = text;
+}
 
 const CONTROLLERS = ["none", "user", "computer", "neutral", "rescuable"];
 const RACES = ["selectable", "human", "orc", "undead", "night elf"];

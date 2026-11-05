@@ -20,6 +20,13 @@ export async function mapStrings(w3: W3Api): Promise<(value: string) => string> 
   return (value) => table.resolve(value);
 }
 
+/** The project's JSON form of a map file. A file kept raw can't be changed as text, so that fails. */
+export function jsonPathOf(w3: W3Api, name: string): string {
+  const path = `map/${name}.json`, files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  if (!files.has(path.toLowerCase()) && files.has(`map/${name}`.toLowerCase())) throw new Error(`${name} is kept raw in this project, so it can't be edited here.`);
+  return path;
+}
+
 /** For tools: the project, or a clear failure. */
 export function requireProject(w3: W3Api) {
   const project = w3.workspace.project();

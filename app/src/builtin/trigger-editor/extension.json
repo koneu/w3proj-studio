@@ -6,6 +6,9 @@
   "activationEvents": ["onStartup"],
   "contributes": {
     "mcpTools": [
+      {"name":"set_trigger_enabled","description":"Turns a trigger on or off in the map. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["name","enabled"],"properties":{"name":{"type":"string"},"enabled":{"type":"boolean"}}}},
+      {"name":"set_trigger_script","description":"Replaces the script of a trigger written in script (see list_triggers). Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["name","script"],"properties":{"name":{"type":"string"},"script":{"type":"string","description":"The whole new text, in the language of the map (see map_info)."}}}},
+      {"name":"create_script_trigger","description":"Adds a trigger written in script. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["name","script"],"properties":{"name":{"type":"string"},"script":{"type":"string"},"category":{"type":"string","description":"Category to put it in (default: the first)."}}}},
       {
         "name": "list_triggers",
         "description": "The open map's triggers by category, each marked gui or script, and optionally its variables.",

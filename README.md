@@ -252,6 +252,19 @@ activates on the first call. If it's disabled, its tools aren't listed. Tools th
 `readOnly` need the setting `mcp.writeTools`, and tools of project extensions need
 `mcp.projectTools`, because a map from someone else could bring any tool.
 
+Tools that change a project go through the service `w3.mcpEdits`, not the workspace:
+
+```js
+const edits = await w3.services.get("w3.mcpEdits");
+await edits.edit("Rename the thing", async (read) => {
+  const text = await read("map/war3map.wts");
+  return [{ path: "map/war3map.wts", text: text.replace("Old", "New") }];
+});
+```
+
+That makes the change undoable and takes a checkpoint first. It refuses while anything in the app
+is unsaved, and anything outside `map/`.
+
 **Replacing built-ins.** Every built-in can be turned off: `"extensions.disabled": ["w3.objectEditor"]`
 in settings (or the Disable button in the Extensions view; applies after a reload). To make a
 different editor the default for some files without disabling anything, map a glob to an editor

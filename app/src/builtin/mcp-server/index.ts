@@ -4,7 +4,9 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { projectPath } from "../../extensions/mcp";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
+import { editablePath, EditLog } from "./edits";
 
 /** One read_file answer; `offset` gets the rest. */
 const READ_LIMIT = 200_000;
@@ -34,6 +36,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return project;
   };
 
+  const out = w3.output.channel("MCP");
+  const log = new EditLog({
+    read: (path) => w3.workspace.readText(path).catch((e) => {
+      if (w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase())) throw e;
+      return null;
+    }),
+    write: async (path, text) => {
+      const isNew = !w3.workspace.files().some((f) => f.path.toLowerCase() === path.toLowerCase());
+      if (text === null) await w3.workspace.delete(path); else await w3.workspace.writeText(path, text);
+      if (isNew || text === null) await w3.workspace.refresh();
+    },
+    unsaved: () => w3.editors.unsavedPaths(),
+    checkpoint: () => w3.commands.execute("w3.checkpoints.create", { quiet: true }).then(() => undefined),
+    log: (line) => out.append(line),
+  });
+  log.onChange = () => w3.views.refresh("w3.mcp.status");
+  let root: string | null = w3.workspace.project()?.root ?? null;
+
+  const undo = async () => {
+    const title = await log.undo();
+    return title ? `Undone: ${title}` : "There's no AI edit to undo.";
+  };
+
   /** Writes into another program's configuration, so it asks first, naming the file. */
   const trySetup = async (client: ClientInfo) => {
     const write = "Add it";
@@ -57,13 +82,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.views.register("w3.mcp.status", {
       render(el) {
-        const on = enabled();
+        const on = enabled(), writing = w3.settings.get<boolean>("mcp.writeTools", false) === true, edits = log.list();
         el.append(
           h("div.ext-item", {},
             h("div.ext-desc", {}, on ? "On: AI clients on this computer can use the open project." : "Off: AI clients can't reach this app."),
             h("div.ext-actions", {},
               h("button", { onclick: () => void w3.commands.execute("w3.mcp.toggle") }, on ? "Turn off" : "Turn on"),
               h("button", { onclick: () => void w3.commands.execute("w3.mcp.copySetup").catch((e) => w3.window.showError(String(e))) }, "Copy client setup"))),
+          h("div.ext-item", {},
+            h("div.ext-desc", {}, writing ? "AI tools may change this project. Each change can be undone." : "AI tools can only read this project."),
+            h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.writeTools", !writing) }, writing ? "Read only" : "Allow edits"))),
+          ...(edits.length ? [
+            h("div.ext-section-title", {}, "AI EDITS"),
+            ...edits.slice(-8).reverse().map((e) => h("div.ext-item", { title: e.files.map((f) => f.path).join("\n") }, h("div.ext-desc", {}, e.title))),
+            h("div.ext-item", {}, h("div.ext-actions", {}, h("button", { onclick: () => void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))) }, `Undo "${edits[edits.length - 1].title}"`))),
+          ] : []),
           h("div.ext-section-title", {}, "CLIENTS"),
           h("div.ext-desc.ext-formats-hint", {}, "Looks where a standard installation keeps its settings, so this can fail. Copy client setup always works."));
         const clients = h("div", {}, h("div.view-empty", {}, "Looking…"));
@@ -72,6 +105,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         w3.backend.invoke<ClientInfo[]>("mcp_clients").then((list) => clients.replaceChildren(...list.map(clientRow)),
           (e) => clients.replaceChildren(h("div.view-error", {}, String(e))));
       },
+    }),
+    w3.services.provide<McpEditsService>(MCP_EDITS_SERVICE, { edit: (title, change) => log.edit(title, change) }),
+    w3.workspace.onDidChange(() => {
+      const now = w3.workspace.project()?.root ?? null;
+      if (now !== root) { root = now; log.reset(); }
+    }),
+    w3.commands.register("w3.mcp.undo", async () => { void w3.window.showInfo(await undo()); }),
+    w3.mcp.registerTool("list_edits", () => log.list().map((e) => ({ title: e.title, at: new Date(e.at).toISOString(), files: e.files.map((f) => f.path) }))),
+    w3.mcp.registerTool("undo_last_edit", undo),
+    w3.mcp.registerTool("edit_text_file", async ({ path, find, replace }) => {
+      open();
+      if (typeof path !== "string" || typeof find !== "string" || typeof replace !== "string" || !find) throw new Error("edit_text_file needs path, find and replace.");
+      const file = editablePath(path);
+      await log.edit(`Edit ${file}`, async (read) => {
+        const text = await read(file);
+        if (text === null) throw new Error(`There's no ${file}.`);
+        const times = text.split(find).length - 1;
+        if (times !== 1) throw new Error(`That text occurs ${times} times in ${file}. It must occur exactly once.`);
+        const next = text.replace(find, () => replace);
+        // JSON forms are packed later: broken ones must not get that far.
+        if (/\.json$/i.test(file)) {
+          const objects = /\.w3[utabdhq]\.json$/i.test(file);
+          const clean = await w3.backend.invoke<string>(objects ? "objects_canonicalize" : "codec_canonicalize", objects ? { name: file, text: next } : { root: open().root, path: file, text: next });
+          return [{ path: file, text: clean }];
+        }
+        return [{ path: file, text: next }];
+      });
+      return `Changed ${file}.`;
     }),
     w3.commands.register("w3.mcp.toggle", async () => {
       await w3.settings.set("mcp.enabled", !enabled());

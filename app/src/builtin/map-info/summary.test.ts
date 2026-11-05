@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapSummary } from "./summary";
+import { StringTable } from "../../lib/formats/wts";
+import { mapSummary, setMapText } from "./summary";
 
 const resolve = (v: string) => v.replace("TRIGSTR_", "text ");
 const info = {
@@ -13,6 +14,19 @@ const info = {
   forces: [{ players: 0b1001, name: "TRIGSTR_5" }, { players: 0b0001, name: "One" }],
   upgrades: [{}], techs: [], unitTables: [], itemTables: [{}, {}],
 };
+
+test("a text in the string table stays there; a text in the file changes there", () => {
+  const table = new StringTable("STRING 1\n{\nOld name\n}\n");
+  const doc = { name: "TRIGSTR_001", author: "Me", loadingScreen: { title: "TRIGSTR_9" } };
+  setMapText(doc, "name", "New name", table);
+  assert.equal(doc.name, "TRIGSTR_001");
+  assert.ok(table.serialize().includes("New name"));
+  setMapText(doc, "author", "You", table);
+  assert.equal(doc.author, "You");
+  setMapText(doc, "loadingTitle", "Not in the table", table);
+  assert.equal(doc.loadingScreen.title, "Not in the table");
+  assert.throws(() => setMapText(doc, "fog", "x", table), /field must be one of/);
+});
 
 test("texts, words and who's in which force", () => {
   const got = mapSummary(info, resolve);

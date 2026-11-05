@@ -7,6 +7,8 @@
   "extensionDependencies": ["w3.terrainViewer"],
   "contributes": {
     "mcpTools": [
+      {"name":"add_region","description":"Adds a region (rectangle in map coordinates; triggers call it gg_rct_<name>). Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["name","left","bottom","right","top"],"properties":{"name":{"type":"string"},"left":{"type":"number"},"bottom":{"type":"number"},"right":{"type":"number"},"top":{"type":"number"}}}},
+      {"name":"remove_region","description":"Removes a region. Triggers using it must be changed too. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}},
       { "name": "list_regions", "description": "The open map's regions: name, rectangle, weather, ambient sound. Triggers call them gg_rct_<name>.", "readOnly": true }
     ]
   }

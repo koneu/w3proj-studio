@@ -18,6 +18,8 @@ import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from 
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { jsonPathOf, requireProject } from "../../lib/formats/mapdoc";
+import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
@@ -128,6 +130,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The open terrain editor's picture as PNG data, longest side at most `size`. */
   let screenshot: ((size: number) => Promise<string>) | null = null;
   ctx.subscriptions.push(
+    w3.mcp.registerTool("place_object", async ({ kind, id, x, y, player, facing }) => {
+      const { root } = requireProject(w3);
+      if (typeof id !== "string" || id.length !== 4) throw new Error("id must be four characters, like hfoo.");
+      if (typeof x !== "number" || typeof y !== "number") throw new Error("x and y must be numbers.");
+      const key = kind === "doodads" ? "doodads" : "units", name = key === "units" ? "war3mapUnits.doo" : "war3map.doo";
+      const path = jsonPathOf(w3, name), ground = projectTerrain(w3);
+      if (!ground) throw new Error("This project has no war3map.w3e.");
+      const owner = typeof player === "number" ? player - 1 : 0;
+      if (key === "units" && (!Number.isInteger(owner) || owner < 0 || owner > 27)) throw new Error("player counts from 1.");
+      const terrain = parseW3e(await readTerrainBytes(ground, { readText: () => w3.workspace.readText(ground), readBytes: () => w3.workspace.readBytes(ground) }));
+      const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+      await edits.edit(`Place ${id}`, async (read) => {
+        const text = await read(path);
+        if (text === null) throw new Error(`This project has no ${name}.`);
+        const doc = JSON.parse(text) as Record<string, unknown>;
+        const list = (doc[key] ??= []) as Placed[];
+        const entry = newEntry({ name, key, doc, list, json: true, dirty: false }, id, [x, y, heightAt(terrain, x, y)], key === "units" ? owner : undefined);
+        if (!entry) throw new Error(`${name} has nothing placed yet to take the layout from.`);
+        if (typeof facing === "number") entry.angle = (facing * Math.PI) / 180;
+        list.push(entry);
+        return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+      });
+      return `Placed ${id} at ${x}, ${y}.`;
+    }),
     w3.mcp.registerTool("terrain_screenshot", async ({ maxSize }) => {
       await w3.commands.execute("w3.terrain.open");
       if (!screenshot) throw new Error("The terrain editor couldn't start (see its tab).");
@@ -1676,6 +1702,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         screenshot = takeScreenshot;
 
         const editorApi = {
+          // Saved by something else (an AI tool), they'd go stale here, and be written back so.
+          watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           save: editable ? async () => {
             const w3e = writeW3e(terrain);
             await writeTerrainBytes(doc.path, w3e, doc);

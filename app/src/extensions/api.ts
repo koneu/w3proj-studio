@@ -230,6 +230,8 @@ export interface W3Api {
     activePath(): string | null;
     /** Whether an editor of the file has unsaved changes. */
     isDirty(path: string): boolean;
+    /** The files with unsaved changes in an editor. */
+    unsavedPaths(): string[];
     /** When another tab becomes active (its file and editor id), or the last one closes (null). */
     onDidChangeActive(listener: (active: { path: string; editor: string } | null) => void): Disposable;
     /** Saves every editor with unsaved changes (e.g. before packing); resolves with how many. */
