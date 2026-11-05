@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DisplayContext } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT, type TriggerData } from "../../lib/triggers/triggerdata";
-import type { Eca, TriggerFile, TriggerItem } from "../../lib/triggers/wtg";
+import { textTriggers, type Eca, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
 import { addScriptTrigger, addVariable, findTrigger, removeTrigger, removeVariable, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 
 // No TriggerData here: functions show as name(arguments).
@@ -108,7 +108,7 @@ test("removing a trigger takes its text along, not another's", () => {
 
 test("a variable in use stays, and the answer says where", () => {
   const v = { name: "Heat", type: "real", isArray: false, arraySize: 1, initialValue: "" };
-  const f = structuredClone(file), scripts = { header: "", texts: [] as string[] } as unknown as Parameters<typeof removeVariable>[1];
+  const f = structuredClone(file), scripts = { header: "", texts: textTriggers(f).map(() => "") } as unknown as Parameters<typeof removeVariable>[1];
   addVariable(f, v);
   addScriptTrigger(f, scripts, "Burn", "call BJDebugMsg(R2S(udg_Heat))", undefined);
   assert.throws(() => removeVariable(f, scripts, "Heat"), /Heat is still used by: Burn/);
