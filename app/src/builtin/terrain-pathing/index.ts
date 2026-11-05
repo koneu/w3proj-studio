@@ -39,6 +39,9 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let active = false;
   /** Generated pathing without overrides; null when stale. */
   let raw: Uint8Array | null = null;
+  /** Where destructables stand: not in the pathing map, since the game blocks them at runtime. */
+  let standing: Uint8Array | null = null;
+  let showStanding = true;
   let loading: Promise<void> | null = null;
 
   const load = w3.workspace.readText(FILE).then((text) => {
@@ -69,7 +72,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     const cells = raw.slice();
     apply(cells);
     const rgba = new Uint8Array(W * H * 4);
-    for (let i = 0; i < cells.length; i++) rgba.set(colour(cells[i], overrides.has(i)), i * 4);
+    for (let i = 0; i < cells.length; i++) rgba.set(showStanding && standing?.[i] && !overrides.has(i) ? [170, 70, 230, 150] : colour(cells[i], overrides.has(i)), i * 4);
     ed.setGroundOverlay(rgba, W, H);
     count.textContent = `${overrides.size.toLocaleString()} cells overridden`;
   };
@@ -77,7 +80,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (!active) return;
     loading ??= (async () => {
       await load;
-      raw = (await ed.pathing({ filtered: false })).cells;
+      [raw, standing] = await Promise.all([ed.pathing({ filtered: false }).then((p) => p.cells), ed.objects.destructables()]);
       loading = null;
       render();
     })().catch((e) => { loading = null; w3.window.showError(`Pathing: ${(e as Error).message ?? e}`); });
@@ -152,7 +155,10 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     count,
     h("span.pathing-legends", {},
       legend("rgb(230,50,50)", "unwalkable"), legend("rgb(40,70,200)", "deep water"), legend("rgb(60,210,80)", "unflyable"),
-      legend("rgb(240,190,40)", "unbuildable"), legend("rgb(20,20,20)", "blocked"), legend("rgba(255,255,255,0.5)", "manual")),
+      legend("rgb(240,190,40)", "unbuildable"), legend("rgb(20,20,20)", "blocked"), legend("rgba(255,255,255,0.5)", "manual"),
+      h("label.pathing-legend", { title: "Trees and other destructables. They aren't in the pathing map: the game blocks them at runtime, and frees the ground when one is destroyed." },
+        h("input", { type: "checkbox", checked: true, onchange: (e: Event) => { showStanding = (e.target as HTMLInputElement).checked; render(); } }),
+        h("span.pathing-swatch", { style: { background: "rgb(170,70,230)" } }), "destructables")),
   );
   setMode("block");
 

@@ -322,8 +322,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       let colors = null;
       if (args.overlay === "heights") colors = heightColors(editor.handle.terrain);
       if (args.overlay === "pathing") {
-        const [pathing, blockers] = await Promise.all([editor.handle.pathing(), editor.handle.objects.blockers()]);
-        colors = { rgba: pathingColors(pathing.cells, blockers), width: pathing.width, height: pathing.height };
+        const [pathing, blockers, destructables] = await Promise.all([editor.handle.pathing(), editor.handle.objects.blockers(), editor.handle.objects.destructables()]);
+        colors = { rgba: pathingColors(pathing.cells, blockers, destructables), width: pathing.width, height: pathing.height };
       }
       const data = await editor.screenshot(size, area, angle, colors);
       const image = { type: "image", data, mimeType: "image/png" };
@@ -777,7 +777,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const changed = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
-          occupancyPromise = walkPromise = null;
+          occupancyPromise = walkPromise = destructablePromise = null;
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
@@ -788,7 +788,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pushEdit = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
-          occupancyPromise = walkPromise = null;
+          occupancyPromise = walkPromise = destructablePromise = null;
           history.length = at;
           history.push(e);
           at = history.length;
@@ -1352,6 +1352,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let occupancyPromise: Promise<Occupancy> | null = null;
         /** What stops a walking unit; dropped with the above. */
         let walkPromise: Promise<Uint8Array> | null = null;
+        let destructablePromise: Promise<Uint8Array> | null = null;
         let pathingData: Promise<PathingData> | null = null;
         const occupancy = () => {
           occupancyPromise ??= (async () => {
@@ -1856,6 +1857,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
               return (await Occupancy.build(terrain, data, placed)).blocked;
             })()),
+            destructables: () => (destructablePromise ??= (async () => {
+              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+              const isDestructable = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind === "w3b";
+              const placed = (dooFile?.list ?? []).filter((e) => isDestructable(e.id)).map((entry) => ({ entry, kind: "w3b" }));
+              return Occupancy.mask(terrain, await pathingData, placed);
+            })()),
             occupancy: async () => {
               const occ = await occupancy();
               return {
@@ -2281,7 +2288,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {
           const reopenInstead = () => { opened = null; return false; };
-          occupancyPromise = walkPromise = null;
+          occupancyPromise = walkPromise = destructablePromise = null;
           minimapStale = true;
           // The editor's undo steps were for the map as it was.
           history.length = 0;

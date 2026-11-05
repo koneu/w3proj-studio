@@ -55,6 +55,17 @@ export class Occupancy {
     return o;
   }
 
+  /** Only the cells these placed objects cover, without the ground. */
+  static async mask(terrain: Terrain, data: PathingData, placed: { entry: Placed; kind: string }[]): Promise<Uint8Array> {
+    const o = new Occupancy(terrain, data);
+    o.blocked.fill(0);
+    for (const { entry, kind } of placed) {
+      const fp = await o.footprint(entry.id, kind);
+      if (fp) o.mark(fp, entry.position[0], entry.position[1], entry.angle);
+    }
+    return o.blocked;
+  }
+
   /** Footprint of an object type ("w3u" units, "w3t" items, "w3b"/"w3d"). */
   footprint(id: string, kind: string): Promise<Footprint | null> {
     const key = `${kind}:${id}`;

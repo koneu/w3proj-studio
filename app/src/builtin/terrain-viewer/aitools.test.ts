@@ -198,14 +198,15 @@ test("rows cover an area evenly, stay in it, and can be loosened", () => {
   assert.ok(loose.every((s, i) => Math.abs(s.x - spots[i].x) <= 10) && loose.some((s, i) => s.x !== spots[i].x));
 });
 
-test("the pathing picture tells free, cliffs, water and what stands there apart", () => {
+test("the pathing picture tells free, cliffs, water, what stands there and destructables apart", () => {
   const free = 0x40, cliff = 0x40 | 0x02, water = 0;
-  const rgba = pathingColors(new Uint8Array([free, cliff, water, free]), new Uint8Array([0, 0, 0, 1]));
+  const rgba = pathingColors(new Uint8Array([free, cliff, water, free, free]), new Uint8Array([0, 0, 0, 1, 1]), new Uint8Array([0, 0, 0, 0, 1]));
   const px = (i: number) => [...rgba.slice(i * 4, i * 4 + 4)];
   assert.equal(px(0)[3], 0);
   assert.deepEqual(px(1), [230, 30, 30, 170]);
   assert.deepEqual(px(2), [60, 150, 255, 90]);
   assert.deepEqual(px(3), [255, 150, 0, 170]);
+  assert.deepEqual(px(4), [170, 70, 230, 170], "a tree is a blocker too, and shows as what it is");
 });
 
 test("a flattened path levels the ground across it towards its middle", () => {

@@ -33,7 +33,7 @@
         "inputSchema": { "type": "object", "properties": {
           "maxSize": { "type": "integer", "description": "Longest side in pixels (default 1280)." },
           "view": { "type": "string", "enum": ["top", "angled", "low"], "description": "For an area: from above (default), at the editor's angle, or low, which shows hills against the sky." },
-          "overlay": { "type": "string", "enum": ["pathing", "heights"], "description": "pathing: red where units can't walk, orange where something stands, blue for water. heights: blue (low) to red (high), with a line every 32 units." },
+          "overlay": { "type": "string", "enum": ["pathing", "heights"], "description": "pathing: red where units can't walk, orange where something stands for good, purple for destructables such as trees, which can be destroyed, blue for water. heights: blue (low) to red (high), with a line every 32 units." },
           "region": {"type":"string","description":"A region of the map, by name."},
           "left": {"type":"number"},
           "bottom": {"type":"number"},
