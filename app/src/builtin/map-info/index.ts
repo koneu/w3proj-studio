@@ -4,6 +4,8 @@ import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { mapSummary } from "./summary";
 import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { parseW3e } from "../../lib/terrain/w3e";
@@ -134,6 +136,12 @@ let lastSection: SectionId = "description";
 const openEditors = new Set<(s: SectionId) => void>();
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(w3.mcp.registerTool("map_info", async () => {
+    requireProject(w3);
+    const info = await readMapDoc<Parameters<typeof mapSummary>[0]>(w3, PATH);
+    if (!info) throw new Error("This map's war3map.w3i can't be read (missing, or damaged by a map protector).");
+    return mapSummary(info, await mapStrings(w3));
+  }));
   const openAt = async (section?: SectionId) => {
     if (!w3.workspace.project()) throw new Error("Open or import a project first.");
     if (!w3.workspace.files().some((f) => f.path.toLowerCase() === PATH)) {

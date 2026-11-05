@@ -3,6 +3,7 @@
 // textures of imported models, placed objects of unknown types, placed objects
 // without a Classic model, and import list entries without their file.
 
+import { readMapDoc } from "../../lib/formats/mapdoc";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck, ProblemFix } from "../../extensions/services";
 import type { FileInfo } from "../../extensions/api";
@@ -90,13 +91,7 @@ export class FileLookup {
 }
 
 /** A map file's JSON document ("map/x.json"), also from the raw file of older projects. */
-export const readMapDoc = async <T>(w3: W3Api, path: string): Promise<T | null> => {
-  const root = w3.workspace.project()?.root;
-  const text = await w3.workspace.readText(path).catch(() =>
-    (root ? w3.backend.invoke<string>("codec_decode", { root, path: path.replace(/\.json$/, "") }).catch(() => null) : null));
-  if (text === null) return null;
-  try { return JSON.parse(text) as T; } catch { return null; }
-};
+export { readMapDoc };
 const readJson = readMapDoc;
 const capped = (list: Problem[], what: string): Problem[] =>
   list.length > LIMIT ? [...list.slice(0, LIMIT), { severity: "warning", message: `… and ${list.length - LIMIT} more ${what}` }] : list;

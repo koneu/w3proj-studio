@@ -9,6 +9,8 @@ import { pickFile, pickLabel, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
+import { capped, mapStrings, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { changedFields, gameFields, mapObjectList, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -61,6 +63,35 @@ function parseValue(type: ValueType, text: string): number | string | null {
 let shiftHeld = false;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** A tool's `kind` argument: the tables, and what the map has of it. */
+  const toolKind = async (name: unknown) => {
+    requireProject(w3);
+    const kind = OBJECT_KINDS[String(name)];
+    if (!kind) throw new Error(`kind must be one of: ${Object.keys(OBJECT_KINDS).join(", ")}.`);
+    const [data, file, resolve] = await Promise.all([loadKind(w3, kind), readMapDoc<MapObjects>(w3, `map/war3map.${kind}.json`), mapStrings(w3)]);
+    return { data, file: file ?? {}, resolve };
+  };
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit }) => {
+      const { data, file, resolve } = await toolKind(kind);
+      const text = typeof filter === "string" ? filter.toLowerCase() : "";
+      const hit = (o: { id: string; name: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text);
+      const game = () => data.baseIds.map((id) => ({ id, name: stripColors(data.names.get(id) ?? id) }));
+      return capped<{ id: string; name: string }>((scope === "game" ? game() : mapObjectList(file, data, resolve)).filter(hit), limit, 200);
+    }),
+    w3.mcp.registerTool("get_object", async ({ kind, id, gameValues }) => {
+      const { data, file, resolve } = await toolKind(kind);
+      const custom = file.custom?.find((o) => o.id === id);
+      const changed = custom ?? file.original?.find((o) => o.base === id);
+      const base = changed?.base ?? String(id);
+      if (!changed && !data.names.has(base)) throw new Error(`There's no ${String(kind)} object "${String(id)}" in this map or the game.`);
+      return {
+        id, name: objectName(changed ?? { base }, data, resolve), ...(custom ? { base } : {}), custom: !!custom,
+        changes: changed ? changedFields(changed, data, resolve) : [],
+        ...(gameValues === true ? { gameValues: gameFields(base, data) } : {}),
+      };
+    }),
+  );
   const icons = iconLoader(w3);
   // Shift held while a new object's base is confirmed: ask for its id.
   const trackShift = (e: KeyboardEvent | MouseEvent) => { shiftHeld = e.shiftKey; };

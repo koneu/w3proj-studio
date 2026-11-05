@@ -132,7 +132,10 @@ function loadShared(w3: W3Api): Promise<Shared> {
     const names = new Map<string, string>();
     for (const [id, kv] of profile) {
       const n = kv.get("name") ?? kv.get("bufftip") ?? kv.get("editorname");
-      if (n) names.set(id, unquote(n));
+      // Doodads and destructables name a string (Name=WESTRING_DOOD_APMS), which can be missing:
+      // then the object's own table has something better than the key.
+      const text = n ? westring(we, unquote(n)) : "";
+      if (n && !text.startsWith("WESTRING_")) names.set(id, unquote(n).startsWith("WESTRING_") ? text : unquote(n));
     }
     return { we, editData, profile, names };
   })();
@@ -191,8 +194,9 @@ async function buildKind(w3: W3Api, kind: string): Promise<KindData> {
   const names = new Map(sharedNames);
   for (const [id, r] of main) {
     const n = r.Name ?? r.name;
-    if (n && n.startsWith("WESTRING_")) names.set(id, westring(we, n));
-    else if (!names.has(id) && r.comment) names.set(id, r.comment);
+    const text = n?.startsWith("WESTRING_") ? westring(we, n) : "";
+    if (text && !text.startsWith("WESTRING_")) names.set(id, text);
+    else if (!names.has(id) && (r.comment || n)) names.set(id, r.comment || n);
   }
 
   const isHero = (id: string) => kind === "w3u" && /^[A-Z]/.test(id);

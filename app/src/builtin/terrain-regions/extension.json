@@ -4,5 +4,10 @@
   "version": "0.1.0",
   "description": "Regions (war3map.w3r) in the terrain editor: draw, move, resize, name, weather, ambient sound, colour.",
   "activationEvents": ["onEditor:w3.terrainViewer"],
-  "extensionDependencies": ["w3.terrainViewer"]
+  "extensionDependencies": ["w3.terrainViewer"],
+  "contributes": {
+    "mcpTools": [
+      { "name": "list_regions", "description": "The open map's regions: name, rectangle, weather, ambient sound. Triggers call them gg_rct_<name>.", "readOnly": true }
+    ]
+  }
 }

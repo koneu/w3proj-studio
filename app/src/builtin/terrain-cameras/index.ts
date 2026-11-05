@@ -8,6 +8,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
+import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3c";
@@ -48,6 +49,13 @@ const ASPECT = 4 / 3;
 const wrap = (a: number) => ((a % 360) + 360) % 360;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(w3.mcp.registerTool("list_cameras", async () => {
+    requireProject(w3);
+    const file = await readMapDoc<{ cameras: Camera[] }>(w3, "map/war3map.w3c.json");
+    return (file?.cameras ?? []).map((c) => ({
+      name: c.name, target: [c.targetX, c.targetY], rotation: c.rotation, angleOfAttack: c.angleOfAttack, distance: c.distance, fieldOfView: c.fieldOfView,
+    }));
+  }));
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
     ctx.subscriptions.push(s.registerToolGroup({ id: "cameras", title: "Cameras", order: 30, create: (ed) => cameraEditor(w3, ed) }));
   });

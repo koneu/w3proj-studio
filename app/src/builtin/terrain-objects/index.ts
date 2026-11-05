@@ -11,12 +11,27 @@ import {
 } from "../../extensions/services";
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
+import { capped, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { h } from "../../workbench/dom";
 
 const NEUTRALS: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Extra", 26: "Neutral Victim", 27: "Neutral Passive" };
 const ownerName = (n: number) => (n < 24 ? `Player ${n + 1} (${TEAM_COLORS[n]?.[0] ?? "?"})` : NEUTRALS[n] ?? `Player ${n + 1}`);
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(w3.mcp.registerTool("list_placed", async ({ kind, id, player, limit }) => {
+    requireProject(w3);
+    const key = kind === "doodads" ? "doodads" : "units";
+    const file = await readMapDoc<Record<string, PlacedThing[]>>(w3, key === "units" ? "map/war3mapUnits.doo.json" : "map/war3map.doo.json");
+    const all = file?.[key] ?? [];
+    const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+    const names = new Map<string, string | undefined>();
+    for (const type of new Set(all.map((p) => p.id))) names.set(type, await objects.name(type).catch(() => undefined));
+    if (typeof id === "string" || typeof player === "number") {
+      return capped(placedList(all, names, typeof id === "string" ? id : undefined, typeof player === "number" ? player : undefined), limit, 200);
+    }
+    return { placed: all.length, types: capped(placedTypes(all, names), limit, 200) };
+  }));
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
     ctx.subscriptions.push(s.registerToolGroup({ id: "objects", title: "Objects", order: 20, create: (ed) => placer(w3, ed) }));
   });

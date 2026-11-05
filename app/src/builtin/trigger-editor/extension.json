@@ -5,6 +5,20 @@
   "description": "GUI triggers (war3map.wtg) and custom script (war3map.wct): the tree of categories, triggers and variables, names, flags, comments, undo and saving. What a trigger contains is shown by trigger kinds from other extensions (service w3.triggers).",
   "activationEvents": ["onStartup"],
   "contributes": {
+    "mcpTools": [
+      {
+        "name": "list_triggers",
+        "description": "The open map's triggers by category, each marked gui or script, and optionally its variables.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "properties": { "variables": { "type": "boolean", "description": "Also list the trigger variables." } } }
+      },
+      {
+        "name": "get_trigger",
+        "description": "One trigger in full: its events, conditions and actions as the World Editor words them, or its script.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "description": "As list_triggers gives it." } } }
+      }
+    ],
     "viewContainers": [{ "id": "triggers", "title": "Triggers", "icon": "ϟ", "order": 5 }],
     "views": [{ "id": "w3.triggers.overview", "title": "Triggers", "container": "triggers" }],
     "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "patterns": ["war3map.wtg", "war3map.wtg.json"] }],

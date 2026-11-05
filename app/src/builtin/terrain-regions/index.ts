@@ -7,6 +7,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { weatherName } from "../../lib/terrain/weather";
+import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3r";
@@ -32,6 +33,13 @@ const PALETTE: [number, number, number][] = [[255, 128, 128], [128, 192, 255], [
 const NO_WEATHER = "0x00000000";
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  ctx.subscriptions.push(w3.mcp.registerTool("list_regions", async () => {
+    requireProject(w3);
+    const file = await readMapDoc<{ regions: { name: string; left: number; bottom: number; right: number; top: number; weather: string; sound: string }[] }>(w3, "map/war3map.w3r.json");
+    return (file?.regions ?? []).map(({ name, left, bottom, right, top, weather, sound }) => ({
+      name, left, bottom, right, top, ...(weather !== "0x00000000" ? { weather } : {}), ...(sound ? { sound } : {}),
+    }));
+  }));
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
     ctx.subscriptions.push(s.registerToolGroup({ id: "regions", title: "Regions", order: 25, create: (ed) => regionEditor(w3, ed) }));
   });

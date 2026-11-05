@@ -4,6 +4,29 @@
   "version": "0.1.0",
   "description": "Table editor for unit, item, ability, buff, doodad, destructable and upgrade data.",
   "contributes": {
+    "mcpTools": [
+      {
+        "name": "list_objects",
+        "description": "Object data of the open map: the objects it adds or changes, or with scope \"game\" the game's own. Gives ids for get_object.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "required": ["kind"], "properties": {
+          "kind": { "type": "string", "enum": ["units", "items", "abilities", "buffs", "destructables", "doodads", "upgrades"] },
+          "scope": { "type": "string", "enum": ["map", "game"], "description": "map (default): what the map adds or changes. game: everything in the game." },
+          "filter": { "type": "string", "description": "Only ids or names containing this text (not case sensitive). Game names are in the installed language." },
+          "limit": { "type": "integer", "description": "At most this many (default 200)." }
+        } }
+      },
+      {
+        "name": "get_object",
+        "description": "One object: what the map changes in it, with field names, and with gameValues its values as the game defines them.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "required": ["kind", "id"], "properties": {
+          "kind": { "type": "string", "enum": ["units", "items", "abilities", "buffs", "destructables", "doodads", "upgrades"] },
+          "id": { "type": "string", "description": "Four letters, like hfoo or h000." },
+          "gameValues": { "type": "boolean", "description": "Also list every field's value from the game (long)." }
+        } }
+      }
+    ],
     "editors": [
       {
         "id": "w3.objectEditor",

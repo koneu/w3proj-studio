@@ -11,6 +11,8 @@ import { StringTable } from "../../lib/formats/wts";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
+import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
+import { findTrigger, triggerDetail, triggerList } from "./triggerinfo";
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
@@ -51,6 +53,25 @@ let startWithVariables = false;
 let startWithTrigger: string | null = null;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** The map's triggers for a tool. */
+  const toolTriggers = async () => {
+    requireProject(w3);
+    const path = wtgPath(w3.workspace.files());
+    if (!path) throw new Error("This map has no triggers (no war3map.wtg).");
+    return readWtgFile(w3.workspace, path, () => triggerData(w3));
+  };
+  ctx.subscriptions.push(
+    w3.mcp.registerTool("list_triggers", async ({ variables }) => triggerList(await toolTriggers(), variables === true)),
+    w3.mcp.registerTool("get_trigger", async ({ name }) => {
+      const file = await toolTriggers();
+      const found = findTrigger(file, String(name));
+      if (!found) throw new Error(`There's no trigger "${String(name)}".`);
+      const all = textTriggers(file);
+      const scripts = await readWctFile(w3.workspace, all.length);
+      const resolve = await mapStrings(w3);
+      return triggerDetail(found, scripts?.texts[all.indexOf(found)] ?? null, { data: await triggerData(w3), string: resolve }, resolve);
+    }),
+  );
   const kinds = new KindRegistry();
   const open = () => w3.commands.execute("w3.triggers.open").catch((e) => w3.window.showError(String(e)));
   // war3map.wct.txt (every trigger's text in one file) in the text editor: highlighted, not checked
