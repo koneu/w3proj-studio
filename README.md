@@ -1,11 +1,17 @@
 # W3Proj Studio
 
-A modular editor for Warcraft III maps. Maps live as **unpacked, git-friendly
-project folders**, and packing to `.w3x` is a release step. Binary map data
-(terrain, doodads, regions…) is still edited in Blizzard's World Editor, which
-this tool launches and syncs back from.
+A remake of the Warcraft III World Editor, built with Rust and Tauri. It opens existing maps and
+creates new ones, with its own terrain, object, trigger, sound and import editors.
 
-Unofficial project, not affiliated with or endorsed by Blizzard Entertainment. Warcraft is a trademark of Blizzard Entertainment. You need your own installed copy of the game.
+Two things work differently from the original. A map lives in an unpacked project folder that
+you can keep in git, and packing to `.w3x` is the last step before release. And nearly everything
+is an extension, in the style of VS Code, so you can add to it or replace parts of it. AI clients
+can also work on a map through a built-in MCP server.
+
+It's a work in progress. Plenty of it hasn't been checked against the game yet.
+
+This is an unofficial project, not affiliated with or endorsed by Blizzard Entertainment.
+Warcraft is a trademark of Blizzard Entertainment. You need your own installed copy of the game.
 
 ## How the World Editor stores a map (and what we do with it)
 
@@ -17,36 +23,36 @@ MPQ archive. The archive holds files like:
 | `war3map.j` / `.lua` | map script (triggers compile to this) | text, as-is |
 | `war3map.w3u/.w3t/.w3a/.w3b/.w3d/.w3h/.w3q` | object data: unit/item/ability/… modifications | **JSON** (`*.json`) |
 | `war3map.wts` | trigger strings (`TRIGSTR_xxx`) | text, as-is |
-| `war3map.w3i` | map info: name, players, forces, options, fog, … (format v25–v39) | **JSON** (`war3map.w3i.json`) |
-| `war3map.doo`, `war3mapUnits.doo` | placed doodads/destructables; units, items, start locations (v8, v12, v13) | **JSON** |
-| `war3map.w3e`, `.wpm`, `.shd` | terrain, pathing, shadows | binary |
+| `war3map.w3i` | map info: name, players, forces, options, fog, … (v18, v25–v39) | **JSON** (`war3map.w3i.json`) |
+| `war3map.doo`, `war3mapUnits.doo` | placed doodads/destructables; units, items, start locations (v7, v8, v12, v13) | **JSON** |
+| `war3map.w3e` | terrain | **text** (`war3map.w3e.txt`) |
+| `war3map.wpm`, `.shd` | pathing, shadows (the terrain editor regenerates both) | binary |
 | `war3map.w3r/.w3c/.w3s` | regions, cameras, sounds | **JSON** |
 | `war3map.wtg` | GUI triggers, variables, categories | **JSON** (`war3map.wtg.json`; unpacking needs the game's `UI\TriggerData.txt`, packing doesn't) |
 | `war3map.wct` | custom script: the map header and each trigger's text | **text** (`war3map.wct.txt`, one section per trigger) |
 | `war3map.imp`, `war3mapImported\*` | imports | as-is |
 
-Every codec is checked on unpack: a file is stored as JSON only if
-`encode(decode(file))` gives back the original bytes; otherwise it is kept raw.
-So **pack is always lossless**. Verified against 676 local maps: 0 mismatches.
-The object-data codec round-trips every file in that set.
+Every codec is checked on unpack: a file is only stored as JSON or text if
+`encode(decode(file))` gives back the original bytes. If not, it stays raw, so packing doesn't
+lose anything. This was run over 676 local maps without a mismatch.
 
 ## Format definitions
 
-Blizzard's binary layouts are not hard-coded: they are **format definitions** (JSON with
-`//` comments) interpreted by one engine (`crates/w3proj/src/format`). The built-ins live in
-[crates/w3proj/formats/](crates/w3proj/formats/) — `w3i`, `doodads`, `units`, `regions`, `cameras`, `sounds` — and are compiled
+The binary layouts aren't hard-coded. They're format definitions (JSON with `//` comments) that
+one engine reads (`crates/w3proj/src/format`). The built-in ones are in
+[crates/w3proj/formats/](crates/w3proj/formats/) (`w3i`, `doodads`, `units`, `regions`, `cameras`, `sounds` and others) and get compiled
 into the CLI and the app. A definition lists fields with types, counts, `if` conditions
 (`version >= 39`), plausibility `check`s and **variants** for layouts that differ without a
 version bump (e.g. v39 player HUD skins, v8 doodads without skin ids): the engine tries each
 reading and keeps the one that reproduces the file byte-exactly and passes the checks; ambiguous
 choices are reported in the unpack output.
 
-To adapt a format (a new patch, an unknown field): copy the definition into the project —
-*Extensions → Formats → Customize*, or `w3proj formats --show w3i > .w3proj/formats/w3i.json` —
+To adapt a format for a new patch or an unknown field, copy the definition into the project with
+*Extensions → Formats → Customize* or `w3proj formats --show w3i > .w3proj/formats/w3i.json`,
 edit it, and re-sync. Definitions in `.w3proj/formats` (project), the app's user `formats`
 folder or `W3PROJ_FORMATS` (CLI) replace built-ins with the same `name`. `w3proj formats`
-lists what is active. Every file is still checked round-trip on unpack, so a wrong definition
-makes files fall back to raw — it cannot corrupt a map.
+lists what's active. Files are still checked on unpack, so a wrong definition makes them fall back
+to raw instead of breaking the map.
 
 ## Project layout
 
@@ -166,7 +172,7 @@ speed and scrubbing, team colour, wireframe, per-geoset visibility, and the list
 textures with load status. It reads MDX v800 (classic) through v1800 (Reforged), including
 HD skin weights and LODs (LOD 1–3 start hidden) and the HD team-colour mask. Textures are
 looked up in the map first, then in the model's own game layer (`.blp`/`.tif` → `.dds`).
-Particles, ribbons, lights, cameras and PBR lighting aren't drawn yet.
+Particles and ribbons are drawn. Reforged's PopcornFX effects, lights and PBR lighting aren't yet.
 
 ### Terrain viewer
 
@@ -175,8 +181,7 @@ game does (corner-mask tile atlas with variations), cliff models, water, and pla
 destructables, units and items as models (from the game's skin tables; player colours for
 units). Drag or arrow keys pan, right-drag rotates, the wheel zooms. Reads `w3e` v11 (classic)
 and v12 (2.0). Raw `war3map.doo` / `war3mapUnits.doo` are decoded through the format engine
-(`codec_decode`) when the project doesn't have them as JSON. Some of it is
-approximated.
+(`codec_decode`) when the project doesn't have them as JSON. Some of the rendering is approximated.
 
 ### Map properties
 
@@ -189,20 +194,19 @@ War3Net / wc3libs and are verified byte-exact against the game's own 3.0 campaig
 ## Workflow with the World Editor
 
 1. **Import .w3x as New Project…** (or **New Map…**, Ctrl+N, for an empty map), then commit the folder.
-2. Edit scripts and object data in the app, or press **F5 — Open in World
-   Editor**. That packs `build/<name>.edit.w3x`, starts
+2. Edit the map in the app, or press **F5** (Open in World Editor) to use Blizzard's editor for
+   something. That packs `build/<name>.edit.w3x`, starts
    `World Editor.exe -launch -loadfile <map>`, and watches the file. Each save
    in the World Editor syncs back into `map/`. The `project.syncOnWorldEditorSave`
    setting takes `ask`, `always` or `never`.
-3. **Ctrl+Shift+B — Pack Release .w3x**. **Ctrl+F5** packs and starts the game
-   with the map.
+3. **Ctrl+Shift+B** packs the release `.w3x`. **Ctrl+F5** packs and starts the game with the map.
 
 The editor and game paths are in *Preferences: Open Settings (JSON)*. They default
 to `_retail_\x86_64`.
 
 ## Extensions
 
-Everything beyond the shell is an extension. Built-ins and user extensions use
+Nearly everything past the shell is an extension. Built-in and user extensions use
 the same API (`app/src/extensions/api.ts`):
 
 ```
@@ -281,7 +285,7 @@ immediately. *Extensions: Create Sample Extension* writes a working example.
 **Settings.** Extensions declare settings in `contributes.configuration` (type, default,
 description, minimum/maximum, enum) and read them with `w3.settings.get(key)`. Values come from
 the open project (`.w3proj/settings.json`, versioned with the map), then the user
-(`%APPDATA%dev.w3proj.studiosettings.json`), then the declared default; settings with
+(`%APPDATA%\dev.w3proj.studio\settings.json`), then the declared default; settings with
 `"scope": "user"` (paths, lists) ignore the project layer. *Preferences: Open Settings* (Ctrl+,)
 edits either layer; the map tools' parameters live under `terrain.*` (pathing, shadows, minimap).
 
@@ -310,10 +314,30 @@ Pathing Editor (`terrain-pathing`, overrides in `.w3proj/pathing.json`).
 
 ## Known limits / next steps
 
-- Binary formats (`w3e`, `wpm`, `shd`, …) are stored raw. New codecs
-  plug into `crates/w3proj/src/codec.rs` and are verified automatically.
+- `wpm` and `shd` are stored raw, as derived data. New codecs plug into
+  `crates/w3proj/src/codec.rs` and get checked automatically.
 - Game data is read-only, and only files stored locally can be read (other
   locales aren't downloaded). Encrypted CASC entries aren't supported; none
   are present in 3.0.1.
 - Files of protected maps whose names were stripped can't be repacked.
 - Archive names that aren't UTF-8 (rare, old Asian-locale maps) are not recovered.
+
+## Credits
+
+Most of what's known about these file formats comes from people who worked it out and published
+it. The formats here were built from their work and then checked against real maps:
+
+- [wc3libs](https://github.com/inwc3/wc3libs), mainly by WaterKnight and Frotty, and its
+  [notes on the 3.0 map formats](https://github.com/inwc3/wc3libs/blob/master/docs/warcraft-iii-3.0-map-formats.md)
+- [War3Net](https://github.com/Drake53/War3Net) by Drake53
+- [WC3MapSpecification](https://github.com/ChiefOfGxBxL/WC3MapSpecification) by ChiefOfGxBxL
+- [HiveWE](https://github.com/stijnherfst/HiveWE) by stijnherfst, for its wiki page on the terrain format
+- [mdx-m3-viewer](https://github.com/flowtsohg/mdx-m3-viewer) by flowtsohg, for how terrain is drawn
+
+The MPQ Huffman tables come from [wow-mpq](https://github.com/wowemulation-dev/warcraft-rs), which
+has them from [StormLib](https://github.com/ladislav-zezula/StormLib) by Ladislav Zezula. They're
+used under the MIT license; the notice is in `crates/mpq/src/huffman_tables.rs`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
