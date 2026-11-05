@@ -148,19 +148,19 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const nameOf = (id: string) => sets.find((s) => s.id === id)?.name ?? id;
     // Tileset (water, lighting, blight) and tile templates: a tileset's own tile list.
     const tilesetSelect = h("select", { title: "The terrain's tileset: water, default lighting and blight follow (the ground tiles stay; see Template)",
-      onchange: () => ed.setTileset(tilesetSelect.value) },
+      onchange: () => { ed.setTileset(tilesetSelect.value); ed.focus(); } },
       ...(sets.some((s) => s.id === terrain.tileset) ? [] : [h("option", { value: terrain.tileset, selected: true }, terrain.tileset)]),
       ...sets.map((s) => h("option", { value: s.id, selected: s.id === terrain.tileset }, s.name)));
     const templateSelect = h("select", { title: "A tileset's own ground tiles" },
       ...sets.map((s) => h("option", { value: s.id, selected: s.id === terrain.tileset }, s.name)));
     const applyTemplate = h("button", {
       title: "Replace the map's ground tiles with this tileset's own, slot by slot (painted ground keeps its slot; cliffs follow); one undo step",
-      onclick: () => { const s = sets.find((x) => x.id === templateSelect.value); if (s) ed.replaceGroundTiles(s.tiles); },
+      onclick: () => { const s = sets.find((x) => x.id === templateSelect.value); if (s) ed.replaceGroundTiles(s.tiles); ed.focus(); },
     }, "Use its tiles");
     // Map Properties keeps its own tileset entry: offer to line the two up when they differ.
     const sync = mapSet && mapSet !== terrain.tileset ? h("div.terrain-tilemgr-sync", {},
       h("span", {}, `Map Properties says ${nameOf(mapSet)}.`),
-      h("button", { title: "Switch the terrain to Map Properties' tileset", onclick: () => ed.setTileset(mapSet) }, "Use it here"),
+      h("button", { title: "Switch the terrain to Map Properties' tileset", onclick: () => { ed.setTileset(mapSet); ed.focus(); } }, "Use it here"),
       h("button", { title: "Write the terrain's tileset into Map Properties (war3map.w3i)", onclick: () => { void ed.setMapTileset(terrain.tileset).then(() => renderTiles()); } }, `Set Map Properties to ${nameOf(terrain.tileset)}`)) : null;
     tilePanel.replaceChildren(
       h("div.terrain-tilemgr-row", {}, h("span.terrain-tilemgr-name", {}, "Tileset"), tilesetSelect),
@@ -175,14 +175,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           const others = t.map((o, j) => [o, j] as const).filter(([, j]) => j !== i);
           const sel = h("select", {}, ...others.map(([o, j]) => h("option", { value: String(j) }, `${names.get(o) ?? o} (${o})`)));
           return h("div.terrain-tilemgr-row.removing", {}, img, h("span", {}, `Remove ${label}: paint its ${usage[i].toLocaleString()} corners with`), sel,
-            h("button", { onclick: () => { removing = null; ed.removeGroundTile(i, Number(sel.value)); } }, "Remove"),
+            h("button", { onclick: () => { removing = null; ed.removeGroundTile(i, Number(sel.value)); ed.focus(); } }, "Remove"),
             h("button", { onclick: () => { removing = null; void renderTiles(); } }, "Cancel"));
         }
         return h("div.terrain-tilemgr-row", {}, img,
           h("span.terrain-tilemgr-name", {}, label),
           h("span.muted", { title: `${usage[i].toLocaleString()} corners` }, `${((100 * usage[i]) / total).toFixed(1)}%`),
-          h("button", { title: "Move up (drawn earlier, under the others)", disabled: i === 0, onclick: () => ed.moveGroundTile(i, i - 1) }, "↑"),
-          h("button", { title: "Move down (drawn later, over the others)", disabled: i === t.length - 1, onclick: () => ed.moveGroundTile(i, i + 1) }, "↓"),
+          h("button", { title: "Move up (drawn earlier, under the others)", disabled: i === 0, onclick: () => { ed.moveGroundTile(i, i - 1); ed.focus(); } }, "↑"),
+          h("button", { title: "Move down (drawn later, over the others)", disabled: i === t.length - 1, onclick: () => { ed.moveGroundTile(i, i + 1); ed.focus(); } }, "↓"),
           h("button", { title: "Remove from the map (its corners get another tile)", disabled: t.length < 2, onclick: () => { removing = i; void renderTiles(); } }, "✕"));
       }),
     );

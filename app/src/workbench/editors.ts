@@ -139,8 +139,14 @@ export class EditorService {
     return provider;
   }
 
+  /** Where keys go that no element has the focus for: a focusable canvas (3D editors listen
+   *  there), else the active editor's pane. */
+  keyTarget(): HTMLElement | null {
+    return this.active ? this.active.el.querySelector<HTMLElement>("canvas[tabindex]") ?? this.active.el : null;
+  }
+
   private addTab(path: string, id: string): Tab {
-    const el = h("div.editor-pane");
+    const el = h("div.editor-pane", { tabindex: -1 });
     // Virtual documents show their editor's title; "w3:<kind>:<file>" ones (e.g. a diff) the file too.
     const editorTitle = this.contributions.find((c) => c.id === id)?.title ?? path;
     const about = /^w3:[^:]+:(.+)$/.exec(path)?.[1];

@@ -82,5 +82,6 @@ export function westring(we: Map<string, string>, s: string): string {
   // Entries can name another entry (WESTRING_UE_UNITRACE_HUMAN=WESTRING_RACE_HUMAN).
   let v = s;
   for (let i = 0; i < 4 && v.startsWith("WESTRING_"); i++) v = we.get(v.toUpperCase()) ?? v;
-  return v.replace(/&/g, "");
+  // Some labels come twice, the second with its hotkey ("Air,&Air", "Ground, &Ground").
+  return v.replace(/&/g, "").replace(/^(.+?),\s*\1$/, "$1");
 }

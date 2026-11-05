@@ -363,7 +363,18 @@ export class Workbench {
         e.preventDefault();
         e.stopPropagation();
         this.run(cmd.id);
+        return;
       }
+      // A re-render removed the focused field, or the clicked button: the focus fell to the page
+      // and the key would reach no editor (Ctrl+Z, Delete, …). It goes to the active editor.
+      if (e.target !== document.body || document.querySelector(".picker-overlay")) return;
+      const target = this.editors.keyTarget();
+      if (!target) return;
+      e.stopPropagation();
+      target.focus({ preventScroll: true });
+      const copy = new KeyboardEvent("keydown", e);
+      target.dispatchEvent(copy);
+      if (copy.defaultPrevented) e.preventDefault();
     }, true);
   }
 }

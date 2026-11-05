@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { toArchiveName, toProjectPath } from "./archivepath";
-import { listItem, parseIni, parseSlk } from "./text";
+import { listItem, parseIni, parseSlk, westring } from "./text";
 import { StringTable } from "./wts";
 
 test("SLK rows are keyed by the header row; the cursor carries over between cells", () => {
@@ -71,4 +71,12 @@ test("archive names ↔ project paths escape what Windows can't store", () => {
   for (const name of ["war3mapImported\\x.mdx", "a:b\\CON.txt", "name.", "100%\\done?.blp", "Ünicode\\ß.wav"]) {
     assert.equal(toArchiveName(toProjectPath(name)), name);
   }
+});
+
+test("westring: references, hotkey marks and doubled labels", () => {
+  const we = new Map([["WESTRING_A", "WESTRING_B"], ["WESTRING_B", "&Human"], ["WESTRING_C", "Air,&Air"], ["WESTRING_D", "Ground, &Ground"], ["WESTRING_E", "Can't raise, Does decay"]]);
+  assert.equal(westring(we, "WESTRING_A"), "Human");
+  assert.equal(westring(we, "WESTRING_C"), "Air");
+  assert.equal(westring(we, "WESTRING_D"), "Ground");
+  assert.equal(westring(we, "WESTRING_E"), "Can't raise, Does decay");
 });
