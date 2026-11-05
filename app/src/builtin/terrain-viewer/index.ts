@@ -20,7 +20,8 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { jsonPathOf, requireProject } from "../../lib/formats/mapdoc";
 import { inArea, readArea, type Area } from "../../lib/terrain/area";
-import { dress, scatterSpots, terrainSummary, viewOfArea, type Dressing } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, scatterSpots, sculptCorners, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK } from "../../lib/terrain/pathing";
 import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
@@ -131,7 +132,11 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   /** The open terrain editor, for tools. */
-  let opened: { handle: TerrainEditorHandle; ready: () => Promise<void>; screenshot: (size: number, area: Area | null, top: boolean) => Promise<string> } | null = null;
+  let opened: {
+    handle: TerrainEditorHandle; ready: () => Promise<void>;
+    screenshot: (size: number, area: Area | null, angle: ViewAngle, heights: boolean) => Promise<string>;
+    derive: (before: { terrain: Terrain; doodads: Placed[] }) => Promise<void>;
+  } | null = null;
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
   let lastView: { key: string; view: TerrainView } | null = null;
 
@@ -160,6 +165,46 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     });
   };
 
+  /** One edit of the ground, as the terrain editor would make it: objects follow, derived files
+   *  are rebuilt. `change` works on the terrain as it's saved, and gives the corners it changed. */
+  const editGround = async (title: string, change: (t: Terrain) => number[]) => {
+    const { root } = requireProject(w3);
+    const path = projectTerrain(w3);
+    if (!path) throw new Error("This project has no war3map.w3e.");
+    if (!isTerrainText(path)) throw new Error("This project keeps its terrain raw, so it can't be edited here.");
+    await liveEditor();
+    const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    const states = { before: null as { terrain: Terrain; doodads: Placed[] } | null, after: null as { terrain: Terrain; doodads: Placed[] } | null };
+    let corners = 0, moved = 0;
+    const changed = await edits.edit(title, async (read) => {
+      const text = await read(path);
+      if (text === null) throw new Error("This project has no war3map.w3e.");
+      const bytes = w3eFromText(text), terrain = parseW3e(bytes);
+      const touched = change(terrain);
+      corners = touched.length;
+      if (!touched.length) return [];
+      const files = [{ path, text: w3eToText(writeW3e(terrain)) }];
+      states.before = { terrain: parseW3e(bytes), doodads: [] };
+      states.after = { terrain, doodads: [] };
+      for (const [name, key] of [["war3map.doo", "doodads"], ["war3mapUnits.doo", "units"]] as const) {
+        const json = `map/${name}.json`, doc = await read(json);
+        if (doc === null) continue;
+        const parsed = JSON.parse(doc) as Record<string, Placed[]>;
+        const list = parsed[key] ?? [];
+        if (key === "doodads") states.before.doodads = structuredClone(list);
+        const count = followGround(list, terrain, touched, key === "doodads");
+        if (key === "doodads") states.after.doodads = list;
+        moved += count;
+        if (count) files.push({ path: json, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: json, text: JSON.stringify(parsed) }) });
+      }
+      return files;
+    }, async (undoing) => {
+      const from = undoing ? states.after : states.before;
+      if (from) await (await liveEditor()).derive(from);
+    });
+    return { changed, corners, objectsMoved: moved };
+  };
+
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean) => {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
     if (!entry) throw new Error(`${f.name} has nothing placed yet to take the layout from.`);
@@ -172,9 +217,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const editor = await liveEditor();
       const area = await readArea(w3, args);
       const size = typeof args.maxSize === "number" && args.maxSize > 0 ? args.maxSize : 1280;
-      const data = await editor.screenshot(size, area, args.view !== "angled");
+      const angle = args.view === "angled" || args.view === "low" ? args.view : "top";
+      const data = await editor.screenshot(size, area, angle, args.heights === true);
       const image = { type: "image", data, mimeType: "image/png" };
       return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
+    }),
+    w3.mcp.registerTool("paint_terrain", async (args) => {
+      const { tile } = args;
+      if (typeof tile !== "string" || tile.length !== 4) throw new Error("tile must be four characters, like Lgrs. terrain_info lists them.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("paint_terrain needs a region, or left, bottom, right and top.");
+      const known = (await (await liveEditor()).handle.tilesets()).flatMap((s) => s.tiles);
+      if (!known.includes(tile)) throw new Error(`"${tile}" isn't one of the game's ground tiles. terrain_info lists them.`);
+      const edge = typeof args.edge === "number" ? Math.min(1, Math.max(0, args.edge)) : 0.3;
+      const shape = args.shape === "box" ? "box" : "ellipse";
+      return editGround(`Paint ${tile} in ${area.name ?? "an area"}`, (t) => paintCorners(t, area, shape, groundSlot(t, tile), edge, Math.random));
+    }),
+    w3.mcp.registerTool("sculpt_terrain", async (args) => {
+      const { mode, amount } = args;
+      if (mode !== "raise" && mode !== "lower" && mode !== "flatten" && mode !== "smooth") throw new Error("mode must be raise, lower, flatten or smooth.");
+      if (amount !== undefined && (typeof amount !== "number" || !Number.isFinite(amount))) throw new Error("amount must be a number.");
+      if (typeof amount === "number" && mode !== "flatten" && (amount <= 0 || amount > 1000)) throw new Error("amount must be above 0, at most 1000.");
+      const area = await readArea(w3, args);
+      if (!area) throw new Error("sculpt_terrain needs a region, or left, bottom, right and top.");
+      const shape = args.shape === "box" ? "box" : "ellipse";
+      return editGround(`${mode[0].toUpperCase()}${mode.slice(1)} ground in ${area.name ?? "an area"}`, (t) => sculptCorners(t, area, shape, mode, typeof amount === "number" ? amount : undefined));
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
       const editor = await liveEditor();
@@ -183,7 +250,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // The game's pathing file leaves out trees and other destructables: what stands there counts.
       const [pathing, room] = await Promise.all([editor.handle.pathing(), editor.handle.objects.occupancy()]);
       const cells = pathing.cells.map((c, i) => (room.blocked[i] ? c | NO_WALK : c));
-      return terrainSummary(t, { ...pathing, cells }, (await readArea(w3, args)) ?? whole);
+      const area = (await readArea(w3, args)) ?? whole;
+      const tiles = (await editor.handle.tilesets()).find((s) => s.id === t.tileset)?.tiles ?? [];
+      return {
+        ...terrainSummary(t, { ...pathing, cells }, area),
+        tilesInMap: t.groundTiles, otherTilesOfTheTileset: tiles.filter((id) => !t.groundTiles.includes(id)),
+        ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
+      };
     }),
     w3.mcp.registerTool("place_objects", async ({ kind, objects, ignoreRoom }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
@@ -219,6 +292,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!area) throw new Error("scatter_objects needs a region, or left, bottom, right and top.");
       const density = typeof args.density === "number" ? Math.min(1, Math.max(0.05, args.density)) : 0.7;
       const limit = typeof args.limit === "number" && args.limit > 0 ? args.limit : 3000;
+      const range = args.scaleRange;
+      if (range !== undefined && !(Array.isArray(range) && range.length === 2 && range.every((n) => typeof n === "number" && n > 0) && range[0] <= range[1])) throw new Error("scaleRange must be [smallest, biggest].");
+      const scaleRange = range as [number, number] | undefined;
       const { handle } = await liveEditor();
       const key = fileKey(args.kind ?? "doodads");
       const counts = new Map<string, number>();
@@ -240,7 +316,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const facing = type.fixedRot ?? Math.random() * 360, angle = (facing * Math.PI) / 180;
           if (!(await room.fits(type.kind, id, spot.x, spot.y, angle))) continue;
           await room.mark(type.kind, id, spot.x, spot.y, angle);
-          add(f, handle, id, spot.x, spot.y, undefined, { facing }, true);
+          add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true);
           counts.set(id, (counts.get(id) ?? 0) + 1);
         }
         if (!counts.size) throw new Error("There's no free ground there for these.");
@@ -1815,16 +1891,59 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         raf = requestAnimationFrame(tick);
 
+        /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
+         *  `baseDoodads` are the state the shadows were last updated for. */
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[]) => {
+          const rf = (p: string) => readFile(w3, doc, p);
+          const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
+          if (cfg<boolean>("pathing.regenerate")) try {
+            const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf, cfg<number>("pathing.deepWater"));
+            filterPathing(wpm);
+            await w3.workspace.writeBytes("map/war3map.wpm", wpm);
+            if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
+          } catch (e) {
+            w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
+          }
+          // Shadows: only cells whose prediction changed since the last save.
+          if (cfg<boolean>("shadows.update")) try {
+            const skins = objCtx?.skins ?? new Map(), baseOf = (id: string) => objCtx?.bases.get(id);
+            const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
+            const before = await predictShadows(baseTerrain, baseDoodads, skins, baseOf, rf, sun);
+            const after = await predictShadows(terrain, doodads, skins, baseOf, rf, sun);
+            const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
+            const shd = updateShadows(stored, before, after);
+            if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
+          } catch (e) {
+            w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
+          }
+          // The minimap is redrawn when something changed since the last save (by default).
+          const minimapMode = cfg<string>("minimap.regenerate");
+          if (minimapMode === "always" || (minimapMode !== "never" && minimapStale)) {
+            try {
+              await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
+              minimapStale = false;
+            } catch (e) {
+              w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
+            }
+          }
+          // Its icons (gold mines, neutral buildings, start locations) follow the placed units;
+          // written only when they differ from the stored ones by more than order and rounding.
+          if (minimapMode !== "never") await updateMinimapIcons(terrain);
+        };
+
         const ready = () => objectsPlaced.catch(() => {});
-        const takeScreenshot = async (size: number, area: Area | null, top: boolean) => {
+        const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, heights: boolean) => {
           await ready();
           await loader.settled();
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
           const before = handle.view();
           if (area) {
             const middle = heightAt(terrain, (area.left + area.right) / 2, (area.bottom + area.top) / 2);
-            handle.setView(viewOfArea(area, middle, canvas.clientWidth / canvas.clientHeight, renderer.fov, top));
+            handle.setView(viewOfArea(area, middle, canvas.clientWidth / canvas.clientHeight, renderer.fov, angle));
           }
+          // Another tool's overlay stays: taking it away would change what the user is doing.
+          const coloured = heights && !renderer.hasGroundOverlay;
+          if (coloured) { const c = heightColors(terrain); handle.setGroundOverlay(c.rgba, c.width, c.height); }
           try {
             // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.
             renderer.render();
@@ -1851,10 +1970,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             return copy.toDataURL("image/png").split(",")[1];
           } finally {
+            if (coloured) handle.setGroundOverlay(null);
             handle.setView(before);
           }
         };
-        opened = { handle, ready, screenshot: takeScreenshot };
+        opened = {
+          handle, ready, screenshot: takeScreenshot,
+          // Tools change the files: what's open is the result already.
+          derive: async (from) => {
+            await ready();
+            minimapStale = true;
+            await updateDerived(dooFile?.list ?? [], from.terrain, from.doodads);
+          },
+        };
 
         const editorApi = {
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
@@ -1879,42 +2007,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             savedAt = at;
             doc.setDirty(false);
             const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
-            const rf = (p: string) => readFile(w3, doc, p);
-            const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
-            // The pathing map follows terrain and doodads.
-            if (cfg<boolean>("pathing.regenerate")) try {
-              const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf, cfg<number>("pathing.deepWater"));
-              filterPathing(wpm);
-              await w3.workspace.writeBytes("map/war3map.wpm", wpm);
-              if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
-            } catch (e) {
-              w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
-            }
-            // Shadows: only cells whose prediction changed since the last save.
-            if (cfg<boolean>("shadows.update")) try {
-              const skins = objCtx?.skins ?? new Map(), baseOf = (id: string) => objCtx?.bases.get(id);
-              const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
-              const before = await predictShadows(parseW3e(savedW3e), savedDoodads ?? doodads, skins, baseOf, rf, sun);
-              const after = await predictShadows(terrain, doodads, skins, baseOf, rf, sun);
-              const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
-              const shd = updateShadows(stored, before, after);
-              if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
-            } catch (e) {
-              w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
-            }
-            // The minimap is redrawn when something changed since the last save (by default).
-            const minimapMode = cfg<string>("minimap.regenerate");
-            if (minimapMode === "always" || (minimapMode !== "never" && minimapStale)) {
-              try {
-                await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
-                minimapStale = false;
-              } catch (e) {
-                w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
-              }
-            }
-            // Its icons (gold mines, neutral buildings, start locations) follow the placed units;
-            // written only when they differ from the stored ones by more than order and rounding.
-            if (minimapMode !== "never") await updateMinimapIcons(terrain);
+            await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads);
             savedW3e = w3e;
             savedDoodads = structuredClone(doodads);
             for (const g of groupInsts.values()) {

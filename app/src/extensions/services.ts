@@ -5,8 +5,9 @@
  *  is refused while anything is unsaved, and only reaches files under map/. */
 export interface McpEditsService {
   /** `change` reads what it needs through `read` and gives the new texts of the files. Nothing
-   *  else runs between the reads and the write. Resolves false if that changed nothing. */
-  edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<{ path: string; text: string }[]>): Promise<boolean>;
+   *  else runs between the reads and the write. Resolves false if that changed nothing.
+   *  `follow` runs after the edit and after its undo, for files derived from these. */
+  edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<{ path: string; text: string }[]>, follow?: (undoing: boolean) => Promise<void>): Promise<boolean>;
 }
 
 export const MCP_EDITS_SERVICE = "w3.mcpEdits";

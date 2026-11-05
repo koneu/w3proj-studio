@@ -540,6 +540,10 @@ export class TerrainRenderer {
   /** Shows an RGBA texture over the ground (`width` × `height` texels, rows from
    *  the south, covering the whole map); null removes it. Re-calling with the
    *  same size only re-uploads the pixels. */
+  get hasGroundOverlay() {
+    return this.overlay !== null;
+  }
+
   setGroundOverlay(rgba: Uint8Array | null, width = 0, height = 0) {
     const gl = this.gl;
     if (!rgba) {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import type { Corner, Terrain } from "../../lib/terrain/w3e";
-import { dress, scatterSpots, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, scatterSpots, sculptCorners, terrainSummary, textMap, viewOfArea } from "./aitools";
 
 /** Repeatable numbers in 0..1. */
 const seeded = (seed = 1) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -39,6 +39,113 @@ test("an ellipse has no corners and thins out at its edge", () => {
 });
 
 const tree = { numVar: 5, randScale: true, minScale: 0.8, maxScale: 1.2, fixedRot: null };
+
+/** 16 × 16 tiles from (0, 0), flat at level 2, height 0. */
+function field(): Terrain {
+  const c = { height: 0, water: 0, texture: 0, variation: 0, layer: 2, ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0 } as Corner;
+  return { tileset: "A", groundTiles: ["Adrt", "Agrs"], width: 17, height: 17, offsetX: 0, offsetY: 0, corners: Array.from({ length: 289 }, () => ({ ...c })) } as unknown as Terrain;
+}
+const hill = { left: 0, bottom: 0, right: 2048, top: 2048 };
+const at = (t: Terrain, x: number, y: number) => groundHeight(t.corners[y * t.width + x]);
+
+test("a hill is highest in the middle and fades to nothing, so it has no step", () => {
+  const t = field();
+  const changed = sculptCorners(t, hill, "ellipse", "raise", 100);
+  assert.equal(at(t, 8, 8), 100);
+  assert.equal(at(t, 0, 0), 0);
+  assert.equal(at(t, 0, 8), 0, "the edge itself");
+  assert.ok(at(t, 4, 8) > 30 && at(t, 4, 8) < 70);
+  for (let x = 0; x < 16; x++) assert.ok(Math.abs(at(t, x + 1, 8) - at(t, x, 8)) < 25, "steep steps would need a cliff");
+  assert.ok(changed.length > 100 && changed.includes(8 * 17 + 8));
+});
+
+test("lowering, flattening and smoothing", () => {
+  const t = field();
+  sculptCorners(t, hill, "ellipse", "lower", 50);
+  assert.equal(at(t, 8, 8), -50);
+  sculptCorners(t, hill, "ellipse", "flatten", 0);
+  assert.equal(at(t, 8, 8), 0);
+  const bumpy = field();
+  bumpy.corners[8 * 17 + 8].rawHeight += 400;
+  sculptCorners(bumpy, hill, "ellipse", "smooth", undefined);
+  assert.ok(at(bumpy, 8, 8) < 20, "a spike goes");
+});
+
+test("smoothing doesn't pull heights across a cliff", () => {
+  const t = field();
+  for (let y = 0; y < 17; y++) for (let x = 9; x < 17; x++) { t.corners[y * 17 + x].layer = 4; t.corners[y * 17 + x].rawHeight += 400; }
+  sculptCorners(t, hill, "ellipse", "smooth", undefined);
+  assert.equal(at(t, 8, 8), 0);
+});
+
+test("the map's boundary stays as it is", () => {
+  const t = field();
+  t.corners[8 * 17 + 8].boundary = true;
+  sculptCorners(t, hill, "ellipse", "raise", 100);
+  assert.equal(at(t, 8, 8), 0);
+});
+
+test("painting a patch: its middle is solid and its edge frays", () => {
+  const t = field();
+  const changed = paintCorners(t, hill, "ellipse", 1, 0.4, seeded());
+  assert.equal(t.corners[8 * 17 + 8].texture, 1);
+  assert.equal(t.corners[8 * 17 + 7].texture, 1);
+  assert.equal(t.corners[0].texture, 0);
+  const n = t.corners.filter((c) => c.texture === 1).length;
+  assert.equal(changed.length, n);
+  const solid = field();
+  assert.ok(paintCorners(solid, hill, "ellipse", 1, 0, seeded()).length > n, "edge 0 paints all of it");
+  assert.equal(paintCorners(solid, hill, "ellipse", 1, 0, seeded()).length, 0, "what has the tile doesn't change");
+});
+
+test("a tile not in the map's list gets a slot, while there's room", () => {
+  const t = field();
+  assert.equal(groundSlot(t, "Agrs"), 1);
+  assert.equal(groundSlot(t, "Lgrs"), 2);
+  t.groundTiles = Array.from({ length: 16 }, (_, i) => `T${i}`);
+  assert.throws(() => groundSlot(t, "Lgrs"), /already has 16/);
+});
+
+test("objects near the change follow the ground, except doodads with a fixed height", () => {
+  const t = field();
+  const changed = sculptCorners(t, hill, "ellipse", "raise", 100);
+  const on = { position: [1024, 1024, 0] }, fixed = { position: [1024, 1024, 0], flags: 6 }, far = { position: [9000, 9000, 7] };
+  assert.equal(followGround([on, fixed, far], t, changed, true), 1);
+  assert.equal(on.position[2], heightAt(t, 1024, 1024));
+  assert.equal(fixed.position[2], 0);
+  assert.equal(far.position[2], 7);
+  const unit = { position: [1024, 1024, 0], flags: 6 };
+  assert.equal(followGround([unit], t, changed, false), 1, "the flag is a doodad's");
+  assert.equal(followGround([on], t, [], true), 0);
+});
+
+test("the height grid has north first and stays small", () => {
+  const t = field();
+  sculptCorners(t, hill, "ellipse", "raise", 100);
+  const small = heightGrid(t, { left: 0, bottom: 0, right: 512, top: 1024 });
+  assert.equal(small.rows.length, 9);
+  assert.equal(small.rows[0].length, 5);
+  assert.equal(small.rows[0][4], Math.round(heightAt(t, 512, 1024)));
+  assert.equal(small.rows[8][0], 0);
+  assert.ok(heightGrid({ ...t }, { left: 0, bottom: 0, right: 12800, top: 12800 }).cellSize === 512);
+});
+
+test("height colours run from blue to red, with lines between levels", () => {
+  const t = field();
+  sculptCorners(t, hill, "ellipse", "raise", 100);
+  const { rgba, width, height } = heightColors(t);
+  assert.deepEqual([width, height, rgba.length], [64, 64, 64 * 64 * 4]);
+  const px = (x: number, y: number) => [...rgba.slice((y * width + x) * 4, (y * width + x) * 4 + 4)];
+  assert.ok(px(1, 1)[2] > px(1, 1)[0], "low is blue");
+  assert.ok(px(32, 32)[0] > px(32, 32)[2], "high is red");
+  assert.ok(Array.from({ length: 64 }, (_, x) => px(x, 32)).some((p) => p[0] === 0 && p[3] === 220), "a line crosses the slope");
+});
+
+test("a size range is used instead of the type's", () => {
+  const e = { variation: 0, angle: 0, scale: [1, 1, 1] as [number, number, number] };
+  dress(e, tree, { scaleRange: [0.3, 0.5] }, true, seeded());
+  assert.ok(e.scale[0] >= 0.3 && e.scale[0] <= 0.5);
+});
 
 test("scattered things differ, within what their type allows", () => {
   const random = seeded();
@@ -117,9 +224,9 @@ test("the summary counts what's inside only", () => {
 });
 
 test("the camera for an area looks at its middle, with room around it", () => {
-  const v = viewOfArea({ left: 0, bottom: 0, right: 2000, top: 1000 }, 40, 2, Math.PI / 2, true);
+  const v = viewOfArea({ left: 0, bottom: 0, right: 2000, top: 1000 }, 40, 2, Math.PI / 2, "top");
   assert.deepEqual(v.target, [1000, 500, 40]);
   assert.ok(Math.abs(v.distance - 600) < 0.001);
-  assert.ok(v.pitch > viewOfArea(box, 0, 1, 1, false).pitch);
-  assert.equal(viewOfArea({ left: 0, bottom: 0, right: 1, top: 1 }, 0, 1, 1, true).distance, 400);
+  assert.ok(v.pitch > viewOfArea(box, 0, 1, 1, "angled").pitch && viewOfArea(box, 0, 1, 1, "angled").pitch > viewOfArea(box, 0, 1, 1, "low").pitch);
+  assert.equal(viewOfArea({ left: 0, bottom: 0, right: 1, top: 1 }, 0, 1, 1, "top").distance, 400);
 });

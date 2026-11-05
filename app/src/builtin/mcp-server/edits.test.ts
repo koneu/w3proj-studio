@@ -117,6 +117,18 @@ test("a failing edit doesn't stop the next one", async () => {
   assert.equal(files.get("map/a"), "2");
 });
 
+test("follow-up work runs after an edit and after its undo, and can't take either back", async () => {
+  const { log, files, state } = setup({ "map/a": "old" });
+  const seen: [boolean, string | undefined][] = [];
+  await log.edit("Change", put("map/a", "new"), async (undoing) => { seen.push([undoing, files.get("map/a")]); throw new Error("no minimap"); });
+  await log.undo();
+  assert.deepEqual(seen, [[false, "new"], [true, "old"]]);
+  assert.equal(files.get("map/a"), "old");
+  assert.ok(state.logged.some((l) => l.includes("no minimap")));
+  await log.edit("Nothing", put("map/a", "old"), async () => { seen.push([false, "ran"]); });
+  assert.equal(seen.length, 2, "nothing changed, nothing follows");
+});
+
 test("old edits drop off", async () => {
   const { log } = setup({ "map/a": "0" });
   for (let i = 1; i <= 35; i++) await log.edit(`E${i}`, put("map/a", String(i)));

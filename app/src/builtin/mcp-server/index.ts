@@ -7,6 +7,7 @@ import { projectPath } from "../../extensions/mcp";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
+import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 
 /** One read_file answer; `offset` gets the rest. */
 const READ_LIMIT = 200_000;
@@ -106,7 +107,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           (e) => clients.replaceChildren(h("div.view-error", {}, String(e))));
       },
     }),
-    w3.services.provide<McpEditsService>(MCP_EDITS_SERVICE, { edit: (title, change) => log.edit(title, change) }),
+    w3.services.provide<McpEditsService>(MCP_EDITS_SERVICE, { edit: (title, change, follow) => log.edit(title, change, follow) }),
     w3.workspace.onDidChange(() => {
       const now = w3.workspace.project()?.root ?? null;
       if (now !== root) { root = now; log.reset(); }
@@ -124,6 +125,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const times = text.split(find).length - 1;
         if (times !== 1) throw new Error(`That text occurs ${times} times in ${file}. It must occur exactly once.`);
         const next = text.replace(find, () => replace);
+        if (isTerrainText(file)) {
+          // Throws if it isn't terrain any more: better now than when the map is packed.
+          w3eFromText(next);
+          return [{ path: file, text: next }];
+        }
         // JSON forms are packed later: broken ones must not get that far.
         if (/\.json$/i.test(file)) {
           const objects = /\.w3[utabdhq]\.json$/i.test(file);
@@ -132,7 +138,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         return [{ path: file, text: next }];
       });
-      return `Changed ${file}.`;
+      return isTerrainText(file)
+        ? `Changed ${file}. Objects, pathing, shadows and the minimap don't follow an edit like this: paint_terrain and sculpt_terrain do.`
+        : `Changed ${file}.`;
     }),
     w3.commands.register("w3.mcp.toggle", async () => {
       await w3.settings.set("mcp.enabled", !enabled());

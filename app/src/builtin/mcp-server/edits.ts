@@ -9,7 +9,9 @@
 import { projectPath } from "../../extensions/mcp";
 
 export interface EditFile { path: string; text: string }
-export interface EditRecord { id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[] }
+export interface EditRecord { id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[]; follow?: EditFollow }
+/** Work derived from the files, after an edit and after its undo: their change is done by then. */
+export type EditFollow = (undoing: boolean) => Promise<void>;
 
 export interface EditIO {
   /** A file's text, or null if it doesn't exist. */
@@ -66,8 +68,13 @@ export class EditLog {
     for (const f of [...files].reverse()) await this.io.write(f.path, f.before);
   }
 
+  /** A failure here doesn't take the edit back: files derived from it are only out of date. */
+  private async followUp(r: { title: string; follow?: EditFollow }, undoing: boolean) {
+    await r.follow?.(undoing).catch((e) => this.io.log(`after "${r.title}": ${String(e)}`));
+  }
+
   /** `change` reads what it needs and gives the new texts. False if nothing changed. */
-  edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<EditFile[]>): Promise<boolean> {
+  edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<EditFile[]>, follow?: EditFollow): Promise<boolean> {
     return this.inTurn(async () => {
       this.refuseUnsaved();
       const wanted = (await change((path) => this.io.read(editablePath(path)))).map((f) => ({ path: editablePath(f.path), text: f.text }));
@@ -89,9 +96,11 @@ export class EditLog {
         await this.restore(done).catch((e2) => this.io.log(`couldn't put files back: ${String(e2)}`));
         throw e;
       }
-      this.records.push({ id: this.next++, title, at: Date.now(), files });
+      const record: EditRecord = { id: this.next++, title, at: Date.now(), files, follow };
+      this.records.push(record);
       if (this.records.length > this.keep) this.records.shift();
       this.io.log(`AI edit: ${title} (${files.map((f) => f.path).join(", ")})`);
+      await this.followUp(record, false);
       this.onChange();
       return true;
     });
@@ -109,6 +118,7 @@ export class EditLog {
       await this.restore(last.files);
       this.records.pop();
       this.io.log(`AI edit undone: ${last.title}`);
+      await this.followUp(last, true);
       this.onChange();
       return last.title;
     });

@@ -3,7 +3,7 @@
 
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { inArea, type Area } from "../../lib/terrain/area";
-import type { Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, heightAt, randomVariation, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -11,7 +11,7 @@ const MAP_SIZE = 64;
 
 /** Spots on a jittered grid, like the Scatter brush, on the pathing grid. The outer part of an
  *  ellipse thins out, so a forest doesn't end in a line. */
-export function scatterSpots(area: Area, spacing: number, shape: "ellipse" | "box", random: () => number) {
+export function scatterSpots(area: Area, spacing: number, shape: Shape, random: () => number) {
   const out: { x: number; y: number }[] = [];
   const cx = (area.left + area.right) / 2, cy = (area.bottom + area.top) / 2;
   const rx = (area.right - area.left) / 2, ry = (area.top - area.bottom) / 2;
@@ -30,13 +30,17 @@ export function scatterSpots(area: Area, spacing: number, shape: "ellipse" | "bo
   return out;
 }
 
-export interface Dressing { facing?: number; scale?: number; variation?: number }
+export interface Dressing { facing?: number; scale?: number; scaleRange?: [number, number]; variation?: number }
 interface Look { numVar: number; randScale: boolean; minScale: number; maxScale: number; fixedRot: number | null }
 interface Dressed { variation: number; angle: number; scale: [number, number, number] }
 
 /** What makes placed objects differ. What's asked for wins; with `vary` the rest is random within
  *  what the object's type allows, as the Scatter brush does. */
 export function dress(e: Dressed, look: Look | null, asked: Dressing, vary: boolean, random: () => number) {
+  if (asked.scaleRange) {
+    const k = asked.scaleRange[0] + random() * (asked.scaleRange[1] - asked.scaleRange[0]);
+    e.scale = [k, k, k];
+  }
   const variations = look?.numVar ?? 1;
   if (asked.variation !== undefined) e.variation = Math.max(0, Math.min(variations - 1, Math.round(asked.variation)));
   else if (vary && variations > 1) e.variation = Math.floor(random() * variations);
@@ -44,7 +48,7 @@ export function dress(e: Dressed, look: Look | null, asked: Dressing, vary: bool
   if (degrees !== undefined && degrees !== null) e.angle = (degrees * Math.PI) / 180;
   else if (vary) e.angle = random() * Math.PI * 2;
   if (asked.scale !== undefined) e.scale = [asked.scale, asked.scale, asked.scale];
-  else if (vary && look?.randScale && look.maxScale > look.minScale) {
+  else if (!asked.scaleRange && vary && look?.randScale && look.maxScale > look.minScale) {
     const k = look.minScale + random() * (look.maxScale - look.minScale);
     e.scale = [k, k, k];
   }
@@ -83,6 +87,146 @@ export function textMap(t: Terrain, p: Pathing, area: Area) {
   return { left: x0, top: y0 + (rows.length * size), cellSize: size, rows };
 }
 
+export type Shape = "ellipse" | "box";
+
+/** How far a point is from the middle of an area: 0 there, 1 at its edge, more outside. */
+function reach(area: Area, shape: Shape, x: number, y: number) {
+  const dx = Math.abs(x - (area.left + area.right) / 2) / ((area.right - area.left) / 2);
+  const dy = Math.abs(y - (area.bottom + area.top) / 2) / ((area.top - area.bottom) / 2);
+  return shape === "ellipse" ? Math.hypot(dx, dy) : Math.max(dx, dy);
+}
+
+/** The corners of an area that aren't the map's unplayable boundary, with their reach. */
+function cornersIn(t: Terrain, area: Area, shape: Shape) {
+  const out: { i: number; r: number }[] = [];
+  for (let y = 0; y < t.height; y++) {
+    for (let x = 0; x < t.width; x++) {
+      const i = y * t.width + x, r = reach(area, shape, t.offsetX + x * TILE, t.offsetY + y * TILE);
+      if (r <= 1 && !t.corners[i].boundary) out.push({ i, r });
+    }
+  }
+  return out;
+}
+
+/** The slot of a ground tile, added to the map's list if needed. */
+export function groundSlot(t: Terrain, tile: string): number {
+  const at = t.groundTiles.indexOf(tile);
+  if (at >= 0) return at;
+  if (t.groundTiles.length >= 16) throw new Error(`This map already has 16 ground tiles (${t.groundTiles.join(", ")}). Use one of those.`);
+  t.groundTiles.push(tile);
+  return t.groundTiles.length - 1;
+}
+
+/** Paints corners with a tile. `edge` (0 to 1) is how much of the outside thins out, so the
+ *  patch doesn't end in a line. The changed corners. */
+export function paintCorners(t: Terrain, area: Area, shape: Shape, slot: number, edge: number, random: () => number) {
+  const changed: number[] = [];
+  for (const { i, r } of cornersIn(t, area, shape)) {
+    if (edge > 0 && r > 1 - edge && random() > (1 - r) / edge) continue;
+    const c = t.corners[i];
+    if (c.texture === slot) continue;
+    c.texture = slot;
+    c.variation = randomVariation();
+    changed.push(i);
+  }
+  return changed;
+}
+
+export type SculptMode = "raise" | "lower" | "flatten" | "smooth";
+
+/** Reshapes the ground, strongest in the middle and fading to nothing at the edge, so it makes no
+ *  steps. flatten goes towards `amount`, or the area's average; smooth stays within a cliff level. */
+export function sculptCorners(t: Terrain, area: Area, shape: Shape, mode: SculptMode, amount: number | undefined) {
+  const inside = cornersIn(t, area, shape);
+  const fade = (r: number) => 0.5 + 0.5 * Math.cos(Math.PI * Math.min(1, r));
+  const heights = t.corners.map(groundHeight);
+  const level = amount ?? inside.reduce((sum, { i }) => sum + heights[i], 0) / Math.max(1, inside.length);
+  const around = (i: number) => {
+    const x = i % t.width, y = Math.floor(i / t.width);
+    let sum = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const ox = x + dx, oy = y + dy;
+        if (ox < 0 || oy < 0 || ox >= t.width || oy >= t.height) continue;
+        const o = oy * t.width + ox;
+        if (t.corners[o].layer === t.corners[i].layer) { sum += heights[o]; n++; }
+      }
+    }
+    return sum / n;
+  };
+  const changed: number[] = [];
+  for (const { i, r } of inside) {
+    const g = heights[i], w = fade(r);
+    const next = mode === "raise" ? g + (amount ?? 64) * w : mode === "lower" ? g - (amount ?? 64) * w
+      : mode === "flatten" ? g + (level - g) * w : g + (around(i) - g) * w;
+    const before = t.corners[i].rawHeight;
+    setGroundHeight(t.corners[i], next);
+    if (t.corners[i].rawHeight !== before) changed.push(i);
+  }
+  return changed;
+}
+
+interface Follower { position: number[]; flags?: number }
+
+/** Puts objects near changed corners back on the ground, as the terrain editor does: all units and
+ *  items, and doodads unless they have a fixed height (flag 4). How many moved. */
+export function followGround(list: Follower[], t: Terrain, corners: number[], doodads: boolean) {
+  if (!corners.length) return 0;
+  const xs = corners.map((i) => i % t.width), ys = corners.map((i) => Math.floor(i / t.width));
+  // Tiles next to a changed corner change too.
+  const near = {
+    left: t.offsetX + (Math.min(...xs) - 1) * TILE, right: t.offsetX + (Math.max(...xs) + 1) * TILE,
+    bottom: t.offsetY + (Math.min(...ys) - 1) * TILE, top: t.offsetY + (Math.max(...ys) + 1) * TILE,
+  };
+  let moved = 0;
+  for (const p of list) {
+    if ((doodads && (p.flags ?? 0) & 4) || !inArea(p.position[0], p.position[1], near)) continue;
+    const z = heightAt(t, p.position[0], p.position[1]);
+    if (Math.abs(z - p.position[2]) > 0.01) { p.position = [p.position[0], p.position[1], z]; moved++; }
+  }
+  return moved;
+}
+
+/** Ground heights of an area as rows of numbers from the north, at most 33 × 33. */
+export function heightGrid(t: Terrain, area: Area) {
+  const step = Math.max(1, Math.ceil(Math.max(area.right - area.left, area.top - area.bottom) / TILE / 32));
+  const size = step * TILE;
+  const left = Math.ceil((area.left - t.offsetX) / size) * size + t.offsetX;
+  const top = Math.floor((area.top - t.offsetY) / size) * size + t.offsetY;
+  const rows: number[][] = [];
+  for (let y = top; y >= area.bottom; y -= size) {
+    const row: number[] = [];
+    for (let x = left; x <= area.right; x += size) row.push(Math.round(heightAt(t, x, y)));
+    rows.push(row);
+  }
+  return { left, top, cellSize: size, rows };
+}
+
+/** A colour for every pathing cell (rows from the south): blue low to red high, with a dark line
+ *  every `step` units of height, so a picture shows slopes that the light hides. */
+export function heightColors(t: Terrain, step = 32) {
+  const width = (t.width - 1) * 4, height = (t.height - 1) * 4;
+  const zs = new Float32Array(width * height);
+  let low = Infinity, high = -Infinity;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const z = heightAt(t, t.offsetX + (x + 0.5) * 32, t.offsetY + (y + 0.5) * 32);
+      zs[y * width + x] = z;
+      low = Math.min(low, z);
+      high = Math.max(high, z);
+    }
+  }
+  const rgba = new Uint8Array(width * height * 4), span = Math.max(1, high - low);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x, band = Math.floor(zs[i] / step), k = (zs[i] - low) / span;
+      const line = (x > 0 && Math.floor(zs[i - 1] / step) !== band) || (y > 0 && Math.floor(zs[i - width] / step) !== band);
+      rgba.set(line ? [0, 0, 0, 220] : [Math.round(255 * k), 90, Math.round(255 * (1 - k)), 110], i * 4);
+    }
+  }
+  return { rgba, width, height };
+}
+
 /** What the ground in an area is like. */
 export function terrainSummary(t: Terrain, p: Pathing, area: Area) {
   const counts = new Map<string, number>();
@@ -116,12 +260,15 @@ export function terrainSummary(t: Terrain, p: Pathing, area: Area) {
   };
 }
 
-/** The camera that shows an area: `top` looks almost straight down. North stays up. */
-export function viewOfArea(area: Area, ground: number, aspect: number, fov: number, top: boolean) {
+const PITCH = { top: 1.5, angled: 0.95, low: 0.42 };
+export type ViewAngle = keyof typeof PITCH;
+
+/** The camera that shows an area, north up: top is almost straight down, low shows the skyline. */
+export function viewOfArea(area: Area, ground: number, aspect: number, fov: number, angle: ViewAngle) {
   const width = area.right - area.left, height = area.top - area.bottom;
   const fit = Math.max(height, width / aspect) * 1.2;
   return {
     target: [(area.left + area.right) / 2, (area.bottom + area.top) / 2, ground] as [number, number, number],
-    yaw: -Math.PI / 2, pitch: top ? 1.5 : 0.95, distance: Math.max(400, fit / 2 / Math.tan(fov / 2)),
+    yaw: -Math.PI / 2, pitch: PITCH[angle], distance: Math.max(400, fit / 2 / Math.tan(fov / 2)),
   };
 }
