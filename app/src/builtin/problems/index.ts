@@ -59,6 +59,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     problems: all,
   };
   ctx.subscriptions.push(w3.services.provide(PROBLEMS_SERVICE, service));
+  ctx.subscriptions.push(w3.mcp.registerTool("list_problems", async () => {
+    if (!w3.workspace.project()) throw new Error("No project is open in W3Proj Studio.");
+    return (await service.run()).map(({ severity, message, location }) => ({ severity, message, location }));
+  }));
   for (const c of [...builtinChecks(w3), ...mapChecks(w3)]) ctx.subscriptions.push(service.registerCheck(c));
 
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };

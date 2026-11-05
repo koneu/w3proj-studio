@@ -3938,6 +3938,7 @@ dependencies = [
  "casc",
  "clap",
  "mpq",
+ "serde_json",
  "w3proj",
 ]
 
@@ -3952,6 +3953,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tokio",
  "w3proj",
  "windows-sys 0.61.2",
 ]

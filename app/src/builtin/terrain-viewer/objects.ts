@@ -182,6 +182,18 @@ export class ObjectLoader {
     this.effectSources.clear();
   }
 
+  /** Resolves when everything asked for so far has loaded. Models draw before their textures
+   *  are there (white), and a model can ask for more while loading. */
+  async settled() {
+    let seen = -1;
+    while (seen !== this.textures.size + this.models.size) {
+      seen = this.textures.size + this.models.size;
+      await Promise.allSettled([...this.textures.values(), ...this.models.values()]);
+    }
+    // Whoever waits for a texture takes it in a callback of its own.
+    await new Promise((done) => setTimeout(done));
+  }
+
   /** Model paths (lower case) that use a texture (as listed in `missing`). */
   modelsUsing(texture: string): Set<string> {
     return this.textureUsers.get(texture.toLowerCase()) ?? new Set();

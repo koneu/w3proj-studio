@@ -9,6 +9,8 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+mod mcp;
+
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -957,6 +959,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Watches::default())
         .manage(Game::default())
+        .manage(mcp::Mcp::default())
         .invoke_handler(tauri::generate_handler![
             project_open,
             project_files,
@@ -997,6 +1000,9 @@ pub fn run() {
             game_list,
             game_resolve,
             game_read,
+            mcp::mcp_serve,
+            mcp::mcp_respond,
+            mcp::mcp_bridge_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running W3Proj Studio");
@@ -1013,8 +1019,10 @@ mod fs_tests {
         let root = dir.to_string_lossy().into_owned();
         (dir, root)
     }
-    fn rand_suffix() -> u128 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    /// Unique within this run: the tests run side by side, and a shared folder gets deleted under one.
+    fn rand_suffix() -> usize {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     #[test]

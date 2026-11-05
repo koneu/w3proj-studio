@@ -231,6 +231,27 @@ the same parsers, writers and checks from `await w3.lib()` (`app/src/extensions/
 `const { terrain, version } = await w3.lib();` Check `version`: it goes up when something there
 changes in a way that breaks extensions.
 
+**MCP tools.** AI clients use the editor through one server, and any extension can add tools to
+it. Declare the tool in `extension.json`, which lists it without loading the extension, and
+answer it in `activate`:
+
+```json
+"contributes": { "mcpTools": [
+  { "name": "my_tool", "description": "What the AI reads to decide when to use it.", "readOnly": true,
+    "inputSchema": { "type": "object", "properties": { "x": { "type": "integer" } } } }
+] }
+```
+
+```js
+ctx.subscriptions.push(w3.mcp.registerTool("my_tool", async ({ x }) => `got ${x}`));
+```
+
+A handler returns text, `{ type: "image", data: base64, mimeType }`, or anything else, which goes
+out as JSON. Throw to report a failure: it ends that one call and nothing else. The extension
+activates on the first call. If it's disabled, its tools aren't listed. Tools that aren't
+`readOnly` need the setting `mcp.writeTools`, and tools of project extensions need
+`mcp.projectTools`, because a map from someone else could bring any tool.
+
 **Replacing built-ins.** Every built-in can be turned off: `"extensions.disabled": ["w3.objectEditor"]`
 in settings (or the Disable button in the Extensions view; applies after a reload). To make a
 different editor the default for some files without disabling anything, map a glob to an editor

@@ -60,6 +60,24 @@ export interface ConfigurationContribution {
   properties: Record<string, ConfigurationProperty>;
 }
 
+/** An MCP tool (see extensions/mcp.ts). Declared here, it's listed without loading the extension. */
+export interface McpToolContribution {
+  /** Letters, digits, "_" and "-", at most 64: clients don't accept more. Like "terrain_screenshot". */
+  name: string;
+  /** What the AI reads to decide when to use it. */
+  description: string;
+  /** JSON Schema of the arguments; none by default. */
+  inputSchema?: Record<string, unknown>;
+  /** Changes nothing. Other tools are only offered with the setting "mcp.writeTools". */
+  readOnly?: boolean;
+}
+
+export type McpContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
+/** Throw to report a failure. Returns text, MCP content (`{ type: "image", data: base64, mimeType }`)
+ *  or anything else, which goes out as JSON. */
+export type McpToolHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
+
 /** A service other extensions can use through `w3.services.get(id)`. */
 export interface ServiceContribution {
   id: string;
@@ -72,7 +90,7 @@ export interface ExtensionManifest {
   version: string;
   description?: string;
   main?: string;
-  /** "*" | "onStartup" | "onCommand:<id>" | "onView:<id>" | "onEditor:<id>" | "onService:<id>" */
+  /** "*" | "onStartup" | "onCommand:<id>" | "onView:<id>" | "onEditor:<id>" | "onService:<id>" | "onMcpTool:<name>" */
   activationEvents?: string[];
   /** Extensions that must be active first. If one is missing or disabled,
    *  this extension fails to activate with a message saying which. */
@@ -84,6 +102,7 @@ export interface ExtensionManifest {
     editors?: EditorContribution[];
     services?: ServiceContribution[];
     configuration?: ConfigurationContribution;
+    mcpTools?: McpToolContribution[];
   };
 }
 
@@ -305,6 +324,12 @@ export interface W3Api {
   lib(): Promise<typeof import("./lib")>;
   extensions: {
     all(): { manifest: ExtensionManifest; source: string; active: boolean; disabled: boolean; error?: string }[];
+  };
+  /** Tools for the one MCP server. Declare a tool in `contributes.mcpTools`, answer it here. */
+  mcp: {
+    registerTool(name: string, handler: McpToolHandler): Disposable;
+    /** One JSON-RPC request; used by the MCP Server extension. */
+    handle(message: string): Promise<string>;
   };
   /** Shared functionality between extensions. A provider declares the id in
    *  `contributes.services` and registers it in activate(); users list the

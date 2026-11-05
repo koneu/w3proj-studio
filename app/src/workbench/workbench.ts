@@ -1,6 +1,7 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
+import { McpTools } from "../extensions/mcp";
 import { invoke, listen, NotUtf8Error } from "./backend";
 import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
@@ -25,6 +26,16 @@ export class Workbench {
   readonly workspace = new WorkspaceService(this.settings);
   readonly output = new OutputPanel();
   readonly game = new GameService(this.settings);
+  readonly mcp = new McpTools({
+    activate: (event) => this.host.fire(event),
+    allowed: ({ source, readOnly }) => (readOnly || this.settings.get<boolean>("mcp.writeTools", false) === true)
+      && (source !== "project" || this.settings.get<boolean>("mcp.projectTools", false) === true),
+    whyUnavailable: (id) => {
+      const e = this.host.extensions.find((x) => x.manifest.id === id);
+      return e?.error ? `${e.manifest.name} ${e.error}.` : undefined;
+    },
+    log: (line) => this.log.append(line),
+  });
   readonly editors: EditorService;
   readonly statusBar: StatusBar;
   readonly notifications: Notifications;
@@ -193,6 +204,7 @@ export class Workbench {
     for (const v of c.views ?? []) this.views.contributeView(v);
     for (const e of c.editors ?? []) this.editors.contribute(rec.manifest.id, e);
     if (c.configuration) this.settings.contribute(rec.manifest.id, c.configuration.title ?? rec.manifest.name, c.configuration.properties);
+    if (c.mcpTools) this.mcp.declare(rec.manifest.id, rec.source, c.mcpTools);
   }
 
   private createApi(): W3Api {
@@ -267,6 +279,7 @@ export class Workbench {
       },
       backend: { invoke, listen },
       lib: () => import("../extensions/lib"),
+      mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), handle: (message) => wb.mcp.handle(message) },
       extensions: {
         all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, disabled: e.disabled, error: e.error })),
       },

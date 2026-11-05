@@ -11,6 +11,9 @@
       { "id": "w3.problems.run", "title": "Check Project for Problems", "category": "Project" },
       { "id": "w3.problems.show", "title": "Show Problems", "category": "Project" },
       { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
+    ],
+    "mcpTools": [
+      { "name": "list_problems", "description": "Checks the open project and lists what's wrong: script errors, missing files, broken references.", "readOnly": true }
     ]
   }
 }

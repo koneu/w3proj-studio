@@ -85,6 +85,7 @@ export class ExtensionHost {
     if (kind === "onView") return !!c.views?.some((x) => x.id === id);
     if (kind === "onEditor") return !!c.editors?.some((x) => x.id === id);
     if (kind === "onService") return !!c.services?.some((x) => x.id === id);
+    if (kind === "onMcpTool") return !!c.mcpTools?.some((x) => x.name === id);
     return false;
   }
 

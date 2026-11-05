@@ -1,6 +1,8 @@
 //! `w3proj` — unpack Warcraft III maps into git-friendly projects and pack
 //! them back.
 
+mod mcp;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -185,6 +187,8 @@ enum Cmd {
     },
     /// List the files in a map.
     Ls { map: PathBuf },
+    /// MCP server over stdin and stdout: AI clients start this to use the running W3Proj Studio.
+    Mcp,
     /// Print one file from a map to stdout.
     Cat { map: PathBuf, file: String },
     /// List the format definitions in use (built-in, W3PROJ_FORMATS, project).
@@ -373,6 +377,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 return Ok(ExitCode::FAILURE);
             }
         }
+        Cmd::Mcp => mcp::run()?,
         Cmd::Ls { map } => {
             let archive = mpq::Archive::open(&map)?;
             let ex = w3proj::project::extract(&archive, &Registry::empty());

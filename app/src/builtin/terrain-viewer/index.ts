@@ -125,7 +125,15 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
+  /** The open terrain editor's picture as PNG data, longest side at most `size`. */
+  let screenshot: ((size: number) => Promise<string>) | null = null;
   ctx.subscriptions.push(
+    w3.mcp.registerTool("terrain_screenshot", async ({ maxSize }) => {
+      await w3.commands.execute("w3.terrain.open");
+      if (!screenshot) throw new Error("The terrain editor couldn't start (see its tab).");
+      const size = typeof maxSize === "number" && maxSize > 0 ? maxSize : 1280;
+      return { type: "image", data: await screenshot(size), mimeType: "image/png" };
+    }),
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
     w3.commands.register("w3.terrain.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
@@ -638,8 +646,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await rebuildObjects();
           }, 300);
         });
+        let objectsPlaced: Promise<void> = Promise.resolve();
         if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-          Promise.all([
+          objectsPlaced = Promise.all([
             loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null),
             loadPlacedFile(w3, "war3mapUnits.doo", "units").catch(() => null),
             loadSkins(w3),
@@ -1653,6 +1662,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         raf = requestAnimationFrame(tick);
 
+        const takeScreenshot = async (size: number) => {
+          await objectsPlaced.catch(() => {});
+          await loader.settled();
+          if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
+          // WebGL keeps a picture only until control returns to the browser: drawn and copied in one go.
+          renderer.render();
+          const scale = Math.min(1, size / Math.max(canvas.width, canvas.height));
+          const copy = h("canvas", { width: Math.round(canvas.width * scale), height: Math.round(canvas.height * scale) });
+          copy.getContext("2d")!.drawImage(canvas, 0, 0, copy.width, copy.height);
+          return copy.toDataURL("image/png").split(",")[1];
+        };
+        screenshot = takeScreenshot;
+
         const editorApi = {
           save: editable ? async () => {
             const w3e = writeW3e(terrain);
@@ -1725,6 +1747,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.look === look) toolGroups.look = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
+            if (screenshot === takeScreenshot) screenshot = null;
             stopLightWatch.dispose();
             stopObjectWatch.dispose();
             clearTimeout(objectReload);

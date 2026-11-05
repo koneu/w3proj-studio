@@ -1,0 +1,42 @@
+{
+  "id": "w3.mcpServer",
+  "name": "MCP Server",
+  "version": "0.1.0",
+  "description": "Lets AI tools use the open project through the Model Context Protocol. One server; every extension brings its own tools.",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "commands": [
+      { "id": "w3.mcp.toggle", "title": "Turn Server On or Off", "category": "MCP" },
+      { "id": "w3.mcp.copySetup", "title": "Copy Client Setup", "category": "MCP" }
+    ],
+    "configuration": {
+      "title": "MCP Server",
+      "properties": {
+        "mcp.enabled": { "type": "boolean", "default": false, "description": "Serve the MCP tools to AI clients on this computer. Clients start `w3proj mcp`, which connects to this app." },
+        "mcp.projectTools": { "type": "boolean", "default": false, "description": "Also offer tools from the open project's own extensions (.w3proj/extensions). A map you got from someone else could bring any tool." },
+        "mcp.writeTools": { "type": "boolean", "default": false, "description": "Also offer tools that change things. All built-in tools only read so far." }
+      }
+    },
+    "mcpTools": [
+      { "name": "project_info", "description": "The open map project: name, folder, number of files, the file open in the editor.", "readOnly": true },
+      {
+        "name": "list_files",
+        "description": "Files of the open project, with sizes.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "properties": {
+          "filter": { "type": "string", "description": "Only paths containing this text (not case sensitive)." },
+          "limit": { "type": "integer", "description": "At most this many files (default 500)." }
+        } }
+      },
+      {
+        "name": "read_file",
+        "description": "A text file of the open project, such as map/war3map.j or map/war3map.w3i.json.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "required": ["path"], "properties": {
+          "path": { "type": "string", "description": "Project-relative path, as list_files gives it." },
+          "offset": { "type": "integer", "description": "Start at this character (for files too long for one read)." }
+        } }
+      }
+    ]
+  }
+}

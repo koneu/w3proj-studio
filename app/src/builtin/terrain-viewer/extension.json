@@ -5,6 +5,16 @@
   "description": "3D view of a map's terrain (war3map.w3e): ground textures, heights, water, and where doodads and units are placed.",
   "extensionDependencies": ["w3.objectEditor"],
   "contributes": {
+    "mcpTools": [
+      {
+        "name": "terrain_screenshot",
+        "description": "A picture of the open map's terrain editor as it looks now: the 3D view with its doodads and units. Opens the terrain first if needed.",
+        "readOnly": true,
+        "inputSchema": { "type": "object", "properties": {
+          "maxSize": { "type": "integer", "description": "Longest side in pixels (default 1280)." }
+        } }
+      }
+    ],
     "viewContainers": [{ "id": "terrain", "title": "Terrain", "icon": "⛰", "order": 3 }],
     "views": [{ "id": "w3.terrain.overview", "title": "Terrain", "container": "terrain" }],
     "editors": [{ "id": "w3.terrainViewer", "title": "Terrain Viewer", "patterns": ["*.w3e", "war3map.w3e.txt"] }],

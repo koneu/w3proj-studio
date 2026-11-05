@@ -20,6 +20,8 @@ serde_json.workspace = true
 mpq.workspace = true
 w3proj.workspace = true
 casc.workspace = true
+# The MCP server's pipe; the runtime itself comes with Tauri.
+tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 # Job objects: tools run by tool_run end together with anything they started.

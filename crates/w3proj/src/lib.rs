@@ -14,6 +14,12 @@ pub mod w3e;
 pub mod wct;
 pub mod wtg;
 
+/// The pipe between `w3proj mcp` and the running app. Per user: two people's apps don't meet.
+pub fn mcp_pipe_name() -> String {
+    let user: String = std::env::var("USERNAME").unwrap_or_default().chars().filter(char::is_ascii_alphanumeric).collect();
+    format!(r"\\.\pipe\w3proj-studio-{user}")
+}
+
 pub use codec::{Codec, Registry};
 pub use project::{
     create, pack, unpack, verify, Manifest, PackReport, UnpackOptions, UnpackReport, VerifyReport,
