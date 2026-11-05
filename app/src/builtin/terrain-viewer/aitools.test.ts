@@ -212,7 +212,9 @@ test("the pathing picture tells free, cliffs, water, what stands there and destr
   assert.deepEqual(px(1), [230, 30, 30, 170]);
   assert.deepEqual(px(2), [60, 150, 255, 90]);
   assert.deepEqual(px(3), [255, 150, 0, 170]);
-  assert.deepEqual(px(4), [170, 70, 230, 170], "a tree is a blocker too, and shows as what it is");
+  assert.deepEqual(px(4), [170, 70, 230, 170], "a tree shows as what it is");
+  const doodad = pathingColors(new Uint8Array([cliff]), new Uint8Array([1]), new Uint8Array([0]));
+  assert.deepEqual([...doodad.slice(0, 4)], [255, 150, 0, 170], "a doodad is in the pathing map too, and still shows as standing there");
 });
 
 test("a flattened path levels the ground across it towards its middle", () => {

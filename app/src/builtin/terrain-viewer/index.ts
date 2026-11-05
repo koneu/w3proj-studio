@@ -333,8 +333,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       let colors = null;
       if (args.overlay === "heights") colors = heightColors(editor.handle.terrain);
       if (args.overlay === "pathing") {
-        const [pathing, blockers, destructables] = await Promise.all([editor.handle.pathing(), editor.handle.objects.blockers(), editor.handle.objects.destructables()]);
-        colors = { rgba: pathingColors(pathing.cells, blockers, destructables), width: pathing.width, height: pathing.height };
+        const [pathing, standing, destructables] = await Promise.all([editor.handle.pathing(), editor.handle.objects.standing(), editor.handle.objects.destructables()]);
+        colors = { rgba: pathingColors(pathing.cells, standing, destructables), width: pathing.width, height: pathing.height };
       }
       const data = await editor.screenshot(size, area, angle, colors, hide);
       const image = { type: "image", data, mimeType: "image/png" };
@@ -520,11 +520,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
       const room = await handle.objects.occupancy();
       const fp = await room.footprint(type.kind, id);
-      const step = typeof spacing === "number" && spacing > 0 ? spacing : (await handle.objects.modelLength(id)) ?? (fp ? Math.max(fp.width, fp.height) * 32 : 0);
+      const shape = await handle.objects.modelShape(id);
+      const step = typeof spacing === "number" && spacing > 0 ? spacing : shape?.length ?? (fp ? Math.max(fp.width, fp.height) * 32 : 0);
       if (!step) throw new Error(`${id} has no length to go by: give spacing.`);
-      const objects = lineSpots(start, end, step, typeof facingOffset === "number" ? facingOffset : 90).map((s) => ({ id, x: s.x, y: s.y, facing: s.facing }));
-      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun, ownPieces: true });
-      return { spacing: step, ...(report as object) };
+      // Turned by the model's own long side.
+      const turn = typeof facingOffset === "number" ? facingOffset : shape && !shape.alongX ? 90 : 0;
+      const objects = lineSpots(start, end, step, turn).map((s) => ({ id, x: s.x, y: s.y, facing: s.facing }));
+      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun, ownPieces: step });
+      return { spacing: step, facingOffset: turn, ...(report as object) };
     }),
     w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
@@ -555,7 +558,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const facing = type.fixedRot ?? o.facing ?? (key === "doodads" ? random() * 360 : 270);
           const angle = (facing * Math.PI) / 180;
           let spot: [number, number] | null = [x, y];
-          if (room && !(await room.fits(kindOf, id, x, y, angle))) {
+          // At a corner a line runs into the end of the last one, of the same fence: that's meant.
+          const joins = typeof ownPieces === "number" && handle.objects.list().some((p) => p.id === id && Math.hypot(p.position[0] - x, p.position[1] - y) <= ownPieces * 0.75);
+          if (room && !joins && !(await room.fits(kindOf, id, x, y, angle))) {
             spot = null;
             if (nearest === true) {
               for (const s of spotsAround(x, y)) if (await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
@@ -569,7 +574,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (place) {
             place(o, i, spot[0], spot[1], facing);
             // A line's pieces touch each other on purpose.
-            if (ownPieces !== true) await room?.mark(kindOf, id, spot[0], spot[1], angle);
+            if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
           }
           placed++;
         }
@@ -797,7 +802,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const changed = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
-          occupancyPromise = walkPromise = destructablePromise = null;
+          occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
@@ -808,7 +813,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pushEdit = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
-          occupancyPromise = walkPromise = destructablePromise = null;
+          occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           history.length = at;
           history.push(e);
           at = history.length;
@@ -1373,6 +1378,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** What stops a walking unit; dropped with the above. */
         let walkPromise: Promise<Uint8Array> | null = null;
         let destructablePromise: Promise<Uint8Array> | null = null;
+        let standingPromise: Promise<Uint8Array> | null = null;
         let pathingData: Promise<PathingData> | null = null;
         const occupancy = () => {
           occupancyPromise ??= (async () => {
@@ -1877,13 +1883,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
               return (await Occupancy.build(terrain, data, placed)).blocked;
             })()),
-            modelLength: async (id) => {
+            standing: () => (standingPromise ??= (async () => {
+              pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
+              const data = await pathingData;
+              const isDestructable = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind === "w3b";
+              const placed = [
+                ...(dooFile?.list ?? []).filter((e) => !isDestructable(e.id)).map((entry) => ({ entry, kind: "w3d" })),
+                ...(unitsFile?.list ?? []).filter((e) => data.unitShape(e.id)?.path).map((entry) => ({ entry, kind: "w3u" })),
+              ];
+              return Occupancy.mask(terrain, data, placed);
+            })()),
+            modelShape: async (id) => {
               const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
               if (!skin) return null;
               const gpu = await loader.modelFor(skin, 0).catch(() => null);
               if (!gpu) return null;
               const { min, max } = bounds(gpu.model);
-              return Math.max(max[0] - min[0], max[1] - min[1]) * skin.modelScale;
+              const x = max[0] - min[0], y = max[1] - min[1];
+              return { length: Math.max(x, y) * skin.modelScale, alongX: x >= y };
             },
             destructables: () => (destructablePromise ??= (async () => {
               pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
@@ -2316,7 +2333,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {
           const reopenInstead = () => { opened = null; return false; };
-          occupancyPromise = walkPromise = destructablePromise = null;
+          occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           minimapStale = true;
           // The editor's undo steps were for the map as it was.
           history.length = 0;

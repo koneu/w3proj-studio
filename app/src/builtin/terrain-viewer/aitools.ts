@@ -348,12 +348,12 @@ export function rowSpots(area: Area, spacingX: number, spacingY: number, jitter:
 /** A colour for every pathing cell (rows from the south), for a picture of what stops a unit:
  *  red for cliffs and the like, orange for what stands there for good, purple for destructables,
  *  which can be destroyed, blue for water, clear for free. */
-export function pathingColors(cells: Uint8Array, blockers: Uint8Array, destructables: Uint8Array) {
+export function pathingColors(cells: Uint8Array, standing: Uint8Array, destructables: Uint8Array) {
   const rgba = new Uint8Array(cells.length * 4);
   for (let i = 0; i < cells.length; i++) {
     const c = cells[i];
     if (destructables[i]) rgba.set([170, 70, 230, 170], i * 4);
-    else if (blockers[i] && !(c & NO_WALK)) rgba.set([255, 150, 0, 170], i * 4);
+    else if (standing[i]) rgba.set([255, 150, 0, 170], i * 4);
     else if (c & NO_WALK) rgba.set(c & NO_WATER ? [230, 30, 30, 170] : [30, 90, 240, 170], i * 4);
     else if (!(c & NO_WATER)) rgba.set([60, 150, 255, 90], i * 4);
   }

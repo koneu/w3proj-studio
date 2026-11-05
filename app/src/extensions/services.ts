@@ -210,8 +210,12 @@ export interface TerrainObjects {
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a
    *  walking unit. Unlike occupancy(), units and items don't count. */
   blockers(): Promise<Uint8Array>;
-  /** How long a type's model is, in world units; null without one. */
-  modelLength(id: string): Promise<number | null>;
+  /** How long a type's model is, in world units, and whether that's along x at facing 0, so which
+   *  way it has to turn to run along a line. Null without a model. */
+  modelShape(id: string): Promise<{ length: number; alongX: boolean } | null>;
+  /** Per pathing cell (rows from the south), 1 where doodads or buildings stand: what's there
+   *  apart from the ground, and from destructables, which can go. */
+  standing(): Promise<Uint8Array>;
   /** Per pathing cell (rows from the south), 1 where a destructable stands. The game's pathing file
    *  leaves these out: it blocks them at runtime, and frees the ground when they're destroyed. */
   destructables(): Promise<Uint8Array>;
