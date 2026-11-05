@@ -82,6 +82,8 @@ const INTERNAL_FLAGS: [number, string][] = [
   [0x0400, "Map properties dialog opened at least once"],
   [0x4000, "Requires The Frozen Throne data"],
 ];
+/** w3i "supported graphics modes" bits (the Problems view checks models per mode). */
+const GRAPHICS_MODES: [number, string][] = [[1, "Classic"], [2, "Reforged (HD)"], [4, "Reforged (DE)"]];
 const CONTROLLERS = [[1, "User"], [2, "Computer"], [3, "Neutral"], [4, "Rescuable"]] as const;
 const RACES = [[0, "Selectable"], [1, "Human"], [2, "Orc"], [3, "Undead"], [4, "Night Elf"]] as const;
 const FORCE_FLAGS: [number, string][] = [
@@ -337,7 +339,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 info.scriptType !== undefined ? row("Script language", select([[0, "JASS"], [1, "Lua"]], () => info.scriptType!, (n) => { info.scriptType = n; }), "Changing this needs the script itself to be converted.") : null,
                 row("Game data set", num(() => info.gameDataSet, (n) => { info.gameDataSet = n; }, { int: true }), "0 = default"),
                 info.gameDataVersion !== undefined ? row("Game data version", num(() => info.gameDataVersion!, (n) => { info.gameDataVersion = n; }, { int: true })) : null,
-                info.supportedModes !== undefined ? row("Supported graphics modes", num(() => info.supportedModes!, (n) => { info.supportedModes = n; }, { int: true }), "bit flags (SD / HD …)") : null,
+                // Not row(): that wraps its content in one label, and these are labelled checkboxes.
+                info.supportedModes !== undefined ? h("div.form-row", {}, h("span.form-label", {}, "Supported graphics modes"), h("div.form-control", {},
+                  ...GRAPHICS_MODES.map(([m, label]) => bit(() => info.supportedModes!, (n) => { info.supportedModes = n; }, m, label)),
+                  (info.supportedModes & ~7) ? h("small.muted", {}, `Other bits kept as-is: 0x${(info.supportedModes & ~7).toString(16)}`) : null,
+                  h("small.muted", {}, "Problems checks the map's models for each mode ticked here."))) : null,
               ),
               info.cameraZoom ? section_("Camera zoom",
                 row("Default", num(() => info.cameraZoom!.default, (n) => { info.cameraZoom!.default = n; }, { int: true })),

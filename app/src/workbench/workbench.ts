@@ -226,6 +226,7 @@ export class Workbench {
         quickPick: (items, opts) => wb.quickInput.pick(items, opts),
         inputBox: (opts) => wb.quickInput.ask(opts),
         pickFile: async (opts) => (await showCursor(), (await openDialog({ title: opts?.title, filters: opts?.filters, multiple: false, directory: false })) as string | null),
+        pickFiles: async (opts) => (await showCursor(), ((await openDialog({ title: opts?.title, filters: opts?.filters, multiple: true, directory: false })) ?? []) as string[]),
         pickFolder: async (opts) => (await showCursor(), (await openDialog({ title: opts?.title, directory: true, multiple: false })) as string | null),
         pickSaveFile: async (opts) => (await showCursor(), (await saveDialog({ title: opts?.title, defaultPath: opts?.defaultPath, filters: opts?.filters })) ?? null),
         withProgress: (title, task) => wb.progress.run(title, task),
@@ -249,6 +250,9 @@ export class Workbench {
         delete: (p) => wb.workspace.delete(p),
         rename: (a, b) => wb.workspace.rename(a, b),
         copy: (a, b) => wb.workspace.copy(a, b),
+        copyMany: (pairs) => wb.workspace.copyMany(pairs),
+        deleteMany: (paths) => wb.workspace.deleteMany(paths),
+        listFolder: (path) => wb.workspace.listFolder(path),
       },
       settings: wb.settings,
       game: {

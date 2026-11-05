@@ -230,6 +230,8 @@ export interface W3Api {
     quickPick<T>(items: QuickPickItem<T>[], opts?: { placeholder?: string }): Promise<QuickPickItem<T> | undefined>;
     inputBox(opts?: { prompt?: string; value?: string; placeholder?: string }): Promise<string | undefined>;
     pickFile(opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
+    /** Several files at once; empty when cancelled. */
+    pickFiles(opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string[]>;
     pickFolder(opts?: { title?: string }): Promise<string | null>;
     pickSaveFile(opts?: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
     withProgress<T>(title: string, task: () => Promise<T>): Promise<T>;
@@ -260,6 +262,13 @@ export interface W3Api {
     delete(projectPath: string): Promise<void>;
     /** Copies a file (project or absolute paths) without loading it: for large files. */
     copy(from: string, to: string): Promise<void>;
+    /** Copies [from, to] pairs in order, stopping at the first failure (`copied` of them were),
+     *  with one refresh of the file list at the end. */
+    copyMany(pairs: [from: string, to: string][]): Promise<{ copied: number; error: string | null }>;
+    /** Deletes project files in order, stopping at the first failure, with one refresh. */
+    deleteMany(projectPaths: string[]): Promise<{ deleted: number; error: string | null }>;
+    /** Every file below a folder (any folder), relative to it, `/`-separated, sorted. */
+    listFolder(path: string): Promise<string[]>;
     /** Moves a project file to another path in the project (fails if the target exists). */
     rename(from: string, to: string): Promise<void>;
     /** A project file was written through the workspace (path as written, forward slashes). */

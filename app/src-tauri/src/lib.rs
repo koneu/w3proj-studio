@@ -436,6 +436,34 @@ async fn fs_copy(from: String, to: String) -> CmdResult<()> {
     .map_err(err)?
 }
 
+/// Every file below a folder (any folder, for importing), as sorted paths relative to it with
+/// `/` separators. Links aren't followed, so a link back up can't make this endless.
+#[tauri::command]
+async fn fs_list_tree(path: String) -> CmdResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(move || list_tree(Path::new(&path)))
+        .await
+        .map_err(err)?
+}
+
+fn list_tree(root: &Path) -> CmdResult<Vec<String>> {
+    let mut files = Vec::new();
+    let mut pending = vec![(root.to_path_buf(), String::new())];
+    while let Some((dir, prefix)) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+            let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+            let name = entry.file_name().into_string().map_err(|n| format!("{}: unusable file name", dir.join(n).display()))?;
+            let kind = entry.file_type().map_err(|e| format!("{}: {e}", entry.path().display()))?;
+            if kind.is_dir() {
+                pending.push((entry.path(), format!("{prefix}{name}/")));
+            } else if kind.is_file() {
+                files.push(format!("{prefix}{name}"));
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
 #[tauri::command]
 fn fs_exists(path: String) -> bool {
     Path::new(&path).exists()
@@ -903,6 +931,7 @@ pub fn run() {
             fs_delete,
             fs_rename,
             fs_copy,
+            fs_list_tree,
             fs_read_bytes,
             fs_exists,
             reveal_in_explorer,
@@ -968,6 +997,19 @@ mod fs_tests {
         assert!(fs_delete(root.clone(), victim.to_string_lossy().into_owned()).is_err());
         assert!(victim.exists());
         std::fs::remove_file(victim).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn list_tree_gives_relative_sorted_files() {
+        let (dir, _) = project();
+        std::fs::create_dir_all(dir.join("map/sub/deep")).unwrap();
+        std::fs::create_dir_all(dir.join("map/empty")).unwrap();
+        std::fs::write(dir.join("map/sub/deep/b.txt"), b"b").unwrap();
+        std::fs::write(dir.join("map/top.txt"), b"t").unwrap();
+        let files = list_tree(&dir.join("map")).unwrap();
+        assert_eq!(files, ["sub/a.txt", "sub/deep/b.txt", "top.txt"]);
+        assert!(list_tree(&dir.join("missing")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -113,6 +113,36 @@ export class WorkspaceService {
     if (this.info) await this.refresh();
     this.onDidSave.fire(to.replace(/\\/g, "/"));
   }
+  /** Copies pairs in order, stopping at the first failure; one refresh at the end. */
+  async copyMany(pairs: [string, string][]) {
+    let copied = 0, error: string | null = null;
+    try {
+      for (const [from, to] of pairs) {
+        await invoke("fs_copy", { from: this.resolve(from), to: this.resolve(to) });
+        copied++;
+      }
+    } catch (e) { error = String(e); }
+    if (this.info) await this.refresh();
+    for (const [, to] of pairs.slice(0, copied)) this.onDidSave.fire(to.replace(/\\/g, "/"));
+    return { copied, error };
+  }
+  /** Deletes project files in order, stopping at the first failure; one refresh at the end. */
+  async deleteMany(paths: string[]) {
+    if (!this.info) throw new Error("no project is open");
+    let deleted = 0, error: string | null = null;
+    try {
+      for (const p of paths) {
+        await invoke("fs_delete", { root: this.info.root, path: this.resolve(p) });
+        deleted++;
+      }
+    } catch (e) { error = String(e); }
+    await this.refresh();
+    return { deleted, error };
+  }
+  /** Every file below a folder, relative to it (`/`-separated, sorted). */
+  listFolder(path: string) {
+    return invoke<string[]>("fs_list_tree", { path: this.resolve(path) });
+  }
   async writeBytes(p: string, bytes: Uint8Array) {
     await writeBytes(this.resolve(p), bytes);
     this.ownWrites.add(this.relative(p));

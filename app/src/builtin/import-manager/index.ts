@@ -5,10 +5,11 @@
 // written right after (so the two never disagree).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { h } from "../../workbench/dom";
+import { formatBytes, h } from "../../workbench/dom";
 import { findPathRefs, updatePathRefs } from "./references";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, clickSelection, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
+import { decodeImage } from "../../lib/image/index.ts";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
 const lists = (campaign: boolean) => {
@@ -17,8 +18,18 @@ const lists = (campaign: boolean) => {
 };
 /** Files above this size aren't opened in a viewer (they're read whole into the window). */
 const MAX_OPEN = 256 * 1024 * 1024;
+/** Images above this size aren't previewed (they'd be read and decoded on every selection). */
+const MAX_PREVIEW = 32 * 1024 * 1024;
+/** Longest side the preview needs: the first mip level at least this large is drawn. */
+const PREVIEW_SIDE = 320;
+/** A folder with more files than this is confirmed first (it's easily the wrong folder). */
+const CONFIRM_FOLDER = 100;
 
 interface ImportsDoc { format?: string; version: number; files: ImportEntry[] }
+/** A file to import: absolute source, and for folder imports its path inside the folder. */
+interface ImportSource { src: string; relative?: string }
+const entryKey = (e: ImportEntry) => e.path.toLowerCase();
+const plural = (n: number, what: string) => `${n.toLocaleString()} ${what}${n === 1 ? "" : "s"}`;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
@@ -55,12 +66,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 }
 
 class ImportView {
-  private selected: string | null = null;
+  /** Selected entries (entryKey); render() drops what the filter hides, so that actions only
+   *  ever touch rows that can be seen. */
+  private selected = new Set<string>();
+  private anchor: string | null = null;
+  /** The rows as shown (selection ranges, Ctrl+A). */
+  private shown: ImportEntry[] = [];
   private query = "";
+  /** The image last previewed (the list redraws often; decoding it each time would be slow). */
+  private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
 
   constructor(private w3: W3Api, private el: HTMLElement, private list: ImportsDoc, private write: () => Promise<void>, private editable: boolean,
     private folder: string) {
     el.classList.add("imp-editor");
+    el.tabIndex = -1;
+    el.addEventListener("keydown", (e) => {
+      if ((e.target as HTMLElement).closest("input, textarea, select")) return;
+      if (e.key.toLowerCase() === "a" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        this.selected = new Set(this.shown.map(entryKey));
+        this.render();
+      } else if (e.key === "Delete" && this.editable && this.selected.size) {
+        this.remove(this.shown.filter((s) => this.selected.has(entryKey(s))));
+      }
+    });
     this.render();
   }
 
@@ -87,31 +116,75 @@ class ImportView {
   }
 
   // ---- actions ----------------------------------------------------------------------
-  private importFile() {
+  private importFiles() {
     void this.run("Import", async () => {
-      const src = await this.w3.window.pickFile({ title: "Import a file into the map" });
-      if (!src) return;
-      // A map or campaign is more likely meant to become a project of its own.
-      if (/\.w3[mxn]$/i.test(src)) {
-        const c = await this.w3.window.showWarning(`${src.split(/[\\/]/).pop()} is a map or campaign. Import it into this map as a file anyway?`,
-          "Import as file", "Open as new project…", "Cancel");
-        if (c === "Open as new project…") { await this.w3.commands.execute("w3.project.importMap", src); return; }
-        if (c !== "Import as file") return;
-      }
-      const path = importPath(src, (p) => this.taken(p), this.folder);
-      // Copied in the backend: imports can be far larger than the webview can hold.
-      await this.w3.window.withProgress(`Importing ${path}`, () => this.w3.workspace.copy(src, projectPath(path)));
-      this.list.files.push({ flags: NEW_IMPORT_FLAGS, path });
-      await this.write();
-      await this.w3.workspace.refresh();
-      this.selected = path;
+      const picked = await this.w3.window.pickFiles({ title: "Import files into the map" });
+      if (picked.length) await this.importAll(picked.map((src) => ({ src })));
     });
+  }
+  /** A folder with what's below it: its structure stays, below the import folder. */
+  private importFolder() {
+    void this.run("Import", async () => {
+      const dir = await this.w3.window.pickFolder({ title: "Import a folder into the map" });
+      if (!dir) return;
+      const base = dir.replace(/[\\/]+$/, "");
+      const name = base.split(/[\\/]/).pop() ?? "";
+      const found = await this.w3.workspace.listFolder(dir);
+      const files = found.filter((f) => !isJunkFile(f));
+      if (!files.length) { void this.w3.window.showInfo(`${dir} has no files to import.`); return; }
+      if (files.length > CONFIRM_FOLDER) {
+        const c = await this.w3.window.showWarning(`Import ${plural(files.length, "file")} from ${dir}?`, "Import", "Cancel");
+        if (c !== "Import") return;
+      }
+      // A drive root has no name of its own.
+      await this.importAll(files.map((f) => ({ src: `${base}/${f}`, relative: name.endsWith(":") ? f : `${name}/${f}` })));
+    });
+  }
+  private async importAll(sources: ImportSource[]) {
+    // A map or campaign is more likely meant to become a project of its own.
+    const maps = sources.filter((s) => /\.w3[mxn]$/i.test(s.src));
+    if (sources.length === 1 && maps.length) {
+      const src = sources[0].src;
+      const c = await this.w3.window.showWarning(`${src.split(/[\\/]/).pop()} is a map or campaign. Import it into this map as a file anyway?`,
+        "Import as file", "Open as new project…", "Cancel");
+      if (c === "Open as new project…") { await this.w3.commands.execute("w3.project.importMap", src); return; }
+      if (c !== "Import as file") return;
+    } else if (maps.length) {
+      const c = await this.w3.window.showWarning(`${maps.length} of these ${maps.length === 1 ? "is a map or campaign" : "are maps or campaigns"}. Import as files too?`, "Import as files", "Skip them", "Cancel");
+      if (c === "Skip them") sources = sources.filter((s) => !maps.includes(s));
+      else if (c !== "Import as files") return;
+    }
+    if (!sources.length) return;
+    const existing = this.files();
+    const used = new Set(this.list.files.map(entryKey));
+    // Also against the batch itself, which isn't on disk or in the list yet.
+    const taken = (p: string) => used.has(p.toLowerCase()) || existing.has(projectPath(p).toLowerCase());
+    const paths = sources.map((s) => {
+      const path = s.relative ? importTreePath(s.relative, taken, this.folder) : importPath(s.src, taken, this.folder);
+      used.add(path.toLowerCase());
+      return path;
+    });
+    // Copied in the backend: imports can be far larger than the webview can hold.
+    const title = paths.length === 1 ? `Importing ${paths[0]}` : `Importing ${plural(paths.length, "file")}`;
+    const { copied, error } = await this.w3.window.withProgress(title, () =>
+      this.w3.workspace.copyMany(sources.map((s, i) => [s.src, projectPath(paths[i])])));
+    const done = paths.slice(0, copied);
+    // What was copied is listed even if a later file failed: the list and the disk agree.
+    this.list.files.push(...done.map((path) => ({ flags: NEW_IMPORT_FLAGS, path })));
+    if (done.length) await this.write();
+    this.select(done);
+    if (error) throw new Error(`${done.length} of ${paths.length} imported, then: ${error}`);
+    if (done.length > 1) void this.w3.window.showInfo(`Imported ${plural(done.length, "file")}.`);
+  }
+  private select(paths: string[]) {
+    this.selected = new Set(paths.map((p) => p.toLowerCase()));
+    this.anchor = paths.length ? paths[paths.length - 1].toLowerCase() : null;
   }
   private register(path: string) {
     void this.run("Add", async () => {
       this.list.files.push({ flags: NEW_IMPORT_FLAGS, path });
       await this.write();
-      this.selected = path;
+      this.select([path]);
     });
   }
   private changePath(entry: ImportEntry, to: string) {
@@ -127,7 +200,7 @@ class ImportView {
       if (entry.path !== from) entry.flags = CUSTOM_PATH_FLAGS;
       entry.path = to;
       await this.write();
-      this.selected = to;
+      this.select([to]);
       // What used the old path (object data, triggers, scripts, models) can follow.
       const refs = await findPathRefs(this.w3, from, projectPath(to));
       const raw = refs.raw.length ? ` Not changeable (kept in binary form; re-sync the project to get text): ${refs.raw.map((p) => p.slice(4)).join(", ")}.` : "";
@@ -143,15 +216,23 @@ class ImportView {
       void this.w3.window.showInfo(`Updated ${count} reference${count === 1 ? "" : "s"} to ${to}.`);
     });
   }
-  private remove(entry: ImportEntry) {
+  private remove(entries: ImportEntry[]) {
     void this.run("Remove", async () => {
-      const c = await this.w3.window.showWarning(`Remove ${entry.path} from the map? The file is deleted from the project.`, "Remove", "Cancel");
+      const ask = entries.length === 1 ? `Remove ${entries[0].path} from the map? The file is deleted from the project.`
+        : `Remove ${plural(entries.length, "file")} from the map? They are deleted from the project.`;
+      const c = await this.w3.window.showWarning(ask, "Remove", "Cancel");
       if (c !== "Remove") return;
-      const f = this.fileOf(entry);
-      if (f) await this.w3.workspace.delete(f.path);
-      this.list.files = this.list.files.filter((f) => f !== entry);
+      const files = this.files();
+      const fileOf = new Map(entries.map((e) => [e, this.fileOf(e, files)?.path]));
+      // Sound entries of different extensions can stand for the same file.
+      const paths = [...new Set([...fileOf.values()].filter((p): p is string => !!p))];
+      const { deleted, error } = await this.w3.window.withProgress(`Removing ${plural(entries.length, "file")}`, () => this.w3.workspace.deleteMany(paths));
+      const kept = new Set(paths.slice(deleted));
+      const gone = new Set(entries.filter((e) => !kept.has(fileOf.get(e) ?? "")));
+      this.list.files = this.list.files.filter((f) => !gone.has(f));
       await this.write();
-      this.selected = null;
+      this.select([]);
+      if (error) throw new Error(`${gone.size} of ${entries.length} removed, then: ${error}`);
     });
   }
   /** `file`: the project file (its name may differ from the listed path for sounds). */
@@ -161,6 +242,23 @@ class ImportView {
       if (!target) return;
       await this.w3.window.withProgress(`Exporting ${path}`, () => this.w3.workspace.copy(file, target));
       void this.w3.window.showInfo(`Exported to ${target}`);
+    });
+  }
+  /** Several files into a folder, each at its place in the map (names can repeat across folders). */
+  private exportMany(files: string[]) {
+    void this.run("Export", async () => {
+      const dir = await this.w3.window.pickFolder({ title: "Export files to…" });
+      if (!dir) return;
+      const pairs = files.map((f): [string, string] => [f, `${dir}/${f.replace(/^map\//, "")}`]);
+      const exists = await Promise.all(pairs.map(([, to]) => this.w3.backend.invoke<boolean>("fs_exists", { path: to })));
+      const clashes = exists.filter(Boolean).length;
+      if (clashes) {
+        const c = await this.w3.window.showWarning(`${plural(clashes, "file")} already in ${dir}. Overwrite?`, "Overwrite", "Cancel");
+        if (c !== "Overwrite") return;
+      }
+      const { copied, error } = await this.w3.window.withProgress(`Exporting ${plural(pairs.length, "file")}`, () => this.w3.workspace.copyMany(pairs));
+      if (error) throw new Error(`${copied} of ${pairs.length} exported, then: ${error}`);
+      void this.w3.window.showInfo(`Exported ${plural(copied, "file")} to ${dir}`);
     });
   }
   private openFile(path: string, file: string) {
@@ -182,7 +280,6 @@ class ImportView {
   render() {
     const files = this.files();
     const q = this.query.trim().toLowerCase();
-    const size = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
     const listed = this.list.files.filter((f) => !q || f.path.toLowerCase().includes(q));
     // Files the list stands for (with their other sound extensions), then the rest of the map folder.
     const claimed = new Set(this.list.files.map((e) => this.fileOf(e, files)?.path.replace(/\\/g, "/").toLowerCase()).filter((x): x is string => !!x));
@@ -190,6 +287,9 @@ class ImportView {
     const unlisted = [...files.values()].map((f) => f.path.replace(/\\/g, "/")).filter((p) => p.startsWith("map/"))
       .map(archivePath)
       .filter((p) => !isMapFile(p) && !claimed.has(projectPath(p).toLowerCase()) && (!q || p.toLowerCase().includes(q)));
+    this.shown = listed;
+    const shownKeys = new Set(listed.map(entryKey));
+    for (const k of this.selected) if (!shownKeys.has(k)) this.selected.delete(k);
     const total = this.list.files.reduce((n, e) => n + (this.fileOf(e, files)?.size ?? 0), 0);
 
     const search = h("input.imp-search", { type: "search", placeholder: "Filter by path", value: this.query,
@@ -203,23 +303,30 @@ class ImportView {
         box?.setSelectionRange(caret, caret);
       } });
     const toolbar = h("div.imp-toolbar", {},
-      ...(this.editable ? [h("button.primary", { onclick: () => this.importFile() }, "Import file…")] : []),
-      search, h("span.muted", {}, `${this.list.files.length} imported · ${size(total)}`));
+      ...(this.editable ? [h("button.primary", { onclick: () => this.importFiles() }, "Import files…"), h("button", { onclick: () => this.importFolder() }, "Import folder…")] : []),
+      search, h("span.muted", {}, `${this.list.files.length} imported · ${formatBytes(total)}`));
 
     const rows = listed.map((e) => {
       const f = this.fileOf(e, files);
-      const active = this.selected !== null && samePath(this.selected, e.path);
+      const active = this.selected.has(entryKey(e));
       return h(`tr.imp-row${active ? ".active" : ""}${f ? "" : ".missing"}`, {
-        onclick: () => { this.selected = e.path; this.render(); },
+        onclick: (ev: MouseEvent) => {
+          const next = clickSelection(listed.map(entryKey), this.selected, this.anchor, entryKey(e), { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey });
+          this.selected = next.selected;
+          this.anchor = next.anchor;
+          this.render();
+        },
         ondblclick: () => { if (f && f.size <= MAX_OPEN) this.openFile(e.path, f.path); },
         title: f ? "" : "Not in the project's map folder",
-      }, h("td.imp-path", {}, this.shownPath(e, f)), h("td", {}, kindOf(e.path)), h("td.imp-size", {}, f ? size(f.size) : "missing"), h("td.muted", {}, String(e.flags)));
+      }, h("td.imp-path", {}, this.shownPath(e, f)), h("td", {}, kindOf(e.path)), h("td.imp-size", {}, f ? formatBytes(f.size) : "missing"), h("td.muted", {}, String(e.flags)));
     });
     const table = h("table.imp-table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Path in the map"), h("th", {}, "Type"), h("th", {}, "Size"), h("th", { title: "Import flags (war3map.imp)" }, "Flags"))),
       h("tbody", {}, ...rows));
 
-    const sel = this.selected ? this.list.files.find((e) => samePath(e.path, this.selected!)) : undefined;
-    const detail = sel ? this.detail(sel, this.fileOf(sel, files)) : h("p.muted", {}, "Select a file to change its path, open, export or remove it.");
+    const sel = listed.filter((e) => this.selected.has(entryKey(e)));
+    const detail = sel.length > 1 ? this.detailMany(sel, files)
+      : sel.length ? this.detail(sel[0], this.fileOf(sel[0], files))
+      : h("p.muted", {}, "Select a file to change its path, open, export or remove it. Ctrl and Shift select several.");
 
     this.el.replaceChildren(h("div.imp-main", {}, toolbar,
       listed.length ? table : h("p.muted", {}, q ? "No imported file matches." : "No imported files yet."),
@@ -245,6 +352,40 @@ class ImportView {
         h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : "",
           onclick: () => file && this.openFile(e.path, file.path) }, kindOf(e.path) === "Sound" ? "▶ Play" : "Open"),
         h("button", { disabled: !exists, onclick: () => file && this.exportFile(e.path, file.path) }, "Export…"),
-        ...(this.editable ? [h("button", { onclick: () => this.remove(e) }, "Remove")] : [])));
+        ...(this.editable ? [h("button", { onclick: () => this.remove([e]) }, "Remove")] : [])),
+      file ? this.preview(e.path, file) : null);
+  }
+
+  private detailMany(entries: ImportEntry[], files: Map<string, FileInfo>): HTMLElement {
+    const found = entries.flatMap((e) => this.fileOf(e, files) ?? []);
+    const size = found.reduce((n, f) => n + f.size, 0);
+    const paths = [...new Set(found.map((f) => f.path))];
+    const missing = entries.length - found.length;
+    return h("div", {},
+      h("h3", {}, plural(entries.length, "file")),
+      h("p.muted", {}, `${formatBytes(size)}${missing ? ` · ${missing} not in the project's map folder` : ""}`),
+      h("div.imp-actions", {},
+        h("button", { disabled: !paths.length, title: "Keeps each file's path in the map below the chosen folder", onclick: () => this.exportMany(paths) }, "Export…"),
+        ...(this.editable ? [h("button", { onclick: () => this.remove(entries) }, "Remove")] : [])));
+  }
+
+  /** The image itself, for files that are images and can be decoded here. */
+  private preview(path: string, file: FileInfo): HTMLElement | null {
+    if (kindOf(path) !== "Image" || file.size > MAX_PREVIEW) return null;
+    const box = h("div.imp-preview");
+    const key = `${file.path}|${file.modified}`;
+    if (this.preview_?.key === key) { box.append(this.preview_.canvas); return box; }
+    void this.w3.workspace.readBytes(file.path).then((bytes) => {
+      const image = decodeImage(bytes, file.path);
+      // Each level halves the sides (and levels are decoded on demand, so only this one is).
+      let level = 0;
+      while (level + 1 < image.mipCount && Math.max(image.width, image.height) >> (level + 1) >= PREVIEW_SIDE) level++;
+      const mip = image.mip(level);
+      const canvas = h("canvas", { width: mip.width, height: mip.height, title: `${image.format}, ${image.width} × ${image.height}` }) as HTMLCanvasElement;
+      canvas.getContext("2d")!.putImageData(new ImageData(mip.rgba as Uint8ClampedArray<ArrayBuffer>, mip.width, mip.height), 0, 0);
+      this.preview_ = { key, canvas };
+      box.replaceChildren(canvas);
+    }).catch(() => box.replaceChildren(h("small.muted", {}, "No preview for this file.")));
+    return box;
   }
 }

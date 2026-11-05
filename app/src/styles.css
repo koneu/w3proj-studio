@@ -625,7 +625,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-search { font: inherit; padding: 2px 6px; width: 260px; }
 .imp-table { border-collapse: collapse; width: 100%; }
 .imp-table th, .imp-table td { text-align: left; padding: 2px 12px 2px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.imp-row { cursor: pointer; }
+.imp-row { cursor: pointer; user-select: none; }
 .imp-row:hover { background: var(--bg-hover); }
 .imp-row.active { background: #37414f; }
 .imp-row.missing .imp-path { color: var(--fg-muted); text-decoration: line-through; }
@@ -637,6 +637,9 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-field label { width: 100%; color: var(--fg-muted); }
 .imp-path-edit { flex: 1; font-family: var(--mono); font-size: 12px; min-width: 0; }
 .imp-actions { display: flex; gap: 6px; margin-top: 10px; }
+.imp-editor:focus { outline: none; }
+.imp-preview { margin-top: 10px; }
+.imp-preview canvas { display: block; max-width: 100%; max-height: 320px; background: repeating-conic-gradient(#2a2a2a 0 25%, #3a3a3a 0 50%) 0 0 / 16px 16px; }
 .imp-warn { color: #cca700; }
 
 /* Map Size tab (terrain editor) */

@@ -46,13 +46,46 @@ export const isMapFile = (archivePath: string) => !/[\\/]/.test(archivePath) && 
 /** Archive path for a file imported from disk: war3mapImported\<name> (campaigns: war3campImported),
  *  numbered if taken. */
 export function importPath(fileName: string, taken: (path: string) => boolean, folder = IMPORT_FOLDER): string {
-  const name = fileName.split(/[\\/]/).pop() ?? "file";
+  return numberedPath(folder, fileName.split(/[\\/]/).pop() ?? "file", taken);
+}
+
+function numberedPath(folder: string, name: string, taken: (path: string) => boolean): string {
   const dot = name.lastIndexOf(".");
   const stem = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : "";
   for (let n = 1; ; n++) {
     const p = `${folder}\\${stem}${n > 1 ? ` (${n})` : ""}${ext}`;
     if (!taken(p)) return p;
   }
+}
+
+/** Archive path for a file of an imported folder (`relative`: "Pack/fx/a.blp"): the folder's
+ *  structure stays below the import folder, numbered if taken. */
+export function importTreePath(relative: string, taken: (path: string) => boolean, folder = IMPORT_FOLDER): string {
+  const parts = relative.split(/[\\/]/);
+  const name = parts.pop() ?? "file";
+  return numberedPath([folder, ...parts].join("\\"), name, taken);
+}
+
+/** System and tool leftovers that a folder import skips (dot files and folders such as .git). */
+export function isJunkFile(relative: string): boolean {
+  const parts = relative.split(/[\\/]/);
+  return parts.some((p) => p.startsWith(".")) || /^(thumbs\.db|desktop\.ini)$/i.test(parts[parts.length - 1]);
+}
+
+/** The selection after a click on `clicked` in a list shown as `order` (Ctrl toggles, Shift
+ *  takes the range from the anchor, a plain click selects one). */
+export function clickSelection(order: string[], selected: ReadonlySet<string>, anchor: string | null, clicked: string,
+  mods: { ctrl: boolean; shift: boolean }): { selected: Set<string>; anchor: string } {
+  if (mods.shift && anchor !== null && order.includes(anchor)) {
+    const [a, b] = [order.indexOf(anchor), order.indexOf(clicked)].sort((x, y) => x - y);
+    return { selected: new Set([...(mods.ctrl ? selected : []), ...order.slice(a, b + 1)]), anchor };
+  }
+  if (mods.ctrl) {
+    const next = new Set(selected);
+    if (!next.delete(clicked)) next.add(clicked);
+    return { selected: next, anchor: clicked };
+  }
+  return { selected: new Set([clicked]), anchor: clicked };
 }
 
 /** What a file is, by its extension (for the list and choosing a viewer). */
