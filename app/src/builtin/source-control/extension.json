@@ -2,18 +2,25 @@
   "id": "w3.sourceControl",
   "name": "Source Control",
   "version": "0.1.0",
-  "description": "Git for the open project: its uncommitted changes in the side bar (refreshed on save and when the window gets the focus), a side-by-side diff against the last commit, and committing all of the project's changes.",
+  "description": "Git for the open project: its uncommitted changes in the side bar (refreshed on save and when the window gets the focus), a side-by-side diff against the last commit, committing all or some of the project's changes, discarding them, history, branches, push and pull.",
   "activationEvents": ["onStartup"],
   "contributes": {
     "viewContainers": [{ "id": "scm", "title": "Source Control", "icon": "⎇", "order": 1 }],
-    "views": [{ "id": "w3.scm.changes", "title": "Changes", "container": "scm" }],
+    "views": [{ "id": "w3.scm.changes", "title": "Changes", "container": "scm" }, { "id": "w3.scm.history", "title": "History", "container": "scm" }],
     "editors": [{ "id": "w3.diff", "title": "Changes", "patterns": ["w3:diff:**/*", "w3:diff:*"] }],
     "commands": [
       { "id": "w3.scm.show", "title": "Show Source Control", "category": "View", "keybinding": "ctrl+shift+g" },
       { "id": "w3.scm.refresh", "title": "Refresh Changes", "category": "Source Control" },
       { "id": "w3.scm.diff", "title": "Open Changes of File", "category": "Source Control", "hidden": true },
       { "id": "w3.scm.diffActive", "title": "Open Changes of the Current File", "category": "Source Control" },
-      { "id": "w3.scm.commit", "title": "Commit All Changes…", "category": "Source Control" }
+      { "id": "w3.scm.commit", "title": "Commit Ticked Changes…", "category": "Source Control" },
+      { "id": "w3.scm.discardAll", "title": "Discard All Changes…", "category": "Source Control" },
+      { "id": "w3.scm.branch", "title": "Switch or Create Branch…", "category": "Source Control" },
+      { "id": "w3.scm.merge", "title": "Merge Branch…", "category": "Source Control" },
+      { "id": "w3.scm.mergeAbort", "title": "Abort Merge", "category": "Source Control" },
+      { "id": "w3.scm.addRemote", "title": "Add Remote…", "category": "Source Control" },
+      { "id": "w3.scm.push", "title": "Push", "category": "Source Control" },
+      { "id": "w3.scm.pull", "title": "Pull", "category": "Source Control" }
     ]
   }
 }

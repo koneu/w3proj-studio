@@ -712,6 +712,10 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<Tool
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = Command::new(&exe);
         cmd.args(&args).current_dir(&cwd);
+        // No console to answer on: a remote that wants a password fails instead of hanging.
+        if exe == "git" {
+            cmd.env("GIT_TERMINAL_PROMPT", "0");
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -823,9 +827,9 @@ async fn git_status(root: String) -> CmdResult<Option<GitStatus>> {
 /// A project file as committed in HEAD: its text, or None when HEAD doesn't have it. Fails for
 /// files that aren't UTF-8 text.
 #[tauri::command]
-async fn git_show(root: String, path: String) -> CmdResult<Option<String>> {
+async fn git_show(root: String, path: String, rev: Option<String>) -> CmdResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(move || {
-        let spec = format!("HEAD:./{path}");
+        let spec = format!("{}:./{path}", rev.as_deref().unwrap_or("HEAD"));
         if git(&root, &["cat-file", "-e", &spec]).is_err() {
             return Ok(None);
         }
@@ -838,9 +842,9 @@ async fn git_show(root: String, path: String) -> CmdResult<Option<String>> {
 
 /// Size of a file in HEAD (for binary files), or None.
 #[tauri::command]
-async fn git_size(root: String, path: String) -> CmdResult<Option<u64>> {
+async fn git_size(root: String, path: String, rev: Option<String>) -> CmdResult<Option<u64>> {
     tauri::async_runtime::spawn_blocking(move || {
-        let spec = format!("HEAD:./{path}");
+        let spec = format!("{}:./{path}", rev.as_deref().unwrap_or("HEAD"));
         Ok(git(&root, &["cat-file", "-s", &spec]).ok().and_then(|b| String::from_utf8_lossy(&b).trim().parse().ok()))
     })
     .await

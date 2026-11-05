@@ -765,6 +765,16 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .problem-row.warning .problem-icon { color: var(--warning); }
 
 /* Source Control */
+.scm-branch { display: flex; align-items: center; gap: 4px; padding: 4px 14px 0; flex-wrap: wrap; }
+.scm-branch button { flex: none; width: auto; }
+.scm-branch-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.scm-tick { margin: 0 6px 0 0; flex: none; align-self: center; }
+.scm-merging { padding: 2px 14px; color: var(--warning); }
+.scm-log-row { padding: 2px 14px; cursor: pointer; display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+.scm-log-row:hover { background: var(--bg-hover); }
+.scm-log-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.scm-log-file { padding: 1px 14px 1px 30px; cursor: pointer; display: flex; gap: 6px; white-space: nowrap; }
+.scm-log-file:hover { background: var(--bg-hover); }
 .scm-commit { display: flex; flex-direction: column; gap: 4px; padding: 6px 14px; }
 .scm-message { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
 .scm-row { display: flex; align-items: baseline; gap: 2px; padding: 2px 8px 2px 14px; cursor: pointer; white-space: nowrap; overflow: hidden; }
