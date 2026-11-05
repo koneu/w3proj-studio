@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { GUIDES, hasRules, parseGuide, rulesTemplate, withOwnRules } from "./guides";
+import { GUIDES, guideTemplate, hasRules, isTopic, ownTopics, parseGuide, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 
 const builtin = "src/builtin";
 const tools = new Set(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
@@ -41,6 +41,28 @@ test("a template nobody filled in changes nothing", () => {
   assert.equal(withOwnRules("Guide.\n", empty), "Guide.\n");
   assert.equal(hasRules(`${empty}No trees.`), true);
   assert.ok(!withOwnRules("Guide.\n", `${empty}No trees.`).includes("Your own rules for"), "the comment isn't sent");
+});
+
+test("a file dropped in the folder is a guide, and one named like a built-in holds rules", () => {
+  const folder = "C:\\Users\\me\\AppData\\guides";
+  assert.deepEqual(ownTopics([`${folder}\\pathing.md`, `${folder}\\melee.md`, `${folder}\\My Style.md`, `${folder}\\notes.txt`], folder), ["My Style", "pathing"]);
+  assert.deepEqual(ownTopics(["pathing.md", "MELEE.md"], folder), ["pathing"], "relative paths too, in any case");
+});
+
+test("a folder inside the folder, or an odd name, is no topic", () => {
+  assert.deepEqual(ownTopics(["C:/g/old/pathing.md", "C:/g/a.b.md", "C:/g/../x.md"], "C:/g"), []);
+  for (const bad of ["", " x", "a/b", "..", "a.b", "a\\b"]) assert.equal(isTopic(bad), false, bad);
+  assert.equal(isTopic("Über pathing_2"), true);
+});
+
+test("a user's guide can be plain text", () => {
+  const plain = parseOwnGuide("# Pathing\n\nKeep ways wide.\n");
+  assert.equal(plain.summary, "Pathing");
+  assert.match(plain.text, /Keep ways wide/);
+  assert.equal(parseOwnGuide("Just some rules.\n").summary, "Just some rules.");
+  const made = parseOwnGuide(`${guideTemplate("pathing")}Text.\n`);
+  assert.equal(made.summary, "One line on when the AI should read this guide.");
+  assert.ok(made.text.startsWith("# pathing") && !made.text.includes("AI doesn't see"));
 });
 
 test("the guides a client is pointed at exist", () => {

@@ -562,10 +562,10 @@ fn app_paths(app: AppHandle) -> CmdResult<Paths> {
     })
 }
 
-/// Removes the user's own rules for a guide. A topic is a plain name, so nothing else can go.
+/// Removes a user's guide, or their rules for a built-in one. A topic is a plain name, so nothing else can go.
 #[tauri::command]
 fn guide_remove(app: AppHandle, topic: String) -> CmdResult<()> {
-    if topic.is_empty() || !topic.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if topic.is_empty() || !topic.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ' ')) {
         return Err(format!("{topic:?} is no guide"));
     }
     let path = config_dir(&app)?.join("guides").join(format!("{topic}.md"));

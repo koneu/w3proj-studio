@@ -7,7 +7,7 @@ import { projectPath } from "../../extensions/mcp";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
-import { GUIDES, hasRules, rulesTemplate, withOwnRules } from "./guides";
+import { GUIDES, guideTemplate, hasRules, isTopic, ownTopics, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 
 /** One read_file answer; `offset` gets the rest. */
@@ -62,6 +62,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return w3.backend.invoke<string>("fs_read_text", { path }).catch(() => "");
   };
 
+  /** The guides a user added to the folder. It doesn't exist until the first one's there. */
+  const listOwnGuides = async () => {
+    const { user_guides: folder } = await w3.backend.invoke<{ user_guides: string }>("app_paths");
+    if (!(await w3.backend.invoke<boolean>("fs_exists", { path: folder }))) return [];
+    return ownTopics(await w3.backend.invoke<string[]>("fs_list_tree", { path: folder }).catch(() => []), folder);
+  };
+  const failed = (work: () => Promise<void>) => () => void work().catch((e) => w3.window.showError(String(e)));
+
   const guideList = h("div");
   const showGuides = async () => {
     const rows = await Promise.all(Object.keys(GUIDES).map(async (topic) => {
@@ -82,8 +90,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("button", { onclick: () => void edit().catch((e) => w3.window.showError(String(e))) }, own ? "Edit my rules" : "Add my rules"),
           ...(own ? [h("button", { onclick: () => void reset().catch((e) => w3.window.showError(String(e))) }, "Reset")] : [])));
     }));
+    const ownRows = (await listOwnGuides()).map((topic) => h("div.ext-item", {},
+      h("div.ext-desc", {}, `${topic}: yours`),
+      h("div.ext-actions", {},
+        h("button", { onclick: failed(async () => { await w3.editors.open(await rulesPath(topic), "w3.textEditor"); }) }, "Edit"),
+        h("button", { onclick: failed(async () => {
+          if (!(await w3.window.confirm(`Delete your ${topic} guide?`, "Delete guide", 20_000))) return;
+          await w3.backend.invoke("guide_remove", { topic });
+          await showGuides();
+        }) }, "Delete"))));
+    const add = failed(async () => {
+      const topic = (await w3.window.inputBox({ prompt: "What's the guide about? One or a few words: the AI asks for it by this name.", placeholder: "pathing" }))?.trim();
+      if (!topic) return;
+      if (!isTopic(topic)) throw new Error("A guide's name can have letters, digits, spaces, - and _.");
+      const path = await rulesPath(topic);
+      if (!(await w3.backend.invoke<boolean>("fs_exists", { path }))) await w3.backend.invoke("fs_write_text", { path, text: guideTemplate(topic) });
+      await w3.editors.open(path, "w3.textEditor");
+      await showGuides();
+    });
+    const openFolder = failed(async () => {
+      const { user_guides: folder } = await w3.backend.invoke<{ user_guides: string }>("app_paths");
+      await w3.window.showInfo(`Guides are .md files in ${folder}`);
+    });
     guideList.replaceChildren(h("div.ext-section-title", {}, "GUIDES"),
-      h("div.ext-desc.ext-formats-hint", {}, "Guides tell the AI how to do a job well. Your rules are added to a guide, and win where they disagree."), ...rows);
+      h("div.ext-desc.ext-formats-hint", {}, "Guides tell the AI how to do a job well. Your rules are added to a guide, and win where they disagree."), ...rows, ...ownRows,
+      h("div.ext-item", {}, h("div.ext-actions", {}, h("button", { onclick: add }, "New guide"), h("button", { onclick: openFolder }, "Where are they?"))));
   };
 
   const editList = h("div");
@@ -184,10 +215,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.commands.register("w3.mcp.undo", async () => { void w3.window.showInfo(await undo()); }),
     w3.mcp.registerTool("read_guide", async ({ topic }) => {
-      if (topic === undefined) return Object.entries(GUIDES).map(([name, guide]) => ({ topic: name, about: guide.summary }));
-      const guide = typeof topic === "string" ? GUIDES[topic] : undefined;
-      if (!guide) throw new Error(`There's no guide on "${String(topic)}". There are: ${Object.keys(GUIDES).join(", ")}.`);
-      return withOwnRules(guide.text, await readRules(topic as string));
+      const own = await listOwnGuides().catch(() => []);
+      const ownGuide = async (name: string) => parseOwnGuide(await readRules(name));
+      if (topic === undefined) {
+        const mine = await Promise.all(own.map(async (name) => ({ topic: name, about: (await ownGuide(name)).summary, fromTheUser: true })));
+        return [...Object.entries(GUIDES).map(([name, guide]) => ({ topic: name, about: guide.summary })), ...mine];
+      }
+      const wanted = typeof topic === "string" ? topic.trim() : "";
+      const mine = own.find((name) => name.toLowerCase() === wanted.toLowerCase());
+      if (mine) return (await ownGuide(mine)).text;
+      const guide = GUIDES[wanted];
+      if (!guide) throw new Error(`There's no guide on "${String(topic)}". There are: ${[...Object.keys(GUIDES), ...own].join(", ")}.`);
+      return withOwnRules(guide.text, await readRules(wanted));
     }),
     w3.mcp.registerTool("list_edits", () => log.list().map((e) => ({ title: e.title, at: new Date(e.at).toISOString(), files: e.files.map((f) => f.path) }))),
     w3.mcp.registerTool("undo_last_edit", undo),

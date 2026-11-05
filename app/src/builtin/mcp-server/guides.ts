@@ -26,6 +26,39 @@ export function withOwnRules(guide: string, own: string) {
   return `${guide}\n## The user's own rules\n\nThese come from the user. Where they disagree with anything above, they win.\n\n${stripComments(own)}\n`;
 }
 
+/** The topics of a user's folder that aren't built in: its .md files directly inside it, by name. A
+ *  file named like a built-in guide holds rules for that one. */
+export function ownTopics(paths: readonly string[], folder: string) {
+  const inside = folder.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() + "/";
+  const builtIn = new Set(Object.keys(GUIDES).map((t) => t.toLowerCase()));
+  const topics = paths.map((p) => p.replace(/\\/g, "/")).map((p) => (p.toLowerCase().startsWith(inside) ? p.slice(inside.length) : p))
+    .filter((p) => !p.includes("/") && /\.md$/i.test(p)).map((p) => p.slice(0, -3))
+    .filter((t) => isTopic(t) && !builtIn.has(t.toLowerCase()));
+  return [...new Set(topics)].sort((a, b) => a.localeCompare(b));
+}
+
+/** A name that can be a file, a topic and a word in the panel. */
+export const isTopic = (name: string) => /^[\p{L}\p{N}_ -]{1,60}$/u.test(name) && name.trim() === name;
+
+/** A user's own guide, which may be as plain as a few lines: without a `summary:` comment its first
+ *  line says what it's about. */
+export function parseOwnGuide(raw: string): Guide {
+  const guide = parseGuide(raw);
+  const first = guide.text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "").trim() ?? "";
+  return { summary: guide.summary || first, text: guide.text };
+}
+
+/** What a new guide of a user's starts with. */
+export const guideTemplate = (topic: string) => `<!--
+summary: One line on when the AI should read this guide.
+
+The AI doesn't see this comment, but it does see the summary when it lists the guides.
+-->
+
+# ${topic}
+
+`;
+
 /** What a user's file starts with. */
 export const rulesTemplate = (topic: string) => `<!--
 Your own rules for the ${topic} guide, in plain words: write below this comment.
