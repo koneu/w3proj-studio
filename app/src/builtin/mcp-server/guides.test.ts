@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { GUIDES } from "./guides";
+import { GUIDES, hasRules, parseGuide, rulesTemplate, withOwnRules } from "./guides";
 
 const builtin = "src/builtin";
 const tools = new Set(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
@@ -15,6 +15,32 @@ test("guides only name tools that exist", () => {
   for (const [topic, guide] of Object.entries(GUIDES)) {
     for (const [word] of guide.text.matchAll(/\b[a-z]+_[a-z_]+\b/g)) assert.ok(tools.has(word), `${topic} names ${word}, which is no tool`);
   }
+});
+
+test("sources and notes stay out of what the AI reads", () => {
+  const g = parseGuide("<!--\nsummary: What it's for.\n\nSources: https://example.org\n-->\n\n# Title\n\nText <!-- inline --> here.\n");
+  assert.equal(g.summary, "What it's for.");
+  assert.ok(g.text.startsWith("# Title") && !g.text.includes("example.org") && !g.text.includes("inline"));
+  for (const guide of Object.values(GUIDES)) assert.ok(!/<!--|https?:/.test(guide.text));
+});
+
+test("every guide keeps its sources in its file", () => {
+  for (const topic of Object.keys(GUIDES)) assert.match(readFileSync(join(builtin, "mcp-server", "guides", `${topic}.md`), "utf8"), /Sources of the \w+ guide/);
+});
+
+test("a user's rules follow the guide and win", () => {
+  const text = withOwnRules(GUIDES.melee.text, "Camps only in corners.");
+  assert.ok(text.startsWith(GUIDES.melee.text));
+  assert.match(text, /own rules[\s\S]*they win[\s\S]*Camps only in corners\.$/m);
+});
+
+test("a template nobody filled in changes nothing", () => {
+  const empty = rulesTemplate("melee");
+  assert.equal(hasRules(empty), false);
+  assert.equal(hasRules(""), false);
+  assert.equal(withOwnRules("Guide.\n", empty), "Guide.\n");
+  assert.equal(hasRules(`${empty}No trees.`), true);
+  assert.ok(!withOwnRules("Guide.\n", `${empty}No trees.`).includes("Your own rules for"), "the comment isn't sent");
 });
 
 test("the guides a client is pointed at exist", () => {

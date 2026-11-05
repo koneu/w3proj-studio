@@ -547,6 +547,7 @@ struct Paths {
     config_dir: String,
     settings: String,
     user_extensions: String,
+    user_guides: String,
 }
 
 #[tauri::command]
@@ -556,8 +557,22 @@ fn app_paths(app: AppHandle) -> CmdResult<Paths> {
     Ok(Paths {
         settings: s(dir.join("settings.json")),
         user_extensions: s(dir.join("extensions")),
+        user_guides: s(dir.join("guides")),
         config_dir: s(dir),
     })
+}
+
+/// Removes the user's own rules for a guide. A topic is a plain name, so nothing else can go.
+#[tauri::command]
+fn guide_remove(app: AppHandle, topic: String) -> CmdResult<()> {
+    if topic.is_empty() || !topic.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(format!("{topic:?} is no guide"));
+    }
+    let path = config_dir(&app)?.join("guides").join(format!("{topic}.md"));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(err)?;
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -975,6 +990,7 @@ pub fn run() {
             codec_write,
             formats_list,
             format_customize,
+            guide_remove,
             fs_read_text,
             fs_write_text,
             fs_write_bytes,

@@ -7,7 +7,7 @@ import { projectPath } from "../../extensions/mcp";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
-import { GUIDES } from "./guides";
+import { GUIDES, hasRules, rulesTemplate, withOwnRules } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 
 /** One read_file answer; `offset` gets the rest. */
@@ -54,6 +54,38 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     log: (line) => out.append(line),
   });
   // Only this part changes with an edit: redrawing the view would flash everything else in it.
+  /** Where a user's rules for a guide are, whether or not they exist yet. */
+  const rulesPath = async (topic: string) => `${(await w3.backend.invoke<{ user_guides: string }>("app_paths")).user_guides}\\${topic}.md`;
+  const readRules = async (topic: string) => {
+    const path = await rulesPath(topic);
+    if (!(await w3.backend.invoke<boolean>("fs_exists", { path }))) return "";
+    return w3.backend.invoke<string>("fs_read_text", { path }).catch(() => "");
+  };
+
+  const guideList = h("div");
+  const showGuides = async () => {
+    const rows = await Promise.all(Object.keys(GUIDES).map(async (topic) => {
+      const own = hasRules(await readRules(topic));
+      const edit = async () => {
+        const path = await rulesPath(topic);
+        if (!(await w3.backend.invoke<boolean>("fs_exists", { path }))) await w3.backend.invoke("fs_write_text", { path, text: rulesTemplate(topic) });
+        await w3.editors.open(path, "w3.textEditor");
+      };
+      const reset = async () => {
+        if (!(await w3.window.confirm(`Delete your own rules for the ${topic} guide?`, "Delete rules", 20_000))) return;
+        await w3.backend.invoke("guide_remove", { topic });
+        await showGuides();
+      };
+      return h("div.ext-item", {},
+        h("div.ext-desc", {}, `${topic}: ${own ? "built-in, with your rules" : "built-in"}`),
+        h("div.ext-actions", {},
+          h("button", { onclick: () => void edit().catch((e) => w3.window.showError(String(e))) }, own ? "Edit my rules" : "Add my rules"),
+          ...(own ? [h("button", { onclick: () => void reset().catch((e) => w3.window.showError(String(e))) }, "Reset")] : [])));
+    }));
+    guideList.replaceChildren(h("div.ext-section-title", {}, "GUIDES"),
+      h("div.ext-desc.ext-formats-hint", {}, "Guides tell the AI how to do a job well. Your rules are added to a guide, and win where they disagree."), ...rows);
+  };
+
   const editList = h("div");
   const showEdits = () => {
     const past = log.history(), canUndo = log.list().at(-1);
@@ -117,6 +149,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("div.ext-desc", {}, asks(key) ? `AI tools ask you before ${what}.` : `AI tools can go ahead with ${what}, after a checkpoint.`),
           h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set(key, !asks(key)) }, asks(key) ? "Stop asking" : "Ask first")));
         showEdits();
+        void showGuides().catch(() => {});
         el.append(
           h("div.ext-item", {},
             h("div.ext-desc", {}, on ? "On: AI clients on this computer can use the open project." : "Off: AI clients can't reach this app."),
@@ -134,6 +167,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.ignoreUndoSteps", !loose) }, loose ? "Keep undo steps" : "Don't care about undo")))] : []),
           ...(writing ? [askRow("mcp.confirmTileset", "changing the tileset"), askRow("mcp.confirmResize", "resizing the map")] : []),
           ...(writing ? [editList] : []),
+          guideList,
           h("div.ext-section-title", {}, "CLIENTS"),
           h("div.ext-desc.ext-formats-hint", {}, "Looks where a standard installation keeps its settings, so this can fail. Copy client setup always works."));
         const clients = h("div", {}, h("div.view-empty", {}, "Looking…"));
@@ -149,11 +183,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (now !== root) { root = now; log.reset(); }
     }),
     w3.commands.register("w3.mcp.undo", async () => { void w3.window.showInfo(await undo()); }),
-    w3.mcp.registerTool("read_guide", ({ topic }) => {
+    w3.mcp.registerTool("read_guide", async ({ topic }) => {
       if (topic === undefined) return Object.entries(GUIDES).map(([name, guide]) => ({ topic: name, about: guide.summary }));
       const guide = typeof topic === "string" ? GUIDES[topic] : undefined;
       if (!guide) throw new Error(`There's no guide on "${String(topic)}". There are: ${Object.keys(GUIDES).join(", ")}.`);
-      return guide.text;
+      return withOwnRules(guide.text, await readRules(topic as string));
     }),
     w3.mcp.registerTool("list_edits", () => log.list().map((e) => ({ title: e.title, at: new Date(e.at).toISOString(), files: e.files.map((f) => f.path) }))),
     w3.mcp.registerTool("undo_last_edit", undo),
@@ -193,6 +227,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await navigator.clipboard.writeText(JSON.stringify({ mcpServers: { w3proj: { command: bridge, args: ["mcp"] } } }, null, 2));
       void w3.window.showInfo("Copied the MCP client setup. Paste it into your client's configuration.");
     }),
+    // Rules are saved outside the project too; a saved file is the cue to look.
+    w3.workspace.onDidSave((path) => { if (/\.md$/i.test(path)) void showGuides().catch(() => {}); }),
     w3.settings.onDidChange((key) => {
       if (key === "mcp.enabled") void apply();
       if (key.startsWith("mcp.")) w3.views.refresh("w3.mcp.status");

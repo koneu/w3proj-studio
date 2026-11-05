@@ -5,8 +5,8 @@
 
 import { build } from "esbuild";
 import { spawnSync } from "node:child_process";
-import { readdirSync, rmSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
@@ -34,6 +34,14 @@ await build({
   outExtension: { ".js": ".mjs" },
   sourcemap: "inline",
   logLevel: "error",
+  // As Vite does: "file?raw" is the file's text.
+  plugins: [{
+    name: "raw",
+    setup(b) {
+      b.onResolve({ filter: /\?raw$/ }, (a) => ({ path: resolve(a.resolveDir, a.path.replace(/\?raw$/, "")), namespace: "raw" }));
+      b.onLoad({ filter: /.*/, namespace: "raw" }, (a) => ({ contents: readFileSync(a.path, "utf8"), loader: "text" }));
+    },
+  }],
 });
 const bundles = tests.map((t) => join(out, relative(join(app, "src"), t)).replace(/\.ts$/, ".mjs"));
 const run = spawnSync(process.execPath, ["--enable-source-maps", "--test", ...process.argv.slice(2), ...bundles], { stdio: "inherit" });
