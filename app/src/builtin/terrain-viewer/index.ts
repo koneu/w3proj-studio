@@ -318,7 +318,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random) => {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
-    if (!entry) throw new Error(`${f.name} has nothing placed yet to take the layout from.`);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
   };
@@ -1842,7 +1841,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
               const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player);
-              if (!entry) return `${f.name} has no entries to take the layout from yet.`;
               entry.angle = at.angle;
               entryFile.set(entry, f);
               return entry;

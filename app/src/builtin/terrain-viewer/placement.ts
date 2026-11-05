@@ -46,18 +46,38 @@ export async function savePlacedFile(w3: W3Api, f: PlacedFile): Promise<void> {
 
 type Entry = Placed & Record<string, unknown>;
 
-/** A new entry of type `id` at a position, modelled on an existing entry
- *  (same id if there is one) so every field the file version needs is
- *  present; per-object data is reset. Null if the file has no entries to
- *  copy the layout from. */
-export function newEntry(f: PlacedFile, id: string, position: [number, number, number], player?: number): Placed | null {
+// 0xFFFFFFFF marks an unset number (every v13 doodad's editorId; the number is the trailer's).
+const UNSET = 0xffffffff;
+
+/** An entry with the fields the file's version has (formats/doodads.json, units.json), for a file
+ *  with nothing to copy: a new map has no doodads yet. */
+function blankEntry(f: PlacedFile): Entry {
+  const version = Number(f.doc.version), subversion = Number(f.doc.subversion);
+  const skin = version >= 12 || (version === 8 && f.doc.skinIds === true);
+  const base = { id: "", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1] } as Entry;
+  if (skin) base.skinId = "";
+  if (version >= 12) base.preFlags = UNSET;
+  base.flags = 2;
+  const end = (trailer: number) => (version >= 12 ? { trailer: new Array<number>(trailer).fill(0), extras: [] } : {});
+  if (f.key === "doodads") {
+    Object.assign(base, { life: 100 }, version >= 8 ? { itemTable: -1, itemSets: [] } : {});
+    return Object.assign(base, { editorId: version >= 13 ? UNSET : 0 }, end(version >= 13 ? 3 : 2));
+  }
+  const hero = subversion >= 11;
+  Object.assign(base, { player: 0, unknown1: 0, unknown2: 0, hp: -1, mana: -1 }, hero ? { itemTable: -1 } : {});
+  Object.assign(base, { itemSets: [], gold: 0, targetAcquisition: -1, level: 1 }, hero ? { strength: 0, agility: 0, intelligence: 0 } : {});
+  Object.assign(base, { inventory: [], abilities: [], randomType: 0, randomLevel: "010000", randomClass: 0, color: -1, waygate: -1, editorId: 0 });
+  return Object.assign(base, end(2));
+}
+
+/** A new entry of type `id` at a position, modelled on an existing entry (same id if there is
+ *  one), or a blank one, so every field the file version needs is present; per-object data is
+ *  reset. */
+export function newEntry(f: PlacedFile, id: string, position: [number, number, number], player?: number): Placed {
   const list = f.list as Entry[];
   const simple = (e: Entry) => e.randomType === undefined || e.randomType === 0;
-  const template = list.find((e) => e.id === id && simple(e)) ?? list.find((e) => e.id !== "sloc" && simple(e)) ?? list.find(simple);
-  if (!template) return null;
+  const template = list.find((e) => e.id === id && simple(e)) ?? list.find((e) => e.id !== "sloc" && simple(e)) ?? list.find(simple) ?? blankEntry(f);
   const e = structuredClone(template) as Entry;
-  // 0xFFFFFFFF marks an unset number (every v13 doodad's editorId; the number is the trailer's).
-  const UNSET = 0xffffffff;
   const nextOf = (get: (x: Entry) => unknown) => 1 + Math.max(-1, ...list.map((x) => Number(get(x)) || 0).filter((n) => n < UNSET));
   Object.assign(e, { id, variation: 0, position, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });
   if ("skinId" in e) e.skinId = id;
