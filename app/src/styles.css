@@ -748,6 +748,17 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .gs-row:hover { background: var(--bg-hover); }
 .gs-row.set .gs-label { font-weight: 600; }
 .gs-input { width: 100%; font: inherit; }
+.gs-picked { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.gs-picked .gs-input { flex: 1; min-width: 0; }
+.gs-picked button { flex: none; }
+.gs-thumb { width: 24px; height: 24px; flex: none; }
+.gs-table-wrap { overflow-x: auto; padding: 6px 0; }
+.gs-table { border-collapse: collapse; }
+.gs-table th { font-weight: normal; color: var(--fg-muted); padding: 2px 6px; text-align: left; white-space: nowrap; }
+.gs-table tr.set th:first-child { font-weight: 600; color: inherit; }
+.gs-table td { padding: 1px 2px; }
+.gs-cell { width: 52px; font: inherit; text-align: right; }
+.gs-cell.invalid { outline: 1px solid var(--error); }
 .gs-default { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .gs-empty, .gs-loading { padding: 12px; }
 

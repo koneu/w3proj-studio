@@ -6,8 +6,9 @@
 // references are edited in war3map.wts.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
+import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
-import { parseIni, parseSlk } from "../../lib/formats/text";
+import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 
@@ -31,6 +32,30 @@ const SECTION_TITLES: Record<string, string> = {
   CustomSkin: "Interface", Errors: "Error Messages", FrameDef: "Interface Texts", Categories: "Categories",
   Misc: "Gameplay", HERO: "Hero Dependencies", TALT: "Altar Dependencies",
 };
+/** Columns of the damage tables, in the order their values are stored. */
+interface Columns { defense: string[]; attack: string[] }
+let columns: Promise<Columns> | null = null;
+/** Each armor type's number in UI\\UnitEditorData.txt is its place in the table. Attack types have
+ *  no such list: their place is the order of the DamageBonus rows, which the values confirm. */
+function loadColumns(w3: W3Api): Promise<Columns> {
+  columns ??= (async () => {
+    const we = new Map<string, string>();
+    for (const sec of parseIni(await w3.game.readText("UI\\WorldEditStrings.txt").catch(() => "")).values()) for (const [k, v] of sec) we.set(k.toUpperCase(), v);
+    const ini = parseIni(await w3.game.readText("UI\\UnitEditorData.txt"));
+    const sec = [...ini].find(([s]) => s.toLowerCase() === "defensetypeint")?.[1] ?? new Map<string, string>();
+    const defense: string[] = [];
+    for (const [k, v] of sec) {
+      if (!/^\d+$/.test(k)) continue;
+      const [place, label] = v.split(",");
+      defense[Number(place)] = westring(we, label);
+    }
+    const attack = ["NORMAL", "PIERCE", "SIEGE", "MAGIC", "CHAOS", "SPELLS", "HERO"].map((a) => westring(we, `WESTRING_UE_ATTACKTYPE_${a}`));
+    return { defense, attack };
+  })();
+  columns.catch(() => { columns = null; });
+  return columns;
+}
+
 const sectionTitle = (s: string) => SECTION_TITLES[s] ?? (/^TWN(\d)$/.exec(s) ? `Town Hall Tier ${s.slice(3)}` : s);
 
 /** The fields of a mode with labels and defaults, loaded once. */
@@ -112,8 +137,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const mode: Mode = /misc\.txt$/i.test(doc.path) ? "misc" : "skin";
         el.append(h("div.muted.gs-loading", {}, "Loading game data…"));
-        const [fields, text, wtsText] = await Promise.all([loadFields(w3, mode), doc.readText(), w3.workspace.readText(WTS).catch(() => null)]);
-        const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d));
+        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), w3.workspace.readText(WTS).catch(() => null),
+          w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null), loadColumns(w3).catch(() => ({ defense: [], attack: [] }))]);
+        const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), objects, cols);
         return {
           save: async () => {
             await doc.writeText(view.text);
@@ -144,9 +170,12 @@ class SettingsView {
   /** Edited texts of war3map.wts (written on save). */
   private texts = new Map<number, string>();
   private folded = new Set<string>();
+  /** Loads pictures of rows that scroll into view (the list has hundreds). */
+  private thumbs: IntersectionObserver | null = null;
 
   constructor(private w3: W3Api, private el: HTMLElement, private mode: Mode, private fields: Field[], public text: string,
-    private strings: StringTable | null, private editable: boolean, private setDirty: (d: boolean) => void) {
+    private strings: StringTable | null, private editable: boolean, private setDirty: (d: boolean) => void,
+    private objects: ObjectsService | null, private columns: Columns) {
     el.classList.add("gs-editor");
     el.tabIndex = -1;
     el.addEventListener("keydown", (e) => {
@@ -193,6 +222,10 @@ class SettingsView {
     this.render();
   }
 
+  /** Fields shown in a damage table (without its column labels they stay plain rows). */
+  private isTable(f: Field) {
+    return (f.type === "defenseTable" && this.columns.defense.length > 0) || (f.type === "attackTable" && this.columns.attack.length > 0);
+  }
   /** The map's raw value of a field, if it sets one. */
   private mapValue(ini: Map<string, Map<string, string>>, f: Field) {
     return ini.get(f.section.toLowerCase())?.get(f.key.toLowerCase());
@@ -216,6 +249,9 @@ class SettingsView {
       return h("input", { type: "checkbox", checked: value.trim() === "1", disabled: !this.editable,
         onchange: (e: Event) => this.set(f, (e.target as HTMLInputElement).checked ? "1" : "0", current) });
     }
+    if (f.type === "unitList" && this.objects && this.editable) {
+      return this.objects.objectField(this.el, { kinds: ["w3u"], list: true, current: value, onCommit: (v) => this.set(f, v, current) });
+    }
     const numeric = ["int", "real", "unreal"].includes(f.type);
     const input = h("input.gs-input", {
       type: numeric ? "number" : "text", value: this.shown(value), readOnly: !this.editable, step: f.type === "int" ? "1" : "any",
@@ -225,10 +261,59 @@ class SettingsView {
       title: f.type.endsWith("List") || f.type.endsWith("Table") ? "Comma-separated values" : "",
       onchange: () => { if (input.value !== this.shown(value)) this.set(f, input.value, current); },
     });
-    return input;
+    const pick = this.picker(f, value, (v) => this.set(f, v, current));
+    return pick ? h("span.gs-picked", {}, input, ...pick) : input;
+  }
+
+  /** A choose button for art and sound fields, with a small picture for images. */
+  private picker(f: Field, value: string, commit: (v: string) => void): HTMLElement[] | null {
+    const objects = this.objects;
+    if (!objects || !this.editable || !["icon", "model", "soundLabel"].includes(f.type)) return null;
+    const button = h("button", { title: f.type === "soundLabel" ? "Choose one of the game's sound labels" : "Choose a file from the map's imports or the game", onclick: async () => {
+      const chosen = f.type === "soundLabel" ? await objects.pickSoundLabel(this.el, { title: "Choose a sound label", current: value })
+        : await objects.pickFile(this.el, { title: f.type === "icon" ? "Choose an image" : "Choose a model", kind: f.type === "icon" ? "image" : "model", current: value });
+      if (chosen !== null) commit(chosen);
+    } }, f.type === "soundLabel" ? "Choose…" : "Browse…");
+    if (f.type !== "icon" || !value) return [button];
+    const thumb = h("img.gs-thumb", { alt: "", "data-path": value });
+    this.thumbs?.observe(thumb);
+    return [thumb, button];
+  }
+
+  /** Damage multipliers: one row per field, a column per armor or attack type. */
+  private table(fields: Field[], cols: string[], ini: Map<string, Map<string, string>>): HTMLElement {
+    const number = (v: string) => v.trim() !== "" && Number.isFinite(Number(v));
+    const row = (f: Field) => {
+      const current = this.mapValue(ini, f);
+      const cells = (current ?? f.def).split(",").map((c) => c.trim());
+      return h(`tr${current !== undefined ? ".set" : ""}`, { title: `${f.section} › ${f.key}\nDefault: ${f.def}` },
+        h("th", {}, f.label),
+        ...cols.map((_, i) => {
+          const input = h("input.gs-cell", { value: cells[i] ?? "", readOnly: !this.editable, onchange: () => {
+            if (!number(input.value)) { input.classList.add("invalid"); return; }
+            const next = cols.map((__, k) => cells[k] ?? "0");
+            next[i] = input.value.trim();
+            this.set(f, next.join(","), current);
+          } });
+          return h("td", {}, input);
+        }),
+        h("td", {}, current !== undefined && this.editable ? h("button.icon-button", { title: "Reset to the game's value (removes it from the map)", onclick: () => this.set(f, null, undefined) }, "↺") : null));
+    };
+    return h("div.gs-table-wrap", {}, h("table.gs-table", {},
+      h("thead", {}, h("tr", {}, h("th", {}), ...cols.map((c) => h("th", {}, c)), h("th", {}))),
+      h("tbody", {}, ...fields.map(row))));
   }
 
   render() {
+    this.thumbs?.disconnect();
+    this.thumbs = new IntersectionObserver((seen) => {
+      for (const e of seen) {
+        if (!e.isIntersecting) continue;
+        const img = e.target as HTMLImageElement;
+        this.thumbs?.unobserve(img);
+        void this.objects?.image(img.dataset.path!).then((src) => { if (src) img.src = src; else img.remove(); });
+      }
+    });
     const scroll = this.el.querySelector(".gs-list")?.scrollTop ?? 0;
     const ini = readIni(this.text);
     const q = this.query.trim().toLowerCase();
@@ -256,7 +341,13 @@ class SettingsView {
       return [
         h("div.gs-section", { onclick: () => { if (fold) this.folded.delete(section); else this.folded.add(section); this.render(); } },
           `${fold ? "▸" : "▾"} ${sectionTitle(section)}`, h("small.muted", {}, ` ${fs.length}`)),
-        ...(fold ? [] : fs.sort((a, b) => a.label.localeCompare(b.label)).map((f) => {
+        // The damage tables come first, whole: their rows are stored separately, but read as one.
+        ...(fold ? [] : (["defenseTable", "attackTable"] as const).flatMap((type) => {
+          const inTable = fs.filter((f) => f.type === type);
+          const cols = type === "defenseTable" ? this.columns.defense : this.columns.attack;
+          return inTable.length && cols.length ? [this.table(inTable, cols, ini)] : [];
+        })),
+        ...(fold ? [] : fs.filter((f) => !this.isTable(f)).sort((a, b) => a.label.localeCompare(b.label)).map((f) => {
           const current = this.mapValue(ini, f);
           const isSet = current !== undefined;
           const raceInfo = f.races && f.races.length > 1 && new Set(f.races.map(([, v]) => v)).size > 1

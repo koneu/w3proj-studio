@@ -4,7 +4,7 @@ import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { lostFunctions, scriptHash } from "../../lib/script/guard";
-import { generateScript, parseSoundLabels, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
+import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -30,9 +30,6 @@ const VJASS_OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s
 const ABILITY_FUNC = ["Campaign", "Common", "Human", "Item", "Neutral", "NightElf", "Orc", "Undead"].map((r) => `Units\\${r}AbilityFunc.txt`);
 
 /** UI\SoundInfo tables with the sound labels' settings, in the order the first match wins. */
-const SOUND_INFO = ["AbilitySounds", "AmbienceSounds", "AmbientMusic", "AnimSounds", "CinematicSounds", "DialogSounds", "DialogueCreepsBase",
-  "DialogueDemonBase", "DialogueHumanBase", "DialogueNagaBase", "DialogueNightElfBase", "DialogueOrcBase", "DialogueUndeadBase", "EAXDefs",
-  "EnvironmentSounds", "Music", "PortraitAnims", "SoundAssetCombat", "UISounds", "UnitAckSounds", "UnitCombatSounds"];
 
 interface GameTables {
   data: TriggerData;

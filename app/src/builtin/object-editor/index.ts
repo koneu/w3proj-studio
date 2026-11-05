@@ -3,11 +3,11 @@ import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
-import { iconLoader, imageLoader, objectsService, stripColors } from "./service";
+import { iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
 import { toProjectPath } from "../../lib/formats/archivepath";
-import { pickFile, type FileKind } from "./filepicker";
+import { pickFile, pickLabel, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
-import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType } from "./fields";
+import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
@@ -373,8 +373,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
           }, "Browse…");
         };
-        /** Editor for one field value. `mixed` lists differing values (multi-selection). */
-        const valueEditor = (type: ValueType, metaType: string, current: number | string, inherited: boolean, onCommit: (v: number | string) => void, mixed?: string[]) => {
+        /** A sound label from the game's tables. */
+        const labelButton = (metaType: string, value: string, onCommit: (v: number | string) => void): HTMLElement | null => (metaType !== "soundLabel" ? null
+          : h("button.obj-art-view", { title: "Choose one of the game's sound labels", onclick: async () => {
+            const label = await pickLabel(el, { title: "Choose a sound label", current: value, labels: () => soundLabels(w3) });
+            if (label !== null) onCommit(label);
+          } }, "Choose…"));
+        /** Editor for one field value. `mixed`: the differing values of a multi-selection, and
+         *  how to change each object's own one (flags and lists tick per object). */
+        const valueEditor = (type: ValueType, metaType: string, current: number | string, inherited: boolean, onCommit: (v: number | string) => void, mixed?: string[], each?: MixedValues["each"]) => {
           if (metaType === "bool") {
             const box = h("input", { type: "checkbox", checked: !mixed && Number(current) === 1, onchange: () => onCommit(box.checked ? 1 : 0) });
             if (mixed) box.indeterminate = true;
@@ -391,14 +398,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return h("div.obj-value-cell", {}, input, h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
           }
           // Object codes and lists of them: the object browser; the value types of UnitEditorData:
-          // a choice, a list or flags. (Mixed values in a multi-selection stay plain text.)
-          if (!mixed && (OBJECT_CODE[metaType] || OBJECT_LIST[metaType])) {
-            return objectEditor(objects, el, OBJECT_CODE[metaType] ?? OBJECT_LIST[metaType], !!OBJECT_LIST[metaType], current, onCommit);
+          // a choice, a list or flags.
+          if (OBJECT_CODE[metaType] || OBJECT_LIST[metaType]) {
+            return objectEditor(objects, el, OBJECT_CODE[metaType] ?? OBJECT_LIST[metaType], !!OBJECT_LIST[metaType], mixed ? "" : current, onCommit, !!mixed);
           }
           const et = editorTypes?.get(metaType);
-          if (!mixed && et) return typeEditor(et, current, type !== "string", onCommit);
+          if (et) return typeEditor(et, mixed ? "" : current, type !== "string", onCommit, mixed && each ? { values: mixed, each } : undefined);
           const resolved = mixed ? null : resolveStr(current);
-          const shown = mixed?.map((v) => stripColors(resolveStr(v) ?? v) || "(empty)");
+          const shown = mixed && [...new Set(mixed)].map((v) => stripColors(resolveStr(v) ?? v) || "(empty)");
           const input = h(`input.obj-value${inherited ? ".inherited" : ""}${mixed ? ".mixed" : ""}`, {
             value: mixed ? "" : String(current),
             placeholder: shown ? `mixed: ${shown.slice(0, 4).join(" / ")}${shown.length > 4 ? " / …" : ""}` : "",
@@ -411,7 +418,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             },
           });
           return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null,
-            mixed ? null : browseButton(metaType, String(current), onCommit), mixed ? null : artPreview(metaType, String(current)));
+            browseButton(metaType, mixed ? "" : String(current), onCommit), labelButton(metaType, mixed ? "" : String(current), onCommit),
+            mixed ? null : artPreview(metaType, String(current)));
         };
 
         const fieldRow = (o: Obj, f: FieldMeta, level: number, levels: number) => {
@@ -607,10 +615,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const distinct = [...new Set(values)];
             const isSame = distinct.length === 1;
             const commit = (v: number | string) => { for (const o of objs) setValue(o, f, level, v); markDirty(); renderDetail(); };
+            const each = (change: (old: string) => number | string) => { for (const o of objs) setValue(o, f, level, change(effective(o, f, level))); markDirty(); renderDetail(); };
             const row = h(`tr${anyModified ? ".modified" : ""}`, {},
               h("td", { title: `${f.category} · ${f.type}` }, h("span.obj-field-label", {}, f.label), h("code", {}, f.id)),
               h("td.muted", {}, level ? String(level) : ""),
-              h("td", {}, valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : distinct)),
+              h("td", {}, valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : values, each)),
               h("td", {}, anyModified
                 ? h("button.icon-button", { title: "Reset all selected to their inherited values", onclick: () => { for (const o of objs) resetValue(o, f, level); markDirty(); renderDetail(); } }, "↺")
                 : null));

@@ -4,7 +4,10 @@
 import type { W3Api } from "../../extensions/api";
 import type { ObjectsService, PickedObject } from "../../extensions/services";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
+import { objectEditor } from "./fields";
+import { pickFile, pickLabel } from "./filepicker";
 import { pickObject } from "./picker";
+import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
 import { StringTable } from "../../lib/formats/wts";
 import { toProjectPath } from "../../lib/formats/archivepath";
@@ -87,8 +90,17 @@ export function iconLoader(w3: W3Api) {
   };
 }
 
+/** The game's sound labels, sorted. Read once. */
+let labels: Promise<string[]> | null = null;
+export function soundLabels(w3: W3Api): Promise<string[]> {
+  labels ??= Promise.all(SOUND_INFO.map((n) => w3.game.readText(`UI\\SoundInfo\\${n}.slk`).catch(() => ""))).then((t) => [...parseSoundLabels(t).keys()].sort((a, b) => a.localeCompare(b)));
+  labels.catch(() => { labels = null; });
+  return labels;
+}
+
 export function objectsService(w3: W3Api): ObjectsService {
   const icons = iconLoader(w3);
+  const images = imageLoader(w3);
   // Callers ask for names one by one, a whole map's worth at once: the files are read once per
   // kind until something is saved or changes on disk.
   const parsed = new Map<string, ReturnType<typeof customObjects>>();
@@ -102,7 +114,11 @@ export function objectsService(w3: W3Api): ObjectsService {
   };
   /** Tab last used per set of kinds, so the browser reopens where it was. */
   const lastTab = new Map<string, number>();
-  return {
+  const service: ObjectsService = {
+    pickFile: (host, opts) => pickFile(w3, host, { ...opts, thumb: images }),
+    pickSoundLabel: (host, opts) => pickLabel(host, { ...opts, labels: () => soundLabels(w3) }),
+    image: (path) => images(/\.\w+$/.test(path) ? path : `${path}.blp`),
+    objectField: (host, opts) => objectEditor(service, host, opts.kinds, opts.list, opts.current, opts.onCommit),
     async name(id, kinds = Object.keys(KIND_LABELS)) {
       for (const kind of kinds) {
         const kd = await loadKind(w3, kind).catch(() => null);
@@ -139,4 +155,5 @@ export function objectsService(w3: W3Api): ObjectsService {
       }
     },
   };
+  return service;
 }

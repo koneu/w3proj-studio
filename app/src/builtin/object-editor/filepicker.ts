@@ -51,9 +51,14 @@ async function filesOf(w3: W3Api, kind: FileKind): Promise<FileEntry[]> {
   return [...imported, ...game];
 }
 
-export interface FilePickOptions {
+interface PickOptions {
   title: string;
-  kind: FileKind;
+  /** Search hint. */
+  placeholder: string;
+  /** The entries, read when the list opens. */
+  load: () => Promise<FileEntry[]>;
+  /** Rows show thumbnails. */
+  images: boolean;
   /** The field's value now (preselects the search). */
   current: string;
   /** Thumbnail (data URL) of an image path. */
@@ -61,7 +66,17 @@ export interface FilePickOptions {
 }
 
 /** Lets the user choose a file; resolves with its path, or null when cancelled. */
-export function pickFile(w3: W3Api, host: HTMLElement, opts: FilePickOptions): Promise<string | null> {
+export function pickFile(w3: W3Api, host: HTMLElement, opts: { title: string; kind: FileKind; current: string; thumb?: (path: string) => Promise<string | null> }): Promise<string | null> {
+  return pick(host, { ...opts, images: opts.kind === "image", placeholder: "Search by words of the path, e.g. footman, BTN hero", load: () => filesOf(w3, opts.kind) });
+}
+
+/** Lets the user choose one of `labels` (sound labels); resolves with it, or null when cancelled. */
+export function pickLabel(host: HTMLElement, opts: { title: string; current: string; labels: () => Promise<string[]> }): Promise<string | null> {
+  return pick(host, { title: opts.title, current: opts.current, images: false, placeholder: "Search by words of the label",
+    load: async () => (await opts.labels()).map((path) => ({ path, imported: false })) });
+}
+
+function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
   return new Promise((resolve) => {
     let all: FileEntry[] = [];
     let shown: FileEntry[] = [];
@@ -72,7 +87,7 @@ export function pickFile(w3: W3Api, host: HTMLElement, opts: FilePickOptions): P
     // The current file's name, without folders and extension, as the first search.
     const start = (opts.current.split(",")[0] ?? "").trim().replace(/^.*\\/, "").replace(/\.\w+$/, "");
     const search = h("input.picker-search", {
-      placeholder: "Search by words of the path, e.g. footman, BTN hero",
+      placeholder: opts.placeholder,
       value: start === "_" ? "" : start,
       oninput: () => { active = 0; filter(); },
       onkeydown: (e: KeyboardEvent) => {
@@ -94,7 +109,7 @@ export function pickFile(w3: W3Api, host: HTMLElement, opts: FilePickOptions): P
     const renderRows = () => {
       seen.disconnect();
       rowsEl.replaceChildren(...shown.slice(0, MAX_ROWS).map((f, i) => {
-        const img = opts.kind === "image" && opts.thumb ? h("img.picker-icon", { alt: "", "data-path": f.path }) : null;
+        const img = opts.images && opts.thumb ? h("img.picker-icon", { alt: "", "data-path": f.path }) : null;
         if (img) seen.observe(img);
         return h(`div.picker-row${i === active ? ".active" : ""}`, {
           onmousedown: (e: MouseEvent) => { e.preventDefault(); finish(f.path); },
@@ -118,6 +133,6 @@ export function pickFile(w3: W3Api, host: HTMLElement, opts: FilePickOptions): P
     host.append(overlay);
     search.focus();
     search.select();
-    void filesOf(w3, opts.kind).then((files) => { all = files; filter(); }, (e) => { countEl.textContent = String((e as Error).message ?? e); });
+    void opts.load().then((files) => { all = files; filter(); }, (e) => { countEl.textContent = String((e as Error).message ?? e); });
   });
 }

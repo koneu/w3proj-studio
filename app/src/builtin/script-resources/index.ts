@@ -9,14 +9,11 @@ import { CODE_EDITOR_SERVICE, type CodeEditorService, type CompletionItem, type 
 import { toArchiveName } from "../../lib/formats/archivepath";
 import { parseIni } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
-import { parseSoundLabels } from "../../lib/script/jass";
+import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 
 /** At most this many items per list. */
 const MAX = 150;
 const MODELS = ["mdx", "mdl"], TEXTURES = ["blp", "dds", "tga", "png"], SOUNDS = ["wav", "mp3", "flac", "ogg"];
-const SOUND_INFO = ["AbilitySounds", "AmbienceSounds", "AmbientMusic", "AnimSounds", "CinematicSounds", "DialogSounds", "DialogueCreepsBase",
-  "DialogueDemonBase", "DialogueHumanBase", "DialogueNagaBase", "DialogueNightElfBase", "DialogueOrcBase", "DialogueUndeadBase", "EAXDefs",
-  "EnvironmentSounds", "Music", "PortraitAnims", "SoundAssetCombat", "UISounds", "UnitAckSounds", "UnitCombatSounds"];
 const ABILITY_FUNC = ["Campaign", "Common", "Human", "Item", "Neutral", "NightElf", "Orc", "Undead"].map((r) => `Units\\${r}AbilityFunc.txt`);
 const KIND_LABELS: Record<string, string> = { w3u: "unit", w3a: "ability", w3t: "item", w3h: "buff", w3q: "upgrade", w3b: "destructable", w3d: "doodad" };
 

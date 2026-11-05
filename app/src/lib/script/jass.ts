@@ -276,6 +276,11 @@ export function sounds(i: ScriptInput): string {
 export interface SoundLabel { channel: number; pitch: number; minDistance: number; maxDistance: number; distanceCutoff: number }
 
 /** Sound labels from the UI\SoundInfo tables (first row of a name wins; "_" is NaN, so never equal). */
+/** The tables of UI\\SoundInfo (`${name}.slk`) that define sound labels. */
+export const SOUND_INFO = ["AbilitySounds", "AmbienceSounds", "AmbientMusic", "AnimSounds", "CinematicSounds", "DialogSounds", "DialogueCreepsBase",
+  "DialogueDemonBase", "DialogueHumanBase", "DialogueNagaBase", "DialogueNightElfBase", "DialogueOrcBase", "DialogueUndeadBase", "EAXDefs",
+  "EnvironmentSounds", "Music", "PortraitAnims", "SoundAssetCombat", "UISounds", "UnitAckSounds", "UnitCombatSounds"];
+
 export function parseSoundLabels(tables: string[]): Map<string, SoundLabel> {
   const out = new Map<string, SoundLabel>();
   for (const text of tables) {

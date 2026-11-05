@@ -54,13 +54,31 @@ export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
   return typesPromise;
 }
 
+/** Several selected objects whose values differ: `each` changes each object's own value. */
+export interface MixedValues { values: string[]; each(change: (old: string) => number | string): void }
+
+const listItems = (value: string) => value.split(",").map((s) => s.trim()).filter((s) => s && s !== "_");
+
+/** A comma list with one entry put in or taken out (its alternative spellings count as it). */
+export function setListValue(old: string, value: string, alts: string[], on: boolean): string {
+  const same = new Set([value, ...alts].map((s) => s.toLowerCase()));
+  const rest = listItems(old).filter((s) => !same.has(s.toLowerCase()));
+  return (on ? [...rest, value] : rest).join(",");
+}
+
+/** How many of `values` a check applies to, as a checkbox shows it. */
+export function checkState(values: string[], has: (value: string) => boolean): { checked: boolean; indeterminate: boolean } {
+  const n = values.filter(has).length;
+  return { checked: n === values.length && n > 0, indeterminate: n > 0 && n < values.length };
+}
+
 /** One choice, a list of checkboxes, or flag checkboxes for an editor type. */
-export function typeEditor(t: EditorType, current: number | string, numeric: boolean, onCommit: (v: number | string) => void): HTMLElement {
+export function typeEditor(t: EditorType, current: number | string, numeric: boolean, onCommit: (v: number | string) => void, mixed?: MixedValues): HTMLElement {
   if (t.shape === "single") {
     const value = String(current);
     const known = t.entries.some((e) => e.value.toLowerCase() === value.toLowerCase() || e.alts.includes(value.toLowerCase()));
     const sel = h("select.obj-select", { onchange: () => onCommit(numeric ? Number(sel.value) : sel.value) },
-      ...(known ? [] : [h("option", { value, selected: true }, value || "(none)")]),
+      ...(known ? [] : [h("option", { value, selected: true }, mixed ? "(mixed)" : value || "(none)")]),
       ...t.entries.map((e) => h("option", { value: e.value, selected: e.value.toLowerCase() === value.toLowerCase() || e.alts.includes(value.toLowerCase()) }, e.label)));
     return sel;
   }
@@ -68,7 +86,9 @@ export function typeEditor(t: EditorType, current: number | string, numeric: boo
     const bits = Number(current) || 0;
     const boxes = t.entries.map((e) => {
       const bit = 1 << Number(e.value);
-      const box = h("input", { type: "checkbox", checked: (bits & bit) !== 0, onchange: () => {
+      const state = mixed ? checkState(mixed.values, (v) => ((Number(v) || 0) & bit) !== 0) : { checked: (bits & bit) !== 0, indeterminate: false };
+      const box = h("input", { type: "checkbox", checked: state.checked, indeterminate: state.indeterminate, onchange: () => {
+        if (mixed) { mixed.each((old) => (box.checked ? (Number(old) || 0) | bit : (Number(old) || 0) & ~bit)); return; }
         const now = t.entries.reduce((n, x, i) => (boxes[i].box.checked ? n | (1 << Number(x.value)) : n), 0);
         onCommit(now);
       } }) as HTMLInputElement;
@@ -78,17 +98,23 @@ export function typeEditor(t: EditorType, current: number | string, numeric: boo
   }
   // A comma list of values (alternative spellings count as the value).
   // "_" is how SLKs and maps write an empty list.
-  const have = new Set(String(current).split(",").map((s) => s.trim().toLowerCase()).filter((s) => s && s !== "_"));
-  const has = (e: EditorType["entries"][number]) => have.has(e.value.toLowerCase()) || e.alts.some((a) => have.has(a.toLowerCase()));
-  const boxes = t.entries.map((e) => h("input", { type: "checkbox", checked: has(e), onchange: () => {
-    onCommit(t.entries.filter((_, i) => (boxes[i] as HTMLInputElement).checked).map((x) => x.value).join(","));
-  } }));
+  const holds = (list: string, e: EditorType["entries"][number]) => {
+    const have = new Set(listItems(list).map((s) => s.toLowerCase()));
+    return have.has(e.value.toLowerCase()) || e.alts.some((a) => have.has(a.toLowerCase()));
+  };
+  const boxes = t.entries.map((e, n) => {
+    const state = mixed ? checkState(mixed.values, (v) => holds(v, e)) : { checked: holds(String(current), e), indeterminate: false };
+    return h("input", { type: "checkbox", checked: state.checked, indeterminate: state.indeterminate, onchange: () => {
+      if (mixed) { mixed.each((old) => setListValue(old, e.value, e.alts, (boxes[n] as HTMLInputElement).checked)); return; }
+      onCommit(t.entries.filter((_, i) => (boxes[i] as HTMLInputElement).checked).map((x) => x.value).join(","));
+    } });
+  });
   return h("div.obj-checks", {}, ...t.entries.map((e, i) => h("label.obj-check", {}, boxes[i], e.label)));
 }
 
 /** An object code (one) or a list of them, chosen in the object browser. */
 export function objectEditor(objects: ObjectsService, host: HTMLElement, kinds: string[], list: boolean, current: number | string,
-  onCommit: (v: string) => void): HTMLElement {
+  onCommit: (v: string) => void, mixed = false): HTMLElement {
   const ids = String(current).split(",").map((s) => s.trim()).filter((s) => s && s !== "_");
   const pick = async () => (await objects.pick(host, { title: list ? "Add" : "Choose", kinds }))?.id;
   const chip = (id: string, i: number) => {
@@ -99,8 +125,9 @@ export function objectEditor(objects: ObjectsService, host: HTMLElement, kinds: 
   };
   return h("div.obj-chips", {},
     ...ids.map(chip),
-    h("button.obj-chip-add", { onclick: async () => {
+    mixed ? h("span.muted", {}, "mixed") : null,
+    h("button.obj-chip-add", { title: mixed ? "Replaces the value of all selected objects" : "", onclick: async () => {
       const id = await pick();
       if (id) onCommit(list ? [...ids, id].join(",") : id);
-    } }, list ? "+ Add" : ids.length ? "Change…" : "Choose…"));
+    } }, mixed ? "Set all…" : list ? "+ Add" : ids.length ? "Change…" : "Choose…"));
 }

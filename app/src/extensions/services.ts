@@ -11,6 +11,14 @@ export interface ObjectsService {
   icon(kind: string, id: string): Promise<string | null>;
   /** Display name of an object id (custom objects: the map's name), searching `kinds` (default: all). */
   name(id: string, kinds?: string[]): Promise<string | undefined>;
+  /** The file browser: a model or image from the map's imports or the game; null when cancelled. */
+  pickFile(host: HTMLElement, opts: { title: string; kind: "model" | "image"; current: string }): Promise<string | null>;
+  /** The game's sound labels to choose from; null when cancelled. */
+  pickSoundLabel(host: HTMLElement, opts: { title: string; current: string }): Promise<string | null>;
+  /** An image of the map's imports or the game as a data URL, or null. */
+  image(path: string): Promise<string | null>;
+  /** The object editor's control for a field holding object ids (one, or a comma list). */
+  objectField(host: HTMLElement, opts: { kinds: string[]; list: boolean; current: string; onCommit: (value: string) => void }): HTMLElement;
 }
 
 export interface PickedObject {
