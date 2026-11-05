@@ -328,6 +328,8 @@ export interface W3Api {
   /** Tools for the one MCP server. Declare a tool in `contributes.mcpTools`, answer it here. */
   mcp: {
     registerTool(name: string, handler: McpToolHandler): Disposable;
+    /** The tools on offer now. */
+    list(): { name: string; description: string }[];
     /** One JSON-RPC request; used by the MCP Server extension. */
     handle(message: string): Promise<string>;
   };

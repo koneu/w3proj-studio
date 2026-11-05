@@ -5,6 +5,8 @@
   "description": "Lets AI tools use the open project through the Model Context Protocol. One server; every extension brings its own tools.",
   "activationEvents": ["onStartup"],
   "contributes": {
+    "viewContainers": [{ "id": "mcp", "title": "MCP", "icon": "⇄", "order": 80 }],
+    "views": [{ "id": "w3.mcp.status", "title": "MCP Server", "container": "mcp" }],
     "commands": [
       { "id": "w3.mcp.toggle", "title": "Turn Server On or Off", "category": "MCP" },
       { "id": "w3.mcp.copySetup", "title": "Copy Client Setup", "category": "MCP" }

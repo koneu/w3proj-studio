@@ -4,9 +4,13 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { projectPath } from "../../extensions/mcp";
+import { h } from "../../workbench/dom";
 
 /** One read_file answer; `offset` gets the rest. */
 const READ_LIMIT = 200_000;
+
+interface ClientInfo { id: string; name: string; path: string; found: boolean; configured: boolean }
+interface SetupResult { path: string; changed: boolean; backup: string | null }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const status = w3.statusBar.add({ id: "w3.mcp.status", text: "", command: "w3.mcp.toggle", align: "right", tooltip: "MCP server is on: AI clients on this computer can use the open project. Click to turn it off." });
@@ -30,7 +34,45 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return project;
   };
 
+  /** Writes into another program's configuration, so it asks first, naming the file. */
+  const trySetup = async (client: ClientInfo) => {
+    const write = "Add it";
+    // Not found: nothing would be written, so there's nothing to ask, only the reason to give.
+    const asked = client.found ? await w3.window.showWarning(`Add W3Proj Studio to ${client.name}? This changes ${client.path}, and keeps the old file next to it as a backup.`, write, "Cancel") : write;
+    if (asked !== write) return;
+    try {
+      const done = await w3.backend.invoke<SetupResult>("mcp_client_setup", { id: client.id });
+      void w3.window.showInfo(done.changed ? `Added to ${client.name}. Restart it to see the tools.` : `${client.name} is already set up.`);
+    } catch (e) {
+      void w3.window.showError(`Couldn't set up ${client.name}: ${e}`);
+    }
+    w3.views.refresh("w3.mcp.status");
+  };
+
+  const clientRow = (client: ClientInfo) => h("div.ext-item", { title: client.path },
+    h("div.ext-title", {}, h("strong", {}, client.name)),
+    h("div.ext-desc", {}, client.configured ? "Set up. Restart it if the tools don't show." : client.found ? "Found, not set up yet." : "Not found in the usual place."),
+    h("div.ext-actions", {}, h("button", { onclick: () => void trySetup(client) }, `Try to set up for ${client.name}`)));
+
   ctx.subscriptions.push(
+    w3.views.register("w3.mcp.status", {
+      render(el) {
+        const on = enabled();
+        el.append(
+          h("div.ext-item", {},
+            h("div.ext-desc", {}, on ? "On: AI clients on this computer can use the open project." : "Off: AI clients can't reach this app."),
+            h("div.ext-actions", {},
+              h("button", { onclick: () => void w3.commands.execute("w3.mcp.toggle") }, on ? "Turn off" : "Turn on"),
+              h("button", { onclick: () => void w3.commands.execute("w3.mcp.copySetup").catch((e) => w3.window.showError(String(e))) }, "Copy client setup"))),
+          h("div.ext-section-title", {}, "CLIENTS"),
+          h("div.ext-desc.ext-formats-hint", {}, "Looks where a standard installation keeps its settings, so this can fail. Copy client setup always works."));
+        const clients = h("div", {}, h("div.view-empty", {}, "Looking…"));
+        el.append(clients, h("div.ext-section-title", {}, "TOOLS"),
+          h("div", {}, ...w3.mcp.list().map((t) => h("div.ext-item", {}, h("div.ext-title", {}, h("code", {}, t.name)), h("div.ext-desc", {}, t.description)))));
+        w3.backend.invoke<ClientInfo[]>("mcp_clients").then((list) => clients.replaceChildren(...list.map(clientRow)),
+          (e) => clients.replaceChildren(h("div.view-error", {}, String(e))));
+      },
+    }),
     w3.commands.register("w3.mcp.toggle", async () => {
       await w3.settings.set("mcp.enabled", !enabled());
     }),
@@ -40,7 +82,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await navigator.clipboard.writeText(JSON.stringify({ mcpServers: { w3proj: { command: bridge, args: ["mcp"] } } }, null, 2));
       void w3.window.showInfo("Copied the MCP client setup. Paste it into your client's configuration.");
     }),
-    w3.settings.onDidChange((key) => { if (key === "mcp.enabled") void apply(); }),
+    w3.settings.onDidChange((key) => {
+      if (key === "mcp.enabled") void apply();
+      if (key.startsWith("mcp.")) w3.views.refresh("w3.mcp.status");
+    }),
 
     w3.mcp.registerTool("project_info", () => {
       const project = open();

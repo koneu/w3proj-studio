@@ -279,7 +279,7 @@ export class Workbench {
       },
       backend: { invoke, listen },
       lib: () => import("../extensions/lib"),
-      mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), handle: (message) => wb.mcp.handle(message) },
+      mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), list: () => wb.mcp.list(), handle: (message) => wb.mcp.handle(message) },
       extensions: {
         all: () => wb.host.extensions.map((e) => ({ manifest: e.manifest, source: e.source, active: e.active, disabled: e.disabled, error: e.error })),
       },

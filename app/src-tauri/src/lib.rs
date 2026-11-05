@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 mod mcp;
+mod mcpclients;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -1003,6 +1004,8 @@ pub fn run() {
             mcp::mcp_serve,
             mcp::mcp_respond,
             mcp::mcp_bridge_path,
+            mcpclients::mcp_clients,
+            mcpclients::mcp_client_setup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running W3Proj Studio");
