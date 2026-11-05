@@ -217,7 +217,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (reason !== "command" && warned.has(key)) return false;
             warned.add(key);
             void w3.window.showWarning(`${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} that the map's triggers don't make (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""}), so it isn't regenerated and changed triggers don't reach it. Replacing it deletes that code.`,
-              "Replace the script", "Keep it").then((c) => { if (c === "Replace the script") void write("replaced on request", true).catch(() => {}); });
+              "Replace the script", "Keep it").then(async (c) => {
+                if (c !== "Replace the script") return;
+                // That code exists nowhere else: a checkpoint keeps it, where they're enabled.
+                await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch(() => {});
+                await write("replaced on request", true).catch(() => {});
+              });
             return false;
           }
         }

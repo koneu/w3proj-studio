@@ -140,9 +140,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       w3.window.showInfo(`Imported ${r.files.length} files into ${dir}.${unnamed}`);
     }),
 
-    w3.commands.register("w3.project.syncFromMap", async () => {
+    // `file`: the map to sync from (else asked for).
+    w3.commands.register("w3.project.syncFromMap", async (file?: string) => {
       root();
-      const map = await w3.window.pickFile({ title: "Sync project from map", filters: MAP_FILTERS });
+      const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Sync project from map", filters: MAP_FILTERS });
       if (map) await sync(map);
     }),
 

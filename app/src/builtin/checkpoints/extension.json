@@ -1,0 +1,23 @@
+{
+  "id": "w3.checkpoints",
+  "name": "Checkpoints",
+  "version": "0.1.0",
+  "description": "Packs the project now and then into build/checkpoints, so a bug or a slip can't cost more than a few minutes of map work; any of them can be restored.",
+  "activationEvents": ["onStartup"],
+  "extensionDependencies": ["w3.mapProject"],
+  "contributes": {
+    "commands": [
+      { "id": "w3.checkpoints.create", "title": "Create Checkpoint", "category": "Project" },
+      { "id": "w3.checkpoints.restore", "title": "Restore Checkpoint…", "category": "Project" }
+    ],
+    "configuration": {
+      "title": "Checkpoints",
+      "properties": {
+        "checkpoints.enabled": { "type": "boolean", "default": true, "description": "Pack the project into build/checkpoints every few minutes while it has saved changes. Unsaved edits aren't included." },
+        "checkpoints.intervalMinutes": { "type": "number", "default": 5, "description": "Minutes between checkpoints." },
+        "checkpoints.keep": { "type": "number", "default": 10, "description": "Checkpoints kept per project; older ones are deleted." },
+        "checkpoints.maxMegabytes": { "type": "number", "default": 500, "description": "Projects larger than this get no automatic checkpoints (packing them takes long and each copy takes that much disk). Create Checkpoint still works." }
+      }
+    }
+  }
+}
