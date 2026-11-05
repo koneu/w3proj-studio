@@ -17,6 +17,8 @@ export interface SpotFacts {
   routes: readonly (readonly Point[])[];
   /** Pathing cells something can't be built on. */
   noBuild?(x: number, y: number): boolean;
+  /** The cliff level at a place: a natural shares its base's. */
+  levelAt?(x: number, y: number): number;
   /** Where the map's middle is, for rotated twins. */
   whole: { left: number; bottom: number; right: number; top: number };
 }
@@ -68,6 +70,16 @@ export function findSpots(kind: SpotKind, f: SpotFacts, count: number, mirror: b
     if (kind === "expansion" && f.noBuild) for (const [dx, dy] of [[0, 0], [160, 0], [-160, 0], [0, 160], [0, -160]]) if (f.noBuild(x + dx, y + dy)) return null;
     return { way, fromStart, fromRoute, sheltered: shelter(x, y) };
   };
+  /** Forward and to the side of the nearest start, on its level, as ladder maps have naturals. */
+  const natural = (x: number, y: number) => {
+    if (f.starts.length !== 2) return 0;
+    const home = f.starts.reduce((a, b) => (Math.hypot(a[0] - x, a[1] - y) < Math.hypot(b[0] - x, b[1] - y) ? a : b));
+    const enemy = f.starts[0] === home ? f.starts[1] : f.starts[0];
+    const a = Math.atan2(enemy[1] - home[1], enemy[0] - home[0]), b = Math.atan2(y - home[1], x - home[0]);
+    const turn = Math.abs((((b - a) * 180) / Math.PI + 540) % 360 - 180);
+    const same = !f.levelAt || f.levelAt(x, y) === f.levelAt(home[0], home[1]);
+    return (same ? 300 : -300) - Math.abs(turn - 40) * 4;
+  };
   const found: { at: [number, number]; score: number; fromStart: number; fromRoute?: number; sheltered: number; wayIn: number; twin?: [number, number] }[] = [];
   for (let y = g.offsetY + 64; y < g.offsetY + h * 32; y += 128) {
     for (let x = g.offsetX + 64; x < g.offsetX + w * 32; x += 128) {
@@ -75,7 +87,7 @@ export function findSpots(kind: SpotKind, f: SpotFacts, count: number, mirror: b
       if (!here) continue;
       const twin: [number, number] | undefined = mirror ? [f.whole.left + f.whole.right - x, f.whole.bottom + f.whole.top - y] : undefined;
       if (twin && !check(twin[0], twin[1])) continue;
-      const score = kind === "camp" ? here.sheltered * 1000 + Math.min(here.fromRoute, 1800) / 3 : Math.min(here.way, 700) - Math.abs(here.fromStart - 5000) / 4;
+      const score = kind === "camp" ? here.sheltered * 1000 + Math.min(here.fromRoute, 1800) / 3 : Math.min(here.way, 700) - Math.abs(here.fromStart - 5000) / 4 + natural(x, y);
       found.push({ at: [x, y], score: Math.round(score), fromStart: Math.round(here.fromStart), ...(Number.isFinite(here.fromRoute) ? { fromRoute: Math.round(here.fromRoute) } : {}), sheltered: Math.round(here.sheltered * 100) / 100, wayIn: here.way, ...(twin ? { twin } : {}) });
     }
   }

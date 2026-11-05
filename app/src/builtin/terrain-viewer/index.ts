@@ -364,7 +364,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     const number = (text: string, key: string, fallback: number) => Number(new RegExp(`^${key}=(\\d+)`, "m").exec(text)?.[1] ?? fallback);
     const widest = starts.map((s) => widestFrom(grid, at(s)));
-    return { handle, grid, widest, units, trees, routes, levels: (id: string) => lookup(levels, id), sights: (id: string) => lookup(sights, id), number, game, data };
+    const t = handle.terrain, counts = new Map<number, number>();
+    for (const c of t.corners) if (!c.boundary) counts.set(c.layer, (counts.get(c.layer) ?? 0) + 1);
+    const commonLevel = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const levelAt = (x: number, y: number) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer ?? 0;
+    return { handle, grid, widest, units, trees, routes, levelAt, commonLevel, levels: (id: string) => lookup(levels, id), sights: (id: string) => lookup(sights, id), number, game, data };
   };
 
   let placeObjects: McpToolHandler = () => undefined;
@@ -632,7 +636,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return checkMelee({
         units: f.units, trees: f.trees, routes: f.routes, level: f.levels, sight: f.sights,
         callForHelp: f.number(f.game, "CreepCallForHelp", 600), shopNotify: f.number(f.data, "NeutralUseNotifyRadius", 900),
-        narrow: narrowStrips(f.grid),
+        narrow: narrowStrips(f.grid), levelAt: f.levelAt, commonLevel: f.commonLevel,
         widestTo: (x, y) => {
           // Creeps and what stands by a camp fill its middle: the way to the place beside it counts.
           let best = 0;
@@ -655,7 +659,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const combined = new Uint16Array(f.grid.width * f.grid.height);
       for (const field of f.widest) for (let i = 0; i < combined.length; i++) combined[i] = Math.max(combined[i], field[i]);
       return findSpots(kind, {
-        grid: f.grid, widest: combined, starts, whole: wholeMap(f.handle),
+        grid: f.grid, widest: combined, starts, whole: wholeMap(f.handle), levelAt: f.levelAt,
         mines: f.units.filter((u) => u.id === "ngol").map((u) => [u.x, u.y] as [number, number]),
         camps: campsOf(f.units, { level: f.levels }).map((c) => c.centre),
         routes: f.routes.flatMap((r) => (r.points ? [r.points] : [])),

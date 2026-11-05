@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { GUIDES, guideTemplate, hasRules, isTopic, ownTopics, parseGuide, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
+import { GUIDES, guideTemplate, hasRules, isTopic, LAYOUT_IDEAS, layoutIdea, ownTopics, parseGuide, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 
 const builtin = "src/builtin";
 const tools = new Set(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
@@ -63,6 +63,13 @@ test("a user's guide can be plain text", () => {
   const made = parseOwnGuide(`${guideTemplate("pathing")}Text.\n`);
   assert.equal(made.summary, "One line on when the AI should read this guide.");
   assert.ok(made.text.startsWith("# pathing") && !made.text.includes("AI doesn't see"));
+});
+
+test("layout ideas differ by chance, and every one can come up", () => {
+  const seen = new Set(LAYOUT_IDEAS.map((_, i) => layoutIdea(() => i / LAYOUT_IDEAS.length)));
+  assert.equal(seen.size, LAYOUT_IDEAS.length);
+  assert.ok(layoutIdea(() => 0.999999).includes(LAYOUT_IDEAS[LAYOUT_IDEAS.length - 1]));
+  assert.ok(!LAYOUT_IDEAS.some((idea) => /main base on|plateau for the base/i.test(idea)), "not the habit it's meant to break");
 });
 
 test("the guides a client is pointed at exist", () => {

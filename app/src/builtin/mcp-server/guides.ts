@@ -17,6 +17,30 @@ export function parseGuide(raw: string): Guide {
 
 export const GUIDES: Record<string, Guide> = { terrain: parseGuide(terrain), spells: parseGuide(spells), melee: parseGuide(melee) };
 
+/** Starting points for a melee map. Left alone, an AI builds the same map every time, and each chat
+ *  starts fresh, so a guide can't ask it to vary: read_guide picks one by chance. */
+export const LAYOUT_IDEAS = [
+  "Open field: hardly any terrain in the way. Camps, distances and scattered forest clumps make the game, as on Northern Isles.",
+  "Ring: something big fills the middle, a lake, a mesa or a deep forest, so armies go round left or right, and a player has to guess which.",
+  "Raised middle: bases on ordinary ground, a broad plateau in the centre with wide ramps, holding the tavern. Whoever holds it sees the map.",
+  "One long road: a single winding main way between the bases, as on Terenas Stand, with camps and expansions off to its sides. Long walks, so harassing costs time.",
+  "Water map: wide water divides the map, and shallow fords are the crossings. Few places to cross, so each one matters.",
+  "Forest map: tree walls do the work instead of cliffs, leaving clearings joined by broad gaps. Lumber opens new ways as the game goes on.",
+  "River: one river runs corner to corner between the bases, with two or three fords and land bridges at different points along it.",
+  "Terraces: the ground steps up across the map in long low cliffs with wide ramps, so every fight has a high side and a low side.",
+];
+
+/** One of them, as a section for the end of the melee guide. */
+export const layoutIdea = (random: () => number) => `
+## The idea for this map
+
+Unless the user asked for something else, start from this one, picked by chance so that maps differ:
+
+${LAYOUT_IDEAS[Math.floor(random() * LAYOUT_IDEAS.length) % LAYOUT_IDEAS.length]}
+
+Make it your own, and keep it clear: a map should be describable in one sentence.
+`;
+
 /** Whether a user's file says anything, past the comment it starts with. */
 export const hasRules = (own: string) => stripComments(own).length > 0;
 

@@ -175,6 +175,26 @@ test("unequal walks show, however even the map looks", () => {
   assert.ok(checkMelee(uneven).findings.some((x) => x.rule === "balance" && /differs by 1200/.test(x.message)));
 });
 
+test("the natural: on foot, on the level, forward", () => {
+  const route = (from: number, to: Point, length: number) => ({ name: "To a mine", points: [] as Point[], from, to, length });
+  const good = { ...map(), routes: [route(0, [-1000, 3000], 5900), route(1, [1000, -3000], 5900)] };
+  assert.ok(!checkMelee(good).findings.some((x) => x.rule === "natural"));
+  const winding = { ...map(), routes: [route(0, [-1000, 3000], 6900), route(1, [1000, -3000], 6900)] };
+  assert.ok(checkMelee(winding).findings.some((x) => x.rule === "natural" && /winds/.test(x.message)));
+  const far = { ...map(), routes: [route(0, [-1000, 3000], 7500), route(1, [1000, -3000], 7500)] };
+  assert.ok(checkMelee(far).findings.some((x) => x.rule === "natural" && /7500 to walk/.test(x.message)));
+  const behind = { ...map(), routes: [route(0, [-9000, 500], 4100), route(1, [9000, -500], 4100)] };
+  assert.ok(checkMelee(behind).findings.some((x) => x.rule === "natural" && /behind the base/.test(x.message)));
+  const high = { ...good, levelAt: (_x: number, y: number) => (y > 2000 || y < -2000 ? 3 : 2), commonLevel: 2 };
+  assert.ok(checkMelee(high).findings.some((x) => x.rule === "natural" && /another cliff level/.test(x.message)));
+});
+
+test("a base above the usual ground is worth a reason", () => {
+  const f = { ...map(), levelAt: () => 4, commonLevel: 2 };
+  assert.ok(checkMelee(f).findings.some((x) => x.rule === "base height" && x.severity === "warning"));
+  assert.ok(!checkMelee({ ...map(), levelAt: () => 2, commonLevel: 2 }).findings.some((x) => x.rule === "base height"));
+});
+
 test("findings say what to do about them", () => {
   const f = checkMelee(map(camp(-3900, 0))).findings.find((x) => x.rule === "camp distance")!;
   assert.match(f.fix ?? "", /find_spots/);

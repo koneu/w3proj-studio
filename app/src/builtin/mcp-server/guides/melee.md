@@ -49,6 +49,8 @@ Goals always win over numbers: fair starts, real choices, and units that get whe
 - Camps near the base. The nearest camp to a start location is 1,750 to 2,250 away, usually about
   2,150, and nothing is closer. A town hall has to be able to stand and build without a fight.
 - A flat map. Paths through trees on flat ground are dull however fair. See Terrain.
+- The same map every time. Main base on a plateau with three ways to the enemy is a habit, not a design: none of
+  the six ladder maps has its main base above the ordinary ground, and most have about two separate ways, some one.
 - All areas looking alike. Each part of the map should be recognisable at a glance.
 - Creeps left on their normal setting. Everything except mine guards goes on Camp mode (see Creeps).
 
@@ -72,7 +74,10 @@ Decide this first, since it decides everything after it:
   skipped object breaks the symmetry unseen. Terrain and start locations have to be done for each side.
 - Give every start room for a whole base, and the same number of ways in. Test it with place_objects
   and dryRun, using a town hall and some large buildings.
-- Offer more than one way between the bases, so a player can flank or dodge an army.
+- Measured: main bases stand on the map's most common cliff level, on all six maps. High ground is for the middle
+  or a side, not by default for the base.
+- Measured, roughly: 1 to 4 separate ways between the bases, most often 2. A second way lets a player flank or
+  dodge an army, but it should come from the map's idea, not from a rule.
 - Compare real walking distances, not straight lines: a tree or cliff on one side can make the same distance
   a long detour. check_melee compares them.
 - Don't send every creeping route inwards towards the middle: a player creeping that way is easy to
@@ -85,7 +90,14 @@ Decide this first, since it decides everything after it:
   matters is that a town hall fits beside it, and that both starts match. One mine per start: two near a start
   hurts Night Elves.
 - Starting mines have 12,500 gold. Expansions have 9,000 to 13,500.
-- The nearest expansion is 3,800 to 5,800 from the start, usually about 5,300.
+- The natural is the expansion a player takes first, and the one closest on foot. Measured on it:
+  - 3,900 to 6,500 to walk from the start, usually about 5,600.
+  - Nearly a straight walk: 1.02 to 1.10 times the straight line, on a way 480 to 670 wide. A natural isn't
+    reached by a winding path or round a cliff.
+  - The same cliff level as the main base, on all six maps, so no ramp between them.
+  - To the side and forward: 23 to 54° off the direction of the enemy, usually about 45. Not behind the base.
+  - Closer to the enemy than the main is: 56 to 82% of the walk from base to base. That's its risk.
+- A second expansion is further again: 400 to 3,900 more on foot on these maps, so the first choice is clear.
 - Further or harder expansions should pay better than easy ones, never worse.
 - Every expansion is guarded; see the mine guards under Creeps.
 

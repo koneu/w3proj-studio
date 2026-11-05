@@ -24,6 +24,9 @@ export interface MeleeFacts {
   sight(id: string): number | undefined;
   /** Ways units walk, as points along them. */
   routes: readonly { name: string; to?: Point; points?: readonly Point[]; problem?: string; from?: number; length?: number }[];
+  /** The cliff level at a place, and the commonest on the map. */
+  levelAt?(x: number, y: number): number;
+  commonLevel?: number;
   /** How wide the widest way from a start to a place is. */
   widestTo?(x: number, y: number): number;
   /** Stray narrow paths, as narrowStrips gives them. */
@@ -38,6 +41,8 @@ export interface MeleeFinding { rule: string; severity: Severity; message: strin
 
 /** What to do about a finding, by rule. */
 const FIX: Record<string, string> = {
+  natural: "find_spots with kind expansion, then a straight, wide way from the base on one level.",
+  "base height": "Lower the base to the usual level with set_cliff_level, unless the map's idea needs it.",
   starts: "place_objects with sloc, one for each player.",
   mine: "move_object: a town hall goes right beside its mine, 771 to 781 from the start.",
   expansion: "find_spots with kind expansion.",
@@ -216,6 +221,25 @@ export function checkMelee(f: MeleeFacts) {
   compare("The nearest tree's distance", "nearestTree", 150);
   compare("The nearest expansion's distance", "nearestExpansion", FAIR);
   if (spread(perStart.map((m) => m.treesWithin1000)) > 15) add("balance", "warning", `Trees near the start differ by ${spread(perStart.map((m) => m.treesWithin1000))} between starts.`);
+
+  // The natural, and the base's own height: what an AI gets wrong by habit.
+  if (f.levelAt && f.commonLevel !== undefined) for (const s of starts) {
+    const level = f.levelAt(s[0], s[1]);
+    if (level > f.commonLevel) add("base height", "warning", `This start is at cliff level ${level}, above the map's usual ${f.commonLevel}. All six ladder maps have it on the usual level.`, s);
+  }
+  starts.forEach((s, i) => {
+    const near = f.routes.filter((r) => r.from === i && r.to && r.length !== undefined).sort((a, b) => (a.length as number) - (b.length as number))[0];
+    if (!near?.to || near.length === undefined) return;
+    const straight = dist(s, near.to), walk = near.length;
+    if (walk < 3300 || walk > 7000) add("natural", "warning", `The natural is ${Math.round(walk)} to walk from the start. Ladder maps have 3,900 to 6,500.`, near.to);
+    if (walk / straight > 1.25) add("natural", "warning", `The way to the natural winds: ${(walk / straight).toFixed(2)} times the straight line. On ladder maps it's 1.02 to 1.10.`, near.to);
+    if (f.levelAt && f.levelAt(s[0], s[1]) !== f.levelAt(near.to[0], near.to[1])) add("natural", "warning", "The natural is on another cliff level than its base. On all six ladder maps it's the same.", near.to);
+    if (starts.length === 2) {
+      const enemy = starts[1 - i], toward = Math.atan2(enemy[1] - s[1], enemy[0] - s[0]), to = Math.atan2(near.to[1] - s[1], near.to[0] - s[0]);
+      const turn = Math.abs((((to - toward) * 180) / Math.PI + 540) % 360 - 180);
+      if (turn > 100) add("natural", "warning", `The natural lies ${Math.round(turn)}° away from the enemy's direction, behind the base. On ladder maps it's 23 to 54°, forward and to the side.`, near.to);
+    }
+  });
 
   // Real walking, which straight lines can hide. Each start's ways to the mines, shortest first.
   const walks = starts.map((_, i) => f.routes.filter((r) => r.from === i && r.length !== undefined).map((r) => r.length as number).sort((a, b) => a - b));

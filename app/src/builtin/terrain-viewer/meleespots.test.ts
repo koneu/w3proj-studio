@@ -88,6 +88,16 @@ test("expansions go by distance from the starts, and need ground to build on", (
   assert.equal(none.spots.length, 0);
 });
 
+test("expansions prefer the side towards the enemy, on the base's level", () => {
+  const { spots } = findSpots("expansion", facts(grid(), { mines: starts }), 6, false);
+  const [x, y] = spots[0].at, home = dist([x, y], starts[0]) < dist([x, y], starts[1]) ? starts[0] : starts[1];
+  const enemy = home === starts[0] ? starts[1] : starts[0];
+  const turn = Math.abs((((Math.atan2(y - home[1], x - home[0]) - Math.atan2(enemy[1] - home[1], enemy[0] - home[0])) * 180) / Math.PI + 540) % 360 - 180);
+  assert.ok(turn < 75, String(turn));
+  const raised = findSpots("expansion", facts(grid(), { mines: starts, levelAt: (a, b) => (Math.hypot(a - x, b - y) < 900 ? 4 : 2) }), 1, false);
+  assert.ok(dist(raised.spots[0].at, [x, y]) >= 900, "ground of another level loses");
+});
+
 test("narrow strips are found, and open ground has none", () => {
   assert.equal(narrowStrips(grid()).strips.length, 0);
   const lane = grid((x, y) => Math.abs(y) < 600 && Math.abs(y) > 80 && Math.abs(x) < 1400);

@@ -7,7 +7,7 @@ import { projectPath } from "../../extensions/mcp";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
-import { GUIDES, guideTemplate, hasRules, isTopic, ownTopics, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
+import { GUIDES, guideTemplate, hasRules, isTopic, layoutIdea, ownTopics, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 
 /** One read_file answer; `offset` gets the rest. */
@@ -226,7 +226,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (mine) return (await ownGuide(mine)).text;
       const guide = GUIDES[wanted];
       if (!guide) throw new Error(`There's no guide on "${String(topic)}". There are: ${[...Object.keys(GUIDES), ...own].join(", ")}.`);
-      return withOwnRules(guide.text, await readRules(wanted));
+      return withOwnRules(wanted === "melee" ? guide.text + layoutIdea(Math.random) : guide.text, await readRules(wanted));
     }),
     w3.mcp.registerTool("list_edits", () => log.list().map((e) => ({ title: e.title, at: new Date(e.at).toISOString(), files: e.files.map((f) => f.path) }))),
     w3.mcp.registerTool("undo_last_edit", undo),
