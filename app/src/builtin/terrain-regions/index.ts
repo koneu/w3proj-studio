@@ -101,6 +101,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       }
     }
     ed.setGroundOverlay(rgba, W, H);
+    ed.setLabels(doc.regions.map((r) => ({ x: (r.left + r.right) / 2, y: (r.bottom + r.top) / 2, text: r.name })));
     count.textContent = `${doc.regions.length} regions`;
   };
 
@@ -172,7 +173,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   return {
     toolbar,
     activate() { active = true; void load.then(() => { renderPanel(); render(); }); },
-    deactivate() { active = false; drag = null; draft = null; ed.setGroundOverlay(null); ed.host.style.cursor = ""; },
+    deactivate() { active = false; drag = null; draft = null; ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       const [x, y] = p.ground;
@@ -258,6 +259,6 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       }
       unsaved = false;
     },
-    dispose() { ed.setGroundOverlay(null); ed.host.style.cursor = ""; },
+    dispose() { ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
   };
 }

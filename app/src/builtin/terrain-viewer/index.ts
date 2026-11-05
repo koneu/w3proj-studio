@@ -206,6 +206,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         let dirty = true;
         const redraw = () => { dirty = true; };
+        const labelLayer = h("div.terrain-labels");
+        let labels: { x: number; y: number; el: HTMLElement }[] = [];
 
         // ---- day/night lighting ---------------------------------------------------------
         // Settings: on/off (off: an even light) and the hour; both remembered across maps.
@@ -1338,6 +1340,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cliffGroundTiles: () => cliffList(terrain, cliffData?.types ?? new Map()).map((c) => c.groundTile),
           setBrush: (r) => { renderer.setBrush(r); redraw(); },
           setGroundOverlay: (rgba, w, hgt) => { renderer.setGroundOverlay(rgba, w, hgt); redraw(); },
+          setLabels: (list) => {
+            labels = (list ?? []).map(({ x, y, text, rgb }) => ({ x, y, el: h("span.terrain-label", { style: rgb ? { color: `rgb(${rgb.join(",")})` } : {} }, text) }));
+            labelLayer.replaceChildren(...labels.map((l) => l.el));
+            redraw();
+          },
           pathing: async (opts) => {
             const doodads = dooFile?.list ?? [];
             const { wpm } = await buildPathingMap(w3, terrain, doodads, (p) => readFile(w3, doc, p), w3.settings.get<number>("terrain.pathing.deepWater"));
@@ -1455,7 +1462,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
               h("span.muted", {}, "Drag: select box · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
-            h("div.model-stage", {}, canvas)),
+            h("div.model-stage", {}, canvas, labelLayer)),
           side));
 
         // ---- camera ------------------------------------------------------------------
@@ -1623,6 +1630,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         }, { passive: false });
 
+        /** Names over the map: HTML over the canvas, placed again whenever the view is drawn. */
+        const placeLabels = () => {
+          for (const { el, x, y } of labels) {
+            const at = renderer.project([x, y, renderer.groundHeight(x, y)]);
+            el.hidden = !at;
+            if (at) el.style.transform = `translate(-50%, -50%) translate(${Math.round(at[0])}px, ${Math.round(at[1])}px)`;
+          }
+        };
         // Static scene: draw only when something changed (or the size did).
         let raf = 0, lastSize = "";
         const tick = () => {
@@ -1630,6 +1645,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Particle effects move by themselves: then every frame is drawn.
           if (canvas.clientWidth > 0 && (dirty || size !== lastSize || renderer.animating)) {
             renderer.render();
+            placeLabels();
             dirty = false;
             lastSize = size;
           }

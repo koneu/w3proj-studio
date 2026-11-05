@@ -104,7 +104,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   const render = () => {
     if (!active) return;
     count.textContent = `${doc.cameras.length} cameras`;
-    if (previewing) { ed.setGroundOverlay(null); return; }
+    if (previewing) { ed.setGroundOverlay(null); ed.setLabels(null); return; }
     const rgba = new Uint8Array(W * H * 4);
     const cell = (x: number, y: number) => [Math.floor((x - t.offsetX) / CELL), Math.floor((y - t.offsetY) / CELL)];
     const dot = (x: number, y: number, r: number, c: number[]) => {
@@ -134,6 +134,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       dot(ex, ey, sel ? 2 : 1, sel ? [255, 255, 255, 255] : col);
     }
     ed.setGroundOverlay(rgba, W, H);
+    ed.setLabels(doc.cameras.map((c) => ({ x: c.targetX, y: c.targetY, text: c.name })));
   };
 
   // ---- undo --------------------------------------------------------------------------
@@ -225,7 +226,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   return {
     toolbar,
     activate() { active = true; previewing = false; void load.then(() => { renderPanel(); render(); }); },
-    deactivate() { active = false; drag = null; ed.setGroundOverlay(null); ed.host.style.cursor = ""; },
+    deactivate() { active = false; drag = null; ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       previewing = false;
@@ -291,6 +292,6 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       }
       unsaved = false;
     },
-    dispose() { ed.setGroundOverlay(null); ed.host.style.cursor = ""; },
+    dispose() { ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
   };
 }
