@@ -214,6 +214,31 @@ export function setRamp(t: Terrain, x: number, y: number, width: number, remove:
   return [...log.corners];
 }
 
+export type DropKind = "any" | "permanent" | "charged" | "powerup" | "artifact";
+const DROP_LETTER: Record<DropKind, string> = { any: "Y", permanent: "i", charged: "j", powerup: "k", artifact: "l" };
+/** What a placed unit can be told besides where it stands. */
+export interface UnitChoices { camp?: unknown; gold?: unknown; drops?: unknown }
+interface UnitEntry { targetAcquisition?: number; gold?: number; itemSets?: { id: string; chance: number }[][] }
+
+/** Applies what a tool asked of a placed unit, or with no entry only checks it. Each drop is one
+ *  item set: a random item of that kind and level, as the game's melee maps have them. */
+export function setUnitChoices(o: UnitChoices, e?: UnitEntry) {
+  if (o.camp !== undefined && typeof o.camp !== "boolean") throw new Error("camp must be true or false.");
+  if (o.gold !== undefined && !(Number.isInteger(o.gold) && (o.gold as number) >= 0 && (o.gold as number) <= 1000000)) throw new Error("gold must be a whole number up to 1000000.");
+  const drops = o.drops === undefined ? undefined : o.drops as { level?: unknown; kind?: unknown }[];
+  if (drops !== undefined && !Array.isArray(drops)) throw new Error("drops must be a list of { level, kind }.");
+  const sets = drops?.map(({ level, kind }) => {
+    if (!Number.isInteger(level) || (level as number) < 1 || (level as number) > 8) throw new Error("A drop's level goes from 1 to 8.");
+    const letter = DROP_LETTER[(kind ?? "any") as DropKind];
+    if (!letter) throw new Error(`A drop's kind is one of ${Object.keys(DROP_LETTER).join(", ")}.`);
+    return [{ id: `Y${letter}I${level as number}`, chance: 100 }];
+  });
+  if (!e) return;
+  if (o.camp !== undefined) e.targetAcquisition = o.camp ? -2 : -1;
+  if (o.gold !== undefined) e.gold = o.gold as number;
+  if (sets) e.itemSets = sets;
+}
+
 /** The slot of a ground tile, added to the map's list if needed, with its cliff type if it has one
  *  (`kinds`), as painting with the brush does. */
 export function groundSlot(t: Terrain, tile: string, kinds: readonly CliffKind[] = []): number {

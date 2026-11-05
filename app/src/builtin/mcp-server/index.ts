@@ -7,6 +7,7 @@ import { projectPath } from "../../extensions/mcp";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
+import { GUIDES } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 
 /** One read_file answer; `offset` gets the rest. */
@@ -138,6 +139,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (now !== root) { root = now; log.reset(); }
     }),
     w3.commands.register("w3.mcp.undo", async () => { void w3.window.showInfo(await undo()); }),
+    w3.mcp.registerTool("read_guide", ({ topic }) => {
+      if (topic === undefined) return Object.entries(GUIDES).map(([name, guide]) => ({ topic: name, about: guide.summary }));
+      const guide = typeof topic === "string" ? GUIDES[topic] : undefined;
+      if (!guide) throw new Error(`There's no guide on "${String(topic)}". There are: ${Object.keys(GUIDES).join(", ")}.`);
+      return guide.text;
+    }),
     w3.mcp.registerTool("list_edits", () => log.list().map((e) => ({ title: e.title, at: new Date(e.at).toISOString(), files: e.files.map((f) => f.path) }))),
     w3.mcp.registerTool("undo_last_edit", undo),
     w3.mcp.registerTool("edit_text_file", async ({ path, find, replace }) => {

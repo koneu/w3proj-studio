@@ -23,6 +23,7 @@
       }
     },
     "mcpTools": [
+      {"name":"read_guide","description":"Explains how to do a kind of job well, with rules and numbers the other tools can't give. Without a topic it lists them. Read melee before building, changing or judging a melee map.","readOnly":true,"inputSchema":{"type":"object","required":[],"properties":{"topic":{"type":"string","description":"Which guide, like melee."}}}},
       { "name": "list_edits", "description": "The AI edits made to this project since it was opened, oldest first.", "readOnly": true },
       { "name": "undo_last_edit", "description": "Takes back the newest AI edit, unless its files changed since. Can be repeated. Needs the setting mcp.writeTools." },
       {"name":"edit_text_file","description":"Replaces one exact piece of a text file under map/, such as war3map.wts. The piece must occur exactly once. Prefer the specific tools: map/war3map.j is rebuilt from triggers and objects, so changes to it can be lost, and for the ground use paint_terrain and sculpt_terrain. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["path","find","replace"],"properties":{"path":{"type":"string"},"find":{"type":"string","description":"The text to replace, with enough around it to be unique."},"replace":{"type":"string"}}}},

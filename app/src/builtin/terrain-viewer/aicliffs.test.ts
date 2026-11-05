@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
-import { groundSlot, setCliffs, setRamp, setWater, withCliffTypes, type CliffKind } from "./aitools";
+import { groundSlot, setCliffs, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind } from "./aitools";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
 
@@ -165,4 +165,22 @@ test("raising the ground over a ramp removes the ramp", () => {
   setCliffs(t, block, "box", { level: 4 }, kinds);
   assert.equal(corner(t, 8, 12).ramp, false);
   assert.equal(corner(t, 6, 12).ramp, true, "outside the area it stays: set_ramp remove takes that away");
+});
+
+test("a unit takes camp mode, gold and random drops", () => {
+  const e = { targetAcquisition: -1, gold: 0, itemSets: [] };
+  setUnitChoices({ camp: true, gold: 9000, drops: [{ level: 2, kind: "powerup" }, { level: 3, kind: "permanent" }, { level: 1 }] }, e);
+  assert.equal(e.targetAcquisition, -2);
+  assert.equal(e.gold, 9000);
+  assert.deepEqual(e.itemSets, [[{ id: "YkI2", chance: 100 }], [{ id: "YiI3", chance: 100 }], [{ id: "YYI1", chance: 100 }]]);
+  setUnitChoices({ camp: false }, e);
+  assert.equal(e.targetAcquisition, -1);
+});
+
+test("wrong unit choices are refused before anything changes", () => {
+  assert.throws(() => setUnitChoices({ camp: "yes" }), /camp must be/);
+  assert.throws(() => setUnitChoices({ gold: -5 }), /gold must be/);
+  assert.throws(() => setUnitChoices({ drops: [{ level: 9 }] }), /level goes from 1 to 8/);
+  assert.throws(() => setUnitChoices({ drops: [{ level: 2, kind: "epic" }] }), /kind is one of any, permanent/);
+  assert.throws(() => setUnitChoices({ drops: "YiI2" }), /must be a list/);
 });

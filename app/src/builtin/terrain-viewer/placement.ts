@@ -93,6 +93,8 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
     }
   } else {
     Object.assign(e, { hp: -1, mana: -1, color: -1, waygate: -1, inventory: [], abilities: [] });
+    // Copied from a start location it would be 0, from a camp's creep the camp setting.
+    if ("targetAcquisition" in e) e.targetAcquisition = id === "sloc" ? 0 : -1;
     if (player !== undefined) e.player = player;
     if (id !== template.id) {
       if ("level" in e) e.level = 1;

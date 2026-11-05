@@ -22,7 +22,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setRamp, setWater, withCliffTypes, type CliffKind } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setRamp, setUnitChoices, setWater, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -326,6 +326,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
+    return entry;
   };
 
   ctx.subscriptions.push(
@@ -579,7 +580,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
-      const wanted = objects as { id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number }[];
+      const wanted = objects as ({ id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number } & UnitChoices)[];
       const { handle } = await liveEditor();
       const files = new Set(wanted.map((o) => (typeof o.id === "string" ? fileOfType(handle, o.id, kind) : null)).filter(Boolean));
       if (files.size > 1) throw new Error("objects mixes units and doodads: place each in its own call.");
@@ -587,7 +588,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const owners = wanted.map((o) => (typeof o.player === "number" ? o.player - 1 : 0));
       for (const [i, o] of wanted.entries()) {
         if (typeof o.id !== "string" || o.id.length !== 4 || typeof o.x !== "number" || typeof o.y !== "number") throw new Error(`objects[${i}] needs an id of four characters, and x and y.`);
-        if (key === "units" && (!Number.isInteger(owners[i]) || owners[i] < 0 || owners[i] > 27)) throw new Error(`objects[${i}]: player counts from 1.`);
+        if (key === "units" && (!Number.isInteger(owners[i]) || owners[i] < 0 || owners[i] > 27)) throw new Error(`objects[${i}]: player counts from 1, to 28.`);
+        if (key === "doodads" && (o.camp !== undefined || o.gold !== undefined || o.drops !== undefined)) throw new Error(`objects[${i}]: camp, gold and drops are for units.`);
+        try { setUnitChoices(o); } catch (e) { throw new Error(`objects[${i}]: ${(e as Error).message}`); }
       }
       const edge = await playable().catch(() => null);
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
@@ -631,7 +634,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
       let placed = 0;
       await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
-        placed = await plan((o, i, x, y, facing) => add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random));
+        placed = await plan((o, i, x, y, facing) => {
+          const entry = add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
+          if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
+        });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
       });
       return { placed, shifted, skipped };

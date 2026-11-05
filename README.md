@@ -334,6 +334,11 @@ it. The formats here were built from their work and then checked against real ma
 - [HiveWE](https://github.com/stijnherfst/HiveWE) by stijnherfst, for its wiki page on the terrain format
 - [mdx-m3-viewer](https://github.com/flowtsohg/mdx-m3-viewer) by flowtsohg, for how terrain is drawn
 
+The melee guide the AI tools read follows Blizzard's
+[designer note on competitive melee maps](http://classic.battle.net/mod/dev/melee.shtml), with
+community reviews from [Hive Workshop](https://www.hiveworkshop.com/) and
+[warcraft3.info](https://warcraft3.info/articles/423). Its numbers were measured on ladder maps.
+
 The MPQ Huffman tables come from [wow-mpq](https://github.com/wowemulation-dev/warcraft-rs), which
 has them from [StormLib](https://github.com/ladislav-zezula/StormLib) by Ladislav Zezula. They're
 used under the MIT license; the notice is in `crates/mpq/src/huffman_tables.rs`.
