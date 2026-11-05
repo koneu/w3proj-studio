@@ -9,6 +9,7 @@
     "views": [{ "id": "w3.explorer.files", "title": "Project", "container": "explorer" }],
     "commands": [
       { "id": "w3.explorer.refresh", "title": "Refresh Explorer", "category": "Explorer" },
+      { "id": "w3.explorer.newFolder", "title": "New Folder…", "category": "Explorer" },
       { "id": "w3.explorer.newFile", "title": "New File…", "category": "Explorer" },
       { "id": "w3.explorer.collapseAll", "title": "Collapse All", "category": "Explorer" },
       { "id": "w3.explorer.focus", "title": "Show Explorer", "category": "View", "keybinding": "ctrl+shift+e" }

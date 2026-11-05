@@ -7,7 +7,8 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { formatBytes, h } from "../../workbench/dom";
 import { findPathRefs, updatePathRefs } from "./references";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, clickSelection, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
+import { clickSelection } from "../../lib/selection";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 

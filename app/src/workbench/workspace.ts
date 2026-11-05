@@ -5,6 +5,7 @@ import { Emitter } from "./dom";
 export class WorkspaceService {
   private info: ProjectInfo | null = null;
   private fileList: FileInfo[] = [];
+  private folderList: string[] = [];
   readonly onDidChange = new Emitter<void>();
   /** A project file was written (its path as given, with forward slashes). */
   readonly onDidSave = new Emitter<string>();
@@ -17,6 +18,9 @@ export class WorkspaceService {
 
   files() {
     return this.fileList;
+  }
+  folders() {
+    return this.folderList;
   }
 
   async open(path: string) {
@@ -31,6 +35,7 @@ export class WorkspaceService {
   close() {
     this.info = null;
     this.fileList = [];
+    this.folderList = [];
     void this.settings.loadProject(null);
     this.onDidChange.fire();
   }
@@ -39,6 +44,7 @@ export class WorkspaceService {
     if (!this.info) return;
     this.info = await invoke<ProjectInfo>("project_open", { path: this.info.root });
     this.fileList = await invoke<FileInfo[]>("project_files", { root: this.info.root });
+    this.folderList = await invoke<string[]>("project_folders", { root: this.info.root });
     this.ownWrites.clear();
     if (fire) this.onDidChange.fire();
   }
@@ -99,6 +105,18 @@ export class WorkspaceService {
   async delete(p: string) {
     if (!this.info) throw new Error("no project is open");
     await invoke("fs_delete", { root: this.info.root, path: this.resolve(p) });
+    await this.refresh();
+  }
+  /** Creates a project folder; the file list is refreshed. */
+  async createFolder(p: string) {
+    if (!this.info) throw new Error("no project is open");
+    await invoke("fs_mkdir", { root: this.info.root, path: this.resolve(p) });
+    await this.refresh();
+  }
+  /** Removes an empty project folder; the file list is refreshed. */
+  async removeFolder(p: string) {
+    if (!this.info) throw new Error("no project is open");
+    await invoke("fs_rmdir", { root: this.info.root, path: this.resolve(p) });
     await this.refresh();
   }
   /** Moves a project file to another project path; the file list is refreshed. */

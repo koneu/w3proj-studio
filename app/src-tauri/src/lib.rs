@@ -377,6 +377,47 @@ fn inside(root: &str, path: &str) -> CmdResult<PathBuf> {
     Ok(parent.join(p.file_name().ok_or("no file name")?))
 }
 
+/// The project's folders (forward slashes), the ones without files too; what `project_files`
+/// leaves out is left out here.
+#[tauri::command]
+fn project_folders(root: String) -> CmdResult<Vec<String>> {
+    let root = PathBuf::from(root);
+    let mut out = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(err)? {
+            let entry = entry.map_err(err)?;
+            if !entry.file_type().map_err(err)?.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+            if !matches!(rel.as_str(), "build" | ".git" | "node_modules") {
+                stack.push(path);
+                out.push(rel);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Creates a folder of the project (with the folders above it).
+#[tauri::command]
+fn fs_mkdir(root: String, path: String) -> CmdResult<()> {
+    let target = Path::new(&path);
+    if target.components().any(|c| matches!(c, std::path::Component::ParentDir)) || !target.starts_with(&root) {
+        return Err(format!("{path} is outside the project"));
+    }
+    std::fs::create_dir_all(target).map_err(|e| format!("{path}: {e}"))
+}
+
+/// Removes an empty folder of the project (a folder with anything in it stays: it fails).
+#[tauri::command]
+fn fs_rmdir(root: String, path: String) -> CmdResult<()> {
+    let p = inside(&root, &path)?;
+    std::fs::remove_dir(&p).map_err(|e| format!("{}: {e}", p.display()))
+}
+
 /// Deletes a file of the project; empty folders it leaves behind go too (up to the root).
 #[tauri::command]
 fn fs_delete(root: String, path: String) -> CmdResult<()> {
@@ -919,6 +960,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             project_open,
             project_files,
+            project_folders,
             project_unpack,
             project_create,
             ui_show_cursor,
@@ -933,6 +975,8 @@ pub fn run() {
             fs_write_text,
             fs_write_bytes,
             fs_delete,
+            fs_mkdir,
+            fs_rmdir,
             fs_rename,
             fs_copy,
             fs_list_tree,
@@ -984,6 +1028,33 @@ mod fs_tests {
         // The emptied folders go, the project root and map/ stay (map/sub is empty but wasn't touched).
         assert!(!dir.join("map/new").exists());
         assert!(dir.join("map").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn folders_empty_ones_too() {
+        let (dir, root) = project();
+        let empty = dir.join("map/empty/deep").to_string_lossy().into_owned();
+        fs_mkdir(root.clone(), empty.clone()).unwrap();
+        std::fs::create_dir_all(dir.join("build/x")).unwrap();
+        let mut list = project_folders(root.clone()).unwrap();
+        list.sort();
+        assert_eq!(list, ["map", "map/empty", "map/empty/deep", "map/sub"]);
+        // Only an empty folder goes.
+        assert!(fs_rmdir(root.clone(), dir.join("map/sub").to_string_lossy().into_owned()).is_err());
+        fs_rmdir(root.clone(), empty).unwrap();
+        assert!(!dir.join("map/empty/deep").exists() && dir.join("map/empty").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn folders_stay_inside_the_project() {
+        let (dir, root) = project();
+        let outside = std::env::temp_dir().join(format!("w3proj-outside-{}", rand_suffix()));
+        assert!(fs_mkdir(root.clone(), outside.to_string_lossy().into_owned()).is_err());
+        assert!(fs_mkdir(root.clone(), format!(r"{root}\map\..\..\escape")).is_err());
+        assert!(fs_rmdir(root.clone(), std::env::temp_dir().to_string_lossy().into_owned()).is_err());
+        assert!(!outside.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

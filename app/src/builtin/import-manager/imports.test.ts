@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clickSelection, importPath, importTreePath, isJunkFile } from "./imports";
+import { clickSelection } from "../../lib/selection";
+import { importPath, importTreePath, isJunkFile } from "./imports";
 
 test("imports go below the import folder, numbered if taken", () => {
   const taken = new Set(["war3mapImported\\a.blp", "war3mapImported\\a (2).blp"]);

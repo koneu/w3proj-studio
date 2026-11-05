@@ -72,22 +72,6 @@ export function isJunkFile(relative: string): boolean {
   return parts.some((p) => p.startsWith(".")) || /^(thumbs\.db|desktop\.ini)$/i.test(parts[parts.length - 1]);
 }
 
-/** The selection after a click on `clicked` in a list shown as `order` (Ctrl toggles, Shift
- *  takes the range from the anchor, a plain click selects one). */
-export function clickSelection(order: string[], selected: ReadonlySet<string>, anchor: string | null, clicked: string,
-  mods: { ctrl: boolean; shift: boolean }): { selected: Set<string>; anchor: string } {
-  if (mods.shift && anchor !== null && order.includes(anchor)) {
-    const [a, b] = [order.indexOf(anchor), order.indexOf(clicked)].sort((x, y) => x - y);
-    return { selected: new Set([...(mods.ctrl ? selected : []), ...order.slice(a, b + 1)]), anchor };
-  }
-  if (mods.ctrl) {
-    const next = new Set(selected);
-    if (!next.delete(clicked)) next.add(clicked);
-    return { selected: next, anchor: clicked };
-  }
-  return { selected: new Set([clicked]), anchor: clicked };
-}
-
 /** What a file is, by its extension (for the list and choosing a viewer). */
 export function kindOf(path: string): string {
   const ext = (/\.([a-z0-9]+)$/i.exec(path)?.[1] ?? "").toLowerCase();

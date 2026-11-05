@@ -250,6 +250,12 @@ export interface W3Api {
     open(path: string): Promise<void>;
     close(): void;
     files(): FileInfo[];
+    /** The project's folders (forward slashes), empty ones too. */
+    folders(): string[];
+    /** Creates a project folder, with those above it. */
+    createFolder(projectPath: string): Promise<void>;
+    /** Removes an empty project folder. */
+    removeFolder(projectPath: string): Promise<void>;
     refresh(): Promise<void>;
     resolve(projectPath: string): string;
     /** Rejects with an error whose `name` is "NotUtf8Error" for binary files. */
