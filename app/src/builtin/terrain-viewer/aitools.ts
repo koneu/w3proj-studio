@@ -264,6 +264,15 @@ export function heightColors(t: Terrain, step = 32) {
   return { rgba, width, height };
 }
 
+/** Evenly along a line, from end to end, turned to run along it. `facingOffset` is the facing
+ *  (degrees) that makes the model's long side follow the line. */
+export function lineSpots(from: [number, number], to: [number, number], spacing: number, facingOffset: number) {
+  const dx = to[0] - from[0], dy = to[1] - from[1], length = Math.hypot(dx, dy);
+  const count = Math.max(1, Math.round(length / spacing));
+  const facing = (((Math.atan2(dy, dx) * 180) / Math.PI + facingOffset) % 360 + 360) % 360;
+  return Array.from({ length: count + 1 }, (_, i) => ({ x: from[0] + (dx * i) / count, y: from[1] + (dy * i) / count, facing }));
+}
+
 /** Where to look for room when a spot is taken: rings around it, nearest first, on the pathing grid. */
 export function spotsAround(x: number, y: number, reach = 320): [number, number][] {
   const out: [number, number][] = [];

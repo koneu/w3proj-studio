@@ -17,7 +17,8 @@
           "scope": { "type": "string", "enum": ["map", "game"], "description": "map (default): what the map adds or changes. game: everything in the game." },
           "filter": { "type": "string", "description": "Only ids or names containing this text (not case sensitive). Game names are in the installed language." },
           "tileset": { "type": "string", "description": "scope game, doodads and destructables: only those made for this tileset. \"map\" means the open map's, or give its letter." },
-          "category": { "type": "string", "description": "scope game: only this category, as the entries show it (not case sensitive). Trees are destructables in the category of trees." },
+          "category": { "type": "string", "description": "scope game: only this category, as the entries show it (not case sensitive)." },
+          "trees": { "type": "boolean", "description": "scope game, destructables: only real trees, as the game targets them." },
           "limit": { "type": "integer", "description": "At most this many (default 200)." }
         } }
       },

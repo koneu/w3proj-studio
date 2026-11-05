@@ -105,13 +105,14 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let asJson = true, unsaved = false, active = false;
   let selected: Region | null = null;
 
-  const load = (async () => {
+  const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.regions ??= [];
-  })().catch((e) => w3.window.showError(`Regions: ${(e as Error).message ?? e}`));
+  };
+  const load = read().catch((e) => w3.window.showError(`Regions: ${(e as Error).message ?? e}`));
   /** The map's sounds (war3map.w3s), offered for the ambient sound. */
   const soundList = h("datalist", { id: `terrain-region-sounds-${Math.random().toString(36).slice(2)}` });
   void (async () => {
@@ -307,6 +308,14 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         await w3.backend.invoke("codec_write", { root, path: FILE, text });
       }
       unsaved = false;
+    },
+    async reloadFile(path) {
+      if (!path.startsWith(FILE)) return false;
+      await read();
+      unsaved = false;
+      selected = null;
+      if (active) { renderPanel(); render(); }
+      return true;
     },
     dispose() { ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
   };

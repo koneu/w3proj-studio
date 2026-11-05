@@ -43,6 +43,11 @@ export class EditLog {
 
   constructor(private io: EditIO, private keep = 30) {}
 
+  /** The group edits are going into, if one is open. */
+  get openGroup(): string | null {
+    return this.group?.title ?? null;
+  }
+
   list(): readonly EditRecord[] {
     return this.records;
   }

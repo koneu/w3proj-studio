@@ -29,6 +29,7 @@ const TILESET_FIELDS = ["btil", "dtil"];
 const MODEL_FIELDS = ["umdl", "ifil", "bfil", "dfil"];
 const SCALE_FIELDS = [["bmis", "bmas"], ["dmis", "dmas"]];
 const PATH_FIELDS = ["bptx", "dptx", "upat"];
+const VARIATION_FIELDS = ["bvar", "dvar"];
 
 /** Stored model → the graphics packs it's only in; empty when the base game has it. */
 export function modelPacks(all: readonly string[]): Map<string, string[]> {
@@ -44,19 +45,21 @@ export function modelPacks(all: readonly string[]): Map<string, string[]> {
   return new Map([...out].map(([k, v]) => [k, v.has("") ? [] : [...v].sort()]));
 }
 
-/** What a model file means for an object: nothing to report, or that it won't show everywhere.
- *  Types with variations name their files without the number. */
-function modelNote(path: string | undefined, stored: ReadonlyMap<string, string[]>) {
+/** What a model means for an object: nothing to report, or that it won't show everywhere. Types
+ *  with variations have a file for each, and a placed one uses just its own, so each counts. */
+function modelNote(path: string | undefined, variations: number, stored: ReadonlyMap<string, string[]>): { noModel?: boolean; modelOnlyIn?: string[]; variationsWithoutModel?: number[] } {
   const key = (path ?? "").replace(/\.md[lx]$/i, "").replace(/\//g, "\\").toLowerCase();
-  if (!key || key === "_" ) return { noModel: true };
-  const packs = stored.get(key) ?? stored.get(`${key}0`) ?? stored.get(`${key}1`);
-  if (!packs) return { noModel: true };
-  return packs.length ? { modelOnlyIn: packs } : {};
+  if (!key || key === "_") return { noModel: true };
+  const files = variations > 1 ? Array.from({ length: variations }, (_, i) => stored.get(`${key}${i}`)) : [stored.get(key) ?? stored.get(`${key}0`)];
+  if (files.every((f) => !f)) return { noModel: true };
+  const missing = files.flatMap((f, i) => (f ? [] : [i]));
+  const packs = [...new Set(files.flatMap((f) => f ?? []))].sort();
+  return { ...(packs.length ? { modelOnlyIn: packs } : {}), ...(missing.length ? { variationsWithoutModel: missing } : {}) };
 }
 
 /** The game's objects of a kind, with what sets them apart. `tileset`: its letter; objects for
  *  all tilesets have "*". `stored`: from modelPacks, to check models. */
-export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue">, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>) {
+export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facets" | "fieldById" | "defaultValue">, clean: (s: string) => string, tileset?: string, category?: string, stored?: ReadonlyMap<string, string[]>, treesOnly = false) {
   const field = TILESET_FIELDS.map((f) => kind.fieldById.get(f)).find(Boolean);
   const fits = (id: string) => {
     if (!tileset || !field) return true;
@@ -68,15 +71,19 @@ export function gameObjectList(kind: Pick<KindData, "baseIds" | "names" | "facet
   const model = MODEL_FIELDS.find((f) => kind.fieldById.has(f));
   const scale = SCALE_FIELDS.find(([low]) => kind.fieldById.has(low));
   const room = PATH_FIELDS.find((f) => kind.fieldById.has(f));
-  return kind.baseIds.filter(fits).map((id) => {
+  const variation = VARIATION_FIELDS.find((f) => kind.fieldById.has(f));
+  const isTree = (id: string) => /\btree\b/.test(kind.facets(id).target ?? "");
+  return kind.baseIds.filter((id) => fits(id) && (!treesOnly || isTree(id))).map((id) => {
     const facets = kind.facets(id);
     const low = scale && Number(value(id, scale[0])), high = scale && Number(value(id, scale[1]));
     const path = room && value(id, room);
     return {
       id, name: clean(kind.names.get(id) ?? id), ...(facets.category ? { category: facets.category } : {}),
-      ...(stored && model ? modelNote(value(id, model), stored) : {}),
+      ...(stored && model ? modelNote(value(id, model), Number(variation && value(id, variation)) || 1, stored) : {}),
       ...(low && high ? { sizeRange: [low, high] } : {}),
-      ...(room ? { takesRoom: !!path && path !== "_" } : {}),
+      // Not known isn't the same as none.
+      ...(path ? { takesRoom: path !== "_" && path.toLowerCase() !== "none" } : {}),
+      ...(isTree(id) ? { tree: true } : {}),
     };
   }).filter((o) => !wanted || o.category?.toLowerCase().includes(wanted));
 }

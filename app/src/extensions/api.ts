@@ -133,6 +133,9 @@ export interface EditorInstance {
   save?(): Promise<void>;
   focus?(): void;
   dispose?(): void;
+  /** Its own file or a watched one was saved by something else, and it has no unsaved changes:
+   *  takes the change in place, keeping what it has loaded. False: opened again, which is slow. */
+  reloadFile?(path: string): Promise<boolean>;
   /** Other project files the editor shows (e.g. "map/war3map.wts" for TRIGSTR texts): when
    *  something else saves one, the editor is opened again if it has no unsaved changes. (Its own
    *  file always counts: saved by something else, it reopens, or asks when there are unsaved

@@ -256,7 +256,11 @@ export class EditorService {
     for (const t of this.tabs.filter((x) => x.provider && x.instance && x.writing === 0)) {
       const own = t.path.toLowerCase() === key;
       if (!own && !t.instance!.watches?.some((w) => w.toLowerCase() === key)) continue;
-      if (!t.dirty) { await this.reopen(t); continue; }
+      if (!t.dirty) {
+        const inPlace = await t.instance!.reloadFile?.(key).catch(() => false);
+        if (!inPlace && t.instance) await this.reopen(t);
+        continue;
+      }
       if (!own || t.conflict) continue;
       const bar: HTMLElement = h("div.editor-conflict", {},
         h("span", {}, "This file was saved by another editor or tool while you have unsaved changes here."),

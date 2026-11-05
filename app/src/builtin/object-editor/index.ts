@@ -75,13 +75,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { data, file: file ?? {}, resolve };
   };
   ctx.subscriptions.push(
-    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category }) => {
+    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category, trees }) => {
       const { data, file, resolve } = await toolKind(kind);
       const text = typeof filter === "string" ? filter.toLowerCase() : "";
       const hit = (o: { id: string; name: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text);
       const wantTileset = tileset === "map" ? (await terrainFacts(w3))?.tileset : typeof tileset === "string" ? tileset : undefined;
       const stored = scope === "game" ? modelPacks(await w3.game.list()) : null;
-      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined);
+      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined, trees === true);
       return capped<{ id: string; name: string }>((scope === "game" ? game() : mapObjectList(file, data, resolve)).filter(hit), limit, 200);
     }),
     w3.mcp.registerTool("get_object", async ({ kind, id, gameValues }) => {

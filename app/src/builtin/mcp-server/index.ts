@@ -64,6 +64,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       activeFile: w3.editors.activePath(), unsaved,
       may: { edit: setting("mcp.writeTools"), save: setting("mcp.saveTool") },
       undoableEdits: log.list().length,
+      // A client that stopped halfway leaves one open: its edits still undo as one.
+      ...(log.openGroup ? { openGroup: log.openGroup } : {}),
       ...(unsaved.length ? { note: "Reading tools see the last save, not these changes, and edits are refused until they're saved." } : {}),
     };
   };

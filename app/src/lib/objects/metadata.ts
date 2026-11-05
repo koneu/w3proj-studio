@@ -224,7 +224,10 @@ async function buildKind(w3: W3Api, kind: string): Promise<KindData> {
       [{ id: "race", label: "Race" }, (id) => raceLabel(row("AbilityBuffData", id).race)],
       [{ id: "kind", label: "Kind" }, (id) => (row("AbilityBuffData", id).isEffect === "1" ? "Effect" : "Buff")],
     ],
-    w3b: [[{ id: "category", label: "Category" }, (id) => category("DestructibleCategories", row("DestructableData", id).category)]],
+    w3b: [
+      [{ id: "category", label: "Category" }, (id) => category("DestructibleCategories", row("DestructableData", id).category)],
+      [{ id: "target", label: "Targeted as" }, (id) => row("DestructableData", id).targType ?? "—"],
+    ],
     w3d: [[{ id: "category", label: "Category" }, (id) => category("DoodadCategories", row("Doodads", id).category)]],
     w3q: [[{ id: "race", label: "Race" }, (id) => raceLabel(row("UpgradeData", id).race)]],
   };

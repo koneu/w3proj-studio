@@ -50,6 +50,35 @@ test("objects say their size and whether they take up ground", () => {
   assert.deepEqual(gameObjectList(game, (s) => s)[0], { id: "a", name: "a", sizeRange: [0.8, 1.2], takesRoom: true });
   values.dptx = "_";
   assert.equal(gameObjectList(game, (s) => s)[0].takesRoom, false);
+  values.dptx = "none";
+  assert.equal(gameObjectList(game, (s) => s)[0].takesRoom, false);
+  delete values.dptx;
+  assert.equal("takesRoom" in gameObjectList(game, (s) => s)[0], false, "unknown isn't no");
+});
+
+test("a type's variations each need a model: a placed one uses just its own", () => {
+  const stored = modelPacks(["War3.w3mod:Doodads/V/Pot0.mdx", "War3.w3mod:Doodads/V/Pot1.mdx", "War3.w3mod:_DE.w3mod:Doodads/V/Jug0.mdx", "War3.w3mod:Doodads/V/Jug1.mdx"]);
+  const paths: Record<string, string> = { a: "Doodads\\V\\Pot", b: "Doodads\\V\\Jug" };
+  const values: Record<string, string> = { dvar: "3" };
+  const game = {
+    baseIds: ["a", "b"], names: new Map<string, string>(), facets: () => ({}),
+    fieldById: new Map([["dfil", field("dfil", "Model")], ["dvar", field("dvar", "Variations")]]),
+    defaultValue: (id: string, f: FieldMeta) => (f.id === "dfil" ? paths[id] : values[f.id]),
+  };
+  const [pot, jug] = gameObjectList(game, (s) => s, undefined, undefined, stored);
+  assert.deepEqual(pot.variationsWithoutModel, [2]);
+  assert.equal("modelOnlyIn" in pot, false);
+  assert.deepEqual(jug.modelOnlyIn, ["DE"]);
+});
+
+test("trees go by what the game targets them as, not their category", () => {
+  const targets: Record<string, string> = { ATtr: "tree", LOcg: "debris", ZTx: "tree,debris" };
+  const game = {
+    baseIds: Object.keys(targets), names: new Map<string, string>(), facets: (id: string) => ({ target: targets[id] }),
+    fieldById: new Map(), defaultValue: () => undefined,
+  };
+  assert.deepEqual(gameObjectList(game, (s) => s, undefined, undefined, undefined, true).map((o) => o.id), ["ATtr", "ZTx"]);
+  assert.equal(gameObjectList(game, (s) => s)[1].tree, undefined);
 });
 
 test("names: the map's own, without colour codes, else the base's", () => {

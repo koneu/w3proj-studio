@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -180,6 +180,15 @@ test("a flattened path levels the ground across it towards its middle", () => {
   paintPath(t, [[0, 896], [2048, 896]], 512, 1, 0, true, seeded());
   assert.ok(at(t, 8, 8) < crown, "a bump beside the line is brought down");
   assert.equal(t.corners[0].rawHeight, 0x2000);
+});
+
+test("a line is even from end to end, and turned along itself", () => {
+  const east = lineSpots([0, 0], [400, 0], 100, 90);
+  assert.deepEqual(east.map((s) => s.x), [0, 100, 200, 300, 400]);
+  assert.ok(east.every((s) => s.facing === 90));
+  assert.equal(lineSpots([0, 0], [0, 400], 100, 90)[0].facing, 180);
+  assert.equal(lineSpots([0, 0], [-400, 0], 100, 90)[0].facing, 270);
+  assert.equal(lineSpots([0, 0], [10, 0], 100, 0).length, 2, "at least both ends");
 });
 
 test("looking for room goes outwards, on the pathing grid", () => {

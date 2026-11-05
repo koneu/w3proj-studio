@@ -56,12 +56,16 @@ test("a gap too small for a big unit says what would fit", () => {
   assert.equal(checkPath(gapped(3), at(4, 15), at(26, 15), 32).walkable, true);
 });
 
-test("of two ways it takes the wide one, though the narrow one is shorter", () => {
+test("the way is the shortest this unit fits, and the wider detour is mentioned", () => {
   // Between the walls: a gap of 1 at the direct line, a gap of 7 far off.
   const h = 41;
   const rows = open(31, h).map((row, y) => (y === 8 || (y >= 30 && y <= 36) ? row : `${row.slice(0, 15)}#${row.slice(16)}`));
-  const r = checkPath(grid(rows), at(4, 8), at(26, 8), 16);
-  assert.equal(r.narrowest?.width, 7 * 32);
+  const small = checkPath(grid(rows), at(4, 8), at(26, 8), 16);
+  assert.equal(small.length, 22 * 32);
+  assert.equal(small.narrowest?.width, 32);
+  assert.equal(small.widestWay, 7 * 32);
+  const big = checkPath(grid(rows), at(4, 8), at(26, 8), 48);
+  assert.ok((big.length ?? 0) > 40 * 32, "too big for the gap: the detour");
 });
 
 test("a diagonal between two blocks isn't a way through", () => {
@@ -70,7 +74,9 @@ test("a diagonal between two blocks isn't a way through", () => {
 });
 
 test("blocked or outside ends are said to be", () => {
-  assert.match(checkPath(grid(["#..", "...", "..."]), at(0, 0), at(2, 2), 16).problem ?? "", /start is on blocked/);
+  const inside = checkPath(grid(["#..", "...", "..."]), at(0, 0), at(2, 2), 16);
+  assert.match(inside.problem ?? "", /start is inside something/);
+  assert.deepEqual(inside.nearestFree, at(1, 0));
   assert.match(checkPath(grid(open(3, 3)), at(0, 0), [9999, 0], 16).problem ?? "", /end is outside/);
 });
 

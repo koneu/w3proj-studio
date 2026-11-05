@@ -71,13 +71,14 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Looking through a camera: the markers are hidden until the next click on the map. */
   let previewing = false;
 
-  const load = (async () => {
+  const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.cameras ??= [];
-  })().catch((e) => w3.window.showError(`Cameras: ${(e as Error).message ?? e}`));
+  };
+  const load = read().catch((e) => w3.window.showError(`Cameras: ${(e as Error).message ?? e}`));
 
   // ---- geometry ----------------------------------------------------------------------
   const ground = (x: number, y: number) => heightAt(t, x, y);
@@ -299,6 +300,14 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         await w3.backend.invoke("codec_write", { root, path: FILE, text });
       }
       unsaved = false;
+    },
+    async reloadFile(path) {
+      if (!path.startsWith(FILE)) return false;
+      await read();
+      unsaved = false;
+      selected = null;
+      if (active) { renderPanel(); render(); }
+      return true;
     },
     dispose() { ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
   };

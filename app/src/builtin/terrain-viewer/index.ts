@@ -21,7 +21,9 @@ import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./pla
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, type Grid } from "./pathcheck";
-import { dress, followGround, groundSlot, heightColors, heightGrid, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, paintCorners, paintPath, scatterSpots, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { changesImports } from "./filewatch";
+import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK } from "../../lib/terrain/pathing";
 import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainView } from "../../extensions/services";
@@ -133,6 +135,26 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   /** The open terrain editor, for tools. */
+  /** Nearly always a burst of edits: the derived files wait for the last of them. */
+  const REBUILD_DELAY = 3000;
+  let rebuild: { key: string; from: { terrain: Terrain; doodads: Placed[] } } | null = null, rebuildTimer: ReturnType<typeof setTimeout> | undefined;
+  /** After the edits stop: pathing, shadows and the minimap, in the background. `from` is the
+   *  state before the first edit: shadows are updated from there. */
+  const rebuildSoon = (from: () => { terrain: Terrain; doodads: Placed[] }) => {
+    const key = w3.workspace.project()?.root ?? "";
+    if (rebuild?.key !== key) rebuild = { key, from: from() };
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => void runRebuild(), REBUILD_DELAY);
+  };
+  const runRebuild = async () => {
+    const editor = opened, job = rebuild;
+    // No editor: it waits for the next edit; a tool opens one then.
+    if (!job || !editor || job.key !== w3.workspace.project()?.root) return;
+    rebuild = null;
+    await editor.derive(job.from).catch((e) => w3.window.showError(`Rebuilding the map's derived files failed: ${e}`));
+  };
+  ctx.subscriptions.push({ dispose: () => clearTimeout(rebuildTimer) });
+
   let opened: {
     handle: TerrainEditorHandle; ready: () => Promise<void>;
     screenshot: (size: number, area: Area | null, angle: ViewAngle, heights: boolean) => Promise<string>;
@@ -144,16 +166,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
   const liveEditor = async () => {
     await w3.commands.execute("w3.terrain.open");
-    for (let n = 0; n < 200 && !opened; n++) await new Promise((done) => setTimeout(done, 100));
-    if (!opened) throw new Error("The terrain editor couldn't start (see its tab).");
-    await opened.ready();
-    return opened;
+    for (let n = 0; n < 200; n++) {
+      const editor = opened;
+      if (editor) {
+        await editor.ready();
+        // Taking a change in place can end in reopening: then it's the next one's turn.
+        if (opened === editor) return editor;
+      } else await new Promise((done) => setTimeout(done, 100));
+    }
+    throw new Error("The terrain editor couldn't start (see its tab).");
   };
   const fileKey = (kind: unknown) => (kind === "doodads" ? "doodads" as const : "units" as const);
 
   /** One edit of a placement file. */
   const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
+    let before: Placed[] = [];
     const name = key === "units" ? "war3mapUnits.doo" : "war3map.doo", path = jsonPathOf(w3, name);
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
     return edits.edit(title, async (read) => {
@@ -161,8 +189,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (text === null) throw new Error(`This project has no ${name}.`);
       const doc = JSON.parse(text) as Record<string, unknown>;
       const list = (doc[key] ??= []) as Placed[];
+      before = key === "doodads" ? structuredClone(list) : [];
       await change({ name, key, doc, list, json: true, dirty: false });
       return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+    }, async () => {
+      const t = opened?.handle.terrain;
+      if (t && key === "doodads") rebuildSoon(() => ({ terrain: { ...t, corners: t.corners.map((c) => ({ ...c })) }, doodads: before }));
     });
   };
 
@@ -201,8 +233,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return files;
     }, async (undoing) => {
       const from = undoing ? states.after : states.before;
-      if (from) await (await liveEditor()).derive(from);
+      if (from) rebuildSoon(() => from);
     });
+    // Pathing, shadows and the minimap follow a moment after the last edit.
     return { changed, corners, objectsMoved: moved };
   };
 
@@ -245,6 +278,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || room.blocked[i] ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
   };
 
+  let placeObjects: McpToolHandler = () => undefined;
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean) => {
     const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
     if (!entry) throw new Error(`${f.name} has nothing placed yet to take the layout from.`);
@@ -315,7 +349,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(args.heights === true ? { heights: heightGrid(t, area) } : {}),
       };
     }),
-    w3.mcp.registerTool("place_objects", async ({ kind, objects, ignoreRoom, nearest, dryRun }) => {
+    w3.mcp.registerTool("place_line", async ({ kind, id, from, to, spacing, facingOffset, ignoreRoom, dryRun }) => {
+      if (typeof id !== "string" || id.length !== 4) throw new Error("id must be four characters, like LTlt.");
+      const [start, end] = [await readPlace(from, "from"), await readPlace(to, "to")];
+      const { handle } = await liveEditor();
+      const type = handle.objects.type(id);
+      if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
+      const room = await handle.objects.occupancy();
+      const fp = await room.footprint(type.kind, id);
+      const step = typeof spacing === "number" && spacing > 0 ? spacing : fp ? Math.max(fp.width, fp.height) * 32 : 0;
+      if (!step) throw new Error(`${id} takes up no ground, so its length isn't known: give spacing.`);
+      const objects = lineSpots(start, end, step, typeof facingOffset === "number" ? facingOffset : 90).map((s) => ({ id, x: s.x, y: s.y, facing: s.facing }));
+      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun });
+      return { spacing: step, ...(report as object) };
+    }),
+    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
       const wanted = objects as { id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number }[];
       const key = fileKey(kind);
@@ -946,7 +994,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
           const l = p.replace(/\\/g, "/").toLowerCase();
           const art = /^map\/war3map(skin)?\.w3[udbt](\.json)?$/.test(l);
-          const imported = /^map\/war3map\.imp(\.json)?$/.test(l) || (l.startsWith("map/") && /\.(mdx|mdl|blp|dds|tga)$/.test(l));
+          const imported = changesImports(l);
           if (!objCtx || (!art && !imported)) return;
           importsChanged ||= imported;
           clearTimeout(objectReload);
@@ -2069,8 +2117,54 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await updateDerived(dooFile?.list ?? [], from.terrain, from.doodads);
           },
         };
+        /** A change from outside, in place: nothing is torn down, so what's loaded stays. Only a
+         *  new ground tile or another map size needs a real reopen. */
+        const takeChange = async (path: string): Promise<boolean> => {
+          const reopenInstead = () => { opened = null; return false; };
+          occupancyPromise = null;
+          minimapStale = true;
+          // The editor's undo steps were for the map as it was.
+          history.length = 0;
+          at = savedAt = 0;
+          if (path === doc.path.toLowerCase()) {
+            const bytes = await readTerrainBytes(doc.path, doc), fresh = parseW3e(bytes);
+            const same = fresh.width === terrain.width && fresh.height === terrain.height && fresh.tileset === terrain.tileset
+              && fresh.groundTiles.join() === terrain.groundTiles.join() && fresh.cliffTiles.join() === terrain.cliffTiles.join();
+            if (!same) return reopenInstead();
+            fresh.corners.forEach((c, i) => Object.assign(terrain.corners[i], c));
+            savedW3e = bytes;
+            notifyGroups({ terrain: true, objects: false } as Edit);
+            void replanCliffs();
+            renderer.terrainChanged();
+            redraw();
+            return true;
+          }
+          for (const [name, key] of [["war3map.doo", "doodads"], ["war3mapUnits.doo", "units"]] as const) {
+            if (path !== `map/${name}.json`.toLowerCase()) continue;
+            const f = await loadPlacedFile(w3, name, key);
+            if (!f) return reopenInstead();
+            if (key === "doodads") { dooFile = f; savedDoodads = structuredClone(f.list); } else { unitsFile = f; savedStarts = startLocations(f.list); }
+            objectsTouched = false;
+            if (selected) clearSelection();
+            await rebuildObjects();
+            notifyGroups({ terrain: false, objects: true } as Edit);
+            redraw();
+            return true;
+          }
+          // A group that isn't open yet reads the file when it is.
+          for (const g of groupInsts.values()) await g.reloadFile?.(path);
+          return true;
+        };
+        let changes: Promise<boolean> = Promise.resolve(true);
+        const reloadFile = (path: string) => {
+          // One at a time, in order; tools wait for them through ready().
+          changes = changes.catch(() => true).then(() => takeChange(path));
+          objectsPlaced = Promise.all([objectsPlaced, changes]).then(() => {});
+          return changes;
+        };
 
         const editorApi = {
+          reloadFile,
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           save: editable ? async () => {
