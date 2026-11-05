@@ -126,6 +126,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   void w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).then((editors) => {
-    ctx.subscriptions.push(editors.registerCompletion({ languages: ["jass"], provide }));
+    ctx.subscriptions.push(editors.registerCompletion({ languages: ["jass", "lua"], provide }));
   });
 }

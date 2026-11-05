@@ -11,6 +11,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, type CodeEditorOptions, type CodeEditorService, type CompletionItem, type CompletionProvider, type CompletionRequest, type FileLanguage } from "../../extensions/services";
 import { checkJass, envWithout } from "../../lib/jass/check";
 import { checkLua } from "../../lib/lua/check";
+import { luaSymbols } from "../../lib/lua/symbols";
 import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
 import { linter } from "./lint";
@@ -73,7 +74,7 @@ function reveal(view: EditorView, name: string | number) {
     view.focus();
     return;
   }
-  const text = view.state.sliceDoc();
+  const text = view.state.doc.toString();
   const re = [
     new RegExp(String.raw`^[ \t]*(?:constant[ \t]+)?(?:native|function)[ \t]+${name}\b`, "m"),
     new RegExp(String.raw`^[ \t]*(?:constant[ \t]+)?\w+[ \t]+(?:array[ \t]+)?${name}\b`, "m"),
@@ -135,7 +136,7 @@ const codeEditors: CodeEditorService = {
           ...basics(language(`x.${opts.language === "jass" ? "j" : opts.language}`), !!opts.readOnly),
           EditorView.theme({ ".cm-scroller": { fontFamily: "var(--mono)", minHeight: "8em" } }),
           ...(lint ? [lint.extension] : []),
-          ...(opts.symbols ? [symbolTools(opts.symbols, elsewhere(opts.openLocation?.bind(opts)), opts.language === "jass" ? extraCompletion : undefined)] : []),
+          ...(opts.symbols ? [symbolTools(opts.symbols, elsewhere(opts.openLocation?.bind(opts)), opts.language === "jass" || opts.language === "lua" ? extraCompletion : undefined, opts.language === "lua" ? "lua" : "jass")] : []),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) { clearTimeout(timer); timer = setTimeout(commit, opts.debounce ?? 600); }
             if (u.focusChanged && !u.view.hasFocus) commit();
@@ -220,6 +221,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 // A claiming language's own declarations, then the game's (no JASS parse of its text).
                 return claim?.symbols ? [...claim.symbols(t), ...jassSymbols(env, "")] : jassSymbols(env, t);
               }, elsewhere(), extraCompletion)] : []),
+              ...(lua ? [symbolTools(async (t) => luaSymbols(await gameJassEnv((p) => w3.game.readText(p)), t), elsewhere(), extraCompletion, "lua")] : []),
               EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
               EditorView.updateListener.of((u) => {
                 if (u.docChanged) doc.setDirty(u.state.sliceDoc() !== saved);

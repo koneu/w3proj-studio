@@ -31,7 +31,8 @@ export function linter(check: (text: string) => Promise<Diagnostic[]> | Diagnost
   let timer: ReturnType<typeof setTimeout> | undefined, run = 0;
   const go = (view: EditorView) => {
     const n = ++run;
-    void Promise.resolve(check(view.state.sliceDoc())).then((diags) => {
+    // The document's own text: diagnostics are positions in it, also in CRLF files.
+    void Promise.resolve(check(view.state.doc.toString())).then((diags) => {
       if (n !== run) return;
       view.dispatch({ effects: setDiagnostics.of(diags) });
       render(view, diags);

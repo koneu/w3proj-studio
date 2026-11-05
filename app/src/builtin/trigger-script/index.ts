@@ -8,7 +8,9 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type TriggerEditorHandle, type TriggersService } from "../../extensions/services";
 import type { TriggerItem } from "../../lib/triggers/wtg";
 import { checkJass } from "../../lib/jass/check";
-import { mapJass } from "../../lib/jass/env";
+import { gameJassEnv, mapJass } from "../../lib/jass/env";
+import { checkLua } from "../../lib/lua/check";
+import { luaSymbols } from "../../lib/lua/symbols";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
 
@@ -34,10 +36,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const env = await map.without(text);
           if (trigger) env.globals.set(own, { type: "trigger", array: false, constant: false });
           return checkJass(text, env, { ordered: false });
-        } : undefined;
+        } : (text: string) => checkLua(text).map((d) => ({ ...d, severity: "error" as const }));
         const editor = code.create(box, {
           value: ed.customText(t) ?? "", language: ed.language, readOnly: !ed.editable, check,
-          symbols: !lua ? map.symbols : undefined,
+          symbols: lua ? async (text: string) => luaSymbols(await gameJassEnv((p) => w3.game.readText(p)), text) : map.symbols,
           openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
         });

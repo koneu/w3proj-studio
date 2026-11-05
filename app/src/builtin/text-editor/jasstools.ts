@@ -9,6 +9,7 @@ import { type Extension } from "@codemirror/state";
 import { EditorView, hoverTooltip, keymap, showPanel, type Panel } from "@codemirror/view";
 import type { CodeSymbol, CompletionItem, CompletionRequest } from "../../extensions/services";
 import { codeSpot, paramOf } from "../../lib/jass/callsite";
+import { luaSpot } from "../../lib/lua/symbols";
 import { h } from "../../workbench/dom";
 
 const COMPLETION_TYPE: Record<string, string> = {
@@ -46,8 +47,10 @@ export type ExtraCompletion = (request: CompletionRequest) => Promise<Completion
 /** `openElsewhere` goes to a symbol declared outside the text (its `location`); `extra` adds other
  *  extensions' items (strings and rawcodes get only those). */
 export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, openElsewhere: (location: string, name: string) => void,
-  extra?: ExtraCompletion): Extension {
-  const current = (view: EditorView) => symbols(view.state.sliceDoc());
+  extra?: ExtraCompletion, language: "jass" | "lua" = "jass"): Extension {
+  // The document's own text: its offsets are what positions in the editor mean, also in CRLF files
+  // (sliceDoc gives the file's line breaks, two characters each).
+  const current = (view: EditorView) => symbols(view.state.doc.toString());
   const goTo = async (view: EditorView, pos: number) => {
     const w = wordAt(view, pos);
     if (!w) return false;
@@ -94,8 +97,8 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
   return [
     autocompletion({
       override: [async (ctx: CompletionContext) => {
-        const text = ctx.state.sliceDoc();
-        const spot = codeSpot(text, ctx.pos);
+        const text = ctx.state.doc.toString();
+        const spot: ReturnType<typeof luaSpot> = language === "lua" ? luaSpot(text, ctx.pos) : codeSpot(text, ctx.pos);
         // Strings and rawcodes: what other extensions know (paths, labels, object ids).
         if (spot.inString || spot.inRawcode) {
           if (!extra) return null;
@@ -104,10 +107,11 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
           const all = await symbols(text).catch(() => [] as CodeSymbol[]);
           const sig = spot.call ? lookup(all, spot.call.name, ctx.pos)?.detail : undefined;
           const call = spot.call ? { ...spot.call, param: sig ? paramOf(sig, spot.call.argIndex) : undefined } : undefined;
-          const items = await extra({ language: "jass", text, pos: ctx.pos, inString: spot.inString, inRawcode: spot.inRawcode, prefix: spot.prefix, call });
+          const items = await extra({ language, text, pos: ctx.pos, inString: spot.inString, inRawcode: spot.inRawcode, prefix: spot.prefix, call });
           if (!items.length) return null;
           // A string's backslashes are written doubled; a rawcode is closed if it isn't yet.
-          const close = spot.inRawcode && ctx.state.sliceDoc(ctx.pos, ctx.pos + 1) !== "'" ? "'" : "";
+          const quote = spot.quote ?? "'";
+          const close = spot.inRawcode && ctx.state.sliceDoc(ctx.pos, ctx.pos + 1) !== quote ? quote : "";
           return {
             from: spot.from, filter: false,
             options: items.map((it): Completion => ({
@@ -121,7 +125,7 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
         // Not inside comments.
         const line = ctx.state.doc.lineAt(ctx.pos);
         const before = line.text.slice(0, ctx.pos - line.from);
-        if (/\/\//.test(before)) return null;
+        if (language === "lua" ? /--/.test(before) : /\/\//.test(before)) return null;
         const list = visible(await symbols(text), ctx.pos);
         const seen = new Set<string>();
         const options: Completion[] = [];
@@ -133,7 +137,7 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
         }
         // Other extensions' items in code (e.g. a language's keywords).
         if (extra) {
-          const items = await extra({ language: "jass", text, pos: ctx.pos, inString: false, inRawcode: false, prefix: word?.text ?? "", call: spot.call });
+          const items = await extra({ language, text, pos: ctx.pos, inString: false, inRawcode: false, prefix: word?.text ?? "", call: spot.call });
           for (const it of items) if (!seen.has(it.label)) { seen.add(it.label); options.push({ label: it.label, apply: it.insert, detail: it.detail, info: it.info, type: it.kind ?? "text", boost: it.boost }); }
         }
         return { from: word ? word.from : ctx.pos, options, validFor: /^\w*$/ };
