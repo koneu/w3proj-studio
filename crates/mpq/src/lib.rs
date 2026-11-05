@@ -41,6 +41,12 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Sector size for the header's shift. Protected maps write nonsense there, so it's capped: the
+/// game reads such maps, and reader and writer have to agree.
+pub(crate) fn sector_size(shift: u16) -> usize {
+    512usize << shift.min(20)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +69,15 @@ mod tests {
         assert_eq!(a.read("empty.txt").unwrap(), b"");
         let list = String::from_utf8(a.read("(listfile)").unwrap()).unwrap();
         assert!(list.contains("war3mapImported\\model.mdx"));
+    }
+
+    #[test]
+    fn a_nonsense_sector_size_still_round_trips() {
+        let mut b = ArchiveBuilder::new(WriteOptions { sector_size_shift: 0xffff, ..WriteOptions::default() });
+        b.add("war3map.j", vec![7; 5000]);
+        let a = Archive::from_bytes(b.write(b"HM3W").unwrap()).unwrap();
+        assert_eq!(a.header().sector_size_shift, 0xffff);
+        assert_eq!(a.read("war3map.j").unwrap(), vec![7; 5000]);
     }
 
     #[test]

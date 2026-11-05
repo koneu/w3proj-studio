@@ -83,7 +83,7 @@ impl ArchiveBuilder {
         let base = out.len();
         out.extend_from_slice(&[0u8; 32]); // header, filled in at the end
 
-        let sector = 512usize << self.options.sector_size_shift;
+        let sector = crate::sector_size(self.options.sector_size_shift);
         let mut blocks: Vec<[u32; 4]> = Vec::with_capacity(self.files.len());
         for (_, data) in &self.files {
             let pos = (out.len() - base) as u32;

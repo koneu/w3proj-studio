@@ -1,0 +1,102 @@
+{
+  "format": "w3proj.mapinfo/1",
+  "version": 31,
+  "saves": 3,
+  "editorVersion": 6114,
+  "gameVersion": [
+    1,
+    33,
+    0,
+    19378
+  ],
+  "name": "TRIGSTR_001",
+  "author": "TRIGSTR_002",
+  "description": "TRIGSTR_003",
+  "suggestedPlayers": "TRIGSTR_004",
+  "cameraBounds": [
+    -128.0,
+    -128.0,
+    128.0,
+    128.0,
+    -128.0,
+    128.0,
+    128.0,
+    -128.0
+  ],
+  "cameraComplements": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "playableWidth": 2,
+  "playableHeight": 2,
+  "flags": 130072,
+  "tileset": "L",
+  "loadingScreen": {
+    "number": -1,
+    "model": "",
+    "text": "",
+    "title": "",
+    "subtitle": ""
+  },
+  "gameDataSet": 2,
+  "prologue": {
+    "path": "",
+    "text": "",
+    "title": "",
+    "subtitle": ""
+  },
+  "fog": {
+    "style": 0,
+    "start": 3000.0,
+    "end": 5000.0,
+    "density": 0.5,
+    "color": [
+      255,
+      255,
+      255,
+      255
+    ]
+  },
+  "weather": "0x00000000",
+  "soundEnvironment": "",
+  "lightEnvironment": "",
+  "waterTint": [
+    128,
+    255,
+    255,
+    255
+  ],
+  "scriptType": 0,
+  "supportedModes": 3,
+  "gameDataVersion": 1,
+  "players": [
+    {
+      "id": 0,
+      "controller": 1,
+      "race": 1,
+      "fixedStart": 0,
+      "name": "TRIGSTR_005",
+      "start": [
+        0.0,
+        0.0
+      ],
+      "allyLow": 0,
+      "allyHigh": 0,
+      "enemyLow": 0,
+      "enemyHigh": 0
+    }
+  ],
+  "forces": [
+    {
+      "flags": 0,
+      "players": 4294967295,
+      "name": "TRIGSTR_006"
+    }
+  ],
+  "upgrades": [],
+  "techs": [],
+  "unitTables": [],
+  "itemTables": []
+}

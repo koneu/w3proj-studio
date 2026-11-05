@@ -162,7 +162,7 @@ impl Archive {
     }
 
     pub fn sector_size(&self) -> usize {
-        512usize << self.header.sector_size_shift.min(20)
+        crate::sector_size(self.header.sector_size_shift)
     }
 
     /// All live slots: hash entries pointing at an existing block.

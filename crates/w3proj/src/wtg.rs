@@ -135,12 +135,25 @@ fn err(m: impl Into<String>) -> Error {
     Error::Format(format!("war3map.wtg: {}", m.into()))
 }
 
+/// How deep actions and parameters may nest. Parsing recurses, and a stack overflow can't be
+/// caught, so a crafted file has to be stopped. Anything deeper would not survive the JSON project
+/// file either (serde_json stops at 128 levels), and real maps stay far below this.
+const MAX_DEPTH: usize = 128;
+
 struct Reader<'a> {
     b: &'a [u8],
     o: usize,
+    depth: usize,
 }
 
 impl Reader<'_> {
+    fn enter(&mut self) -> Result<()> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return Err(err(format!("nested more than {MAX_DEPTH} levels deep")));
+        }
+        Ok(())
+    }
     fn u32(&mut self) -> Result<u32> {
         let s = self.b.get(self.o..self.o + 4).ok_or_else(|| err("truncated"))?;
         self.o += 4;
@@ -183,6 +196,7 @@ impl Ctx<'_> {
             .ok_or_else(|| err(format!("unknown trigger function \"{name}\" (not in TriggerData.txt)")))
     }
     fn param(&self, r: &mut Reader) -> Result<Param> {
+        r.enter()?;
         let ty = r.i32()?;
         let value = r.str()?;
         let call = if r.flag()? {
@@ -197,15 +211,18 @@ impl Ctx<'_> {
             None
         };
         let index = if r.flag()? { Some(Box::new(self.param(r)?)) } else { None };
+        r.depth -= 1;
         Ok(Param { ty, value, call, index })
     }
     fn eca(&self, r: &mut Reader, child: bool) -> Result<Eca> {
+        r.enter()?;
         let kind = r.u32()?;
         let group = if child { Some(r.u32()?) } else { None };
         let name = r.str()?;
         let enabled = r.flag()?;
         let params = (0..self.args(kind, &name)?).map(|_| self.param(r)).collect::<Result<_>>()?;
         let children = if self.v7 { r.list(|r| self.eca(r, true))? } else { Vec::new() };
+        r.depth -= 1;
         Ok(Eca { kind, group, name, enabled, params, children })
     }
     fn trigger(&self, r: &mut Reader, ty: u32, id: Option<u32>) -> Result<Trigger> {
@@ -236,7 +253,7 @@ pub fn parse(b: &[u8], data: &TriggerData) -> Result<TriggerFile> {
     if b.get(..4) != Some(b"WTG!") {
         return Err(err("missing WTG! header"));
     }
-    let mut r = Reader { b, o: 4 };
+    let mut r = Reader { b, o: 4, depth: 0 };
     let first = r.u32()?;
     let f = if first == MARKER {
         let version = r.u32()?;

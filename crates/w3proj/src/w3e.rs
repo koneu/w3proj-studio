@@ -91,7 +91,8 @@ fn parse(b: &[u8]) -> Result<Terrain> {
     p += 16;
     let per = if version == 12 { 8 } else { 7 };
     let n = width.checked_mul(height).ok_or_else(|| err("size overflow"))?;
-    let body = b.get(p..p + n * per).ok_or_else(|| err(format!("truncated: {width}×{height} corners")))?;
+    let end = n.checked_mul(per).and_then(|size| size.checked_add(p)).ok_or_else(|| err("size overflow"))?;
+    let body = b.get(p..end).ok_or_else(|| err(format!("truncated: {width}×{height} corners")))?;
     let corners = body
         .chunks(per)
         .map(|c| {
@@ -475,6 +476,14 @@ mod tests {
              \n[layer] all 2\n\
              \n[flags]\n00000\n00000\n00005\n"
         );
+    }
+
+    #[test]
+    fn a_size_too_large_to_multiply_is_an_error() {
+        let mut b = sample(12, &[]);
+        let at = b.len() - 3 * 5 * 8 - 16;
+        b[at..at + 8].copy_from_slice(&[0, 0, 0, 0x40, 0, 0, 0, 0x40]);
+        assert!(to_text(&b).is_err());
     }
 
     #[test]
