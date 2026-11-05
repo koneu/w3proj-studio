@@ -5,6 +5,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseSlk } from "../../lib/formats/text";
 import { TILESETS } from "../../lib/terrain/tilesets";
+import { strokePoints } from "../../lib/terrain/strokepath";
 import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
@@ -14,6 +15,8 @@ type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
 const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
 
+/** World units between brush stamps per step of the brush size (half its radius). */
+const BRUSH_SPACING = 64;
 /** Maps hold at most this many ground tile types (World Editor limit). */
 const MAX_GROUND_TILES = 16;
 
@@ -63,19 +66,29 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let tool: Tool = "paint", size = 2, strength = 16, paintTex = 0, square = false;
   /** Tile type chosen for painting (may not be in the map yet). */
   let paintTile = terrain.groundTiles[0] ?? "";
-  let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number } | null = null;
+  let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number] } | null = null;
 
-  /** One brush application at a ground point. */
-  const applyAt = (p: [number, number, number]) => {
-    if (!stroke) return;
-    const brush = { x: p[0], y: p[1], radius: size, square };
-    const did = tool === "paint"
+  /** One brush application at a ground point; true if it changed something. */
+  const stamp = (x: number, y: number): boolean => {
+    if (!stroke) return false;
+    const brush = { x, y, radius: size, square };
+    return tool === "paint"
       ? paintTexture(terrain, brush, paintTex, stroke.s)
       : tool === "blight" || tool === "unblight"
       ? paintBlight(terrain, brush, tool === "blight", stroke.s)
       : isLayerTool(tool)
       ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
       : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
+  };
+  /** The brush at a ground point, and along the way from the last one. Raise, Lower and Smooth
+   *  stay one application each: their strength adds up, so stamps in between would change it. */
+  const applyAt = (p: [number, number, number]) => {
+    if (!stroke) return;
+    const along = stroke.at && tool !== "raise" && tool !== "lower" && tool !== "smooth";
+    const points = along ? strokePoints(stroke.at!, [p[0], p[1]], size * BRUSH_SPACING) : [[p[0], p[1]] as [number, number]];
+    let did = false;
+    for (const [x, y] of points) did = stamp(x, y) || did;
+    stroke.at = [p[0], p[1]];
     if (did) ed.terrainChanged();
   };
   const endStroke = () => {

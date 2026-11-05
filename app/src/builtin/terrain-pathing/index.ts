@@ -7,6 +7,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
+import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
 const FILE = ".w3proj/pathing.json";
@@ -84,7 +85,9 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
 
   // ---- painting ----------------------------------------------------------------------
   let stroke: Map<number, Override | undefined> | null = null;
-  const touched = (cx: number, cy: number) => {
+  /** The stroke's last point. */
+  let last: [number, number] | null = null;
+  const touched =(cx: number, cy: number) => {
     const out: number[] = [];
     for (let y = cy - radius + 1; y < cy + radius; y++) {
       for (let x = cx - radius + 1; x < cx + radius; x++) {
@@ -96,16 +99,20 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   };
   const mask = () => (flags.walk ? WALK : 0) | (flags.fly ? NO_FLY : 0) | (flags.build ? NO_BUILD : 0);
   const paint = (p: [number, number, number]) => {
-    const cx = Math.floor((p[0] - t.offsetX) / 32), cy = Math.floor((p[1] - t.offsetY) / 32);
     const m = mask();
-    for (const i of touched(cx, cy)) {
-      if (!stroke!.has(i)) stroke!.set(i, overrides.get(i) && { ...overrides.get(i)! });
-      const o = { ...(overrides.get(i) ?? { set: 0, clear: 0 }) };
-      if (mode === "block") { o.set |= m; o.clear &= ~m; }
-      else if (mode === "allow") { o.clear |= m; o.set &= ~m; }
-      else { o.set &= ~m; o.clear &= ~m; }
-      if (o.set || o.clear) overrides.set(i, o); else overrides.delete(i);
+    // Along the way from the last point: a quick drag must not leave gaps units walk through.
+    for (const [x, y] of last ? strokePoints(last, [p[0], p[1]], 16) : [[p[0], p[1]]]) {
+      const cx = Math.floor((x - t.offsetX) / 32), cy = Math.floor((y - t.offsetY) / 32);
+      for (const i of touched(cx, cy)) {
+        if (!stroke!.has(i)) stroke!.set(i, overrides.get(i) && { ...overrides.get(i)! });
+        const o = { ...(overrides.get(i) ?? { set: 0, clear: 0 }) };
+        if (mode === "block") { o.set |= m; o.clear &= ~m; }
+        else if (mode === "allow") { o.clear |= m; o.set &= ~m; }
+        else { o.set &= ~m; o.clear &= ~m; }
+        if (o.set || o.clear) overrides.set(i, o); else overrides.delete(i);
+      }
     }
+    last = [p[0], p[1]];
     render();
   };
   const restore = (values: Map<number, Override | undefined>) => {
@@ -156,6 +163,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       stroke = new Map();
+      last = null;
       paint(p.ground);
       return true;
     },
