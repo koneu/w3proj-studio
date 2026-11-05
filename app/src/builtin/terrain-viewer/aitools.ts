@@ -140,7 +140,7 @@ export function paintCorners(t: Terrain, area: Area, shape: Shape, slot: number,
     const c = t.corners[i];
     if (c.texture === slot) continue;
     c.texture = slot;
-    c.variation = randomVariation();
+    c.variation = randomVariation(random);
     changed.push(i);
   }
   return changed;
@@ -176,7 +176,7 @@ export function paintPath(t: Terrain, points: readonly [number, number][], width
       }
       if ((edge > 0 && r > 1 - edge && random() > (1 - r) / edge) || c.texture === slot) continue;
       c.texture = slot;
-      c.variation = randomVariation();
+      c.variation = randomVariation(random);
       changed.add(i);
     }
   }
@@ -190,7 +190,7 @@ export function paintPath(t: Terrain, points: readonly [number, number][], width
       const i = y * t.width + x, c = t.corners[i];
       if (c.boundary || c.texture === slot) continue;
       c.texture = slot;
-      c.variation = randomVariation();
+      c.variation = randomVariation(random);
       changed.add(i);
     }
   }
@@ -324,13 +324,14 @@ export function replacePlaced(list: { id: string; position: readonly number[]; v
   return changed;
 }
 
-/** Evenly along a line, from end to end, turned to run along it. `facingOffset` is the facing
- *  (degrees) that makes the model's long side follow the line. */
+/** Pieces along a line, turned to run along it, each centred in its own stretch, so the row starts
+ *  and ends at the line's ends and two lines meet in a corner. `facingOffset` is the facing (degrees) that makes a model follow the line. */
 export function lineSpots(from: [number, number], to: [number, number], spacing: number, facingOffset: number) {
   const dx = to[0] - from[0], dy = to[1] - from[1], length = Math.hypot(dx, dy);
-  const count = Math.max(1, Math.round(length / spacing));
+  // Rounded up: pieces overlapping a little look better than gaps.
+  const count = Math.max(1, Math.ceil(length / spacing - 0.05));
   const facing = (((Math.atan2(dy, dx) * 180) / Math.PI + facingOffset) % 360 + 360) % 360;
-  return Array.from({ length: count + 1 }, (_, i) => ({ x: from[0] + (dx * i) / count, y: from[1] + (dy * i) / count, facing }));
+  return Array.from({ length: count }, (_, i) => ({ x: from[0] + (dx * (i + 0.5)) / count, y: from[1] + (dy * (i + 0.5)) / count, facing }));
 }
 
 /** Rows across an area, for fields and orchards; `jitter` (units) keeps them from looking ruled. */

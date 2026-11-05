@@ -79,6 +79,8 @@ code { font-family: var(--mono); font-size: 12px; }
 .tree-row:hover { background: var(--bg-hover); }
 .ext-deps { font-size: 11px; color: var(--fg-muted); }
 .ext-blocked { font-size: 11px; color: var(--warning); }
+.ai-edit { padding: 1px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-edit.undone { opacity: 0.55; }
 .tree-row.selected { background: #37414f; }
 .tree-row.drop-target { outline: 1px solid var(--accent, #4a8bd6); outline-offset: -1px; }
 .tree.drop-target { outline: 1px dashed var(--accent, #4a8bd6); outline-offset: -2px; }

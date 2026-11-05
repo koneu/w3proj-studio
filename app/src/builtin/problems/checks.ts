@@ -189,11 +189,14 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       title: "Placed objects",
       async run() {
         const known = new Set<string>(["sloc"]);
+        /** By the placement file each belongs in. */
+        const inUnits = new Set<string>(["sloc"]), inDoodads = new Set<string>();
+        const note = (kind: string, id: string) => { known.add(id); (kind === "w3u" || kind === "w3t" ? inUnits : inDoodads).add(id); };
         for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
           const k = await loadKind(w3, kind).catch(() => null);
-          for (const id of k?.baseIds ?? []) known.add(id);
+          for (const id of k?.baseIds ?? []) note(kind, id);
           for (const file of [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`]) {
-            for (const o of (await readJson<{ custom?: Obj[] }>(w3, file))?.custom ?? []) if (o.id) known.add(o.id);
+            for (const o of (await readJson<{ custom?: Obj[] }>(w3, file))?.custom ?? []) if (o.id) note(kind, o.id);
           }
         }
         // A campaign's chapter map also has the campaign's custom objects.
@@ -201,25 +204,32 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
         const campaign = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
         if (campaign) {
           for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
-            for (const o of (await readJson<{ custom?: Obj[] }>(w3, `${campaign}\\map\\war3campaign.${kind}.json`))?.custom ?? []) if (o.id) known.add(o.id);
+            for (const o of (await readJson<{ custom?: Obj[] }>(w3, `${campaign}\\map\\war3campaign.${kind}.json`))?.custom ?? []) if (o.id) note(kind, o.id);
           }
         }
         // Random units/items/buildings ("uDNR", "iDNR", "bDNR") and random items by level ("YiI1").
         const random = (id: string) => /^[uib]DNR$/.test(id) || /^Y.I\d$/.test(id);
         const unknown = new Map<string, { n: number; x: number; y: number; file: string }>();
+        const misplaced = new Map<string, { n: number; x: number; y: number; file: string }>();
         for (const [file, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
           const list = (await readJson<Record<string, { id: string; position: number[] }[]>>(w3, file))?.[key] ?? [];
           for (const p of list) {
-            if (known.has(p.id) || random(p.id)) continue;
-            const u = unknown.get(p.id) ?? { n: 0, x: p.position[0], y: p.position[1], file };
+            if (random(p.id)) continue;
+            const own = key === "units" ? inUnits : inDoodads, other = key === "units" ? inDoodads : inUnits;
+            const list2 = !known.has(p.id) ? unknown : other.has(p.id) && !own.has(p.id) ? misplaced : null;
+            if (!list2) continue;
+            const u = list2.get(p.id) ?? { n: 0, x: p.position[0], y: p.position[1], file };
             u.n++;
-            unknown.set(p.id, u);
+            list2.set(p.id, u);
           }
         }
-        return capped([...unknown].map(([id, u]): Problem => ({
-          severity: "warning", message: `${id}: unknown object type (not in the game's or the map's object data), placed ${u.n}×`,
-          location: u.file.slice(4), reveal: { command: "w3.terrain.showPoint", args: [u.x, u.y] },
-        })), "unknown types");
+        const report = (list: typeof unknown, say: (id: string, u: { n: number }) => string) => [...list].map(([id, u]): Problem => ({
+          severity: "warning", message: say(id, u), location: u.file.slice(4), reveal: { command: "w3.terrain.showPoint", args: [u.x, u.y] },
+        }));
+        return capped([
+          ...report(unknown, (id, u) => `${id}: unknown object type (not in the game's or the map's object data), placed ${u.n}×`),
+          ...report(misplaced, (id, u) => `${id}: in the wrong placement file, placed ${u.n}×: units and items belong in war3mapUnits.doo, doodads and destructables in war3map.doo`),
+        ], "unknown types");
       },
     },
     {

@@ -36,6 +36,8 @@ export class EditLog {
   private queue: Promise<unknown> = Promise.resolve();
   private checkpointed = false;
   private next = 1;
+  /** What has happened, undone edits too, for showing: it stays when an edit goes. */
+  private past: { id: number; title: string; undone: boolean }[] = [];
   /** Open group: edits go into this record, which is the newest one. */
   private group: EditRecord | null = null;
   /** After an edit or an undo. */
@@ -48,6 +50,16 @@ export class EditLog {
     return this.group?.title ?? null;
   }
 
+  /** The edits so far, newest first, with those undone marked. */
+  history(): readonly { title: string; undone: boolean }[] {
+    return [...this.past].reverse();
+  }
+
+  private remember(r: EditRecord) {
+    this.past.push({ id: r.id, title: r.title, undone: false });
+    if (this.past.length > this.keep) this.past.shift();
+  }
+
   list(): readonly EditRecord[] {
     return this.records;
   }
@@ -55,6 +67,7 @@ export class EditLog {
   /** Another project: its edits and its checkpoint are its own. */
   reset() {
     this.records = [];
+    this.past = [];
     this.group = null;
     this.checkpointed = false;
     this.onChange();
@@ -123,14 +136,16 @@ export class EditLog {
       const g = this.group;
       if (g) {
         // First in the group: it joins the list only now, so an empty group leaves no trace.
-        if (!this.records.includes(g)) this.records.push(g);
+        if (!this.records.includes(g)) { this.records.push(g); this.remember(g); }
         for (const f of files) {
           const known = g.files.find((x) => x.path === f.path);
           if (known) known.after = f.after; else g.files.push({ ...f });
         }
         if (follow) g.follows.push(follow);
       } else {
-        this.records.push({ id: this.next++, title, at: Date.now(), files, follows: follow ? [follow] : [] });
+        const record: EditRecord = { id: this.next++, title, at: Date.now(), files, follows: follow ? [follow] : [] };
+        this.records.push(record);
+        this.remember(record);
       }
       if (this.records.length > this.keep) this.records.shift();
       this.io.log(`AI edit: ${title} (${files.map((f) => f.path).join(", ")})`);
@@ -153,6 +168,8 @@ export class EditLog {
       }
       await this.restore(last.files);
       this.records.pop();
+      const shown = this.past.find((p) => p.id === last.id);
+      if (shown) shown.undone = true;
       this.io.log(`AI edit undone: ${last.title}`);
       for (const follow of [...last.follows].reverse()) await this.followUp(last.title, follow, true);
       this.onChange();

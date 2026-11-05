@@ -86,6 +86,12 @@ test("the map's boundary stays as it is", () => {
   assert.equal(at(t, 8, 8), 0);
 });
 
+test("a seed repeats a painted patch, tile variations included", () => {
+  const paint = (seed: number) => { const t = field(); paintCorners(t, hill, "ellipse", 1, 0.3, seededRandom(seed)); return t.corners.map((c) => [c.texture, c.variation]); };
+  assert.deepEqual(paint(5), paint(5));
+  assert.notDeepEqual(paint(5), paint(6));
+});
+
 test("painting a patch: its middle is solid and its edge frays", () => {
   const t = field();
   const changed = paintCorners(t, hill, "ellipse", 1, 0.4, seeded());
@@ -263,13 +269,14 @@ test("a picture can leave things out, water with its shoreline", () => {
   assert.throws(() => hiddenInPicture("doodads"), /hide lists any of/);
 });
 
-test("a line is even from end to end, and turned along itself", () => {
+test("a line's pieces fill it from end to end, so corners meet, and are turned along it", () => {
   const east = lineSpots([0, 0], [400, 0], 100, 90);
-  assert.deepEqual(east.map((s) => s.x), [0, 100, 200, 300, 400]);
+  assert.deepEqual(east.map((s) => s.x), [50, 150, 250, 350]);
   assert.ok(east.every((s) => s.facing === 90));
   assert.equal(lineSpots([0, 0], [0, 400], 100, 90)[0].facing, 180);
   assert.equal(lineSpots([0, 0], [-400, 0], 100, 90)[0].facing, 270);
-  assert.equal(lineSpots([0, 0], [10, 0], 100, 0).length, 2, "at least both ends");
+  assert.equal(lineSpots([0, 0], [10, 0], 100, 0).length, 1, "at least one");
+  assert.equal(lineSpots([0, 0], [1000, 0], 190, 90).length, 6, "1000 / 190: rather a little overlap than gaps");
 });
 
 test("looking for room goes outwards, on the pathing grid", () => {

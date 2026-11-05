@@ -52,7 +52,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     checkpoint: () => w3.commands.execute("w3.checkpoints.create", { quiet: true }).then(() => undefined),
     log: (line) => out.append(line),
   });
-  log.onChange = () => w3.views.refresh("w3.mcp.status");
+  // Only this part changes with an edit: redrawing the view would flash everything else in it.
+  const editList = h("div");
+  const showEdits = () => {
+    const past = log.history(), canUndo = log.list().at(-1);
+    editList.replaceChildren(
+      h("div.ext-section-title", {}, "AI EDITS"),
+      ...(past.length ? past.slice(0, 6).map((e) => h(`div.ext-desc.ai-edit${e.undone ? ".undone" : ""}`, { title: e.title }, e.title, e.undone ? h("small.muted", {}, " undone") : null)) : [h("div.view-empty", {}, "None yet.")]),
+      ...(past.length > 6 ? [h("div.ext-desc.ai-edit.muted", {}, `and ${past.length - 6} earlier`)] : []),
+      ...(canUndo ? [h("div.ext-item", {}, h("div.ext-actions", {}, h("button", { onclick: () => void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))) }, `Undo "${canUndo.title}"`)))] : []));
+  };
+  log.onChange = showEdits;
   let root: string | null = w3.workspace.project()?.root ?? null;
 
   const setting = (key: string) => w3.settings.get<boolean>(key, false) === true;
@@ -98,7 +108,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.views.register("w3.mcp.status", {
       render(el) {
-        const on = enabled(), writing = setting("mcp.writeTools"), saving = setting("mcp.saveTool"), edits = log.list();
+        const on = enabled(), writing = setting("mcp.writeTools"), saving = setting("mcp.saveTool");
+        showEdits();
         el.append(
           h("div.ext-item", {},
             h("div.ext-desc", {}, on ? "On: AI clients on this computer can use the open project." : "Off: AI clients can't reach this app."),
@@ -111,11 +122,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ...(writing ? [h("div.ext-item", {},
             h("div.ext-desc", {}, saving ? "AI tools may save everything unsaved, your own work too." : "AI tools ask you to save."),
             h("div.ext-actions", {}, h("button", { onclick: () => void w3.settings.set("mcp.saveTool", !saving) }, saving ? "Stop saving" : "Allow saving")))] : []),
-          ...(edits.length ? [
-            h("div.ext-section-title", {}, "AI EDITS"),
-            ...edits.slice(-8).reverse().map((e) => h("div.ext-item", { title: e.files.map((f) => f.path).join("\n") }, h("div.ext-desc", {}, e.title))),
-            h("div.ext-item", {}, h("div.ext-actions", {}, h("button", { onclick: () => void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))) }, `Undo "${edits[edits.length - 1].title}"`))),
-          ] : []),
+          ...(writing ? [editList] : []),
           h("div.ext-section-title", {}, "CLIENTS"),
           h("div.ext-desc.ext-formats-hint", {}, "Looks where a standard installation keeps its settings, so this can fail. Copy client setup always works."));
         const clients = h("div", {}, h("div.view-empty", {}, "Looking…"));

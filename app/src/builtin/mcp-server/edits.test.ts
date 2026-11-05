@@ -175,6 +175,19 @@ test("undo closes an open group, and a failed edit doesn't end it", async () => 
   assert.deepEqual(log.list().map((e) => e.title), ["After"]);
 });
 
+test("what was done stays listed after an undo, marked", async () => {
+  const { log } = setup({ "map/a": "1" });
+  await log.edit("One", put("map/a", "2"));
+  await log.beginGroup("Forest");
+  await log.edit("In it", put("map/a", "3"));
+  await log.endGroup();
+  await log.undo();
+  assert.deepEqual(log.history(), [{ title: "Forest", undone: true }, { title: "One", undone: false }].map((e) => ({ id: e.title === "One" ? 1 : 2, ...e })));
+  assert.equal(log.list().length, 1);
+  log.reset();
+  assert.equal(log.history().length, 0);
+});
+
 test("old edits drop off", async () => {
   const { log } = setup({ "map/a": "0" });
   for (let i = 1; i <= 35; i++) await log.edit(`E${i}`, put("map/a", String(i)));

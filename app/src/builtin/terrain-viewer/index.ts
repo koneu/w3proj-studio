@@ -24,6 +24,7 @@ import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
 import { changesImports } from "./filewatch";
+import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK } from "../../lib/terrain/pathing";
@@ -178,6 +179,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     throw new Error("The terrain editor couldn't start (see its tab).");
   };
   const fileKey = (kind: unknown) => (kind === "doodads" ? "doodads" as const : "units" as const);
+  /** Which placement file a type belongs in. The type decides: put in the wrong file, an object
+   *  silently isn't what was asked for. */
+  const fileOfType = (handle: TerrainEditorHandle, id: string, kind: unknown) => {
+    const type = handle.objects.type(id)?.kind;
+    if (!type) return kind === undefined ? null : fileKey(kind);
+    const key = type === "w3d" || type === "w3b" ? "doodads" as const : "units" as const;
+    if (kind !== undefined && kind !== key) throw new Error(`${id} is one of the map's ${key}, not ${String(kind)}.`);
+    return key;
+  };
 
   /** One edit of a placement file. */
   const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
@@ -382,7 +392,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (problem) throw new Error(problem);
       const [width, height] = resizedSize(t, change);
       const removed = outsideAfterResize(handle.objects.list(), t, change);
-      const result = { width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed };
+      const grows = change.some((n) => n > 0);
+      const result = {
+        width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed,
+        ...(grows ? { note: "New ground continues the map's edge: the same tile and height as far as it reaches, and the tiles repeat. Paint it afterwards to hide that." } : {}),
+      };
       if (dryRun === true) return result;
       await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}?`, "Resize map");
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
@@ -506,23 +520,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!type) throw new Error(`"${id}" isn't an object type here. list_objects gives them.`);
       const room = await handle.objects.occupancy();
       const fp = await room.footprint(type.kind, id);
-      const step = typeof spacing === "number" && spacing > 0 ? spacing : fp ? Math.max(fp.width, fp.height) * 32 : 0;
-      if (!step) throw new Error(`${id} takes up no ground, so its length isn't known: give spacing.`);
+      const step = typeof spacing === "number" && spacing > 0 ? spacing : (await handle.objects.modelLength(id)) ?? (fp ? Math.max(fp.width, fp.height) * 32 : 0);
+      if (!step) throw new Error(`${id} has no length to go by: give spacing.`);
       const objects = lineSpots(start, end, step, typeof facingOffset === "number" ? facingOffset : 90).map((s) => ({ id, x: s.x, y: s.y, facing: s.facing }));
-      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun });
+      const report = await placeObjects({ kind, objects, ignoreRoom, dryRun, ownPieces: true });
       return { spacing: step, ...(report as object) };
     }),
-    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed }) => {
+    w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
       const wanted = objects as { id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number }[];
-      const key = fileKey(kind);
+      const { handle } = await liveEditor();
+      const files = new Set(wanted.map((o) => (typeof o.id === "string" ? fileOfType(handle, o.id, kind) : null)).filter(Boolean));
+      if (files.size > 1) throw new Error("objects mixes units and doodads: place each in its own call.");
+      const key = [...files][0] ?? fileKey(kind ?? "doodads");
       const owners = wanted.map((o) => (typeof o.player === "number" ? o.player - 1 : 0));
       for (const [i, o] of wanted.entries()) {
         if (typeof o.id !== "string" || o.id.length !== 4 || typeof o.x !== "number" || typeof o.y !== "number") throw new Error(`objects[${i}] needs an id of four characters, and x and y.`);
         if (key === "units" && (!Number.isInteger(owners[i]) || owners[i] < 0 || owners[i] > 27)) throw new Error(`objects[${i}]: player counts from 1.`);
       }
-      const { handle } = await liveEditor();
-      const bounds = await playable().catch(() => null);
+      const edge = await playable().catch(() => null);
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
@@ -545,14 +561,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const s of spotsAround(x, y)) if (await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
-              skipped.push({ index: i, id, x, y, reason: bounds && !inArea(x, y, bounds) ? "outside the playable map" : "something stands there, or the ground doesn't allow it" });
+              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "outside the playable map" : "something stands there, or the ground doesn't allow it" });
               continue;
             }
             shifted.push({ index: i, id, from: [x, y], to: spot });
           }
           if (place) {
             place(o, i, spot[0], spot[1], facing);
-            await room?.mark(kindOf, id, spot[0], spot[1], angle);
+            // A line's pieces touch each other on purpose.
+            if (ownPieces !== true) await room?.mark(kindOf, id, spot[0], spot[1], angle);
           }
           placed++;
         }
@@ -579,7 +596,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const keep = [...await readKeepClear(args.avoid), ...(args.ignoreReserved === true ? [] : await readReserved())];
       const seed = seedOf(args.seed), random = seededRandom(seed);
       const { handle } = await liveEditor();
-      const key = fileKey(args.kind ?? "doodads");
+      const files = new Set((ids as string[]).map((i) => fileOfType(handle, i, args.kind)).filter(Boolean));
+      if (files.size > 1) throw new Error("ids mixes units and doodads: scatter each in its own call.");
+      const key = [...files][0] ?? fileKey(args.kind ?? "doodads");
       const counts = new Map<string, number>();
       let noRoom = 0, keptClear = 0;
       await editPlaced(`Scatter ${(ids as string[]).join(", ")} in ${area.name ?? "an area"}`, key, async (f) => {
@@ -1858,6 +1877,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const placed = [...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })), ...buildings];
               return (await Occupancy.build(terrain, data, placed)).blocked;
             })()),
+            modelLength: async (id) => {
+              const skin = objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
+              if (!skin) return null;
+              const gpu = await loader.modelFor(skin, 0).catch(() => null);
+              if (!gpu) return null;
+              const { min, max } = bounds(gpu.model);
+              return Math.max(max[0] - min[0], max[1] - min[1]) * skin.modelScale;
+            },
             destructables: () => (destructablePromise ??= (async () => {
               pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
               const isDestructable = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind === "w3b";

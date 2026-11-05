@@ -150,23 +150,34 @@ export function checkRoute(g: Grid, points: [number, number][], unitSize: number
       if (c[i] && distanceToLine(wx, wy, points) <= half) inside[i] = c[i];
     }
   }
-  const room = roomFor(unitSize);
-  let length = 0, tightest = -1;
+  const room = roomFor(unitSize), top = inside.reduce((a, b) => Math.max(a, b), 0);
+  // The tightest place of the corridor itself, found along the widest way through each leg: that
+  // doesn't depend on the unit, or on which side of the road a shortest way happens to hug.
+  let length = 0, tightest = -1, widest = top;
   for (let leg = 0; leg + 1 < stops.length; leg++) {
     const from = stops[leg], to = stops[leg + 1], kept = [inside[from], inside[to]];
     inside[from] = inside[to] = 0xffff;
     const found = search(inside, w, h, from, to, room);
-    inside[from] = kept[0]; inside[to] = kept[1];
     if (!found.found) return { ...base, walkable: false, failedLeg: leg, stuckAt: world(found.closest), problem: "The unit can't get along here without leaving the corridor." };
+    let low = room, high = top;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (search(inside, w, h, from, to, middle).found) low = middle; else high = middle - 1;
+    }
+    const wide = search(inside, w, h, from, to, low);
+    inside[from] = kept[0]; inside[to] = kept[1];
     let last = to;
     for (let i = found.prev[to]; ; i = found.prev[i]) {
       length += Math.hypot(world(i)[0] - world(last)[0], world(i)[1] - world(last)[1]);
-      if (i !== from && c[i] && (tightest < 0 || c[i] < c[tightest])) tightest = i;
       last = i;
       if (i === from) break;
     }
+    const way: number[] = [];
+    for (let i = wide.prev[to]; i !== from; i = wide.prev[i]) way.push(i);
+    const least = way.reduce((a, i) => Math.min(a, c[i]), Infinity), tight = way.filter((i) => c[i] === least);
+    if (tight.length && least <= widest) { widest = least; tightest = tight[Math.floor(tight.length / 2)]; }
   }
-  return { ...base, walkable: true, length: Math.round(length), ...(tightest >= 0 ? { narrowest: { width: (c[tightest] * 2 - 1) * CELL, at: world(tightest) } } : {}) };
+  return { ...base, walkable: true, length: Math.round(length), ...(tightest >= 0 ? { narrowest: { width: (widest * 2 - 1) * CELL, at: world(tightest) } } : {}) };
 }
 
 /** The placed object closest to a point, within `reach`: what's probably making a place tight. */

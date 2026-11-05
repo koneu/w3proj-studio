@@ -130,6 +130,15 @@ test("a route stays in its corridor, and fails where it would have to leave", ()
   assert.equal(wide.narrowest?.width, 32);
 });
 
+test("a road's narrowest place doesn't depend on the unit, or the side a way hugs", () => {
+  const rows = open(41, 21).map((row, y) => (y >= 7 && y <= 13 ? row : "#".repeat(41)));
+  const line: [number, number][] = [at(8, 9), at(32, 11)];
+  const small = checkRoute(grid(rows), line, 16, 600), big = checkRoute(grid(rows), line, 48, 600);
+  assert.equal(small.walkable && big.walkable, true);
+  assert.equal(small.narrowest?.width, 7 * 32);
+  assert.equal(big.narrowest?.width, 7 * 32);
+});
+
 test("a route goes through all its points, and a blocked one is named", () => {
   const free = checkRoute(grid(open(30, 30)), [at(2, 2), at(20, 2), at(20, 20)], 16, 128);
   assert.equal(free.walkable, true);
