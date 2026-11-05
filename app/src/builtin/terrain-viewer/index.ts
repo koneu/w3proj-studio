@@ -22,7 +22,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid } from "./pathcheck";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, rowSpots, scatterSpots, seededRandom, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle } from "./aitools";
 import { changesImports } from "./filewatch";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -329,21 +329,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const image = { type: "image", data, mimeType: "image/png" };
       return area ? [image, { type: "text", text: `Shows ${area.name ?? "the area"} (x ${area.left} to ${area.right}, y ${area.bottom} to ${area.top}), outlined, with north up.` }] : image;
     }),
-    w3.mcp.registerTool("set_tileset", async ({ tileset, replaceTiles }) => {
+    w3.mcp.registerTool("replace_objects", async (args) => {
+      const swaps = args.swaps as Record<string, string> | undefined;
+      if (!swaps || typeof swaps !== "object" || !Object.keys(swaps).length) throw new Error("swaps must say what becomes what, like {\"LTlt\": \"FTtw\"}.");
+      const area = await readArea(w3, args);
+      const { handle } = await liveEditor();
+      const look = (id: string) => handle.objects.type(id);
+      for (const to of Object.values(swaps)) if (!look(to)) throw new Error(`"${to}" isn't an object type here. list_objects gives them.`);
+      let changed = 0;
+      await editPlaced(`Replace ${Object.keys(swaps).join(", ")}`, fileKey(args.kind ?? "doodads"), (f) => {
+        changed = replacePlaced(f.list as Parameters<typeof replacePlaced>[0], swaps, area, (id) => look(id)?.numVar ?? 1);
+        if (!changed) throw new Error("Nothing placed matches that.");
+      });
+      return { changed };
+    }),
+    w3.mcp.registerTool("set_tileset", async ({ tileset, replaceTiles, dryRun }) => {
       if (typeof tileset !== "string") throw new Error("tileset must be a letter; terrain_info lists them.");
       requireProject(w3);
       const { handle } = await liveEditor();
       const sets = await handle.tilesets();
       const set = sets.find((s) => s.id === tileset);
       if (!set) throw new Error(`"${tileset}" isn't a tileset. They are: ${sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
-      const tiles = replaceTiles !== false;
-      const from = sets.find((s) => s.id === handle.terrain.tileset)?.name ?? handle.terrain.tileset;
-      await withConsent(`change the tileset from ${from} to ${set.name}${tiles ? ", replacing the ground tiles" : ""}?`, "Change tileset");
+      const t = handle.terrain, old = sets.find((s) => s.id === t.tileset);
+      const swap = replaceTiles !== false, before = [...t.groundTiles];
+      const { tiles, kept } = swap ? swapTiles(before, old?.tiles ?? [], set.tiles) : { tiles: before, kept: [] };
+      const plan = { tileset: set.id, name: set.name, tiles: before.map((from, i) => ({ from, to: tiles[i] })), keptFromOtherTilesets: kept };
+      if (dryRun === true) return plan;
+      const stays = kept.length ? `, keeping ${kept.join(", ")}` : "";
+      await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset");
       handle.setTileset(set.id);
-      if (tiles) handle.replaceGroundTiles(set.tiles);
+      if (swap) handle.replaceGroundTiles(tiles);
+      // Exactly the tileset's own list again: nothing is custom about it any more.
+      if (t.groundTiles.join() === set.tiles.join()) { t.customTilesets = false; t.customTilesetsRaw = 0; }
       await handle.setMapTileset(set.id);
       await w3.editors.saveAll();
-      return { tileset: set.id, name: set.name, groundTiles: handle.terrain.groundTiles };
+      return { ...plan, groundTiles: t.groundTiles };
     }),
     w3.mcp.registerTool("resize_map", async ({ left, right, bottom, top, border, dryRun }) => {
       const side = (n: unknown) => (n === undefined ? 0 : n);

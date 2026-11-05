@@ -301,6 +301,29 @@ export function outsideAfterResize(list: readonly { position: readonly number[] 
   return list.filter((p) => p.position[0] < left || p.position[0] > right || p.position[1] < bottom || p.position[1] > top).length;
 }
 
+/** The map's tile list after changing tileset, slot by slot: the old tileset's tiles become the new
+ *  one's, and a tile from elsewhere, added on purpose, stays. No corner changes slot. */
+export function swapTiles(current: readonly string[], oldOwn: readonly string[], newOwn: readonly string[]) {
+  let next = 0;
+  const tiles = current.map((tile) => (oldOwn.includes(tile) ? newOwn[Math.min(next++, newOwn.length - 1)] : tile));
+  return { tiles, kept: current.filter((tile) => !oldOwn.includes(tile)) };
+}
+
+/** Swaps placed objects for other types, keeping where they stand. A variation the new type
+ *  hasn't got becomes one it has. How many changed. */
+export function replacePlaced(list: { id: string; position: readonly number[]; variation?: number; skinId?: string }[], swaps: Readonly<Record<string, string>>, area: Area | null, variations: (id: string) => number) {
+  let changed = 0;
+  for (const e of list) {
+    const to = swaps[e.id];
+    if (!to || (area && !inArea(e.position[0], e.position[1], area))) continue;
+    e.id = to;
+    if ("skinId" in e) e.skinId = to;
+    if (e.variation !== undefined) e.variation = Math.min(e.variation, Math.max(0, variations(to) - 1));
+    changed++;
+  }
+  return changed;
+}
+
 /** Evenly along a line, from end to end, turned to run along it. `facingOffset` is the facing
  *  (degrees) that makes the model's long side follow the line. */
 export function lineSpots(from: [number, number], to: [number, number], spacing: number, facingOffset: number) {

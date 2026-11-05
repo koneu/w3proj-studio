@@ -3,5 +3,6 @@
 export const TILESETS: Record<string, string> = {
   A: "Ashenvale", B: "Barrens", C: "Felwood", D: "Dungeon", F: "Lordaeron Fall", G: "Underground",
   I: "Icecrown Glacier", J: "Dalaran Ruins", K: "Black Citadel", L: "Lordaeron Summer", N: "Northrend",
-  O: "Outland", Q: "Village Fall", V: "Village", W: "Lordaeron Winter", X: "Dalaran", Y: "Cityscape", Z: "Sunken Ruins",
+  O: "Outland", P: "Cityscape Ruins", Q: "Village Fall", R: "Lordaeron Capital Ruins", V: "Village", W: "Lordaeron Winter",
+  X: "Dalaran", Y: "Cityscape", Z: "Sunken Ruins", e: "Lordaeron Capital", u: "Undercity", M: "Misc",
 };

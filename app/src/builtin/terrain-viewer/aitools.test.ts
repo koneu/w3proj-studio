@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, rowSpots, seededRandom, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { dress, followGround, groundSlot, heightColors, heightGrid, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, seededRandom, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -227,6 +227,31 @@ test("resizing counts what ends up outside, on the sides that are cut", () => {
   assert.equal(outsideAfterResize(list, t, [0, -4, 0, 0]), 1);
   assert.equal(outsideAfterResize(list, t, [0, 0, 0, -4]), 1);
   assert.equal(outsideAfterResize(list, t, [8, 8, 8, 8]), 0, "growing removes nothing");
+});
+
+test("a tileset change swaps the tileset's own tiles, slot by slot, and keeps others", () => {
+  const got = swapTiles(["Ldrt", "Lgrs", "Vcbp", "Lrok"], ["Ldrt", "Lrok", "Lgrs", "Lgrd"], ["Fdrt", "Frok", "Fgrs", "Fgrd"]);
+  assert.deepEqual(got.tiles, ["Fdrt", "Frok", "Vcbp", "Fgrs"]);
+  assert.deepEqual(got.kept, ["Vcbp"]);
+});
+
+test("a tileset with fewer tiles repeats its last, so no slot is lost", () => {
+  assert.deepEqual(swapTiles(["A", "B", "C"], ["A", "B", "C"], ["X", "Y"]).tiles, ["X", "Y", "Y"]);
+});
+
+test("objects swap types where they stand, in an area if given", () => {
+  const list = [
+    { id: "LTlt", position: [0, 0, 5], variation: 7, skinId: "LTlt" },
+    { id: "LTlt", position: [900, 0, 5], variation: 1 },
+    { id: "ARrk", position: [0, 0, 5] },
+  ];
+  assert.equal(replacePlaced(list, { LTlt: "FTtw" }, { left: -10, bottom: -10, right: 10, top: 10 }, () => 4), 1);
+  assert.deepEqual(list[0], { id: "FTtw", position: [0, 0, 5], variation: 3, skinId: "FTtw" });
+  assert.equal(list[1].id, "LTlt");
+  assert.equal(replacePlaced(list, { LTlt: "FTtw" }, null, () => 4), 1);
+  assert.equal(list[1].variation, 1);
+  assert.equal("skinId" in list[1], false);
+  assert.equal(list[2].id, "ARrk");
 });
 
 test("a line is even from end to end, and turned along itself", () => {
