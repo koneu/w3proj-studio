@@ -6,7 +6,8 @@ import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
-import { bounds, ModelGpu, poseNodes, standClock, uploadTexture, type Mat4 } from "../../lib/model/renderer";
+import { createTexture, drawnTextures } from "../../lib/model/gltexture";
+import { bounds, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni } from "../../lib/formats/text";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
@@ -235,7 +236,7 @@ export class ObjectLoader {
         let error = "";
         for (const v of variants) {
           try {
-            const tex = uploadTexture(this.gl, decodeImage(await this.readFile(v), v).mip(0), flags);
+            const tex = createTexture(this.gl, decodeImage(await this.readFile(v), v), { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
             this.onTexture();
             return tex;
           } catch (e) { error += `${error ? " | " : ""}${v}: ${(e as Error).message ?? e}`; }
@@ -291,8 +292,9 @@ export class ObjectLoader {
         // Stand still at the start of its "Stand" animation.
         gpu.props = req.props ?? [];
         gpu.pose(standClock(model, gpu.props));
+        const drawn = drawnTextures(model);
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
-          if (!p) return;
+          if (!p || !drawn.has(i)) return;
           const tex = req.retexture?.(p) ?? p;
           let users = this.textureUsers.get(tex.toLowerCase());
           if (!users) this.textureUsers.set(tex.toLowerCase(), (users = new Set()));

@@ -5,7 +5,8 @@ import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry } from "./toolhost";
 import { h } from "../../workbench/dom";
-import { decodeImage } from "../../lib/image/index.ts";
+import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
+import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
@@ -1129,7 +1130,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!path) { status(row, "missing"); return; }
           let img = tileImages.get(id);
           if (!img) {
-            img = readGroundTexture(w3, doc, path).then(({ buf, name }) => ({ img: decodeImage(buf, name).mip(0), name }));
+            img = readGroundTexture(w3, doc, path).then(({ buf, name }) => ({ img: decodeImage(buf, name), name }));
             tileImages.set(id, img);
           }
           img.then(({ img: mip, name }) => {
@@ -1142,7 +1143,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`));
         };
         /** Decoded ground textures by tile id. */
-        const tileImages = new Map<string, Promise<{ img: ReturnType<ReturnType<typeof decodeImage>["mip"]>; name: string }>>();
+        const tileImages = new Map<string, Promise<{ img: DecodedImage; name: string }>>();
         /** Rebuilds the side list and the renderer's textures after the tile list changed. */
         const syncTileList = async () => {
           texList.replaceChildren();
@@ -1202,7 +1203,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const path = entry?.split(",")[1]?.trim();
           if (!path) return;
           const { buf, name } = await readGroundTexture(w3, doc, `${path}.blp`);
-          renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name).mip(0));
+          renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name));
           redraw();
         }).catch(() => { /* blight shows as the placeholder colour */ });
         tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
@@ -1225,7 +1226,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (let i = 0; i < frames; i++) {
             const path = frames > 1 ? `${row.texFile}${String(i).padStart(2, "0")}.blp` : `${row.texFile}.blp`;
             // The tileset's own water frames (`_Tilesets/<letter>.w3mod`) where it has them.
-            readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path).mip(0)); redraw(); }, () => {});
+            readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path)); redraw(); }, () => {});
           }
         }).catch(() => { /* the default water colour */ });
         };
@@ -1236,7 +1237,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           let p = thumbCache.get(path);
           if (!p) {
             p = readGroundTexture(w3, doc, path).then(({ buf, name }) => {
-              const mip = decodeImage(buf, name).mip(0), cell = mip.height / 4;
+              // Four rows of cells, a thumbnail each: no need to decode a Reforged tile's full size for that.
+              const image = decodeImage(buf, name), mip = image.mip(levelFor(image, 4 * 32)), cell = mip.height / 4;
               const full = document.createElement("canvas");
               full.width = mip.width; full.height = mip.height;
               full.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(mip.rgba), mip.width, mip.height), 0, 0);
@@ -1400,7 +1402,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const tex of new Set(splats.map((s) => s.def.texture))) {
             if (splatImages.has(tex.toLowerCase())) continue;
             splatImages.add(tex.toLowerCase());
-            readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex).mip(0)); redraw(); }, () => {});
+            readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex)); redraw(); }, () => {});
           }
           redraw();
         };

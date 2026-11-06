@@ -9,6 +9,19 @@ export interface Mip {
   rgba: Uint8ClampedArray;
 }
 
+/** One mip level as the file stores it. */
+export interface BlockLevel {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
+
+/** A block-compressed image: what a GPU can read without decoding. */
+export interface BlockImage {
+  format: "bc1" | "bc2" | "bc3";
+  levels: BlockLevel[];
+}
+
 export interface DecodedImage {
   /** Human-readable format description, e.g. "BLP1 JPEG, 8-bit alpha". */
   format: string;
@@ -18,6 +31,8 @@ export interface DecodedImage {
   /** Mip levels that could be located; decoded on demand. */
   mipCount: number;
   mip(level: number): Mip;
+  /** The file's own blocks, where it has any a GPU reads as they are. */
+  blocks?: BlockImage;
 }
 
 const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
@@ -139,12 +154,14 @@ function decodeBlp2(b: Uint8Array): DecodedImage {
   const slice = (i: number) => b.subarray(levels[i].offset, levels[i].offset + levels[i].size);
 
   let format: string;
+  let blockFormat: BlockImage["format"] | undefined;
   let decode: (i: number) => Uint8ClampedArray;
   if (encoding === 1) {
     format = `BLP2 palettized, ${alphaDepth}-bit alpha`;
     decode = (i) => palettized(b, 148, slice(i), levels[i].width, levels[i].height, normalizeAlphaBits(alphaDepth));
   } else if (encoding === 2) {
-    const f: BlockFormat = alphaType === 7 ? "bc3" : alphaType === 1 ? "bc2" : "bc1";
+    const f = alphaType === 7 ? "bc3" : alphaType === 1 ? "bc2" : "bc1";
+    blockFormat = f;
     format = `BLP2 ${f === "bc1" ? "DXT1" : f === "bc2" ? "DXT3" : "DXT5"}`;
     decode = (i) => decodeBlocks(f, slice(i), levels[i].width, levels[i].height);
   } else if (encoding === 3) {
@@ -158,6 +175,7 @@ function decodeBlp2(b: Uint8Array): DecodedImage {
   return {
     format, width, height, hasAlpha: alphaDepth > 0, mipCount: levels.length,
     mip: cached(levels.length, (i) => ({ width: levels[i].width, height: levels[i].height, rgba: decode(i) })),
+    blocks: blockFormat && { format: blockFormat, levels: levels.map((l, i) => ({ width: l.width, height: l.height, data: slice(i) })) },
   };
 }
 
@@ -242,6 +260,10 @@ function decodeDds(b: Uint8Array): DecodedImage {
       } else rgba = decodeBlocks(kind, b.subarray(l.offset), l.width, l.height);
       return { width: l.width, height: l.height, rgba };
     }),
+    blocks: kind === "bc1" || kind === "bc2" || kind === "bc3" ? {
+      format: kind,
+      levels: levels.map((l) => ({ width: l.width, height: l.height, data: b.subarray(l.offset, l.offset + levelSize(l.width, l.height)) })),
+    } : undefined,
   };
 }
 

@@ -2,8 +2,10 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
+import type { DecodedImage } from "../../lib/image/index";
 import { fogForCamera, FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
-import { compile, mat4, poseNodes, standClock, type Clock, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { createTexture } from "../../lib/model/gltexture";
+import { compile, mat4, poseNodes, standClock, type Clock, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 
@@ -514,15 +516,8 @@ export class TerrainRenderer {
     });
   }
 
-  setSplatTexture(path: string, img: DecodedTexture) {
-    const gl = this.gl, tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this.splatTextures.set(path.toLowerCase(), tex);
+  setSplatTexture(path: string, img: DecodedImage) {
+    this.splatTextures.set(path.toLowerCase(), createTexture(this.gl, img, { repeat: [false, false] }));
   }
 
   /** The tileset's water (frames are filled in by setWaterFrame as they load). */
@@ -531,16 +526,9 @@ export class TerrainRenderer {
     this.waterFrameShown = -1;
   }
 
-  setWaterFrame(i: number, img: DecodedTexture) {
+  setWaterFrame(i: number, img: DecodedImage) {
     if (i >= this.waterLook.frames.length) return;
-    const gl = this.gl, tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    this.waterLook.frames[i] = tex;
+    this.waterLook.frames[i] = createTexture(this.gl, img, { repeat: [true, true] });
   }
 
   /** The water animation frame for now. */
@@ -645,16 +633,9 @@ export class TerrainRenderer {
     this.markers.set(name, this.colorMesh(markers.flatMap((m) => [m.x, m.y, m.z + 8, m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255, 1])));
   }
 
-  setGroundTexture(i: number, img: DecodedTexture) {
-    const gl = this.gl, tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
-    gl.generateMipmap(gl.TEXTURE_2D);
+  setGroundTexture(i: number, img: DecodedImage) {
     // Deeper mip levels would blend neighbouring cells together.
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, Math.max(0, Math.log2(img.height / 4) - 3));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const tex = createTexture(this.gl, img, { repeat: [false, false], maxLevel: Math.max(0, Math.log2(img.height / 4) - 3) });
     this.textures[i] = { tex, extended: img.width > img.height };
   }
 
