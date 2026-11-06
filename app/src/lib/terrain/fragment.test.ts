@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
+import { areaBetween, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
 import { parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
 
 const tree = (x: number, y: number, z = 0, angle = 0) => ({ list: "doodads" as const, entry: { id: "LTlt", position: [x, y, z], angle, scale: [1, 1, 1], life: 100 } });
@@ -219,4 +219,17 @@ test("painted Boundary goes along with the ground, and isn't the map's border", 
   assert.deepEqual(to.corners.map((c) => c.boundary), [false, true, false, false]);
   assert.equal(parseW3e(writeW3e(from)).corners[0].boundary, true);
   assert.equal(from.corners[0].rawWater & 0x4000, 0);
+});
+
+test("an area runs between two tiles, dragged any way", () => {
+  assert.deepEqual(areaBetween([2, 3], [5, 7]), { x0: 2, y0: 3, x1: 6, y1: 8 });
+  assert.deepEqual(areaBetween([5, 7], [2, 3]), { x0: 2, y0: 3, x1: 6, y1: 8 });
+  assert.deepEqual(areaBetween([4, 4], [4, 4]), { x0: 4, y0: 4, x1: 5, y1: 5 }, "one tile");
+});
+
+test("a drag past the edge stays on the map", () => {
+  const t = { width: 5, height: 5, offsetX: -256, offsetY: -256 };
+  assert.deepEqual(tileOf(t, -256, -256), [0, 0]);
+  assert.deepEqual(tileOf(t, 1, 1), [2, 2]);
+  assert.deepEqual(tileOf(t, -9999, 9999), [0, 3]);
 });

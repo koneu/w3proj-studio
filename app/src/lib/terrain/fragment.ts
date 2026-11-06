@@ -103,6 +103,19 @@ export function turnAngle(turn: Turn, angle: number): number {
 
 const TILE = 128;
 
+/** The tile a world point is on, kept on the map. */
+export function tileOf(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, x: number, y: number): [number, number] {
+  return [
+    Math.max(0, Math.min(t.width - 2, Math.floor((x - t.offsetX) / TILE))),
+    Math.max(0, Math.min(t.height - 2, Math.floor((y - t.offsetY) / TILE))),
+  ];
+}
+
+/** The corners of the tiles between two tiles, either way round. */
+export function areaBetween(a: readonly [number, number], b: readonly [number, number]): CornerArea {
+  return { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]) + 1, y1: Math.max(a[1], b[1]) + 1 };
+}
+
 /** The ground of an area, around `centre`. */
 export function groundOf(t: Terrain, a: CornerArea, centre: readonly [number, number]): FragmentGround {
   const width = a.x1 - a.x0 + 1, height = a.y1 - a.y0 + 1;

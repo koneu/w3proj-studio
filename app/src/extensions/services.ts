@@ -137,8 +137,6 @@ export interface TerrainEditorHandle {
   setView(v: Partial<TerrainView>): void;
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
-  /** The block of ground Ctrl+C takes, in corners; null for none. With `objects` it takes what stands there too. */
-  setArea(area: (import("../lib/terrain/fragment").CornerArea & { objects: boolean }) | null): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
    *  the corners; objects standing on the changed `corners` (indices) follow the
    *  ground; `cliffs` re-plans cliff and ramp models. */

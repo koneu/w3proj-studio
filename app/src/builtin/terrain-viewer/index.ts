@@ -24,7 +24,7 @@ import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableA
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
-import { centreOf, fragmentOf, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
+import { areaBetween, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -1752,6 +1752,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         const setArea = (a: typeof terrainArea) => { terrainArea = a; drawArea(a); };
+        /** The Select tab's mode: dragging selects objects or a block of ground. Ctrl+Shift and a drag does an area in either. */
+        let areaMode = false, withObjects = true;
+        /** A press on the way to being an area: where it began. */
+        let areaPress: { from: [number, number]; x: number; y: number; moved: boolean } | null = null;
         /** A block of ground, with what stands on it if so chosen. */
         const copyArea = (a: NonNullable<typeof terrainArea>) => {
           const worldX = (x: number) => terrain.offsetX + x * 128, worldY = (y: number) => terrain.offsetY + y * 128;
@@ -1794,6 +1798,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const startPaste = () => {
           if (!clipboard) return false;
+          setArea(null);
           showTab(null);
           clearSelection();
           const f = pasting = clipboard;
@@ -1872,6 +1877,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Ctrl+C, X, V and A, and the keys while pasting. True when the key did something. */
         const clipboardKey = (e: KeyboardEvent) => {
           if (pasting && e.key === "Escape") { endPaste(); return true; }
+          if (terrainArea && e.key === "Escape") { setArea(null); return true; }
           const turn = turnKey(e);
           if (turn && pasting) {
             if (!e.repeat) { pasting = turnFragment(pasting, turn); if (pasteAt) showPaste(pasteAt); }
@@ -1892,14 +1898,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return false;
         };
 
-        /** Alt+click: the selection goes there, keeping its shape. */
-        const moveTo = (g: Vec3) => {
-          const entries = selectedEntries(), before = entries.map(poseOf), [ax, ay] = entries[0].position;
-          for (const p of entries) {
-            const x = p.position[0] + g[0] - ax, y = p.position[1] + g[1] - ay;
-            setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], p.angle);
-          }
-          moveEdits(entries, before);
+        /** Alt: the selection goes to the pointer, keeping its shape, and follows it while held. */
+        const startMoveTo = (g: Vec3) => {
+          const entries = selectedEntries();
+          objDrag = { entries, before: entries.map(poseOf), anchor: [...entries[0].position] as Vec3, moved: true };
+          dragObjects(g);
         };
         /** "Face point": the selection turns toward the pointer until a click (apply) or Esc. */
         let facing: { entries: Placed[]; before: Pose[] } | null = null;
@@ -2235,15 +2238,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         );
 
         function selectBar() {
-          // Which kinds a selection box picks up.
-          return h("div.terrain-group-tools", {},
-            h("span.terrain-tool-opt", { title: "Kinds of objects a selection box picks up" }, "Box selects:",
+          const objectsOnly = h("button.chip", { title: "A drag selects objects. Ctrl+Shift and a drag selects a block of ground", onclick: () => setMode(false) }, "Objects");
+          const ground = h("button.chip", { title: "A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Ctrl+Shift and a drag does this in Objects too", onclick: () => setMode(true) }, "Area");
+          const standing = h("input", { type: "checkbox", checked: withObjects, onchange: () => {
+            withObjects = standing.checked;
+            if (terrainArea) terrainArea = { ...terrainArea, objects: withObjects };
+            canvas.focus();
+          } });
+          const standingWrap = h("label.terrain-tool-opt", { title: "Copy the units, items and doodads standing on the area along with its ground" }, standing, " With objects");
+          const kindsWrap = h("span.terrain-tool-opt", { title: "Kinds of objects a selection box picks up" }, "Box selects:",
               ...([["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"]] as const).map(([k, label]) => {
                 const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus(); } });
                 return h("label.terrain-place-opt", {}, cb, ` ${label}`);
-              })),
-            filterInput, h("button", { title: "Select every object matching the filter", onclick: () => void runFilter() }, "Select matching"),
-            modeHint);
+              }));
+          const filterRun = h("button", { title: "Select every object matching the filter", onclick: () => void runFilter() }, "Select matching");
+          const setMode = (area: boolean) => {
+            areaMode = area;
+            objectsOnly.classList.toggle("on", !area);
+            ground.classList.toggle("on", area);
+            standingWrap.hidden = !area;
+            kindsWrap.hidden = filterInput.hidden = filterRun.hidden = area;
+            if (!area) setArea(null);
+            canvas.focus();
+          };
+          objectsOnly.classList.add("on");
+          standingWrap.hidden = true;
+          return h("div.terrain-group-tools", {}, h("span.terrain-tool-opt", {}, objectsOnly, ground), standingWrap, kindsWrap, filterInput, filterRun, modeHint);
         }
         const filterHelp = "Select all objects matching every condition (and the Box selects kinds): field op value, op = != < > <= >= or : (contains). Fields: id, kind (unit, item, destructable, doodad), owner (Player 1 = 1), name, x, y, z, facing, scale, variation. Examples: kind=unit owner=1 · name:tree scale>1.1 · id=LTlt";
         const filterInput = h("input.terrain-filter", {
@@ -2367,7 +2387,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const handle: TerrainEditorHandle = {
           terrain, editable, redraw, host: el, resizeMap,
           terrainChanged: (cliffs) => { renderer.terrainChanged(); if (cliffs) void liveCliffs(); doc.setDirty(true); redraw(); },
-          setArea,
           commitTerrain,
           tilesets: () => loadTilesets(w3).then((d) => d.sets.map((s) => ({ id: s.id, name: s.name, tiles: s.tiles.map((t) => t.id) }))),
           setTileset: (id) => {
@@ -2543,6 +2562,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const activeInst = () => (activeGroup ? groupInsts.get(activeGroup) ?? null : null);
         const showTab = (id: string | null) => {
           if (id === activeGroup) return;
+          setArea(null);
           activeInst()?.deactivate?.();
           activeGroup = id;
           const inst = activeInst();
@@ -2653,6 +2673,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let drag: { x: number; y: number; button: number } | null = null;
         /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
         let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
+        const dragObjects = (p: Vec3) => {
+          if (!objDrag) return;
+          const dx = p[0] - objDrag.anchor[0], dy = p[1] - objDrag.anchor[1];
+          objDrag.entries.forEach((entry, i) => {
+            const [x, y] = objDrag!.before[i].position;
+            setPlacement(entry, [x + dx, y + dy, ownHeight(entry) ?? heightAt(terrain, x + dx, y + dy)], entry.angle);
+          });
+          refreshGroupRings();
+        };
         /** A selection box being dragged (canvas CSS pixels). */
         let box: { x0: number; y0: number; x1: number; y1: number; add: boolean; shown: boolean } | null = null;
         const boxEl = h("div.terrain-select-box", { hidden: true });
@@ -2697,11 +2726,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             endFacing(e.button === 0);
             return;
           }
-          if (e.button === 0 && editable && !activeGroup && selectedEntries().length && (e.ctrlKey || e.metaKey || e.altKey)) {
+          const ctrl = e.ctrlKey || e.metaKey;
+          if (e.button === 0 && !activeGroup && !e.altKey && ((ctrl && e.shiftKey) || (areaMode && !ctrl && !e.shiftKey))) {
             const g = groundAt(e);
             if (g) {
               e.preventDefault();
-              if (e.altKey) moveTo(g);
+              areaPress = { from: tileOf(terrain, g[0], g[1]), x: e.clientX, y: e.clientY, moved: false };
+              return;
+            }
+          }
+          if (e.button === 0) setArea(null);
+          if (e.button === 0 && editable && !activeGroup && selectedEntries().length && (ctrl || e.altKey)) {
+            const g = groundAt(e);
+            if (g) {
+              e.preventDefault();
+              if (e.altKey) startMoveTo(g);
               else { startFacing(); faceHeld = true; faceToward(g); }
               refreshGroupRings();
               return;
@@ -2730,6 +2769,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         canvas.addEventListener("mousemove", (e) => {
           if (toolGroups.picking?.objects) { showPickTarget(pickTarget(groundAt(e))); return; }
           if (pasting) { const g = groundAt(e); if (g) showPaste(g); }
+          if (areaPress) {
+            if (Math.hypot(e.clientX - areaPress.x, e.clientY - areaPress.y) >= 4) areaPress.moved = true;
+            const g = areaPress.moved ? groundAt(e) : null;
+            if (g) setArea({ ...areaBetween(areaPress.from, tileOf(terrain, g[0], g[1])), objects: withObjects });
+            return;
+          }
           activeInst()?.pointerMove?.({ ground: groundAt(e), event: e, down: groupDrag });
           if (groupDrag) return;
           if (facing) { const g = groundAt(e); if (g) faceToward(g); return; }
@@ -2737,12 +2782,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const p = groundAt(e);
             if (p) {
               objDrag.moved = true;
-              const dx = p[0] - objDrag.anchor[0], dy = p[1] - objDrag.anchor[1];
-              objDrag.entries.forEach((entry, i) => {
-                const [x, y] = objDrag!.before[i].position;
-                setPlacement(entry, [x + dx, y + dy, ownHeight(entry) ?? heightAt(terrain, x + dx, y + dy)], entry.angle);
-              });
-              refreshGroupRings();
+              dragObjects(p);
             }
             return;
           }
@@ -2812,6 +2852,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const onUp = (e: MouseEvent) => {
           if (faceHeld) { faceHeld = false; endFacing(true); return; }
+          if (areaPress) {
+            const { moved } = areaPress;
+            areaPress = null;
+            if (!moved) setArea(null);
+            return;
+          }
           if (groupDrag) {
             groupDrag = false;
             activeInst()?.pointerUp?.({ ground: groundAt(e), event: e, down: false });
