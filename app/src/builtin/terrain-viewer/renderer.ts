@@ -2,6 +2,7 @@
 // placed doodads/units as models, and point markers for objects without one.
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
+import { fogForCamera, FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { compile, mat4, poseNodes, standClock, type Clock, type DecodedTexture, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
@@ -22,6 +23,7 @@ const GROUND_VS = `#version 300 es
 in vec3 aPos; in vec3 aNormal; in vec2 aLocal; in float aCell; in float aShade;
 uniform mat4 uViewProj; uniform float uExtended;
 out vec2 vUV; out vec3 vNormal; out float vShade;
+${FOG_VS}
 void main() {
   int cell = int(aCell);
   bool ext = uExtended > 0.5;
@@ -36,6 +38,7 @@ void main() {
   vUV = (cr + local) / vec2(ext ? 8.0 : 4.0, 4.0);
   vNormal = aNormal; vShade = aShade;
   gl_Position = uViewProj * vec4(aPos, 1.0);
+  vFogDepth = gl_Position.w;
 }`;
 const GROUND_FS = `#version 300 es
 precision mediump float;
@@ -43,10 +46,11 @@ in vec2 vUV; in vec3 vNormal; in float vShade;
 uniform sampler2D uTex;
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
+${FOG_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
   vec3 light = uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-  outColor = vec4(c.rgb * light * vShade, c.a);
+  outColor = vec4(fogged(c.rgb * light * vShade), c.a);
 }`;
 
 const COLOR_VS = `#version 300 es
@@ -65,7 +69,8 @@ const WATER_VS = `#version 300 es
 in vec3 aPos; in vec2 aUv; in float aDepth;
 uniform mat4 uViewProj;
 out vec2 vUv; out float vDepth;
-void main() { vUv = aUv; vDepth = aDepth; gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+${FOG_VS}
+void main() { vUv = aUv; vDepth = aDepth; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const WATER_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv; in float vDepth;
@@ -73,13 +78,14 @@ uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; unif
 // The map's water tint (white without) and the scene light on a flat surface.
 uniform vec4 uTint; uniform vec3 uLight;
 out vec4 outColor;
+${FOG_FS}
 void main() {
   const float minDepth = 10.0 / 128.0, deepLevel = 64.0 / 128.0, maxDepth = 72.0 / 128.0;
   vec4 c = vDepth <= deepLevel
     ? mix(uShallowMin, uShallowMax, clamp((vDepth - minDepth) / (deepLevel - minDepth), 0.0, 1.0))
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 w = texture(uTex, vUv) * c * uTint;
-  outColor = vec4(w.rgb * uLight, w.a);
+  outColor = vec4(fogged(w.rgb * uLight), w.a);
 }`;
 
 /** A tileset's water: animation frames (by index; null until loaded), frames per second and
@@ -101,13 +107,15 @@ const SPLAT_VS = `#version 300 es
 in vec3 aPos; in vec2 aUv;
 uniform mat4 uViewProj;
 out vec2 vUv;
-void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+${FOG_VS}
+void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const SPLAT_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv;
 uniform sampler2D uTex; uniform vec4 uColor; uniform vec3 uLight;
 out vec4 outColor;
-void main() { vec4 c = texture(uTex, vUv) * uColor; outColor = vec4(c.rgb * uLight, c.a); }`;
+${FOG_FS}
+void main() { vec4 c = texture(uTex, vUv) * uColor; outColor = vec4(fogged(c.rgb * uLight), c.a); }`;
 
 // Ground overlay: a texture spread over the map (one texel per 32×32 pathing
 // cell), e.g. the pathing editor's view.
@@ -115,10 +123,12 @@ const OVERLAY_VS = `#version 300 es
 in vec3 aPos;
 uniform mat4 uViewProj; uniform vec4 uRect;
 out vec2 vUV;
-void main() { vUV = (aPos.xy - uRect.xy) / uRect.zw; gl_Position = uViewProj * vec4(aPos, 1.0); }`;
+${FOG_VS}
+void main() { vUV = (aPos.xy - uRect.xy) / uRect.zw; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const OVERLAY_FS = `#version 300 es
 precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
-void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; }`;
+${FOG_FS}
+void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
 
 /** A ground-following circle (selection, brush outline). */
 export interface Ring {
@@ -216,6 +226,9 @@ export class TerrainRenderer {
   /** The dark over the map's border: its own layer, as tools use the overlay. */
   private border: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
   showBorder = true;
+  /** The map's fog, and whether it's shown. */
+  fog: Fog | null = null;
+  showFog = true;
   private wire: Mesh;
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
@@ -549,16 +562,17 @@ export class TerrainRenderer {
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder } = this;
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog } = this;
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
     this.wireframe = false;
     this.overlay = null;
     this.showBorder = false;
+    this.showFog = false;
     return () => {
       this.setGroundOverlay(null);
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder });
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog });
     };
   }
 
@@ -840,7 +854,10 @@ export class TerrainRenderer {
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);
-    gl.clearColor(0.11, 0.12, 0.14, 1);
+    // Past the end of the fog there's nothing to see, so the background is the fog too.
+    const fog = this.showFog && this.fog ? fogForCamera(this.fog, this.distance) : null;
+    const back = fog?.color ?? [0.11, 0.12, 0.14];
+    gl.clearColor(back[0], back[1], back[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -853,6 +870,7 @@ export class TerrainRenderer {
 
     // Ground: lowest texture first, the others blend over it.
     gl.useProgram(this.groundProg);
+    setFog(gl, (name) => gl.getUniformLocation(this.groundProg, name), fog);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.groundProg, "uViewProj"), false, viewProj);
     const groundLight = this.terrainLight ?? GROUND_DEFAULT;
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uLightDir"), groundLight.dir);
@@ -874,6 +892,8 @@ export class TerrainRenderer {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
+      // The border is part of the map, and fades with it. What a tool shows has to stay readable.
+      setFog(gl, (name) => gl.getUniformLocation(this.overlayProg as WebGLProgram, name), layer === this.border ? fog : null);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
       gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
       gl.activeTexture(gl.TEXTURE0);
@@ -890,6 +910,7 @@ export class TerrainRenderer {
     // Building ground marks, on the ground under the objects.
     if (this.splats.length && !this.hiddenGroups.has("units")) {
       gl.useProgram(this.splatProg);
+      setFog(gl, (name) => gl.getUniformLocation(this.splatProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.splatProg, "uTex"), 0);
       const sun = this.terrainLight;
@@ -919,7 +940,7 @@ export class TerrainRenderer {
       for (const b of this.batches) {
         if (this.hiddenGroups.has(b.group)) continue;
         const light = (b.group === "units" ? this.unitLight : this.terrainLight) ?? undefined;
-        for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined, light });
+        for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog });
       }
     }
     if (this.showEffects) this.drawParticles(viewProj, this.eye());
@@ -949,6 +970,7 @@ export class TerrainRenderer {
       const look = this.waterLook, frame = this.waterFrame();
       this.waterFrameShown = frame;
       gl.useProgram(this.waterProg);
+      setFog(gl, (name) => gl.getUniformLocation(this.waterProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.waterProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.waterProg, "uTex"), 0);
       for (const [name, v] of [["uShallowMin", look.shallowMin], ["uShallowMax", look.shallowMax], ["uDeepMin", look.deepMin], ["uDeepMax", look.deepMax]] as const) {

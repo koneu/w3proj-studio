@@ -1,3 +1,4 @@
+import { fogOf } from "../../lib/model/fog";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
@@ -993,13 +994,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The playable part as last read from the map; null until then. */
         let playableEdge: Area | null = null;
         const loadBorder = async () => {
-          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+          const info = await readMapDoc<{ cameraComplements?: number[] } & Parameters<typeof fogOf>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
           if (!info) return;
+          renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
           renderer.setBorder(borderShade(terrain.width - 1, terrain.height - 1, info.cameraComplements), terrain.width - 1, terrain.height - 1);
           redraw();
         };
         renderer.showBorder = showBoundary();
+        renderer.showFog = w3.settings.get<boolean>("terrain.fog", true) !== false;
         void loadBorder();
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
@@ -2715,6 +2718,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
+              toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),

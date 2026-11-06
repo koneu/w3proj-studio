@@ -2,6 +2,7 @@
 // float texture), keyframe animation, Warcraft blend modes, team colour.
 // Particles, ribbons and texture animations are not drawn.
 
+import { FOG_FS, FOG_VS, setFog, type Fog } from "./fog";
 import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
@@ -208,6 +209,7 @@ uniform highp sampler2D uBones;
 // follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
 uniform highp sampler2D uHeight; uniform float uUseHeight; uniform vec4 uHeightRect;
 out vec3 vNormal; out vec2 vUV;
+${FOG_VS}
 float groundAt(vec2 p) {
   vec2 g = clamp((p - uHeightRect.xy) / 128.0, vec2(0.0), uHeightRect.zw - 1.0);
   ivec2 i0 = ivec2(floor(g)), i1 = min(i0 + 1, ivec2(uHeightRect.zw) - 1);
@@ -229,6 +231,7 @@ void main() {
   vec4 world = uWorld * m * vec4(aPos, 1.0);
   if (uUseHeight > 0.5) world.z += groundAt(world.xy);
   gl_Position = uViewProj * world;
+  vFogDepth = gl_Position.w;
 }`;
 
 const FS = `#version 300 es
@@ -240,13 +243,14 @@ uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix
 // Scene light: direction toward it, diffuse and ambient colour (intensity included).
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
+${FOG_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c *= uColor;
   if (c.a < uAlphaTest) discard;
   vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-  outColor = vec4(mix(c.rgb * light, uMix.rgb, uMix.a), c.a);
+  outColor = vec4(fogged(mix(c.rgb * light, uMix.rgb, uMix.a)), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -314,7 +318,7 @@ export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
 }
 
-const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -378,6 +382,7 @@ export type DrawPass = "opaque" | "blended" | "all";
 export interface DrawOptions {
   /** Player colour index (TEAM_COLORS). */
   team?: number;
+  fog?: Fog | null;
   wireframe?: boolean;
   /** Opaque layers, blended layers, or both (opaque first). */
   pass?: DrawPass;
@@ -584,6 +589,7 @@ export class ModelGpu {
     gl.uniform3f(u.uTeam, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
     const mx = opts.mix ?? [0, 0, 0, 0];
     gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
+    setFog(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.fog);
     const light = opts.light ?? DEFAULT_LIGHT;
     gl.uniform3fv(u.uLightDir, light.dir);
     gl.uniform3fv(u.uDiffuse, light.diffuse);
