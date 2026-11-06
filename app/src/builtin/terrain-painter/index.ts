@@ -35,7 +35,7 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
     ["cliffLevel", "Level", "Bring everything to the cliff level where the stroke starts"],
     ["cliffDown", "−1", "Lower a cliff level (one below where the stroke starts)"],
     ["cliffDown2", "−2", "Lower two cliff levels (two below where the stroke starts)"],
-    ["ramp", "Ramp", "Click a straight one-level cliff edge to build a ramp, as wide as fits up to Size; click a ramp to remove it"],
+    ["ramp", "Ramp", "Click a one-level cliff to build a ramp, as wide as fits up to Size; click a ramp to remove it"],
     ["shallow", "Shallow", "Shallow water: one level below where the stroke starts"],
     ["deep", "Deep", "Deep water: two levels below where the stroke starts"],
     ["dry", "Dry", "Remove water (use Cliffs +1 to raise the ground again)"],

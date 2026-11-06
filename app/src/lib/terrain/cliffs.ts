@@ -46,7 +46,8 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
  *  on the lower layer, `2 * halfWidth + 1` corners across, as World Editor
  *  ramps are); on a tile that already has ramp corners the ramp there is
  *  removed. Returns a message when nothing could be done. `asFarAsPossible` is for the brush: a ramp takes
- *  the width that fits. Without it a ramp is the width asked for or nothing, for callers that have to be told. */
+ *  the width that fits, and a corner or diagonal cliff gets one too. Without it a ramp is the width asked for
+ *  or nothing, for callers that have to be told. */
 export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number, stroke: CornerLog, asFarAsPossible = false): string | null {
   const x = Math.floor((wx - t.offsetX) / 128), y = Math.floor((wy - t.offsetY) / 128);
   if (x < 0 || y < 0 || x >= t.width - 1 || y >= t.height - 1) return "Outside the map.";
@@ -66,10 +67,10 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
     while (todo.length) {
       const [cx, cy] = todo.pop()!;
       const i = cy * t.width + cx;
-      if (seen.has(i) || !at(cx, cy)?.ramp || Math.abs(cx - x) > 8 || Math.abs(cy - y) > 8) continue;
+      if (seen.has(i) || !at(cx, cy)?.ramp) continue;
       seen.add(i);
       set(cx, cy, false);
-      todo.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) todo.push([cx + dx, cy + dy]);
     }
     return null;
   }
@@ -85,6 +86,11 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
     const cells = rampCells(tx, ty);
     if (typeof cells === "string") { if (tx === x && ty === y) problem = cells; continue; }
     for (const [cx, cy] of cells) set(cx, cy, true);
+    return null;
+  }
+  const band = asFarAsPossible ? slopeBand(t, Math.round((wx - t.offsetX) / 128), Math.round((wy - t.offsetY) / 128), Math.max(1, halfWidth)) : [];
+  if (band.length) {
+    for (const [cx, cy] of band) set(cx, cy, true);
     return null;
   }
   return problem;
@@ -129,6 +135,57 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
     return rows.slice(run[0], run[1] + 1).flat();
   }
 
+}
+
+/** Tiles in a line a ramp needs to end on. */
+const STRAIGHT_RUN = 4;
+
+/** A ramp on a cliff that bends, as the World Editor flags one: every corner of the cliff tiles, and the low
+ *  ground one step further. Measured on a ramp it built right round a plateau and one along a diagonal: 135 of
+ *  138 corners. It covers the cliff within `reach` corners of corner (cx, cy), and goes on along the slope to the
+ *  next straight stretch: only there can a ramp end, as side pieces exist for nothing else, and one that stops
+ *  on the bend leaves a hole. Round a plateau with no straight edge that's the whole way round. Empty if
+ *  there's no one-level cliff here. */
+export function slopeBand(t: Terrain, cx: number, cy: number, reach: number): [number, number][] {
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? t.corners[y * t.width + x] : null);
+  const levels = (tx: number, ty: number) => [at(tx, ty), at(tx + 1, ty), at(tx, ty + 1), at(tx + 1, ty + 1)].map((c) => c?.layer ?? -1);
+  let start: [number, number] | null = null, hi = -1;
+  for (let dy = -2; dy <= 1 && !start; dy++) for (let dx = -2; dx <= 1 && !start; dx++) {
+    const ls = levels(cx + dx, cy + dy), top = Math.max(...ls);
+    if (!ls.includes(-1) && top - Math.min(...ls) === 1) { start = [cx + dx, cy + dy]; hi = top; }
+  }
+  if (!start) return [];
+  const lo = hi - 1;
+  const cliffTile = (tx: number, ty: number) => { const ls = levels(tx, ty); return ls.includes(hi) && ls.includes(lo) && ls.every((l) => l === hi || l === lo); };
+  /** Which way the tile's edge runs, if straight: its corners fall one way, two high and two low. */
+  const heading = (tx: number, ty: number) => {
+    const [bl, br, tl, tr] = levels(tx, ty);
+    return bl === br && tl === tr && bl !== tl ? "east" : bl === tl && br === tr && bl !== br ? "north" : "";
+  };
+  // Along the cliff from the click, first come first served. Past the brush a walk ends after STRAIGHT_RUN
+  // tiles in a line: a side piece is two long and needs the cliff to go on straight behind it.
+  const tiles = new Set<number>();
+  const key = (x: number, y: number) => y * t.width + x;
+  const todo: [number, number, string, number][] = [[start[0], start[1], "", 0]];
+  while (todo.length) {
+    const [x, y, way, run] = todo.shift()!;
+    if (tiles.has(key(x, y))) continue;
+    tiles.add(key(x, y));
+    const inBrush = Math.abs(x - cx) <= reach && Math.abs(y - cy) <= reach;
+    const here = heading(x, y), next = here && here === way ? run + 1 : here ? 1 : 0;
+    if (!inBrush && next >= STRAIGHT_RUN) continue;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if ((dx || dy) && cliffTile(x + dx, y + dy)) todo.push([x + dx, y + dy, here, next]);
+    }
+  }
+  const onCliff = (x: number, y: number) => tiles.has(key(x, y)) || tiles.has(key(x - 1, y)) || tiles.has(key(x, y - 1)) || tiles.has(key(x - 1, y - 1));
+  const lowEdge = (x: number, y: number) => at(x, y)?.layer === lo && onCliff(x, y);
+  const out: [number, number][] = [];
+  for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+    const c = at(x, y)!;
+    if (onCliff(x, y) || (c.layer === lo && (lowEdge(x + 1, y) || lowEdge(x - 1, y) || lowEdge(x, y + 1) || lowEdge(x, y - 1)))) out.push([x, y]);
+  }
+  return out.length >= 4 ? out : [];
 }
 
 /** The longest unbroken stretch of rows that fit, of two at least (one tile wide), nearest the middle one

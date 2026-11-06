@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { toggleRamp, widestRun } from "./cliffs";
+import { slopeBand, toggleRamp, widestRun } from "./cliffs";
 import type { Corner, Terrain } from "./w3e";
 
 /** Rows from the north, a digit per corner: its cliff level. */
@@ -77,7 +77,117 @@ test("near a corner the brush uses the straight part beside it; the strict way r
   assert.ok(t.corners.some((c) => c.ramp));
 });
 
-test("a true diagonal is refused, not built badly: real maps flag those in a way not worked out yet", () => {
+// A ramp the World Editor built right round the inside of a plateau: levels, and * for its flags.
+const ring = [
+  "3 3 3 3 3 3 3 3 3 3 3 3 3 3 3",
+  "3 3 3 3 3 3*3*3*3*3*3*3 3 3 3",
+  "3 3 3 3 3*3*2*2*2*2*3*3*3 3 3",
+  "3 3 3 3*3*2*2*2*2*2*2*3*3*3 3",
+  "3 3 3*3*2*2*2*2 2 2*2*2*3*3*3",
+  "3 3 3*2*2*2*2 2 2 2 2*2*2*3*3",
+  "3 3 3*2*2*2 2 2 2 2 2 2*2*3*3",
+  "3 3 3*2*2*2 2 2 2 2 2 2*2*3*3",
+  "3 3 3*2*2*2*2 2 2 2 2*2*2*3*3",
+  "3 3 3*3*2*2*2*2*2 2*2*2*3*3*3",
+  "3 3 3 3*3*2*2*2*2*2*2*3*3*3 3",
+  "3 3 3 3 3*3*2*2*2*2*3*3*3 3 3",
+  "3 3 3 3 3 3*3*3*3*3*3*3 3 3 3",
+  "3 3 3 3 3 3 3 3 3 3 3 3 3 3 3",
+];
+
+test("a bending ramp is flagged as the World Editor does", () => {
+  const cells = ring.map((r) => r.match(/\d\*?/g) as string[]), h = cells.length, w = cells[0].length;
+  const t = land(cells.map((r) => r.map((c) => c[0]).join("")));
+  const band = new Set(slopeBand(t, 3, 6, 20).map(([x, y]) => `${x},${y}`));
+  const wrong: string[] = [];
+  cells.forEach((row, n) => row.forEach((c, x) => {
+    if (band.has(`${x},${h - 1 - n}`) !== (c.length > 1)) wrong.push(`${x},${h - 1 - n}`);
+  }));
+  assert.ok(wrong.length <= 1, `${wrong.length} corners differ of ${w * h}: ${wrong.join(" ")}`);
+});
+
+// A diagonal that runs into a long straight edge on its way east.
+const bend = () => land([
+  "333333333333333",
+  "333333333333333",
+  "333333333333333",
+  "333333333222222",
+  "333333322222222",
+  "333332222222222",
+  "333222222222222",
+  "222222222222222",
+  "222222222222222",
+  "222222222222222",
+].concat([]));
+
+test("a small brush stops once the cliff runs straight, a big one goes further", () => {
+  const steep = land([
+    "33333333333333333333",
+    "33333333333333333333",
+    "33333333333333333322",
+    "33333333332222222222",
+    "33333333322222222222",
+    "33333333222222222222",
+    "22222222222222222222",
+    "22222222222222222222",
+    "22222222222222222222",
+  ]);
+  const small = slopeBand(steep, 8, 3, 1), whole = slopeBand(steep, 8, 3, 30);
+  assert.ok(small.length >= 4 && small.length < whole.length, `${small.length} of ${whole.length}`);
+});
+
+test("with no straight stretch to end on, a ramp goes the whole way round", () => {
+  const cells = ring.map((r) => r.match(/\d\*?/g) as string[]);
+  const flat = () => land(cells.map((r) => r.map((c) => c[0]).join("")));
+  assert.equal(slopeBand(flat(), 3, 6, 1).length, slopeBand(flat(), 3, 6, 20).length);
+});
+
+test("one click takes off a long ramp, however far it runs", () => {
+  const t = bend();
+  for (const [x, y] of slopeBand(t, 7, 4, 1)) t.corners[y * t.width + x].ramp = true;
+  const flagged = t.corners.filter((c) => c.ramp);
+  assert.ok(flagged.length > 10);
+  assert.equal(toggleRamp(t, 7.5 * 128, 4.5 * 128, 1, log, true), null);
+  assert.equal(t.corners.some((c) => c.ramp), false, ramps(t).join("\n"));
+});
+
+test("with no straight stretch at all, a ramp goes the whole way round", () => {
+  // A diamond: nothing but diagonal edges.
+  const diamond = () => land([
+    "22222222",
+    "22233222",
+    "22333322",
+    "23333332",
+    "23333332",
+    "22333322",
+    "22233222",
+    "22222222",
+  ]);
+  assert.equal(slopeBand(diamond(), 2, 2, 1).length, slopeBand(diamond(), 2, 2, 20).length);
+});
+
+test("on a long cliff the ramp ends at the first straight stretch past the bend, not at the far end of the map", () => {
+  const t = land([
+    "3333333333",
+    "3333333333",
+    "3333333333",
+    "3333333322",
+    "3333332222",
+    "3333322222",
+    "3332222222",
+    "2222222222",
+    "2222222222",
+    "2222222222",
+  ].map((r) => r));
+  const band = slopeBand(t, 5, 4, 1);
+  assert.ok(band.length > 4);
+  assert.deepEqual(slopeBand(land(["2222", "2222", "2222"]), 1, 1, 2), [], "no cliff, no ramp");
+  const lows = band.filter(([x, y]) => t.corners[y * t.width + x].layer === 2);
+  const highs = band.filter(([x, y]) => t.corners[y * t.width + x].layer === 3);
+  assert.ok(lows.length && highs.length);
+});
+
+test("a diagonal cliff gets a ramp from the brush, on both of its levels", () => {
   const t = land([
     "33333222",
     "33332222",
@@ -86,8 +196,10 @@ test("a true diagonal is refused, not built badly: real maps flag those in a way
     "32222222",
     "22222222",
   ]);
-  assert.ok(toggleRamp(t, 3.5 * 128, 2.5 * 128, 2, log, true));
-  assert.equal(t.corners.some((c) => c.ramp), false);
+  assert.equal(toggleRamp(t, 3.5 * 128, 2.5 * 128, 2, log, true), null);
+  const flagged = t.corners.filter((c) => c.ramp);
+  assert.ok(flagged.some((c) => c.layer === 3) && flagged.some((c) => c.layer === 2), ramps(t).join(" "));
+  assert.equal(toggleRamp(land(["2222", "2222"]), 128, 64, 1, log, true) !== null, true);
 });
 
 test("the brush takes off what it built, in one click", () => {
