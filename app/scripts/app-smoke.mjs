@@ -274,12 +274,39 @@ async function objectByHand(page, hands, root, fail) {
   await hands.type("uhpm");
   await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
   await retype(hands, ".obj-table .obj-value-cell input", "777");
+  await limits(page, hands, file, fail);
   if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("changing a field didn't mark the file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
   await sleep(300);
   const objects = JSON.parse(readFileSync(file, "utf8"));
   const mod = objects.original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
   if (mod?.value !== 777) fail(`the Footman's hit points are ${JSON.stringify(mod)}`);
+}
+
+/** Hit points stop at 500000 in the World Editor: past that the field warns and still saves. */
+async function limits(page, hands, file, fail) {
+  const flagged = () => page.evaluate(`document.querySelectorAll("tr.obj-over").length`);
+  const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input").title`);
+  if (await flagged()) fail("777 hit points were marked as outside the limits");
+  if (!/range: 1 to 500000/.test(await tooltip())) fail(`the field's tooltip is "${await tooltip()}"`);
+  await retype(hands, ".obj-table .obj-value-cell input", "999999");
+  if ((await flagged()) !== 1) fail("999999 hit points weren't marked as outside the limits");
+  if (!/Outside/.test(await tooltip())) fail(`the warning's tooltip is "${await tooltip()}"`);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const saved = JSON.parse(readFileSync(file, "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
+  if (saved?.value !== 999999) fail(`a value past the limit was saved as ${JSON.stringify(saved)}`);
+  // The filter, with no field search in the way.
+  await page.evaluate(`(() => { const e = document.querySelector("input.obj-field-search"); e.value = ""; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  await until("all the fields", () => page.evaluate(`document.querySelectorAll(".obj-table tr").length > 20`), 5000);
+  await hands.click(".obj-detail-toolbar label", "Outside limits (1)");
+  await until("the filter", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  await hands.click(".obj-detail-toolbar label", "Outside limits (1)");
+  await hands.click("input.obj-field-search");
+  await hands.type("uhpm");
+  await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  await retype(hands, ".obj-table .obj-value-cell input", "777");
+  if (await flagged()) fail("the mark stayed after going back inside the limits");
 }
 
 /** The Trigger Editor: renames the map's trigger, switches it off, and Build carries both. */

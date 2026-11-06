@@ -1,4 +1,5 @@
 import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
+import { outside, rangeNote } from "../../lib/objects/limits";
 import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
@@ -265,6 +266,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let filter = "";
         let fieldFilter = "";
         let modifiedOnly = false;
+        let outsideOnly = false;
         /** Folded multi-selection blocks ("same" / "different"); kept across re-renders. */
         const foldedBlocks = new Set<string>();
         // What would be written: standard objects without modifications are
@@ -592,6 +594,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             mixed ? null : artPreview(metaType, String(current)));
         };
 
+        /** Whether an object sets a field past the World Editor's range. Only what the map sets
+         *  counts: inherited values are the game's own. */
+        const overLimit = (o: Obj, f: FieldMeta, level: number) => {
+          const found = findMod(o, f.id, level);
+          return !!found && outside(f.range, found.m.value);
+        };
+        /** Puts a number field's range in its tooltip, under what the tooltip already says. */
+        const withRange = (cell: HTMLElement, f: FieldMeta, over: boolean) => {
+          const note = rangeNote(f.range, over), target = cell.matches("input") ? cell : cell.querySelector("input");
+          if (note && target) target.title = [target.title, note].filter(Boolean).join("\n");
+          return cell;
+        };
+        const outsideToggle = (label: string) => h("label", { title: "Show only values past the World Editor's range" },
+          h("input", { type: "checkbox", checked: outsideOnly, onchange: (e: Event) => { outsideOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), ` ${label}`);
         const fieldRow = (o: Obj, f: FieldMeta, level: number, levels: number) => {
           const found = findMod(o, f.id, level);
           const def = kd!.defaultValue(o.base, f, level);
@@ -602,12 +618,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             markDirty();
             renderDetail();
           };
-          return h(`tr${inherited ? "" : ".modified"}`, {},
+          const over = overLimit(o, f, level);
+          return h(`tr${inherited ? "" : ".modified"}${over ? ".obj-over" : ""}`, {},
             h("td", { title: `${f.category} · ${f.type}${f.slk ? ` · ${f.slk}.${f.field}` : ""}` },
               h("span.obj-field-label", {}, f.label),
               h("code", {}, f.id)),
             h("td.muted", {}, levels > 1 ? String(level) : ""),
-            h("td", {}, valueEditor(f.valueType, f.type, current, inherited, commit)),
+            h("td", {}, withRange(valueEditor(f.valueType, f.type, current, inherited, commit), f, over)),
             h("td", {}, found
               ? h("button.icon-button", {
                   title: def !== undefined ? `Reset to inherited value: ${def}` : "Remove modification",
@@ -693,6 +710,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const f = kind === "w3u" ? kd?.fieldById.get("uani") : undefined;
           return f ? effective(o, f, 0) : "";
         };
+        /** Values of the shown object past the World Editor's range. */
+        let overCount = 0;
         const renderDetailInner = () => {
           // Edits can change names and the clean-up count in the list too.
           renderList();
@@ -713,12 +732,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const levels = levelCount(o);
             const q = fieldFilter.toLowerCase();
             const byCategory = new Map<string, HTMLElement[]>();
+            overCount = 0;
             for (const f of kd.fieldsFor(o.base)) {
               const lvls = f.repeat > 0 ? Array.from({ length: levels }, (_, i) => i + 1) : [0];
               for (const lv of lvls) {
                 const found = findMod(o, f.id, lv);
                 if (found) known.add(found.m);
+                const over = overLimit(o, f, lv);
+                if (over) overCount++;
                 if (modifiedOnly && !found) continue;
+                if (outsideOnly && !over) continue;
                 if (q && !`${f.label} ${f.id}`.toLowerCase().includes(q)) continue;
                 const rows = byCategory.get(f.category) ?? [];
                 rows.push(fieldRow(o, f, lv, f.repeat > 0 ? levels : 1));
@@ -733,7 +756,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   h("tbody", {}, ...rows)),
               ));
             }
-            if (!byCategory.size) sections.push(h("div.muted", {}, modifiedOnly ? "No modified fields." : "No fields match."));
+            if (!byCategory.size) sections.push(h("div.muted", {}, outsideOnly ? "No values outside the World Editor's range." : modifiedOnly ? "No modified fields." : "No fields match."));
           }
           // Mods the field table didn't show: unknown fields, or levels beyond the level count.
           const other = modLists(o).flatMap((l) => l.mods).filter((m) => !known.has(m));
@@ -749,6 +772,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             kd ? h("div.obj-detail-toolbar", {},
               fieldSearch,
               h("label", {}, h("input", { type: "checkbox", checked: modifiedOnly, onchange: (e: Event) => { modifiedOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), " Modified only"),
+              outsideToggle(`Outside limits${overCount ? ` (${overCount})` : ""}`),
               LEVEL_FIELD[kind] ? h("span.muted", {}, `${levelCount(o)} level${levelCount(o) === 1 ? "" : "s"}`) : null,
             ) : null,
             ...sections,
@@ -787,14 +811,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const values = objs.map((o) => effective(o, f, level));
             const anyModified = objs.some((o) => findMod(o, f.id, level));
             if (modifiedOnly && !anyModified) continue;
+            const over = objs.some((o) => overLimit(o, f, level));
+            if (outsideOnly && !over) continue;
             const distinct = [...new Set(values)];
             const isSame = distinct.length === 1;
             const commit = (v: number | string) => { for (const o of objs) setValue(o, f, level, v); markDirty(); renderDetail(); };
             const each = (change: (old: string) => number | string) => { for (const o of objs) setValue(o, f, level, change(effective(o, f, level))); markDirty(); renderDetail(); };
-            const row = h(`tr${anyModified ? ".modified" : ""}`, {},
+            const row = h(`tr${anyModified ? ".modified" : ""}${over ? ".obj-over" : ""}`, {},
               h("td", { title: `${f.category} · ${f.type}` }, h("span.obj-field-label", {}, f.label), h("code", {}, f.id)),
               h("td.muted", {}, level ? String(level) : ""),
-              h("td", {}, valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : values, each)),
+              h("td", {}, withRange(valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : values, each), f, over)),
               h("td", {}, anyModified
                 ? h("button.icon-button", { title: "Reset all selected to their inherited values", onclick: () => { for (const o of objs) resetValue(o, f, level); markDirty(); renderDetail(); } }, "↺")
                 : null));
@@ -820,7 +846,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             header,
             h("div.obj-detail-toolbar", {},
               fieldSearch,
-              h("label", {}, h("input", { type: "checkbox", checked: modifiedOnly, onchange: (e: Event) => { modifiedOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), " Modified in any")),
+              h("label", {}, h("input", { type: "checkbox", checked: modifiedOnly, onchange: (e: Event) => { modifiedOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), " Modified in any"),
+              outsideToggle("Outside limits in any")),
             block("same", `Same in all (${sameCount})`, " — editing changes every selected object", same),
             block("different", `Different (${diffCount})`, " — a value entered here overrides all selected", diff),
           );

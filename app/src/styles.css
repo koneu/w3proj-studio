@@ -248,6 +248,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-section h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); margin: 16px 0 4px; }
 .obj-table tr.modified td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .obj-table tr.modified .obj-field-label { color: var(--accent); }
+.obj-table tr.obj-over .obj-value { color: var(--warning); border-color: var(--warning); }
 .obj-value.inherited { color: var(--fg-muted); border-color: transparent; background: transparent; }
 .obj-value.inherited:hover, .obj-value.inherited:focus { border-color: var(--border); background: var(--bg); }
 .obj-bool { display: inline-flex; gap: 8px; align-items: center; }

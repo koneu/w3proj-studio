@@ -3,6 +3,7 @@
 // default (inherited) value of every field.
 
 import type { W3Api } from "../../extensions/api";
+import { rangeOf, type FieldRange } from "./limits";
 import { listItem, parseIni, parseIniRaw, parseSlk, unquote, westring } from "../formats/text";
 
 export type ValueType = "int" | "real" | "unreal" | "string";
@@ -45,6 +46,8 @@ export interface FieldMeta {
   /** Ability "DataA…" column (1 = A) — also the mod's data pointer. */
   data: number;
   sort: string;
+  /** The range the World Editor keeps a number field in. */
+  range?: FieldRange;
   use: Record<string, string>;
   useSpecific?: string[];
   notSpecific?: string[];
@@ -199,6 +202,7 @@ async function buildKind(w3: W3Api, kind: string): Promise<KindData> {
       repeat: Number(r.repeat ?? 0),
       data: Number(r.data ?? 0),
       sort: r.sort ?? "",
+      range: rangeOf(r.type ?? "string", r.minVal, r.maxVal),
       use: r,
       useSpecific: r.useSpecific ? r.useSpecific.split(",") : undefined,
       notSpecific: r.notSpecific ? r.notSpecific.split(",") : undefined,
