@@ -93,7 +93,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     for (const [x, y] of points) did = stamp(x, y) || did;
     stroke.at = [p[0], p[1]];
     stroke.last = performance.now();
-    if (did) ed.terrainChanged();
+    if (did) ed.terrainChanged(isLayerTool(tool));
   };
   /** Raise, Lower and Smooth go by time, not by mouse events: what a moment adds is shared out along
    *  the way the mouse went, so a quick drag is lower but has no gaps, and holding still goes on. */
@@ -301,7 +301,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         rampProblem = toggleRamp(terrain, g[0], g[1], size, s, true);
         stroke = { s, target: 0, layer: { layer: 2 }, last: performance.now() };
         rampDrag = !onRamp;
-        if (!rampProblem) ed.terrainChanged();
+        if (!rampProblem) ed.terrainChanged(true);
         return true;
       }
       const start = async () => {
@@ -331,12 +331,14 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     },
     pointerMove(p) {
       if (tool === "select") { if (p.down && p.ground) areaTo(p.ground); return; }
-      if (tool === "ramp" && p.down && rampDrag && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) {
-        stroke.last = performance.now();
-        if (toggleRamp(terrain, p.ground[0], p.ground[1], size, stroke.s, true, true) === null) { rampProblem = null; ed.terrainChanged(); }
-      }
-      if (tool === "ramp" && p.down) return;
       ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
+      if (tool === "ramp") {
+        if (p.down && rampDrag && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) {
+          stroke.last = performance.now();
+          if (toggleRamp(terrain, p.ground[0], p.ground[1], size, stroke.s, true, true) === null) { rampProblem = null; ed.terrainChanged(true); }
+        }
+        return;
+      }
       // Re-apply while held, a few times per second.
       if (p.down && stroke?.height && p.ground) stroke.height.moveTo([p.ground[0], p.ground[1]]);
       else if (p.down && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) applyAt(p.ground);

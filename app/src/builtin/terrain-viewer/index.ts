@@ -1307,8 +1307,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         }
         /** Places cliff models for the current layers (initially and after edits). */
-        async function replanCliffs() {
-          void replanShore();
+        async function replanCliffs(shore = true) {
+          if (shore) void replanShore();
           if (!cliffData) return;
           const gen = ++cliffGen;
           const { requests, groundOverrides } = planCliffs(terrain, cliffData.types, cliffData.exists);
@@ -1324,6 +1324,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cliffInfo.title = failed.map((f) => f.error).join("\n");
           redraw();
         }
+        /** Cliffs during a stroke: one replan at a time and the newest state after it, or a drag faster than
+         *  the models load would never see any. The shore, which takes longer, waits for the end of the stroke. */
+        let cliffsBusy = false, cliffsAgain = false;
+        const liveCliffs = async () => {
+          if (cliffsBusy) { cliffsAgain = true; return; }
+          cliffsBusy = true;
+          try {
+            do { cliffsAgain = false; await replanCliffs(false); } while (cliffsAgain);
+          } finally { cliffsBusy = false; }
+        };
         Promise.all([w3.game.readText("TerrainArt\\CliffTypes.slk"), w3.game.list()]).then(async ([slk, list]) => {
           const types = new Map(parseSlk(slk).filter((r) => r.cliffID).map((r) => [r.cliffID, r as unknown as CliffType]));
           // Stored paths look like "War3.w3mod:_HD.w3mod:Doodads/…". Only the art
@@ -2323,7 +2333,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const handle: TerrainEditorHandle = {
           terrain, editable, redraw, host: el, resizeMap,
-          terrainChanged: () => { renderer.terrainChanged(); doc.setDirty(true); redraw(); },
+          terrainChanged: (cliffs) => { renderer.terrainChanged(); if (cliffs) void liveCliffs(); doc.setDirty(true); redraw(); },
           setArea,
           commitTerrain,
           tilesets: () => loadTilesets(w3).then((d) => d.sets.map((s) => ({ id: s.id, name: s.name, tiles: s.tiles.map((t) => t.id) }))),
