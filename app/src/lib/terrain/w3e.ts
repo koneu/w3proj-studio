@@ -27,7 +27,7 @@ export interface Corner {
   hasWater: boolean;
   boundary: boolean;
   /** Stored values, written back as they are: ground height (without layer)
-   *  and the whole water word (level + unknown high bits). `height` and
+   *  and the whole water word (level + MAP_EDGE). `height` and
    *  `water` above are derived from them (see setGroundHeight). */
   rawHeight: number;
   rawWater: number;
@@ -148,6 +148,21 @@ export function waterLevelAt(z: number): number {
 }
 
 /** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
+/** Bit of the water word: the tile whose lower left corner this is lies past the playable map. The game
+ *  and the World Editor darken those tiles. Measured: 14 of 14 maps, saved by the World Editor among them. */
+const MAP_EDGE = 0x4000;
+
+/** Marks the tiles past the playable map; `complements` are the w3i's left, right, bottom, top. */
+export function markMapEdge(t: Terrain, complements: readonly number[]) {
+  const [left, right, bottom, top] = complements;
+  const tilesX = t.width - 1, tilesY = t.height - 1;
+  for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+    const c = t.corners[y * t.width + x];
+    const past = x < tilesX && y < tilesY && (x < left || x >= tilesX - right || y < bottom || y >= tilesY - top);
+    c.rawWater = past ? c.rawWater | MAP_EDGE : c.rawWater & ~MAP_EDGE;
+  }
+}
+
 export function setWaterLevel(c: Corner, level: number) {
   c.hasWater = true;
   c.rawWater = (c.rawWater & 0xc000) | (level & 0x3fff);

@@ -22,8 +22,8 @@
 //! for 0–63). A grid whose corners all hold the same value is written as `[name] all value`.
 //!
 //! Fields: `height` ground height (stored value − 0x2000, quarter world units), `water`
-//! water level (bits 0–13 − 0x2000), `water-bits` (bits 14–15 of the water word, meaning
-//! unknown), `texture`, `variation`, `cliff-variation`, `cliff-texture`, `layer`, `flags`
+//! water level (bits 0–13 − 0x2000), `water-bits` (bits 14–15 of the water word: 1 on the lower
+//! left corner of each tile past the playable map), `texture`, `variation`, `cliff-variation`, `cliff-texture`, `layer`, `flags`
 //! (1 ramp, 2 blight, 4 water, 8 boundary), and for version 12 `texture-bits` (bits 10–15
 //! of the texture word) when any is set. Bytes after the corners go into `[trailer]` as hex.
 //! Tile ids that aren't printable ASCII are written as `hex:XXXXXXXX` (their 4 bytes).

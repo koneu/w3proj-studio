@@ -10,7 +10,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { heightAt, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -303,11 +303,13 @@ export function newTerrain(o: NewMapOptions): Terrain {
     if (level !== null) setWaterLevel(c, level);
     return c;
   });
-  return {
+  const t: Terrain = {
     version: 12, tileset: o.tileset, customTilesets: o.customTiles, customTilesetsRaw: o.customTiles ? 1 : 0,
     groundTiles: o.groundTiles, cliffTiles: o.cliffTiles,
     width, height, offsetX: -o.width * 64, offsetY: -o.height * 64, corners, trailer: new Uint8Array(0),
   };
+  markMapEdge(t, MARGINS);
+  return t;
 }
 
 /** Camera bounds as the World Editor sets them: 4 tiles inside the left

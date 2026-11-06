@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapChoices, playableOf } from "./newmap";
+import { mapChoices, newTerrain, playableOf, type NewMapOptions } from "./newmap";
 
 const data = {
   sets: [
@@ -55,6 +55,13 @@ test("water needs ground to drop", () => {
   assert.throws(() => mapChoices({ name: "A", water: "deep", cliffLevel: 1 }, data, folder), /Deep water needs cliffLevel 2/);
   assert.throws(() => mapChoices({ name: "A", water: "shallow", cliffLevel: 0 }, data, folder), /Shallow water needs cliffLevel 1/);
   assert.equal(mapChoices({ name: "A", water: "deep" }, data, folder).water, "deep");
+});
+
+test("a new map marks its border, or the game and the World Editor don't darken it", () => {
+  const t = newTerrain({ width: 32, height: 32, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], baseTile: "Ldrt", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  const marked = t.corners.filter((c) => c.rawWater & 0x4000).length;
+  const [w, h] = playableOf(32, 32);
+  assert.equal(marked, 32 * 32 - w * h);
 });
 
 test("what can be played of a map", () => {

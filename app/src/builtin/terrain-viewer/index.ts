@@ -38,7 +38,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { markMapEdge, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
@@ -2052,6 +2052,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             await savePlacedFile(w3, f);
           }
+          markMapEdge(next, complements);
           await writeTerrainBytes(doc.path, writeW3e(next), doc);
           await editDoc("war3map.w3i", (info) => {
             info.cameraComplements = [...complements];
@@ -2712,6 +2713,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
           save: editable ? async () => {
+            // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
+            const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+            if (edgeInfo?.cameraComplements) markMapEdge(terrain, edgeInfo.cameraComplements);
             const w3e = writeW3e(terrain);
             await writeTerrainBytes(doc.path, w3e, doc);
             if (objectsTouched) {
