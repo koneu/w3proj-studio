@@ -36,7 +36,7 @@ oracle only proves the code does what the code does.
 | Random maps | the JASS and Lua checkers on every generated script | `app/src/lib/script/random-maps.test.ts` | every commit, CI |
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
 | Real app | the map it packs is the CLI's, byte for byte; nothing changes without an edit | `app/scripts/app-smoke.mjs` | locally, before merging |
-| Corpus | real maps, and the baseline of which codec reads what | `w3proj verify`, `twin-check.mjs` | locally, before merging |
+| Corpus | real maps, and the baseline of which codec reads what; a map's whole ground through a fragment gives the same file | `w3proj verify`, `twin-check.mjs` | locally, before merging |
 | Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
 | The real thing | the game and World Editor | the release checklist below | by hand, before a release |
 
@@ -99,7 +99,7 @@ Measured on 2026-11-06. TypeScript counts every source file, so a file no test i
 | `lib/image`, `lib/lua`, `lib/formats`, `lib/triggers`, `lib/terrain` | 65–90% |
 | `lib/script` (writes `war3map.j`) | 87% (2% before its tests) |
 | `lib/jass` | 79% |
-| `lib/objects`, `lib/ai` | **0%** |
+| `lib/ai`, `lib/objects` | 95%, 89% (0% before their tests) |
 | `workbench`, most of `builtin/` | 0–10% |
 
 Unit coverage counts only unit tests: the UI smoke and the corpus run far more code than this
@@ -140,6 +140,8 @@ Each of these comes from a test on this project that looked fine and wasn't.
   an error at the hostile depth means nothing. With the control, it crashed the process.
 - **Count what happened.** The damage tests fail if everything is accepted or everything is
   rejected: that would mean the damage reached nothing.
+- **Don't change the code under a running check.** A corpus run started next to a sabotage bundled the
+  sabotaged file and reported 67 failures, under a `tail` that said exit 0.
 - **Same input every run.** Random tests use a fixed seed and print it.
 - **Go through the front door.** `app-smoke` first packed with the backend call directly and passed;
   the Build command it stood in for left out what had just been saved.
