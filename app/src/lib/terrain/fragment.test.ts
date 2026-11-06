@@ -206,3 +206,17 @@ test("a fragment with ground survives being a file, and turns with it", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(turned)), turned);
   assert.deepEqual([turned.ground!.width, turned.ground!.height], [3, 3]);
 });
+
+test("painted Boundary goes along with the ground, and isn't the map's border", () => {
+  const from = land(2, 2);
+  from.corners[0].boundary = true;
+  const g = groundOf(from, { x0: 0, y0: 0, x1: 1, y1: 1 }, [0, 0]);
+  const to = land(2, 2);
+  to.corners[1].boundary = true;
+  const st = stampGround(to, g, [0, 0], [0, 1], [0, 1]);
+  assert.deepEqual(to.corners.map((c) => c.boundary), [true, false, false, false]);
+  st.undo();
+  assert.deepEqual(to.corners.map((c) => c.boundary), [false, true, false, false]);
+  assert.equal(parseW3e(writeW3e(from)).corners[0].boundary, true);
+  assert.equal(from.corners[0].rawWater & 0x4000, 0);
+});

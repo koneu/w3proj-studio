@@ -31,6 +31,8 @@ export interface FragmentCorner {
   layer: number;
   ramp: boolean;
   blight: boolean;
+  /** Painted as Boundary. */
+  boundary: boolean;
 }
 
 export interface FragmentGround {
@@ -109,7 +111,7 @@ export function groundOf(t: Terrain, a: CornerArea, centre: readonly [number, nu
     const c = t.corners[y * t.width + x];
     corners.push({
       ground: groundHeight(c), water: c.rawWater & 0x3fff, hasWater: c.hasWater, texture: c.texture, texExtra: c.texExtra,
-      variation: c.variation, cliffVariation: c.cliffVariation, cliffTexture: c.cliffTexture, layer: c.layer, ramp: c.ramp, blight: c.blight,
+      variation: c.variation, cliffVariation: c.cliffVariation, cliffTexture: c.cliffTexture, layer: c.layer, ramp: c.ramp, blight: c.blight, boundary: c.boundary,
     });
   }
   return {
@@ -151,7 +153,7 @@ export function stampGround(t: Terrain, g: FragmentGround, origin: readonly [num
     setWaterLevel(c, from.water);
     Object.assign(c, {
       hasWater: from.hasWater, texture: tiles[from.texture] ?? 0, texExtra: from.texExtra, variation: from.variation,
-      cliffVariation: from.cliffVariation, cliffTexture: cliffs[from.cliffTexture] ?? from.cliffTexture, ramp: from.ramp, blight: from.blight,
+      cliffVariation: from.cliffVariation, cliffTexture: cliffs[from.cliffTexture] ?? from.cliffTexture, ramp: from.ramp, blight: from.blight, boundary: from.boundary,
     });
     after.set(i, { ...c });
   }

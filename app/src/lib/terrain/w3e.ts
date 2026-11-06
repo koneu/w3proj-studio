@@ -8,7 +8,8 @@
 //   v12: u16 texture (low 6 bits) | flags << 6
 //   u8   variation     ground variation (low 5 bits) | cliff variation << 5
 //   u8   cliff texture (high nibble) | layer (low nibble)
-// Flags: 1 ramp, 2 blight, 4 water, 8 boundary (camera bounds edge).
+// Flags: 1 ramp, 2 blight, 4 water, 8 boundary (the World Editor's Boundary tile, painted anywhere; the
+// map's outer border is a bit of the water word instead, see markMapEdge).
 // The v12 bit layout was worked out from 38 maps saved by the 2.0 editor.
 
 export interface Corner {
