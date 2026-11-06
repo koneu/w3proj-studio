@@ -95,7 +95,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
   const strip = (s: string) => s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
   const entry = (id: string, name: string, base?: string): Entry => {
     const facets = kd.facets(base ?? id);
-    return { id, base, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")}`.toLowerCase() };
+    return { id, base, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
   };
   const entries: Entry[] = [
     ...(opts.custom ?? []).map((c) => entry(c.id, strip(c.name), c.base)),

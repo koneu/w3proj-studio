@@ -82,7 +82,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category, trees }) => {
       const { data, file, resolve } = await toolKind(kind);
       const text = typeof filter === "string" ? filter.toLowerCase() : "";
-      const hit = (o: { id: string; name: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text);
+      const hit = (o: { id: string; name: string; base?: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text) || data.searchText(o.base ?? o.id).includes(text);
       const wantTileset = tileset === "map" ? (await terrainFacts(w3))?.tileset : typeof tileset === "string" ? tileset : undefined;
       const stored = scope === "game" ? modelPacks(await w3.game.list()) : null;
       const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined, trees === true);
@@ -328,7 +328,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         const renderList = () => {
           const group = (title: string, objs: Obj[], action?: HTMLElement) => {
-            const items = objs.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)}`.toLowerCase().includes(filter));
+            const items = objs.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
             return [
               h("div.obj-group", {}, h("span", {}, `${title} (${items.length})`), action ?? null),
               ...items.map((o) =>
@@ -341,7 +341,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ),
             ];
           };
-          const matchesFilter = (o: Obj) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)}`.toLowerCase().includes(filter);
+          const matchesFilter = (o: Obj) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter);
           // With a filter, only the listed entries are cleaned up.
           const unchanged = file.original.filter((o) => !hasMods(o) && matchesFilter(o)).length;
           const cleanUp = unchanged

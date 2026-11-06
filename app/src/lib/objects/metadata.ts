@@ -65,6 +65,9 @@ export interface KindData {
   fieldById: Map<string, FieldMeta>;
   /** Base object id → display name. */
   names: Map<string, string>;
+  /** Lower-case English words for a base object from the game's tables, on any install: the shown
+   *  names are in the install's language, so "footman" wouldn't find a German Fußsoldat. */
+  searchText(baseId: string): string;
   /** Base object ids that exist in the game, in table order. */
   baseIds: string[];
   /** Level count of a base object (1 for kinds without levels). */
@@ -73,6 +76,19 @@ export interface KindData {
   fieldsFor(baseId: string): FieldMeta[];
   /** Inherited value of a field (level is 1-based for repeating fields, else 0). */
   defaultValue(baseId: string, f: FieldMeta, level: number): string | undefined;
+}
+
+/** English words of table rows: their internal name and comment columns, which no locale changes.
+ *  "HeroPaladin" gives "hero paladin" too. Strings to look up (WESTRING_…) aren't words. */
+export function englishWords(rows: readonly Record<string, string>[]) {
+  const words = new Set<string>();
+  for (const row of rows) {
+    for (const [column, value] of Object.entries(row)) {
+      if (!/^(name|comments?|comment\(s\))$/i.test(column) || !value || value.startsWith("WESTRING_")) continue;
+      words.add(value.trim().replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase());
+    }
+  }
+  return [...words].join(" ");
 }
 
 /** Per object kind: metadata SLK and the data tables (SLK name → path, key column). */
@@ -240,6 +256,7 @@ async function buildKind(w3: W3Api, kind: string): Promise<KindData> {
     fields,
     fieldById,
     names,
+    searchText: (id) => englishWords([...tables.values()].flatMap((t) => { const r = t.get(id); return r ? [r] : []; })),
     baseIds: [...main.keys()],
     levels(baseId) {
       if (kind === "w3a") return Math.max(1, Number(main.get(baseId)?.levels ?? 1));
