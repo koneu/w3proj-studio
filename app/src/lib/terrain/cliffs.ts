@@ -45,8 +45,9 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
  *  corners along the slope get the ramp flag (the high end and two corners
  *  on the lower layer, `2 * halfWidth + 1` corners across, as World Editor
  *  ramps are); on a tile that already has ramp corners the ramp there is
- *  removed. Returns a message when nothing could be done. */
-export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number, stroke: CornerLog): string | null {
+ *  removed. Returns a message when nothing could be done. `asFarAsPossible` is for the brush: a ramp takes
+ *  the width that fits. Without it a ramp is the width asked for or nothing, for callers that have to be told. */
+export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number, stroke: CornerLog, asFarAsPossible = false): string | null {
   const x = Math.floor((wx - t.offsetX) / 128), y = Math.floor((wy - t.offsetY) / 128);
   if (x < 0 || y < 0 || x >= t.width - 1 || y >= t.height - 1) return "Outside the map.";
   const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : null);
@@ -105,17 +106,43 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
     else return "Click a straight cliff edge (not a corner) to build a ramp.";
     // The ramp's centre line runs through the click.
     const centre = along[0] ? Math.round((wy - t.offsetY) / 128) : Math.round((wx - t.offsetX) / 128);
-    const cells: [number, number][] = [];
+    const rows: [number, number][][] = [];
     for (let k = -halfWidth; k <= halfWidth; k++) {
+      const row: [number, number][] = [];
+      let fits = true;
       for (let s = 0; s < 3; s++) {
         const cx = along[0] ? start[0] + along[0] * s : centre + k;
         const cy = along[0] ? centre + k : start[1] + along[1] * s;
         const c = at(cx, cy);
-        if (!c) return "The ramp would leave the map.";
-        if (c.layer !== (s === 0 ? hi : lo)) return "The cliff isn't straight and level enough here for a ramp this wide (try a smaller Size).";
-        cells.push([cx, cy]);
+        if (!c) { if (!asFarAsPossible) return "The ramp would leave the map."; fits = false; break; }
+        if (c.layer !== (s === 0 ? hi : lo)) {
+          if (!asFarAsPossible) return "The cliff isn't straight and level enough here for a ramp this wide (try a smaller Size).";
+          fits = false;
+          break;
+        }
+        row.push([cx, cy]);
       }
+      rows.push(fits ? row : []);
     }
-    return cells;
+    const run = widestRun(rows.map((r) => r.length > 0), halfWidth);
+    if (!run) return "The cliff isn't straight and level enough here for a ramp.";
+    return rows.slice(run[0], run[1] + 1).flat();
   }
+
+}
+
+/** The longest unbroken stretch of rows that fit, of two at least (one tile wide), nearest the middle one
+ *  (`middle` is its index) when there are several as long. Null if none. */
+export function widestRun(fits: readonly boolean[], middle: number): [number, number] | null {
+  let best: [number, number] | null = null;
+  const off = (r: [number, number]) => (middle < r[0] ? r[0] - middle : middle > r[1] ? middle - r[1] : 0);
+  for (let i = 0; i < fits.length; i++) {
+    if (!fits[i] || fits[i - 1]) continue;
+    let j = i;
+    while (fits[j + 1]) j++;
+    const run: [number, number] = [i, j];
+    if (j === i) continue;
+    if (!best || off(run) < off(best) || (off(run) === off(best) && j - i > best[1] - best[0])) best = run;
+  }
+  return best;
 }
