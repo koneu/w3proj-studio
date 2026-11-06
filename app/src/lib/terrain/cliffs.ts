@@ -47,8 +47,9 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
  *  ramps are); on a tile that already has ramp corners the ramp there is
  *  removed. Returns a message when nothing could be done. `asFarAsPossible` is for the brush: a ramp takes
  *  the width that fits, and a corner or diagonal cliff gets one too. Without it a ramp is the width asked for
- *  or nothing, for callers that have to be told. */
-export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number, stroke: CornerLog, asFarAsPossible = false): string | null {
+ *  or nothing, for callers that have to be told. `keep` is for a drag: what's there stays, so going over a
+ *  ramp doesn't take it away. */
+export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number, stroke: CornerLog, asFarAsPossible = false, keep = false): string | null {
   const x = Math.floor((wx - t.offsetX) / 128), y = Math.floor((wy - t.offsetY) / 128);
   if (x < 0 || y < 0 || x >= t.width - 1 || y >= t.height - 1) return "Outside the map.";
   const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : null);
@@ -61,7 +62,8 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
   const quad = [at(x, y)!, at(x + 1, y)!, at(x, y + 1)!, at(x + 1, y + 1)!];
 
   // Remove: clear the connected ramp corners around the click.
-  if (quad.some((c) => c.ramp)) {
+  if (keep && quad.every((c) => c.ramp)) return null;
+  if (!keep && quad.some((c) => c.ramp)) {
     const todo = [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]].filter(([cx, cy]) => at(cx, cy)!.ramp);
     const seen = new Set<number>();
     while (todo.length) {

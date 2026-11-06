@@ -230,6 +230,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
   const strengthWrap = h("label.terrain-tool-opt", { title: "How fast the ground rises or sinks at the brush's centre, while the button is held" }, "Strength ",
     h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
+  /** While the button is held on the Ramp tool: the drag builds on. What the press had to say, if nothing built. */
+  let rampDrag = false, rampProblem: string | null = null;
   // The block of ground being selected: where the drag began, and the tile the pointer is on.
   let selecting: { from: [number, number] } | null = null;
   let withObjects = true;
@@ -293,10 +295,13 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         return true;
       }
       if (tool === "ramp") {
+        // The press builds or, on a ramp, takes it off; a drag goes on building from there.
+        const onRamp = terrain.corners[Math.round((g[1] - terrain.offsetY) / 128) * terrain.width + Math.round((g[0] - terrain.offsetX) / 128)]?.ramp ?? false;
         const s = new Stroke("ramp");
-        const problem = toggleRamp(terrain, g[0], g[1], size, s, true);
-        if (problem) w3.window.showWarning(problem);
-        else { stroke = { s, target: 0, layer: { layer: 2 }, last: 0 }; endStroke(); }
+        rampProblem = toggleRamp(terrain, g[0], g[1], size, s, true);
+        stroke = { s, target: 0, layer: { layer: 2 }, last: performance.now() };
+        rampDrag = !onRamp;
+        if (!rampProblem) ed.terrainChanged();
         return true;
       }
       const start = async () => {
@@ -326,12 +331,24 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     },
     pointerMove(p) {
       if (tool === "select") { if (p.down && p.ground) areaTo(p.ground); return; }
+      if (tool === "ramp" && p.down && rampDrag && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) {
+        stroke.last = performance.now();
+        if (toggleRamp(terrain, p.ground[0], p.ground[1], size, stroke.s, true, true) === null) { rampProblem = null; ed.terrainChanged(); }
+      }
+      if (tool === "ramp" && p.down) return;
       ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
       // Re-apply while held, a few times per second.
       if (p.down && stroke?.height && p.ground) stroke.height.moveTo([p.ground[0], p.ground[1]]);
       else if (p.down && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) applyAt(p.ground);
     },
-    pointerUp() { selecting = null; endStroke(); },
+    pointerUp() {
+      selecting = null;
+      endStroke();
+      rampDrag = false;
+      // Only now: a press beside the cliff may have led to one on it.
+      if (rampProblem) void w3.window.showWarning(rampProblem);
+      rampProblem = null;
+    },
     pointerLeave() { if (!stroke) ed.setBrush(null); },
     changed(what) {
       // Tile list edits (and their undo) change the palette and the panel.

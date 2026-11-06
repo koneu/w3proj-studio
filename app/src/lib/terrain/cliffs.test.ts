@@ -215,3 +215,32 @@ test("flat ground and tall cliffs still have nothing for a ramp", () => {
   assert.ok(toggleRamp(tall, 1.5 * 128, 1.5 * 128, 2, log, true));
   assert.equal(tall.corners.some((c) => c.ramp), false);
 });
+
+test("a drag adds to a ramp, along the cliff, and going back over it takes nothing away", () => {
+  const t = land([
+    "333333333333",
+    "333333333333",
+    "333333333333",
+    "222222222222",
+    "222222222222",
+    "222222222222",
+  ]);
+  const at = (x: number) => toggleRamp(t, x * 128, 2.5 * 128, 1, log, true, true);
+  assert.equal(at(3), null);
+  const one = t.corners.filter((c) => c.ramp).length;
+  at(5);
+  at(7);
+  const more = t.corners.filter((c) => c.ramp).length;
+  assert.ok(more > one, `${one} then ${more}`);
+  at(5);
+  at(3);
+  assert.equal(t.corners.filter((c) => c.ramp).length, more);
+});
+
+test("a click on a ramp still takes it off", () => {
+  const t = edge();
+  toggleRamp(t, 3 * 128, 2.5 * 128, 2, log, true);
+  assert.ok(t.corners.some((c) => c.ramp));
+  toggleRamp(t, 3 * 128, 2.5 * 128, 2, log, true);
+  assert.equal(t.corners.some((c) => c.ramp), false);
+});
