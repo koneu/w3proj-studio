@@ -39,9 +39,10 @@ const r1 = (v: number) => fixed(v, 1);
 const str = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const RACES = ["", "HUMAN", "ORC", "UNDEAD", "NIGHTELF"];
 const CONTROLLERS = ["", "USER", "COMPUTER", "NEUTRAL", "RESCUABLE"];
-/** Map flags: "fixed player settings for custom forces", "use custom forces", terrain fog, water tint. */
-const FIXED_SETTINGS = 0x20, CUSTOM_FORCES = 0x40, TERRAIN_FOG = 0x2000, WATER_TINT = 0x10000;
-/** RACE_PREF_* by its bit value (HUD skins are stored that way). */
+/** Map flags: melee map, "fixed player settings for custom forces", "use custom forces", terrain fog, water tint. */
+const MELEE = 4, FIXED_SETTINGS = 0x20, CUSTOM_FORCES = 0x40, TERRAIN_FOG = 0x2000, WATER_TINT = 0x10000;
+/** RACE_PREF_* by its bit value (HUD skins are stored that way). Anything else is RANDOM: World
+ *  Editor 3.0.1 gives its own new maps 32759 and writes that. */
 const RACE_PREFS: Record<number, string> = { 1: "HUMAN", 2: "ORC", 4: "UNDEAD", 8: "NIGHTELF", 16: "DEMON", 32: "RANDOM", 64: "USER_SELECTABLE" };
 /** Force flags and the alliance they set between the force's members. */
 const ALLIANCE: [number, string, string][] = [
@@ -61,7 +62,7 @@ export function playersSection(i: SetupInput): string {
     slots.push(`    // Player ${p.id}`, `    call SetPlayerStartLocation( ${pl}, ${index} )`);
     if (p.fixedStart & 1) slots.push(`    call ForcePlayerStartLocation( ${pl}, ${index} )`);
     slots.push(`    call SetPlayerColor( ${pl}, ConvertPlayerColor(${p.id}) )`, `    call SetPlayerRacePreference( ${pl}, RACE_PREF_${RACES[p.race] || "RANDOM"} )`);
-    if (p.hudSkin !== undefined) slots.push(`    call SetPlayerRaceSkin( ${pl}, RACE_PREF_${RACE_PREFS[p.hudSkin] ?? "USER_SELECTABLE"} )`);
+    if (p.hudSkin !== undefined) slots.push(`    call SetPlayerRaceSkin( ${pl}, RACE_PREF_${RACE_PREFS[p.hudSkin] ?? "RANDOM"} )`);
     slots.push(`    call SetPlayerRaceSelectable( ${pl}, ${p.race === 0 || !fixed} )`, `    call SetPlayerController( ${pl}, MAP_CONTROL_${CONTROLLERS[p.controller] ?? "USER"} )`);
     // Rescuable players can be rescued by every user player.
     if (p.controller === 4) {
@@ -179,14 +180,15 @@ export function mainSection(i: SetupInput): string {
 }
 
 /** Editors before 6116 always wrote TEAMS_TOGETHER (bit 0 of the flags fits the game's maps as well;
- *  nothing separates the two, and this way maps from today's editors can't be affected). */
+ *  nothing separates the two, and this way maps from today's editors can't be affected). After that
+ *  a melee map gets it and others USE_MAP_SETTINGS, with custom forces or without. */
 const oldPlacement = (i: SetupInput) => ((i.info.editorVersion as number | undefined) ?? 6116) < 6116;
 
 export function configSection(i: SetupInput): string {
   const players = i.info.players;
   const lines = ["function config takes nothing returns nothing", `    call SetMapName( ${str(i.info.name)} )`, `    call SetMapDescription( ${str(i.info.description)} )`,
     `    call SetPlayers( ${players.length} )`, `    call SetTeams( ${players.length} )`,
-    `    call SetGamePlacement( MAP_PLACEMENT_${i.info.flags & CUSTOM_FORCES && !oldPlacement(i) ? "USE_MAP_SETTINGS" : "TEAMS_TOGETHER"} )`, ""];
+    `    call SetGamePlacement( MAP_PLACEMENT_${i.info.flags & MELEE || oldPlacement(i) ? "TEAMS_TOGETHER" : "USE_MAP_SETTINGS"} )`, ""];
   players.forEach((p, index) => lines.push(`    call DefineStartLocation( ${index}, ${r1(p.start[0])}, ${r1(p.start[1])} )`));
   lines.push("", "    // Player setup", "    call InitCustomPlayerSlots(  )");
   // Without custom forces the lobby sets up teams: every slot is offered, then the generic setup.

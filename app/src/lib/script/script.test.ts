@@ -93,7 +93,7 @@ test("the header names the map and its author, if any", () => {
   const h = header(input());
   has(h, "// Test Map");
   has(h, "//   Map Author: Someone");
-  hasNot(header(input({ info: info({ author: "" }) })), "Map Author");
+  has(header(input({ info: info({ author: "" }) })), "//   Map Author: ");
   has(header(input({ string: (v) => (v === "Test Map" ? "Resolved" : v) })), "// Resolved");
 });
 
@@ -457,6 +457,9 @@ test("player slots", () => {
   has(s, "    call SetPlayerStartLocation( Player(3), 1 )");
   has(s, "    call ForcePlayerStartLocation( Player(3), 1 )");
   has(s, "    call SetPlayerRacePreference( Player(3), RACE_PREF_NIGHTELF )");
+  // World Editor 3.0.1 gives new maps 32759 and writes it as RANDOM.
+  has(playersSection(setup({ players: [player(0, { hudSkin: 32759 })] })), "    call SetPlayerRaceSkin( Player(0), RACE_PREF_RANDOM )");
+  has(playersSection(setup({ players: [player(0, { hudSkin: 64 })] })), "    call SetPlayerRaceSkin( Player(0), RACE_PREF_USER_SELECTABLE )");
   has(s, "    call SetPlayerController( Player(3), MAP_CONTROL_COMPUTER )");
   has(s, "    call SetPlayerRaceSelectable( Player(3), true )");
   // With fixed settings only "selectable" races can be changed.
@@ -518,11 +521,14 @@ test("weather, fog and water tint are written only when the map switches them on
 test("placement: custom forces use the map's settings, except from old editors", () => {
   has(configSection(setup({ flags: 0x40, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
   has(configSection(setup({ flags: 0x40, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
-  has(configSection(setup({ flags: 0, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  has(configSection(setup({ flags: 4, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  // A World Editor save: no custom forces, not melee.
+  has(configSection(setup({ flags: 0xdc10, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  has(configSection(setup({ flags: 0, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
 });
 
 test("config: players, teams and how the lobby sets them up", () => {
-  const s = configSection(setup({ players: [player(0), player(1, { controller: 2 })] }));
+  const s = configSection(setup({ flags: 4, players: [player(0), player(1, { controller: 2 })] }));
   has(s, "    call SetPlayers( 2 )");
   has(s, "    call DefineStartLocation( 1, 100.0, 0.0 )");
   has(s, "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
