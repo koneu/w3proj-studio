@@ -1752,8 +1752,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         const setArea = (a: typeof terrainArea) => { terrainArea = a; drawArea(a); };
-        /** The Select tab's mode: dragging selects objects or a block of ground. Ctrl+Shift and a drag does an area in either. */
-        let areaMode = false, withObjects = true;
+        /** The Select tab's mode: dragging selects objects or a block of ground. Holding A does an area in either. */
+        let areaMode = false, withObjects = true, areaKey = false;
         /** A press on the way to being an area: where it began. */
         let areaPress: { from: [number, number]; x: number; y: number; moved: boolean } | null = null;
         /** A block of ground, with what stands on it if so chosen. */
@@ -2238,8 +2238,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         );
 
         function selectBar() {
-          const objectsOnly = h("button.chip", { title: "A drag selects objects. Ctrl+Shift and a drag selects a block of ground", onclick: () => setMode(false) }, "Objects");
-          const ground = h("button.chip", { title: "A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Ctrl+Shift and a drag does this in Objects too", onclick: () => setMode(true) }, "Area");
+          const objectsOnly = h("button.chip", { title: "A drag selects objects. Hold A and drag to select a block of ground", onclick: () => setMode(false) }, "Objects");
+          const ground = h("button.chip", { title: "A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Holding A and dragging does this in Objects too", onclick: () => setMode(true) }, "Area");
           const standing = h("input", { type: "checkbox", checked: withObjects, onchange: () => {
             withObjects = standing.checked;
             if (terrainArea) terrainArea = { ...terrainArea, objects: withObjects };
@@ -2727,7 +2727,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return;
           }
           const ctrl = e.ctrlKey || e.metaKey;
-          if (e.button === 0 && !activeGroup && !e.altKey && ((ctrl && e.shiftKey) || (areaMode && !ctrl && !e.shiftKey))) {
+          if (e.button === 0 && !activeGroup && !e.altKey && !ctrl && !e.shiftKey && (areaKey || areaMode)) {
             const g = groundAt(e);
             if (g) {
               e.preventDefault();
@@ -2804,6 +2804,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
           if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
+          if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
           if (clipboardKey(e)) { e.preventDefault(); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
@@ -2876,6 +2877,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
+        // Wherever the key comes up, and if it never does here: Alt+Tab takes it along.
+        const areaKeyUp = (e: KeyboardEvent) => { if (e.key.toLowerCase() === "a") areaKey = false; };
+        const areaKeyLost = () => { areaKey = false; };
+        window.addEventListener("keyup", areaKeyUp);
+        window.addEventListener("blur", areaKeyLost);
         canvas.addEventListener("wheel", (e) => {
           e.preventDefault();
           renderer.distance = Math.max(200, Math.min(renderer.terrain.width * 300, renderer.distance * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
@@ -3106,6 +3112,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopLightSettings.dispose();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
+            window.removeEventListener("keyup", areaKeyUp);
+            window.removeEventListener("blur", areaKeyLost);
             renderer.dispose();
           },
         };
