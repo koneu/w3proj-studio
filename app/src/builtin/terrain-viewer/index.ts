@@ -23,7 +23,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
-import { FIXED_HEIGHT, isObjectEditorKey, isRecallKey, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
+import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -1023,14 +1023,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } };
         const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } };
+        /** While a key edits: whether it's the first press or a repeat of a held key. */
+        let keyPress: "first" | "repeat" | null = null;
+        /** The undo step a held key is building; a repeat joins it. */
+        let keyStep: Edit | null = null;
         const pushEdit = (e: Edit) => {
           notifyGroups(e);
           minimapStale = true;
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+          if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && at !== savedAt) {
+            history[at - 1] = keyStep = joinSteps(keyStep, e);
+            return;
+          }
           history.length = at;
           history.push(e);
           at = history.length;
+          keyStep = keyPress ? e : null;
           doc.setDirty(at !== savedAt);
+        };
+        /** Runs a key's edit; however long the key is held, it's one undo step. */
+        const byKey = (e: KeyboardEvent, edit: () => void) => {
+          keyPress = e.repeat ? "repeat" : "first";
+          try { edit(); } finally { keyPress = null; }
         };
         const groundAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
@@ -1427,10 +1441,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const doodads = (dooFile?.list ?? []).filter((p) => !(((p as Placed & { flags?: number }).flags ?? 0) & 4));
           return [...doodads, ...(unitsFile?.list ?? [])].filter(inside);
         };
+        /** Objects placed or moved since the last save: saving sets their border flag. Others keep what they have. */
+        const repositioned = new Set<Placed>();
         /** Moves/turns an entry and its model in place (no rebuild). */
         const setPlacement = (entry: Placed, position: [number, number, number], angle: number) => {
           const inst = findInstance(entry);
           const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1], dz = position[2] - entry.position[2];
+          if (dx || dy) repositioned.add(entry);
           entry.position = position;
           entry.angle = angle;
           objectsTouched = true;
@@ -1457,6 +1474,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const apply = (poses: Pose[]) => { entries.forEach((e, i) => setPlacement(e, [...poses[i].position], poses[i].angle)); refreshGroupRings(); };
           pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });
         };
+        /** Sets the border flag of what was placed or moved, from where it ended up. */
+        const markBorder = async () => {
+          if (!dooFile || !repositioned.size) return;
+          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+          if (!info) return;
+          const edge = playableArea(info, terrain);
+          for (const p of dooFile.list) {
+            const flags = flagsOf(p);
+            if (repositioned.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
+          }
+          repositioned.clear();
+        };
         const deleteSelected = () => deleteEntries(selectedEntries());
         /** Deletes placements as one undo step. */
         const deleteEntries = (entries: Placed[]) => {
@@ -1481,6 +1510,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const editProps = (entry: Placed, change: Partial<Props>) => {
           const before = snapshot(entry);
           Object.assign(entry, change);
+          if (change.position) repositioned.add(entry);
           const after = snapshot(entry);
           pushEdit({ undo: () => Object.assign(entry, structuredClone(before)), redo: () => Object.assign(entry, structuredClone(after)), terrain: false, objects: true });
           objectsTouched = true;
@@ -1499,7 +1529,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const applyMass = (entries: Placed[], change: (p: Placed, i: number) => Partial<Props> | null) => {
           const before = entries.map(snapshot);
           let n = 0;
-          entries.forEach((p, i) => { const c = change(p, i); if (c) { Object.assign(p, c); n++; } });
+          entries.forEach((p, i) => { const c = change(p, i); if (c) { Object.assign(p, c); n++; if (c.position) repositioned.add(p); } });
           if (!n) return;
           const after = entries.map(snapshot);
           const set = (v: Props[]) => entries.forEach((p, i) => Object.assign(p, structuredClone(v[i])));
@@ -1999,6 +2029,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const keep = f.list.filter((p) => inside(p.position[0], p.position[1]));
             removed += f.list.length - keep.length;
             f.list.splice(0, f.list.length, ...keep);
+            // The border itself moved, so anything can be on the other side of it now.
+            if (f === dooFile) {
+              const edge = playableArea({ cameraComplements: complements }, next);
+              for (const p of keep) {
+                const flags = flagsOf(p);
+                if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
+              }
+            }
             await savePlacedFile(w3, f);
           }
           await writeTerrainBytes(doc.path, writeW3e(next), doc);
@@ -2094,6 +2132,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
               const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player);
               entry.angle = at.angle;
+              repositioned.add(entry);
               entryFile.set(entry, f);
               return entry;
             },
@@ -2436,9 +2475,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
-          if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
+          if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); byKey(e, () => rotateSelected(e.key === "[" ? 15 : -15)); return; }
           const edit = editable && !activeGroup && selectedEntries().length ? selectionKey(e) : null;
-          if (edit) { e.preventDefault(); keyEdit(edit); return; }
+          if (edit) { e.preventDefault(); byKey(e, () => keyEdit(edit)); return; }
           const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
           if (!d) return;
           e.preventDefault();
@@ -2661,6 +2700,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const w3e = writeW3e(terrain);
             await writeTerrainBytes(doc.path, w3e, doc);
             if (objectsTouched) {
+              await markBorder();
               for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
               // Placed, moved or deleted start locations add, move or remove the map's players.
               if (unitsFile) {

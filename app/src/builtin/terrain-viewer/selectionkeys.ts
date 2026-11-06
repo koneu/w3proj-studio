@@ -49,3 +49,16 @@ export const scaled = (scale: readonly number[], step: readonly number[]): [numb
 export const FIXED_HEIGHT = 4;
 /** Flag of a doodad past the playable map: every doodad out there has it on ladder maps, and no other. */
 export const OUTSIDE_PLAYABLE = 1;
+
+/** A doodad's flags for where it stands. */
+export const borderFlags = (flags: number, outside: boolean) => (outside ? flags | OUTSIDE_PLAYABLE : flags & ~OUTSIDE_PLAYABLE);
+
+export interface Step { undo(): void; redo(): void; terrain: boolean; objects: boolean }
+
+/** Two undo steps as one: a held key's repeats join its first press. */
+export const joinSteps = (first: Step, then: Step): Step => ({
+  undo: () => { then.undo(); first.undo(); },
+  redo: () => { first.redo(); then.redo(); },
+  terrain: first.terrain || then.terrain,
+  objects: first.objects || then.objects,
+});
