@@ -263,6 +263,8 @@ export interface W3Api {
     /** Asks with buttons `yes` and Cancel. After `expires` ms the question disappears, so nobody
      *  can answer one that's no longer being waited for. True only if `yes` was pressed. */
     confirm(message: string, yes: string, expires: number): Promise<boolean>;
+    /** A question after pressing Delete: pressing it again answers yes, Escape no. A key held down doesn't. */
+    askDelete(message: string, yes: string): Promise<boolean>;
     quickPick<T>(items: QuickPickItem<T>[], opts?: { placeholder?: string }): Promise<QuickPickItem<T> | undefined>;
     inputBox(opts?: { prompt?: string; value?: string; placeholder?: string }): Promise<string | undefined>;
     pickFile(opts?: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;

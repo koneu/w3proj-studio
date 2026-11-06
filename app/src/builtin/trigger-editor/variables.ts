@@ -100,8 +100,8 @@ export async function deleteVariable(w3: W3Api, host: VariableHost, v: Variable,
   if (uses) {
     const c = opts.cut
       ? await w3.window.showWarning(`${v.name} is used ${uses} time${uses === 1 ? "" : "s"} in triggers. Those uses stay and work again when you paste it; until then the map script can't be compiled.`, "Cut", "Cancel")
-      : await w3.window.showWarning(`${v.name} is used ${uses} time${uses === 1 ? "" : "s"} in triggers. Delete it and clear those parameters?`, "Delete", "Cancel");
-    if (c !== (opts.cut ? "Cut" : "Delete")) return;
+      : await w3.window.askDelete(`${v.name} is used ${uses} time${uses === 1 ? "" : "s"} in triggers. Delete it and clear those parameters?`, "Delete");
+    if (c !== true && c !== "Cut") return;
   }
   ed.edit(`${opts.cut ? "Cut" : "Delete"} ${v.name}`, () => {
     const file = ed.file;

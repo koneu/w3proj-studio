@@ -221,8 +221,7 @@ class ImportView {
     void this.run("Remove", async () => {
       const ask = entries.length === 1 ? `Remove ${entries[0].path} from the map? The file is deleted from the project.`
         : `Remove ${plural(entries.length, "file")} from the map? They are deleted from the project.`;
-      const c = await this.w3.window.showWarning(ask, "Remove", "Cancel");
-      if (c !== "Remove") return;
+      if (!(await this.w3.window.askDelete(ask, "Remove"))) return;
       const files = this.files();
       const fileOf = new Map(entries.map((e) => [e, this.fileOf(e, files)?.path]));
       // Sound entries of different extensions can stand for the same file.

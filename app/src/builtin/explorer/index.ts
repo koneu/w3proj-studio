@@ -167,8 +167,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const busy = unsaved(files);
     const only = roots.length === 1 ? roots[0] : null;
     const what = only ? (isFolder(only) ? `the folder ${only} (${files.length} file${files.length === 1 ? "" : "s"})` : only) : `${roots.length} items (${files.length} file${files.length === 1 ? "" : "s"})`;
-    const c = await w3.window.showWarning(`Delete ${what}?${busy.length ? ` Unsaved changes in ${busy.join(", ")} are lost.` : ""} Use git to get deleted files back.`, "Delete", "Cancel");
-    if (c !== "Delete") return;
+    if (!(await w3.window.askDelete(`Delete ${what}?${busy.length ? ` Unsaved changes in ${busy.join(", ")} are lost.` : ""} Use git to get deleted files back.`, "Delete"))) return;
     for (const f of files) await w3.editors.close(f);
     const { error } = await w3.workspace.deleteMany(files);
     if (error) throw new Error(error);

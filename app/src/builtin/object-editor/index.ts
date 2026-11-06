@@ -425,8 +425,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const objs = [...selection];
           if (!objs.length) return;
           const what = objs.length === 1 ? (objs[0].id || objs[0].base) : `${objs.length} objects`;
-          const c = await w3.window.showWarning(`Remove ${what} and all their modifications?`, "Remove", "Cancel");
-          if (c !== "Remove") return;
+          if (!(await w3.window.askDelete(`Remove ${what} and all their modifications?`, "Remove"))) return;
           file.custom = file.custom.filter((o) => !selection.has(o));
           file.original = file.original.filter((o) => !selection.has(o));
           select(file.custom[0] ?? file.original[0] ?? null);

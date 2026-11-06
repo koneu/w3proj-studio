@@ -139,6 +139,17 @@ async function run() {
     const browserAll = await page.evaluate(`document.querySelectorAll(".picker-row").length`);
     await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
     const browserClosed = await page.evaluate(`window.__pick.then((r) => r === null && !document.querySelector(".picker-browse"))`);
+    // A question after Delete: a key held down doesn't answer it, a new press does.
+    const heldKey = await page.evaluate(`(async () => {
+      let answer = "open";
+      void w3.window.askDelete("Smoke?", "Remove").then((r) => { answer = r; });
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", repeat: true, bubbles: true }));
+      await new Promise((r) => setTimeout(r, 30));
+      const held = answer;
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+      await new Promise((r) => setTimeout(r, 30));
+      return held === "open" && answer === true;
+    })()`);
     const titleBarOk = await page.evaluate(`!!document.querySelector(".titlebar .menubar") && !!document.querySelector(".titlebar .titlebar-search") && document.querySelectorAll(".titlebar-button").length === 3 && document.querySelector(".titlebar").getBoundingClientRect().top === 0`);
     const menus = await page.evaluate(`[...document.querySelectorAll(".menubar-item")].map((b) => b.textContent)`);
     await page.evaluate(`document.querySelector(".menubar-item").click()`);
@@ -172,6 +183,7 @@ async function run() {
     if (started.search !== "" || !started.row.includes("Footman") || !started.folder.startsWith("▾Footman") && !started.folder.includes("Footman")) found.push(`the file browser didn't open at the current file: ${browserStart}`);
     if (browserAll !== 3) found.push(`All files shows ${browserAll} of 3`);
     if (!browserClosed) found.push("the file browser didn't close");
+    if (!heldKey) found.push("the Delete question doesn't tell a held key from a new press");
     if (!titleBarOk) found.push("the title bar isn't complete, or not at the top");
     if (!fileMenu.some((t) => t.startsWith("New Map"))) found.push("the File menu has no New Map");
     if (!commands.includes("workbench.undo") || !commands.includes("workbench.redo")) found.push("no Undo and Redo commands");
