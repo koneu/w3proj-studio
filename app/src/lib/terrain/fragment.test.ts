@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { areaBetween, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
+import { areaBetween, changeArea, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
 import { parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
 
 const tree = (x: number, y: number, z = 0, angle = 0) => ({ list: "doodads" as const, entry: { id: "LTlt", position: [x, y, z], angle, scale: [1, 1, 1], life: 100 } });
@@ -232,4 +232,18 @@ test("a drag past the edge stays on the map", () => {
   assert.deepEqual(tileOf(t, -256, -256), [0, 0]);
   assert.deepEqual(tileOf(t, 1, 1), [2, 2]);
   assert.deepEqual(tileOf(t, -9999, 9999), [0, 3]);
+});
+
+test("changing an area touches only what's in it and what's asked for, and undoes", () => {
+  const t = land(4, 4);
+  t.corners.forEach((c, i) => { c.texture = i % 2; });
+  const was = t.corners.map((c) => c.texture);
+  const st = changeArea(t, { x0: 1, y0: 1, x1: 2, y1: 2 }, (c) => { if (c.texture !== 1) return false; c.texture = 5; return true; });
+  assert.deepEqual(st.corners, [5, 9].filter((i) => was[i] === 1));
+  assert.equal(t.corners[1].texture, 1, "outside the area");
+  assert.equal(t.corners[6].texture, 0, "another tile");
+  st.undo();
+  assert.deepEqual(t.corners.map((c) => c.texture), was);
+  st.redo();
+  assert.equal(t.corners[5].texture, 5);
 });

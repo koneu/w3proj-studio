@@ -174,6 +174,19 @@ export function stampGround(t: Terrain, g: FragmentGround, origin: readonly [num
   return { corners: [...before.keys()], undo: () => restore(before), redo: () => restore(after) };
 }
 
+/** Changes the corners of an area, for one undo step: `change` says if it did anything to a corner. */
+export function changeArea(t: Terrain, a: CornerArea, change: (c: Corner) => boolean) {
+  const before = new Map<number, Corner>(), after = new Map<number, Corner>();
+  for (let y = a.y0; y <= a.y1; y++) for (let x = a.x0; x <= a.x1; x++) {
+    const i = y * t.width + x, c = t.corners[i], was = { ...c };
+    if (!change(c)) continue;
+    before.set(i, was);
+    after.set(i, { ...c });
+  }
+  const restore = (saved: Map<number, Corner>) => { for (const [i, c] of saved) t.corners[i] = { ...c }; };
+  return { corners: [...before.keys()], undo: () => restore(before), redo: () => restore(after) };
+}
+
 export function turnFragment(f: Fragment, turn: Turn): Fragment {
   return {
     ...f,

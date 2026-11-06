@@ -24,7 +24,7 @@ import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableA
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
-import { areaBetween, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
+import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -39,7 +39,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { onBoundary, markMapEdge, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { onBoundary, markMapEdge, heightAt, parseW3e, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
@@ -1035,6 +1035,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           notifyGroups(e);
           minimapStale = true;
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+          if (e.terrain && areaPanel) void showAreaPanel();
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           doc.setDirty(at !== savedAt);
@@ -1751,7 +1752,63 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setGroundOverlay(rgba, W, H);
           redraw();
         };
-        const setArea = (a: typeof terrainArea) => { terrainArea = a; drawArea(a); };
+        const setArea = (a: typeof terrainArea) => {
+          terrainArea = a;
+          drawArea(a);
+          if (!a && areaPanel) { areaPanel = false; clearSelection(); }
+        };
+        /** Whether the side panel shows the area. */
+        let areaPanel = false;
+        /** Tile names by id, once read. */
+        let tileNames: Promise<Map<string, string>> | null = null;
+        const replaceRow = (label: string, from: [string, string][], to: [string, string][], run: (from: string, to: string) => void | Promise<void>) => {
+          const pick = (options: [string, string][]) => h("select", {}, ...options.map(([value, text]) => h("option", { value }, text)));
+          const fromEl = pick(from), toEl = pick(to);
+          return h("div.terrain-sel-area", {},
+            h("div.terrain-sel-sub.muted", {}, label),
+            h("div.terrain-sel-row", {}, h("span.muted", {}, "Replace"), fromEl),
+            h("div.terrain-sel-row", {}, h("span.muted", {}, "with"), toEl),
+            h("div.terrain-sel-actions", {}, h("button", { onclick: () => void Promise.resolve(run(fromEl.value, toEl.value)).catch((e) => w3.window.showError(String(e))) }, "Replace")));
+        };
+        const showAreaPanel = async () => {
+          const a = terrainArea;
+          if (!a) return;
+          areaPanel = true;
+          tileNames ??= w3.game.readText("TerrainArt\\Terrain.slk").then((text) => new Map(parseSlk(text).filter((r) => r.tileID).map((r) => [r.tileID, r.comment || r.tileID]))).catch(() => new Map<string, string>());
+          const names = await tileNames, sets = await handle.tilesets().catch(() => []);
+          if (terrainArea !== a) return;
+          const cliffGrounds = handle.cliffGroundTiles();
+          const inArea: Corner[] = [];
+          for (let y = a.y0; y <= a.y1; y++) for (let x = a.x0; x <= a.x1; x++) inArea.push(terrain.corners[y * terrain.width + x]);
+          const label = (id: string) => [id, `${names.get(id) ?? id} (${id})`] as [string, string];
+          const usedTiles = [...new Set(inArea.map((c) => terrain.groundTiles[c.texture]))];
+          const ownTiles = sets.find((s) => s.id === terrain.tileset)?.tiles ?? [];
+          // A cliff's number past the list stands for the first type, as when it's drawn.
+          const cliffOf = (c: Corner) => (c.cliffTexture < cliffGrounds.length ? c.cliffTexture : 0);
+          const layers = new Set(inArea.map((c) => c.layer));
+          const usedCliffs = layers.size > 1 ? [...new Set(inArea.map(cliffOf))] : [];
+          const commit = (st: ReturnType<typeof changeArea>) => {
+            if (!st.corners.length) { void w3.window.showInfo("Nothing to replace there."); return; }
+            commitTerrain({ ...st, cliffs: true });
+            void showAreaPanel();
+          };
+          selInfo.className = "terrain-selection";
+          selInfo.replaceChildren(
+            h("div.terrain-sel-title", {}, h("div.terrain-sel-name", {}, `${a.x1 - a.x0} × ${a.y1 - a.y0} tiles`)),
+            h("div.muted", {}, "Ctrl+C copies it · Esc clears it"),
+            replaceRow("Ground tile", usedTiles.map(label), [...new Set([...terrain.groundTiles, ...ownTiles])].map(label), async (from, to) => {
+              const number = await handle.ensureGroundTile(to);
+              if (number === null) { void w3.window.showWarning("This map can't take another ground tile."); return; }
+              const was = terrain.groundTiles.indexOf(from);
+              commit(changeArea(terrain, a, (c) => { if (c.texture !== was || was === number) return false; c.texture = number; return true; }));
+            }),
+            ...(usedCliffs.length && cliffGrounds.length ? [replaceRow("Cliff type", usedCliffs.map((n) => [String(n), label(cliffGrounds[n])[1]] as [string, string]),
+              cliffGrounds.map((g, n) => [String(n), label(g)[1]] as [string, string]), (from, to) => {
+                const was = Number(from), number = Number(to);
+                commit(changeArea(terrain, a, (c) => { if (cliffOf(c) !== was || was === number) return false; c.cliffTexture = number; return true; }));
+              })] : []),
+          );
+        };
         /** The Select tab's mode: dragging selects objects or a block of ground. Holding A does an area in either. */
         let areaMode = false, withObjects = true, areaKey = false;
         /** A press on the way to being an area: where it began. */
@@ -2040,7 +2097,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selected = null;
           group = [];
           selInfo.className = "terrain-selection muted";
-          selInfo.replaceChildren("Click a unit, item, doodad or destructable, or drag a box around several.");
+          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : "Click a unit, item, doodad or destructable, or drag a box around several. Hold A and drag for an area.");
           renderer.setSelection(null);
           redraw();
         };
@@ -2262,7 +2319,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ground.classList.toggle("on", area);
             standingWrap.hidden = !area;
             kindsWrap.hidden = filterInput.hidden = filterRun.hidden = area;
-            if (!area) setArea(null);
+            dragHint.textContent = area ? "Drag: select an area" : "Drag: select box · Hold A and drag: select an area";
+            setArea(null);
+            clearSelection();
             canvas.focus();
           };
           objectsOnly.classList.add("on");
@@ -2557,6 +2616,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
         if (lastView?.key === viewKey) handle.setView(lastView.view);
         const tabsEl = h("div.terrain-tabs");
+        const dragHint = h("span", {}, "Drag: select box · Hold A and drag: select an area");
         const builtinBar = selectBar();
         const groupBar = h("div.model-toolbar.terrain-tools", {}, builtinBar);
         /** The active tab: null = the built-in tools. */
@@ -2657,7 +2717,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
-              h("span.muted", {}, "Drag: select box · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
+              h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas, labelLayer)),
           side));
@@ -2861,6 +2921,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const { moved } = areaPress;
             areaPress = null;
             if (!moved) setArea(null);
+            else if (terrainArea) { clearSelection(); void showAreaPanel(); }
             return;
           }
           if (groupDrag) {
