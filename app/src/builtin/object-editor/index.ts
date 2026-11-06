@@ -472,7 +472,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** A sound label from the game's tables. */
         const labelButton = (metaType: string, value: string, onCommit: (v: number | string) => void): HTMLElement | null => (metaType !== "soundLabel" ? null
           : h("button.obj-art-view", { title: "Choose one of the game's sound labels", onclick: async () => {
-            const label = await pickLabel(el, { title: "Choose a sound label", current: value, labels: () => soundLabels(w3) });
+            const label = await pickLabel(w3, el, { title: "Choose a sound label", current: value, labels: () => soundLabels(w3) });
             if (label !== null) onCommit(label);
           } }, "Choose…"));
         /** Editor for one field value. `mixed`: the differing values of a multi-selection, and

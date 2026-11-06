@@ -190,6 +190,12 @@ async function run() {
       return all.map((e) => ({ id: e.manifest.id, active: e.active, error: e.error ?? null }));
     })()`);
     const commands = await page.evaluate(`w3Workbench.commands.all().map((c) => c.id)`);
+    // The file browser: folders, list and preview come up, and Escape closes it.
+    await page.evaluate(`w3.services.get("w3.objects").then((o) => { window.__pick = o.pickFile(document.body, { title: "Smoke", kind: "model", current: "" }); })`);
+    await sleep(300);
+    const browser_ = await page.evaluate(`[".browse-tree", ".picker-rows", ".browse-preview canvas"].map((c) => !!document.querySelector(c))`);
+    await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+    const browserClosed = await page.evaluate(`window.__pick.then((r) => r === null && !document.querySelector(".picker-browse"))`);
     const titleBarOk = await page.evaluate(`!!document.querySelector(".titlebar .menubar") && !!document.querySelector(".titlebar .titlebar-search") && document.querySelectorAll(".titlebar-button").length === 3 && document.querySelector(".titlebar").getBoundingClientRect().top === 0`);
     const menus = await page.evaluate(`[...document.querySelectorAll(".menubar-item")].map((b) => b.textContent)`);
     await page.evaluate(`document.querySelector(".menubar-item").click()`);
@@ -218,6 +224,8 @@ async function run() {
     }
     if (commands.length < 20) found.push(`only ${commands.length} commands`);
     if (menus.join() !== "File,Edit,View,Scenario,Module,Tools,Help") found.push(`the menu bar shows ${menus.join()}`);
+    if (browser_.includes(false)) found.push(`the file browser came up without a panel: ${browser_}`);
+    if (!browserClosed) found.push("the file browser didn't close");
     if (!titleBarOk) found.push("the title bar isn't complete, or not at the top");
     if (!fileMenu.some((t) => t.startsWith("New Map"))) found.push("the File menu has no New Map");
     if (!commands.includes("workbench.undo") || !commands.includes("workbench.redo")) found.push("no Undo and Redo commands");

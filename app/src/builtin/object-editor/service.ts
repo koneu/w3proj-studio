@@ -116,7 +116,7 @@ export function objectsService(w3: W3Api): ObjectsService {
   const lastTab = new Map<string, number>();
   const service: ObjectsService = {
     pickFile: (host, opts) => pickFile(w3, host, { ...opts, thumb: images }),
-    pickSoundLabel: (host, opts) => pickLabel(host, { ...opts, labels: () => soundLabels(w3) }),
+    pickSoundLabel: (host, opts) => pickLabel(w3, host, { ...opts, labels: () => soundLabels(w3) }),
     image: (path) => images(/\.\w+$/.test(path) ? path : `${path}.blp`),
     objectField: (host, opts) => objectEditor(service, host, opts.kinds, opts.list, opts.current, opts.onCommit),
     async name(id, kinds = Object.keys(KIND_LABELS)) {
