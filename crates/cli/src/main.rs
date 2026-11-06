@@ -12,25 +12,45 @@ macro_rules! print {
     ($($arg:tt)*) => { $crate::out(format_args!($($arg)*)) };
 }
 
+/// Set once the reader of stdout has closed the pipe: the output is dropped from then on, but the
+/// command still finishes its work (writes, exit code) as if nothing happened.
+static PIPE_CLOSED: AtomicBool = AtomicBool::new(false);
+
 fn out(args: std::fmt::Arguments) {
     use std::io::Write;
+    if PIPE_CLOSED.load(Ordering::Relaxed) {
+        return;
+    }
     if let Err(e) = std::io::stdout().write_fmt(args) {
         if e.kind() == std::io::ErrorKind::BrokenPipe {
-            std::process::exit(0);
+            PIPE_CLOSED.store(true, Ordering::Relaxed);
+            return;
         }
         eprintln!("error: writing to stdout: {e}");
         std::process::exit(1);
     }
 }
 
-/// True when the error is a write to a pipe that was closed by the reader.
-fn is_broken_pipe(e: &anyhow::Error) -> bool {
-    e.chain().any(|c| c.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe))
+/// Writes raw bytes to stdout. A closed pipe is not an error; any other failure is.
+fn write_stdout(bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    if PIPE_CLOSED.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    let mut so = std::io::stdout();
+    match so.write_all(bytes).and_then(|()| so.flush()) {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+            PIPE_CLOSED.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+        r => Ok(r?),
+    }
 }
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
@@ -254,7 +274,6 @@ enum GameCmd {
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(code) => code,
-        Err(e) if is_broken_pipe(&e) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
             ExitCode::FAILURE
@@ -455,13 +474,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     }
                 }
                 GameCmd::Cat { path } => {
-                    use std::io::Write;
                     let bytes = if path.contains(".w3mod:") {
                         game.read_exact(&path)?
                     } else {
                         game.read(&path, mode, None)?.1
                     };
-                    std::io::stdout().write_all(&bytes)?;
+                    write_stdout(&bytes)?;
                 }
                 GameCmd::Resolve { path } => match game.resolve(&path, mode, None) {
                     Some(full) => println!("{full}"),
@@ -491,9 +509,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
         }
         Cmd::Cat { map, file } => {
-            use std::io::Write;
             let bytes = mpq::Archive::open(&map)?.read(&file)?;
-            std::io::stdout().write_all(&bytes)?;
+            write_stdout(&bytes)?;
         }
     }
     Ok(ExitCode::SUCCESS)

@@ -237,3 +237,40 @@ fn a_real_error_still_reports_and_fails() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("error:"), "{}", text(&o));
 }
+
+/// A folder of many copies of the packed mini map, with long names, so that `verify` prints far
+/// more than any pipe buffer holds: some write is then certain to happen after the reader left.
+/// With `bad`, a file that is no map sorts last, so `verify` has a failure to report at the end.
+fn many_maps(test: &str, bad: bool) -> PathBuf {
+    let dir = workdir(test);
+    let one = dir.join("one.w3x");
+    pack(&fixture(), &one);
+    let maps = dir.join("maps");
+    fs::create_dir_all(&maps).unwrap();
+    for i in 0..600 {
+        fs::copy(&one, maps.join(format!("{}_{i:04}.w3x", "a".repeat(100)))).unwrap();
+    }
+    if bad {
+        fs::write(maps.join("zzz_not_a_map.w3x"), b"this is not an archive").unwrap();
+    }
+    maps
+}
+
+#[test]
+fn a_closed_pipe_does_not_stop_verify_from_writing_the_baseline() {
+    let maps = many_maps("closed_pipe_baseline", false);
+    let baseline = maps.parent().unwrap().join("baseline.tsv");
+    let o = run_with_closed_pipe(&["verify", s(&maps), "--game", "none", "--baseline", s(&baseline), "--update-baseline"]);
+    assert!(o.status.success(), "{:?}: {}", o.status, text(&o));
+    assert!(String::from_utf8_lossy(&o.stderr).trim().is_empty(), "{}", text(&o));
+    let table = fs::read_to_string(&baseline).expect("the baseline was not written");
+    assert!(table.contains("war3map.w3i"), "{table}");
+}
+
+#[test]
+fn a_closed_pipe_does_not_hide_a_failing_verify() {
+    let maps = many_maps("closed_pipe_failure", true);
+    let o = run_with_closed_pipe(&["verify", s(&maps), "--game", "none"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(!String::from_utf8_lossy(&o.stderr).contains("panicked"), "{}", text(&o));
+}
