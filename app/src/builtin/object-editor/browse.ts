@@ -42,6 +42,29 @@ export function findListed(value: string, paths: readonly string[]) {
   return wanted ? paths.find((p) => p.replace(/\.\w+$/, "").toLowerCase() === wanted) ?? null : null;
 }
 
+/** What a unit says, in the order a set is best heard by. */
+const SET_SOUNDS = ["What", "Ready", "Yes", "YesAttack", "Warcry", "Pissed"];
+
+/** Unit sound sets: the names shared by labels like FootmanWhat and FootmanYes. */
+export function soundSets(labels: readonly string[]) {
+  const sets = new Set<string>();
+  const ending = new RegExp(`(${[...SET_SOUNDS].sort((a, b) => b.length - a.length).join("|")})$`);
+  for (const l of labels) { const m = ending.exec(l); if (m && m.index > 0) sets.add(l.slice(0, m.index)); }
+  return [...sets].sort((a, b) => a.localeCompare(b));
+}
+
+/** The label a sound field plays, or null when there's nothing to hear. Weapon sounds name a weapon,
+ *  with a label per thing hit: flesh is what a player hears most. */
+export function fieldSound(metaType: string, value: string, labels: readonly string[]) {
+  const v = value.trim();
+  if (!v || v === "_" || v === "Nothing" || v === "None") return null;
+  const known = (l: string) => labels.find((x) => x.toLowerCase() === l.toLowerCase()) ?? null;
+  if (metaType === "soundLabel") return known(v);
+  if (metaType === "combatSound") return known(`${v}Flesh`);
+  if (metaType === "unitSound") return SET_SOUNDS.map((s) => known(v + s)).find(Boolean) ?? null;
+  return null;
+}
+
 const AUDIO = /\.(wav|mp3|flac|ogg)$/i;
 const stem = (path: string) => path.toLowerCase().replace(AUDIO, "");
 

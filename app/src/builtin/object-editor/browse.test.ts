@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findListed, folderTree, foldersOf, inFolder, labelFiles, storedSound } from "./browse";
+import { fieldSound, findListed, folderTree, foldersOf, inFolder, labelFiles, soundSets, storedSound } from "./browse";
 
 const paths = ["Units\\Human\\Footman\\Footman.mdl", "Units\\Human\\Knight\\Knight.mdl", "units\\Orc\\Grunt\\Grunt.mdl", "Doodads\\Rock.mdl", "war3mapImported\\x.mdl", "Top.mdl"];
 
@@ -36,6 +36,28 @@ test("a field's value finds its file, without extension and in any case", () => 
   assert.equal(findListed("Doodads\\Rock.mdl, Other.mdl", paths), "Doodads\\Rock.mdl");
   assert.equal(findListed("_", paths), null);
   assert.equal(findListed("", paths), null);
+});
+
+const LABELS = ["FootmanWhat", "FootmanYes", "FootmanYesAttack", "FootmanPissed", "KnightReady", "MetalHeavyBashFlesh", "MetalHeavyBashStone", "SpellHit"];
+
+test("sound sets are what the labels of a unit share", () => {
+  assert.deepEqual(soundSets(LABELS), ["Footman", "Knight"]);
+  assert.deepEqual(soundSets(["What", "YesAttack"]), [], "a name needs something before its ending");
+});
+
+test("a sound field plays what its kind means", () => {
+  assert.equal(fieldSound("unitSound", "Footman", LABELS), "FootmanWhat");
+  assert.equal(fieldSound("unitSound", "Knight", LABELS), "KnightReady", "not every set has every line");
+  assert.equal(fieldSound("combatSound", "MetalHeavyBash", LABELS), "MetalHeavyBashFlesh");
+  assert.equal(fieldSound("soundLabel", "spellhit", LABELS), "SpellHit", "whatever the case");
+});
+
+test("a sound field with nothing to play says so", () => {
+  for (const v of ["", " ", "_", "Nothing", "None", "Missing"]) {
+    assert.equal(fieldSound("unitSound", v, LABELS), null, v);
+    assert.equal(fieldSound("combatSound", v, LABELS), null, v);
+  }
+  assert.equal(fieldSound("string", "Footman", LABELS), null, "other fields aren't sound");
 });
 
 test("a label plays its first file, and the first row of a label counts", () => {

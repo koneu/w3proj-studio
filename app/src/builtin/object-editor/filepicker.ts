@@ -110,9 +110,14 @@ export function pickFile(w3: W3Api, host: HTMLElement, opts: { title: string; ki
 }
 
 /** Lets the user choose one of `labels` (sound labels); resolves with it, or null when cancelled. */
-export function pickLabel(w3: W3Api, host: HTMLElement, opts: { title: string; current: string; labels: () => Promise<string[]> }): Promise<string | null> {
+export function pickLabel(w3: W3Api, host: HTMLElement, opts: { title: string; current: string; labels: () => Promise<string[]>; playAs?: (entry: string) => Promise<string | null> }): Promise<string | null> {
   const player = soundPlayer(w3);
-  return pick(host, { title: opts.title, current: opts.current, images: false, placeholder: "Search by words of the label", preview: "sound", play: player.play, stop: player.stop,
+  const play = async (entry: string) => {
+    const label = opts.playAs ? await opts.playAs(entry) : entry;
+    if (!label) throw new Error(`${entry} has nothing to hear.`);
+    await player.play(label);
+  };
+  return pick(host, { title: opts.title, current: opts.current, images: false, placeholder: "Search by words of the label", preview: "sound", play, stop: player.stop,
     load: async () => (await opts.labels()).map((path) => ({ path, imported: false })) });
 }
 

@@ -5,7 +5,8 @@ import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } f
 import { pickBaseObject } from "./picker";
 import { iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
 import { toProjectPath } from "../../lib/formats/archivepath";
-import { pickFile, pickLabel, type FileKind } from "./filepicker";
+import { fieldSound, soundSets } from "./browse";
+import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
@@ -482,11 +483,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }, "Browse…");
         };
         /** A sound label from the game's tables. */
-        const labelButton = (metaType: string, value: string, onCommit: (v: number | string) => void): HTMLElement | null => (metaType !== "soundLabel" ? null
-          : h("button.obj-art-view", { title: "Choose one of the game's sound labels", onclick: async () => {
-            const label = await pickLabel(w3, el, { title: "Choose a sound label", current: value, labels: () => soundLabels(w3) });
+        const labelButton = (metaType: string, value: string, onCommit: (v: number | string) => void): HTMLElement | null => (metaType !== "soundLabel" && metaType !== "unitSound" ? null
+          : h("button.obj-art-view", { title: metaType === "unitSound" ? "Choose one of the game's unit sound sets" : "Choose one of the game's sound labels", onclick: async () => {
+            const sets = metaType === "unitSound";
+            const label = await pickLabel(w3, el, {
+              title: sets ? "Choose a unit sound set" : "Choose a sound label", current: value,
+              labels: async () => (sets ? soundSets(await soundLabels(w3)) : soundLabels(w3)),
+              playAs: async (entry) => fieldSound(metaType, entry, await soundLabels(w3)),
+            });
             if (label !== null) onCommit(label);
           } }, "Choose…"));
+        /** ▶ beside a sound field, to hear what it's set to without opening anything. */
+        const sounds = soundPlayer(w3);
+        const playButton = (metaType: string, value: string): HTMLElement | null => (!["soundLabel", "unitSound", "combatSound"].includes(metaType) ? null
+          : h("button.obj-art-view", { title: "Play this sound", onclick: async () => {
+            const label = fieldSound(metaType, value, await soundLabels(w3));
+            if (!label) { void w3.window.showInfo("This field has no sound to play."); return; }
+            await sounds.play(label).catch((e) => w3.window.showWarning(String((e as Error).message ?? e)));
+          } }, "▶"));
         /** Editor for one field value. `mixed`: the differing values of a multi-selection, and
          *  how to change each object's own one (flags and lists tick per object). */
         const valueEditor = (type: ValueType, metaType: string, current: number | string, inherited: boolean, onCommit: (v: number | string) => void, mixed?: string[], each?: MixedValues["each"]) => {
@@ -511,7 +525,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return objectEditor(objects, el, OBJECT_CODE[metaType] ?? OBJECT_LIST[metaType], !!OBJECT_LIST[metaType], mixed ? "" : current, onCommit, !!mixed);
           }
           const et = editorTypes?.get(metaType);
-          if (et) return typeEditor(et, mixed ? "" : current, type !== "string", onCommit, mixed && each ? { values: mixed, each } : undefined);
+          if (et) {
+            const editor = typeEditor(et, mixed ? "" : current, type !== "string", onCommit, mixed && each ? { values: mixed, each } : undefined);
+            const play = mixed ? null : playButton(metaType, String(current));
+            return play ? h("div.obj-sound-cell", {}, editor, play) : editor;
+          }
           const resolved = mixed ? null : resolveStr(current);
           const shown = mixed && [...new Set(mixed)].map((v) => stripColors(resolveStr(v) ?? v) || "(empty)");
           const input = h(`input.obj-value${inherited ? ".inherited" : ""}${mixed ? ".mixed" : ""}`, {
@@ -527,6 +545,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           return h("div.obj-value-cell", {}, input, resolved ? h("div.obj-resolved", {}, stripColors(resolved)) : null,
             browseButton(metaType, mixed ? "" : String(current), onCommit), labelButton(metaType, mixed ? "" : String(current), onCommit),
+            mixed ? null : playButton(metaType, String(current)),
             mixed ? null : artPreview(metaType, String(current)));
         };
 
@@ -942,7 +961,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             w3.views.refresh("w3.objects.kinds");
           },
           focus: () => search.focus(),
-          dispose: () => { focusers.delete(doc.path); preview?.dispose(); },
+          dispose: () => { focusers.delete(doc.path); preview?.dispose(); sounds.stop(); },
           watches: ["map/war3map.wts"],
         };
       },
