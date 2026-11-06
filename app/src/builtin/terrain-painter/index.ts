@@ -5,7 +5,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseSlk } from "../../lib/formats/text";
 import { TILESETS } from "../../lib/terrain/tilesets";
-import { strokePoints } from "../../lib/terrain/strokepath";
+import { HEIGHT_TICK, heightPerPoint, strokePoints } from "../../lib/terrain/strokepath";
 import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
@@ -69,7 +69,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   let stroke: { s: Stroke; target: number; layer: LayerTarget; last: number; at?: [number, number] } | null = null;
 
   /** One brush application at a ground point; true if it changed something. */
-  const stamp = (x: number, y: number): boolean => {
+  const stamp = (x: number, y: number, amount = strength): boolean => {
     if (!stroke) return false;
     const brush = { x, y, radius: size, square };
     return tool === "paint"
@@ -78,20 +78,34 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ? paintBlight(terrain, brush, tool === "blight", stroke.s)
       : isLayerTool(tool)
       ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
-      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : strength, stroke.s);
+      : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : amount, stroke.s);
   };
-  /** The brush at a ground point, and along the way from the last one. Raise, Lower and Smooth
-   *  stay one application each: their strength adds up, so stamps in between would change it. */
+  /** Raise and Lower go by time, not by mouse events: what a moment adds is shared out along the
+   *  way the mouse went, so a quick drag is lower but has no gaps, and holding still keeps going. */
+  const addsUp = () => tool === "raise" || tool === "lower";
+  /** The brush at a ground point, and along the way from the last one. */
   const applyAt = (p: [number, number, number]) => {
     if (!stroke) return;
-    const along = stroke.at && tool !== "raise" && tool !== "lower" && tool !== "smooth";
-    const points = along ? strokePoints(stroke.at!, [p[0], p[1]], size * BRUSH_SPACING) : [[p[0], p[1]] as [number, number]];
+    const now = performance.now(), first = !stroke.at;
+    const points = first ? [[p[0], p[1]] as [number, number]] : strokePoints(stroke.at!, [p[0], p[1]], size * BRUSH_SPACING);
+    const amount = addsUp() ? heightPerPoint(strength, first ? HEIGHT_TICK : now - stroke.last, points.length) : strength;
     let did = false;
-    for (const [x, y] of points) did = stamp(x, y) || did;
+    for (const [x, y] of points) did = stamp(x, y, amount) || did;
     stroke.at = [p[0], p[1]];
+    stroke.last = now;
     if (did) ed.terrainChanged();
   };
+  /** While the button is down and the mouse still, height brushes keep working. */
+  let holding: ReturnType<typeof setInterval> | undefined;
+  const hold = () => {
+    clearInterval(holding);
+    if (tool !== "raise" && tool !== "lower" && tool !== "smooth") return;
+    holding = setInterval(() => {
+      if (stroke?.at && performance.now() - stroke.last >= HEIGHT_TICK) applyAt([stroke.at[0], stroke.at[1], 0]);
+    }, HEIGHT_TICK);
+  };
   const endStroke = () => {
+    clearInterval(holding);
     if (!stroke) return;
     const s = stroke.s;
     stroke = null;
@@ -207,7 +221,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ...grounds.map((g, i) => h("option", { value: String(i), selected: cliffType === i }, `${names.get(g) ?? g} cliff`)));
   };
   const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
-  const strengthWrap = h("label.terrain-tool-opt", { title: "Height change per application at the brush centre" }, "Strength ",
+  const strengthWrap = h("label.terrain-tool-opt", { title: "How fast the ground rises or sinks at the brush's centre, while the button is held" }, "Strength ",
     h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
   const setTool = (t: Tool) => {
     tool = t;
@@ -268,6 +282,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - WATER_OFFSET) } : { layer: 2 };
         stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
         applyAt(g);
+        hold();
       };
       void start();
       return true;
@@ -275,10 +290,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     pointerMove(p) {
       ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
       // Re-apply while held, a few times per second.
-      if (p.down && stroke && p.ground && performance.now() - stroke.last > 40) {
-        stroke.last = performance.now();
-        applyAt(p.ground);
-      }
+      if (p.down && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) applyAt(p.ground);
     },
     pointerUp() { endStroke(); },
     pointerLeave() { if (!stroke) ed.setBrush(null); },

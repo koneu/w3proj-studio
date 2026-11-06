@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseW3e, setGroundHeight, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, parseW3e, setGroundHeight, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
-import { applyLayer, matchCliffTypes, paintTexture, Stroke } from "./tools";
+import { HEIGHT_TICK, heightPerPoint, strokePoints } from "../../lib/terrain/strokepath";
+import { applyHeight, applyLayer, matchCliffTypes, paintTexture, Stroke } from "./tools";
 
 /** A flat 32×32 Lordaeron Summer map covered in grass (Lgrs), cliff level 2, cliff types unset
  *  (15), as the World Editor's New Map makes it. */
@@ -60,6 +61,41 @@ test("a cliff raised on grass becomes a grass cliff, on the cliff corners only",
   assert.equal(at(13, 16), 1);
   assert.equal(at(16, 16), 15);
   assert.equal(at(11, 16), 15);
+});
+
+/** A drag across the map at a speed, in mouse events `ms` apart, as the painter stamps it. */
+function drag(speedPerMs: number, ms: number) {
+  const t = flatMap(), s = new Stroke("raise"), radius = 2;
+  const y = 0, spacing = radius * 64, from = -800, to = 800;
+  let at = from;
+  while (at < to) {
+    const next = Math.min(to, at + speedPerMs * ms), points = strokePoints([at, y], [next, y], spacing);
+    for (const [px, py] of points) applyHeight(t, { x: px, y: py, radius }, "raise", heightPerPoint(16, ms, points.length), s);
+    at = next;
+  }
+  return [...Array(9).keys()].map((i) => groundHeight(t.corners[16 * t.width + 12 + i]));
+}
+
+test("a quick drag is one even ridge, not bumps", () => {
+  const ridge = drag(8, 40);
+  assert.ok(Math.min(...ridge) > 0, ridge.join());
+  assert.ok(Math.max(...ridge) / Math.min(...ridge) < 1.4, ridge.join());
+});
+
+test("a drag adds less the faster it goes, not more", () => {
+  const slow = Math.max(...drag(2, 40)), quick = Math.max(...drag(8, 40));
+  assert.ok(quick < slow, `${quick} ${slow}`);
+});
+
+test("how often the mouse reports doesn't change the height", () => {
+  const often = drag(4, 20), seldom = drag(4, 80);
+  assert.ok(Math.abs(Math.max(...often) - Math.max(...seldom)) / Math.max(...often) < 0.25, `${often} ${seldom}`);
+});
+
+test("height goes by time, and a stall doesn't count in full", () => {
+  assert.equal(heightPerPoint(16, HEIGHT_TICK, 1), 16);
+  assert.equal(heightPerPoint(16, HEIGHT_TICK * 2, 2), 16);
+  assert.equal(heightPerPoint(16, 5000, 1), heightPerPoint(16, 200, 1));
 });
 
 test("a chosen cliff type wins over the ground", () => {
