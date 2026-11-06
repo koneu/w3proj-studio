@@ -4,12 +4,9 @@
 
 import { h } from "../../workbench/dom";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
+import { compare, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, resolveField, type FieldFilter } from "./filters";
 
 const MAX_ROWS = 300;
-const OPS = [">=", "<=", "!=", ">", "<", "=", ":"] as const;
-type Op = (typeof OPS)[number];
-const OP_LABEL: Record<Op, string> = { ">=": "≥", "<=": "≤", "!=": "≠", ">": ">", "<": "<", "=": "=", ":": "contains" };
-const TOKEN = /^([^\s<>=!:]+)(>=|<=|!=|>|<|=|:)(.*)$/;
 
 interface Entry {
   id: string;
@@ -18,50 +15,6 @@ interface Entry {
   name: string;
   facets: Record<string, string>;
   haystack: string;
-}
-
-interface FieldFilter {
-  token: string;
-  field: FieldMeta | null;
-  key: string;
-  op: Op;
-  value: string;
-}
-
-/** Field for a filter key: exact id, then the game's column name ("HP",
- *  "goldcost"), then label without spaces, then the shortest label containing
- *  the key as whole word(s) ("range" → "Attack 1 - Range"), then label
- *  prefix, then label substring. */
-export function resolveField(fields: FieldMeta[], key: string): FieldMeta | null {
-  const k = key.toLowerCase().replace(/_/g, " ");
-  const compact = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const word = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-  const byWord = fields.filter((f) => word.test(f.label)).sort((a, b) => a.label.length - b.label.length)[0];
-  return (
-    fields.find((f) => f.id.toLowerCase() === k) ??
-    fields.find((f) => f.field.toLowerCase() === k) ??
-    fields.find((f) => compact(f.label) === compact(k)) ??
-    byWord ??
-    fields.find((f) => f.label.toLowerCase().startsWith(k)) ??
-    fields.find((f) => f.label.toLowerCase().includes(k)) ??
-    null
-  );
-}
-
-function compare(actual: string | undefined, op: Op, expected: string): boolean {
-  if (actual === undefined) return op === "!=";
-  const a = Number(actual), e = Number(expected);
-  const numeric = actual.trim() !== "" && expected.trim() !== "" && Number.isFinite(a) && Number.isFinite(e);
-  const as = actual.toLowerCase(), es = expected.toLowerCase();
-  switch (op) {
-    case ">": return numeric && a > e;
-    case ">=": return numeric && a >= e;
-    case "<": return numeric && a < e;
-    case "<=": return numeric && a <= e;
-    case "=": return numeric ? a === e : as === es;
-    case "!=": return numeric ? a !== e : as !== es;
-    case ":": return as.includes(es);
-  }
 }
 
 export function pickBaseObject(
@@ -127,15 +80,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       resolve(id === undefined ? undefined : { id });
     };
 
-    const parseQuery = () => {
-      words = [];
-      filters = [];
-      for (const token of search.value.trim().split(/\s+/).filter(Boolean)) {
-        const m = TOKEN.exec(token);
-        if (m) filters.push({ token, key: m[1], op: m[2] as Op, value: m[3], field: resolveField(kd.fields, m[1]) });
-        else words.push(token.toLowerCase());
-      }
-    };
+    const parseQuery = () => { ({ words, filters } = parseFilters(search.value, kd.fields)); };
 
     const matches = (e: Entry, skipFacet?: string) => {
       if (!words.every((t) => e.haystack.includes(t))) return false;
@@ -203,7 +148,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       filterChips.replaceChildren(
         ...filters.map((f) =>
           h(`span.filter-chip${f.field ? "" : ".error"}`, { title: f.field ? `${f.field.id} · ${f.field.type}` : "No field matches this name" },
-            f.field ? `${f.field.label} ${OP_LABEL[f.op]} ${f.value.replace(/_/g, " ")}` : `unknown field "${f.key}"`,
+            f.field ? `${f.field.label} ${OP_LABEL[f.op]} ${filterValue(f.value)}` : `unknown field "${f.key}"`,
             h("button.icon-button", {
               title: "Remove filter",
               onclick: () => {
