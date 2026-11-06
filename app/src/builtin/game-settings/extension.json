@@ -6,8 +6,8 @@
   "contributes": {
     "editors": [{ "id": "w3.gameSettings", "title": "Gameplay Constants / Game Interface", "patterns": ["war3mapMisc.txt", "war3mapSkin.txt"] }],
     "commands": [
-      { "id": "w3.gameplayConstants.open", "title": "Gameplay Constants…", "category": "Scenario" },
-      { "id": "w3.gameInterface.open", "title": "Game Interface…", "category": "Scenario" }
+      { "id": "w3.gameplayConstants.open", "menu": "Scenario:1:2", "title": "Gameplay Constants…", "category": "Scenario" },
+      { "id": "w3.gameInterface.open", "menu": "Scenario:1:3", "title": "Game Interface…", "category": "Scenario" }
     ]
   }
 }

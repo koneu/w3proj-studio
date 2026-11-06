@@ -50,7 +50,7 @@
     ],
     "commands": [
       {
-        "id": "w3.objectEditor.open",
+        "id": "w3.objectEditor.open", "menu": "Module:1:2",
         "title": "Open Object Editor…",
         "category": "Object Editor",
         "keybinding": "f6"

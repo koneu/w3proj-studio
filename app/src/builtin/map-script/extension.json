@@ -10,7 +10,7 @@
       {"name":"build_script","description":"Rebuilds the map script from triggers and objects now, and checks it: the errors, each with its line, the code there and the trigger it's from. Always use after writing or changing a script. This checks grammar and types, not what the game will do.","inputSchema":{"type":"object","required":[],"properties":{}}},
       {"name":"search_script_api","description":"Looks up the game's script functions, types and constants, with their exact signatures, so nothing has to be guessed. Names are the same in JASS and Lua.","readOnly":true,"inputSchema":{"type":"object","required":["filter"],"properties":{"filter":{"type":"string","description":"Part of a name, not case sensitive, like Hashtable or SpecialEffect."},"kind":{"type":"string","enum":["native","function","global","constant","type"]},"limit":{"type":"integer","description":"At most this many (default 80)."}}}}
     ],
-    "commands": [{ "id": "w3.script.generate", "title": "Generate Map Script", "category": "Project" }],
+    "commands": [{ "id": "w3.script.generate", "menu": "Tools:1:2", "title": "Generate Map Script", "category": "Project" }],
     "configuration": {
       "title": "Map Script",
       "properties": {

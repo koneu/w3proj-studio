@@ -53,6 +53,9 @@ code { font-family: var(--mono); font-size: 12px; }
 
 /* Layout */
 #app { display: flex; flex-direction: column; }
+.menubar { display: flex; flex-shrink: 0; height: 26px; align-items: stretch; background: var(--bg-3); border-bottom: 1px solid var(--border); padding: 0 4px; }
+.menubar-item { padding: 0 9px; background: none; border: none; color: var(--fg); font: inherit; cursor: pointer; }
+.menubar-item:hover { background: #37414f; }
 .main { flex: 1; display: flex; min-height: 0; }
 .activitybar { width: 46px; background: var(--bg-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
 .activity { width: 46px; height: 44px; border: none; border-left: 2px solid transparent; border-radius: 0; background: none; font-size: 20px; color: var(--fg-muted); padding: 0; }
@@ -565,7 +568,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-tab-extra { margin-left: auto; }
 .trig-tab-extra ~ .trig-tab-extra { margin-left: 0; }
 .context-menu { position: fixed; z-index: 100; min-width: 180px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); padding: 4px 0; user-select: none; }
-.context-menu-item { padding: 4px 14px; cursor: pointer; white-space: nowrap; }
+.context-menu-item { padding: 4px 14px; cursor: pointer; white-space: nowrap; display: flex; justify-content: space-between; gap: 28px; }
+.context-menu-shortcut { color: var(--fg-muted); }
 .context-menu-item:hover { background: #37414f; }
 .context-menu-item.disabled { color: var(--fg-muted); cursor: default; background: none; }
 .context-menu-sep { height: 1px; margin: 4px 0; background: var(--border); }

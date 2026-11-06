@@ -8,8 +8,8 @@
     "viewContainers": [{ "id": "problems", "title": "Problems", "icon": "⚠", "order": 9 }],
     "views": [{ "id": "w3.problems.list", "title": "Problems", "container": "problems" }],
     "commands": [
-      { "id": "w3.problems.run", "title": "Check Project for Problems", "category": "Project" },
-      { "id": "w3.problems.show", "title": "Show Problems", "category": "Project" },
+      { "id": "w3.problems.run", "menu": "Tools:1:1", "title": "Check Project for Problems", "category": "Project" },
+      { "id": "w3.problems.show", "menu": "View:2:3", "title": "Show Problems", "category": "Project" },
       { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
     ],
     "mcpTools": [

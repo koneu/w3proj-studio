@@ -5,6 +5,6 @@
   "description": "The map's imported files (war3map.imp) like the World Editor's Import Manager: import files from disk, change their path in the archive, export, open, remove, and list files in the map that aren't registered.",
   "contributes": {
     "editors": [{ "id": "w3.importManager", "title": "Import Manager", "patterns": ["war3map.imp.json", "war3map.imp", "war3campaign.imp.json", "war3campaign.imp"] }],
-    "commands": [{ "id": "w3.imports.open", "title": "Import Manager", "category": "Module", "keybinding": "f9" }]
+    "commands": [{ "id": "w3.imports.open", "menu": "Module:1:5", "title": "Import Manager", "category": "Module", "keybinding": "f9" }]
   }
 }

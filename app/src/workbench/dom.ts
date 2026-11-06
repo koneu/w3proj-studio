@@ -74,7 +74,7 @@ export function showContextMenu(at: { x: number; y: number }, items: import("../
     : h(`div.context-menu-item${it.disabled ? ".disabled" : ""}`, {
       title: it.hint ?? "",
       onclick: () => { if (it.disabled) return; close(); it.run(); },
-    }, it.label)));
+    }, it.label, ...(it.shortcut ? [h("span.context-menu-shortcut", {}, it.shortcut)] : []))));
   document.body.append(menu);
   // Keep it on screen.
   const r = menu.getBoundingClientRect();

@@ -190,6 +190,10 @@ async function run() {
       return all.map((e) => ({ id: e.manifest.id, active: e.active, error: e.error ?? null }));
     })()`);
     const commands = await page.evaluate(`w3Workbench.commands.all().map((c) => c.id)`);
+    const menus = await page.evaluate(`[...document.querySelectorAll(".menubar-item")].map((b) => b.textContent)`);
+    await page.evaluate(`document.querySelector(".menubar-item").click()`);
+    const fileMenu = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
+    await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
     // With nothing open there's nothing to undo: the buttons by the tabs stay away.
     const undoHidden = await page.evaluate(`document.querySelector(".tabs-actions")?.hidden === true`);
     const shown = [];
@@ -212,6 +216,8 @@ async function run() {
       else if (!e.active) found.push(`extension ${e.id} didn't activate`);
     }
     if (commands.length < 20) found.push(`only ${commands.length} commands`);
+    if (menus.join() !== "File,Edit,View,Scenario,Module,Tools,Help") found.push(`the menu bar shows ${menus.join()}`);
+    if (!fileMenu.some((t) => t.startsWith("New Map"))) found.push("the File menu has no New Map");
     if (!commands.includes("workbench.undo") || !commands.includes("workbench.redo")) found.push("no Undo and Redo commands");
     if (!undoHidden) found.push("the undo buttons show with no editor open");
     shown.forEach((s, i) => s === "ok" || found.push(`view "${views[i]}" shows an error`));

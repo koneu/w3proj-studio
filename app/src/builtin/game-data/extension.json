@@ -13,7 +13,7 @@
     "commands": [
       { "id": "w3.game.openPath", "title": "Open Game File…", "category": "Game Data" },
       { "id": "w3.game.info", "title": "Show Storage Info", "category": "Game Data" },
-      { "id": "w3.game.setMode", "title": "Set Graphics Mode (SD/HD/DE)…", "category": "Game Data" }
+      { "id": "w3.game.setMode", "menu": "View:3:1", "title": "Set Graphics Mode (SD/HD/DE)…", "category": "Game Data" }
     ]
   }
 }

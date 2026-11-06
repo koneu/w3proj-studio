@@ -8,8 +8,8 @@
     "views": [{ "id": "w3.campaign.overview", "title": "Campaign", "container": "campaign" }],
     "editors": [{ "id": "w3.campaignEditor", "title": "Campaign Editor", "patterns": ["war3campaign.w3f.json"] }],
     "commands": [
-      { "id": "w3.campaign.open", "title": "Campaign Editor", "category": "Module" },
-      { "id": "w3.campaign.new", "title": "New Campaign…", "category": "Project" },
+      { "id": "w3.campaign.open", "menu": "Module:2:2", "title": "Campaign Editor", "category": "Module" },
+      { "id": "w3.campaign.new", "menu": "File:1:2", "title": "New Campaign…", "category": "Project" },
       { "id": "w3.campaign.back", "title": "Back to Campaign", "category": "Module" },
       { "id": "w3.campaign.newMap", "title": "Campaign: New Chapter Map…", "category": "Module" },
       { "id": "w3.campaign.addMap", "title": "Campaign: Add Existing Map…", "category": "Module" }

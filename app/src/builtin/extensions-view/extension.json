@@ -7,7 +7,7 @@
     "viewContainers": [{ "id": "extensions", "title": "Extensions", "icon": "⧉", "order": 90 }],
     "views": [{ "id": "w3.extensions.installed", "title": "Installed", "container": "extensions" }],
     "commands": [
-      { "id": "w3.extensions.openFolder", "title": "Open User Extensions Folder", "category": "Extensions" },
+      { "id": "w3.extensions.openFolder", "menu": "Tools:4:2", "title": "Open User Extensions Folder", "category": "Extensions" },
       { "id": "w3.extensions.createSample", "title": "Create Sample Extension", "category": "Extensions" }
     ]
   }

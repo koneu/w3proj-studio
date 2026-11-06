@@ -5,6 +5,8 @@ import { McpTools } from "../extensions/mcp";
 import { invoke, listen, NotUtf8Error } from "./backend";
 import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
+import { MenuBar } from "./menubar";
+import { menuTree } from "./menus";
 import { EditorService, type OpenEditors } from "./editors";
 import { GAME_SCHEME, GameService } from "./game";
 import { Notifications, Progress } from "./notifications";
@@ -43,6 +45,7 @@ export class Workbench {
   });
   readonly editors: EditorService;
   readonly statusBar: StatusBar;
+  private menuBar: MenuBar;
   readonly notifications: Notifications;
   readonly quickInput: QuickInput;
   readonly progress: Progress;
@@ -83,7 +86,8 @@ export class Workbench {
     this.progress = new Progress(this.statusBar.progress);
 
     const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
-    root.append(main, this.statusBar.root);
+    this.menuBar = new MenuBar(() => menuTree(this.commands.all()), (c) => this.run(c));
+    root.append(this.menuBar.root, main, this.statusBar.root);
     this.notifications = new Notifications(root);
     this.quickInput = new QuickInput(root);
 
@@ -205,6 +209,7 @@ export class Workbench {
   private applyContributions(rec: ExtensionRecord) {
     const c = rec.manifest.contributes ?? {};
     for (const cmd of c.commands ?? []) this.commands.contribute(rec.manifest.id, cmd);
+    if (c.commands?.length) this.menuBar.render();
     for (const vc of c.viewContainers ?? []) this.views.contributeContainer(vc);
     for (const v of c.views ?? []) this.views.contributeView(v);
     for (const e of c.editors ?? []) this.editors.contribute(rec.manifest.id, e);
@@ -298,7 +303,7 @@ export class Workbench {
   }
 
   private registerCoreCommands() {
-    const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: { keybinding?: string; category?: string; hidden?: boolean } = {}) => {
+    const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: { keybinding?: string; category?: string; hidden?: boolean; menu?: string } = {}) => {
       this.commands.contribute("core", { id, title, category: extra.category ?? "View", ...extra });
       this.commands.register(id, run);
     };
@@ -311,7 +316,7 @@ export class Workbench {
       items.sort((a, b) => a.label.localeCompare(b.label));
       const pick = await this.quickInput.pick(items, { placeholder: "Type a command" });
       if (pick) this.run(pick.value!);
-    }, { keybinding: "ctrl+shift+p" });
+    }, { keybinding: "ctrl+shift+p", menu: "Edit:2:2" });
     c("workbench.quickOpen", "Go to File…", async () => {
       const files = this.workspace.files();
       if (!files.length) return;
@@ -320,11 +325,11 @@ export class Workbench {
         { placeholder: "Search files by name" },
       );
       if (pick) await this.editors.open(pick.value!);
-    }, { keybinding: "ctrl+p", category: "Go" });
-    c("workbench.toggleSidebar", "Toggle Side Bar", () => this.views.toggleSidebar(), { keybinding: "ctrl+b" });
-    c("workbench.togglePanel", "Toggle Output Panel", () => this.output.toggle(), { keybinding: "ctrl+j" });
-    c("workbench.save", "Save", () => this.editors.save(), { keybinding: "ctrl+s", category: "File" });
-    c("workbench.closeEditor", "Close Editor", () => this.editors.closeActive(), { keybinding: "ctrl+w", category: "File" });
+    }, { keybinding: "ctrl+p", category: "Go", menu: "Edit:2:1" });
+    c("workbench.toggleSidebar", "Toggle Side Bar", () => this.views.toggleSidebar(), { keybinding: "ctrl+b", menu: "View:1:1" });
+    c("workbench.togglePanel", "Toggle Output Panel", () => this.output.toggle(), { keybinding: "ctrl+j", menu: "View:1:2" });
+    c("workbench.save", "Save", () => this.editors.save(), { keybinding: "ctrl+s", category: "File", menu: "File:3:1" });
+    c("workbench.closeEditor", "Close Editor", () => this.editors.closeActive(), { keybinding: "ctrl+w", category: "File", menu: "File:3:2" });
     c("workbench.reopenWith", "Reopen Editor With…", async () => {
       const path = this.editors.activePath();
       if (!path) return;
@@ -364,8 +369,8 @@ export class Workbench {
       this.notifications.show("info", pick.value ? `${glob} now opens with ${pick.label}.` : `Removed the default editor for ${glob}.`);
     }, { category: "File" });
     // No keys: each editor binds Ctrl+Z itself, and bound here too they'd step twice.
-    c("workbench.undo", "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit" });
-    c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit" });
+    c("workbench.undo", "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit", menu: "Edit:1:1" });
+    c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit", menu: "Edit:1:2" });
     c("workbench.openSettings", "Open Settings (JSON)", async () => {
       const p = this.settings.settingsPath();
       if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("worldEditor.path", this.settings.get("worldEditor.path"));
@@ -379,7 +384,7 @@ export class Workbench {
       await this.editors.open(PROJECT_SETTINGS, "w3.textEditor");
     }, { category: "Preferences" });
     c("workbench.reload", "Reload Window", () => location.reload(), { category: "Developer", keybinding: "ctrl+r" });
-    c("workbench.showLog", "Show Extension Host Log", () => this.log.show(), { category: "Developer" });
+    c("workbench.showLog", "Show Extension Host Log", () => this.log.show(), { category: "Developer", menu: "Help:2:1" });
   }
 
   private registerKeybindings() {

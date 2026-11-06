@@ -13,6 +13,9 @@ export interface CommandContribution {
   keybinding?: string;
   /** Hide from the command palette. */
   hidden?: boolean;
+  /** Where it shows in the menu bar: "Tools", or with a group and a place in it, "File:2:1". A menu
+   *  not there yet is added. Without this it's in the command palette only. */
+  menu?: string;
 }
 
 export interface ViewContainerContribution {
@@ -152,7 +155,7 @@ export interface EditorProvider {
 }
 
 /** An entry of a context menu; "-" is a separator. */
-export type MenuItem = "-" | { label: string; run: () => void; disabled?: boolean; hint?: string };
+export type MenuItem = "-" | { label: string; run: () => void; disabled?: boolean; hint?: string; shortcut?: string };
 
 export interface QuickPickItem<T = unknown> {
   label: string;

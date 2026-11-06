@@ -6,6 +6,6 @@
   "activationEvents": ["onStartup"],
   "contributes": {
     "editors": [{ "id": "w3.welcome", "title": "Welcome", "patterns": ["w3:welcome"] }],
-    "commands": [{ "id": "w3.welcome.show", "title": "Welcome", "category": "Help" }]
+    "commands": [{ "id": "w3.welcome.show", "menu": "Help:1:1", "title": "Welcome", "category": "Help" }]
   }
 }

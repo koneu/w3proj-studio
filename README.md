@@ -222,7 +222,7 @@ the same API (`app/src/extensions/api.ts`):
 {
   "id": "me.stats", "name": "Stats", "version": "0.1.0", "main": "main.js",
   "contributes": {
-    "commands": [{ "id": "me.stats.run", "title": "Run Stats", "keybinding": "ctrl+alt+s" }],
+    "commands": [{ "id": "me.stats.run", "title": "Run Stats", "keybinding": "ctrl+alt+s", "menu": "Tools" }],
     "viewContainers": [{ "id": "stats", "title": "Stats", "icon": "∑" }],
     "views": [{ "id": "me.stats.view", "title": "Stats", "container": "stats" }],
     "editors": [{ "id": "me.stats.editor", "title": "Stats Editor", "patterns": ["*.w3i"] }]

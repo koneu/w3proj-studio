@@ -9,7 +9,7 @@
     "views": [{ "id": "w3.scm.changes", "title": "Changes", "container": "scm" }, { "id": "w3.scm.history", "title": "History", "container": "scm" }],
     "editors": [{ "id": "w3.diff", "title": "Changes", "patterns": ["w3:diff:**/*", "w3:diff:*"] }],
     "commands": [
-      { "id": "w3.scm.show", "title": "Show Source Control", "category": "View", "keybinding": "ctrl+shift+g" },
+      { "id": "w3.scm.show", "menu": "View:2:2", "title": "Show Source Control", "category": "View", "keybinding": "ctrl+shift+g" },
       { "id": "w3.scm.refresh", "title": "Refresh Changes", "category": "Source Control" },
       { "id": "w3.scm.diff", "title": "Open Changes of File", "category": "Source Control", "hidden": true },
       { "id": "w3.scm.diffActive", "title": "Open Changes of the Current File", "category": "Source Control" },

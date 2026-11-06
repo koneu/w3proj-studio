@@ -7,7 +7,7 @@
   "extensionDependencies": ["w3.mapScript"],
   "contributes": {
     "editors": [{ "id": "w3.textEditor", "title": "Text Editor", "patterns": ["*.vj", "*.zn"] }],
-    "commands": [{ "id": "w3.vjass.check", "title": "vJASS: Check JassHelper", "category": "Project" }],
+    "commands": [{ "id": "w3.vjass.check", "menu": "Tools:1:3", "title": "vJASS: Check JassHelper", "category": "Project" }],
     "configuration": {
       "title": "vJASS (JassHelper)",
       "properties": {
