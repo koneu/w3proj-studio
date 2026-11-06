@@ -17,6 +17,17 @@ export function playableArea(info: { cameraComplements?: number[] }, t: { offset
   };
 }
 
+/** The dark over the map's border, one RGBA texel per tile, row 0 in the south. */
+export function borderShade(tilesX: number, tilesY: number, complements: readonly number[] = [0, 0, 0, 0]): Uint8Array {
+  const [left, right, bottom, top] = complements;
+  const rgba = new Uint8Array(tilesX * tilesY * 4);
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    if (x < left || x >= tilesX - right || y < bottom || y >= tilesY - top) rgba[(y * tilesX + x) * 4 + 3] = BORDER_ALPHA;
+  }
+  return rgba;
+}
+const BORDER_ALPHA = 165;
+
 /** Says when an area reaches past the playable part; null when it doesn't. */
 export function beyondPlayable(area: Area, playable: Area): string | null {
   const sides = [area.left < playable.left && "west", area.right > playable.right && "east", area.bottom < playable.bottom && "south", area.top > playable.top && "north"].filter(Boolean);

@@ -58,7 +58,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     let ok = true;
     if (respect()) {
       const occ = await ed.objects.occupancy();
-      ok = await occ.fits(kind, id, g[0], g[1], angle);
+      ok = ed.objects.backdrop(kind, g[0], g[1]) || await occ.fits(kind, id, g[0], g[1], angle);
     }
     if (seq !== ghostSeq) return;
     ed.objects.setGhost({ id, x: g[0], y: g[1], angle, player: kind === "w3u" ? owner : undefined, ok });
@@ -102,7 +102,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const spots: { x: number; y: number; angle: number }[] = [];
     if (!stroke) {
       const angle = facing();
-      if (respect() && fp && !(await occ!.fits(kind, id, pos[0], pos[1], angle))) {
+      if (respect() && fp && !ed.objects.backdrop(kind, pos[0], pos[1]) && !(await occ!.fits(kind, id, pos[0], pos[1], angle))) {
         w3.window.showWarning(`No room for ${name} here (its footprint overlaps blocked ground or another object). Turn off "Respect pathing" to place it anyway.`);
         return;
       }
@@ -121,7 +121,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           const sx = Math.round(x / 32) * 32, sy = Math.round(y / 32) * 32;
           if (fp) {
             if (respect()) {
-              if (!(await occ!.fits(kind, id, sx, sy, angle))) continue;
+              if (!ed.objects.backdrop(kind, sx, sy) && !(await occ!.fits(kind, id, sx, sy, angle))) continue;
               await occ!.mark(kind, id, sx, sy, angle);
             } else if ([...spots, ...stroke.entries.map((e) => ({ x: e.position[0], y: e.position[1] }))]
               .some((s) => Math.hypot(s.x - sx, s.y - sy) < spacing * 0.75)) continue;

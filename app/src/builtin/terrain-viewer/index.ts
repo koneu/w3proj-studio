@@ -20,7 +20,7 @@ import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
-import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
+import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
@@ -983,7 +983,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.unitLight = on && lighting?.unit ? lightAt(lighting.unit, hour) : null;
           redraw();
         };
+        const showBoundary = () => w3.settings.get<boolean>("terrain.boundary", true) !== false;
+        /** The playable part as last read from the map; null until then. */
+        let playableEdge: Area | null = null;
+        const loadBorder = async () => {
+          const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
+          if (!info) return;
+          playableEdge = playableArea(info, terrain);
+          renderer.setBorder(borderShade(terrain.width - 1, terrain.height - 1, info.cameraComplements), terrain.width - 1, terrain.height - 1);
+          redraw();
+        };
+        renderer.showBorder = showBoundary();
+        void loadBorder();
         const stopLightSettings = w3.settings.onDidChange((key) => {
+          if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
         });
@@ -2137,6 +2150,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return entry;
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
+            backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             update: () => {
               objectsTouched = true;
               void rebuildObjects();
@@ -2332,6 +2346,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
               h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
+              toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
               h("span.muted", {}, "Drag: select box · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),

@@ -213,6 +213,9 @@ export class TerrainRenderer {
   private splatTextures = new Map<string, WebGLTexture>();
   private overlayProg: WebGLProgram | null = null;
   private overlay: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
+  /** The dark over the map's border: its own layer, as tools use the overlay. */
+  private border: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
+  showBorder = true;
   private wire: Mesh;
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
@@ -310,6 +313,7 @@ export class TerrainRenderer {
     this.water = this.buildWater();
     this.wire = this.buildWire();
     if (this.overlay) this.overlay = { ...this.overlayMesh(), tex: this.overlay.tex };
+    if (this.border) this.border = { ...this.overlayMesh(), tex: this.border.tex };
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
   }
@@ -543,15 +547,16 @@ export class TerrainRenderer {
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay } = this;
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder } = this;
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
     this.wireframe = false;
     this.overlay = null;
+    this.showBorder = false;
     return () => {
       this.setGroundOverlay(null);
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay });
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder });
     };
   }
 
@@ -567,7 +572,19 @@ export class TerrainRenderer {
       const tex = gl.createTexture()!;
       this.overlay = { ...this.overlayMesh(), tex };
     }
-    gl.bindTexture(gl.TEXTURE_2D, this.overlay.tex);
+    this.uploadOverlay(this.overlay.tex, rgba, width, height);
+  }
+
+  /** The border's shade, one texel per tile. */
+  setBorder(rgba: Uint8Array, width: number, height: number) {
+    this.overlayProg ??= compile(this.gl, OVERLAY_VS, OVERLAY_FS);
+    this.border ??= { ...this.overlayMesh(), tex: this.gl.createTexture()! };
+    this.uploadOverlay(this.border.tex, rgba, width, height);
+  }
+
+  private uploadOverlay(tex: WebGLTexture, rgba: Uint8Array, width: number, height: number) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -851,19 +868,20 @@ export class TerrainRenderer {
       gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.offset * 4);
     }
 
-    if (this.overlay && this.overlayProg) {
+    for (const layer of [this.overlay, this.showBorder ? this.border : null]) {
+      if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
       gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.overlay.tex);
+      gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
-      gl.bindVertexArray(this.overlay.vao);
-      gl.drawElements(gl.TRIANGLES, this.overlay.count, gl.UNSIGNED_INT, 0);
+      gl.bindVertexArray(layer.vao);
+      gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
       gl.depthMask(true);
     }
 
