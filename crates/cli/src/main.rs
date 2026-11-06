@@ -3,6 +3,31 @@
 
 mod mcp;
 
+/// `println!`/`print!` that end the command quietly when the reader has gone away
+/// (`w3proj ... | head`) instead of panicking. Any other write error is reported.
+macro_rules! println {
+    ($($arg:tt)*) => { $crate::out(format_args!("{}\n", format_args!($($arg)*))) };
+}
+macro_rules! print {
+    ($($arg:tt)*) => { $crate::out(format_args!($($arg)*)) };
+}
+
+fn out(args: std::fmt::Arguments) {
+    use std::io::Write;
+    if let Err(e) = std::io::stdout().write_fmt(args) {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("error: writing to stdout: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// True when the error is a write to a pipe that was closed by the reader.
+fn is_broken_pipe(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| c.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe))
+}
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -229,6 +254,7 @@ enum GameCmd {
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(code) => code,
+        Err(e) if is_broken_pipe(&e) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
             ExitCode::FAILURE

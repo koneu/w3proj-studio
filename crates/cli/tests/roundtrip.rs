@@ -200,3 +200,40 @@ fn unpacking_into_a_project_again_keeps_it_in_sync() {
     pack(&project, &second);
     assert_eq!(fs::read(first).unwrap(), fs::read(second).unwrap());
 }
+
+/// Runs `w3proj args` with its output pipe already closed on the reader's side, like `| head`.
+fn run_with_closed_pipe(args: &[&str]) -> Output {
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_w3proj"))
+        .args(args)
+        .env_remove("W3PROJ_FORMATS")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take()); // the reader goes away before the command prints anything
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn a_closed_output_pipe_ends_the_command_quietly() {
+    let dir = workdir("closed_pipe");
+    let map = dir.join("mini.w3x");
+    pack(&fixture(), &map);
+    for args in [vec!["ls", s(&map)], vec!["formats"]] {
+        let o = run_with_closed_pipe(&args);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(!err.contains("panicked") && !err.contains("failed printing"), "{args:?} panicked: {err}");
+        assert!(err.trim().is_empty(), "{args:?} should stay quiet, stderr: {err}");
+        assert!(o.status.success(), "{args:?} should exit cleanly, got {:?}", o.status);
+    }
+}
+
+#[test]
+fn a_real_error_still_reports_and_fails() {
+    let dir = workdir("real_error");
+    let missing = dir.join("missing.w3x");
+    let o = w3proj(&["ls", s(&missing)]);
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("error:"), "{}", text(&o));
+}
