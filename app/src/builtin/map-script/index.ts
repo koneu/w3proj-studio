@@ -10,7 +10,7 @@ import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env
 import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
-import { abilityOrders, gameTeamColors, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
+import { abilityOrders, gameTeamColors, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -122,7 +122,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     type Objects = { custom?: { id: string; base: string; mods?: { field: string; value: unknown }[] }[] };
     const customUnits = new Map<string, { base: string; bldg?: boolean }>();
     const unitFiles = await Promise.all(["map/war3map.w3u", "map/war3mapSkin.w3u"].map((f) => json<Objects & ObjectFile>(f)));
-    const colors = teamColors(unitFiles, g.unitColors);
+    const colors = teamColors(unitFiles, g.unitColors), special = specialUnits(unitFiles);
     for (const file of unitFiles) {
       for (const o of file?.custom ?? []) {
         const b = o.mods?.find((m) => m.field === "ubdg");
@@ -148,7 +148,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const durations = await soundDurations(sounds.map((s) => s.file), path);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), teamColor: (id) => colors.get(id),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
       lights: { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") },
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
       units: (await json<{ units: ScriptInput["units"] }>("map/war3mapUnits.doo"))?.units,

@@ -122,14 +122,15 @@ function randomMap(seed: number, lua: boolean): ScriptInput {
   const mask = () => r.int(16);
   const flagsOf = () => (r.bool() ? 0x20 : 0) | (r.bool() ? 0x40 : 0) | (r.bool() ? 0x2000 : 0) | (r.bool() ? 0x10000 : 0);
   const editorVersion = r.pick([0, 6031, 6117, 7000, 7003]);
-  const hasTable = r.bool();
+  const hasTable = r.bool(), groups = r.bool();
   const placed = (id: string, editorId: number, extra: object = {}) => ({
     id, editorId, variation: 0, position: [r.int(4000) - 2000 + 0.25, r.int(4000) - 2000, 0], angle: r.int(6), player: r.pick([...ids, 24, 27]), hp: r.pick([-1, 50]), mana: r.pick([-1, 100]),
     gold: 12500, targetAcquisition: r.pick([-1, -2, 300]), level: r.pick([0, 1, 3]), inventory: r.bool() ? [{ slot: 0, id: "ratc" }] : [],
     abilities: r.bool() ? [{ id: "AHhb", autocast: r.int(2), level: 1 + r.int(2) }] : [], color: r.pick([-1, 3]), waygate: r.pick([-1, 0]),
     itemTable: hasTable ? r.pick([-1, -1, 0]) : -1, itemSets: r.bool() ? [[{ id: "ratc", chance: 40 }, { id: "YiI2", chance: 30 }]] : [], ...extra,
   });
-  const units = [...Array.from({ length: r.int(5) }, (_, k) => placed(r.pick(["hfoo", "hbar", "ngol", "ugol", "sloc"]), k)), ...Array.from({ length: r.int(3) }, (_, k) => placed("ratc", 100 + k))];
+  const randomUnit = (k: number) => placed(r.pick(["uDNR", "bDNR"]), 200 + k, r.pick<object>([{ randomType: 0, randomLevel: "020000" }, { randomType: 2, randomUnits: [{ id: "hfoo", chance: 100 }] }, ...(groups ? [{ randomType: 1, randomGroup: 2, randomPosition: 1 }] : [])]));
+  const units = [...Array.from({ length: r.int(5) }, (_, k) => placed(r.pick(["hfoo", "hbar", "ngol", "ugol", "nwgt", "sloc"]), k)), ...Array.from({ length: r.int(3) }, (_, k) => randomUnit(k)), ...Array.from({ length: r.int(3) }, (_, k) => placed("ratc", 100 + k))];
   const doodads = Array.from({ length: r.int(4) }, (_, k) => ({
     id: r.pick(["LTlt", "ATg1"]), editorId: k, variation: 1, position: [1, 2, 3], angle: 1, scale: [1, 1, 1], flags: r.pick([0, 2, 4]), life: r.pick([0, 50, 100]),
     itemTable: -1, itemSets: r.bool() ? [[{ id: "ratc", chance: 100 }]] : [],
@@ -154,7 +155,7 @@ function randomMap(seed: number, lua: boolean): ScriptInput {
       terrainFog: r.bool() ? { style: 1, overSky: 1, linearStart: 0, linearEnd: 1, maxOpacity: 1, height: 100 } : undefined,
       upgrades: r.bool() ? [{ players: mask(), id: "Rhme", level: 0, availability: r.int(3) }] : [], techs: r.bool() ? [{ players: mask(), id: r.pick(["hfoo", "AHhb"]) }] : [],
       itemTables: hasTable ? [{ number: 0, sets: [[{ id: "ratc", chance: 50 }, { id: "YYI/", chance: 25 }]] }] : [],
-      unitTables: r.bool() ? [{ number: 2, name: "Creeps", positions: [0, 1], lines: [{ chance: 60, ids: ["hfoo", "0x00000000"] }, { chance: 40, ids: ["YYU2", "hpea"] }] }] : [],
+      unitTables: groups ? [{ number: 2, name: "Creeps", positions: [0, 1], lines: [{ chance: 60, ids: ["hfoo", "0x00000000"] }, { chance: 40, ids: ["YYU2", "hpea"] }] }] : [],
     },
     data, units: units as never, doodads: doodads as never, regions, cameras: uniq(r, r.int(3)).map((name) => ({ name, targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, farZ: 5000, nearZ: 16 })),
     sounds: sounds as never, triggers: t?.file, custom: t?.custom as never,
@@ -190,7 +191,7 @@ test("every random map's war3map.lua reads as Lua", () => {
 test("the random maps reach what they're meant to reach", () => {
   const scripts = Array.from({ length: ROUNDS }, (_, k) => generateScript(randomMap(k + 1, false))).join("\n");
   for (const want of ["CreateAllUnits", "CreateAllItems", "CreateAllDestructables", "InitSounds", "CreateRegions", "CreateCameras", "InitUpgrades", "InitTechTree", "InitRandomGroups",
-    "RunInitializationTriggers", "InitAllyPriorities", "ItemTable000000_DropItems", "Unit000000_DropItems", "bj_forLoopAIndex", "exitwhen (i >", "CreateBlightedGoldmine", "WaygateActivate"]) {
+    "RunInitializationTriggers", "InitAllyPriorities", "ItemTable000000_DropItems", "Unit000000_DropItems", "bj_forLoopAIndex", "exitwhen (i >", "CreateBlightedGoldmine", "WaygateActivate", "gg_rg_002[1]", "ChooseRandomCreep", "ChooseRandomNPBuilding"]) {
     assert.ok(scripts.includes(want), `no random map has ${want}`);
   }
 });

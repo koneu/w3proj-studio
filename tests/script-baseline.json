@@ -10,7 +10,7 @@
         375
       ],
       "(whole file)": [
-        181,
+        196,
         326
       ],
       "": [
@@ -18,11 +18,11 @@
         326
       ],
       "Global Variables": [
-        324,
+        326,
         326
       ],
       "Custom Script Code": [
-        321,
+        322,
         326
       ],
       "Random Groups": [
@@ -50,11 +50,11 @@
         326
       ],
       "Regions": [
-        324,
+        326,
         326
       ],
       "Cameras": [
-        317,
+        326,
         326
       ],
       "Items": [
@@ -62,7 +62,7 @@
         326
       ],
       "Unit Creation": [
-        283,
+        299,
         326
       ],
       "Upgrades": [
@@ -74,11 +74,11 @@
         326
       ],
       "Triggers": [
-        313,
+        319,
         326
       ],
       "Players": [
-        325,
+        326,
         326
       ],
       "Main Initialization": [
@@ -86,12 +86,12 @@
         326
       ],
       "Map Configuration": [
-        317,
+        326,
         326
       ]
     },
     "problems": 46,
-    "guarded": 7,
+    "guarded": 0,
     "checked": 375
   },
   "valid": {

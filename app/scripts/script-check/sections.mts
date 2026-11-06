@@ -58,13 +58,13 @@ for (const m of readdirSync("ws")) {
   let triggers, custom;
   try {
     triggers = W.parseWtg(new Uint8Array(readFileSync(`${d}/war3map.wtg`)), data);
-    custom = existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
+    custom = existsSync(`${d}/war3map.wct.txt`) ? W.parseWctText(read(`${d}/war3map.wct.txt`)) : existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
   } catch { continue; }
   // The trigger files read and written again, byte for byte.
   const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
   const wtgBytes = new Uint8Array(readFileSync(`${d}/war3map.wtg`));
   const rt = (stats["(wtg byte-exact)"] ??= [0, 0]); rt[1]++; if (same(W.writeWtg(triggers), wtgBytes)) rt[0]++;
-  if (custom) {
+  if (custom && existsSync(`${d}/war3map.wct`)) {
     const wctBytes = new Uint8Array(readFileSync(`${d}/war3map.wct`));
     const rc = (stats["(wct byte-exact)"] ??= [0, 0]); rc[1]++; if (same(W.writeWct(custom), wctBytes)) rc[0]++;
     const rx = (stats["(wct via text)"] ??= [0, 0]); rx[1]++;
@@ -81,7 +81,8 @@ for (const m of readdirSync("ws")) {
       customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
     }
   }
-  const colors = O.teamColors([json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")], gameColors);
+  const unitFiles = [json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")];
+  const colors = O.teamColors(unitFiles, gameColors), special = O.specialUnits(unitFiles);
   const customAbilities = new Set<string>((json(d, "war3map.w3a")?.custom ?? []).map((o: any) => o.id));
   const customItems = new Set<string>((json(d, "war3map.w3t")?.custom ?? []).map((o: any) => o.id));
   const kindOf = (id: string): any => {
@@ -94,7 +95,7 @@ for (const m of readdirSync("ws")) {
   };
   const lt = (info.lightEnvironment || info.tileset) as string;
   const input = {
-    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a), teamColor: (id: string) => colors.get(id),
+    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a), teamColor: (id: string) => colors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
     lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") },
     groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
@@ -103,6 +104,8 @@ for (const m of readdirSync("ws")) {
   };
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
   const whole = J.generateScript(input), file = read(scriptFile);
+  // SCRIPT_CHECK_DUMP=<folder>: both scripts per map, to go through the differences.
+  if (process.env.SCRIPT_CHECK_DUMP && scriptFile.endsWith(".j")) writeFileSync(`${process.env.SCRIPT_CHECK_DUMP}/${m}.json`, JSON.stringify([norm(whole), norm(file)]));
   const inList = (a: any[] | undefined, f: (x: any) => string) => (a ?? []).map(f);
   const units = json(d, "war3mapUnits.doo")?.units ?? [], doodads = json(d, "war3map.doo")?.doodads ?? [];
   const known = new Set<string>([

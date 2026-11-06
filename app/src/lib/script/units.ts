@@ -17,6 +17,8 @@ export interface UnitJson {
   level: number; strength?: number; agility?: number; intelligence?: number;
   inventory: { slot: number; id: string }[]; abilities: { id: string; autocast: number; level: number }[];
   color: number; waygate: number; editorId: number;
+  /** Random units (ids uDNR, bDNR): 0 any by level, 1 from a random group, 2 from a list. */
+  randomType?: number; randomLevel?: string; randomGroup?: number; randomPosition?: number; randomUnits?: { id: string; chance: number }[];
 }
 
 export interface UnitsInput {
@@ -29,8 +31,10 @@ export interface UnitsInput {
   referenced: Set<string>;
   /** Region global for a waygate target (region creation number). */
   regionName?: (index: number) => string | undefined;
-  /** Whether a (custom) unit type is a gold mine; default: ngol, ugol, egol. */
+  /** Whether a (custom) unit type is a gold mine, besides ngol, ugol and egol. */
   goldMine?: (id: string) => boolean;
+  /** Whether a (custom) unit type is a waygate, besides nwgt. */
+  waygate?: (id: string) => boolean;
   /** Team colour a unit type has in the map's object data (lib/script/objects). */
   teamColor?: (id: string) => number | undefined;
   /** The orders that turn an ability's autocast on and off, if it has one. */
@@ -49,8 +53,27 @@ const deg = (rad: number) => fixed(Math.fround(Math.fround(rad) * Math.fround(18
 /** Neutral players (1.31+ numbering). */
 const NEUTRAL_HOSTILE = 24, NEUTRAL_PASSIVE = 27;
 
+/** The player field: the owner, and a flag for Ancients placed uprooted. */
+const owner = (u: UnitJson) => u.player & 0xffff, uprooted = (u: UnitJson) => (u.player & 0x10000) !== 0;
+/** Placeholders for a random unit and a random building: no such unit types exist. */
+const RANDOM_BUILDING = "bDNR", RANDOM_UNIT = "uDNR";
+const isRandom = (u: UnitJson) => u.id === RANDOM_UNIT || u.id === RANDOM_BUILDING;
+
+/** Lines that put a random unit's type into unitID. */
+function pickRandom(u: UnitJson): string[] {
+  if (u.randomType === 1) return [`    set unitID = gg_rg_${String(u.randomGroup ?? 0).padStart(3, "0")}[${u.randomPosition ?? 0}]`];
+  if (u.randomType === 2) {
+    return ["    call RandomDistReset(  )", ...(u.randomUnits ?? []).map((r) => `    call RandomDistAddItem( '${r.id}', ${r.chance} )`), "    set unitID = RandomDistChoose(  )"];
+  }
+  // Any by level: no map of the game's has one, so this form isn't compared with the World Editor.
+  if (u.id === RANDOM_BUILDING) return ["    set unitID = ChooseRandomNPBuilding(  )"];
+  const level = parseInt((u.randomLevel ?? "").slice(0, 2), 16);
+  return [`    set unitID = ChooseRandomCreep( ${Number.isNaN(level) || level === 255 ? -1 : level} )`];
+}
+
 const GOLD_MINES = new Set(["ngol", "ugol", "egol"]);
-const isGoldMine = (i: UnitsInput, id: string) => i.goldMine?.(id) ?? GOLD_MINES.has(id);
+const isGoldMine = (i: UnitsInput, id: string) => GOLD_MINES.has(id) || (i.goldMine?.(id) ?? false);
+const isWaygate = (i: UnitsInput, id: string) => id === "nwgt" || (i.waygate?.(id) ?? false);
 
 export const unitGlobal = (u: UnitJson) => `gg_unit_${u.id}_${String(u.editorId).padStart(4, "0")}`;
 
@@ -58,10 +81,12 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   const g = unitGlobal(u);
   const v = i.referenced.has(g) ? g : "u";
   const pos = `${r1(u.position[0])}, ${r1(u.position[1])}, ${deg(u.angle)}`;
+  const random = isRandom(u);
   // Blighted gold mines have their own constructor (it also blights the ground).
-  const lines = [u.id === "ugol"
-    ? `    set ${v} = CreateBlightedGoldmine( p, ${pos} )`
+  const lines = [random ? `    set ${v} = BlzCreateUnitWithSkin( p, unitID, ${pos}, unitID )`
+    : u.id === "ugol" ? `    set ${v} = CreateBlightedGoldmine( p, ${pos} )`
     : `    set ${v} = BlzCreateUnitWithSkin( p, '${u.id}', ${pos}, '${u.skinId ?? u.id}' )`];
+  if (uprooted(u)) lines.push(`    call IssueImmediateOrder( ${v}, "unroot" )`);
   if (isGoldMine(i, u.id)) lines.push(`    call SetResourceAmount( ${v}, ${u.gold} )`);
   // -2: "camp" (guard position), written as an acquisition range of 200.
   if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
@@ -76,11 +101,13 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     if (order) lines.push(`    call IssueImmediateOrder( ${v}, "${order}" )`);
   }
   for (const it of u.inventory) lines.push(`    call UnitAddItemToSlotById( ${v}, '${it.id}', ${it.slot} )`);
-  if (u.waygate >= 0) {
+  // Other units store 0 here, and in the colour field: only waygates mean them.
+  const waygate = isWaygate(i, u.id);
+  if (waygate && u.waygate >= 0) {
     const r = i.regionName?.(u.waygate);
     if (r) lines.push(`    call WaygateSetDestination( ${v}, GetRectCenterX(${r}), GetRectCenterY(${r}) )`, `    call WaygateActivate( ${v}, true )`);
   }
-  const color = u.color !== -1 ? u.color : i.teamColor?.(u.id);
+  const color = waygate && u.color !== -1 ? u.color : i.teamColor?.(u.id);
   if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
   // Items drop from a map item table or the unit's own sets.
   const drops = dropFunctionOf("Unit", u, i.units.indexOf(u));
@@ -88,7 +115,8 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     lines.push("    set t = CreateTrigger(  )", `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_DEATH )`,
       `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_CHANGE_OWNER )`, `    call TriggerAddAction( t, function ${drops} )`);
   }
-  return lines;
+  // A group's line can leave a slot empty: then nothing is placed there.
+  return random ? [...pickRandom(u), "    if (unitID != -1) then", ...lines.map((l) => `    ${l}`), "    endif"] : lines;
 }
 
 /** The "Items" section body: items placed on the map (war3mapUnits.doo), or "". */
@@ -130,9 +158,10 @@ export function unitsSection(i: UnitsInput): string {
   if (!placed.length) return "";
   const parts: string[] = [];
   const playerBuildings: string[] = [], playerUnits: string[] = [];
+  const isBuilding = (u: UnitJson) => u.id === RANDOM_BUILDING || i.kindOf(u.id) === "building";
   const of = (player: number, building: boolean) =>
-    placed.filter((u) => u.player === player && (i.kindOf(u.id) === "building") === building).flatMap((u) => unitLines(i, u));
-  const players = [...new Set(placed.map((u) => u.player))].filter((p) => p !== NEUTRAL_HOSTILE && p !== NEUTRAL_PASSIVE).sort((a, b) => a - b);
+    placed.filter((u) => owner(u) === player && isBuilding(u) === building).flatMap((u) => unitLines(i, u));
+  const players = [...new Set(placed.map(owner))].filter((p) => p !== NEUTRAL_HOSTILE && p !== NEUTRAL_PASSIVE).sort((a, b) => a - b);
   for (const p of players) {
     const b = of(p, true), u = of(p, false);
     if (b.length) { parts.push(creator(`CreateBuildingsForPlayer${p}`, `Player(${p})`, b)); playerBuildings.push(`CreateBuildingsForPlayer${p}`); }

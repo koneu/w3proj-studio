@@ -10,6 +10,7 @@ import { ACTION, CALL, CONDITION, EVENT, type TriggerData } from "../triggers/tr
 import type { Call, CustomTextFile, Eca, Param, TriggerFile, TriggerItem } from "../triggers/wtg";
 
 import { CONCAT, INT_DIV, RAW } from "./lua";
+import { ident } from "./names";
 
 const EOL = "\r\n";
 const SEP = "//===========================================================================";
@@ -22,10 +23,6 @@ export interface TriggerScriptInput {
   lua?: boolean;
 }
 
-const ident = (name: string) => {
-  const s = name.trimEnd().replace(/[^A-Za-z0-9_]/g, "_");
-  return s.endsWith("_") ? `${s}u` : s;
-};
 const str = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const pad3 = (n: number) => String(n).padStart(3, "0");
 

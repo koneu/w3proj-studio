@@ -7,6 +7,7 @@
 
 import { parseSlk } from "../formats/text";
 import { jassToLua, RAW } from "./lua";
+import { ident } from "./names";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { scriptItems, triggersSection } from "./triggers";
@@ -58,6 +59,9 @@ export interface ScriptInput {
   kindOf?: (id: string) => "building" | "unit" | "item" | "sloc" | "ability" | undefined;
   /** Team colour a unit type has in the map's object data (lib/script/objects). */
   teamColor?: (id: string) => number | undefined;
+  /** Whether a custom unit type is a gold mine or a waygate (lib/script/objects). */
+  goldMine?: (id: string) => boolean;
+  waygate?: (id: string) => boolean;
   /** The orders that turn an ability's autocast on and off. */
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
@@ -81,12 +85,7 @@ export function banner(title: string): string {
   return ["//***************************************************************************", "//*", `//*  ${title}`, "//*",
     "//***************************************************************************", ""].join(EOL) + EOL;
 }
-/** Identifiers from names: trailing spaces dropped, anything but letters, digits and _ becomes _,
- *  and a "u" is appended when that leaves a trailing _ (JASS doesn't allow one). */
-export const ident = (name: string) => {
-  const s = name.trimEnd().replace(/[^A-Za-z0-9_]/g, "_");
-  return s.endsWith("_") ? `${s}u` : s;
-};
+export { ident };
 /** Reals with one decimal, as in Rect( 3936.0, … ). */
 const r1 = (v: number) => fixed(v, 1); // map values are 32-bit floats
 /** A JASS string literal. */
@@ -337,14 +336,15 @@ export function cameras(i: ScriptInput): string {
   for (const c of i.cameras ?? []) {
     const n = `gg_cam_${ident(c.name)}`;
     const field = (f: string, v: number) => `    call CameraSetupSetField( ${n}, CAMERA_FIELD_${f}, ${r1(v)}, 0.0 )`;
-    const extra = c.unknown ?? [0, 0, 0];
     lines.push(`    set ${n} = CreateCameraSetup(  )`,
       field("ZOFFSET", c.zOffset), field("ROTATION", c.rotation), field("ANGLE_OF_ATTACK", c.angleOfAttack),
       field("TARGET_DISTANCE", c.distance), field("ROLL", c.roll), field("FIELD_OF_VIEW", c.fieldOfView), field("FARZ", c.farZ),
-      field("NEARZ", c.nearZ), field("LOCAL_PITCH", c.localPitch ?? 0), field("LOCAL_YAW", c.localYaw ?? 0), field("LOCAL_ROLL", c.localRoll ?? 0),
-      field("DEPTH_OF_FIELD_DISTANCE", extra[0]), field("DEPTH_OF_FIELD_SCALE", extra[1]), field("ZABSOLUTE", extra[2]),
-      `    call CameraSetupSetDestPosition( ${n}, ${r1(c.targetX)}, ${r1(c.targetY)}, 0.0 )`,
-      `    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ?? 0} )`, "");
+      field("NEARZ", c.nearZ), field("LOCAL_PITCH", c.localPitch ?? 0), field("LOCAL_YAW", c.localYaw ?? 0), field("LOCAL_ROLL", c.localRoll ?? 0));
+    // Only the newer camera file has these (war3map.w3c v3; v0 is the old form).
+    if (c.unknown) lines.push(field("DEPTH_OF_FIELD_DISTANCE", c.unknown[0]), field("DEPTH_OF_FIELD_SCALE", c.unknown[1]), field("ZABSOLUTE", c.unknown[2]));
+    lines.push(`    call CameraSetupSetDestPosition( ${n}, ${r1(c.targetX)}, ${r1(c.targetY)}, 0.0 )`);
+    if (c.unknown) lines.push(`    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ?? 0} )`);
+    lines.push("");
   }
   lines.push("endfunction", "", "");
   return banner("Cameras") + lines.join(EOL);
@@ -419,7 +419,7 @@ function unitCreation(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
   const regions = i.regions ?? [];
   const body = unitsSection({
-    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, teamColor: i.teamColor,
+    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });
   return body ? banner("Unit Creation") + body : "";

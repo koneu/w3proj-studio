@@ -15,7 +15,7 @@ for (const m of readdirSync("ws")) {
   let triggers, custom;
   try {
     triggers = W.parseWtg(new Uint8Array(readFileSync(`${d}/war3map.wtg`)), data);
-    custom = existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
+    custom = existsSync(`${d}/war3map.wct.txt`) ? W.parseWctText(readFileSync(`${d}/war3map.wct.txt`, "utf8")) : existsSync(`${d}/war3map.wct`) ? W.parseWct(new Uint8Array(readFileSync(`${d}/war3map.wct`)), W.textTriggers(triggers).length) : null;
   } catch { continue; }
   const info = JSON.parse(readFileSync(`${d}/war3map.w3i.json`, "utf8"));
   const gen = J.generateSections({ info, data, triggers, custom }).get("Triggers") ?? "";

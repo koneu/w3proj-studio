@@ -24,7 +24,7 @@
       { "name": "skinId", "type": "id", "if": "version >= 12 || (version == 8 && skinIds)" },
       { "name": "preFlags", "type": "u32", "if": "version >= 12", "doc": "3.0; -1 in all samples" },
       { "name": "flags", "type": "u8" },
-      { "name": "player", "type": "u32" },
+      { "name": "player", "type": "u32", "doc": "low 16 bits the owner, bit 16 an Ancient placed uprooted" },
       { "name": "unknown1", "type": "u8" },
       { "name": "unknown2", "type": "u8" },
       { "name": "hp", "type": "i32", "doc": "-1 = default" },

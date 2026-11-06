@@ -72,13 +72,14 @@ export function playersSection(i: SetupInput): string {
   slots.push("endfunction", "");
 
   const teams = ["function InitCustomTeams takes nothing returns nothing"];
-  let first = true;
-  i.info.forces.forEach((f, k) => {
+  let first = true, team = 0;
+  i.info.forces.forEach((f) => {
     // Forces without players are left out.
     const members = players.filter((p) => (f.players >>> p.id) & 1);
     if (!members.length) return;
     if (!first) teams.push("");
     first = false;
+    const k = team++;
     teams.push(`    // Force: ${f.name}`);
     for (const p of members) {
       teams.push(`    call SetPlayerTeam( Player(${p.id}), ${k} )`);
@@ -177,11 +178,15 @@ export function mainSection(i: SetupInput): string {
   return lines.join(EOL);
 }
 
+/** Editors before 6116 always wrote TEAMS_TOGETHER (bit 0 of the flags fits the game's maps as well;
+ *  nothing separates the two, and this way maps from today's editors can't be affected). */
+const oldPlacement = (i: SetupInput) => ((i.info.editorVersion as number | undefined) ?? 6116) < 6116;
+
 export function configSection(i: SetupInput): string {
   const players = i.info.players;
   const lines = ["function config takes nothing returns nothing", `    call SetMapName( ${str(i.info.name)} )`, `    call SetMapDescription( ${str(i.info.description)} )`,
     `    call SetPlayers( ${players.length} )`, `    call SetTeams( ${players.length} )`,
-    `    call SetGamePlacement( MAP_PLACEMENT_${i.info.flags & CUSTOM_FORCES ? "USE_MAP_SETTINGS" : "TEAMS_TOGETHER"} )`, ""];
+    `    call SetGamePlacement( MAP_PLACEMENT_${i.info.flags & CUSTOM_FORCES && !oldPlacement(i) ? "USE_MAP_SETTINGS" : "TEAMS_TOGETHER"} )`, ""];
   players.forEach((p, index) => lines.push(`    call DefineStartLocation( ${index}, ${r1(p.start[0])}, ${r1(p.start[1])} )`));
   lines.push("", "    // Player setup", "    call InitCustomPlayerSlots(  )");
   // Without custom forces the lobby sets up teams: every slot is offered, then the generic setup.

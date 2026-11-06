@@ -9,7 +9,7 @@ import { destructablesSection, type DestructableJson } from "./destructables";
 import { dropFunction, dropFunctionOf, dropSection, itemTableFunction, randomGroupsSection } from "./drops";
 import { banner, generateScript, generateSections, header, ident, literal, parseSoundLabels, placedName, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
 import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
-import { abilityOrders, gameTeamColors, teamColors } from "./objects";
+import { abilityOrders, gameTeamColors, specialUnits, teamColors } from "./objects";
 import { AMBIENCE, configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
 import { triggersSection } from "./triggers";
@@ -55,7 +55,9 @@ test("names become identifiers as the World Editor makes them", () => {
   assert.equal(ident("Boss Room (2)"), "Boss_Room__2_u");
   assert.equal(ident("Wave_"), "Wave_u");
   assert.equal(ident("trailing  "), "trailing");
-  assert.equal(ident("Größe"), "Gr__e");
+  // By UTF-8 byte: two for each of these letters, three for a Chinese character.
+  assert.equal(ident("Größe"), "Gr____e");
+  assert.equal(ident("金矿1"), "______1");
 });
 
 test("strings are quoted with their special characters escaped", () => {
@@ -213,10 +215,22 @@ test("orders come from the game's ability tables", () => {
   assert.equal(o.has("Ablo"), false);
 });
 
-test("a type's team colour goes on placed units, a unit's own colour wins", () => {
+test("only waygates mean the placement's own colour and target", () => {
+  const regionName = () => "gg_rct_Exit";
+  const placed = units([unit({ id: "ogru", color: 0, waygate: 0 })], { regionName });
+  hasNot(placed, "SetUnitColor");
+  hasNot(placed, "Waygate");
+  const gate = units([unit({ id: "nwgt", color: 3, waygate: 0 })], { regionName });
+  has(gate, "    call SetUnitColor( u, ConvertPlayerColor(3) )");
+  has(gate, "    call WaygateActivate( u, true )");
+  has(units([unit({ id: "n000", color: 3, waygate: 0 })], { regionName, waygate: (id: string) => id === "n000" }), "    call WaygateActivate( u, true )");
+});
+
+test("a type's team colour goes on placed units", () => {
   const teamColor = (id: string) => (id === "ntav" ? 12 : undefined);
   has(units([unit({ id: "ntav" })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
-  has(units([unit({ id: "ntav", color: 3 })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(3) )");
+  // The placement's own colour field is ignored unless it's a waygate.
+  has(units([unit({ id: "ntav", color: 3 })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
   hasNot(units([unit()], { teamColor }), "SetUnitColor");
   has(units([unit({ id: "ntav" })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
   // Colour 0 is a colour.
@@ -237,12 +251,31 @@ test("team colours: the game's, changed by the map, inherited by custom units", 
   assert.equal(game.get("ntav"), 0, "the game's table stays as it was");
 });
 
+test("a map can take a type's team colour away", () => {
+  const c = teamColors([{ original: [{ base: "ntav", mods: [{ field: "utco", value: -1 }] }], custom: [{ id: "n000", base: "nmr2", mods: [{ field: "utco", value: -1 }] }, { id: "n001", base: "ntav" }] }], new Map([["ntav", 0], ["nmr2", 12]]));
+  assert.equal(c.has("ntav"), false);
+  assert.equal(c.has("n000"), false);
+  assert.equal(c.has("n001"), false);
+  assert.equal(c.get("nmr2"), 12);
+});
+
+test("custom gold mines and waygates are found in the object data", () => {
+  const s = specialUnits([{ original: [{ base: "nrdr", mods: [{ field: "uabi", value: "Awan,Agld,Avul" }] }, { base: "hfoo", mods: [{ field: "uabi", value: "Adef" }] }],
+    custom: [{ id: "n000", base: "ngol" }, { id: "n001", base: "hfoo", mods: [{ field: "uabi", value: "Agld" }] }, { id: "n002", base: "nwgt" }, { id: "n003", base: "hfoo" }] }, null]);
+  for (const id of ["ngol", "ugol", "egol", "nrdr", "n000", "n001"]) assert.ok(s.goldMines.has(id), id);
+  assert.ok(!s.goldMines.has("n003"));
+  assert.ok(!s.goldMines.has("hfoo"));
+  assert.ok(s.waygates.has("n002"));
+  assert.ok(!s.waygates.has("n003"));
+  has(units([unit({ id: "n000", gold: 7000 })], { goldMine: (id: string) => s.goldMines.has(id) }), "    call SetResourceAmount( u, 7000 )");
+});
+
 test("waygates go to their region, if it still exists", () => {
   const regionName = (n: number) => (n === 2 ? "gg_rct_Exit" : undefined);
-  const u = units([unit({ waygate: 2 })], { regionName });
+  const u = units([unit({ id: "nwgt", waygate: 2 })], { regionName });
   has(u, "    call WaygateSetDestination( u, GetRectCenterX(gg_rct_Exit), GetRectCenterY(gg_rct_Exit) )");
   has(u, "    call WaygateActivate( u, true )");
-  hasNot(units([unit({ waygate: 9 })], { regionName }), "Waygate");
+  hasNot(units([unit({ id: "nwgt", waygate: 9 })], { regionName }), "Waygate");
 });
 
 test("units go to one function per player and kind, neutrals last", () => {
@@ -261,6 +294,39 @@ test("neutral buildings come first: hostile, then passive, then the players'", (
 test("units are created in placement order", () => {
   const s = units([unit({ editorId: 5, position: [5, 0, 0] }), unit({ editorId: 2, position: [2, 0, 0] })]);
   assert.ok(s.indexOf("'hfoo', 2.0") < s.indexOf("'hfoo', 5.0"));
+});
+
+test("a placed random unit picks its type when the map starts", () => {
+  const fromGroup = units([unit({ id: "uDNR", randomType: 1, randomGroup: 1, randomPosition: 2 })]);
+  has(fromGroup, "    set unitID = gg_rg_001[2]");
+  has(fromGroup, "    if (unitID != -1) then");
+  has(fromGroup, "        set u = BlzCreateUnitWithSkin( p, unitID, 100.0, 200.0, 0.000, unitID )");
+  has(fromGroup, "    endif");
+  hasNot(fromGroup, "'uDNR'");
+  const fromList = units([unit({ id: "uDNR", randomType: 2, randomUnits: [{ id: "nfoh", chance: 50 }, { id: "nmoo", chance: 50 }] })]);
+  has(fromList, "    call RandomDistAddItem( 'nfoh', 50 )");
+  has(fromList, "    set unitID = RandomDistChoose(  )");
+  has(units([unit({ id: "uDNR", randomType: 0, randomLevel: "020000" })]), "    set unitID = ChooseRandomCreep( 2 )");
+  has(units([unit({ id: "bDNR", randomType: 0 })]), "    set unitID = ChooseRandomNPBuilding(  )");
+});
+
+test("what follows a random unit stays inside its if", () => {
+  const s = units([unit({ id: "uDNR", randomType: 1, randomGroup: 0, randomPosition: 0, itemTable: 4 })]);
+  has(s, "        call TriggerRegisterUnitEvent( t, u, EVENT_UNIT_DEATH )");
+});
+
+test("a random building goes with the buildings", () => {
+  const s = units([unit({ id: "bDNR", randomType: 1, randomGroup: 0, randomPosition: 0 })]);
+  assert.ok(s.includes("function CreateBuildingsForPlayer0 takes"));
+  hasNot(s, "function CreateUnitsForPlayer0");
+});
+
+test("the player field also says an Ancient is placed uprooted", () => {
+  const s = units([unit({ id: "eaow", player: 0x10001 })], { referenced: new Set(["gg_unit_eaow_0001"]) });
+  has(s, '    call IssueImmediateOrder( gg_unit_eaow_0001, "unroot" )');
+  assert.ok(s.includes("function CreateUnitsForPlayer1 takes"));
+  hasNot(s, "65537");
+  hasNot(units([unit({ id: "eaow", player: 1 })]), "unroot");
 });
 
 test("code that doesn't compile needs no assignment: a disabled trigger's unit stays a plain u", () => {
@@ -401,7 +467,8 @@ test("forces: empty ones are left out, alliances go both ways", () => {
   const s = playersSection(setup({ players: [player(0), player(1)], forces: [{ flags: 0, players: 0, name: "Empty" }, { flags: 0x3, players: 3, name: "Team" }] }));
   hasNot(s, "Force: Empty");
   has(s, "    // Force: Team");
-  has(s, "    call SetPlayerTeam( Player(0), 1 )");
+  // Teams count the forces that are written.
+  has(s, "    call SetPlayerTeam( Player(0), 0 )");
   has(s, "    call SetPlayerState( Player(0), PLAYER_STATE_ALLIED_VICTORY, 1 )");
   has(s, "    call SetPlayerAllianceStateAllyBJ( Player(0), Player(1), true )");
   has(s, "    call SetPlayerAllianceStateAllyBJ( Player(1), Player(0), true )");
@@ -441,6 +508,12 @@ test("weather, fog and water tint are written only when the map switches them on
   const w = mainSection(setup({ weather: "RAhr", cameraComplements: [6, 6, 4, 8] }));
   has(w, "    set we = AddWeatherEffect( Rect(-2304.0,-1792.0,2304.0,2304.0), 'RAhr' )");
   has(w, "    local weathereffect we");
+});
+
+test("placement: custom forces use the map's settings, except from old editors", () => {
+  has(configSection(setup({ flags: 0x40, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  has(configSection(setup({ flags: 0x40, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  has(configSection(setup({ flags: 0, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
 });
 
 test("config: players, teams and how the lobby sets them up", () => {
@@ -507,6 +580,16 @@ test("a region with an ambient sound places it on the ground at its centre", () 
   has(s, "    set we = AddWeatherEffect( gg_rct_Lake, 'RAhr' )");
   has(s, "    call SetSoundPosition( gg_snd_W, 50.0, 25.0, 75.0 )");
   has(s, "    call RegisterStackedSound( gg_snd_W, true, 100.0, 50.0 )");
+});
+
+test("cameras of the old file format have fewer fields", () => {
+  const cam = { name: "C", targetX: 0, targetY: 0, zOffset: 0, rotation: 0, angleOfAttack: 0, distance: 0, roll: 0, fieldOfView: 0, farZ: 0, nearZ: 0 };
+  const old = generateSections(input({ cameras: [cam] })).get("Cameras")!;
+  for (const f of ["DEPTH_OF_FIELD", "ZABSOLUTE", "BlzCameraSetupSetCameraType"]) hasNot(old, f);
+  has(old, "    call CameraSetupSetDestPosition( gg_cam_C, 0.0, 0.0, 0.0 )");
+  const now = generateSections(input({ cameras: [{ ...cam, unknown: [1, 2, 3], trailer: 1 }] })).get("Cameras")!;
+  has(now, "    call CameraSetupSetField( gg_cam_C, CAMERA_FIELD_ZABSOLUTE, 3.0, 0.0 )");
+  has(now, "    call BlzCameraSetupSetCameraType( gg_cam_C, 1 )");
 });
 
 test("camera fields round like the rest", () => {

@@ -42,21 +42,39 @@ export function gameTeamColors(rows: Record<string, string>[]): Map<string, numb
  *  as SetUnitColor. */
 export function teamColors(files: (ObjectFile | null | undefined)[], game: Map<string, number> = new Map()): Map<string, number> {
   const out = new Map(game);
+  /** The object's own value; -1 means no colour, undefined that it doesn't say. */
   const own = (o: ObjectEntry) => {
     const v = o.mods?.find((m) => m.field === "utco")?.value;
-    return typeof v === "number" && v >= 0 ? v : undefined;
+    return typeof v === "number" ? v : undefined;
   };
+  const put = (id: string, v: number | undefined) => { if (v === undefined || v < 0) out.delete(id); else out.set(id, v); };
   for (const f of files) {
     for (const o of f?.original ?? []) {
       const v = own(o);
-      if (v !== undefined) out.set(o.base, v);
+      if (v !== undefined) put(o.base, v);
     }
   }
   for (const f of files) {
-    for (const o of f?.custom ?? []) {
-      const v = own(o) ?? out.get(o.base);
-      if (o.id && v !== undefined) out.set(o.id, v);
-    }
+    for (const o of f?.custom ?? []) if (o.id) put(o.id, own(o) ?? out.get(o.base));
   }
   return out;
+}
+
+/** Unit types the map makes gold mines (the Gold Mine ability in their list) and those based on the
+ *  game's special types. */
+export function specialUnits(files: (ObjectFile | null | undefined)[]): { goldMines: Set<string>; waygates: Set<string> } {
+  const goldMines = new Set<string>(["ngol", "ugol", "egol"]), waygates = new Set<string>(["nwgt"]);
+  const hasGold = (o: ObjectEntry) => {
+    const v = o.mods?.find((m) => m.field === "uabi")?.value;
+    return typeof v === "string" && v.split(",").includes("Agld");
+  };
+  for (const f of files) for (const o of f?.original ?? []) if (hasGold(o)) goldMines.add(o.base);
+  for (const f of files) {
+    for (const o of f?.custom ?? []) {
+      if (!o.id) continue;
+      if (hasGold(o) || goldMines.has(o.base)) goldMines.add(o.id);
+      if (waygates.has(o.base)) waygates.add(o.id);
+    }
+  }
+  return { goldMines, waygates };
 }

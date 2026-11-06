@@ -127,6 +127,11 @@ Each of these comes from a test on this project that looked fine and wasn't.
 
 - **Prove the test can fail.** Break the code once and see it go red. The UI smoke was checked
   with a sabotaged extension, the generator's tests by putting each bug they found back.
+- **Feed the check what the app gets.** `script-check` read raw terrain and custom text, but projects
+  keep those as text files, so it quietly compared without them. It reported missing triggers
+  and 7 false alarms that weren't there.
+- **Let the oracle overrule you.** A rule that looks right goes through the comparison first: one
+  of today's added 147 differences and was taken out again.
 - **The check has to run the app's code.** `script-check` used to keep its own copy of how orders
   are looked up, so it could only ever prove the copy. Share the code instead (`lib/script/objects.ts`).
 - **Give "it was rejected" a control.** The first `wtg_hostile` test passed at once, because its
@@ -156,6 +161,6 @@ In order of what I'd do next.
 4. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist
    is all there is. Saved-by-World-Editor samples of each file version would at least pin the
    formats, and could settle the unknown fields listed in `openpoints/test.md`.
-5. **The generated script isn't identical yet.** Of the 326 JASS maps, 181 match the World Editor's
-   file exactly, 87 have the same lines in another order (creation order of destructables and
-   items, as far as looked at) and 58 really differ. The last group hasn't been sorted out yet.
+5. **The generated script isn't identical yet.** Of the 326 JASS maps, 196 match the World Editor's
+   file exactly, 99 have the same lines in another order, and 31 really differ, mostly by a few
+   lines. `openpoints/test.md` lists what's left.

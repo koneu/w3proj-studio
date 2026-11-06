@@ -168,6 +168,8 @@ native BlzCreateItemWithSkin takes integer itemid, real x, real y, integer skinI
 native SetItemColor takes item whichItem, playercolor whichColor returns nothing
 native BlzSetItemColor takes item whichItem, playercolor whichColor returns nothing
 native ChooseRandomItem takes integer level returns integer
+native ChooseRandomCreep takes integer level returns integer
+native ChooseRandomNPBuilding takes nothing returns integer
 native ChooseRandomItemEx takes itemtype whichType, integer level returns integer
 native GetDestructableLife takes destructable d returns real
 native SetDestructableLife takes destructable d, real life returns nothing
