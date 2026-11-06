@@ -1797,11 +1797,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const f = pasting;
           if (!f) return;
           const stamped = await placeGround(f, g);
-          // Ground and objects are one undo step, and objects stand on the new ground.
+          // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
+          // own step: without clearing keyStep this click would join the one before.
+          keyStep = null;
           keyPress = "first";
           if (stamped?.corners.length) commitTerrain({ ...stamped, cliffs: true });
           keyPress = "repeat";
-          try { placeObjects(f, g); } finally { keyPress = null; }
+          try { placeObjects(f, g); } finally { keyPress = null; keyStep = null; }
         };
         const placeObjects = (f: Fragment, g: Vec3) => {
           const added: { entry: Placed; f: PlacedFile }[] = [];
