@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { groundHeight, parseW3e, setGroundHeight, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
-import { HEIGHT_TICK, heightPerPoint, strokePoints } from "../../lib/terrain/strokepath";
+import { HEIGHT_TICK, heightPerPoint, HeightStroke } from "../../lib/terrain/strokepath";
 import { applyHeight, applyLayer, matchCliffTypes, paintTexture, Stroke } from "./tools";
 
 /** A flat 32×32 Lordaeron Summer map covered in grass (Lgrs), cliff level 2, cliff types unset
@@ -63,15 +63,19 @@ test("a cliff raised on grass becomes a grass cliff, on the cliff corners only",
   assert.equal(at(11, 16), 15);
 });
 
-/** A drag across the map at a speed, in mouse events `ms` apart, as the painter stamps it. */
-function drag(speedPerMs: number, ms: number) {
-  const t = flatMap(), s = new Stroke("raise"), radius = 2;
-  const y = 0, spacing = radius * 64, from = -800, to = 800;
-  let at = from;
+/** A drag across the map at a speed, with the clock ticking `ms` apart while the mouse reports
+ *  many times in between, as the painter runs it. `busy` makes every third tick late. */
+function drag(speedPerMs: number, ms: number, busy = false) {
+  const t = flatMap(), s = new Stroke("raise"), radius = 2, y = 0, from = -800, to = 800;
+  const brush = new HeightStroke([from, y], -HEIGHT_TICK, radius * 64);
+  let now = 0, at = from, n = 0;
+  const stamp = () => { for (const d of brush.tick(now, 16)) applyHeight(t, { x: d.x, y: d.y, radius }, "raise", d.amount, s); };
+  stamp();
   while (at < to) {
-    const next = Math.min(to, at + speedPerMs * ms), points = strokePoints([at, y], [next, y], spacing);
-    for (const [px, py] of points) applyHeight(t, { x: px, y: py, radius }, "raise", heightPerPoint(16, ms, points.length), s);
-    at = next;
+    const step = busy && ++n % 3 === 0 ? ms * 3 : ms;
+    for (let m = 0; m < 5; m++) { at = Math.min(to, at + (speedPerMs * step) / 5); brush.moveTo([at, y]); }
+    now += step;
+    stamp();
   }
   return [...Array(9).keys()].map((i) => groundHeight(t.corners[16 * t.width + 12 + i]));
 }
@@ -80,6 +84,27 @@ test("a quick drag is one even ridge, not bumps", () => {
   const ridge = drag(8, 40);
   assert.ok(Math.min(...ridge) > 0, ridge.join());
   assert.ok(Math.max(...ridge) / Math.min(...ridge) < 1.4, ridge.join());
+});
+
+test("a busy app doesn't leave bumps on a quick drag", () => {
+  const ridge = drag(8, 40, true);
+  assert.ok(Math.min(...ridge) > 0, ridge.join());
+  assert.ok(Math.max(...ridge) / Math.min(...ridge) < 1.4, ridge.join());
+});
+
+test("standing still keeps adding at the same place", () => {
+  const brush = new HeightStroke([100, 100], 0, 128);
+  assert.deepEqual(brush.tick(HEIGHT_TICK, 16), [{ x: 100, y: 100, amount: 16 }]);
+  assert.deepEqual(brush.tick(HEIGHT_TICK * 2, 16), [{ x: 100, y: 100, amount: 16 }]);
+});
+
+test("a stamp only ever goes to the newest place, never back", () => {
+  const brush = new HeightStroke([0, 0], 0, 128);
+  brush.moveTo([50, 0]);
+  brush.moveTo([1000, 0]);
+  const stamps = brush.tick(HEIGHT_TICK, 16);
+  assert.equal(stamps[stamps.length - 1].x, 1000);
+  assert.deepEqual(brush.tick(HEIGHT_TICK * 2, 16).map((d) => d.x), [1000]);
 });
 
 test("a drag adds less the faster it goes, not more", () => {

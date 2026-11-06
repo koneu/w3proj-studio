@@ -190,6 +190,7 @@ async function run() {
       return all.map((e) => ({ id: e.manifest.id, active: e.active, error: e.error ?? null }));
     })()`);
     const commands = await page.evaluate(`w3Workbench.commands.all().map((c) => c.id)`);
+    const titleBarOk = await page.evaluate(`!!document.querySelector(".titlebar .menubar") && !!document.querySelector(".titlebar .titlebar-search") && document.querySelectorAll(".titlebar-button").length === 3 && document.querySelector(".titlebar").getBoundingClientRect().top === 0`);
     const menus = await page.evaluate(`[...document.querySelectorAll(".menubar-item")].map((b) => b.textContent)`);
     await page.evaluate(`document.querySelector(".menubar-item").click()`);
     const fileMenu = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
@@ -217,6 +218,7 @@ async function run() {
     }
     if (commands.length < 20) found.push(`only ${commands.length} commands`);
     if (menus.join() !== "File,Edit,View,Scenario,Module,Tools,Help") found.push(`the menu bar shows ${menus.join()}`);
+    if (!titleBarOk) found.push("the title bar isn't complete, or not at the top");
     if (!fileMenu.some((t) => t.startsWith("New Map"))) found.push("the File menu has no New Map");
     if (!commands.includes("workbench.undo") || !commands.includes("workbench.redo")) found.push("no Undo and Redo commands");
     if (!undoHidden) found.push("the undo buttons show with no editor open");

@@ -7,6 +7,7 @@ import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
 import { menuTree } from "./menus";
+import { TitleBar } from "./titlebar";
 import { EditorService, type OpenEditors } from "./editors";
 import { GAME_SCHEME, GameService } from "./game";
 import { Notifications, Progress } from "./notifications";
@@ -46,6 +47,7 @@ export class Workbench {
   readonly editors: EditorService;
   readonly statusBar: StatusBar;
   private menuBar: MenuBar;
+  private titleBar: TitleBar;
   readonly notifications: Notifications;
   readonly quickInput: QuickInput;
   readonly progress: Progress;
@@ -87,7 +89,10 @@ export class Workbench {
 
     const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
     this.menuBar = new MenuBar(() => menuTree(this.commands.all()), (c) => this.run(c));
-    root.append(this.menuBar.root, main, this.statusBar.root);
+    this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
+    this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking());
+    this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
+    root.append(this.titleBar.root, main, this.statusBar.root);
     this.notifications = new Notifications(root);
     this.quickInput = new QuickInput(root);
 
