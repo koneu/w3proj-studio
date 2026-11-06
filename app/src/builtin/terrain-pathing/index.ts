@@ -7,6 +7,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
+import { pathingOverridesText } from "../../lib/terrain/resize";
 import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
@@ -196,8 +197,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     async save() {
       if (!unsaved || (!fileExists && !overrides.size)) return;
       const cells = [...overrides].sort((a, b) => a[0] - b[0]).map(([i, o]) => [i % W, Math.floor(i / W), o.set, o.clear]);
-      // One cell per line keeps diffs small.
-      const text = `{\n  "format": "${FORMAT}",\n  "width": ${W},\n  "height": ${H},\n  "cells": [${cells.map((c) => `\n    ${JSON.stringify(c)}`).join(",")}${cells.length ? "\n  " : ""}]\n}\n`;
+      const text = pathingOverridesText({ format: FORMAT, width: W, height: H, cells: cells as [number, number, number, number][] });
       await w3.workspace.writeText(FILE, text);
       fileExists = true;
       unsaved = false;

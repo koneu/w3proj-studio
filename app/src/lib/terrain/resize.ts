@@ -81,3 +81,28 @@ export function cameraBounds(t: Terrain, c: Sides): number[] {
 
 /** Playable size in tiles for a terrain and border. */
 export const playableSize = (t: Terrain, c: Sides): [number, number] => [t.width - 1 - c[0] - c[1], t.height - 1 - c[2] - c[3]];
+
+/** The Pathing Editor's overrides (.w3proj/pathing.json): sparse, per 32×32 cell. */
+export interface PathingOverrides { format?: string; width: number; height: number; cells: [number, number, number, number][] }
+
+/** The overrides after `change`: each stays on the same ground cell (cells shift with the
+ *  offset), those on cells that no longer exist are dropped. A file for another size than the
+ *  terrain's (the editor ignores it already) is returned as it is. */
+export function resizePathingOverrides(file: PathingOverrides, t: Terrain, change: Sides): PathingOverrides {
+  if (file.width !== (t.width - 1) * 4 || file.height !== (t.height - 1) * 4) return file;
+  const [w, h] = resizedSize(t, change).map((n) => n * 4);
+  const dx = change[0] * 4, dy = change[2] * 4;
+  const cells: PathingOverrides["cells"] = [];
+  for (const [x, y, set, clear] of file.cells) {
+    const nx = x + dx, ny = y + dy;
+    if (nx >= 0 && nx < w && ny >= 0 && ny < h) cells.push([nx, ny, set, clear]);
+  }
+  cells.sort((a, b) => a[1] * w + a[0] - (b[1] * w + b[0]));
+  return { ...file, width: w, height: h, cells };
+}
+
+/** The file's text, one cell per line to keep diffs small. */
+export function pathingOverridesText(file: PathingOverrides): string {
+  const { cells } = file;
+  return `{\n  "format": "${file.format ?? "w3proj.pathing/1"}",\n  "width": ${file.width},\n  "height": ${file.height},\n  "cells": [${cells.map((c) => `\n    ${JSON.stringify(c)}`).join(",")}${cells.length ? "\n  " : ""}]\n}\n`;
+}

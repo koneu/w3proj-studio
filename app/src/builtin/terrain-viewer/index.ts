@@ -48,7 +48,7 @@ import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } fro
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
-import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, pathingOverridesText, playableSize, resizeGrid, resizePathingOverrides, resizeProblem, resizeTerrain, worldRect, type PathingOverrides, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
@@ -2500,12 +2500,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           const shd = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
           if (shd) await w3.workspace.writeBytes("map/war3map.shd", resizeGrid(shd, terrain, change, 4));
-          // Pathing and minimap from the new terrain. Pathing Editor overrides are by cell, so they
-          // only apply while the size stays.
+          // Pathing and minimap from the new terrain. Pathing Editor overrides are by cell: they move
+          // with the ground (cells that no longer exist go) and are applied to the new pathing here,
+          // since the editor reopens on the new size only afterwards.
           const rf = (p: string) => readFile(w3, doc, p);
           const doodads = dooFile?.list ?? [];
           const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"));
+          const stored = await w3.workspace.readText(".w3proj/pathing.json").then((x) => JSON.parse(x) as PathingOverrides).catch(() => null);
+          // Same size: the tool groups' own filters, as everywhere else.
           if (change.every((c) => c === 0)) filterPathing(wpm);
+          else if (stored && Array.isArray(stored.cells)) {
+            const moved = resizePathingOverrides(stored, terrain, change);
+            if (moved !== stored) await w3.workspace.writeText(".w3proj/pathing.json", pathingOverridesText(moved));
+            if (moved.width === (next.width - 1) * 4 && moved.height === (next.height - 1) * 4) {
+              const cells = wpm.subarray(16);
+              for (const [x, y, set, clear] of moved.cells) cells[y * moved.width + x] = (cells[y * moved.width + x] | set) & ~clear;
+            }
+          }
           await w3.workspace.writeBytes("map/war3map.wpm", wpm);
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
           await updateMinimapIcons(next);
