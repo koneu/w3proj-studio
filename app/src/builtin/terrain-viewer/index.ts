@@ -23,6 +23,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
+import { FIXED_HEIGHT, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -385,6 +386,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
     return entry;
+  };
+
+  /** Doodads past the playable map carry a flag: every one on ladder maps does, and no others. */
+  const markBackdrop = (entry: Placed, x: number, y: number, edge: Area | null) => {
+    if (edge && !inArea(x, y, edge)) (entry as Placed & { flags?: number }).flags = ((entry as Placed & { flags?: number }).flags ?? 2) | OUTSIDE_PLAYABLE;
   };
 
   ctx.subscriptions.push(
@@ -778,6 +784,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         placed = await plan((o, i, x, y, facing) => {
           const entry = add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
           if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
+          else markBackdrop(entry, x, y, edge);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
       });
@@ -827,10 +834,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!isBackdrop(type.kind, twin[0], twin[1], edge, whole) && !(await room.fits(type.kind, id, twin[0], twin[1], twinAngle))) { noRoom++; continue; }
           }
           await room.mark(type.kind, id, spot.x, spot.y, angle);
-          add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random);
+          markBackdrop(add(f, handle, id, spot.x, spot.y, undefined, { facing, scaleRange }, true, random), spot.x, spot.y, edge);
           if (twin) {
             await room.mark(type.kind, id, twin[0], twin[1], twinAngle);
-            add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random);
+            markBackdrop(add(f, handle, id, twin[0], twin[1], undefined, { facing: twinFacing, scaleRange }, true, random), twin[0], twin[1], edge);
           }
           counts.set(id, (counts.get(id) ?? 0) + (twin ? 2 : 1));
         }
@@ -1465,9 +1472,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void rebuildObjects();
         };
         /** Fields the selection panel edits. */
-        type Props = Pick<Placed, "player" | "variation" | "scale" | "position" | "angle">;
+        type Props = Pick<Placed, "player" | "variation" | "scale" | "position" | "angle"> & { flags?: number };
+        const flagsOf = (e: Placed) => (e as Placed & { flags?: number }).flags;
         const snapshot = (e: Placed): Props => structuredClone({
-          ...(e.player !== undefined ? { player: e.player } : {}), variation: e.variation, scale: e.scale, position: e.position, angle: e.angle,
+          ...(e.player !== undefined ? { player: e.player } : {}), ...(flagsOf(e) !== undefined ? { flags: flagsOf(e) } : {}),
+          variation: e.variation, scale: e.scale, position: e.position, angle: e.angle,
         });
         const editProps = (entry: Placed, change: Partial<Props>) => {
           const before = snapshot(entry);
@@ -1547,6 +1556,38 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selectEntries(found);
           if (!found.length) w3.window.showInfo("No objects match.");
           return null;
+        };
+        /** The height of a doodad that has one of its own, which moving it mustn't lose. */
+        const ownHeight = (p: Placed) => (((flagsOf(p) ?? 0) & FIXED_HEIGHT) !== 0 ? p.position[2] : null);
+        /** The World Editor's keys for the selection. Height and size are for doodads and destructables. */
+        const keyEdit = (key: SelectionKey) => {
+          const entries = selectedEntries(), doodads = entries.filter((p) => dooFile?.list.includes(p));
+          if ("rotate" in key) rotateSelected(key.rotate);
+          else if ("nudge" in key) {
+            const before = entries.map(poseOf);
+            for (const p of entries) {
+              const x = p.position[0] + key.nudge[0], y = p.position[1] + key.nudge[1];
+              setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], p.angle);
+            }
+            moveEdits(entries, before);
+          } else if ("raise" in key) {
+            applyMass(doodads, (p) => ({ position: [p.position[0], p.position[1], p.position[2] + key.raise], flags: (flagsOf(p) ?? 2) | FIXED_HEIGHT }));
+          } else applyMass(doodads, (p) => ({ scale: scaled(p.scale, key.scale) }));
+        };
+        /** Ctrl+click: the selection turns to that point. */
+        const faceOnce = (g: Vec3) => {
+          const entries = selectedEntries(), before = entries.map(poseOf);
+          for (const p of entries) setPlacement(p, [...p.position], Math.atan2(g[1] - p.position[1], g[0] - p.position[0]));
+          moveEdits(entries, before);
+        };
+        /** Alt+click: the selection goes there, keeping its shape. */
+        const moveTo = (g: Vec3) => {
+          const entries = selectedEntries(), before = entries.map(poseOf), [ax, ay] = entries[0].position;
+          for (const p of entries) {
+            const x = p.position[0] + g[0] - ax, y = p.position[1] + g[1] - ay;
+            setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], p.angle);
+          }
+          moveEdits(entries, before);
         };
         /** "Face point": the selection turns toward the pointer until a click (apply) or Esc. */
         let facing: { entries: Placed[]; before: Pose[] } | null = null;
@@ -1846,8 +1887,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const rect = canvas.getBoundingClientRect();
           const ray = renderer.ray(e.clientX - rect.left, e.clientY - rect.top);
           const inst = renderer.pickObject(ray, pickRadius);
-          // Ctrl+click adds or removes an object.
-          if (e.ctrlKey || e.metaKey) {
+          // Shift+click adds or removes an object, as in the World Editor; so does Ctrl+click with nothing
+          // selected yet, when it has no point to face.
+          if (e.shiftKey || e.ctrlKey || e.metaKey) {
             if (!inst?.pick) return;
             const cur = selectedEntries(), entry = inst.pick.placed;
             selectEntries(cur.includes(entry) ? cur.filter((p) => p !== entry) : [...cur, entry]);
@@ -2308,6 +2350,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             endFacing(e.button === 0);
             return;
           }
+          if (e.button === 0 && editable && !activeGroup && selectedEntries().length && (e.ctrlKey || e.metaKey || e.altKey)) {
+            const g = groundAt(e);
+            if (g) {
+              e.preventDefault();
+              if (e.altKey) moveTo(g); else faceOnce(g);
+              refreshGroupRings();
+              return;
+            }
+          }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
             const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius) : null;
@@ -2340,7 +2391,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const dx = p[0] - objDrag.anchor[0], dy = p[1] - objDrag.anchor[1];
               objDrag.entries.forEach((entry, i) => {
                 const [x, y] = objDrag!.before[i].position;
-                setPlacement(entry, [x + dx, y + dy, heightAt(terrain, x + dx, y + dy)], entry.angle);
+                setPlacement(entry, [x + dx, y + dy, ownHeight(entry) ?? heightAt(terrain, x + dx, y + dy)], entry.angle);
               });
               refreshGroupRings();
             }
@@ -2370,6 +2421,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }
+          const edit = editable && !activeGroup && selectedEntries().length ? selectionKey(e) : null;
+          if (edit) { e.preventDefault(); keyEdit(edit); return; }
           const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
           if (!d) return;
           e.preventDefault();

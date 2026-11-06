@@ -22,7 +22,7 @@
       { "name": "scale", "type": "f32", "count": 3 },
       { "name": "skinId", "type": "id", "if": "version >= 12 || (version == 8 && skinIds)" },
       { "name": "preFlags", "type": "u32", "if": "version >= 12", "doc": "3.0; -1 in all samples" },
-      { "name": "flags", "type": "u8", "doc": "bit 0 invisible, bit 1 visible, bit 2 fixed z" },
+      { "name": "flags", "type": "u8", "doc": "bit 0 outside the playable map, bit 1 visible, bit 2 fixed z" },
       { "name": "life", "type": "u8", "doc": "percent" },
       { "name": "itemTable", "type": "i32", "if": "version >= 8", "doc": "map item table index, -1 none" },
       { "name": "itemSets", "type": "list", "count": "u32", "if": "version >= 8", "item":
