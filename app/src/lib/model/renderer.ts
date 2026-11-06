@@ -3,6 +3,8 @@
 // Particles, ribbons and texture animations are not drawn.
 
 import { FOG_FS, FOG_VS, setFog, type Fog } from "./fog";
+import type { DecodedImage } from "../image/index";
+import { createTexture } from "./gltexture";
 import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
@@ -278,12 +280,6 @@ export function compile(gl: WebGL2RenderingContext, vs: string, fs: string): Web
 
 // ------------------------------------------------------------------ GPU model
 
-export interface DecodedTexture {
-  width: number;
-  height: number;
-  rgba: Uint8ClampedArray;
-}
-
 interface GpuGeoset {
   vao: WebGLVertexArrayObject;
   indexCount: number;
@@ -366,17 +362,6 @@ function shared(gl: WebGL2RenderingContext): Shared {
 
 /** Uploads a decoded image with mipmaps. `flags` is the MDX texture's: bit 0
  *  wraps width, bit 1 wraps height. */
-export function uploadTexture(gl: WebGL2RenderingContext, img: DecodedTexture, flags: number): WebGLTexture {
-  const t = gl.createTexture()!;
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, img.width, img.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(img.rgba.buffer, img.rgba.byteOffset, img.rgba.byteLength));
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, flags & 1 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, flags & 2 ? gl.REPEAT : gl.CLAMP_TO_EDGE);
-  return t;
-}
-
 export type DrawPass = "opaque" | "blended" | "all";
 
 export interface DrawOptions {
@@ -700,8 +685,9 @@ export class ModelRenderer {
     return this.gpu.texturePaths();
   }
 
-  setTexture(i: number, img: DecodedTexture) {
-    this.gpu.textures[i] = uploadTexture(this.gl, img, this.model.textures[i].flags);
+  setTexture(i: number, img: DecodedImage) {
+    const { flags } = this.model.textures[i];
+    this.gpu.textures[i] = createTexture(this.gl, img, { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
   }
 
   private makeGrid() {
@@ -781,8 +767,10 @@ export class ModelRenderer {
     this.particleRenderer ??= new ParticleRenderer(this.gl);
   }
 
-  setEffectTexture(i: number, img: DecodedTexture) {
-    if (this.effectModel) this.effectTextures[i] = uploadTexture(this.gl, img, this.effectModel.textures[i].flags);
+  setEffectTexture(i: number, img: DecodedImage) {
+    if (!this.effectModel) return;
+    const { flags } = this.effectModel.textures[i];
+    this.effectTextures[i] = createTexture(this.gl, img, { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
   }
 
   /** Particles alive now (0 without emitters). */

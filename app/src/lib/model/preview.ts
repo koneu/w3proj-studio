@@ -96,7 +96,7 @@ export class ModelPreview {
     this.note.textContent = "";
     r.texturePaths().forEach((p, i) => {
       if (!p) return;
-      this.read(p).then((buf) => { if (this.renderer === r) r.setTexture(i, decodeImage(buf, p).mip(0)); }, () => {});
+      this.read(p).then((buf) => { if (this.renderer === r) r.setTexture(i, decodeImage(buf, p)); }, () => {});
     });
   }
 

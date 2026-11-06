@@ -68,7 +68,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const load = textureLoader(w3, { path: "game:War3.w3mod:" } as EditorDocument);
               sd.textures.forEach((t, i) => {
                 if (t.replaceableId !== 0 || !t.path) return;
-                load(t.path).then((buf) => renderer.setEffectTexture(i, decodeImage(buf, t.path).mip(0)), () => {});
+                load(t.path).then((buf) => renderer.setEffectTexture(i, decodeImage(buf, t.path)), () => {});
               });
             }
           } catch { /* no classic copy */ }
@@ -111,8 +111,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const row = h("div.model-row", { title: label }, h("span.model-dot.pending", {}, "●"), h("span", {}, label));
             if (paths[i]) {
               load(paths[i]!).then((buf) => {
-                const img = decodeImage(buf, paths[i]!).mip(0);
-                renderer.setTexture(i, img);
+                renderer.setTexture(i, decodeImage(buf, paths[i]!));
                 row.firstElementChild!.className = "model-dot ok";
               }).catch((e) => {
                 row.firstElementChild!.className = "model-dot missing";
