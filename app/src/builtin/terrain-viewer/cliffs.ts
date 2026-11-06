@@ -83,6 +83,14 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
         // bottom 0,3) for 2×1 pieces, a column (left 0,1 or right 2,3) for 1×2.
         const ramps = outer.map((c, i) => (c.ramp ? i : -1)).filter((i) => i >= 0).join("");
         if (!(bw === 2 ? ramps === "12" || ramps === "03" : ramps === "01" || ramps === "23")) continue;
+        // A side piece for a ramp running straight past it: the ramp's row flagged all along, the far side
+        // not, and level with the ramp's low end in the middle (it falls high, low, low). Others are where a
+        // ramp ends on a bent cliff, where the piece leaves a hole here: an ordinary cliff meets its
+        // neighbours. This only decides what the view draws, the map keeps its flags.
+        const middle = bw === 2 ? [corner(bx + 1, by), corner(bx + 1, by + 1)] : [corner(bx, by + 1), corner(bx + 1, by + 1)];
+        const [near, far] = ramps === "03" || ramps === "01" ? middle : [middle[1], middle[0]];
+        const low = Math.min(...outer.filter((c) => c.ramp).map((c) => c.layer));
+        if (!near.ramp || far.ramp || near.layer !== low) continue;
         const type = list[outer[0].cliffTexture] ?? list[0];
         if (!type?.rampModelDir) continue;
         const path = `Doodads\\Terrain\\${type.rampModelDir}\\${type.rampModelDir}${name}0.mdx`;

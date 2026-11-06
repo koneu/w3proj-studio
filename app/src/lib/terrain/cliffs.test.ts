@@ -120,50 +120,24 @@ const bend = () => land([
   "222222222222222",
 ].concat([]));
 
-test("a small brush stops once the cliff runs straight, a big one goes further", () => {
-  const steep = land([
-    "33333333333333333333",
-    "33333333333333333333",
-    "33333333333333333322",
-    "33333333332222222222",
-    "33333333322222222222",
-    "33333333222222222222",
-    "22222222222222222222",
-    "22222222222222222222",
-    "22222222222222222222",
-  ]);
-  const small = slopeBand(steep, 8, 3, 1), whole = slopeBand(steep, 8, 3, 30);
-  assert.ok(small.length >= 4 && small.length < whole.length, `${small.length} of ${whole.length}`);
-});
-
-test("with no straight stretch to end on, a ramp goes the whole way round", () => {
+test("the band stays inside the brush, and a drag paints the rest", () => {
   const cells = ring.map((r) => r.match(/\d\*?/g) as string[]);
   const flat = () => land(cells.map((r) => r.map((c) => c[0]).join("")));
-  assert.equal(slopeBand(flat(), 3, 6, 1).length, slopeBand(flat(), 3, 6, 20).length);
+  const small = slopeBand(flat(), 3, 6, 2);
+  assert.ok(small.length >= 4 && small.length < slopeBand(flat(), 3, 6, 20).length);
+  for (const [x, y] of small) assert.ok(Math.abs(x - 3) <= 3 && Math.abs(y - 6) <= 3, `${x},${y}`);
+  const t = flat();
+  for (const at of [2, 6, 10]) for (const [x, y] of slopeBand(t, 3, at, 2)) t.corners[y * t.width + x].ramp = true;
+  assert.ok(t.corners.filter((c) => c.ramp).length > small.length);
 });
 
 test("one click takes off a long ramp, however far it runs", () => {
   const t = bend();
-  for (const [x, y] of slopeBand(t, 7, 4, 1)) t.corners[y * t.width + x].ramp = true;
+  for (const [x, y] of slopeBand(t, 7, 4, 3)) t.corners[y * t.width + x].ramp = true;
   const flagged = t.corners.filter((c) => c.ramp);
   assert.ok(flagged.length > 10);
   assert.equal(toggleRamp(t, 7.5 * 128, 4.5 * 128, 1, log, true), null);
   assert.equal(t.corners.some((c) => c.ramp), false, ramps(t).join("\n"));
-});
-
-test("with no straight stretch at all, a ramp goes the whole way round", () => {
-  // A diamond: nothing but diagonal edges.
-  const diamond = () => land([
-    "22222222",
-    "22233222",
-    "22333322",
-    "23333332",
-    "23333332",
-    "22333322",
-    "22233222",
-    "22222222",
-  ]);
-  assert.equal(slopeBand(diamond(), 2, 2, 1).length, slopeBand(diamond(), 2, 2, 20).length);
 });
 
 test("on a long cliff the ramp ends at the first straight stretch past the bend, not at the far end of the map", () => {

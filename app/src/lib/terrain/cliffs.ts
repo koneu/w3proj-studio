@@ -139,15 +139,10 @@ export function toggleRamp(t: Terrain, wx: number, wy: number, halfWidth: number
 
 }
 
-/** Tiles in a line a ramp needs to end on. */
-const STRAIGHT_RUN = 4;
-
 /** A ramp on a cliff that bends, as the World Editor flags one: every corner of the cliff tiles, and the low
  *  ground one step further. Measured on a ramp it built right round a plateau and one along a diagonal: 135 of
- *  138 corners. It covers the cliff within `reach` corners of corner (cx, cy), and goes on along the slope to the
- *  next straight stretch: only there can a ramp end, as side pieces exist for nothing else, and one that stops
- *  on the bend leaves a hole. Round a plateau with no straight edge that's the whole way round. Empty if
- *  there's no one-level cliff here. */
+ *  138 corners. It covers the cliff within `reach` corners of corner (cx, cy) and no further: a drag paints the
+ *  rest. Empty if there's no one-level cliff here. */
 export function slopeBand(t: Terrain, cx: number, cy: number, reach: number): [number, number][] {
   const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? t.corners[y * t.width + x] : null);
   const levels = (tx: number, ty: number) => [at(tx, ty), at(tx + 1, ty), at(tx, ty + 1), at(tx + 1, ty + 1)].map((c) => c?.layer ?? -1);
@@ -159,27 +154,9 @@ export function slopeBand(t: Terrain, cx: number, cy: number, reach: number): [n
   if (!start) return [];
   const lo = hi - 1;
   const cliffTile = (tx: number, ty: number) => { const ls = levels(tx, ty); return ls.includes(hi) && ls.includes(lo) && ls.every((l) => l === hi || l === lo); };
-  /** Which way the tile's edge runs, if straight: its corners fall one way, two high and two low. */
-  const heading = (tx: number, ty: number) => {
-    const [bl, br, tl, tr] = levels(tx, ty);
-    return bl === br && tl === tr && bl !== tl ? "east" : bl === tl && br === tr && bl !== br ? "north" : "";
-  };
-  // Along the cliff from the click, first come first served. Past the brush a walk ends after STRAIGHT_RUN
-  // tiles in a line: a side piece is two long and needs the cliff to go on straight behind it.
   const tiles = new Set<number>();
   const key = (x: number, y: number) => y * t.width + x;
-  const todo: [number, number, string, number][] = [[start[0], start[1], "", 0]];
-  while (todo.length) {
-    const [x, y, way, run] = todo.shift()!;
-    if (tiles.has(key(x, y))) continue;
-    tiles.add(key(x, y));
-    const inBrush = Math.abs(x - cx) <= reach && Math.abs(y - cy) <= reach;
-    const here = heading(x, y), next = here && here === way ? run + 1 : here ? 1 : 0;
-    if (!inBrush && next >= STRAIGHT_RUN) continue;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      if ((dx || dy) && cliffTile(x + dx, y + dy)) todo.push([x + dx, y + dy, here, next]);
-    }
-  }
+  for (let y = cy - reach; y < cy + reach; y++) for (let x = cx - reach; x < cx + reach; x++) if (cliffTile(x, y)) tiles.add(key(x, y));
   const onCliff = (x: number, y: number) => tiles.has(key(x, y)) || tiles.has(key(x - 1, y)) || tiles.has(key(x, y - 1)) || tiles.has(key(x - 1, y - 1));
   const lowEdge = (x: number, y: number) => at(x, y)?.layer === lo && onCliff(x, y);
   const out: [number, number][] = [];
