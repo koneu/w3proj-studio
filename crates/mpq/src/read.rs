@@ -355,3 +355,43 @@ fn decompress(buf: &[u8], expected: usize, block_flags: u32) -> Result<Vec<u8>> 
     }
     Ok(cur)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The writer never makes Huffman or ADPCM sectors, so nothing reaches those decoders unless a
+    /// test aims at them: random damage to a fixture only does by luck, and loses that luck
+    /// whenever the fixture changes. This proves they survive bad data, not that they decode
+    /// sound correctly: only the corpus has real sectors of these kinds.
+    #[test]
+    fn huffman_and_adpcm_sectors_survive_any_data() {
+        let mut state = 0x9e37_79b9_u32;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state
+        };
+        for mask in [0x01u8, 0x40, 0x80, 0x41, 0x81] {
+            let (mut ok, mut refused) = (0, 0);
+            for round in 0..4000 {
+                let len = 1 + next() as usize % (64 << (round % 5));
+                let mut sector = vec![mask];
+                // A few low-entropy rounds too: long runs walk other paths than noise.
+                let spread = if round % 3 == 0 { 8 } else { 256 };
+                sector.extend((0..len).map(|_| (next() % spread) as u8));
+                let expected = 1 + next() as usize % 8192;
+                match decompress(&sector, expected, 0) {
+                    Ok(out) => {
+                        assert_eq!(out.len(), expected, "mask {mask:#x}: wrong sector size came through");
+                        ok += 1;
+                    }
+                    Err(_) => refused += 1,
+                }
+            }
+            assert!(refused > 0, "mask {mask:#x}: nothing was refused, so nothing reached the decoder");
+            println!("mask {mask:#04x}: {ok} decoded, {refused} refused");
+        }
+    }
+}
