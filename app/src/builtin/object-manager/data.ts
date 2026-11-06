@@ -1,6 +1,7 @@
 // What the Object Manager lists: the map's contents by type, and which
 // triggers use each thing (generated globals gg_…, object codes, variables).
 
+import { ownerOf } from "../../lib/terrain/owner";
 import { placedName, ident, type PlacedJson } from "../../lib/script/jass";
 import type { TriggerFile } from "../../lib/triggers/wtg";
 
@@ -29,7 +30,7 @@ export interface Node {
 type Placed = PlacedJson & { position: number[]; player?: number };
 
 const NEUTRAL: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Victim", 26: "Neutral Extra", 27: "Neutral Passive" };
-const owner = (p?: number) => (p === undefined ? "" : NEUTRAL[p] ?? `Player ${p + 1}`);
+const owner = (player?: number) => { const p = ownerOf(player); return p === undefined ? "" : NEUTRAL[p] ?? `Player ${p + 1}`; };
 const at = (p: Placed) => `(${Math.round(p.position[0])}, ${Math.round(p.position[1])})`;
 
 /** What object data holds per object (field values are strings, ints, reals). */

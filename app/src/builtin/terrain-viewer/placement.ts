@@ -4,6 +4,7 @@
 // the raw file by the backend (`codec_write`).
 
 import type { W3Api } from "../../extensions/api";
+import { placedText, splitOwners } from "../../lib/terrain/owner";
 import type { Placed } from "./objects";
 
 export interface PlacedFile {
@@ -28,12 +29,13 @@ export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "
   const doc = JSON.parse(text) as Record<string, unknown>;
   const list = (doc[key] ?? []) as Placed[];
   doc[key] = list;
+  splitOwners(list);
   return { name, key, doc, list, json, dirty: false };
 }
 
 export async function savePlacedFile(w3: W3Api, f: PlacedFile): Promise<void> {
   const root = w3.workspace.project()!.root, path = `map/${f.name}`;
-  const text = JSON.stringify(f.doc);
+  const text = placedText(f.doc);
   if (f.json) {
     // Canonical formatting keeps diffs minimal (and validates by encoding).
     const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text });
@@ -78,6 +80,8 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   const simple = (e: Entry) => e.randomType === undefined || e.randomType === 0;
   const template = list.find((e) => e.id === id && simple(e)) ?? list.find((e) => e.id !== "sloc" && simple(e)) ?? list.find(simple) ?? blankEntry(f);
   const e = structuredClone(template) as Entry;
+  // A new unit isn't placed uprooted because the one it's copied from was.
+  delete e.playerFlags;
   const nextOf = (get: (x: Entry) => unknown) => 1 + Math.max(-1, ...list.map((x) => Number(get(x)) || 0).filter((n) => n < UNSET));
   Object.assign(e, { id, variation: 0, position, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });
   if ("skinId" in e) e.skinId = id;

@@ -1,5 +1,6 @@
 // What's placed on a map, as the MCP tool tells about it.
 
+import { ownerOf } from "../../lib/terrain/owner";
 import { inArea, type Area } from "../../lib/terrain/area";
 
 export interface PlacedThing { id: string; position: number[]; angle: number; player?: number; life?: number; hp?: number }
@@ -18,9 +19,9 @@ export function placedTypes(all: PlacedThing[], names: Names) {
 export function placedList(all: PlacedThing[], names: Names, id?: string, player?: number, area?: Area | null) {
   return all
     .map((p, index) => ({ p, index }))
-    .filter(({ p }) => (id === undefined || p.id === id) && (player === undefined || p.player === player - 1) && (!area || inArea(p.position[0], p.position[1], area)))
+    .filter(({ p }) => (id === undefined || p.id === id) && (player === undefined || ownerOf(p.player) === player - 1) && (!area || inArea(p.position[0], p.position[1], area)))
     .map(({ p, index }) => ({
       index, id: p.id, name: names.get(p.id), position: p.position, angle: p.angle,
-      ...(p.player !== undefined ? { player: p.player + 1 } : {}),
+      ...(p.player !== undefined ? { player: ownerOf(p.player) + 1 } : {}),
     }));
 }

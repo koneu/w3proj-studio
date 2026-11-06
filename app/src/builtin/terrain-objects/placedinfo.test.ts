@@ -31,3 +31,9 @@ test("doodads have no owner, and don't get one", () => {
   const got = placedList([at("ATtr")], names, "ATtr");
   assert.equal("player" in got[0], false);
 });
+
+test("an Ancient placed uprooted still belongs to its owner", () => {
+  const all: PlacedThing[] = [{ id: "eaow", position: [0, 0, 0], angle: 0, player: 0x10001 }];
+  const [e] = placedList(all, new Map(), undefined, 2) as unknown as { player: number }[];
+  assert.equal(e.player, 2);
+});

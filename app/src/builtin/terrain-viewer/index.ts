@@ -18,6 +18,7 @@ import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from 
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -203,9 +204,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (text === null) throw new Error(`This project has no ${name}.`);
       const doc = JSON.parse(text) as Record<string, unknown>;
       const list = (doc[key] ??= []) as Placed[];
+      splitOwners(list);
       before = key === "doodads" ? structuredClone(list) : [];
       await change({ name, key, doc, list, json: true, dirty: false });
-      return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+      return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
     }, async () => {
       const t = opened?.handle.terrain;
       if (t && key === "doodads") rebuildSoon(() => ({ terrain: { ...t, corners: t.corners.map((c) => ({ ...c })) }, doodads: before }));

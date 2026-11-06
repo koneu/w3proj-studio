@@ -45,3 +45,9 @@ test("an empty unit file takes a unit, with hero fields only where the layout ha
   assert.ok("strength" in sub11 && "itemTable" in sub11);
   assert.equal(sub11.level, 1);
 });
+
+test("a new unit copied from an uprooted Ancient isn't uprooted", () => {
+  const ancient = { id: "eaow", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1], player: 1, playerFlags: 0x10000 } as Placed;
+  const e = newEntry(file("units", 8, 11, {}, [ancient]), "eaow", [64, 0, 0]) as unknown as Record<string, unknown>;
+  assert.equal("playerFlags" in e, false);
+});
