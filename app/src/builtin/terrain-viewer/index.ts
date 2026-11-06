@@ -17,7 +17,7 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
-import { loadPlacedFile, newEntry, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
@@ -737,7 +737,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
       /** Works out what fits; `place` then puts it there. A dry run doesn't mark what it finds, since
        *  that would stay in the editor's map of what's taken: objects in it can overlap each other. */
-      const plan = async (place: ((o: typeof wanted[number], i: number, x: number, y: number, facing: number) => void) | null) => {
+      const plan = async (place: ((o: typeof wanted[number], i: number, x: number, y: number, facing: number) => Promise<void>) | null) => {
         skipped.length = shifted.length = 0;
         const room = ignoreRoom === true ? null : await handle.objects.occupancy();
         let placed = 0;
@@ -770,11 +770,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             continue;
           }
           if (place) {
-            place(o, i, spot[0], spot[1], facing);
+            await place(o, i, spot[0], spot[1], facing);
             // A line's pieces touch each other on purpose.
             if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
             if (paired) {
-              place(o, i, twin[0], twin[1], twinFacing);
+              await place(o, i, twin[0], twin[1], twinFacing);
               if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
             }
           }
@@ -785,8 +785,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (dryRun === true) return { wouldPlace: await plan(null), shifted, skipped };
       let placed = 0;
       await editPlaced(`Place ${wanted.length} object${wanted.length === 1 ? "" : "s"}`, key, async (f) => {
-        placed = await plan((o, i, x, y, facing) => {
-          const entry = add(f, handle, o.id as string, x, y, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
+        placed = await plan(async (o, i, x, y, facing) => {
+          const [atX, atY] = key === "units" ? await handle.objects.buildingSpot(o.id as string, x, y) : [x, y];
+          const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
           if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
           else markBackdrop(entry, x, y, edge);
         });
@@ -1356,6 +1357,40 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Splats\UberSplatData.slk, once read; splat textures asked for. */
         let splatTable: Promise<Map<string, SplatDef>> | null = null;
         const splatImages = new Set<string>();
+        /** The ground marks, from where the buildings are now. */
+        const showSplats = async () => {
+          if (!objCtx) return;
+          const { skins, bases } = objCtx;
+          const table = await (splatTable ??= loadSplatTable(w3).catch(() => new Map<string, SplatDef>()));
+          const splats = planSplats(unitsFile?.list ?? [], skins, table, (id) => bases.get(id));
+          renderer.setSplats(splats.map((s) => ({ x: s.x, y: s.y, scale: s.def.scale, texture: s.def.texture, blend: s.def.blend, color: s.def.color })));
+          for (const tex of new Set(splats.map((s) => s.def.texture))) {
+            if (splatImages.has(tex.toLowerCase())) continue;
+            splatImages.add(tex.toLowerCase());
+            readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex).mip(0)); redraw(); }, () => {});
+          }
+          redraw();
+        };
+        /** Set while a redraw of the marks is on its way: a drag moves a building many times a frame. */
+        let splatsDue = false;
+        const moveSplats = () => {
+          if (splatsDue) return;
+          splatsDue = true;
+          requestAnimationFrame(() => { splatsDue = false; void showSplats(); });
+        };
+        /** Pathing texture size of each unit type met so far, null for those without: buildings have one. */
+        const buildingCells = new Map<string, [number, number] | null>();
+        const loadCells = async (id: string) => {
+          if (buildingCells.has(id) || id === "sloc") return;
+          pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (x) => objCtx?.bases.get(x));
+          const data = await pathingData, shape = data.unitShape(id);
+          const image = shape?.path ? await data.texture(shape.path).catch(() => null) : null;
+          buildingCells.set(id, image ? [image.width, image.height] : null);
+        };
+        const onGrid = (id: string, x: number, y: number): [number, number] => {
+          const cells = buildingCells.get(id);
+          return cells ? [onBuildingGrid(x, cells[0]), onBuildingGrid(y, cells[1])] : [x, y];
+        };
         async function rebuildObjects() {
           if (!objCtx) return;
           const { skins, bases } = objCtx;
@@ -1366,17 +1401,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const others = renderer.batches.filter((b) => b.group !== "doodads" && b.group !== "units");
           renderer.batches.length = 0;
           renderer.batches.push(...others, ...d.batches, ...u.batches);
-          // Buildings' ground marks.
-          void (splatTable ??= loadSplatTable(w3).catch(() => new Map<string, SplatDef>())).then((table) => {
-            const splats = planSplats(units, skins, table, baseOf);
-            renderer.setSplats(splats.map((s) => ({ x: s.x, y: s.y, scale: s.def.scale, texture: s.def.texture, blend: s.def.blend, color: s.def.color })));
-            for (const tex of new Set(splats.map((s) => s.def.texture))) {
-              if (splatImages.has(tex.toLowerCase())) continue;
-              splatImages.add(tex.toLowerCase());
-              readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex).mip(0)); redraw(); }, () => {});
-            }
-            redraw();
-          });
+          void showSplats();
+          for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.
           renderer.setMarkers("doodads", d.unresolved.map((p) => marker(p, [90, 200, 90])));
           renderer.setMarkers("units", u.unresolved.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
@@ -1461,10 +1487,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Objects placed or moved since the last save: saving sets their border flag. Others keep what they have. */
         const repositioned = new Set<Placed>();
         /** Moves/turns an entry and its model in place (no rebuild). */
-        const setPlacement = (entry: Placed, position: [number, number, number], angle: number) => {
+        const setPlacement = (entry: Placed, wanted: [number, number, number], angle: number) => {
           const inst = findInstance(entry);
+          const [gx, gy] = onGrid(entry.id, wanted[0], wanted[1]);
+          const position: [number, number, number] = gx === wanted[0] && gy === wanted[1] ? wanted : [gx, gy, heightAt(terrain, gx, gy)];
           const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1], dz = position[2] - entry.position[2];
-          if (dx || dy) repositioned.add(entry);
+          if (dx || dy) {
+            repositioned.add(entry);
+            if (skinOf(entry)?.uberSplat) moveSplats();
+          }
           entry.position = position;
           entry.angle = angle;
           objectsTouched = true;
@@ -1491,8 +1522,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const apply = (poses: Pose[]) => { entries.forEach((e, i) => setPlacement(e, [...poses[i].position], poses[i].angle)); refreshGroupRings(); };
           pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });
         };
-        /** Sets the border flag of what was placed or moved, from where it ended up. */
-        const markBorder = async () => {
+        /** Sets the border flag of what was placed or moved, from where it ended up, and puts any building
+         *  that got past the keys and the mouse on its grid: typed coordinates and the "Edit all" fields. */
+        const settleMoved = async () => {
+          for (const p of unitsFile?.list ?? []) {
+            if (!repositioned.has(p)) continue;
+            const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
+            if (x !== p.position[0] || y !== p.position[1]) p.position = [x, y, heightAt(terrain, x, y)];
+          }
           if (!dooFile || !repositioned.size) return;
           const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
           if (!info) return;
@@ -1613,7 +1650,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else if ("nudge" in key) {
             const before = entries.map(poseOf);
             for (const p of entries) {
-              const x = p.position[0] + key.nudge[0], y = p.position[1] + key.nudge[1];
+              // The building grid is twice as fine as a nudge: half a step would round back one way.
+              const step = buildingCells.get(p.id) ? 2 : 1;
+              const x = p.position[0] + key.nudge[0] * step, y = p.position[1] + key.nudge[1] * step;
               setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], p.angle);
             }
             moveEdits(entries, before);
@@ -1686,7 +1725,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Where an object of the fragment lands, null if that's off the map. */
         const pasteSpot = (o: FragmentObject, g: Vec3): [number, number, number] | null => {
-          const [cx, cy] = pasteCentre(pasting as Fragment, g), x = cx + o.at[0], y = cy + o.at[1];
+          const [cx, cy] = pasteCentre(pasting as Fragment, g);
+          const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [cx + o.at[0], cy + o.at[1]];
           if (!inArea(x, y, wholeMap(handle))) return null;
           const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0, ground = heightAt(terrain, x, y);
           return [x, y, fixed ? ground + o.at[2] : ground];
@@ -1716,6 +1756,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pasteModels = [];
           const what = [...(f.ground ? [`${f.ground.width - 1} × ${f.ground.height - 1} tiles`] : []), ...(f.objects.length || !f.ground ? [`${f.objects.length} object${f.objects.length === 1 ? "" : "s"}`] : [])];
           selInfo.textContent = `Pasting ${what.join(" and ")}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
+          // The clipboard may come from another map, with buildings this one hasn't met.
+          for (const id of new Set(f.objects.filter((o) => o.list === "units").map((o) => String(o.entry.id)))) void loadCells(id).catch(() => { /* stays free */ });
           void Promise.all(f.objects.slice(0, MAX_GHOSTS).map(async (o) => {
             const skin = skinOf(o.entry as unknown as Placed);
             if (!skin) return null;
@@ -2340,6 +2382,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return entry;
             },
             list: () => [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])],
+            buildingSpot: async (id, x, y) => { await loadCells(id).catch(() => { /* stays free */ }); return onGrid(id, x, y); },
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             update: () => {
               objectsTouched = true;
@@ -2916,7 +2959,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const w3e = writeW3e(terrain);
             await writeTerrainBytes(doc.path, w3e, doc);
             if (objectsTouched) {
-              await markBorder();
+              await settleMoved();
               for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
               // Placed, moved or deleted start locations add, move or remove the map's players.
               if (unitsFile) {

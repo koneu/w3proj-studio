@@ -56,12 +56,13 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const type = ed.objects.type(id);
     const angle = type?.fixedRot != null ? deg(type.fixedRot) : deg(270);
     let ok = true;
+    const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, g[0], g[1]) : g;
     if (respect()) {
       const occ = await ed.objects.occupancy();
-      ok = ed.objects.backdrop(kind, g[0], g[1]) || await occ.fits(kind, id, g[0], g[1], angle);
+      ok = ed.objects.backdrop(kind, x, y) || await occ.fits(kind, id, x, y, angle);
     }
     if (seq !== ghostSeq) return;
-    ed.objects.setGhost({ id, x: g[0], y: g[1], angle, player: kind === "w3u" ? owner : undefined, ok });
+    ed.objects.setGhost({ id, x, y, angle, player: kind === "w3u" ? owner : undefined, ok });
   };
 
   const START = { kind: "w3u", id: "sloc", name: "Start Location" };
@@ -102,11 +103,12 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const spots: { x: number; y: number; angle: number }[] = [];
     if (!stroke) {
       const angle = facing();
-      if (respect() && fp && !ed.objects.backdrop(kind, pos[0], pos[1]) && !(await occ!.fits(kind, id, pos[0], pos[1], angle))) {
+      const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, pos[0], pos[1]) : pos;
+      if (respect() && fp && !ed.objects.backdrop(kind, x, y) && !(await occ!.fits(kind, id, x, y, angle))) {
         w3.window.showWarning(`No room for ${name} here (its footprint overlaps blocked ground or another object). Turn off "Respect pathing" to place it anyway.`);
         return;
       }
-      spots.push({ x: pos[0], y: pos[1], angle });
+      spots.push({ x, y, angle });
     } else {
       // A jittered grid over the brush, spaced by the footprint (wider at lower density).
       const density = Math.min(1, Math.max(0.05, w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1));
@@ -118,7 +120,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           if (Math.hypot(x - pos[0], y - pos[1]) > radius) continue;
           const angle = facing();
           // Snap to the pathing grid like the World Editor (cell centres for trees).
-          const sx = Math.round(x / 32) * 32, sy = Math.round(y / 32) * 32;
+          const [sx, sy] = kind === "w3u" ? await ed.objects.buildingSpot(id, Math.round(x / 32) * 32, Math.round(y / 32) * 32) : [Math.round(x / 32) * 32, Math.round(y / 32) * 32];
           if (fp) {
             if (respect()) {
               if (!ed.objects.backdrop(kind, sx, sy) && !(await occ!.fits(kind, id, sx, sy, angle))) continue;

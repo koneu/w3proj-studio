@@ -209,6 +209,8 @@ export interface TerrainObjects {
   remove(entries: PlacedEntry[]): void;
   /** Footprints against blocked ground and placed objects (rebuilt after edits). */
   occupancy(): Promise<TerrainOccupancy>;
+  /** Where a unit type lands near a point: buildings go on the building grid, others stay. */
+  buildingSpot(id: string, x: number, y: number): Promise<[number, number]>;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a

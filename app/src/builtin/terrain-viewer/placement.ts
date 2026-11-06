@@ -119,3 +119,10 @@ export function pastedEntry(f: PlacedFile, copied: { entry: Record<string, unkno
   made.angle = copied.angle;
   return made;
 }
+
+/** The building grid: a building's edges lie on the 64 grid, so a 6×6 one stands at 32 past it and an
+ *  8×8 one on it. All 251 buildings on 14 real maps do. `cells` is its pathing texture's side. */
+export const onBuildingGrid = (v: number, cells: number) => {
+  const half = cells * 16;
+  return Math.round((v - half) / 64) * 64 + half;
+};

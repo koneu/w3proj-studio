@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { newEntry, pastedEntry, type PlacedFile } from "./placement";
+import { newEntry, onBuildingGrid, pastedEntry, type PlacedFile } from "./placement";
 import type { Placed } from "./objects";
 
 const file = (key: "doodads" | "units", version: number, subversion: number, more: Record<string, unknown> = {}, list: Placed[] = []): PlacedFile =>
@@ -89,4 +89,13 @@ test("a pasted unit stays its owner's", () => {
   f.list.push(newEntry(f, "hfoo", [0, 0, 0], 1));
   const e = pastedEntry(f, { entry: { id: "hfoo", player: 3 }, angle: 0 }, [64, 0, 0]);
   assert.equal(e.player, 3);
+});
+
+test("buildings stand where real maps have them: their edges on the 64 grid", () => {
+  // Footprints and spots measured on 14 maps: 8, 12 and 16 on the grid, 6 at 32 past it.
+  for (const cells of [4, 8, 12, 16]) assert.equal(((onBuildingGrid(1000, cells) % 64) + 64) % 64, 0, `${cells} cells`);
+  for (const cells of [2, 6, 10]) assert.equal(((onBuildingGrid(1000, cells) % 64) + 64) % 64, 32, `${cells} cells`);
+  assert.equal(onBuildingGrid(-1000, 8) % 64, -0);
+  for (const cells of [4, 6, 8, 12]) assert.equal(onBuildingGrid(onBuildingGrid(777, cells), cells), onBuildingGrid(777, cells), "stays put");
+  assert.ok(Math.abs(onBuildingGrid(100, 6) - 100) <= 32, "the nearest spot");
 });
