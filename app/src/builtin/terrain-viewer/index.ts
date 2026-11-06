@@ -23,7 +23,7 @@ import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
-import { FIXED_HEIGHT, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
+import { FIXED_HEIGHT, isObjectEditorKey, isRecallKey, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -1695,7 +1695,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ]),
             row("Model", p.model),
             h("div.terrain-sel-actions", {},
-              h("button", { onclick: () => w3.commands.execute("w3.objectEditor.open", p.kind, p.id).catch((e) => w3.window.showError(String(e))) }, "Open in Object Editor"),
+              h("button", { title: "Ctrl+F1", onclick: () => openObject(p.kind, p.id) }, "Open in Object Editor"),
               ...(editable ? [h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete")] : [])),
             h("div.terrain-sel-actions.wrap", {},
               h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
@@ -1705,7 +1705,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setSelection(ringOf(inst));
           redraw();
         };
+        const openObject = (kind: string, id: string) => {
+          w3.commands.execute("w3.objectEditor.open", kind, id).catch((e) => w3.window.showError(String(e)));
+        };
+        /** What was selected before the selection was cleared, for Space. */
+        let lastSelected: Placed[] = [];
         const clearSelection = () => {
+          const was = selectedEntries();
+          if (was.length) lastSelected = was;
           selected = null;
           group = [];
           selInfo.className = "terrain-selection muted";
@@ -1790,7 +1797,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return h("div.terrain-sel-row", {}, h("span.muted", {}, `${c.n} ×`), name,
               h("button.icon-button.terrain-sel-open", {
                 title: `Open ${c.id} in the Object Editor`,
-                onclick: () => w3.commands.execute("w3.objectEditor.open", c.kind, c.id).catch((e) => w3.window.showError(String(e))),
+                onclick: () => openObject(c.kind, c.id),
               }, "↗"));
           }), ...(rows.length > shown.length ? [h("div.muted", {}, `… ${rows.length - shown.length} more types`)] : []));
           // Owner for all selected units at once.
@@ -2415,6 +2422,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
+          if (isRecallKey(e) && !activeGroup) {
+            e.preventDefault();
+            if (e.repeat || facing) return;
+            if (selectedEntries().length) clearSelection(); else selectEntries(lastSelected);
+            return;
+          }
+          if (isObjectEditorKey(e)) {
+            e.preventDefault();
+            const pick = selectedEntries().map(findInstance)[0]?.pick;
+            if (pick) openObject(pick.kind, pick.id);
+            return;
+          }
           if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); rotateSelected(e.key === "[" ? 15 : -15); return; }

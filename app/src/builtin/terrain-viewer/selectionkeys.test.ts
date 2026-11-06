@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { scaled, selectionKey } from "./selectionkeys";
+import { isObjectEditorKey, isRecallKey, scaled, selectionKey } from "./selectionkeys";
 
 const press = (key: string, more: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
   selectionKey({ key, code: more.code ?? "", ctrlKey: false, metaKey: false, altKey: false, ...more });
@@ -35,6 +35,21 @@ test("plain arrows and everything else stay out of it", () => {
   assert.equal(press("a"), null);
   assert.equal(press("z", { ctrlKey: true }), null, "undo isn't ours");
   assert.equal(press("PageUp", { altKey: true }), null);
+});
+
+test("Space alone recalls the selection", () => {
+  const keys = { key: " ", code: "Space", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isRecallKey(keys), true);
+  assert.equal(isRecallKey({ ...keys, ctrlKey: true }), false);
+  assert.equal(isRecallKey({ ...keys, shiftKey: true }), false);
+  assert.equal(isRecallKey({ ...keys, key: "a" }), false);
+});
+
+test("Ctrl+F1 is the Object Editor, plain F1 isn't", () => {
+  const keys = { key: "F1", code: "F1", ctrlKey: true, metaKey: false, altKey: false };
+  assert.equal(isObjectEditorKey(keys), true);
+  assert.equal(isObjectEditorKey({ ...keys, ctrlKey: false }), false);
+  assert.equal(isObjectEditorKey({ ...keys, altKey: true }), false);
 });
 
 test("a size has a floor, and no drift from adding fractions", () => {

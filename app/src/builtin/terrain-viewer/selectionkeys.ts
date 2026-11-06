@@ -33,6 +33,14 @@ export function selectionKey(e: Keys): SelectionKey | null {
   return null;
 }
 
+type PlainKeys = Keys & { shiftKey: boolean };
+
+/** Space alone: selects the last selected object, or deselects. */
+export const isRecallKey = (e: PlainKeys) => e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+
+/** Ctrl+F1: the selection in the Object Editor. */
+export const isObjectEditorKey = (e: Keys) => e.key === "F1" && (e.ctrlKey || e.metaKey) && !e.altKey;
+
 /** A scale after a step, never so small the object is gone. */
 export const scaled = (scale: readonly number[], step: readonly number[]): [number, number, number] =>
   [0, 1, 2].map((i) => Math.round(Math.max(0.05, (scale[i] ?? 1) + step[i]) * 1000) / 1000) as [number, number, number];
