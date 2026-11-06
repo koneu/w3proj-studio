@@ -10,9 +10,9 @@ import { HEIGHT_TICK, HeightStroke, strokePoints } from "../../lib/terrain/strok
 import { groundHeight, waterLevelAt, WATER_OFFSET } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
-import { applyHeight, applyLayer, matchCliffTypes, paintBlight, paintTexture, Stroke, toggleRamp, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
+import { applyHeight, applyLayer, matchCliffTypes, paintBlight, paintBoundary, paintTexture, Stroke, toggleRamp, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
-type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "select";
+type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "boundary" | "unboundary" | "select";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
 const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
 
@@ -27,6 +27,7 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
   ["Paint", [
     ["paint", "Paint", "Paint a ground texture"],
     ["blight", "Blight", "Paint Undead blight"], ["unblight", "Unblight", "Remove blight"],
+    ["boundary", "Boundary", "Make tiles unplayable, as past the map's edge: nothing walks there, doodads can stand there"], ["unboundary", "No boundary", "Remove Boundary"],
   ]],
   ["Cliffs", [
     ["cliffUp", "+1", "Raise a cliff level (one above where the stroke starts)"],
@@ -48,7 +49,7 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
 const BRUSH_COLORS: Record<Tool, [number, number, number]> = {
   raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
   cliffUp: [255, 200, 120], cliffUp2: [255, 180, 90], cliffLevel: [240, 220, 160], cliffDown: [220, 140, 80], cliffDown2: [200, 110, 60], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
-  ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160], select: [255, 255, 255],
+  ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160], boundary: [120, 120, 130], unboundary: [220, 220, 230], select: [255, 255, 255],
 };
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -78,6 +79,8 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       ? paintTexture(terrain, brush, paintTex, stroke.s)
       : tool === "blight" || tool === "unblight"
       ? paintBlight(terrain, brush, tool === "blight", stroke.s)
+      : tool === "boundary" || tool === "unboundary"
+      ? paintBoundary(terrain, brush, tool === "boundary", stroke.s)
       : isLayerTool(tool)
       ? applyLayer(terrain, brush, tool, stroke.layer, stroke.s)
       : applyHeight(terrain, brush, tool as HeightTool, tool === "plateau" ? stroke.target : amount, stroke.s);

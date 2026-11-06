@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { groundHeight, parseW3e, setGroundHeight, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { HEIGHT_TICK, heightPerPoint, HeightStroke } from "../../lib/terrain/strokepath";
-import { applyHeight, applyLayer, matchCliffTypes, paintTexture, Stroke } from "./tools";
+import { applyHeight, applyLayer, matchCliffTypes, paintBoundary, paintTexture, Stroke } from "./tools";
 
 /** A flat 32×32 Lordaeron Summer map covered in grass (Lgrs), cliff level 2, cliff types unset
  *  (15), as the World Editor's New Map makes it. */
@@ -37,6 +37,27 @@ function layers(t: Terrain): string {
   }
   return rows.join("\n");
 }
+
+test("Boundary paints as a stroke of its own, leaves the ground, and comes off again", () => {
+  const t = flatMap(), ground = t.corners.map((c) => [c.texture, c.rawHeight, c.layer, c.rawWater]);
+  const brush = { x: 0, y: 0, radius: 2, square: true };
+  const s = new Stroke("boundary");
+  assert.equal(paintBoundary(t, brush, true, s), true);
+  assert.equal(s.finish(t), true, "a stroke of nothing but Boundary counts as a change");
+  const painted = t.corners.filter((c) => c.boundary).length;
+  assert.ok(painted > 0);
+  assert.deepEqual(t.corners.map((c) => [c.texture, c.rawHeight, c.layer, c.rawWater]), ground);
+  assert.equal(parseW3e(writeW3e(t)).corners.filter((c) => c.boundary).length, painted, "it's in the file");
+  s.undo(t);
+  assert.equal(t.corners.some((c) => c.boundary), false);
+  s.redo(t);
+  assert.equal(t.corners.filter((c) => c.boundary).length, painted);
+  const off = new Stroke("unboundary");
+  assert.equal(paintBoundary(t, brush, false, off), true);
+  assert.equal(off.finish(t), true);
+  assert.equal(t.corners.some((c) => c.boundary), false);
+  assert.equal(paintBoundary(t, brush, false, new Stroke("unboundary")), false, "nothing left to take off");
+});
 
 test("square and round cliff brushes, and undo", () => {
   const t = flatMap();

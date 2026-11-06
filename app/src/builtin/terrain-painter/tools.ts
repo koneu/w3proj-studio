@@ -72,7 +72,7 @@ export class Stroke {
     for (const i of this.before.keys()) this.after.set(i, { ...t.corners[i] });
     for (const [i, b] of this.before) {
       const a = this.after.get(i)!;
-      if (a.rawHeight !== b.rawHeight || a.texture !== b.texture || a.variation !== b.variation || a.ramp !== b.ramp || a.blight !== b.blight
+      if (a.rawHeight !== b.rawHeight || a.texture !== b.texture || a.variation !== b.variation || a.ramp !== b.ramp || a.blight !== b.blight || a.boundary !== b.boundary
         || a.layer !== b.layer || a.hasWater !== b.hasWater || a.rawWater !== b.rawWater || a.cliffTexture !== b.cliffTexture) return true;
     }
     return false;
@@ -159,6 +159,19 @@ export function paintTexture(t: Terrain, b: Brush, tex: number, stroke: Stroke):
 }
 
 /** Adds (on) or removes blight under the brush. */
+/** Paints or removes Boundary: the World Editor's unplayable tiles, a flag that leaves the ground as it is. */
+export function paintBoundary(t: Terrain, b: Brush, on: boolean, stroke: Stroke): boolean {
+  let changed = false;
+  for (const { i } of cornersIn(t, b)) {
+    const c = t.corners[i];
+    if (c.boundary === on) continue;
+    stroke.touch(t, i);
+    c.boundary = on;
+    changed = true;
+  }
+  return changed;
+}
+
 export function paintBlight(t: Terrain, b: Brush, on: boolean, stroke: Stroke): boolean {
   let changed = false;
   for (const { i } of cornersIn(t, b)) {

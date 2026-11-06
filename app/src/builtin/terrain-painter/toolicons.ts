@@ -17,6 +17,8 @@ const PATHS: Record<string, string> = {
   dry: "M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2M12 8a4 4 0 1 0 .01 0",
   blight: "M4 18c2-7 14-7 16 0zM8 12L7 8M12 10.5V6M16 12l1-4",
   unblight: "M4 18c2-7 14-7 16 0zM3 3l18 18",
+  boundary: "M4 4h16v16H4zM4 12h16M12 4v16",
+  unboundary: "M4 4h16v16H4zM3 3l18 18",
   ramp: "M2 20h6l8-8h6",
 };
 
