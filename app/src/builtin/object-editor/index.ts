@@ -9,7 +9,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession } from "./wtssession";
+import { WtsSession, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -295,7 +295,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const keyOf = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
         const restore = (s: string) => {
           const keys = new Set([...selection].map(keyOf)), anchor = selected ? keyOf(selected) : null;
-          const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: Record<number, string> };
+          const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: WtsSnapshot };
           file.custom = d.custom;
           file.original = d.original;
           if (hasWts) wts.restore(d.wts);
