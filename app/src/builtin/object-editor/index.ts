@@ -9,6 +9,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
+import { WtsSession } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -233,13 +234,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const optInts = OPT_INTS.has(kind);
 
         // The map's string table: TRIGSTR_n values show (and edit) their text in war3map.wts.
-        let savedWts = await w3.workspace.readText("map/war3map.wts").catch(() => null);
-        let table = new StringTable(savedWts ?? "");
+        const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        const wts = new WtsSession(wtsText ?? "");
+        const hasWts = wtsText !== null;
         const trigRef = (v: unknown) => {
           const n = typeof v === "string" ? StringTable.ref(v) : null;
-          return n !== null && table.has(n) ? n : null;
+          return n !== null && wts.table.has(n) ? n : null;
         };
-        const resolveStr = (v: unknown) => { const n = trigRef(v); return n === null ? null : table.get(n)!; };
+        const resolveStr = (v: unknown) => { const n = trigRef(v); return n === null ? null : wts.table.get(n)!; };
 
         // Game knowledge; until it loads (or without a game install) the
         // editor shows only the modifications, with raw ids.
@@ -277,7 +279,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let saved = "";
         // Undo/redo: every change ends in markDirty, which records the whole file (snapshots;
         // object data files are small). Restoring maps the selection back by id.
-        const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: table.serialize() });
+        const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: wts.snapshot() });
         const history = [snapshot()];
         let at = 0;
         const record = () => {
@@ -288,15 +290,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           at = history.length - 1;
         };
         /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
-        const isDirty = () => serialize() !== saved || (savedWts !== null && table.serialize() !== savedWts);
+        const isDirty = () => serialize() !== saved || (hasWts && wts.dirty);
         const markDirty = () => { record(); doc.setDirty(isDirty()); };
         const keyOf = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
         const restore = (s: string) => {
           const keys = new Set([...selection].map(keyOf)), anchor = selected ? keyOf(selected) : null;
-          const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: string };
+          const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: Record<number, string> };
           file.custom = d.custom;
           file.original = d.original;
-          if (savedWts !== null) table = new StringTable(d.wts);
+          if (hasWts) wts.restore(d.wts);
           const all = [...file.custom, ...file.original];
           selection = new Set(all.filter((o) => keys.has(keyOf(o))));
           selected = all.find((o) => keyOf(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
@@ -405,7 +407,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, listMenu());
         });
         const copySelection = () => {
-          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : table.get(ref) ?? null; };
+          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
           clipboard[kind] = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
         };
         /** New custom objects from what was copied, each with the next free id. Copied from another
@@ -562,10 +564,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A string kept in war3map.wts: the text itself is edited (shared by everything using it).
           const ref = mixed || type !== "string" ? null : trigRef(current);
           if (ref !== null) {
-            const text = table.get(ref) ?? "";
+            const text = wts.table.get(ref) ?? "";
             const input = h(`input.obj-value${inherited ? ".inherited" : ""}`, {
               value: text, title: `Text of TRIGSTR_${ref} in war3map.wts (every use of this string changes)`,
-              onchange: () => { table.set(ref, input.value); markDirty(); renderDetail(); },
+              onchange: () => { wts.set(ref, input.value); markDirty(); renderDetail(); },
             });
             return h("div.obj-value-cell", {}, input, h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
           }
@@ -1043,7 +1045,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const path = await w3.window.pickSaveFile({ title: `Export ${kindInfo?.label ?? kind}`, defaultPath: `${kindInfo?.label ?? kind}.${kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });
           if (!path) return;
           // Its own texts: references to this map's string table mean nothing in another.
-          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : table.get(ref) ?? null; };
+          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
           const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, text)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
@@ -1106,14 +1108,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (isNew && !exists()) await w3.workspace.refresh();
             // Edited strings go to war3map.wts, merged onto the file as it is now (other editors
             // may have saved strings meanwhile; only changed blocks are rewritten).
-            if (savedWts !== null && table.serialize() !== savedWts) {
-              const base = savedWts;
-              const current = await w3.workspace.readText("map/war3map.wts").catch(() => base);
-              const merged = StringTable.merge(base, table, current);
-              if (merged !== current) await w3.workspace.writeText("map/war3map.wts", merged);
-              savedWts = merged;
-              table = new StringTable(merged);
-            }
+            if (hasWts) await wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t));
             saved = serialize();
             doc.setDirty(false);
             w3.views.refresh("w3.objects.kinds");
