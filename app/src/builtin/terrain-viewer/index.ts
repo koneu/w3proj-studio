@@ -24,7 +24,7 @@ import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableA
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
-import { centreOf, fragmentOf, snapped, turnAngle, turnFragment, turnOffset, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
+import { centreOf, fragmentOf, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -1651,9 +1651,42 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           clipboard = fragmentOf(entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry })), (x, y) => heightAt(terrain, x, y));
           return true;
         };
+        /** The block of ground Ctrl+C takes. */
+        let terrainArea: (CornerArea & { objects: boolean }) | null = null;
+        /** The area drawn on the ground, as one overlay: the Terrain tab's selection, or what's being pasted. */
+        let areaShown = "";
+        const drawArea = (a: CornerArea | null) => {
+          const key = a ? `${a.x0},${a.y0},${a.x1},${a.y1}` : "";
+          if (key === areaShown) return;
+          areaShown = key;
+          if (!a) { renderer.setGroundOverlay(null); redraw(); return; }
+          const W = terrain.width - 1, H = terrain.height - 1, rgba = new Uint8Array(W * H * 4);
+          for (let y = Math.max(0, a.y0); y < Math.min(H, a.y1); y++) for (let x = Math.max(0, a.x0); x < Math.min(W, a.x1); x++) {
+            const edge = x === a.x0 || y === a.y0 || x === a.x1 - 1 || y === a.y1 - 1;
+            rgba.set([255, 255, 255, edge ? 110 : 45], (y * W + x) * 4);
+          }
+          renderer.setGroundOverlay(rgba, W, H);
+          redraw();
+        };
+        const setArea = (a: typeof terrainArea) => { terrainArea = a; drawArea(a); };
+        /** A block of ground, with what stands on it if so chosen. */
+        const copyArea = (a: NonNullable<typeof terrainArea>) => {
+          const worldX = (x: number) => terrain.offsetX + x * 128, worldY = (y: number) => terrain.offsetY + y * 128;
+          const centre = centreOf([[worldX(a.x0), worldY(a.y0)], [worldX(a.x1), worldY(a.y1)]]);
+          const inside = { left: worldX(a.x0), right: worldX(a.x1), bottom: worldY(a.y0), top: worldY(a.y1) };
+          const items = !a.objects ? [] : ([["doodads", dooFile], ["units", unitsFile]] as const).flatMap(([list, f]) => (f?.list ?? [])
+            .filter((p) => p.id !== "sloc" && inArea(p.position[0], p.position[1], inside)).map((entry) => ({ list, entry })));
+          clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), centre), ground: groundOf(terrain, a, centre) };
+        };
+        /** Where the fragment's centre lands for a pointer on the ground: ground goes on whole tiles. */
+        const pasteCentre = (f: Fragment, g: Vec3): [number, number] => {
+          if (!f.ground) return [snapped(g[0]), snapped(g[1])];
+          const [x, y] = groundOrigin(terrain, f.ground, g[0], g[1]);
+          return [terrain.offsetX + x * 128 - f.ground.at[0], terrain.offsetY + y * 128 - f.ground.at[1]];
+        };
         /** Where an object of the fragment lands, null if that's off the map. */
         const pasteSpot = (o: FragmentObject, g: Vec3): [number, number, number] | null => {
-          const x = snapped(g[0]) + o.at[0], y = snapped(g[1]) + o.at[1];
+          const [cx, cy] = pasteCentre(pasting as Fragment, g), x = cx + o.at[0], y = cy + o.at[1];
           if (!inArea(x, y, wholeMap(handle))) return null;
           const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0, ground = heightAt(terrain, x, y);
           return [x, y, fixed ? ground + o.at[2] : ground];
@@ -1662,6 +1695,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pasteAt = g;
           const f = pasting;
           if (!f) return;
+          if (f.ground) {
+            const [x, y] = groundOrigin(terrain, f.ground, g[0], g[1]);
+            drawArea({ x0: x, y0: y, x1: x + f.ground.width - 1, y1: y + f.ground.height - 1 });
+          }
           renderer.ghosts = pasteModels.flatMap((m, i) => {
             const o = f.objects[i], position = pasteSpot(o, g);
             if (!m || !position) return [];
@@ -1677,7 +1714,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           clearSelection();
           const f = pasting = clipboard;
           pasteModels = [];
-          selInfo.textContent = `Pasting ${f.objects.length} object${f.objects.length === 1 ? "" : "s"}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
+          const what = [...(f.ground ? [`${f.ground.width - 1} × ${f.ground.height - 1} tiles`] : []), ...(f.objects.length || !f.ground ? [`${f.objects.length} object${f.objects.length === 1 ? "" : "s"}`] : [])];
+          selInfo.textContent = `Pasting ${what.join(" and ")}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
           void Promise.all(f.objects.slice(0, MAX_GHOSTS).map(async (o) => {
             const skin = skinOf(o.entry as unknown as Placed);
             if (!skin) return null;
@@ -1694,11 +1732,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pasting = null;
           pasteModels = [];
           renderer.ghosts = [];
+          drawArea(null);
           clearSelection();
         };
-        const placePaste = (g: Vec3) => {
+        /** This map's number for each of the ground's tiles, adding those it lacks. Null where it's full. */
+        const tileNumbers = async (ids: readonly string[], used: ReadonlySet<number>) => {
+          const out: number[] = [];
+          for (let i = 0; i < ids.length; i++) out[i] = used.has(i) ? await handle.ensureGroundTile(ids[i]).then((n) => n ?? -1) : 0;
+          return out;
+        };
+        const placeGround = async (f: Fragment, g: Vec3) => {
+          const ground = f.ground;
+          if (!ground) return null;
+          const tiles = await tileNumbers(ground.tiles, new Set(ground.corners.map((c) => c.texture)));
+          const full = tiles.filter((n) => n < 0).length;
+          if (full) void w3.window.showWarning(`This map can't take ${full} more ground tile${full === 1 ? "" : "s"}; its first tile stands in.`);
+          const cliffs = ground.cliffs.map((id) => Math.max(0, terrain.cliffTiles.indexOf(id)));
+          return stampGround(terrain, ground, groundOrigin(terrain, ground, g[0], g[1]), tiles.map((n) => Math.max(0, n)), cliffs);
+        };
+        const placePaste = async (g: Vec3) => {
           const f = pasting;
           if (!f) return;
+          const stamped = await placeGround(f, g);
+          // Ground and objects are one undo step, and objects stand on the new ground.
+          keyPress = "first";
+          if (stamped?.corners.length) commitTerrain({ ...stamped, cliffs: true });
+          keyPress = "repeat";
+          try { placeObjects(f, g); } finally { keyPress = null; }
+        };
+        const placeObjects = (f: Fragment, g: Vec3) => {
           const added: { entry: Placed; f: PlacedFile }[] = [];
           let off = 0;
           for (const o of f.objects) {
@@ -1730,9 +1792,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (turn && editable && !activeGroup && selectedEntries().length) { if (!e.repeat) turnSelection(turn); return true; }
           if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
           const key = e.key.toLowerCase();
+          if (key === "c" && terrainArea) { copyArea(terrainArea); return true; }
           if (key === "c") return copySelection();
           if (key === "x") {
-            if (!editable || !copySelection()) return false;
+            if (terrainArea || !editable || !copySelection()) return false;
             deleteEntries(copyable());
             return true;
           }
@@ -2216,6 +2279,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const handle: TerrainEditorHandle = {
           terrain, editable, redraw, host: el, resizeMap,
           terrainChanged: () => { renderer.terrainChanged(); doc.setDirty(true); redraw(); },
+          setArea,
           commitTerrain,
           tilesets: () => loadTilesets(w3).then((d) => d.sets.map((s) => ({ id: s.id, name: s.name, tiles: s.tiles.map((t) => t.id) }))),
           setTileset: (id) => {
@@ -2525,7 +2589,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (pasting && e.button === 0) {
             e.preventDefault();
             const g = groundAt(e);
-            if (g) placePaste(g);
+            if (g) void placePaste(g);
             return;
           }
           const gi = activeInst();

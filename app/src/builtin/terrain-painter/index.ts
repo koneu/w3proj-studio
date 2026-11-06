@@ -1,6 +1,7 @@
 // Terrain Painter: the terrain brushes as a tool group of the terrain editor
 // (service "w3.terrain"): height, ground textures, cliffs, water, blight, ramps.
 
+import type { CornerArea } from "../../lib/terrain/fragment";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseSlk } from "../../lib/formats/text";
@@ -11,7 +12,7 @@ import { h } from "../../workbench/dom";
 import { toolIcon } from "./toolicons";
 import { applyHeight, applyLayer, matchCliffTypes, paintBlight, paintTexture, Stroke, toggleRamp, type HeightTool, type LayerTarget, type LayerTool } from "./tools";
 
-type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight";
+type Tool = HeightTool | LayerTool | "paint" | "ramp" | "blight" | "unblight" | "select";
 const LAYER_TOOLS: Tool[] = ["cliffUp", "cliffUp2", "cliffLevel", "cliffDown", "cliffDown2", "shallow", "deep", "dry"];
 const isLayerTool = (t: Tool): t is LayerTool => LAYER_TOOLS.includes(t);
 
@@ -22,6 +23,7 @@ const MAX_GROUND_TILES = 16;
 
 /** The toolbar's sections and their tools: [tool, label, tooltip]. */
 const SECTIONS: [string, [Tool, string, string][]][] = [
+  ["Area", [["select", "Select", "Drag over the ground, then Ctrl+C to copy it. Esc clears it"]]],
   ["Paint", [
     ["paint", "Paint", "Paint a ground texture"],
     ["blight", "Blight", "Paint Undead blight"], ["unblight", "Unblight", "Remove blight"],
@@ -46,7 +48,7 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
 const BRUSH_COLORS: Record<Tool, [number, number, number]> = {
   raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
   cliffUp: [255, 200, 120], cliffUp2: [255, 180, 90], cliffLevel: [240, 220, 160], cliffDown: [220, 140, 80], cliffDown2: [200, 110, 60], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
-  ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160],
+  ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160], select: [255, 255, 255],
 };
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -225,7 +227,27 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const cliffWrap = h("label.terrain-tool-opt", { title: "Which cliff new cliffs get" }, "Cliff type ", cliffSelect);
   const strengthWrap = h("label.terrain-tool-opt", { title: "How fast the ground rises or sinks at the brush's centre, while the button is held" }, "Strength ",
     h("input", { type: "range", min: "2", max: "64", value: String(strength), oninput: (e: Event) => { strength = Number((e.target as HTMLInputElement).value); } }));
+  // The block of ground being selected: where the drag began, and the tile the pointer is on.
+  let selecting: { from: [number, number] } | null = null;
+  let withObjects = true;
+  let area: CornerArea | null = null;
+  const tileAt = (g: readonly number[]): [number, number] => [
+    Math.max(0, Math.min(terrain.width - 2, Math.floor((g[0] - terrain.offsetX) / 128))),
+    Math.max(0, Math.min(terrain.height - 2, Math.floor((g[1] - terrain.offsetY) / 128))),
+  ];
+  const showArea = () => ed.setArea(area && { ...area, objects: withObjects });
+  const areaTo = (g: readonly number[]) => {
+    if (!selecting) return;
+    const [ax, ay] = selecting.from, [bx, by] = tileAt(g);
+    area = { x0: Math.min(ax, bx), y0: Math.min(ay, by), x1: Math.max(ax, bx) + 1, y1: Math.max(ay, by) + 1 };
+    showArea();
+  };
+  const clearArea = () => { area = null; selecting = null; showArea(); };
+  const objectsBox = h("input", { type: "checkbox", checked: true, onchange: () => { withObjects = objectsBox.checked; showArea(); ed.focus(); } });
+  const objectsWrap = h("label.terrain-tool-opt", { title: "Copy the units, items and doodads standing on the area along with its ground" }, objectsBox, " With objects");
   const setTool = (t: Tool) => {
+    if (t !== "select") clearArea();
+    objectsWrap.hidden = t !== "select";
     tool = t;
     for (const [k, b] of buttons) b.classList.toggle("active", k === t);
     texWrap.hidden = t !== "paint";
@@ -251,17 +273,22 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     h("label.terrain-tool-opt", { title: "Brush shape (not for ramps)" }, "Shape ",
       h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
         h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
-    strengthWrap, cliffWrap, texWrap),
+    strengthWrap, cliffWrap, texWrap, objectsWrap),
     tilePanel,
   );
   setTool("paint");
 
   return {
     toolbar,
-    deactivate() { endStroke(); ed.setBrush(null); },
+    deactivate() { endStroke(); ed.setBrush(null); clearArea(); },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       const g = p.ground;
+      if (tool === "select") {
+        selecting = { from: tileAt(g) };
+        areaTo(g);
+        return true;
+      }
       if (tool === "ramp") {
         const s = new Stroke("ramp");
         const problem = toggleRamp(terrain, g[0], g[1], size, s);
@@ -289,13 +316,19 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       void start();
       return true;
     },
+    keyDown(e) {
+      if (e.key !== "Escape" || !area) return false;
+      clearArea();
+      return true;
+    },
     pointerMove(p) {
+      if (tool === "select") { if (p.down && p.ground) areaTo(p.ground); return; }
       ed.setBrush(p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: BRUSH_COLORS[tool], square: square && tool !== "ramp" } : null);
       // Re-apply while held, a few times per second.
       if (p.down && stroke?.height && p.ground) stroke.height.moveTo([p.ground[0], p.ground[1]]);
       else if (p.down && stroke && p.ground && performance.now() - stroke.last > HEIGHT_TICK) applyAt(p.ground);
     },
-    pointerUp() { endStroke(); },
+    pointerUp() { selecting = null; endStroke(); },
     pointerLeave() { if (!stroke) ed.setBrush(null); },
     changed(what) {
       // Tile list edits (and their undo) change the palette and the panel.
