@@ -33,7 +33,7 @@ test("adding on the left and bottom moves the offset, not the world position", (
   assert.deepEqual(r.corners[r.width + 1], terrain(3, 3).corners[0]);
 });
 
-import { resizePathingOverrides, type PathingOverrides } from "./resize";
+import { applyPathingOverrides, pathingOverridesText, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
 
 // A 64×64-tile map is 256×256 pathing cells.
 const file = (t: Terrain, cells: PathingOverrides["cells"]): PathingOverrides => ({ format: "w3proj.pathing/1", width: (t.width - 1) * 4, height: (t.height - 1) * 4, cells });
@@ -90,4 +90,44 @@ test("pathing overrides: growing and shrinking back brings them back", () => {
 test("pathing overrides: a file for another size is left alone", () => {
   const t = big(), f = { ...file(t, [[1, 1, 1, 0]]), width: 100 };
   assert.deepEqual(resizePathingOverrides(f, t, [32, 0, 0, 0]), f);
+});
+
+test("pathing overrides: malformed cells leave the file untouched instead of throwing", () => {
+  const t = big();
+  for (const cells of [[null], [5], [[1, 2, 3]], [[1, 2, "a", 0]], "x"]) {
+    const f = { format: "w3proj.pathing/1", width: 256, height: 256, cells } as unknown as PathingOverrides;
+    assert.equal(resizePathingOverrides(f, t, [32, 0, 0, 0]), f);
+    assert.equal(applyPathingOverrides(new Uint8Array(16 + 256 * 256), f, t), false);
+  }
+});
+
+test("pathing overrides: the text parses back, even with a format that needs escaping", () => {
+  const f = { format: 'a"b\c', width: 4, height: 4, cells: [[1, 2, 3, 4]] } as PathingOverrides;
+  assert.deepEqual(JSON.parse(pathingOverridesText(f)), f);
+  assert.deepEqual(JSON.parse(pathingOverridesText({ ...f, cells: [] })).cells, []);
+});
+
+test("pathing overrides: the cell under a fixed world point follows the real offset", () => {
+  const changes: Sides[] = [[32, 0, 0, 0], [0, 0, 32, 0], [-32, 0, 0, 0], [0, 0, -32, 0], [32, -32, 0, 0], [-32, 64, 32, -32]];
+  for (const change of changes) {
+    const t = big(), after = resizeTerrain(t, change);
+    // World point of the middle of old cell (cx, cy); it must stay in the cell the file moved it to.
+    const [cx, cy] = [150, 140];
+    const wx = t.offsetX + cx * 32 + 16, wy = t.offsetY + cy * 32 + 16;
+    const nx = Math.floor((wx - after.offsetX) / 32), ny = Math.floor((wy - after.offsetY) / 32);
+    const r = resizePathingOverrides(file(t, [[cx, cy, 1, 0]]), t, change);
+    const inside = nx >= 0 && ny >= 0 && nx < (after.width - 1) * 4 && ny < (after.height - 1) * 4;
+    assert.deepEqual(r.cells, inside ? [[nx, ny, 1, 0]] : [], change.join());
+  }
+});
+
+test("applying moved overrides to the new wpm: only the new terrain's size matches", () => {
+  const t = big(), change: Sides = [32, 0, 0, 0], next = resizeTerrain(t, change);
+  const moved = resizePathingOverrides(file(t, [[3, 4, 8, 0]]), t, change);
+  const wpm = new Uint8Array(16 + 384 * 256);
+  assert.equal(applyPathingOverrides(wpm, moved, t), false, "the old terrain doesn't match the moved file");
+  assert.ok(wpm.every((b) => b === 0));
+  assert.equal(applyPathingOverrides(wpm, moved, next), true);
+  assert.equal(wpm[16 + 4 * 384 + 131], 8);
+  assert.equal(wpm.reduce((n, b) => n + (b ? 1 : 0), 0), 1);
 });

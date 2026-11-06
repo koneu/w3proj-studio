@@ -85,10 +85,18 @@ export const playableSize = (t: Terrain, c: Sides): [number, number] => [t.width
 /** The Pathing Editor's overrides (.w3proj/pathing.json): sparse, per 32×32 cell. */
 export interface PathingOverrides { format?: string; width: number; height: number; cells: [number, number, number, number][] }
 
+/** Whether a parsed pathing.json has the shape the editor writes: sizes and `[x, y, set, clear]` numbers. */
+export function validPathingOverrides(file: unknown): file is PathingOverrides {
+  const f = file as Partial<PathingOverrides> | null;
+  return !!f && typeof f === "object" && Number.isInteger(f.width) && Number.isInteger(f.height) && Array.isArray(f.cells)
+    && f.cells.every((c) => Array.isArray(c) && c.length === 4 && c.every((n) => Number.isInteger(n)));
+}
+
 /** The overrides after `change`: each stays on the same ground cell (cells shift with the
  *  offset), those on cells that no longer exist are dropped. A file for another size than the
  *  terrain's (the editor ignores it already) is returned as it is. */
 export function resizePathingOverrides(file: PathingOverrides, t: Terrain, change: Sides): PathingOverrides {
+  if (!validPathingOverrides(file)) return file;
   if (file.width !== (t.width - 1) * 4 || file.height !== (t.height - 1) * 4) return file;
   const [w, h] = resizedSize(t, change).map((n) => n * 4);
   const dx = change[0] * 4, dy = change[2] * 4;
@@ -104,5 +112,17 @@ export function resizePathingOverrides(file: PathingOverrides, t: Terrain, chang
 /** The file's text, one cell per line to keep diffs small. */
 export function pathingOverridesText(file: PathingOverrides): string {
   const { cells } = file;
-  return `{\n  "format": "${file.format ?? "w3proj.pathing/1"}",\n  "width": ${file.width},\n  "height": ${file.height},\n  "cells": [${cells.map((c) => `\n    ${JSON.stringify(c)}`).join(",")}${cells.length ? "\n  " : ""}]\n}\n`;
+  return `{\n  "format": ${JSON.stringify(file.format ?? "w3proj.pathing/1")},\n  "width": ${file.width},\n  "height": ${file.height},\n  "cells": [${cells.map((c) => `\n    ${JSON.stringify(c)}`).join(",")}${cells.length ? "\n  " : ""}]\n}\n`;
+}
+
+/** Applies the overrides to a wpm (16-byte header, then one byte per cell) of terrain `t`.
+ *  Returns false, changing nothing, when the file isn't valid or is for another size than `t`. */
+export function applyPathingOverrides(wpm: Uint8Array, file: unknown, t: Terrain): boolean {
+  if (!validPathingOverrides(file) || file.width !== (t.width - 1) * 4 || file.height !== (t.height - 1) * 4) return false;
+  const cells = wpm.subarray(16);
+  for (const [x, y, set, clear] of file.cells) {
+    const i = y * file.width + x;
+    if (x >= 0 && x < file.width && y >= 0 && y < file.height && i < cells.length) cells[i] = (cells[i] | set) & ~clear;
+  }
+  return true;
 }
