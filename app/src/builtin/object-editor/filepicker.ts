@@ -121,7 +121,7 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
     let all: FileEntry[] = [];
     let shown: FileEntry[] = [];
     let active = 0;
-    /** The folder listed, "" for all of them; which ones show their subfolders. */
+    /** The folder listed, "" for all of them; which ones show their subfolders, in lower case: the game's paths mix cases. */
     let folder = "";
     let tree: Folder | null = null;
     const open = new Set<string>();
@@ -218,13 +218,13 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
     };
     const renderTree = () => {
       const row = (f: Folder, depth: number): HTMLElement[] => {
-        const isOpen = open.has(f.path), label = f.path ? f.name : "All files";
+        const key = f.path.toLowerCase(), isOpen = open.has(key), label = f.path ? f.name : "All files";
         return [
-          h(`div.browse-folder${folder === f.path ? ".active" : ""}`, {
+          h(`div.browse-folder${folder.toLowerCase() === key ? ".active" : ""}`, {
             style: { paddingLeft: `${6 + depth * 12}px` }, title: f.path || "All files",
             onclick: () => {
               folder = f.path;
-              if (f.path) { if (isOpen) open.delete(f.path); else open.add(f.path); }
+              if (f.path) { if (isOpen) open.delete(key); else open.add(key); }
               active = 0;
               renderTree();
               filter();
@@ -254,7 +254,7 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
         const listed = findListed(opts.current, paths);
         if (listed) {
           const parents = foldersOf(listed);
-          for (const f of parents) open.add(f);
+          for (const f of parents) open.add(f.toLowerCase());
           folder = parents[parents.length - 1] ?? "";
         }
         renderTree();

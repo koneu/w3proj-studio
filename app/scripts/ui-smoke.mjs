@@ -193,7 +193,7 @@ async function run() {
     // The file browser: folders, list and preview come up, and Escape closes it.
     // It opens at the current file with nothing searched: a search left in the box empties every other folder.
     await page.evaluate(`(() => {
-      w3.game.list = async () => ["War3.w3mod:Units/Human/Footman/Footman.mdx", "War3.w3mod:Units/Human/Knight/Knight.mdx", "War3.w3mod:Units/Orc/Grunt/Grunt.mdx"];
+      w3.game.list = async () => ["War3.w3mod:units/Human/Knight/Knight.mdx", "War3.w3mod:Units/Human/Footman/Footman.mdx", "War3.w3mod:Units/Orc/Grunt/Grunt.mdx"];
       const current = ["units", "human", "footman", "footman"].join(String.fromCharCode(92));
       return w3.services.get("w3.objects").then((o) => { window.__pick = o.pickFile(document.body, { title: "Smoke", kind: "model", current }); });
     })()`);
