@@ -371,7 +371,7 @@ async function run() {
   const port = await freePort();
   const child = spawn(exe, [], {
     stdio: "ignore",
-    env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
+    env: { ...process.env, W3PROJ_TRIGGERDATA: join(repo, "tests", "fixtures", "TriggerData.txt"), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
   });
   let exited = null;
   child.on("exit", (code) => { exited = code; });

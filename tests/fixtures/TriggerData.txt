@@ -1,0 +1,16 @@
+// Made up for the tests: invented function names, nothing from the game.
+// Same layout as the game's UI\TriggerData.txt, as far as the wtg codec reads it.
+[TriggerEvents]
+_MapFooStart_Category=TC_FOO
+MapFooStart=0,nothing
+FooTimerEvent=0,real
+
+[TriggerConditions]
+IsFooReady=0,integer,integer
+
+[TriggerActions]
+DoFooThing=0,string,real
+LogFoo=0,string
+
+[TriggerCalls]
+GetFooValue=0,1,integer,integer

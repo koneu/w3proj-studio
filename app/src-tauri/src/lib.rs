@@ -112,14 +112,22 @@ async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomple
         }) as w3proj::project::NameSource
     });
     // GUI triggers (war3map.wtg) become JSON when the game's TriggerData.txt can be read.
-    let trigger_data = install.map(|install| {
+    // W3PROJ_TRIGGERDATA (tests only): a TriggerData.txt to use instead of the game's.
+    let test_file = std::env::var_os("W3PROJ_TRIGGERDATA").map(PathBuf::from);
+    let trigger_data = test_file.map(|file| {
+        Arc::new(move || {
+            let bytes = std::fs::read(&file).ok()?;
+            Some(Arc::new(w3proj::triggerdata::TriggerData::parse(&String::from_utf8_lossy(&bytes))))
+        }) as w3proj::codec::TriggerDataSource
+    });
+    let trigger_data = trigger_data.or_else(|| install.map(|install| {
         let app = app.clone();
         Arc::new(move || {
             let g = game_data(&app.state::<Game>(), &install).ok()?;
             let (_, bytes) = g.read(r"UI\TriggerData.txt", casc::Mode::Hd, None).ok()?;
             Some(Arc::new(w3proj::triggerdata::TriggerData::parse(&String::from_utf8_lossy(&bytes))))
         }) as w3proj::codec::TriggerDataSource
-    });
+    }));
     tauri::async_runtime::spawn_blocking(move || {
         let opts = UnpackOptions { allow_incomplete, more_names };
         let mut codecs = Registry::for_project(Path::new(&dir), &user_formats).map_err(err)?;

@@ -1,0 +1,62 @@
+{
+  "reforged": true,
+  "version": 7,
+  "counts": [
+    {"count":1,"deleted":[]},
+    {"count":1,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]},
+    {"count":0,"deleted":[]}
+  ],
+  "unknown": 0,
+  "variables": [
+    {"name":"fooCount","type":"integer","unknown":1,"isArray":false,"arraySize":1,"initialized":true,"initialValue":"3","id":1,"parent":-1}
+  ],
+  "items": [
+    {"type":4,"id":1,"name":"Foo Setup","isComment":0,"expanded":1,"parent":-1},
+    {
+      "type": 8,
+      "name": "Foo Init",
+      "description": "Made up.",
+      "isComment": 0,
+      "id": 2,
+      "enabled": true,
+      "isCustom": false,
+      "initiallyOff": false,
+      "runOnInit": false,
+      "parent": 1,
+      "ecas": [
+        {
+          "kind": 0,
+          "name": "MapFooStart",
+          "enabled": true,
+          "params": [],
+          "children": []
+        },
+        {
+          "kind": 1,
+          "name": "IsFooReady",
+          "enabled": true,
+          "params": [
+            {"type":0,"value":"1"},
+            {"type":2,"value":"GetFooValue","call":{"kind":3,"name":"GetFooValue","hasParams":true,"params":[{"type":0,"value":"2"}],"trailer":0}}
+          ],
+          "children": []
+        },
+        {
+          "kind": 2,
+          "name": "DoFooThing",
+          "enabled": true,
+          "params": [
+            {"type":3,"value":"\"hello\""},
+            {"type":0,"value":"1.5"}
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

@@ -38,6 +38,16 @@ fn s(p: &Path) -> &str {
     p.to_str().unwrap()
 }
 
+/// The made-up TriggerData.txt the fixture's war3map.wtg is read with (nothing from the game).
+fn trigger_data() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/TriggerData.txt")
+}
+
+/// Unpacks with the made-up TriggerData, so the trigger codec really runs.
+fn unpack(map: &Path, project: &Path) -> String {
+    ok(&["unpack", s(map), s(project), "--game", "none", "--trigger-data", s(&trigger_data())])
+}
+
 fn pack(project: &Path, out: &Path) {
     ok(&["pack", s(project), "-o", s(out)]);
 }
@@ -65,7 +75,7 @@ fn pack_unpack_pack_changes_nothing() {
     let (first, project, second) = (dir.join("first.w3x"), dir.join("project"), dir.join("second.w3x"));
 
     pack(&fixture(), &first);
-    ok(&["unpack", s(&first), s(&project), "--game", "none"]);
+    unpack(&first, &project);
     pack(&project, &second);
 
     assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "the map changed");
@@ -92,7 +102,7 @@ fn verify_finds_every_codec_at_work() {
     let map = dir.join("mini.w3x");
     pack(&fixture(), &map);
     let baseline = dir.join("baseline.tsv");
-    ok(&["verify", s(&map), "--game", "none", "--baseline", s(&baseline), "--update-baseline"]);
+    ok(&["verify", s(&map), "--game", "none", "--trigger-data", s(&trigger_data()), "--baseline", s(&baseline), "--update-baseline"]);
 
     let table = fs::read_to_string(&baseline).unwrap();
     let codec = |file: &str| {
@@ -107,6 +117,7 @@ fn verify_finds_every_codec_at_work() {
         ("war3map.mmp", "format:minimap"),
         ("war3map.w3u", "objdata-json"),
         ("war3map.w3e", "w3e-text"),
+        ("war3map.wtg", "wtg-json"),
     ] {
         assert_eq!(codec(file).as_deref(), Some(id), "{file} in\n{table}");
     }
@@ -147,7 +158,7 @@ fn a_changed_project_file_reaches_the_map() {
     let dir = workdir("edit");
     let (first, project, edited) = (dir.join("first.w3x"), dir.join("project"), dir.join("edited.w3x"));
     pack(&fixture(), &first);
-    ok(&["unpack", s(&first), s(&project), "--game", "none"]);
+    unpack(&first, &project);
 
     let path = project.join("map/war3map.w3r.json");
     fs::write(&path, fs::read_to_string(&path).unwrap().replace("Middle", "Edited")).unwrap();
@@ -163,7 +174,7 @@ fn a_project_file_that_makes_no_sense_stops_the_pack() {
     let dir = workdir("broken");
     let (first, project, out) = (dir.join("first.w3x"), dir.join("project"), dir.join("out.w3x"));
     pack(&fixture(), &first);
-    ok(&["unpack", s(&first), s(&project), "--game", "none"]);
+    unpack(&first, &project);
 
     fs::write(project.join("map/war3map.w3r.json"), "{ not json").unwrap();
     let o = w3proj(&["pack", s(&project), "-o", s(&out)]);
@@ -189,12 +200,12 @@ fn unpacking_into_a_project_again_keeps_it_in_sync() {
     let dir = workdir("resync");
     let (first, project, second) = (dir.join("first.w3x"), dir.join("project"), dir.join("second.w3x"));
     pack(&fixture(), &first);
-    ok(&["unpack", s(&first), s(&project), "--game", "none"]);
+    unpack(&first, &project);
     let before = files(&project.join("map"));
 
     // A stray file disappears, because the project mirrors the map.
     fs::write(project.join("map/stray.txt"), "left over").unwrap();
-    ok(&["unpack", s(&first), s(&project), "--game", "none"]);
+    unpack(&first, &project);
 
     assert_eq!(before, files(&project.join("map")));
     pack(&project, &second);
@@ -273,4 +284,50 @@ fn a_closed_pipe_does_not_hide_a_failing_verify() {
     let o = run_with_closed_pipe(&["verify", s(&maps), "--game", "none"]);
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
     assert!(!String::from_utf8_lossy(&o.stderr).contains("panicked"), "{}", text(&o));
+}
+
+#[test]
+fn the_trigger_codec_really_runs() {
+    let dir = workdir("wtg");
+    let (first, project, edited) = (dir.join("first.w3x"), dir.join("project"), dir.join("edited.w3x"));
+    pack(&fixture(), &first);
+
+    // Binary in the map, JSON in the project: not a raw passthrough.
+    let bin = w3proj(&["cat", s(&first), "war3map.wtg"]).stdout;
+    assert_eq!(&bin[..4], b"WTG!");
+    unpack(&first, &project);
+    assert!(!project.join("map/war3map.wtg").exists());
+    assert!(project.join("map/war3map.wtg.json").exists());
+
+    // An edit of the JSON reaches the binary.
+    let path = project.join("map/war3map.wtg.json");
+    fs::write(&path, fs::read_to_string(&path).unwrap().replace("Foo Init", "Bar Init")).unwrap();
+    pack(&project, &edited);
+    let bin = w3proj(&["cat", s(&edited), "war3map.wtg"]).stdout;
+    assert!(bin.windows(8).any(|w| w == b"Bar Init"));
+    assert!(!bin.windows(8).any(|w| w == b"Foo Init"));
+}
+
+#[test]
+fn a_function_missing_from_trigger_data_leaves_the_file_raw_and_undamaged() {
+    let dir = workdir("wtg_unknown");
+    let (first, project, second) = (dir.join("first.w3x"), dir.join("project"), dir.join("second.w3x"));
+    pack(&fixture(), &first);
+
+    // The same data without DoFooThing, which the fixture's trigger uses.
+    let data = dir.join("TriggerData.txt");
+    let full = fs::read_to_string(trigger_data()).unwrap();
+    let cut: String = full.lines().filter(|l| !l.starts_with("DoFooThing")).map(|l| format!("{l}
+")).collect();
+    assert_ne!(full.len(), cut.len(), "the control line wasn't there");
+    fs::write(&data, cut).unwrap();
+
+    let out = ok(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&data)]);
+    assert!(out.contains("raw war3map.wtg"), "{out}");
+    assert!(!project.join("map/war3map.wtg.json").exists());
+    let kept = fs::read(project.join("map/war3map.wtg")).unwrap();
+    assert_eq!(kept, w3proj(&["cat", s(&first), "war3map.wtg"]).stdout, "the raw file changed");
+
+    pack(&project, &second);
+    assert_eq!(fs::read(first).unwrap(), fs::read(second).unwrap());
 }

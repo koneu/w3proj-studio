@@ -84,6 +84,15 @@ fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/mini-map")
 }
 
+/// The built-in codecs, with the fixture's made-up TriggerData so the trigger codec decodes too.
+fn registry() -> Registry {
+    let text = fs::read_to_string(fixture().join("../TriggerData.txt")).unwrap();
+    let data = std::sync::Arc::new(w3proj::triggerdata::TriggerData::parse(&text));
+    let mut codecs = Registry::default();
+    codecs.set_trigger_data(std::sync::Arc::new(move || Some(data.clone())));
+    codecs
+}
+
 fn tmp(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("robustness");
     fs::create_dir_all(&dir).unwrap();
@@ -93,14 +102,14 @@ fn tmp(name: &str) -> PathBuf {
 /// The fixture as a map. Tests run in parallel: each passes its own name.
 fn map_bytes(name: &str) -> Vec<u8> {
     let out = tmp(name);
-    w3proj::pack(&fixture(), Some(&out), &Registry::default()).unwrap();
+    w3proj::pack(&fixture(), Some(&out), &registry()).unwrap();
     fs::read(out).unwrap()
 }
 
 /// Files of the map that a codec reads.
 fn codec_files(test: &str) -> Vec<(String, Vec<u8>)> {
     let archive = Archive::from_bytes(map_bytes(&format!("{test}.w3x"))).unwrap();
-    let codecs = Registry::default();
+    let codecs = registry();
     archive
         .read("(listfile)")
         .map(|l| String::from_utf8_lossy(&l).lines().map(str::to_string).collect::<Vec<_>>())
@@ -161,7 +170,7 @@ fn report(failures: BTreeMap<String, String>) {
 
 #[test]
 fn codecs_survive_damaged_files() {
-    let codecs = Registry::default();
+    let codecs = registry();
     let mut failures = BTreeMap::new();
     let mut lost = Vec::new();
     let (mut accepted, mut rejected) = (0, 0);
@@ -198,7 +207,7 @@ fn codecs_survive_damaged_files() {
 
 #[test]
 fn damaged_project_files_are_errors() {
-    let codecs = Registry::default();
+    let codecs = registry();
     let mut failures = BTreeMap::new();
     for (name, bytes) in codec_files("project-files") {
         let codec = codecs.for_archive_name(&name).next().unwrap();
@@ -262,7 +271,7 @@ fn decompression_survives_damaged_sectors() {
 #[test]
 fn verify_never_reports_a_silent_change() {
     let bytes = map_bytes("verify.w3x");
-    let codecs = Registry::default();
+    let codecs = registry();
     let path = tmp("damaged.w3x");
     let mut failures = BTreeMap::new();
     let mut changed = Vec::new();
