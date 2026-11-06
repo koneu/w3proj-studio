@@ -1574,12 +1574,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             applyMass(doodads, (p) => ({ position: [p.position[0], p.position[1], p.position[2] + key.raise], flags: (flagsOf(p) ?? 2) | FIXED_HEIGHT }));
           } else applyMass(doodads, (p) => ({ scale: scaled(p.scale, key.scale) }));
         };
-        /** Ctrl+click: the selection turns to that point. */
-        const faceOnce = (g: Vec3) => {
-          const entries = selectedEntries(), before = entries.map(poseOf);
-          for (const p of entries) setPlacement(p, [...p.position], Math.atan2(g[1] - p.position[1], g[0] - p.position[0]));
-          moveEdits(entries, before);
-        };
         /** Alt+click: the selection goes there, keeping its shape. */
         const moveTo = (g: Vec3) => {
           const entries = selectedEntries(), before = entries.map(poseOf), [ax, ay] = entries[0].position;
@@ -1591,6 +1585,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** "Face point": the selection turns toward the pointer until a click (apply) or Esc. */
         let facing: { entries: Placed[]; before: Pose[] } | null = null;
+        /** Facing with Ctrl and the button held: it ends when the button is let go. */
+        let faceHeld = false;
         const startFacing = () => {
           const entries = selectedEntries();
           if (!editable || !entries.length) return;
@@ -2354,7 +2350,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const g = groundAt(e);
             if (g) {
               e.preventDefault();
-              if (e.altKey) moveTo(g); else faceOnce(g);
+              if (e.altKey) moveTo(g);
+              else { startFacing(); faceHeld = true; faceToward(g); }
               refreshGroupRings();
               return;
             }
@@ -2449,6 +2446,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         const onUp = (e: MouseEvent) => {
+          if (faceHeld) { faceHeld = false; endFacing(true); return; }
           if (groupDrag) {
             groupDrag = false;
             activeInst()?.pointerUp?.({ ground: groundAt(e), event: e, down: false });
