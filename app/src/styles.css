@@ -252,7 +252,10 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-value.inherited { color: var(--fg-muted); border-color: transparent; background: transparent; }
 .obj-value.inherited:hover, .obj-value.inherited:focus { border-color: var(--border); background: var(--bg); }
 .obj-bool { display: inline-flex; gap: 8px; align-items: center; }
-.obj-toolbar-buttons { display: flex; gap: 4px; }
+.obj-toolbar-buttons { display: flex; gap: 4px; align-items: center; }
+.obj-autofill { width: min(420px, 94%); padding: 12px 16px; gap: 6px; }
+.obj-autofill-rows { max-height: 240px; overflow-y: auto; }
+.obj-autofill .terrain-sel-row > .muted:first-child { flex: 0 0 170px; }
 .obj-group { display: flex; justify-content: space-between; align-items: baseline; }
 .obj-group .link-inline { font-size: 11px; text-transform: none; letter-spacing: 0; }
 .obj-kind { height: 28px; }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
 const file = (version = 3): EditFile => ({ format: "w3proj.objects/1", version, original: [], custom: [] });
@@ -102,4 +102,28 @@ test("a pasted object is new, whatever it was copied from", () => {
 test("older files keep their end marker right", () => {
   assert.equal(pastedObject({ base: "hfoo", id: "h000", end: "h000", mods: [] }, "h001", 2).end, "h001");
   assert.ok(!("end" in pastedObject({ base: "hfoo", id: "h000", end: "h000", mods: [] }, "h001", 3)));
+});
+
+test("Auto Fill: each level from the one before, its number and a constant", () => {
+  assert.deepEqual(autoFill({ from: 1, to: 3, base: 100, previous: 1, level: 0, constant: 25 }).map((r) => r.value), [100, 125, 150]);
+  assert.deepEqual(autoFill({ from: 1, to: 3, base: 10, previous: 2, level: 0, constant: 0 }).map((r) => r.value), [10, 20, 40]);
+  assert.deepEqual(autoFill({ from: 1, to: 3, base: 0, previous: 0, level: 5, constant: 1 }).map((r) => r.value), [0, 11, 16], "a level's number, not its distance");
+  assert.deepEqual(autoFill({ from: 2, to: 4, base: 7, previous: 1, level: 0, constant: 0 }).map((r) => r.level), [2, 3, 4], "levels before the start stay out");
+  assert.equal(autoFill({ from: 3, to: 3, base: 1, previous: 9, level: 9, constant: 9 }).length, 1);
+});
+
+test("Auto Fill on text puts the level where the mark is", () => {
+  assert.deepEqual(autoFillText("Deals # damage, # times", "#", 1, 2).map((r) => r.value), ["Deals 1 damage, 1 times", "Deals 2 damage, 2 times"]);
+  assert.deepEqual(autoFillText("Same", "", 1, 2).map((r) => r.value), ["Same", "Same"], "no mark, no change");
+});
+
+test("importing replaces by id or base, adds the rest, and shares nothing", () => {
+  const file = { format: "x", version: 3, custom: [{ base: "hfoo", id: "h000", mods: [] }], original: [{ base: "hpea", mods: [] as { field: string; type: string; value: number }[] }] };
+  const incoming = { custom: [{ base: "hrif", id: "h000", mods: [] }, { base: "hkni", id: "h001", mods: [] }], original: [{ base: "hpea", mods: [{ field: "uhpm", type: "int", value: 9 }] }, { base: "hfoo", mods: [] }] };
+  assert.deepEqual(mergeObjects(file, incoming), { added: 2, replaced: 2 });
+  assert.equal(file.custom[0].base, "hrif");
+  assert.equal(file.custom.length, 2);
+  assert.equal(file.original[0].mods![0].value, 9);
+  incoming.original[0].mods![0].value = 1;
+  assert.equal(file.original[0].mods![0].value, 9);
 });

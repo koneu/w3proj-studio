@@ -177,6 +177,24 @@ fn objects_canonicalize(name: String, text: String) -> CmdResult<String> {
     String::from_utf8(json).map_err(err)
 }
 
+/// Writes object data (`text`, in project JSON) as the game's binary file, which the
+/// World Editor imports. `name` says which kind, like `war3map.w3u`.
+#[tauri::command]
+fn objects_export(name: String, text: String, path: String) -> CmdResult<()> {
+    let opt = w3proj::objdata::kind(&name).ok_or("not an object data file")?;
+    let bin = w3proj::objdata::from_json(text.as_bytes(), opt).map_err(err)?;
+    std::fs::write(&path, bin).map_err(err)
+}
+
+/// Reads a binary object data file, like one the World Editor exported, as project JSON.
+#[tauri::command]
+fn objects_import(name: String, path: String) -> CmdResult<String> {
+    let opt = w3proj::objdata::kind(&name).ok_or("not an object data file")?;
+    let bin = std::fs::read(&path).map_err(err)?;
+    let json = w3proj::objdata::to_json(&bin, opt).map_err(err)?;
+    String::from_utf8(json).map_err(err)
+}
+
 /// Validates a codec-backed project file (e.g. `map/war3map.w3i.json`) by
 /// encoding it to the archive format, and returns it in canonical form.
 #[tauri::command]
@@ -985,6 +1003,8 @@ pub fn run() {
             ui_show_cursor,
             project_pack,
             objects_canonicalize,
+            objects_export,
+            objects_import,
             codec_canonicalize,
             codec_decode,
             codec_write,

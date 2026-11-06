@@ -93,3 +93,34 @@ export function removeObject(file: EditFile, id: string): boolean {
   }
   return false;
 }
+
+export interface AutoFill { from: number; to: number; base: number; previous: number; level: number; constant: number }
+
+/** The World Editor's Auto Fill Levels: level `from` gets the base value, and each after it the one before
+ *  times `previous`, plus its level times `level`, plus `constant`. */
+export function autoFill(o: AutoFill): { level: number; value: number }[] {
+  const out = [{ level: o.from, value: o.base }];
+  for (let n = o.from + 1; n <= o.to; n++) out.push({ level: n, value: out[out.length - 1].value * o.previous + n * o.level + o.constant });
+  return out;
+}
+
+/** The same for text: `mark` in the base text stands for the level. */
+export function autoFillText(text: string, mark: string, from: number, to: number): { level: number; value: string }[] {
+  const out: { level: number; value: string }[] = [];
+  for (let n = from; n <= to; n++) out.push({ level: n, value: mark ? text.split(mark).join(String(n)) : text });
+  return out;
+}
+
+/** Takes in objects from a file: what's there under the same id, or base for game objects, is replaced. */
+export function mergeObjects(file: EditFile, imported: Pick<EditFile, "original" | "custom">) {
+  let added = 0, replaced = 0;
+  const take = (list: EditObject[], items: EditObject[], same: (a: EditObject, b: EditObject) => boolean) => {
+    for (const o of items) {
+      const at = list.findIndex((x) => same(x, o));
+      if (at >= 0) { list[at] = structuredClone(o); replaced++; } else { list.push(structuredClone(o)); added++; }
+    }
+  };
+  take(file.custom, imported.custom ?? [], (a, b) => a.id === b.id);
+  take(file.original, imported.original ?? [], (a, b) => a.base === b.base);
+  return { added, replaced };
+}

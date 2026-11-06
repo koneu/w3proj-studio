@@ -13,7 +13,7 @@ import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, ty
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
-import { addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 
@@ -25,6 +25,8 @@ interface ObjectFile { format: string; version: number; original: Obj[]; custom:
 
 /** Copied objects by kind, for the session: they paste into any open map. */
 const clipboard: Record<string, Obj[]> = {};
+/** A field value copied by the field menu: goes into any field of the same type. */
+let fieldClip: { type: string; value: number | string } | null = null;
 
 const FORMAT = "w3proj.objects/1";
 
@@ -328,9 +330,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return img;
         };
 
+        /** The list's order: as in the file, or by name. */
+        let sortByName = false;
+        const inOrder = (objs: Obj[]) => (sortByName ? [...objs].sort((a, b) => nameOf(a).localeCompare(nameOf(b))) : objs);
         const renderList = () => {
           const group = (title: string, objs: Obj[], action?: HTMLElement) => {
-            const items = objs.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
+            const items = inOrder(objs).filter((o) => !filter || `${o.base} ${o.id ?? ""} ${nameOf(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
             return [
               h("div.obj-group", {}, h("span", {}, `${title} (${items.length})`), action ?? null),
               ...items.map((o) =>
@@ -352,7 +357,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               onclick: () => cleanUpStandard(matchesFilter),
             }, `Clean up (${unchanged})`)
             : undefined;
-          visible = [...file.custom, ...file.original].filter(matchesFilter);
+          visible = [...inOrder(file.custom), ...inOrder(file.original)].filter(matchesFilter);
           listEl.replaceChildren(...group("Custom", file.custom), ...group("Modified standard", file.original, cleanUp));
         };
 
@@ -608,6 +613,56 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const outsideToggle = (label: string) => h("label", { title: "Show only values past the World Editor's range" },
           h("input", { type: "checkbox", checked: outsideOnly, onchange: (e: Event) => { outsideOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), ` ${label}`);
+        /** The World Editor's Auto Fill Levels, with its preview. */
+        const openAutoFill = (o: Obj, f: FieldMeta, levels: number) => {
+          const text = f.valueType === "string";
+          const number = (label: string, value: string, step = "any") => {
+            const input = h("input", { type: "number", step, value, oninput: preview });
+            return { input, row: h("div.terrain-sel-row", {}, h("span.muted", {}, label), input) };
+          };
+          const fromEl = h("select", { onchange: () => { base.input.value = effective(o, f, Number(fromEl.value)); baseText.value = effective(o, f, Number(fromEl.value)); preview(); } },
+            ...Array.from({ length: levels }, (_, i) => h("option", { value: String(i + 1) }, String(i + 1))));
+          const base = number("Base value", effective(o, f, 1)), previous = number("Previous value factor", "1"), level = number("Level factor", "0"), constant = number("Constant factor", "0");
+          const baseText = h("input", { value: effective(o, f, 1), oninput: preview }), mark = h("input", { value: "#", size: 3, maxLength: 8, oninput: preview });
+          const rows = h("div.obj-autofill-rows");
+          const values = () => {
+            const from = Number(fromEl.value);
+            if (text) return autoFillText(baseText.value, mark.value, from, levels);
+            const raw = autoFill({ from, to: levels, base: Number(base.input.value), previous: Number(previous.input.value), level: Number(level.input.value), constant: Number(constant.input.value) });
+            return raw.map((r) => ({ level: r.level, value: f.valueType === "int" ? Math.round(r.value) : Math.round(r.value * 1000) / 1000 }));
+          };
+          function preview() { rows.replaceChildren(...values().map((r) => h("div.terrain-sel-row", {}, h("span.muted", {}, `Level ${r.level}`), h("span", {}, String(r.value))))); }
+          const close = () => { overlay.remove(); };
+          const apply = () => {
+            for (const r of values()) setValue(o, f, r.level, r.value);
+            close();
+            markDirty();
+            renderDetail();
+          };
+          const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(); } },
+            h("div.picker.obj-autofill", {},
+              h("h3", {}, `Auto Fill Levels: ${f.label}`),
+              h("div.terrain-sel-row", {}, h("span.muted", {}, "Start from level"), fromEl),
+              ...(text
+                ? [h("div.terrain-sel-row", {}, h("span.muted", {}, "Base text"), baseText), h("div.terrain-sel-row", {}, h("span.muted", {}, "Replace with level"), mark)]
+                : [base.row, previous.row, level.row, constant.row]),
+              h("div.terrain-sel-sub.muted", {}, "Preview"), rows,
+              h("div.obj-toolbar-buttons", {}, h("button.primary-inline", { onclick: apply }, "OK"), h("button", { onclick: close }, "Cancel"))));
+          el.append(overlay);
+          preview();
+          (text ? baseText : base.input).focus();
+        };
+        /** Right-click on a field, as in the World Editor. */
+        const fieldMenu = (o: Obj, f: FieldMeta, level: number, levels: number, current: number | string, e: MouseEvent) => {
+          e.preventDefault();
+          const held = fieldClip, fits = !!held && held.type === f.valueType;
+          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
+            { label: "Copy value", run: () => { fieldClip = { type: f.valueType, value: current }; } },
+            { label: "Paste value", disabled: !fits, hint: held && !fits ? "The copied value is of another type." : undefined, run: () => { setValue(o, f, level, (held as { value: number | string }).value); markDirty(); renderDetail(); } },
+            { label: "Reset to default", disabled: !findMod(o, f.id, level), run: () => { resetValue(o, f, level); markDirty(); renderDetail(); } },
+            ...(levels > 1 ? ["-" as const, { label: "Auto Fill Levels…", run: () => openAutoFill(o, f, levels) }] : []),
+          ]);
+        };
         const fieldRow = (o: Obj, f: FieldMeta, level: number, levels: number) => {
           const found = findMod(o, f.id, level);
           const def = kd!.defaultValue(o.base, f, level);
@@ -619,7 +674,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             renderDetail();
           };
           const over = overLimit(o, f, level);
-          return h(`tr${inherited ? "" : ".modified"}${over ? ".obj-over" : ""}`, {},
+          return h(`tr${inherited ? "" : ".modified"}${over ? ".obj-over" : ""}`, { oncontextmenu: (e: MouseEvent) => fieldMenu(o, f, level, levels, current, e) },
             h("td", { title: `${f.category} · ${f.type}${f.slk ? ` · ${f.slk}.${f.field}` : ""}` },
               h("span.obj-field-label", {}, f.label),
               h("code", {}, f.id)),
@@ -960,6 +1015,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 h("div.obj-toolbar-buttons", {},
                   h("button", { title: "Create a new custom object based on a game object", onclick: newObject }, "+ New"),
                   h("button", { title: "Change a game object itself — affects every instance in the map", onclick: editStandard }, "Edit standard…"))),
+              h("div.obj-toolbar-buttons", {},
+                h("button", { title: `Save this map's ${kindInfo?.label ?? kind} as a .${kind} file, which the World Editor can import too`, onclick: () => void exportFile().catch(failed) }, "Export…"),
+                h("button", { title: `Take in a .${kind} file, from the World Editor or another map. Same ids are replaced`, onclick: () => void importFile().catch(failed) }, "Import…"),
+                h("label", { title: "Sort the list by name" }, h("input", { type: "checkbox", onchange: (e: Event) => { sortByName = (e.target as HTMLInputElement).checked; renderList(); } }), " By name")),
               status,
               search,
               listEl,
@@ -980,6 +1039,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (k === "z" && !e.shiftKey) { e.preventDefault(); step(-1); }
           else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); step(1); }
         });
+        const exportFile = async () => {
+          const path = await w3.window.pickSaveFile({ title: `Export ${kindInfo?.label ?? kind}`, defaultPath: `${kindInfo?.label ?? kind}.${kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });
+          if (!path) return;
+          // Its own texts: references to this map's string table mean nothing in another.
+          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : table.get(ref) ?? null; };
+          const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, text)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
+          await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
+          void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
+        };
+        const importFile = async () => {
+          const path = await w3.window.pickFile({ title: `Import ${kindInfo?.label ?? kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });
+          if (!path) return;
+          const incoming = JSON.parse(await w3.backend.invoke<string>("objects_import", { name: `war3map.${kind}`, path })) as ObjectFile;
+          const { added, replaced } = mergeObjects(file as unknown as EditFile, incoming as unknown as EditFile);
+          markDirty();
+          renderDetail();
+          void w3.window.showInfo(`Imported: ${added} new, ${replaced} replaced. Ctrl+Z takes it back.`);
+        };
+        const failed = (e: unknown) => void w3.window.showError(String((e as Error).message ?? e));
         const focusObject = (id: string) => {
           search.value = id;
           filter = id.toLowerCase();
