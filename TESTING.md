@@ -35,6 +35,7 @@ oracle only proves the code does what the code does.
 | Hostile input | never panics; what parses still round-trips | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
 | Random maps | the JASS and Lua checkers on every generated script | `app/src/lib/script/random-maps.test.ts` | every commit, CI |
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
+| Real app | the map it packs is the CLI's, byte for byte; nothing changes without an edit | `app/scripts/app-smoke.mjs` | locally, before merging |
 | Corpus | real maps, and the baseline of which codec reads what | `w3proj verify`, `twin-check.mjs` | locally, before merging |
 | Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
 | The real thing | the game and World Editor | the release checklist below | by hand, before a release |
@@ -83,7 +84,7 @@ is for new codecs and maps, never for making a failure go away.
 
 **GUI rounds in the running app** are for what only eyes can judge. They use scratch copies and a
 backed-up `settings.json`, and they don't take over the screen while someone works at the PC.
-`ui-smoke` has no window, so it's always allowed.
+`ui-smoke` and `app-smoke` show no window and use their own settings, so they're always allowed.
 
 ## Coverage: what the numbers mean
 
@@ -151,9 +152,9 @@ Each of these comes from a test on this project that looked fine and wasn't.
 
 In order of what I'd do next.
 
-1. **The real backend under the real UI.** The UI smoke's backend is a fake, so no project is ever
-   opened. `workbench/backend.ts` is one small seam: a test bridge to the Rust commands would let a
-   headless run open the mini map and every editor, which is most of what a GUI round does by hand.
+1. **Editing by hand in the real app.** `app-smoke` opens a project, every editor, saves, packs and
+   unpacks with the real backend, but its one edit writes the file directly. Clicks and keys in the
+   terrain, trigger and object editors are still GUI rounds. New Map isn't covered either.
 2. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
    read map files too. They can't corrupt memory, but they can freeze the app.
 3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is

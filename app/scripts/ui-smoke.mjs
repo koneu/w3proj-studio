@@ -13,6 +13,7 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { connect, problems, sleep, until as untilFor } from "./cdp.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(app, "dist");
@@ -78,63 +79,7 @@ function findEdge() {
   return found;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function until(what, check) {
-  const end = Date.now() + TIMEOUT;
-  for (;;) {
-    const v = await check();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await sleep(100);
-  }
-}
-
-class Page {
-  next = 1;
-  pending = new Map();
-  events = [];
-  constructor(ws) {
-    this.ws = ws;
-    ws.addEventListener("message", (m) => {
-      const msg = JSON.parse(m.data);
-      if (msg.id) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        if (msg.error) reject(new Error(`${msg.error.message}`));
-        else resolve(msg.result);
-      } else this.events.push(msg);
-    });
-  }
-  send(method, params = {}) {
-    const id = this.next++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
-    });
-  }
-  async evaluate(expression) {
-    const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-    if (r.exceptionDetails) throw new Error(`in the page: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`);
-    return r.result.value;
-  }
-}
-
-/** Everything the page reported as wrong, in words. */
-function problems(events) {
-  const out = [];
-  for (const e of events) {
-    if (e.method === "Runtime.exceptionThrown") {
-      const d = e.params.exceptionDetails;
-      out.push(`uncaught: ${d.exception?.description ?? d.text}`);
-    } else if (e.method === "Runtime.consoleAPICalled" && e.params.type === "error") {
-      out.push(`console.error: ${e.params.args.map((a) => a.value ?? a.description ?? "").join(" ")}`);
-    } else if (e.method === "Log.entryAdded" && e.params.entry.level === "error") {
-      out.push(`browser: ${e.params.entry.text} ${e.params.entry.url ?? ""}`);
-    }
-  }
-  return [...new Set(out)];
-}
+const until = (what, check) => untilFor(what, check, TIMEOUT);
 
 async function run() {
   if (process.argv.includes("--build")) {
@@ -162,19 +107,8 @@ async function run() {
   try {
     const portFile = join(profile, "DevToolsActivePort");
     const port = await until("the browser", () => existsSync(portFile) && readFileSync(portFile, "utf8").split("\n")[0]);
-    const targets = await until("a page", async () => {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-      return list.find((t) => t.type === "page");
-    });
-    const ws = new WebSocket(targets.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => {
-      ws.addEventListener("open", resolve);
-      ws.addEventListener("error", () => reject(new Error("no DevTools connection")));
-    });
-    const page = new Page(ws);
-    await page.send("Page.enable");
-    await page.send("Runtime.enable");
-    await page.send("Log.enable");
+    const page = await connect(port);
+    const ws = page.ws;
     await page.send("Page.addScriptToEvaluateOnNewDocument", { source: `(${fakeTauri})();` });
     await page.send("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/` });
 

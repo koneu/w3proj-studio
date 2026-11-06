@@ -90,6 +90,7 @@ const local = [
   ["hostile input, 20000 rounds", shell("cargo test --release -p w3proj --test robustness --locked --quiet", repo, { W3PROJ_ROBUSTNESS_ROUNDS: "20000" })],
   ["corpus round trip and codec baseline", needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`))],
   ["Rust and TypeScript codecs agree", needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, app, { W3PROJ_GAME: game, W3PROJ_BIN: bin }))],
+  ["the real app on a scratch project", shell("node scripts/app-smoke.mjs", app, { W3PROJ_BIN: bin })],
   ["generated scripts against the World Editor's", needs(join(game, ".build.info"), "the game", shell("node scripts/script-check/run.mjs", app, { W3PROJ_GAME: game, W3PROJ_BIN: bin }))],
 ];
 

@@ -10,6 +10,7 @@
     "test": "node scripts/test.mjs",
     "coverage": "node scripts/coverage.mjs",
     "ui-smoke": "node scripts/ui-smoke.mjs",
+    "app-smoke": "node scripts/app-smoke.mjs",
     "tauri": "tauri",
     "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png"
   },
