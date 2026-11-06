@@ -229,6 +229,9 @@ export class TerrainRenderer {
   /** The map's fog, and whether it's shown. */
   fog: Fog | null = null;
   showFog = true;
+  /** A sky model drawn around the camera, and the radius it reaches at scale 1. */
+  sky: { gpu: ModelGpu; radius: number } | null = null;
+  showSky = true;
   private wire: Mesh;
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
@@ -562,7 +565,7 @@ export class TerrainRenderer {
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog } = this;
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky } = this;
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
@@ -570,9 +573,10 @@ export class TerrainRenderer {
     this.overlay = null;
     this.showBorder = false;
     this.showFog = false;
+    this.showSky = false;
     return () => {
       this.setGroundOverlay(null);
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog });
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky });
     };
   }
 
@@ -863,10 +867,23 @@ export class TerrainRenderer {
     gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.CULL_FACE);
 
+    const far = this.distance * 10;
     const viewProj = mat4.mul(
-      mat4.perspective(this.fov, w / Math.max(1, h), Math.max(10, this.distance / 50), this.distance * 10),
+      mat4.perspective(this.fov, w / Math.max(1, h), Math.max(10, this.distance / 50), far),
       mat4.lookAt(this.eye(), this.target, [0, 0, 1]),
     );
+
+    // The sky: behind everything, around the camera, as far as the view reaches.
+    if (this.sky && this.showSky) {
+      const s = (far * 0.7) / Math.max(1, this.sky.radius), [x, y, z] = this.eye();
+      gl.disable(gl.CULL_FACE);
+      gl.depthMask(false);
+      this.sky.gpu.draw(viewProj, new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, x, y, z, 1]), { onTop: true, pass: "all" });
+      gl.depthMask(true);
+      gl.enable(gl.DEPTH_TEST);
+      gl.enable(gl.CULL_FACE);
+      gl.disable(gl.BLEND);
+    }
 
     // Ground: lowest texture first, the others blend over it.
     gl.useProgram(this.groundProg);

@@ -1,4 +1,5 @@
 import { fogOf } from "../../lib/model/fog";
+import { skyList } from "./skies";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
@@ -1003,9 +1004,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         renderer.showBorder = showBoundary();
         renderer.showFog = w3.settings.get<boolean>("terrain.fog", true) !== false;
+        /** The game's skies, for the view: a map doesn't keep one, the World Editor has it as a preference. */
+        const skySelect = h("select", { title: "The sky in this view. It isn't part of the map", onchange: () => void w3.settings.set("terrain.sky", skySelect.value) }, h("option", { value: "" }, "No sky"));
+        const showSkyChoice = async () => {
+          const path = w3.settings.get<string>("terrain.sky", "") ?? "";
+          skySelect.value = path;
+          if (!path) { renderer.sky = null; redraw(); return; }
+          const { batches, failed } = await loader.loadModels("sky", [{ path: path.replace(/\.mdl$/i, ".mdx"), replaceable: {}, instances: [{ world: new Float32Array(16), team: 0 } as unknown as ObjectInstance] }]);
+          if (failed.length) { void w3.window.showWarning(`The sky didn't load: ${failed[0].error}`); return; }
+          const b = bounds(batches[0].gpu.model);
+          renderer.sky = { gpu: batches[0].gpu, radius: Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2 };
+          redraw();
+        };
+        Promise.all([w3.game.readText("UI\\WorldEditData.txt"), w3.game.readText("UI\\WorldEditStrings.txt")]).then(([data, strings]) => {
+          skySelect.append(...skyList(data, strings).map((s) => h("option", { value: s.path }, s.name)));
+          return showSkyChoice();
+        }).catch(() => { /* no list, no sky */ });
         void loadBorder();
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
+          if (key === "terrain.sky") void showSkyChoice();
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
         });
@@ -2719,6 +2737,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
+              skySelect,
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),

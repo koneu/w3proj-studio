@@ -63,6 +63,7 @@
     "configuration": {
       "title": "Terrain",
       "properties": {
+        "terrain.sky": { "type": "string", "default": "", "description": "Sky model shown in the terrain view, by its path; empty for none. A view setting: it isn't part of the map." },
         "terrain.fog": { "type": "boolean", "default": true, "description": "Show the map's fog in the terrain view, when the map has it on." },
         "terrain.boundary": { "type": "boolean", "default": true, "description": "Darken the part of the map past the playable area in the terrain view." },
         "terrain.animate": { "type": "boolean", "default": true, "description": "Placed objects play their Stand animation in the terrain view (off: they stand still)." },
