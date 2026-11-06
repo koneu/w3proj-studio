@@ -1,4 +1,5 @@
 import { fogOf } from "../../lib/model/fog";
+import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
@@ -1023,6 +1024,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return showSkyChoice();
         }).catch(() => { /* no list, no sky */ });
         void loadBorder();
+        /** The map's weather as last shown, so that only a change starts it over. */
+        let weatherShown = "";
+        const loadWeather = async () => {
+          const [info, regions] = await Promise.all([
+            readMapDoc<{ weather?: string }>(w3, "map/war3map.w3i.json").catch(() => null),
+            readMapDoc<{ regions: ({ weather: string } & WeatherBox)[] }>(w3, "map/war3map.w3r.json").catch(() => null),
+          ]);
+          const real = (id?: string) => !!id && id !== "0x00000000";
+          const wanted = [...(real(info?.weather) ? [{ id: info!.weather!, box: null as WeatherBox | null }] : []),
+            ...(regions?.regions ?? []).filter((r) => real(r.weather)).map((r) => ({ id: r.weather, box: { left: r.left, right: r.right, bottom: r.bottom, top: r.top } as WeatherBox | null }))];
+          const key = JSON.stringify(wanted);
+          if (key === weatherShown) return;
+          weatherShown = key;
+          const rows = wanted.length ? new Map(parseSlk(await w3.game.readText("TerrainArt\\Weather.slk").catch(() => "")).map((r) => [r.effectID, r])) : new Map<string, Record<string, string>>();
+          const list = renderer.setWeather(wanted.filter((w) => rows.has(w.id)).map((w) => ({ effect: weatherEffect(rows.get(w.id)!), box: w.box })));
+          for (const w of list) {
+            const read = (ext: string) => readFile(w3, doc, w.effect.texture + ext).then((buf) => renderer.setWeatherTexture(w, decodeImage(buf, w.effect.texture + ext)));
+            void read(".blp").catch(() => read(".dds")).catch(() => { /* white streaks show it's there */ });
+          }
+          redraw();
+        };
+        renderer.showWeather = w3.settings.get<boolean>("terrain.weather", true) !== false;
+        void loadWeather();
+        const stopWeatherWatch = w3.workspace.onDidChange(() => void loadWeather());
+        const stopWeatherSaves = w3.workspace.onDidSave((path) => { if (/war3map\.w3[ir]\.json$/i.test(path)) void loadWeather(); });
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
           if (key === "terrain.sky") void showSkyChoice();
@@ -2752,6 +2778,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
+              toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
               skySelect,
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
@@ -3213,6 +3240,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopObjectWatch.dispose();
             clearTimeout(objectReload);
             stopLightSettings.dispose();
+            stopWeatherWatch.dispose();
+            stopWeatherSaves.dispose();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
             window.removeEventListener("keyup", areaKeyUp);

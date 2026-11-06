@@ -65,7 +65,7 @@ export class ParticleInstance {
   readonly emitters: EmitterState[];
   readonly ribbons: RibbonState[];
 
-  constructor(readonly model: Model, private random: () => number = Math.random) {
+  constructor(readonly model: Model, private random: () => number = Math.random, private limit = MAX_PER_EMITTER) {
     this.emitters = model.particleEmitters2.map((e) => ({ e, particles: [], carry: 0, lastFrame: -1 }));
     this.ribbons = model.ribbons.map((r) => ({ r, segments: [], head: null, carry: 0, color: [1, 1, 1, 1], cell: 0 }));
   }
@@ -123,7 +123,7 @@ export class ParticleInstance {
       const toWorld = modelSpace ? node : mul(world, node);
       const pivot: Vec3 = [m.pivots[e.node.objectId * 3] ?? 0, m.pivots[e.node.objectId * 3 + 1] ?? 0, m.pivots[e.node.objectId * 3 + 2] ?? 0];
       const line = (e.node.flags & PRE2_FLAGS.lineEmitter) !== 0;
-      for (let i = 0; i < spawn && s.particles.length < MAX_PER_EMITTER; i++) {
+      for (let i = 0; i < spawn && s.particles.length < this.limit; i++) {
         const lx = pivot[0] + (rnd() - 0.5) * width, ly = pivot[1] + (rnd() - 0.5) * length, lz = pivot[2];
         // Within the cone around +Z (line emitters: in the XZ plane).
         const polar = rnd() * latitude, azimuth = line ? (rnd() < 0.5 ? 0 : Math.PI) : rnd() * Math.PI * 2;

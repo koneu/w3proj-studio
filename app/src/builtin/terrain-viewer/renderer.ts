@@ -12,6 +12,7 @@ import type { SceneLight } from "../../lib/model/dnclight";
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
+import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
 import { heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
 
@@ -200,6 +201,10 @@ interface Mesh {
 /** Texture slot of the tileset's blight (beyond any ground tile index). */
 export const BLIGHT_TEXTURE = 100;
 
+/** A weather's emitter doesn't animate: it has one still node. */
+const WEATHER_CLOCK = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
+const WEATHER_NODES = [new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])];
+
 export class TerrainRenderer {
   readonly gl: WebGL2RenderingContext;
   private groundProg: WebGLProgram;
@@ -248,6 +253,9 @@ export class TerrainRenderer {
   /** Particles per placed object (new instances after a rebuild start fresh). */
   private particleStates = new WeakMap<ObjectInstance, ParticleInstance>();
   private lastParticleTime = -1;
+  /** The map's weather: over its box, or following the view without one. */
+  weather: { effect: WeatherEffect; particles: ParticleInstance; texture: WebGLTexture | null; box: WeatherBox | null }[] = [];
+  showWeather = true;
   wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
   hiddenGroups = new Set<string>();
@@ -553,7 +561,7 @@ export class TerrainRenderer {
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky } = this;
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather } = this;
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
@@ -562,9 +570,10 @@ export class TerrainRenderer {
     this.showBorder = false;
     this.showFog = false;
     this.showSky = false;
+    this.showWeather = false;
     return () => {
       this.setGroundOverlay(null);
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky });
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather });
     };
   }
 
@@ -805,7 +814,18 @@ export class TerrainRenderer {
     if (this.showWater && this.water.count && this.waterLook.frames.length > 1 && this.waterFrame() !== this.waterFrameShown) return true;
     if (this.animate && performance.now() - this.lastAnimFrame > 33
       && this.batches.some((b) => b.instances.length && b.gpu.model.sequences.length && !this.hiddenGroups.has(b.group))) return true;
+    if (this.showWeather && this.weather.length) return true;
     return this.showEffects && this.batches.some((b) => b.instances.length && b.effects && !this.hiddenGroups.has(b.group));
+  }
+
+  /** Weather to draw from now on. */
+  setWeather(list: { effect: WeatherEffect; box: WeatherBox | null }[]) {
+    this.weather = list.map((w) => ({ ...w, particles: new ParticleInstance(w.effect.model, Math.random, MOST_PARTICLES), texture: null }));
+    return this.weather;
+  }
+
+  setWeatherTexture(w: TerrainRenderer["weather"][number], img: DecodedImage) {
+    w.texture = createTexture(this.gl, img, { repeat: [false, false] });
   }
 
   /** Steps and draws the particles of placed objects near the view. */
@@ -816,7 +836,7 @@ export class TerrainRenderer {
     // Far objects aren't simulated (they keep their particles until the view comes back).
     const reach = this.distance * 2.5 + 1024;
     const items: Parameters<ParticleRenderer["draw"]>[2] = [];
-    for (const b of this.batches) {
+    for (const b of this.showEffects ? this.batches : []) {
       const fx = b.effects;
       if (!fx || this.hiddenGroups.has(b.group)) continue;
       for (const inst of b.instances) {
@@ -827,6 +847,12 @@ export class TerrainRenderer {
         p.step(dt, fx.classic ? fx.clock : b.gpu.poseClock, fx.classic ? fx.nodeWorld : b.gpu.nodeWorld, inst.world);
         items.push({ particles: p, textures: fx.textures, world: inst.world });
       }
+    }
+    if (this.showWeather) for (const w of this.weather) {
+      const box = w.box ?? viewBox(this.target[0], this.target[1], this.distance);
+      const world = placeWeather(w.effect, box, w.box ? this.groundHeight((box.left + box.right) / 2, (box.bottom + box.top) / 2) : this.target[2]);
+      w.particles.step(dt, WEATHER_CLOCK, WEATHER_NODES, world);
+      items.push({ particles: w.particles, textures: [w.texture], world });
     }
     if (!items.length) return;
     this.particleRenderer ??= new ParticleRenderer(this.gl);
@@ -941,7 +967,7 @@ export class TerrainRenderer {
         for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog });
       }
     }
-    if (this.showEffects) this.drawParticles(viewProj, this.eye());
+    if (this.showEffects || this.showWeather) this.drawParticles(viewProj, this.eye());
     else this.lastParticleTime = -1;
     // Placement preview: see-through, red where the object doesn't fit.
     for (const g of this.ghost ? [this.ghost, ...this.ghosts] : this.ghosts) {
