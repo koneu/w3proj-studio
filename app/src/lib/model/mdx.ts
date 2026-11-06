@@ -453,7 +453,12 @@ export function parseMdx(buf: Uint8Array): Model {
     sequences: [], globalSequences: [], textures: [], materials: [], geosets: [], geosetAnims: [],
     nodes: [], pivots: new Float32Array(0), particleEmitters2: [], ribbons: [], textureAnims: [], skipped: [], warnings: [],
   };
-  const node = (n: Node) => { model.nodes[n.objectId] = n; };
+  // The ids count the nodes, so they stay far below the file's size. `nodes` is indexed by them and
+  // the renderer walks and spreads it: a damaged id of billions would stop the app.
+  const node = (n: Node) => {
+    if (n.objectId >= buf.length) throw new Error(`node id ${n.objectId}`);
+    model.nodes[n.objectId] = n;
+  };
   while (r.left >= 8) {
     const tag = r.tag();
     const size = r.u32();

@@ -35,6 +35,13 @@ export interface DecodedImage {
   blocks?: BlockImage;
 }
 
+/** As much as a graphics card takes. The sizes come from the file, and decoding allocates and walks them. */
+const MAX_SIDE = 16384;
+
+function checkSize(width: number, height: number) {
+  if (width > MAX_SIDE || height > MAX_SIDE) throw new Error(`image of ${width}×${height}`);
+}
+
 const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
 const magic = (b: Uint8Array) => String.fromCharCode(b[0], b[1], b[2], b[3]);
 
@@ -59,6 +66,7 @@ function cached(count: number, decode: (level: number) => Mip): (level: number) 
 
 /** Mip levels whose offset/size entries point inside the file. */
 function mipTable(b: Uint8Array, offsetsAt: number, sizesAt: number, w: number, h: number, hasMips: boolean) {
+  checkSize(w, h);
   const levels: { offset: number; size: number; width: number; height: number }[] = [];
   for (let i = 0; i < (hasMips ? 16 : 1); i++) {
     const offset = u32(b, offsetsAt + i * 4), size = u32(b, sizesAt + i * 4);
@@ -73,6 +81,7 @@ function mipTable(b: Uint8Array, offsetsAt: number, sizesAt: number, w: number, 
 /** Palettized pixels + separate alpha plane (BLP1 and BLP2 share this). */
 function palettized(b: Uint8Array, palAt: number, data: Uint8Array, w: number, h: number, alphaBits: number): Uint8ClampedArray {
   const n = w * h;
+  if (data.length < n) throw new Error("palettized data truncated");
   const out = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) {
     const p = palAt + data[i] * 4;
@@ -167,7 +176,9 @@ function decodeBlp2(b: Uint8Array): DecodedImage {
   } else if (encoding === 3) {
     format = "BLP2 BGRA8";
     decode = (i) => {
-      const s = slice(i), out = new Uint8ClampedArray(levels[i].width * levels[i].height * 4);
+      const s = slice(i);
+      if (s.length < levels[i].width * levels[i].height * 4) throw new Error("BGRA data truncated");
+      const out = new Uint8ClampedArray(levels[i].width * levels[i].height * 4);
       for (let p = 0; p < out.length; p += 4) { out[p] = s[p + 2]; out[p + 1] = s[p + 1]; out[p + 2] = s[p]; out[p + 3] = s[p + 3]; }
       return out;
     };
@@ -189,7 +200,8 @@ const FOURCC: Record<string, BlockFormat> = {
 
 function decodeDds(b: Uint8Array): DecodedImage {
   const height = u32(b, 12), width = u32(b, 16);
-  const mipCount = Math.max(1, u32(b, 28));
+  checkSize(width, height);
+  const mipCount = Math.min(Math.max(1, u32(b, 28)), 16);
   const pfFlags = u32(b, 80);
   const fourcc = String.fromCharCode(b[84], b[85], b[86], b[87]);
   let dataAt = 128;
@@ -215,6 +227,7 @@ function decodeDds(b: Uint8Array): DecodedImage {
   }
 
   const bpp = u32(b, 88);
+  if (kind === "masks" && ![8, 16, 24, 32].includes(bpp)) throw new Error(`DDS with ${bpp} bits per pixel`);
   const masks = [u32(b, 92), u32(b, 96), u32(b, 100), pfFlags & 1 ? u32(b, 104) : 0];
   const levelSize = (w: number, h: number) =>
     kind === "rgba" || kind === "bgra" ? w * h * 4 : kind === "masks" ? w * h * (bpp >> 3) : blockDataSize(kind, w, h);
@@ -301,6 +314,9 @@ function decodeTga(b: Uint8Array): DecodedImage {
   };
 
   const n = width * height;
+  checkSize(width, height);
+  // At best a run of 128 pixels takes two bytes. Cut-off files stay readable, so this isn't exact.
+  if (n > b.length * 64) throw new Error(`TGA of ${width}×${height} in ${b.length} bytes`);
   // Decode the pixel stream (raw or RLE) into storage order.
   const stream = new Uint8Array(n * pixelBytes);
   if (rle) {

@@ -71,6 +71,7 @@ export function parseW3e(buf: Uint8Array): Terrain {
   const list = () => {
     const n = dv.getUint32(p, true);
     p += 4;
+    if (p + n * 4 > buf.length) throw new Error(`truncated: a list of ${n} tiles`);
     const out: string[] = [];
     for (let i = 0; i < n; i++, p += 4) out.push(id(p));
     return out;

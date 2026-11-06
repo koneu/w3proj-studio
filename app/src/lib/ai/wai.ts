@@ -83,7 +83,13 @@ class Reader {
   constructor(private b: Uint8Array) { this.v = new DataView(b.buffer, b.byteOffset, b.byteLength); }
   u32() { const x = this.v.getUint32(this.o, true); this.o += 4; return x; }
   i32() { const x = this.v.getInt32(this.o, true); this.o += 4; return x; }
-  id() { const s = decodeLossless(this.b.subarray(this.o, this.o + 4)); this.o += 4; return s; }
+  id() {
+    // Past the end a subarray is just empty: without this a wrong count would run on for good.
+    if (this.o + 4 > this.b.length) throw new Error("unexpected end of file");
+    const s = decodeLossless(this.b.subarray(this.o, this.o + 4));
+    this.o += 4;
+    return s;
+  }
   str() { const e = this.b.indexOf(0, this.o); if (e < 0) throw new Error("unterminated string"); const s = decodeLossless(this.b.subarray(this.o, e)); this.o = e + 1; return s; }
   get done() { return this.o >= this.b.length; }
 }

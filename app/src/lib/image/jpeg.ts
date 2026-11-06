@@ -137,6 +137,7 @@ export function decodeJpeg(buf: Uint8Array): JpegImage {
         height = u16(seg + 1);
         width = u16(seg + 3);
         const n = buf[seg + 5];
+        if (n < 1 || n > 4) throw new Error(`JPEG with ${n} components`);
         comps = [];
         for (let i = 0; i < n; i++) {
           const o = seg + 6 + i * 3;
@@ -146,6 +147,8 @@ export function decodeJpeg(buf: Uint8Array): JpegImage {
         vmax = Math.max(...comps.map((c) => c.v));
         mcusX = Math.ceil(width / (8 * hmax));
         mcusY = Math.ceil(height / (8 * vmax));
+        // Each block takes at least a bit, so the size can't be far from the file's.
+        if (mcusX * mcusY * comps.reduce((sum, c) => sum + c.h * c.v, 0) > buf.length * 8) throw new Error(`JPEG of ${width}×${height} in ${buf.length} bytes`);
         for (const c of comps) {
           c.blocksPerLine = mcusX * c.h;
           c.blocksPerColumn = mcusY * c.v;

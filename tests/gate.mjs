@@ -88,6 +88,7 @@ const bin = join(repo, "target", "release", `w3proj${exe}`);
 const local = [
   ["release CLI", shell("cargo build --release --locked -p w3proj-cli")],
   ["hostile input, 20000 rounds", shell("cargo test --release -p w3proj --test robustness --locked --quiet", repo, { W3PROJ_ROBUSTNESS_ROUNDS: "20000" })],
+  ["hostile input on the game's own files", needs(join(game, ".build.info"), "the game", shell("node scripts/hostile-seeds.mjs", app, { W3PROJ_GAME: game, W3PROJ_BIN: bin }))],
   ["corpus round trip and codec baseline", needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`))],
   ["Rust and TypeScript codecs agree", needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, app, { W3PROJ_GAME: game, W3PROJ_BIN: bin }))],
   ["the real app on a scratch project", shell("node scripts/app-smoke.mjs", app, { W3PROJ_BIN: bin })],

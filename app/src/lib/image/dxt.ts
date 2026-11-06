@@ -63,11 +63,11 @@ function alphaBlock(d: Uint8Array, o: number, out: number[], ch: number) {
 }
 
 export function decodeBlocks(f: BlockFormat, data: Uint8Array, width: number, height: number): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(width * height * 4);
   const bw = Math.ceil(width / 4), bh = Math.ceil(height / 4);
   const bsize = blockBytes(f);
-  const px: number[] = new Array(64).fill(0);
   if (data.length < bw * bh * bsize) throw new Error(`${f} data truncated`);
+  const out = new Uint8ClampedArray(width * height * 4);
+  const px: number[] = new Array(64).fill(0);
   for (let by = 0; by < bh; by++) {
     for (let bx = 0; bx < bw; bx++) {
       const o = (by * bw + bx) * bsize;
