@@ -8,7 +8,7 @@ export interface StartPlayer {
   id: number; controller: number; race: number; fixedStart: number; name: string; start: number[];
   allyLow: number; allyHigh: number; enemyLow?: number; enemyHigh?: number; hudSkin?: number;
 }
-export interface PlayerInfo { version: number; players: StartPlayer[]; forces: { players: number }[] }
+export interface PlayerInfo { version: number; playerHudSkins?: boolean; players: StartPlayer[]; forces: { players: number }[] }
 interface Placed { id: string; player?: number; position: number[] }
 
 /** Players a w3i version can hold: 24 since 1.31 (w3i v31), 12 before. */
@@ -25,15 +25,21 @@ export function startLocations(units: readonly Placed[]): Map<number, number[]> 
 export function addPlayer(info: PlayerInfo, id: number, start: number[]): StartPlayer {
   const like = info.players[0];
   const p: StartPlayer = { id, controller: 1, race: 0, fixedStart: 0, name: `Player ${id + 1}`, start: [start[0], start[1]], allyLow: 0, allyHigh: 0 };
-  // Fields that depend on the file version, as the other players have them.
-  if (!like || like.enemyLow !== undefined) { p.enemyLow = 0; p.enemyHigh = 0; }
-  if (like?.hudSkin !== undefined) p.hudSkin = 0;
+  // Fields that depend on the file version, as the other players have them. The first player of a
+  // map has nobody to go by.
+  if (like ? like.enemyLow !== undefined : info.version >= 31) { p.enemyLow = 0; p.enemyHigh = 0; }
+  if (like ? like.hudSkin !== undefined : info.version >= 39 && info.playerHudSkins) p.hudSkin = 0;
   info.players.push(p);
   info.players.sort((a, b) => a.id - b.id);
   const bit = (1 << id) >>> 0;
   if (info.forces.length && !info.forces.some((f) => (f.players & bit) !== 0)) info.forces[0].players = (info.forces[0].players | bit) >>> 0;
   return p;
 }
+
+/** Where a map without a start location gets one: the middle of its playable part, on the 64 grid
+ *  start locations keep to. The game stays in its main menu on a map with no players. */
+export const firstStart = (a: { left: number; right: number; bottom: number; top: number }): [number, number] =>
+  [Math.round((a.left + a.right) / 128) * 64, Math.round((a.bottom + a.top) / 128) * 64];
 
 /** Removes player `id` from the players and the forces. */
 export function removePlayer(info: PlayerInfo, id: number) {

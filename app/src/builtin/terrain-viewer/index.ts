@@ -41,7 +41,7 @@ import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { markMapEdge, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
-import { startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
@@ -2956,6 +2956,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
             if (edgeInfo?.cameraComplements) markMapEdge(terrain, edgeInfo.cameraComplements);
+            // The game won't start a map with no players, so one always gets Player 1's start.
+            const startAdded = !!edgeInfo && !!unitsFile && !unitsFile.list.some((p) => p.id === "sloc");
+            if (startAdded && unitsFile) {
+              const [x, y] = firstStart(playableArea(edgeInfo, terrain));
+              unitsFile.list.push(newEntry(unitsFile, "sloc", [x, y, heightAt(terrain, x, y)], 0));
+              objectsTouched = true;
+              void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
+            }
             const w3e = writeW3e(terrain);
             await writeTerrainBytes(doc.path, w3e, doc);
             if (objectsTouched) {
@@ -2975,6 +2983,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             savedAt = at;
             doc.setDirty(false);
+            if (startAdded) void rebuildObjects();
             const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
             await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads);
             savedW3e = w3e;

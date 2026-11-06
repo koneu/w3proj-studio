@@ -178,6 +178,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
 
     w3.commands.register("w3.project.testMap", async () => {
+      // The game would just stay in its main menu, with nothing to say why.
+      const units = await w3.workspace.readText("map/war3mapUnits.doo.json").catch(() => null);
+      if (units !== null && !units.includes('"sloc"')) {
+        throw new Error("This map has no start location, so the game can't start it. Place one, or save in the terrain view, which adds Player 1's.");
+      }
       const r = await pack(null, true);
       if (!r) return;
       await w3.backend.invoke("game_test_map", { exe: w3.settings.get<string>("game.path"), map: r.output });
