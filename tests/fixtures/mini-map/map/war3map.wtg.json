@@ -13,7 +13,8 @@
   ],
   "unknown": 0,
   "variables": [
-    {"name":"fooCount","type":"integer","unknown":1,"isArray":false,"arraySize":1,"initialized":true,"initialValue":"3","id":1,"parent":-1}
+    {"name":"fooCount","type":"integer","unknown":1,"isArray":false,"arraySize":1,"initialized":true,"initialValue":"3","id":1,"parent":-1},
+    {"name":"fooList","type":"string","unknown":1,"isArray":true,"arraySize":4,"initialized":false,"initialValue":"","id":2,"parent":-1}
   ],
   "items": [
     {"type":4,"id":1,"name":"Foo Setup","isComment":0,"expanded":1,"parent":-1},
@@ -57,6 +58,83 @@
           "children": []
         }
       ]
-    }
+    },
+    {
+      "type": 8,
+      "name": "Foo Branch",
+      "description": "",
+      "isComment": 0,
+      "id": 3,
+      "enabled": true,
+      "isCustom": false,
+      "initiallyOff": false,
+      "runOnInit": true,
+      "parent": 1,
+      "ecas": [
+        {
+          "kind": 0,
+          "name": "FooTimerEvent",
+          "enabled": true,
+          "params": [
+            {"type":0,"value":"5"}
+          ],
+          "children": []
+        },
+        {
+          "kind": 2,
+          "name": "FooIfThenElse",
+          "enabled": true,
+          "params": [],
+          "children": [
+            {
+              "kind": 1,
+              "group": 0,
+              "name": "IsFooReady",
+              "enabled": true,
+              "params": [
+                {"type":0,"value":"1"},
+                {"type":0,"value":"2"}
+              ],
+              "children": []
+            },
+            {
+              "kind": 2,
+              "group": 1,
+              "name": "DoFooThing",
+              "enabled": true,
+              "params": [
+                {"type":3,"value":"\"yes\""},
+                {"type":0,"value":"2.5"}
+              ],
+              "children": []
+            },
+            {
+              "kind": 2,
+              "group": 2,
+              "name": "LogFoo",
+              "enabled": true,
+              "params": [
+                {"type":1,"value":"fooList","index":{"type":1,"value":"fooCount"}}
+              ],
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": 16,
+      "name": "A note",
+      "description": "Only a comment.",
+      "isComment": 1,
+      "id": 4,
+      "enabled": true,
+      "isCustom": false,
+      "initiallyOff": false,
+      "runOnInit": false,
+      "parent": 1,
+      "ecas": []
+    },
+    {"type":64,"id":5,"name":"fooList","parent":1}
   ]
 }

@@ -112,14 +112,19 @@ async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomple
         }) as w3proj::project::NameSource
     });
     // GUI triggers (war3map.wtg) become JSON when the game's TriggerData.txt can be read.
-    // W3PROJ_TRIGGERDATA (tests only): a TriggerData.txt to use instead of the game's.
-    let test_file = std::env::var_os("W3PROJ_TRIGGERDATA").map(PathBuf::from);
-    let trigger_data = test_file.map(|file| {
-        Arc::new(move || {
-            let bytes = std::fs::read(&file).ok()?;
-            Some(Arc::new(w3proj::triggerdata::TriggerData::parse(&String::from_utf8_lossy(&bytes))))
-        }) as w3proj::codec::TriggerDataSource
-    });
+    // W3PROJ_TRIGGERDATA (debug builds only, for the app smoke test): a TriggerData.txt to use
+    // instead of the game's. An unreadable file is an error, never a silent fallback.
+    #[cfg(debug_assertions)]
+    let trigger_data: Option<w3proj::codec::TriggerDataSource> = match std::env::var_os("W3PROJ_TRIGGERDATA").map(PathBuf::from) {
+        Some(file) => {
+            let bytes = std::fs::read(&file).map_err(|e| format!("W3PROJ_TRIGGERDATA {}: {e}", file.display()))?;
+            let data = Arc::new(w3proj::triggerdata::TriggerData::parse(&String::from_utf8_lossy(&bytes)));
+            Some(Arc::new(move || Some(data.clone())))
+        }
+        None => None,
+    };
+    #[cfg(not(debug_assertions))]
+    let trigger_data: Option<w3proj::codec::TriggerDataSource> = None;
     let trigger_data = trigger_data.or_else(|| install.map(|install| {
         let app = app.clone();
         Arc::new(move || {

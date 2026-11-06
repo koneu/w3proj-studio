@@ -324,10 +324,31 @@ fn a_function_missing_from_trigger_data_leaves_the_file_raw_and_undamaged() {
 
     let out = ok(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&data)]);
     assert!(out.contains("raw war3map.wtg"), "{out}");
+    assert!(out.contains("unknown trigger function \"DoFooThing\""), "{out}");
     assert!(!project.join("map/war3map.wtg.json").exists());
     let kept = fs::read(project.join("map/war3map.wtg")).unwrap();
     assert_eq!(kept, w3proj(&["cat", s(&first), "war3map.wtg"]).stdout, "the raw file changed");
 
     pack(&project, &second);
     assert_eq!(fs::read(first).unwrap(), fs::read(second).unwrap());
+}
+
+#[test]
+fn an_unreadable_trigger_data_file_is_an_error_that_names_it() {
+    let dir = workdir("wtg_bad_data");
+    let (project, missing, map) = (dir.join("project"), dir.join("nothing.txt"), dir.join("map.w3x"));
+    pack(&fixture(), &map);
+    // A folder can't be read as a file either.
+    for bad in [missing.as_path(), dir.as_path()] {
+        let runs = [
+            vec!["unpack", s(&map), s(&project), "--game", "none", "--trigger-data", s(bad)],
+            vec!["verify", s(&map), "--game", "none", "--trigger-data", s(bad)],
+        ];
+        for args in runs {
+            let o = w3proj(&args);
+            assert!(!o.status.success(), "w3proj {args:?} should fail: {}", text(&o));
+            assert!(text(&o).contains(s(bad)), "the message doesn't name {}: {}", bad.display(), text(&o));
+        }
+    }
+    assert!(!project.exists(), "work started before the file was checked");
 }

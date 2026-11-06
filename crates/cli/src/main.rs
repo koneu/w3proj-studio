@@ -171,6 +171,14 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
     Ok(out)
 }
 
+/// A `--trigger-data` file that can't be read is an error, before any work starts.
+fn check_trigger_data(file: &Option<PathBuf>) -> Result<()> {
+    if let Some(file) = file {
+        std::fs::read(file).with_context(|| format!("--trigger-data {}: can't read the file", file.display()))?;
+    }
+    Ok(())
+}
+
 /// `file`: a TriggerData.txt to use instead of the game's (the tests bring a made-up one).
 fn with_trigger_data(mut codecs: Registry, game: &Option<LazyGame>, file: &Option<PathBuf>) -> Registry {
     if let Some(file) = file.clone() {
@@ -209,7 +217,7 @@ enum Cmd {
         #[arg(long, default_value = DEFAULT_INSTALL)]
         game: String,
         /// Read GUI triggers with this TriggerData.txt instead of the game's.
-        #[arg(long)]
+        #[arg(long, hide = true)]
         trigger_data: Option<PathBuf>,
     },
     /// Pack a project folder into a .w3x (the release step).
@@ -239,7 +247,7 @@ enum Cmd {
         #[arg(long, default_value = DEFAULT_INSTALL)]
         game: String,
         /// Read GUI triggers with this TriggerData.txt instead of the game's.
-        #[arg(long)]
+        #[arg(long, hide = true)]
         trigger_data: Option<PathBuf>,
     },
     /// List the files in a map.
@@ -310,6 +318,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             game,
             trigger_data,
         } => {
+            check_trigger_data(&trigger_data)?;
             let game = lazy_game(&game);
             let opts = UnpackOptions {
                 allow_incomplete,
@@ -362,6 +371,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             println!("{} files, {} bytes → {}", r.files, r.bytes, r.output.display());
         }
         Cmd::Verify { maps, baseline, update_baseline, quiet, game, trigger_data } => {
+            check_trigger_data(&trigger_data)?;
             let maps = expand_maps(&maps)?;
             let mut base = match &baseline {
                 Some(path) if path.exists() => read_baseline(path)?,

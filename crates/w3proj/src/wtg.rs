@@ -567,3 +567,67 @@ pub fn text_trigger_names(json: &[u8]) -> Option<Vec<String>> {
             .collect(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data() -> TriggerData {
+        TriggerData::parse("[TriggerActions]\nDoIt=0,string\n")
+    }
+
+    /// A classic file written by hand, byte by byte: one category, no variables, one trigger with one action.
+    fn classic(version: u32) -> Vec<u8> {
+        let v7 = version == 7;
+        let mut b = b"WTG!".to_vec();
+        let u = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_le_bytes());
+        u(&mut b, version);
+        u(&mut b, 1); // categories
+        u(&mut b, 5);
+        b.extend_from_slice(b"Cat\0");
+        if v7 {
+            u(&mut b, 0);
+        }
+        u(&mut b, 0); // unknown
+        u(&mut b, 0); // variables
+        u(&mut b, 1); // triggers
+        b.extend_from_slice(b"T\0\0"); // name, description
+        if v7 {
+            u(&mut b, 0); // is comment
+        }
+        for v in [1, 0, 0, 0] {
+            u(&mut b, v); // enabled, custom, initially off, run on init
+        }
+        u(&mut b, 5); // parent category
+        u(&mut b, 1); // actions
+        u(&mut b, 2); // kind: action
+        b.extend_from_slice(b"DoIt\0");
+        u(&mut b, 1); // enabled
+        u(&mut b, 3); // parameter: string
+        b.extend_from_slice(b"\"x\"\0");
+        u(&mut b, 0); // no call
+        u(&mut b, 0); // no index
+        if v7 {
+            u(&mut b, 0); // no children
+        }
+        b
+    }
+
+    #[test]
+    fn classic_v4_and_v7_read_and_write_the_same_bytes() {
+        for version in [4, 7] {
+            let bytes = classic(version);
+            let f = parse(&bytes, &data()).unwrap();
+            assert!(!f.reforged);
+            assert_eq!(f.version, version);
+            assert_eq!(f.items.len(), 2, "a category and a trigger");
+            let Item::Trigger(t) = &f.items[1] else { panic!("no trigger") };
+            assert_eq!((t.parent, t.ecas.len(), t.ecas[0].params[0].value.as_str()), (5, 1, "\"x\""));
+            assert_eq!(write(&f), bytes, "v{version} didn't survive a rewrite");
+            // Control: a byte more is rejected, so the equality above isn't a vacuous one.
+            let mut longer = bytes.clone();
+            longer.push(0);
+            assert!(parse(&longer, &data()).is_err());
+        }
+    }
+}

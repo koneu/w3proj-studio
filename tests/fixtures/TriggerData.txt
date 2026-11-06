@@ -11,6 +11,7 @@ IsFooReady=0,integer,integer
 [TriggerActions]
 DoFooThing=0,string,real
 LogFoo=0,string
+FooIfThenElse=0
 
 [TriggerCalls]
 GetFooValue=0,1,integer,integer

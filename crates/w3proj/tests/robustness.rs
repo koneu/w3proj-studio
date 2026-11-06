@@ -174,6 +174,8 @@ fn codecs_survive_damaged_files() {
     let mut failures = BTreeMap::new();
     let mut lost = Vec::new();
     let (mut accepted, mut rejected) = (0, 0);
+    // Per codec: (accepted, rejected). A codec whose damage only ever goes one way proves little.
+    let mut per_codec: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     for (name, bytes) in codec_files("codecs") {
         for seed in 0..rounds() {
             let bad = damage(&bytes, &mut Rng::new(seed + 1));
@@ -184,9 +186,11 @@ fn codecs_survive_damaged_files() {
                     // gives the file back, so that check must never panic either.
                     let Ok(project) = codec.decode(&name, &bad) else {
                         rejected += 1;
+                        per_codec.entry(codec.id().to_string()).or_default().1 += 1;
                         return;
                     };
                     accepted += 1;
+                    per_codec.entry(codec.id().to_string()).or_default().0 += 1;
                     {
                         if let Ok(again) = codec.encode(&name, &project) {
                             if again != bad {
@@ -203,6 +207,9 @@ fn codecs_survive_damaged_files() {
     // so this is only printed; the test below checks the promise end to end.
     println!("{accepted} damaged files accepted, {rejected} rejected, {} of them encoded differently (these fall back to raw)", lost.len());
     assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+    println!("per codec (accepted, rejected): {per_codec:?}");
+    let wtg = per_codec.get("wtg-json").copied().unwrap_or_default();
+    assert!(wtg.0 > 0 && wtg.1 > 0, "wtg-json must see both damaged files it accepts and rejects: {per_codec:?}");
 }
 
 #[test]
