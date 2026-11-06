@@ -1,6 +1,7 @@
 // The real app, with its real Rust backend, on a scratch copy of the mini map: opens the project,
 // opens each file in its editor, saves, and packs; then makes new maps, places objects, builds them
-// and holds the result against the CLI and the game's script API. ui-smoke runs the front end on a
+// and holds the result against the CLI and the game's script API; then uses the New Map dialog and
+// paints terrain by mouse and keyboard, sent into the hidden window. ui-smoke runs the front end on a
 // fake; this is what that can't reach. New maps need the game installed (W3PROJ_GAME).
 //
 // It runs a build of its own, made with these changes to tauri.conf.json:
@@ -19,7 +20,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statS
 import { createServer } from "node:net";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connect, problems, sleep, until } from "./cdp.mjs";
+import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
@@ -151,6 +152,93 @@ async function newMaps(page, found) {
   return scripts.length;
 }
 
+/** The New Map dialog and the terrain painter, by mouse and keyboard. */
+async function byHand(page, found) {
+  const hands = new Hands(page), folder = join(work, "by-hand");
+  mkdirSync(folder, { recursive: true });
+  const fail = (what) => found.push(`by hand: ${what}`);
+  const errorText = () => page.evaluate(`document.querySelector(".newmap-error")?.textContent ?? ""`);
+  const dialogOpen = () => page.evaluate(`!!document.querySelector(".newmap-dialog")`);
+  const openDialog = async () => {
+    await page.evaluate(`void w3.commands.execute("w3.map.new")`);
+    await until("the New Map dialog", dialogOpen, 20000);
+  };
+
+  // Stands for the folder picker, which is the system's.
+  await page.evaluate(`(() => { w3.window.pickFolder = async () => ${JSON.stringify(folder)}; })()`);
+
+  // Cancel and Esc leave everything as it was.
+  const before = await page.evaluate(`w3.workspace.project()?.root`);
+  await openDialog();
+  await hands.click(".newmap-buttons button", "Cancel");
+  if (await dialogOpen()) fail("Cancel left the dialog open");
+  await openDialog();
+  await hands.key("Escape", "Escape", 27);
+  if (await dialogOpen()) fail("Esc left the dialog open");
+
+  // What can't work is refused, with a reason.
+  await openDialog();
+  await hands.click(".newmap-buttons button", "Create");
+  if (!/where/.test(await errorText())) fail(`no folder gave "${await errorText()}"`);
+  await hands.click(".newmap-dialog button", "Browse…");
+  await sleep(100);
+  await page.evaluate(`(() => {
+    const rows = [...document.querySelectorAll(".newmap-row")];
+    const select = (label) => rows.find((r) => r.textContent.startsWith(label)).querySelector("select");
+    const set = (label, value) => { const e = select(label); e.value = value; e.dispatchEvent(new Event("change", { bubbles: true })); e.dispatchEvent(new Event("input", { bubbles: true })); };
+    set("Cliff level", "0"); set("Water", "deep");
+  })()`);
+  await hands.click(".newmap-buttons button", "Create");
+  if (!/Deep water needs/.test(await errorText())) fail(`deep water on level 0 gave "${await errorText()}"`);
+  if ((await page.evaluate(`w3.workspace.project()?.root`)) !== before) fail("a refused map changed the project");
+
+  // Filled in by hand, and created with Enter.
+  await page.evaluate(`(() => {
+    const rows = [...document.querySelectorAll(".newmap-row")];
+    const set = (label, value) => { const e = rows.find((r) => r.textContent.startsWith(label)).querySelector("select"); e.value = value; e.dispatchEvent(new Event("change", { bubbles: true })); e.dispatchEvent(new Event("input", { bubbles: true })); };
+    set("Cliff level", "2"); set("Water", "none"); set("Tileset", "A");
+    const [w, h] = rows.find((r) => r.textContent.startsWith("Size")).querySelectorAll("select");
+    w.value = "64"; w.dispatchEvent(new Event("input", { bubbles: true }));
+    h.value = "128"; h.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await hands.click("input.newmap-input");
+  await hands.key("a", "KeyA", 65, 2);
+  await hands.type("Typed Map");
+  await hands.key("Tab", "Tab", 9);
+  await hands.type("Someone");
+  await hands.key("Enter", "Enter", 13);
+  const root = await until("the map", () => page.evaluate(`(() => { const r = w3.workspace.project()?.root; return r && r !== ${JSON.stringify(before)} && w3.editors.activePath() ? r : null; })()`));
+  if (!root.replaceAll("\\", "/").endsWith("/by-hand/Typed Map")) fail(`it went to ${root}`);
+  const info = JSON.parse(readFileSync(join(root, "map", "war3map.w3i.json"), "utf8"));
+  const wts = readFileSync(join(root, "map", "war3map.wts"), "utf8");
+  const shown = (v) => (/^TRIGSTR_/.test(v) ? wts : v);
+  if (!shown(info.name).includes("Typed Map")) fail(`its name is ${info.name}`);
+  if (!shown(info.author).includes("Someone")) fail(`its author is ${info.author}`);
+  if (info.tileset !== "A") fail(`its tileset is ${info.tileset}`);
+  const wpm = readFileSync(join(root, "map", "war3map.wpm"));
+  if (wpm.readUInt32LE(8) !== 64 * 4 || wpm.readUInt32LE(12) !== 128 * 4) fail("its size isn't the one chosen");
+
+  // Painting: a drag on the canvas changes the ground, saving keeps it, undo takes it back.
+  const ground = join(root, "map", "war3map.w3e.txt");
+  const untouched = hash(ground);
+  await until("the terrain view", () => page.evaluate(`[...document.querySelectorAll("button, .tab")].some((b) => b.textContent.trim() === "Terrain")`), 20000);
+  await sleep(500);
+  await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain").click()`);
+  await sleep(300);
+  const canvas = await hands.where(".terrain-view canvas, canvas");
+  await hands.drag({ x: canvas.x - 60, y: canvas.y + 20 }, { x: canvas.x + 60, y: canvas.y + 20 });
+  await sleep(300);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const painted = hash(ground);
+  if (painted === untouched) fail("painting changed nothing on disk");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
+}
+
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
@@ -253,6 +341,7 @@ async function run() {
     if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
 
     const made = await newMaps(page, found);
+    await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 

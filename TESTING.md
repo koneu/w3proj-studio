@@ -154,10 +154,10 @@ Each of these comes from a test on this project that looked fine and wasn't.
 
 In order of what I'd do next.
 
-1. **Editing by hand in the real app.** `app-smoke` opens a project and every editor, makes four new
-   maps, places objects, saves, builds and unpacks with the real backend, but through the app's API.
-   Clicks and keys in the terrain, trigger and object editors, and the New Map dialog, are still
-   GUI rounds.
+1. **Editing by hand in the other editors.** `app-smoke` opens a project and every editor, makes new
+   maps, places objects, saves, builds and unpacks. The New Map dialog and painting terrain go by
+   mouse and keyboard, sent over DevTools into the hidden window. The trigger and object editors
+   and placing with the mouse are still GUI rounds.
 2. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
    read map files too. They can't corrupt memory, but they can freeze the app.
 3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is

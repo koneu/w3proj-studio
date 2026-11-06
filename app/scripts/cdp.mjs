@@ -46,6 +46,50 @@ export class Page {
   }
 }
 
+/** Input the way a person gives it, sent into the page: the desktop's mouse and keyboard aren't used. */
+export class Hands {
+  constructor(page) { this.page = page; }
+  /** The centre of the first element matching a selector, and containing a text if given. */
+  async where(selector, text = null) {
+    const at = await this.page.evaluate(`(() => {
+      const e = [...document.querySelectorAll(${JSON.stringify(selector)})].find((x) => ${JSON.stringify(text)} === null || x.textContent.trim() === ${JSON.stringify(text)});
+      if (!e) return null;
+      e.scrollIntoView({ block: "center" });
+      const r = e.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, width: r.width, height: r.height };
+    })()`);
+    if (!at) throw new Error(`nothing to click: ${selector}${text ? ` "${text}"` : ""}`);
+    return at;
+  }
+  mouse(type, x, y, buttons = 0) {
+    return this.page.send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" && !buttons ? "none" : "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1 });
+  }
+  async click(selector, text = null) {
+    const { x, y } = await this.where(selector, text);
+    await this.mouse("mouseMoved", x, y);
+    await this.mouse("mousePressed", x, y, 1);
+    await this.mouse("mouseReleased", x, y);
+    await sleep(50);
+  }
+  async drag(from, to, steps = 12) {
+    await this.mouse("mouseMoved", from.x, from.y);
+    await this.mouse("mousePressed", from.x, from.y, 1);
+    for (let i = 1; i <= steps; i++) {
+      await this.mouse("mouseMoved", from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps, 1);
+      await sleep(30);
+    }
+    await this.mouse("mouseReleased", to.x, to.y);
+    await sleep(100);
+  }
+  type(text) { return this.page.send("Input.insertText", { text }); }
+  async key(key, code, windowsVirtualKeyCode, modifiers = 0) {
+    const e = { key, code, windowsVirtualKeyCode, modifiers };
+    await this.page.send("Input.dispatchKeyEvent", { type: "keyDown", ...e });
+    await this.page.send("Input.dispatchKeyEvent", { type: "keyUp", ...e });
+    await sleep(50);
+  }
+}
+
 /** The page with this DevTools port, connected, with its events on. */
 export async function connect(port, wanted = () => true) {
   const target = await until("a page", async () => {
