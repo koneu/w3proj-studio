@@ -1,5 +1,5 @@
 // The JASS checker on valid scripts (Blizzard.j, the game maps' war3map.j): every report is a false positive.
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const L = process.argv[2], show = Number(process.argv[3] ?? 10);
 const C = await import(pathToFileURL(L + "/jass/check.ts").href);
@@ -28,3 +28,4 @@ for (const m of readdirSync("ws")) {
 }
 console.log(`maps ${maps}, without reports ${clean}, reports ${total}, ${Date.now() - t0} ms`);
 for (const [k, n] of [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(String(n).padStart(6), k);
+if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify({ common: dc.length, blizzard: db.length, maps, clean, reports: total }));

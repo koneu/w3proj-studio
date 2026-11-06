@@ -1,7 +1,7 @@
 // Section-by-section comparison of lib/script output with the World Editor's war3map.j.
 // Run from a folder with ws/<n>/map (unpacked maps) and the game tables (see README.md).
 // Args: <path to app/src/lib> [section to show diffs for] [number of diffs]
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const L = process.argv[2];
 const only = process.argv[3] ?? "";
@@ -11,10 +11,12 @@ const { parseTriggerData } = await mod("/triggers/triggerdata.ts");
 const W = await mod("/triggers/wtg.ts");
 const J = await mod("/script/jass.ts");
 const G = await mod("/script/guard.ts");
+const O = await mod("/script/objects.ts");
 const R = await mod("/triggers/refs.ts");
 const { checkLua } = await mod("/lua/check.ts");
 const { StringTable } = await mod("/formats/wts.ts");
 const T = await mod("/terrain/w3e.ts");
+const { w3eFromText } = await mod("/terrain/w3etext.ts");
 const { parseIni, parseSlk } = await mod("/formats/text.ts");
 
 const read = (f: string) => readFileSync(f, "utf8");
@@ -27,9 +29,9 @@ const buildings = new Set(balance.filter((r: any) => r.isbldg === "1").map((r: a
 const unitIds = new Set(balance.map((r: any) => r.unitBalanceID));
 const itemIds = new Set(parseSlk(read("ItemData.slk")).map((r: any) => r.itemID));
 const abilityIds = new Set(parseSlk(read("AbilityData.slk")).map((r: any) => r.alias));
-const orders = new Map<string, { on: string; off: string }>();
 const labels = existsSync("soundinfo") ? J.parseSoundLabels(readdirSync("soundinfo").map((f) => read("soundinfo/" + f))) : new Map();
-for (const f of readdirSync("abil")) for (const [id, sec] of parseIni(read("abil/" + f))) { const on = sec.get("orderon"), off = sec.get("orderoff"); if (on && off && !orders.has(id)) orders.set(id, { on, off }); }
+const gameColors = O.gameTeamColors(parseSlk(read("unitUI.slk")));
+const orders = O.abilityOrders(readdirSync("abil").map((f) => parseIni(read("abil/" + f))));
 
 const stats: Record<string, [number, number]> = {};
 // lib/script/guard: maps the World Editor made must not look as if they had code of their own.
@@ -70,7 +72,7 @@ for (const m of readdirSync("ws")) {
   }
   const wj = (stats["(wtg via JSON)"] ??= [0, 0]); wj[1]++; if (same(W.writeWtg(W.parseWtgJson(W.writeWtgJson(triggers))), wtgBytes)) wj[0]++;
   const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
-  const terrain = existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
+  const terrain = existsSync(`${d}/war3map.w3e.txt`) ? T.parseW3e(w3eFromText(read(`${d}/war3map.w3e.txt`))) : existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
   // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
   const customUnits = new Map<string, { base: string; bldg?: boolean }>();
   for (const f of ["war3map.w3u", "war3mapSkin.w3u"]) {
@@ -79,6 +81,7 @@ for (const m of readdirSync("ws")) {
       customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
     }
   }
+  const colors = O.teamColors([json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")], gameColors);
   const customAbilities = new Set<string>((json(d, "war3map.w3a")?.custom ?? []).map((o: any) => o.id));
   const customItems = new Set<string>((json(d, "war3map.w3t")?.custom ?? []).map((o: any) => o.id));
   const kindOf = (id: string): any => {
@@ -91,7 +94,7 @@ for (const m of readdirSync("ws")) {
   };
   const lt = (info.lightEnvironment || info.tileset) as string;
   const input = {
-    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a),
+    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a), teamColor: (id: string) => colors.get(id),
     lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") },
     groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
@@ -139,3 +142,4 @@ console.log(`problems: ${broken.length} in the game's maps`);
 for (const b of broken.slice(0, 20)) console.log(`  ${b}`);
 console.log(`guard: ${guarded.length} of ${checked} maps would keep their script`);
 for (const [m, lost] of guarded) console.log(`  ${m}: ${lost.length} (${lost.slice(0, 6).join(", ")})`);
+if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify({ identical: stats, problems: broken.length, guarded: guarded.length, checked }));

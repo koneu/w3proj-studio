@@ -1,0 +1,108 @@
+{
+  "sections": {
+    "identical": {
+      "(wtg byte-exact)": [
+        375,
+        375
+      ],
+      "(wtg via JSON)": [
+        375,
+        375
+      ],
+      "(whole file)": [
+        181,
+        326
+      ],
+      "": [
+        326,
+        326
+      ],
+      "Global Variables": [
+        324,
+        326
+      ],
+      "Custom Script Code": [
+        321,
+        326
+      ],
+      "Random Groups": [
+        326,
+        326
+      ],
+      "Map Item Tables": [
+        326,
+        326
+      ],
+      "Unit Item Tables": [
+        326,
+        326
+      ],
+      "Destructible Item Tables": [
+        326,
+        326
+      ],
+      "Sound Assets": [
+        320,
+        326
+      ],
+      "Destructable Objects": [
+        228,
+        326
+      ],
+      "Regions": [
+        324,
+        326
+      ],
+      "Cameras": [
+        317,
+        326
+      ],
+      "Items": [
+        288,
+        326
+      ],
+      "Unit Creation": [
+        283,
+        326
+      ],
+      "Upgrades": [
+        317,
+        326
+      ],
+      "TechTree": [
+        326,
+        326
+      ],
+      "Triggers": [
+        313,
+        326
+      ],
+      "Players": [
+        325,
+        326
+      ],
+      "Main Initialization": [
+        326,
+        326
+      ],
+      "Map Configuration": [
+        317,
+        326
+      ]
+    },
+    "problems": 46,
+    "guarded": 7,
+    "checked": 375
+  },
+  "valid": {
+    "common": 0,
+    "blizzard": 0,
+    "maps": 326,
+    "clean": 326,
+    "reports": 0
+  },
+  "mistakes": {
+    "missed": 0,
+    "falseAlarms": 0
+  }
+}

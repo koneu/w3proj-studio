@@ -85,7 +85,7 @@ async function measure() {
   const hits = collect(raw, out);
   if (!hits.files.size) throw new Error("no coverage was collected");
   const files = {};
-  for (const file of walk(src).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))) {
+  for (const file of walk(src).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".fixture.ts"))) {
     const code = await codeLines(file);
     files[relative(src, file).replaceAll("\\", "/")] = { lines: code.size, covered: hits.covered(file, code) };
   }

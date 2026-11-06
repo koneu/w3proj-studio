@@ -3,7 +3,9 @@
     "extensions": 40,
     "lib/formats": 68,
     "lib/image": 81,
+    "lib/jass": 78,
     "lib/lua": 90,
+    "lib/script": 85,
     "lib/terrain": 60,
     "lib/triggers": 67
   },

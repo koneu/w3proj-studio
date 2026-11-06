@@ -1,5 +1,5 @@
 // Deliberate mistakes the JASS checker must report (one per case), and correct code it must accept.
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const C = await import(pathToFileURL(process.argv[2] + "/jass/check.ts").href);
 const env = C.envFrom([readFileSync("Blizzard.j", "utf8")], C.envFrom([readFileSync("common.j", "utf8")]));
@@ -41,13 +41,14 @@ const good: [string, string][] = [
   ["hex and rawcodes", fn("    local integer a = 0xFF + $10 + 'hfoo' + 'a'")],
   ["string concat", fn("    local string s = \"a\" + I2S(1) + null")],
 ];
-let ok = 0;
+let ok = 0, missed = 0, falseAlarms = 0;
 for (const [name, src] of bad) {
   const d = C.checkJass(src, env);
-  if (d.length) { ok++; console.log(`ok   ${name.padEnd(30)} ${d[0].message}`); } else console.log(`MISS ${name}`);
+  if (d.length) { ok++; console.log(`ok   ${name.padEnd(30)} ${d[0].message}`); } else { missed++; console.log(`MISS ${name}`); }
 }
 for (const [name, src] of good) {
   const d = C.checkJass(src, env);
-  if (!d.length) ok++; else console.log(`FALSE ${name}: ${d.map((x: any) => x.message).join("; ")}`);
+  if (!d.length) ok++; else { falseAlarms++; console.log(`FALSE ${name}: ${d.map((x: any) => x.message).join("; ")}`); }
 }
 console.log(`${ok}/${bad.length + good.length}`);
+if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify({ missed, falseAlarms }));

@@ -33,9 +33,10 @@ oracle only proves the code does what the code does.
 | Unit | known answers, round trips | `#[test]`, `src/**/*.test.ts` | every commit, CI |
 | System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` | every commit, CI |
 | Hostile input | never panics; what parses still round-trips | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
+| Random maps | the JASS and Lua checkers on every generated script | `app/src/lib/script/random-maps.test.ts` | every commit, CI |
 | UI smoke | the app's own error reports | `app/scripts/ui-smoke.mjs` | every commit, CI |
 | Corpus | real maps, and the baseline of which codec reads what | `w3proj verify`, `twin-check.mjs` | locally, before merging |
-| Generated script | the World Editor's own `war3map.j` | `app/scripts/script-check` | by hand for now |
+| Generated script | the World Editor's own `war3map.j` on the game's 326 JASS maps | `app/scripts/script-check/run.mjs`, `tests/script-baseline.json` | locally, before merging |
 | The real thing | the game and World Editor | the release checklist below | by hand, before a release |
 
 The top of the table is fast and runs everywhere; the bottom is slow and only runs here, because
@@ -67,6 +68,10 @@ hostile-input tests are set with `W3PROJ_ROBUSTNESS_ROUNDS`. The corpus tier fin
 corpus tier. A change in `tests/corpus-baseline.tsv` has to be intended: `--update-baseline`
 is for new codecs and maps, never for making a failure go away.
 
+**Change to the script generator.** The corpus tier compares it with the World Editor. Counts in
+`tests/script-baseline.json` may rise, never fall; when they rise, keep it with
+`node app/scripts/script-check/run.mjs --update-baseline`.
+
 **Before merging to master.** `node tests/gate.mjs all`.
 
 **Before a release.** The whole gate, then the checklist. Only the game can answer these:
@@ -82,7 +87,7 @@ backed-up `settings.json`, and they don't take over the screen while someone wor
 
 ## Coverage: what the numbers mean
 
-Measured on 2026-11-05. TypeScript counts every source file, so a file no test imports is 0%.
+Measured on 2026-11-06. TypeScript counts every source file, so a file no test imports is 0%.
 
 | Area | Lines covered |
 |---|---|
@@ -90,15 +95,14 @@ Measured on 2026-11-05. TypeScript counts every source file, so a file no test i
 | `mpq` / `w3proj` / `cli` | 89% / 81% / 56% |
 | `casc` (reads the game's storage) | 23% |
 | Tauri backend (`app/src-tauri`) | 33% |
-| TypeScript, all | 14% |
-| `lib/image`, `lib/lua`, `lib/formats`, `lib/triggers`, `lib/terrain` | 60–90% |
-| `lib/script` (writes `war3map.j`) | **2%** |
-| `lib/jass`, `lib/objects`, `lib/ai` | **0%** |
+| `lib/image`, `lib/lua`, `lib/formats`, `lib/triggers`, `lib/terrain` | 65–90% |
+| `lib/script` (writes `war3map.j`) | 87% (2% before its tests) |
+| `lib/jass` | 79% |
+| `lib/objects`, `lib/ai` | **0%** |
 | `workbench`, most of `builtin/` | 0–10% |
 
 Unit coverage counts only unit tests: the UI smoke and the corpus run far more code than this
-shows. The low numbers in the last rows are the useful part of this table, and `lib/script` is the
-one that matters: it writes what the game runs.
+shows. The low numbers in the last rows are the useful part of this table.
 
 **How to use it:** look for what's at zero and ask whether that's a risk. `tests/coverage-floor.json`
 holds floors for the logic layers, so tested code doesn't quietly stop being tested. Raise a floor
@@ -122,7 +126,9 @@ cargo mutants -f crates/mpq/src/crypto.rs -p mpq
 Each of these comes from a test on this project that looked fine and wasn't.
 
 - **Prove the test can fail.** Break the code once and see it go red. The UI smoke was checked
-  with a sabotaged extension.
+  with a sabotaged extension, the generator's tests by putting each bug they found back.
+- **The check has to run the app's code.** `script-check` used to keep its own copy of how orders
+  are looked up, so it could only ever prove the copy. Share the code instead (`lib/script/objects.ts`).
 - **Give "it was rejected" a control.** The first `wtg_hostile` test passed at once, because its
   hand-built file was invalid and never reached the recursion. A sane depth must parse, or
   an error at the hostile depth means nothing. With the control, it crashed the process.
@@ -132,6 +138,7 @@ Each of these comes from a test on this project that looked fine and wasn't.
 - **Test the result, not the call.** A round trip or known answer, not "it didn't throw".
 - **Fixtures are made up.** Nothing from the game or other people's maps goes into the repository;
   `tests/fixtures` is handwritten and stays byte-exact through `.gitattributes`.
+  `lib/jass/mini-game.fixture.ts` is a small handwritten stand-in for the game's script API.
 - **Real maps are read-only.** Work on copies in a scratch folder.
 - **A flaky test is a bug.** Fix it or remove it; don't rerun until green.
 
@@ -139,15 +146,16 @@ Each of these comes from a test on this project that looked fine and wasn't.
 
 In order of what I'd do next.
 
-1. **`lib/script` and `lib/jass` unit tests.** Generated `war3map.j` is what players run, and the
-   check that exists (`script-check`) needs a manual setup. Make it a corpus step.
-2. **The real backend under the real UI.** The UI smoke's backend is a fake, so no project is ever
+1. **The real backend under the real UI.** The UI smoke's backend is a fake, so no project is ever
    opened. `workbench/backend.ts` is one small seam: a test bridge to the Rust commands would let a
    headless run open the mini map and every editor, which is most of what a GUI round does by hand.
-3. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
+2. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
    read map files too. They can't corrupt memory, but they can freeze the app.
-4. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is
+3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is
    at 37%. A small made-up TriggerData fixes that.
-5. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist
+4. **The game itself.** Nothing automatic proves that a map loads in the game: the release checklist
    is all there is. Saved-by-World-Editor samples of each file version would at least pin the
    formats, and could settle the unknown fields listed in `openpoints/test.md`.
+5. **The generated script isn't identical yet.** Of the 326 JASS maps, 181 match the World Editor's
+   file exactly, 87 have the same lines in another order (creation order of destructables and
+   items, as far as looked at) and 58 really differ. The last group hasn't been sorted out yet.
