@@ -83,3 +83,17 @@ export class StringTable {
     return out.serialize();
   }
 }
+
+/** Strings from `incoming`, a translation say, put into the map's `current` file by their numbers. Only the
+ *  changed blocks are rewritten; numbers the map doesn't have stay out, as nothing would use them. */
+export function importStrings(current: string, incoming: string) {
+  const table = new StringTable(current), next = new StringTable(incoming);
+  let changed = 0, unknown = 0;
+  for (const [n, value] of next.entries()) {
+    if (!table.has(n)) { unknown++; continue; }
+    if (table.get(n)!.replace(/\r\n/g, "\n") === value.replace(/\r\n/g, "\n")) continue;
+    table.set(n, value);
+    changed++;
+  }
+  return { text: table.serialize(), changed, unknown };
+}

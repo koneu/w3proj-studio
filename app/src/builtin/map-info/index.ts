@@ -1,7 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { StringTable } from "../../lib/formats/wts";
+import { importStrings, StringTable } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -138,6 +138,8 @@ let requestedSection: SectionId | null = null;
 let lastSection: SectionId = "description";
 const openEditors = new Set<(s: SectionId) => void>();
 
+const STRINGS = "map/war3map.wts";
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(w3.mcp.registerTool("map_info", async () => {
     requireProject(w3);
@@ -183,6 +185,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   ctx.subscriptions.push(
     w3.commands.register("w3.mapInfo.open", (section?: SectionId) => openAt(section)),
+    // Strings go out as the map's own war3map.wts, a text file a translator can work in.
+    w3.commands.register("w3.strings.export", async () => {
+      const text = await w3.workspace.readText(STRINGS).catch(() => null);
+      if (text === null) throw new Error("This map has no strings.");
+      const path = await w3.window.pickSaveFile({ title: "Export strings", defaultPath: "strings.txt", filters: [{ name: "Strings (.txt)", extensions: ["txt"] }] });
+      if (!path) return;
+      await w3.backend.writeBytes(path, new TextEncoder().encode(text));
+      void w3.window.showInfo(`Exported ${[...new StringTable(text).entries()].length} strings.`);
+    }),
+    w3.commands.register("w3.strings.import", async () => {
+      const text = await w3.workspace.readText(STRINGS).catch(() => null);
+      if (text === null) throw new Error("This map has no strings.");
+      const path = await w3.window.pickFile({ title: "Import strings", filters: [{ name: "Strings (.txt, .wts)", extensions: ["txt", "wts"] }] });
+      if (!path) return;
+      const { text: next, changed, unknown } = importStrings(text, new TextDecoder().decode(await w3.backend.readBytes(path)));
+      const extra = unknown ? ` ${unknown} in the file ${unknown === 1 ? "isn't" : "aren't"} in this map, and stay${unknown === 1 ? "s" : ""} out.` : "";
+      if (!changed) { void w3.window.showInfo(`No strings to change.${extra}`); return; }
+      await w3.workspace.writeText(STRINGS, next);
+      void w3.window.showInfo(`Imported ${changed} string${changed === 1 ? "" : "s"}.${extra}`);
+    }),
     w3.views.register("w3.scenario.sections", {
       render(el) {
         if (!w3.workspace.project()) {
