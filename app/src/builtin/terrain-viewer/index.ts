@@ -28,6 +28,7 @@ import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableA
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
+import { resetVariations } from "../../lib/terrain/variation";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
@@ -906,6 +907,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       toolGroups.pendingLook = [x, y];
       await w3.commands.execute("w3.terrain.open");
       if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y); toolGroups.pendingLook = null; }
+    }),
+    w3.commands.register("w3.terrain.resetVariations", async () => {
+      if (!toolGroups.resetVariations) throw new Error("Open the terrain editor first.");
+      if (!toolGroups.resetVariations()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
     // `opts` (other extensions): dialog preset, and a step before the map is created (and opened).
     w3.commands.register("w3.map.new", async (opts?: NewMapPreset & { beforeCreate?(o: { dir: string; name: string }): Promise<void> }) => {
@@ -2757,6 +2762,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         toolGroups.livePlacements = live;
         const look = (x: number, y: number) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); };
         toolGroups.look = look;
+        toolGroups.resetVariations = () => {
+          if (!editable) throw new Error("This terrain is read-only.");
+          const log = new CornerUndo();
+          if (!resetVariations(terrain, log)) return false;
+          commitTerrain(log.step(terrain));
+          return true;
+        };
         if (toolGroups.pendingLook) { const [px, py] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py)); }
         if (editable) queueMicrotask(syncGroups);
 
@@ -3232,6 +3244,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             if (toolGroups.look === look) toolGroups.look = null;
+            toolGroups.resetVariations = null;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             if (opened?.screenshot === takeScreenshot) opened = null;

@@ -20,6 +20,8 @@ export class TerrainToolRegistry implements TerrainService {
 
   /** Set by the open terrain editor: moves its camera to a point. */
   look: ((x: number, y: number) => void) | null = null;
+  /** Set by the open terrain editor: Reset Texture Variations, as one undo step; false when nothing changed. */
+  resetVariations: (() => boolean) | null = null;
   /** A point to show once the terrain editor has opened. */
   pendingLook: [number, number] | null = null;
 
