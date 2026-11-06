@@ -39,7 +39,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { markMapEdge, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
+import { onBoundary, markMapEdge, heightAt, parseW3e, writeW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
@@ -306,7 +306,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const walkGrid = async (handle: TerrainEditorHandle): Promise<Grid> => {
     const [pathing, blockers] = await Promise.all([handle.pathing(), handle.objects.blockers()]);
     const t = handle.terrain;
-    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || blockers[i] ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
+    const painted = (i: number) => onBoundary(t, t.offsetX + ((i % pathing.width) + 0.5) * 32, t.offsetY + (Math.floor(i / pathing.width) + 0.5) * 32);
+    return { blocked: pathing.cells.map((c, i) => (c & NO_WALK || blockers[i] || painted(i) ? 1 : 0)), width: pathing.width, height: pathing.height, offsetX: t.offsetX, offsetY: t.offsetY };
   };
 
   /** How long Studio waits for a yes. Less than a tool call may take, or the answer goes nowhere. */
@@ -2450,7 +2451,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return {
                 blocked: occ.blocked,
                 footprint: async (kind, id) => { const fp = await occ.footprint(id, kind); return fp && { width: fp.width, height: fp.height }; },
-                fits: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); return !fp || occ.fits(fp, x, y, angle); },
+                fits: async (kind, id, x, y, angle) => {
+                  // Units and items can't stand on painted Boundary. Doodads can, as past the map's edge.
+                  if ((kind === "w3u" || kind === "w3t") && id !== "sloc" && onBoundary(terrain, x, y)) return false;
+                  const fp = await occ.footprint(id, kind);
+                  return !fp || occ.fits(fp, x, y, angle);
+                },
                 mark: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); if (fp) occ.mark(fp, x, y, angle); },
               };
             },

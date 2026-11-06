@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { borderShade } from "./area";
-import { markMapEdge, setWaterLevel, type Corner, type Terrain } from "./w3e";
+import { markMapEdge, onBoundary, setWaterLevel, type Corner, type Terrain } from "./w3e";
 
 test("the border's shade covers the tiles past the playable map, on each side", () => {
   // Left 1, right 2, bottom 1, top 0, on 5 by 3 tiles.
@@ -29,4 +29,15 @@ test("the map edge marks each tile past the playable map at its lower left corne
   assert.equal(corners[0].rawWater & 0x8000, 0x8000, "the other bit stays");
   setWaterLevel(corners[0], 0x2100);
   assert.equal(corners[0].rawWater & 0x4000, 0x4000, "a new water level keeps the mark");
+});
+
+test("a tile counts as Boundary when one of its corners is painted, the same tiles the view darkens", () => {
+  const corners = Array.from({ length: 16 }, () => ({ boundary: false }) as Corner);
+  corners[5].boundary = true; // Corner (1, 1), at world 128, 128.
+  const t = { width: 4, height: 4, offsetX: 0, offsetY: 0, corners } as Terrain;
+  assert.equal(onBoundary(t, 64, 64), true, "the tile south-west of it");
+  assert.equal(onBoundary(t, 200, 200), true, "the tile north-east of it");
+  assert.equal(onBoundary(t, 300, 64), false, "two tiles away");
+  assert.equal(onBoundary(t, -10, 64), false, "off the map");
+  assert.equal(onBoundary(t, 64, 400), false, "past the last row of tiles");
 });
