@@ -575,6 +575,17 @@ export function replacePlaced(list: { id: string; position: readonly number[]; v
   return changed;
 }
 
+/** What a selection can become, its own kind first (the picker opens there): doodads and destructables share a
+ *  file, units and items each stay what they are. */
+export function replaceableKinds(kinds: Iterable<string>): string[] {
+  const out = new Set<string>();
+  for (const k of kinds) for (const to of k === "w3d" ? ["w3d", "w3b"] : k === "w3b" ? ["w3b", "w3d"] : [k]) out.add(to);
+  return [...out];
+}
+
+/** Whether something of kind `from` can become kind `to`. */
+export const replaceableBy = (from: string, to: string) => replaceableKinds([from]).includes(to);
+
 /** Pieces along a line, turned to run along it, each centred in its own stretch, so the row starts
  *  and ends at the line's ends and two lines meet in a corner. `facingOffset` is the facing (degrees) that makes a model follow the line. */
 export function lineSpots(from: [number, number], to: [number, number], spacing: number, facingOffset: number) {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseArea } from "../../lib/terrain/area";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { groundHeight, heightAt, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, seededRandom, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
+import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, replacePlaced, rowSpots, seededRandom, swapTiles, scatterSpots, sculptCorners, spotsAround, terrainSummary, textMap, viewOfArea } from "./aitools";
 import { beyondPlayable, distanceToLine, isKeptClear, playableArea } from "../../lib/terrain/area";
 
 /** Repeatable numbers in 0..1. */
@@ -376,4 +376,16 @@ test("the camera for an area looks at its middle, with room around it", () => {
   assert.ok(Math.abs(v.distance - 600) < 0.001);
   assert.ok(v.pitch > viewOfArea(box, 0, 1, 1, "angled").pitch && viewOfArea(box, 0, 1, 1, "angled").pitch > viewOfArea(box, 0, 1, 1, "low").pitch);
   assert.equal(viewOfArea({ left: 0, bottom: 0, right: 1, top: 1 }, 0, 1, 1, "top").distance, 400);
+});
+
+test("a selection is offered what it can become", () => {
+  assert.deepEqual(replaceableKinds(["w3d"]), ["w3d", "w3b"]);
+  assert.deepEqual(replaceableKinds(["w3b"]), ["w3b", "w3d"], "trees open on destructables");
+  assert.deepEqual(replaceableKinds(["w3b", "w3d"]), ["w3b", "w3d"]);
+  assert.deepEqual(replaceableKinds(["w3u"]), ["w3u"]);
+  assert.deepEqual(replaceableKinds(["w3t"]), ["w3t"]);
+  assert.deepEqual(replaceableKinds(["w3u", "w3d"]).sort(), ["w3b", "w3d", "w3u"]);
+  assert.equal(replaceableBy("w3d", "w3b"), true, "a tree can become a destructable");
+  assert.equal(replaceableBy("w3u", "w3d"), false, "a unit can't become a doodad: they're in different files");
+  assert.equal(replaceableBy("w3t", "w3u"), false);
 });

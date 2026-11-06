@@ -27,7 +27,7 @@ import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, O
 import { centreOf, fragmentOf, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changesImports } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
@@ -1681,8 +1681,41 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           moveEdits(entries, before);
           refreshGroupRings();
         };
-        const turnButtons = () => ([["mirrorX", "Mirror ↔", "Mirror east to west (H)"], ["mirrorY", "Mirror ↕", "Mirror north to south (V)"], ["cw", "Turn 90°", "Turn a quarter clockwise (R, back with Shift+R)"]] as const)
-          .map(([turn, label, title]) => h("button", { title, onclick: () => turnSelection(turn) }, label));
+        /** The selection becomes another type where it stands, as one undo step. */
+        const replaceSelected = async () => {
+          const entries = selectedEntries().filter((p) => p.id !== "sloc");
+          const kinds = new Map(entries.map((p) => [p, findInstance(p)?.pick?.kind ?? (dooFile?.list.includes(p) ? "w3d" : "w3u")]));
+          if (!kinds.size) return;
+          const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+          const chosen = await objects.pick(el, { title: `Replace ${entries.length === 1 ? "this" : `these ${entries.length}`} with…`, kinds: replaceableKinds(kinds.values()) });
+          canvas.focus();
+          if (!chosen) return;
+          const swapped = entries.filter((p) => replaceableBy(kinds.get(p) as string, chosen.kind) && p.id !== chosen.id);
+          if (!swapped.length) return;
+          await loadCells(chosen.id).catch(() => { /* stays free */ });
+          type Look = Props & { id: string; skinId?: string };
+          const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
+          const before = swapped.map(look);
+          replacePlaced(swapped as Parameters<typeof replacePlaced>[0], Object.fromEntries(swapped.map((p) => [p.id, chosen.id])), null, (id) => handle.objects.type(id)?.numVar ?? 1);
+          for (const p of swapped) {
+            // A building of another size has another spot on the grid.
+            const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
+            if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, heightAt(terrain, x, y)]; repositioned.add(p); }
+          }
+          const after = swapped.map(look);
+          const put = (v: Look[]) => { swapped.forEach((p, i) => Object.assign(p, structuredClone(v[i]))); };
+          pushEdit({ undo: () => put(before), redo: () => put(after), terrain: false, objects: true });
+          objectsTouched = true;
+          await rebuildObjects();
+          selectEntries(entries);
+          const left = entries.length - swapped.length;
+          if (left) void w3.window.showInfo(`Replaced ${swapped.length}. The other ${left} can't become ${chosen.name}, or already are.`);
+        };
+        const turnButtons = () => [
+          ...([["mirrorX", "Mirror ↔", "Mirror east to west (H)"], ["mirrorY", "Mirror ↕", "Mirror north to south (V)"], ["cw", "Turn 90°", "Turn a quarter clockwise (R, back with Shift+R)"]] as const)
+            .map(([turn, label, title]) => h("button", { title, onclick: () => turnSelection(turn) }, label)),
+          h("button", { title: "Swap what's selected for another type, where it stands", onclick: () => void replaceSelected().catch((e) => w3.window.showError(String(e))) }, "Replace…"),
+        ];
 
         // ---- copy and paste ----------------------------------------------------------------
         /** While pasting: what's being pasted. Each click places a copy, until Esc. */
