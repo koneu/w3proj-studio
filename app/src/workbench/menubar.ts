@@ -1,16 +1,33 @@
 // The bar along the top: File, Edit and so on. Menus are built when opened, so commands of an
-// extension loaded later are there.
+// extension loaded later are there. By keyboard: Alt alone goes to the bar, Alt and a letter opens
+// a menu, and the arrow keys, Enter and Esc do the rest.
 
 import type { MenuItem } from "../extensions/api";
-import { h, showContextMenu } from "./dom";
-import type { Menu } from "./menus";
+import { closeContextMenu, h, showContextMenu } from "./dom";
+import { menuFor, type Menu, type MenuEntry } from "./menus";
 
 export class MenuBar {
   readonly root = h("div.menubar");
   /** The menu showing, while a dropdown is open. */
   private open: string | null = null;
+  /** Where the keyboard was before the bar, to go back to. */
+  private before: HTMLElement | null = null;
+  /** Alt is down, and nothing else happened since: letting go goes to the bar. */
+  private altAlone = false;
 
-  constructor(private menus: () => Menu[], private run: (command: string) => void) {}
+  constructor(private menus: () => Menu[], private run: (command: string) => void, private blocked: (when: MenuEntry["when"]) => string | undefined) {
+    this.root.addEventListener("keydown", (e) => this.barKey(e));
+    window.addEventListener("keydown", (e) => this.globalKey(e), true);
+    window.addEventListener("keyup", (e) => {
+      if (e.key !== "Alt" || !this.altAlone) return;
+      this.altAlone = false;
+      e.preventDefault();
+      this.toggleBar();
+    }, true);
+    // Alt and a click means something in the terrain view, and Alt+Tab leaves the window.
+    window.addEventListener("mousedown", () => { this.altAlone = false; }, true);
+    window.addEventListener("blur", () => { this.altAlone = false; });
+  }
 
   /** Call when commands were added. */
   render() {
@@ -26,17 +43,82 @@ export class MenuBar {
     }));
   }
 
+  private buttons() { return [...this.root.children] as HTMLElement[]; }
+
   private showing() { return document.querySelector(".context-menu") ? this.open : null; }
 
-  private show(name: string, button: HTMLElement) {
+  private inBar() { return this.buttons().includes(document.activeElement as HTMLElement); }
+
+  private enter(button: HTMLElement) {
+    if (!this.inBar()) this.before = document.activeElement as HTMLElement | null;
+    button.focus();
+  }
+
+  private leave() {
+    this.before?.focus();
+    if (this.inBar()) (document.activeElement as HTMLElement).blur();
+    this.before = null;
+  }
+
+  private toggleBar() {
+    if (this.showing()) { closeContextMenu(); this.leave(); return; }
+    if (this.inBar()) { this.leave(); return; }
+    const first = this.buttons()[0];
+    if (first) this.enter(first);
+  }
+
+  private neighbour(button: HTMLElement, step: 1 | -1) {
+    const list = this.buttons();
+    return list[(list.indexOf(button) + step + list.length) % list.length];
+  }
+
+  private globalKey(e: KeyboardEvent) {
+    if (e.key === "Alt") {
+      if (!e.repeat) this.altAlone = !e.ctrlKey && !e.shiftKey && !e.metaKey;
+      return;
+    }
+    this.altAlone = false;
+    // Ctrl with Alt is AltGr, which types characters on many keyboards.
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.key.length !== 1) return;
+    const name = menuFor(this.menus().map((m) => m.name), e.key);
+    const button = this.buttons().find((b) => b.textContent === name);
+    if (!name || !button) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.enter(button);
+    this.show(name, button, true);
+  }
+
+  /** The keys while a button of the bar has the focus and no menu is open. */
+  private barKey(e: KeyboardEvent) {
+    const button = e.target as HTMLElement;
+    const take = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === "ArrowRight") { take(); this.neighbour(button, 1).focus(); }
+    else if (e.key === "ArrowLeft") { take(); this.neighbour(button, -1).focus(); }
+    else if (e.key === "Escape") { take(); this.leave(); }
+    else if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") { take(); this.show(button.textContent ?? "", button, true); }
+  }
+
+  private show(name: string, button: HTMLElement, keyboard = false) {
     const menu = this.menus().find((m) => m.name === name);
     if (!menu) return;
     const items: MenuItem[] = menu.groups.flatMap((group, i) => [
       ...(i ? ["-" as const] : []),
-      ...group.map((e) => ({ label: e.title, shortcut: e.shortcut, run: () => this.run(e.id) })),
+      ...group.map((e) => {
+        const why = this.blocked(e.when);
+        return { label: e.title, shortcut: e.shortcut, run: () => { this.leave(); this.run(e.id); }, disabled: !!why, ...(why ? { hint: why } : {}) };
+      }),
     ]);
     const r = button.getBoundingClientRect();
-    showContextMenu({ x: r.left, y: r.bottom }, items);
+    showContextMenu({ x: r.left, y: r.bottom }, items, {
+      first: keyboard,
+      side: (step) => {
+        const next = this.neighbour(button, step);
+        if (keyboard) next.focus();
+        this.show(next.textContent ?? "", next, keyboard);
+      },
+      ...(keyboard ? { escape: () => button.focus() } : {}),
+    });
     this.open = name;
   }
 }

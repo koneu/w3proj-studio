@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { CommandContribution } from "../extensions/api";
-import { menuTree, shortcutText } from "./menus";
+import { menuFor, menuTree, nextEnabled, shortcutText, whyBlocked } from "./menus";
 
 const cmd = (id: string, menu?: string, keybinding?: string): CommandContribution => ({ id, title: id, ...(menu ? { menu } : {}), ...(keybinding ? { keybinding } : {}) });
 
@@ -47,4 +47,35 @@ test("what a user looks for first is in the menus of the built-in extensions", (
     assert.ok(placed.get(id)?.startsWith(menu), id);
   }
   assert.ok(placed.size >= 30);
+});
+
+test("a menu entry says why it can't run, and only then", () => {
+  const none = { project: false, editor: false, save: false, undo: false };
+  assert.equal(whyBlocked(undefined, none), undefined);
+  assert.equal(whyBlocked("project", { ...none, project: true }), undefined);
+  assert.equal(whyBlocked("editor", { ...none, editor: true }), undefined);
+  assert.equal(whyBlocked("save", { ...none, save: true }), undefined);
+  assert.equal(whyBlocked("undo", { ...none, undo: true }), undefined);
+  assert.match(whyBlocked("project", { ...none, editor: true }) ?? "", /project/);
+  for (const when of ["editor", "save", "undo"] as const) assert.ok(whyBlocked(when, { ...none, project: true }), when);
+  const [file] = menuTree([{ ...cmd("a", "File"), when: "project" }]);
+  assert.equal(file.groups[0][0].when, "project");
+});
+
+test("the keys step past what's switched off, and round the ends", () => {
+  const on = [true, false, true, false];
+  assert.equal(nextEnabled(on, -1, 1), 0, "down from nothing is the first");
+  assert.equal(nextEnabled(on, -1, -1), 2, "up from nothing is the last");
+  assert.equal(nextEnabled(on, 0, 1), 2);
+  assert.equal(nextEnabled(on, 2, 1), 0);
+  assert.equal(nextEnabled(on, 0, -1), 2);
+  assert.equal(nextEnabled([false, false], -1, 1), -1);
+  assert.equal(nextEnabled([], -1, 1), -1);
+});
+
+test("Alt and a letter finds its menu", () => {
+  const names = ["File", "Edit", "Module"];
+  assert.equal(menuFor(names, "f"), "File");
+  assert.equal(menuFor(names, "M"), "Module");
+  assert.equal(menuFor(names, "x"), undefined);
 });

@@ -8,14 +8,14 @@
     "commands": [
       { "id": "w3.project.open", "menu": "File:2:1", "title": "Open Project Folder…", "category": "Project", "keybinding": "ctrl+o" },
       { "id": "w3.project.importMap", "menu": "File:2:2", "title": "Import Map or Campaign as New Project…", "category": "Project" },
-      { "id": "w3.project.syncFromMap", "menu": "File:4:5", "title": "Sync Project from .w3x…", "category": "Project" },
-      { "id": "w3.project.pack", "menu": "File:4:2", "title": "Pack Release .w3x", "category": "Project", "keybinding": "ctrl+shift+b" },
-      { "id": "w3.project.packAs", "menu": "File:4:3", "title": "Pack Release .w3x As…", "category": "Project" },
-      { "id": "w3.project.openInWorldEditor", "menu": "File:4:4", "title": "Open in World Editor", "category": "Project", "keybinding": "f5" },
-      { "id": "w3.project.testMap", "menu": "File:4:1", "title": "Test Map in Warcraft III", "category": "Project", "keybinding": "ctrl+f5" },
-      { "id": "w3.project.reveal", "menu": "Tools:4:1", "title": "Reveal Project in File Explorer", "category": "Project" },
+      { "id": "w3.project.syncFromMap", "when": "project", "menu": "File:4:5", "title": "Sync Project from .w3x…", "category": "Project" },
+      { "id": "w3.project.pack", "when": "project", "menu": "File:4:2", "title": "Pack Release .w3x", "category": "Project", "keybinding": "ctrl+shift+b" },
+      { "id": "w3.project.packAs", "when": "project", "menu": "File:4:3", "title": "Pack Release .w3x As…", "category": "Project" },
+      { "id": "w3.project.openInWorldEditor", "when": "project", "menu": "File:4:4", "title": "Open in World Editor", "category": "Project", "keybinding": "f5" },
+      { "id": "w3.project.testMap", "when": "project", "menu": "File:4:1", "title": "Test Map in Warcraft III", "category": "Project", "keybinding": "ctrl+f5" },
+      { "id": "w3.project.reveal", "when": "project", "menu": "Tools:4:1", "title": "Reveal Project in File Explorer", "category": "Project" },
       { "id": "w3.project.showManifest", "title": "Open Project Manifest", "category": "Project" },
-      { "id": "w3.project.close", "menu": "File:2:3", "title": "Close Project", "category": "Project" }
+      { "id": "w3.project.close", "when": "project", "menu": "File:2:3", "title": "Close Project", "category": "Project" }
     ]
   }
 }

@@ -1,4 +1,5 @@
 import type { Disposable } from "../extensions/api";
+import { nextEnabled } from "./menus";
 
 type Child = Node | string | null | undefined | false;
 
@@ -63,19 +64,52 @@ export function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** A context menu at a screen point; closes on choice, Escape or a click elsewhere. */
-export function showContextMenu(at: { x: number; y: number }, items: import("../extensions/api").MenuItem[]) {
-  document.querySelector(".context-menu")?.remove();
-  const close = () => { menu.remove(); window.removeEventListener("mousedown", outside, true); window.removeEventListener("keydown", key, true); };
+/** What the menu bar adds to a menu: left and right go to the next menu. */
+export interface MenuKeys {
+  /** Start on the first entry, as when opened by keyboard. */
+  first?: boolean;
+  side?(step: 1 | -1): void;
+  escape?(): void;
+}
+
+let closeOpen: (() => void) | null = null;
+export const closeContextMenu = () => closeOpen?.();
+
+/** A context menu at a screen point; closes on choice, Escape or a click elsewhere. Up, down and
+ *  Enter work in it. */
+export function showContextMenu(at: { x: number; y: number }, items: import("../extensions/api").MenuItem[], keys: MenuKeys = {}) {
+  closeOpen?.();
+  const close = () => { menu.remove(); closeOpen = null; window.removeEventListener("mousedown", outside, true); window.removeEventListener("keydown", key, true); };
   const outside = (e: MouseEvent) => { if (!menu.contains(e.target as Node)) close(); };
-  const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
-  const menu = h("div.context-menu", {}, ...items.map((it) => it === "-"
-    ? h("div.context-menu-sep")
-    : h(`div.context-menu-item${it.disabled ? ".disabled" : ""}`, {
+  const choices = items.filter((it) => it !== "-");
+  const enabled = choices.map((it) => !it.disabled);
+  const rows: HTMLElement[] = [];
+  let active = -1;
+  const setActive = (i: number) => { rows[active]?.classList.remove("active"); active = i; rows[i]?.classList.add("active"); };
+  const choose = (i: number) => { const it = choices[i]; if (!it || it.disabled) return; close(); it.run(); };
+  const key = (e: KeyboardEvent) => {
+    const take = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === "Escape") { take(); close(); keys.escape?.(); }
+    else if (e.key === "ArrowDown") { take(); setActive(nextEnabled(enabled, active, 1)); }
+    else if (e.key === "ArrowUp") { take(); setActive(nextEnabled(enabled, active, -1)); }
+    else if ((e.key === "Enter" || e.key === " ") && active >= 0) { take(); choose(active); }
+    else if (keys.side && e.key === "ArrowLeft") { take(); keys.side(-1); }
+    else if (keys.side && e.key === "ArrowRight") { take(); keys.side(1); }
+  };
+  const menu = h("div.context-menu", {}, ...items.map((it) => {
+    if (it === "-") return h("div.context-menu-sep");
+    const i = rows.length;
+    const row = h(`div.context-menu-item${it.disabled ? ".disabled" : ""}`, {
       title: it.hint ?? "",
-      onclick: () => { if (it.disabled) return; close(); it.run(); },
-    }, it.label, ...(it.shortcut ? [h("span.context-menu-shortcut", {}, it.shortcut)] : []))));
+      onclick: () => choose(i),
+      onmouseenter: () => { if (!it.disabled) setActive(i); },
+    }, it.label, ...(it.shortcut ? [h("span.context-menu-shortcut", {}, it.shortcut)] : []));
+    rows.push(row);
+    return row;
+  }));
+  closeOpen = close;
   document.body.append(menu);
+  if (keys.first) setActive(nextEnabled(enabled, -1, 1));
   // Keep it on screen.
   const r = menu.getBoundingClientRect();
   menu.style.left = `${Math.max(0, Math.min(at.x, window.innerWidth - r.width - 4))}px`;

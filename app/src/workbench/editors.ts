@@ -132,6 +132,10 @@ export class EditorService {
     return this.active?.path ?? null;
   }
 
+  /** What the active editor can do: the Welcome page is a tab, but has nothing to save. */
+  canSave() { return !!this.active?.instance?.save; }
+  canUndo() { return !!this.active?.instance?.undo; }
+
   async open(path: string, providerId?: string) {
     const existing = this.tabs.find((t) => t.path === path && (!providerId || t.providerId === providerId));
     if (existing) return this.show(existing);

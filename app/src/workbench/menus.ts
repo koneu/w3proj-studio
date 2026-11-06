@@ -6,7 +6,7 @@ import type { CommandContribution } from "../extensions/api";
 /** The World Editor's order. A menu an extension names that isn't here goes before Help. */
 const ORDER = ["File", "Edit", "View", "Scenario", "Module", "Tools", "Help"];
 
-export interface MenuEntry { id: string; title: string; shortcut?: string }
+export interface MenuEntry { id: string; title: string; shortcut?: string; when?: CommandContribution["when"] }
 export interface Menu { name: string; groups: MenuEntry[][] }
 
 /** "ctrl+shift+b" as the World Editor would write it: Ctrl+Shift+B. */
@@ -18,6 +18,29 @@ function place(menu: string) {
   return { name: name.trim(), group: Number(group) || 0, order: Number(order) || 0 };
 }
 
+/** Why a command can't run now; undefined when it can. */
+export function whyBlocked(when: MenuEntry["when"], now: { project: boolean; editor: boolean; save: boolean; undo: boolean }): string | undefined {
+  if (when === "project" && !now.project) return "Open or import a project first.";
+  if (when === "editor" && !now.editor) return "Nothing is open.";
+  if (when === "save" && !now.save) return "This can't be saved.";
+  if (when === "undo" && !now.undo) return "This editor has no undo.";
+  return undefined;
+}
+
+/** The entry a step away, past those switched off and round the ends; -1 if none can be chosen. */
+export function nextEnabled(enabled: readonly boolean[], from: number, step: 1 | -1): number {
+  const n = enabled.length;
+  let i = from < 0 && step < 0 ? 0 : from;
+  for (let tries = 0; tries < n; tries++) {
+    i = (i + step + n) % n;
+    if (enabled[i]) return i;
+  }
+  return -1;
+}
+
+/** The menu Alt and a letter opens: the first one starting with it. */
+export const menuFor = (names: readonly string[], key: string) => names.find((n) => n[0].toLowerCase() === key.toLowerCase());
+
 export function menuTree(commands: readonly CommandContribution[]): Menu[] {
   const menus = new Map<string, Map<number, { order: number; at: number; entry: MenuEntry }[]>>();
   commands.forEach((c, at) => {
@@ -27,7 +50,7 @@ export function menuTree(commands: readonly CommandContribution[]): Menu[] {
     if (!menus.has(name)) menus.set(name, new Map());
     const groups = menus.get(name) as Map<number, { order: number; at: number; entry: MenuEntry }[]>;
     if (!groups.has(group)) groups.set(group, []);
-    groups.get(group)?.push({ order, at, entry: { id: c.id, title: c.title, ...(c.keybinding ? { shortcut: shortcutText(c.keybinding) } : {}) } });
+    groups.get(group)?.push({ order, at, entry: { id: c.id, title: c.title, ...(c.keybinding ? { shortcut: shortcutText(c.keybinding) } : {}), ...(c.when ? { when: c.when } : {}) } });
   });
   const rank = (name: string) => { const i = ORDER.indexOf(name); return i >= 0 ? i : ORDER.length - 1.5; };
   return [...new Set([...ORDER, ...menus.keys()])].filter((n) => menus.has(n)).sort((a, b) => rank(a) - rank(b)).map((name) => ({

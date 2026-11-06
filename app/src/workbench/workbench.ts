@@ -1,12 +1,12 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import type { W3Api } from "../extensions/api";
+import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
 import { invoke, listen, NotUtf8Error } from "./backend";
 import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
-import { menuTree } from "./menus";
+import { menuTree, whyBlocked } from "./menus";
 import { TitleBar } from "./titlebar";
 import { EditorService, type OpenEditors } from "./editors";
 import { GAME_SCHEME, GameService } from "./game";
@@ -88,7 +88,8 @@ export class Workbench {
     this.progress = new Progress(this.statusBar.progress);
 
     const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
-    this.menuBar = new MenuBar(() => menuTree(this.commands.all()), (c) => this.run(c));
+    this.menuBar = new MenuBar(() => menuTree(this.commands.all()), (c) => this.run(c),
+      (when) => whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo() }));
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
     this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking());
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
@@ -309,7 +310,7 @@ export class Workbench {
   }
 
   private registerCoreCommands() {
-    const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: { keybinding?: string; category?: string; hidden?: boolean; menu?: string } = {}) => {
+    const c = (id: string, title: string, run: (...a: any[]) => unknown, extra: Partial<Pick<CommandContribution, "keybinding" | "category" | "hidden" | "menu" | "when">> = {}) => {
       this.commands.contribute("core", { id, title, category: extra.category ?? "View", ...extra });
       this.commands.register(id, run);
     };
@@ -331,11 +332,11 @@ export class Workbench {
         { placeholder: "Search files by name" },
       );
       if (pick) await this.editors.open(pick.value!);
-    }, { keybinding: "ctrl+p", category: "Go", menu: "Edit:2:1" });
+    }, { keybinding: "ctrl+p", category: "Go", menu: "Edit:2:1", when: "project" });
     c("workbench.toggleSidebar", "Toggle Side Bar", () => this.views.toggleSidebar(), { keybinding: "ctrl+b", menu: "View:1:1" });
     c("workbench.togglePanel", "Toggle Output Panel", () => this.output.toggle(), { keybinding: "ctrl+j", menu: "View:1:2" });
-    c("workbench.save", "Save", () => this.editors.save(), { keybinding: "ctrl+s", category: "File", menu: "File:3:1" });
-    c("workbench.closeEditor", "Close Editor", () => this.editors.closeActive(), { keybinding: "ctrl+w", category: "File", menu: "File:3:2" });
+    c("workbench.save", "Save", () => this.editors.save(), { keybinding: "ctrl+s", category: "File", menu: "File:3:1", when: "save" });
+    c("workbench.closeEditor", "Close Editor", () => this.editors.closeActive(), { keybinding: "ctrl+w", category: "File", menu: "File:3:2", when: "editor" });
     c("workbench.reopenWith", "Reopen Editor With…", async () => {
       const path = this.editors.activePath();
       if (!path) return;
@@ -375,8 +376,8 @@ export class Workbench {
       this.notifications.show("info", pick.value ? `${glob} now opens with ${pick.label}.` : `Removed the default editor for ${glob}.`);
     }, { category: "File" });
     // No keys: each editor binds Ctrl+Z itself, and bound here too they'd step twice.
-    c("workbench.undo", "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit", menu: "Edit:1:1" });
-    c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit", menu: "Edit:1:2" });
+    c("workbench.undo", "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit", menu: "Edit:1:1", when: "undo" });
+    c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit", menu: "Edit:1:2", when: "undo" });
     c("workbench.openSettings", "Open Settings (JSON)", async () => {
       const p = this.settings.settingsPath();
       if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("worldEditor.path", this.settings.get("worldEditor.path"));

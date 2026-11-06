@@ -16,6 +16,8 @@ export interface CommandContribution {
   /** Where it shows in the menu bar: "Tools", or with a group and a place in it, "File:2:1". A menu
    *  not there yet is added. Without this it's in the command palette only. */
   menu?: string;
+  /** What it needs to run; its menu entry is greyed out without it. */
+  when?: "project" | "editor" | "save" | "undo";
 }
 
 export interface ViewContainerContribution {

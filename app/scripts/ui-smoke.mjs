@@ -160,6 +160,40 @@ async function run() {
     await page.evaluate(`document.querySelector(".menubar-item").click()`);
     const fileMenu = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
     await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+    // The menu bar by keyboard, and what can't run with no project open.
+    const menuKeys = await page.evaluate(`(() => {
+      const key = (type, k, more = {}) => (document.activeElement ?? window).dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true, cancelable: true, ...more }));
+      const press = (k, more) => key("keydown", k, more);
+      const active = () => document.querySelector(".context-menu-item.active")?.firstChild?.textContent ?? null;
+      const titles = () => [...document.querySelectorAll(".context-menu-item")].map((e) => e.firstChild.textContent);
+      const focus = () => document.activeElement?.textContent;
+      const notes = {};
+      press("f", { altKey: true });
+      notes.opened = active();
+      notes.greyed = [...document.querySelectorAll(".context-menu-item.disabled")].map((e) => e.firstChild.textContent);
+      notes.why = document.querySelector(".context-menu-item.disabled")?.title;
+      const before = active();
+      press("ArrowDown");
+      notes.moved = active() !== before;
+      press("ArrowRight");
+      notes.nextMenu = titles().includes("Undo");
+      notes.nextFocus = focus();
+      press("Escape");
+      notes.closed = !document.querySelector(".context-menu");
+      notes.backOnBar = focus();
+      press("Escape");
+      notes.leftBar = !document.activeElement?.classList.contains("menubar-item");
+      press("Alt"); key("keyup", "Alt");
+      notes.altTap = focus();
+      press("Alt"); key("keyup", "Alt");
+      notes.altAgain = !document.activeElement?.classList.contains("menubar-item");
+      press("Alt"); window.dispatchEvent(new MouseEvent("mousedown")); key("keyup", "Alt");
+      notes.altClick = !document.activeElement?.classList.contains("menubar-item");
+      press("q", { altKey: true, ctrlKey: true });
+      press("f", { altKey: true, ctrlKey: true });
+      notes.altGr = !document.querySelector(".context-menu");
+      return notes;
+    })()`);
     // With nothing open there's nothing to undo: the buttons by the tabs stay away.
     const undoHidden = await page.evaluate(`document.querySelector(".tabs-actions")?.hidden === true`);
     const shown = [];
@@ -175,6 +209,9 @@ async function run() {
     ws.close();
 
     const found = problems(page.events);
+    if (!menuKeys.opened || !menuKeys.moved || !menuKeys.nextMenu || menuKeys.nextFocus !== "Edit" || !menuKeys.closed || menuKeys.backOnBar !== "Edit"
+      || !menuKeys.leftBar || menuKeys.altTap !== "File" || !menuKeys.altAgain || !menuKeys.altClick || !menuKeys.altGr) found.push(`menu bar keys: ${JSON.stringify(menuKeys)}`);
+    if (!menuKeys.greyed?.includes("Close Project") || !menuKeys.greyed?.includes("Save") || menuKeys.greyed?.includes("New Map…") || !/project/.test(menuKeys.why ?? "")) found.push(`menu entries greyed out: ${JSON.stringify(menuKeys)}`);
     if (views.length < 3) found.push(`only ${views.length} side bar views`);
     if (extensions.length < 20) found.push(`only ${extensions.length} extensions`);
     for (const e of extensions) {

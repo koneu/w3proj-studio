@@ -12,8 +12,8 @@
       {"name":"restore_checkpoint","description":"Puts the whole map back as it was at a checkpoint, unsaved work excluded. The way back after a restart, when undo_last_edit has nothing left. The user has to confirm it in Studio, within about 90 seconds, so tell them to look there first. A checkpoint of the current state is made first. Refused while anything is unsaved. Needs the setting mcp.writeTools.","inputSchema":{"type":"object","required":["name"],"properties":{"name":{"type":"string","description":"As list_checkpoints gives it."}}}}
     ],
     "commands": [
-      { "id": "w3.checkpoints.create", "menu": "Tools:2:1", "title": "Create Checkpoint", "category": "Project" },
-      { "id": "w3.checkpoints.restore", "menu": "Tools:2:2", "title": "Restore Checkpoint…", "category": "Project" }
+      { "id": "w3.checkpoints.create", "when": "project", "menu": "Tools:2:1", "title": "Create Checkpoint", "category": "Project" },
+      { "id": "w3.checkpoints.restore", "when": "project", "menu": "Tools:2:2", "title": "Restore Checkpoint…", "category": "Project" }
     ],
     "configuration": {
       "title": "Checkpoints",

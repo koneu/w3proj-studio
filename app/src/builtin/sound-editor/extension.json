@@ -5,6 +5,6 @@
   "description": "The map's sounds and music (war3map.w3s): browse and play the game's and imported sound files, add them as sounds or music, edit their settings (effect, channel, volume, pitch, 3D distances and cones) like the World Editor's Sound Editor.",
   "contributes": {
     "editors": [{ "id": "w3.soundEditor", "title": "Sound Editor", "patterns": ["war3map.w3s.json", "war3map.w3s"] }],
-    "commands": [{ "id": "w3.sounds.open", "menu": "Module:1:4", "title": "Sound Editor", "category": "Module", "keybinding": "f8" }]
+    "commands": [{ "id": "w3.sounds.open", "when": "project", "menu": "Module:1:4", "title": "Sound Editor", "category": "Module", "keybinding": "f8" }]
   }
 }
