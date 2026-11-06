@@ -3,12 +3,19 @@
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Waits for a check to come out true. One that throws counts as not yet: a file can be half
+ *  written, a page still loading. The last error goes into the timeout's message. */
 export async function until(what, check, timeout = 60000) {
   const end = Date.now() + timeout;
+  let last = null;
   for (;;) {
-    const v = await check();
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    try {
+      const v = await check();
+      if (v) return v;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ""}`);
     await sleep(100);
   }
 }
