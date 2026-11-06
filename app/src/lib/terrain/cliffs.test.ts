@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { slopeBand, toggleRamp, widestRun } from "./cliffs";
+import { adjustLevels, CornerUndo, slopeBand, toggleRamp, widestRun } from "./cliffs";
 import type { Corner, Terrain } from "./w3e";
 
 /** Rows from the north, a digit per corner: its cliff level. */
@@ -217,4 +217,49 @@ test("a click on a ramp still takes it off", () => {
   assert.ok(t.corners.some((c) => c.ramp));
   toggleRamp(t, 3 * 128, 2.5 * 128, 2, log, true);
   assert.equal(t.corners.some((c) => c.ramp), false);
+});
+
+const levels = (t: Terrain) => Array.from({ length: t.height }, (_, n) => {
+  const y = t.height - 1 - n;
+  return t.corners.slice(y * t.width, (y + 1) * t.width).map((c) => c.layer).join("");
+});
+const block = (x0: number, y0: number, x1: number, y1: number) => ({ x0, y0, x1, y1 });
+
+test("a block keeps its shape as it moves, the rest stays", () => {
+  const t = land(["22222", "23322", "22322", "22222"]);
+  adjustLevels(t, block(1, 1, 2, 2), 1, [], log);
+  assert.deepEqual(levels(t), ["22222", "24422", "23422", "22222"]);
+});
+
+test("moving a block is one step, and undoes exactly", () => {
+  const t = land(["222", "222", "222"]);
+  const undo = new CornerUndo();
+  adjustLevels(t, block(0, 0, 1, 1), 2, [], undo);
+  const step = undo.step(t);
+  assert.deepEqual(levels(t), ["222", "442", "442"]);
+  assert.equal(step.corners.length, 4);
+  step.undo();
+  assert.deepEqual(levels(t), ["222", "222", "222"]);
+  step.redo();
+  assert.deepEqual(levels(t), ["222", "442", "442"]);
+});
+
+test("a ramp inside the block comes along, one it cuts through is gone", () => {
+  const whole = land(["2222", "2222", "2222"]);
+  whole.corners[5].ramp = whole.corners[6].ramp = true;
+  adjustLevels(whole, block(0, 0, 3, 2), 1, [], log);
+  assert.deepEqual(ramps(whole), ["....", ".##.", "...."]);
+  const cut = land(["2222", "2222", "2222"]);
+  cut.corners[5].ramp = cut.corners[6].ramp = true;
+  adjustLevels(cut, block(0, 0, 1, 2), 1, [], log);
+  assert.deepEqual(ramps(cut), ["....", "....", "...."]);
+});
+
+test("water rises with the ground, by a level's worth", () => {
+  const t = land(["22", "22"]);
+  t.corners[0].hasWater = true;
+  t.corners[0].rawWater = 0x4000 | 0x2100;
+  adjustLevels(t, block(0, 0, 1, 1), 1, [], log);
+  assert.equal(t.corners[0].rawWater, 0x4000 | 0x2300, "the map edge bit stays");
+  assert.equal(t.corners[1].hasWater, undefined);
 });

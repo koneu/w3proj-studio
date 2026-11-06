@@ -27,6 +27,7 @@ import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableA
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
+import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
@@ -42,7 +43,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { onBoundary, markMapEdge, heightAt, parseW3e, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { cameraBounds, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
@@ -1810,11 +1811,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const cliffOf = (c: Corner) => (c.cliffTexture < cliffGrounds.length ? c.cliffTexture : 0);
           const layers = new Set(inArea.map((c) => c.layer));
           const usedCliffs = layers.size > 1 ? [...new Set(inArea.map(cliffOf))] : [];
-          const commit = (st: ReturnType<typeof changeArea>) => {
-            if (!st.corners.length) { void w3.window.showInfo("Nothing to replace there."); return; }
+          const commit = (st: ReturnType<typeof changeArea>, nothing = "Nothing to replace there.") => {
+            if (!st.corners.length) { void w3.window.showInfo(nothing); return; }
             commitTerrain({ ...st, cliffs: true });
             void showAreaPanel();
           };
+          const adjust = (by: number) => {
+            const log = new CornerUndo();
+            adjustLevels(terrain, a, by, cliffGrounds, log);
+            commit(log.step(terrain));
+          };
+          const lowest = Math.min(...layers), highest = Math.max(...layers);
+          const levelButton = (by: number, text: string) => h("button", { title: `Move all of this ${by > 0 ? "up" : "down"} a cliff level, with what's on it`, disabled: lowest + by < 0 || highest + by > 15, onclick: () => adjust(by) }, text);
           selInfo.className = "terrain-selection";
           selInfo.replaceChildren(
             h("div.terrain-sel-title", {}, h("div.terrain-sel-name", {}, `${a.x1 - a.x0} × ${a.y1 - a.y0} tiles`)),
@@ -1830,6 +1838,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 const was = Number(from), number = Number(to);
                 commit(changeArea(terrain, a, (c) => { if (cliffOf(c) !== was || was === number) return false; c.cliffTexture = number; return true; }));
               })] : []),
+            h("div.terrain-sel-area", {},
+              h("div.terrain-sel-sub.muted", {}, highest === lowest ? `Cliff level ${lowest}` : `Cliff levels ${lowest}–${highest}`),
+              h("div.terrain-sel-actions.wrap", {},
+                levelButton(-1, "Level −1"), levelButton(1, "Level +1"),
+                h("button", { title: "Flatten hills and dips, keeping the cliff levels", onclick: () => commit(changeArea(terrain, a, (c) => { if (groundHeight(c) === 0) return false; setGroundHeight(c, 0); return true; }), "This ground is flat already.") }, "Reset height field"))),
           );
         };
         /** The Select tab's mode: dragging selects objects or a block of ground. Holding A does an area in either. */
