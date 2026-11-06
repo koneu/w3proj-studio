@@ -2016,11 +2016,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ]),
             row("Model", p.model),
             h("div.terrain-sel-actions", {},
-              h("button", { title: "Ctrl+F1", onclick: () => openObject(p.kind, p.id) }, "Open in Object Editor"),
-              ...(editable ? [h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete")] : [])),
+              h("button", { title: "Ctrl+F1", onclick: () => openObject(p.kind, p.id) }, "Open in Object Editor")),
+            // The same order as for several objects below, with Delete last.
             h("div.terrain-sel-actions.wrap", {},
               h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
-              ...(editable ? [h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons()] : [])),
+              ...(editable ? [
+                h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(),
+                h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
+              ] : [])),
             ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete · Ctrl+C, then Ctrl+V to copy")] : []),
           );
           renderer.setSelection(ringOf(inst));
@@ -2155,13 +2158,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selInfo.replaceChildren(
             h("div.terrain-sel-name", {}, `${group.length} objects selected`),
             list,
-            h("div.terrain-sel-actions", {}, quick("Select all of these types", "Select every object of the selected types", selectSameTypes)),
+            ...(editable ? [] : [h("div.terrain-sel-actions", {}, quick("Select all of these types", "Select every object of the selected types", selectSameTypes))]),
             ...(editable ? [
               ...(ownerSel ? [h("div.terrain-sel-row", {}, h("span.muted", {}, `Owner (${units.length})`), ownerSel)] : []),
               h("div.terrain-sel-sub.muted", { title: help }, "Edit all (Enter applies; hover for help)"),
               massField("X", "x", help), massField("Y", "y", help), massField("Z", "z", help),
               massField("Facing", "facing", help), massField("Scale", "scale", help), massField("Variation", "variation", help),
               h("div.terrain-sel-actions.wrap", {},
+                quick("Select all of these types", "Select every object of the selected types", selectSameTypes),
                 quick("Face point", "Turn every selected object toward the pointer (F); click to apply", startFacing),
                 ...turnButtons(),
                 quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
