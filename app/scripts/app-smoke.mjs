@@ -1,7 +1,7 @@
 // The real app, with its real Rust backend, on a scratch copy of the mini map: opens the project,
 // opens each file in its editor, saves, and packs; then makes new maps, places objects, builds them
-// and holds the result against the CLI and the game's script API; then uses the New Map dialog and
-// paints terrain by mouse and keyboard, sent into the hidden window. ui-smoke runs the front end on a
+// and holds the result against the CLI and the game's script API; then uses the New Map dialog, paints
+// terrain, changes a unit and renames a trigger by mouse and keyboard, sent into the hidden window. ui-smoke runs the front end on a
 // fake; this is what that can't reach. New maps need the game installed (W3PROJ_GAME).
 //
 // It runs a build of its own, made with these changes to tauri.conf.json:
@@ -237,6 +237,73 @@ async function byHand(page, found) {
   await page.evaluate(`w3.editors.saveAll()`);
   await sleep(300);
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
+
+  await objectByHand(page, hands, root, fail);
+  await triggerByHand(page, hands, root, fail);
+}
+
+/** Replaces all of a text field's text, as selecting it and typing does; Tab commits. */
+async function retype(hands, selector, text) {
+  await hands.click(selector);
+  await hands.key("a", "KeyA", 65, 2);
+  await hands.type(text);
+  await hands.key("Tab", "Tab", 9);
+  await sleep(150);
+}
+
+/** The Object Editor: finds the Footman, changes its hit points, saves. */
+async function objectByHand(page, hands, root, fail) {
+  const file = join(root, "map", "war3map.w3u.json");
+  // A new map has no unit data yet: the kind's row in the side view makes the file.
+  await page.evaluate(`w3.editors.closeAll()`);
+  if (!existsSync(file)) await page.evaluate(`w3.workspace.writeText("map/war3map.w3u.json", JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
+  await page.evaluate(`w3.editors.open("map/war3map.w3u.json")`);
+  await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
+
+  // Edit standard…, then the Footman in the picker.
+  await hands.click(".obj-toolbar-buttons button", "Edit standard…");
+  await until("the picker", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 20`), 20000);
+  await hands.click("input.picker-search");
+  await hands.type("hfoo");
+  await sleep(300);
+  await hands.key("Enter", "Enter", 13);
+  await until("its fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 15000);
+
+  await hands.click("input.obj-field-search");
+  await hands.type("uhpm");
+  await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  await retype(hands, ".obj-table .obj-value-cell input", "777");
+  if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("changing a field didn't mark the file as changed");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const objects = JSON.parse(readFileSync(file, "utf8"));
+  const mod = objects.original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
+  if (mod?.value !== 777) fail(`the Footman's hit points are ${JSON.stringify(mod)}`);
+}
+
+/** The Trigger Editor: renames the map's trigger, switches it off, and Build carries both. */
+async function triggerByHand(page, hands, root, fail) {
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`w3.editors.open("map/war3map.wtg.json")`);
+  await until("the trigger tree", () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].some((e) => e.textContent === "Initialization")`), 20000);
+  // The category starts closed, so its arrow comes first.
+  await page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization").parentElement.querySelector(".trig-caret").setAttribute("data-smoke", "caret")`);
+  await hands.click("[data-smoke=caret]");
+  await until("the trigger's row", () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].some((e) => e.textContent.trim() === "Melee Initialization")`), 5000);
+  await hands.click(".trig-tree-rows .trig-label", "Melee Initialization");
+  await until("the trigger", () => page.evaluate(`document.querySelector("input.trig-name")?.value === "Melee Initialization"`), 5000);
+  await retype(hands, "input.trig-name", "Typed Trigger");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const output = await page.evaluate(`w3.workspace.project().default_output`);
+  const map = resolve(root, output);
+  await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+  await until("the build", () => existsSync(map), 20000);
+  await sleep(300);
+  const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
+  if (!script.includes("function InitTrig_Typed_Trigger takes")) fail("the renamed trigger isn't in the script");
+  if (script.includes("InitTrig_Melee_Initialization")) fail("the old trigger name is still in the script");
+  if (!script.includes("BlzCreateUnitWithSkin") && !script.includes("function main")) fail("the script looks empty");
 }
 
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
@@ -244,7 +311,8 @@ const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
 
 async function run() {
-  rmSync(work, { recursive: true, force: true });
+  // WebView2's helpers outlive the app by a moment.
+  rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   mkdirSync(work, { recursive: true });
   if (!process.argv.includes("--no-build")) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
