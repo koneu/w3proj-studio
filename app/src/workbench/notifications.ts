@@ -2,12 +2,19 @@ import { h } from "./dom";
 
 type Severity = "info" | "warning" | "error";
 
+const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta"]);
+
 /** What a key means to a question opened by the Delete key. A key still held from opening it repeats,
- *  and has to mean nothing: only a new press answers. Typing in a field stays typing. */
-export function deleteQuestionKey(e: { key: string; repeat: boolean; target: unknown }): "yes" | "no" | null {
+ *  and has to mean nothing: only a new press answers. Typing in a field stays typing. Any other key
+ *  moves on, like arrows to another object: the question was about what was selected before, so it
+ *  goes, or the next Delete would answer it for something else. */
+export function deleteQuestionKey(e: { key: string; repeat: boolean; target: unknown }): "yes" | "no" | "away" | null {
+  if (MODIFIERS.has(e.key)) return null;
   const t = e.target as { tagName?: string; isContentEditable?: boolean } | null;
-  if (e.repeat || t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || t?.isContentEditable) return null;
-  return e.key === "Delete" ? "yes" : e.key === "Escape" ? "no" : null;
+  const typing = t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || !!t?.isContentEditable;
+  if (e.key === "Delete") return e.repeat || typing ? null : "yes";
+  if (e.key === "Escape") return e.repeat ? null : "no";
+  return "away";
 }
 
 export class Notifications {
@@ -18,21 +25,25 @@ export class Notifications {
   }
 
   /** `expires`: the question goes away after this many ms, answered with nothing. `byKey`: the action
-   *  the Delete key takes, and Escape cancels (see deleteQuestionKey). */
+   *  the Delete key takes; Escape cancels, and so does moving on, by a click elsewhere or another key
+   *  (see deleteQuestionKey). */
   show(severity: Severity, message: string, actions: string[] = [], expires?: number, byKey?: string): Promise<string | undefined> {
     return new Promise((resolve) => {
       let timer = 0;
       const onKey = (e: KeyboardEvent) => {
         const answer = deleteQuestionKey(e);
+        if (answer === "away") { close(); return; }
         if (!answer) { if (e.key === "Delete" && e.repeat) { e.preventDefault(); e.stopPropagation(); } return; }
         // It answers this, and mustn't reach the list behind and ask again.
         e.preventDefault();
         e.stopPropagation();
         close(answer === "yes" ? byKey : undefined);
       };
+      const onPress = (e: MouseEvent) => { if (!toast.contains(e.target as Node)) close(); };
       const close = (result?: string) => {
         clearTimeout(timer);
         window.removeEventListener("keydown", onKey, true);
+        window.removeEventListener("mousedown", onPress, true);
         toast.remove();
         resolve(result);
       };
@@ -49,7 +60,10 @@ export class Notifications {
         ),
       );
       this.root.append(toast);
-      if (byKey) window.addEventListener("keydown", onKey, true);
+      if (byKey) {
+        window.addEventListener("keydown", onKey, true);
+        window.addEventListener("mousedown", onPress, true);
+      }
       // Toasts that ask something stay until answered.
       if (expires) timer = window.setTimeout(() => close(), expires);
       else if (!actions.length) timer = window.setTimeout(() => close(), severity === "error" ? 12000 : 6000);

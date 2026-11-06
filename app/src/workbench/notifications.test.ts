@@ -14,13 +14,19 @@ test("a key held down from opening the question means nothing", () => {
   assert.equal(deleteQuestionKey(key("Escape", true)), null);
 });
 
-test("typing in a field stays typing", () => {
+test("typing in a field stays typing, and ends the question", () => {
+  assert.equal(deleteQuestionKey(key("a", false, { tagName: "INPUT" })), "away");
   assert.equal(deleteQuestionKey(key("Delete", false, { tagName: "INPUT" })), null);
   assert.equal(deleteQuestionKey(key("Delete", false, { tagName: "TEXTAREA" })), null);
   assert.equal(deleteQuestionKey(key("Delete", false, { tagName: "DIV", isContentEditable: true })), null);
 });
 
-test("other keys don't answer", () => {
-  assert.equal(deleteQuestionKey(key("Enter")), null);
-  assert.equal(deleteQuestionKey(key("x")), null);
+test("other keys move on, so the next Delete can't answer for something else", () => {
+  assert.equal(deleteQuestionKey(key("ArrowDown")), "away");
+  assert.equal(deleteQuestionKey(key("ArrowDown", true)), "away");
+  assert.equal(deleteQuestionKey(key("Enter")), "away");
+});
+
+test("holding a modifier isn't moving on", () => {
+  for (const k of ["Shift", "Control", "Alt", "Meta"]) assert.equal(deleteQuestionKey(key(k)), null);
 });

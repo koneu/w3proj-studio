@@ -148,7 +148,12 @@ async function run() {
       const held = answer;
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
       await new Promise((r) => setTimeout(r, 30));
-      return held === "open" && answer === true;
+      // Clicking elsewhere drops the question, so the next Delete can't answer for something else.
+      let moved = "open";
+      void w3.window.askDelete("Smoke?", "Remove").then((r) => { moved = r; });
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 30));
+      return held === "open" && answer === true && moved === false;
     })()`);
     const titleBarOk = await page.evaluate(`!!document.querySelector(".titlebar .menubar") && !!document.querySelector(".titlebar .titlebar-search") && document.querySelectorAll(".titlebar-button").length === 3 && document.querySelector(".titlebar").getBoundingClientRect().top === 0`);
     const menus = await page.evaluate(`[...document.querySelectorAll(".menubar-item")].map((b) => b.textContent)`);

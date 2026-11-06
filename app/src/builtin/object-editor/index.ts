@@ -426,9 +426,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!objs.length) return;
           const what = objs.length === 1 ? (objs[0].id || objs[0].base) : `${objs.length} objects`;
           if (!(await w3.window.askDelete(`Remove ${what} and all their modifications?`, "Remove"))) return;
-          file.custom = file.custom.filter((o) => !selection.has(o));
-          file.original = file.original.filter((o) => !selection.has(o));
-          select(file.custom[0] ?? file.original[0] ?? null);
+          // What the question named, whatever is selected by now.
+          const going = new Set(objs);
+          file.custom = file.custom.filter((o) => !going.has(o));
+          file.original = file.original.filter((o) => !going.has(o));
+          selection = new Set([...selection].filter((o) => !going.has(o)));
+          select((selected && !going.has(selected) ? selected : null) ?? file.custom[0] ?? file.original[0] ?? null);
           markDirty(); renderDetail();
         };
         listEl.tabIndex = 0;
