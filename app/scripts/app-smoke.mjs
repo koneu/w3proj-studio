@@ -24,7 +24,8 @@ import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
-const work = join(repo, "target", "app-smoke");
+// W3_SMOKE_DIR: another folder, when this one has a project someone opened to try out.
+const work = process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke");
 const exeName = process.platform === "win32" ? ".exe" : "";
 const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
 const cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
