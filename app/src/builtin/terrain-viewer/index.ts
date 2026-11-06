@@ -909,8 +909,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y); toolGroups.pendingLook = null; }
     }),
     w3.commands.register("w3.terrain.resetVariations", async () => {
-      if (!toolGroups.resetVariations) throw new Error("Open the terrain editor first.");
-      if (!toolGroups.resetVariations()) void w3.window.showInfo("Every ground tile is plain already.");
+      const path = w3.editors.activePath();
+      const reset = path ? toolGroups.resetVariations.get(path) : undefined;
+      if (!reset) throw new Error("Switch to a terrain editor first.");
+      if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
     // `opts` (other extensions): dialog preset, and a step before the map is created (and opened).
     w3.commands.register("w3.map.new", async (opts?: NewMapPreset & { beforeCreate?(o: { dir: string; name: string }): Promise<void> }) => {
@@ -2762,13 +2764,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         toolGroups.livePlacements = live;
         const look = (x: number, y: number) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); };
         toolGroups.look = look;
-        toolGroups.resetVariations = () => {
+        const resetGround = () => {
           if (!editable) throw new Error("This terrain is read-only.");
           const log = new CornerUndo();
           if (!resetVariations(terrain, log)) return false;
           commitTerrain(log.step(terrain));
           return true;
         };
+        toolGroups.resetVariations.set(doc.path, resetGround);
         if (toolGroups.pendingLook) { const [px, py] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py)); }
         if (editable) queueMicrotask(syncGroups);
 
@@ -3244,7 +3247,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             if (toolGroups.look === look) toolGroups.look = null;
-            toolGroups.resetVariations = null;
+            if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             if (opened?.screenshot === takeScreenshot) opened = null;
