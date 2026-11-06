@@ -18,6 +18,7 @@ const ORDERS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]
 
 const signed = (n: number) => n | 0;
 const quote = (id: string) => (HERO_IDS[id] ?? `'${id}'`);
+const jassString = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
 /** `gCond_<name>`: the global a named condition is kept in. */
 export function conditionGlobal(name: string): string {
@@ -44,7 +45,7 @@ function paramJass(p: Param, type: string, data: TriggerData): string {
     case 2: return p.call ? conditionJass(p.call, data, p.call.kind) : p.value;
     case 3: {
       if (/code$/.test(type)) return quote(p.value);
-      if (type === "string" || type === "StringExt") return `"${p.value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+      if (type === "string" || type === "StringExt") return `"${jassString(p.value)}"`;
       return p.value;
     }
     default: return p.value;
@@ -137,7 +138,7 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
     `    call SetSlowChopping( ${on(0x200)} )`,
     `    call SetCaptainChanges( ${on(0x400)} )`,
     `    call SetSmartArtillery( ${on(0x800)} )`,
-    ...((ai.options & 0x2000) ? [`    call SetPlayerName( ai_player, "${ai.name.replace(/"/g, '\\"')}" )`] : []),
+    ...((ai.options & 0x2000) ? [`    call SetPlayerName( ai_player, "${jassString(ai.name)}" )`] : []),
   ]);
 
   // ---- conditions --------------------------------------------------------------------
