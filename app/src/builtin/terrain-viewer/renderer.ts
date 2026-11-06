@@ -235,6 +235,8 @@ export class TerrainRenderer {
   hiddenGroups = new Set<string>();
   /** A model previewing a placement (drawn see-through; red when `ok` is false). */
   ghost: { gpu: ModelGpu; world: Mat4; team: number; ok: boolean } | null = null;
+  /** Several at once, for what's being pasted. */
+  ghosts: NonNullable<TerrainRenderer["ghost"]>[] = [];
   readonly batches: ObjectBatch[] = [];
   /** Camera: looks at `target` from `distance` away. */
   yaw = -Math.PI / 2;
@@ -923,8 +925,7 @@ export class TerrainRenderer {
     if (this.showEffects) this.drawParticles(viewProj, this.eye());
     else this.lastParticleTime = -1;
     // Placement preview: see-through, red where the object doesn't fit.
-    if (this.ghost) {
-      const g = this.ghost;
+    for (const g of this.ghost ? [this.ghost, ...this.ghosts] : this.ghosts) {
       g.gpu.draw(viewProj, g.world, { team: g.team, pass: "all", tint: [1, 1, 1, 0.75], mix: g.ok ? undefined : [1, 0.1, 0.1, 0.65], onTop: true });
     }
     gl.enable(gl.CULL_FACE);

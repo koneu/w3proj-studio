@@ -1,6 +1,8 @@
 // The World Editor's keys for what's selected. Height and scale are for doodads and destructables:
 // a unit stands on the ground, at the size its type says.
 
+import type { Turn } from "../../lib/terrain/fragment";
+
 export type SelectionKey =
   | { raise: number }
   | { rotate: number }
@@ -40,6 +42,17 @@ export const isRecallKey = (e: PlainKeys) => e.key === " " && !e.ctrlKey && !e.m
 
 /** Ctrl+F1: the selection in the Object Editor. */
 export const isObjectEditorKey = (e: Keys) => e.key === "F1" && (e.ctrlKey || e.metaKey) && !e.altKey;
+
+/** H and V mirror, R turns a quarter, Shift+R back: for the selection and for what's being pasted. */
+export function turnKey(e: PlainKeys): Turn | null {
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  switch (e.key.toLowerCase()) {
+    case "h": return "mirrorX";
+    case "v": return "mirrorY";
+    case "r": return e.shiftKey ? "ccw" : "cw";
+    default: return null;
+  }
+}
 
 /** A scale after a step, never so small the object is gone. */
 export const scaled = (scale: readonly number[], step: readonly number[]): [number, number, number] =>

@@ -17,13 +17,14 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
-import { loadPlacedFile, newEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { loadPlacedFile, newEntry, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
-import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, type SelectionKey } from "./selectionkeys";
+import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
+import { centreOf, fragmentOf, snapped, turnAngle, turnFragment, turnOffset, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -137,6 +138,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   }
   return { buf: await w3.game.read(path), name: path };
 }
+
+/** What Ctrl+C took: stays over tabs, so it can go into another open map. */
+let clipboard: Fragment | null = null;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
@@ -1617,6 +1621,126 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             applyMass(doodads, (p) => ({ position: [p.position[0], p.position[1], p.position[2] + key.raise], flags: (flagsOf(p) ?? 2) | FIXED_HEIGHT }));
           } else applyMass(doodads, (p) => ({ scale: scaled(p.scale, key.scale) }));
         };
+        /** The selection mirrored or turned a quarter around its middle, as one undo step. */
+        const turnSelection = (turn: Turn) => {
+          const entries = selectedEntries(), before = entries.map(poseOf), [cx, cy] = centreOf(entries.map((p) => p.position));
+          for (const p of entries) {
+            const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy), x = cx + dx, y = cy + dy;
+            setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], turnAngle(turn, p.angle));
+          }
+          moveEdits(entries, before);
+          refreshGroupRings();
+        };
+        const turnButtons = () => ([["mirrorX", "Mirror ↔", "Mirror east to west (H)"], ["mirrorY", "Mirror ↕", "Mirror north to south (V)"], ["cw", "Turn 90°", "Turn a quarter clockwise (R, back with Shift+R)"]] as const)
+          .map(([turn, label, title]) => h("button", { title, onclick: () => turnSelection(turn) }, label));
+
+        // ---- copy and paste ----------------------------------------------------------------
+        /** While pasting: what's being pasted. Each click places a copy, until Esc. */
+        let pasting: Fragment | null = null;
+        /** Where the pointer last was over the ground. */
+        let pasteAt: Vec3 | null = null;
+        type Ghost = NonNullable<typeof renderer.ghost>;
+        let pasteModels: ({ gpu: Ghost["gpu"]; modelScale: number } | null)[] = [];
+        /** More would slow the view down, and the shape shows long before that. */
+        const MAX_GHOSTS = 300;
+        /** What's copied: start locations belong to their players. */
+        const copyable = () => selectedEntries().filter((p) => p.id !== "sloc");
+        const copySelection = () => {
+          const entries = copyable();
+          if (!entries.length) return false;
+          clipboard = fragmentOf(entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry })), (x, y) => heightAt(terrain, x, y));
+          return true;
+        };
+        /** Where an object of the fragment lands, null if that's off the map. */
+        const pasteSpot = (o: FragmentObject, g: Vec3): [number, number, number] | null => {
+          const x = snapped(g[0]) + o.at[0], y = snapped(g[1]) + o.at[1];
+          if (!inArea(x, y, wholeMap(handle))) return null;
+          const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0, ground = heightAt(terrain, x, y);
+          return [x, y, fixed ? ground + o.at[2] : ground];
+        };
+        const showPaste = (g: Vec3) => {
+          pasteAt = g;
+          const f = pasting;
+          if (!f) return;
+          renderer.ghosts = pasteModels.flatMap((m, i) => {
+            const o = f.objects[i], position = pasteSpot(o, g);
+            if (!m || !position) return [];
+            const entry = { ...(o.entry as unknown as Placed), position, angle: o.angle };
+            const team = entry.player !== undefined && entry.player < TEAM_COLORS.length ? entry.player : NEUTRAL;
+            return [{ gpu: m.gpu, world: placement(entry, m.modelScale), team, ok: true }];
+          });
+          redraw();
+        };
+        const startPaste = () => {
+          if (!clipboard) return false;
+          showTab(null);
+          clearSelection();
+          const f = pasting = clipboard;
+          pasteModels = [];
+          selInfo.textContent = `Pasting ${f.objects.length} object${f.objects.length === 1 ? "" : "s"}. Click to place, as often as you like · H and V mirror · R turns · Esc ends.`;
+          void Promise.all(f.objects.slice(0, MAX_GHOSTS).map(async (o) => {
+            const skin = skinOf(o.entry as unknown as Placed);
+            if (!skin) return null;
+            const gpu = await loader.modelFor(skin, Number(o.entry.variation) || 0).catch(() => null);
+            return gpu ? { gpu, modelScale: skin.modelScale } : null;
+          })).then((models) => {
+            if (!pasting) return;
+            pasteModels = models;
+            if (pasteAt) showPaste(pasteAt);
+          });
+          return true;
+        };
+        const endPaste = () => {
+          pasting = null;
+          pasteModels = [];
+          renderer.ghosts = [];
+          clearSelection();
+        };
+        const placePaste = (g: Vec3) => {
+          const f = pasting;
+          if (!f) return;
+          const added: { entry: Placed; f: PlacedFile }[] = [];
+          let off = 0;
+          for (const o of f.objects) {
+            const file = o.list === "doodads" ? dooFile : unitsFile, spot = pasteSpot(o, g);
+            // Units and items can't stand past the playable map, trees and doodads can.
+            const standing = spot && (o.list === "doodads" || !playableEdge || inArea(spot[0], spot[1], playableEdge));
+            if (!file || !spot || !standing) { off++; continue; }
+            const made = pastedEntry(file, o, spot);
+            file.list.push(made);
+            repositioned.add(made);
+            added.push({ entry: made, f: file });
+          }
+          if (off) void w3.window.showWarning(`${off} of ${f.objects.length} would land off the map or past its playable part, and weren't placed.`);
+          if (!added.length) return;
+          const remove = () => { for (const a of added) a.f.list.splice(a.f.list.indexOf(a.entry), 1); };
+          const put = () => { for (const a of added) a.f.list.push(a.entry); };
+          pushEdit({ undo: remove, redo: put, terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+        };
+        /** Ctrl+C, X, V and A, and the keys while pasting. True when the key did something. */
+        const clipboardKey = (e: KeyboardEvent) => {
+          if (pasting && e.key === "Escape") { endPaste(); return true; }
+          const turn = turnKey(e);
+          if (turn && pasting) {
+            if (!e.repeat) { pasting = turnFragment(pasting, turn); if (pasteAt) showPaste(pasteAt); }
+            return true;
+          }
+          if (turn && editable && !activeGroup && selectedEntries().length) { if (!e.repeat) turnSelection(turn); return true; }
+          if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
+          const key = e.key.toLowerCase();
+          if (key === "c") return copySelection();
+          if (key === "x") {
+            if (!editable || !copySelection()) return false;
+            deleteEntries(copyable());
+            return true;
+          }
+          if (key === "v") return editable && startPaste();
+          if (key === "a" && !activeGroup) { selectEntries(allPlaced().filter((o) => o.id !== "sloc").map((o) => o.p)); return true; }
+          return false;
+        };
+
         /** Alt+click: the selection goes there, keeping its shape. */
         const moveTo = (g: Vec3) => {
           const entries = selectedEntries(), before = entries.map(poseOf), [ax, ay] = entries[0].position;
@@ -1742,8 +1866,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...(editable ? [h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete")] : [])),
             h("div.terrain-sel-actions.wrap", {},
               h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
-              ...(editable ? [h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point")] : [])),
-            ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete")] : []),
+              ...(editable ? [h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons()] : [])),
+            ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete · Ctrl+C, then Ctrl+V to copy")] : []),
           );
           renderer.setSelection(ringOf(inst));
           redraw();
@@ -1885,6 +2009,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               massField("Facing", "facing", help), massField("Scale", "scale", help), massField("Variation", "variation", help),
               h("div.terrain-sel-actions.wrap", {},
                 quick("Face point", "Turn every selected object toward the pointer (F); click to apply", startFacing),
+                ...turnButtons(),
                 quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
                 quick("Random variation", "A random model variation for each object", () => applyMass(group, (p) => {
                   const n = skinOf(p)?.numVar ?? 1;
@@ -2397,6 +2522,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (g) toolGroups.picking.finish({ x: g[0], y: g[1], ...(target ? { object: target } : {}) });
             return;
           }
+          if (pasting && e.button === 0) {
+            e.preventDefault();
+            const g = groundAt(e);
+            if (g) placePaste(g);
+            return;
+          }
           const gi = activeInst();
           if (gi && e.button === 0 && gi.pointerDown?.({ ground: groundAt(e), event: e, down: false })) {
             e.preventDefault();
@@ -2440,6 +2571,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         canvas.addEventListener("mousemove", (e) => {
           if (toolGroups.picking?.objects) { showPickTarget(pickTarget(groundAt(e))); return; }
+          if (pasting) { const g = groundAt(e); if (g) showPaste(g); }
           activeInst()?.pointerMove?.({ ground: groundAt(e), event: e, down: groupDrag });
           if (groupDrag) return;
           if (facing) { const g = groundAt(e); if (g) faceToward(g); return; }
@@ -2474,6 +2606,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
           if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
+          if (clipboardKey(e)) { e.preventDefault(); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }

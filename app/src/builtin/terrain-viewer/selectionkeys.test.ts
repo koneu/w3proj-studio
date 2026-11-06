@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { borderFlags, isObjectEditorKey, isRecallKey, joinSteps, scaled, selectionKey } from "./selectionkeys";
+import { borderFlags, isObjectEditorKey, isRecallKey, joinSteps, scaled, selectionKey, turnKey } from "./selectionkeys";
 
 const press = (key: string, more: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
   selectionKey({ key, code: more.code ?? "", ctrlKey: false, metaKey: false, altKey: false, ...more });
@@ -69,6 +69,16 @@ test("joined steps undo backwards and redo forwards", () => {
   assert.deepEqual(log, ["undo c", "undo b", "undo a", "redo a", "redo b", "redo c"]);
   assert.equal(held.objects, true);
   assert.equal(held.terrain, false);
+});
+
+test("H, V and R mirror and turn, but Ctrl+V is still paste", () => {
+  const keys = { code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(turnKey({ ...keys, key: "h" }), "mirrorX");
+  assert.equal(turnKey({ ...keys, key: "v" }), "mirrorY");
+  assert.equal(turnKey({ ...keys, key: "r" }), "cw");
+  assert.equal(turnKey({ ...keys, key: "R", shiftKey: true }), "ccw");
+  assert.equal(turnKey({ ...keys, key: "v", ctrlKey: true }), null);
+  assert.equal(turnKey({ ...keys, key: "a" }), null);
 });
 
 test("a size has a floor, and no drift from adding fractions", () => {

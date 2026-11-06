@@ -108,3 +108,14 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   }
   return e;
 }
+
+/** A new object in `f` from a copied one. It's numbered as a new one, and takes only the fields this
+ *  file's version has: the copy may come from another map. */
+export function pastedEntry(f: PlacedFile, copied: { entry: Record<string, unknown>; angle: number }, position: [number, number, number]): Placed {
+  const made = newEntry(f, String(copied.entry.id), position, copied.entry.player as number | undefined) as Placed & Record<string, unknown>;
+  for (const [key, value] of Object.entries(copied.entry)) {
+    if (key in made && key !== "editorId" && key !== "trailer") made[key] = structuredClone(value);
+  }
+  made.angle = copied.angle;
+  return made;
+}
