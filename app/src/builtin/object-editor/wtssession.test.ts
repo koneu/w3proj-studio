@@ -48,7 +48,7 @@ interface Editor<S> {
   set(n: number, v: string): void;
   snapshot(): S;
   restore(s: S): void;
-  save(d: ReturnType<typeof disk>): Promise<void>;
+  save(d: ReturnType<typeof disk>): Promise<unknown>;
   table: StringTable;
 }
 const real = (text: string): Editor<unknown> => {
@@ -59,7 +59,7 @@ const old = (text: string): Editor<unknown> => {
   const a = new OldSession(text);
   return { set: (n, v) => a.set(n, v), snapshot: () => a.snapshot(), restore: (s) => a.restore(s as string), save: (d) => a.save(d.read, d.write), get table() { return a.table; } };
 };
-/** Control: a save that writes the editor's whole table over the file. */
+/** Control: a save without the merge, writing the editor's whole table over the file. Not in the shipped class. */
 const wholeFile = (text: string): Editor<unknown> => {
   const a = new WtsSession(text);
   return { set: (n, v) => a.set(n, v), snapshot: () => a.snapshot(), restore: (s) => a.restore(s as never), save: async (d) => { await d.write(a.table.serialize()); }, get table() { return a.table; } };
@@ -99,7 +99,7 @@ test("undo keeps a string another editor saved after the editor's own save of it
 
 test("control: the old whole-file history loses the other editor's string in that case", async () => {
   const r = await otherEditorSavedAnOwnedString(old);
-  assert.notEqual(r.afterUndo[0], "B1");
+  assert.deepEqual(r.afterUndo, ["ONE", "two"], "B1 is gone: A put its old text back (and A's later change is undone)");
 });
 
 test("undo past a save keeps strings another editor changed since", async () => {
@@ -108,9 +108,9 @@ test("undo past a save keeps strings another editor changed since", async () => 
   assert.deepEqual(r.afterRedo, ["B1", "B2"]);
 });
 
-test("control: the old history and a whole-file save both lose them", async () => {
-  assert.notDeepEqual((await otherEditorChangedASavedString(old)).afterUndo, ["B1", "B2"]);
-  assert.notDeepEqual((await otherEditorChangedASavedString(wholeFile)).afterUndo, ["B1", "B2"]);
+test("control: the old history loses string 1, a save without the merge loses both", async () => {
+  assert.deepEqual((await otherEditorChangedASavedString(old)).afterUndo, ["one", "B2"]);
+  assert.deepEqual((await otherEditorChangedASavedString(wholeFile)).afterUndo, ["one", "two"]);
 });
 
 test("a string typed again after another editor took it is the editor's again", async () => {
@@ -169,4 +169,57 @@ test("saving without a change neither reads nor writes", async () => {
   a.set(1, "one"); a.snapshot();
   assert.equal(a.dirty, false);
   await a.save(async () => { throw new Error("read"); }, async () => { throw new Error("write"); });
+});
+
+test("a failed write leaves the session as it was, so the retry still protects the other editor", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); const s1 = a.snapshot(); await a.save(d.read, d.write);
+  a.set(2, "TWO"); a.snapshot();
+  d.b(1, "B1");
+  a.restore(s0);
+  a.set(2, "T3"); a.snapshot();
+  await assert.rejects(a.save(d.read, async () => { throw new Error("disk full"); }), /disk full/);
+  assert.equal(a.table.get(1), "one", "nothing was changed by the failed save");
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "B1");
+  assert.equal(get(d.text, 2), "T3");
+  a.restore(s1); // undo/redo to the entry from before: string 1 is the other editor's now
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "B1");
+});
+
+test("redo of a fresh, unsaved edit stays an edit even if another editor saved the string", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); const s1 = a.snapshot();
+  d.b(1, "B1");
+  a.restore(s0);
+  a.restore(s1);
+  const changed = await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "ONE");
+  assert.equal(a.table.get(1), "ONE");
+  assert.equal(changed, false, "what the editor shows is what was saved");
+});
+
+test("a save tells when it changed a text the editor shows", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); a.snapshot(); await a.save(d.read, d.write);
+  d.b(1, "B1");
+  a.restore(s0);
+  assert.equal(await a.save(d.read, d.write), true);
+  assert.equal(a.table.get(1), "B1");
+});
+
+test("a string typed while the save is writing is kept, and the editor stays dirty", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); a.snapshot();
+  await a.save(d.read, async (t) => { a.set(2, "late"); a.snapshot(); await d.write(t); });
+  assert.equal(a.table.get(2), "late");
+  assert.equal(a.dirty, true);
+  assert.equal(get(d.text, 2), "two");
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 2), "late");
+  assert.equal(a.dirty, false);
 });

@@ -1108,9 +1108,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (isNew && !exists()) await w3.workspace.refresh();
             // Edited strings go to war3map.wts, merged onto the file as it is now (other editors
             // may have saved strings meanwhile; only changed blocks are rewritten).
-            if (hasWts) await wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t));
+            if (hasWts) {
+              try {
+                // A text changed by the save (another editor's was kept) shows at once.
+                if (await wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t))) renderDetail();
+              } catch (e) {
+                // The object file is written; saving again rewrites it unchanged and retries the strings.
+                await w3.workspace.refresh().catch(() => {});
+                const missing = !w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.wts");
+                w3.window.showError(missing ? "war3map.wts missing: strings not saved" : `war3map.wts: strings not saved (${e})`);
+              }
+            }
             saved = serialize();
-            doc.setDirty(false);
+            doc.setDirty(isDirty());
             w3.views.refresh("w3.objects.kinds");
           },
           focus: () => search.focus(),

@@ -1,8 +1,20 @@
 import { StringTable } from "../../lib/formats/wts";
 
-/** One string in a history entry. `e` says which stretch of the editor's ownership of the string
- *  the entry belongs to (see `WtsSession.epoch`). */
-export type WtsSnapshot = Record<number, { e: number; t: string }>;
+/** A history entry: the editor's strings at the time, and how many saves had happened. */
+export interface WtsSnapshot { v: number; s: Record<number, string> }
+
+/** A string the editor has changed. */
+interface Owned {
+  /** Its text before the editor's first change. */
+  text: string;
+  /** The save count when the editor took it. Entries older than this hold text from before another
+   *  editor had it, and must not be put back. */
+  since: number;
+  /** Put back by undo/redo from before the last save, and not typed since: if another editor saved
+   *  it meanwhile, their text stays. A fresh edit (typed, or redone from after the last save) is
+   *  a normal edit, where the last save wins. */
+  undone: boolean;
+}
 
 const norm = (s: string | undefined) => s?.replace(/\r\n/g, "\n");
 
@@ -15,31 +27,27 @@ const norm = (s: string | undefined) => s?.replace(/\r\n/g, "\n");
 export class WtsSession {
   table: StringTable;
   /** The file as last read or saved (the base for merging). */
-  saved: string;
+  private saved: string;
   /** The strings of `saved`, to tell dirty without serializing. */
   private savedValues: Map<number, string>;
-  /** The text of each string the editor owns (has changed), before its first change. */
-  private origin = new Map<number, string>();
-  /** Counts how often the editor gave up a string (another editor saved it). History entries
-   *  from before that are stale for the string: they hold text that is no longer the editor's. */
-  private epoch = new Map<number, number>();
-  /** Strings put back by undo/redo and not typed since. If another editor changed one on disk
-   *  since the editor saved, putting the old text back would undo their work, so it is left. */
-  private undone = new Set<number>();
-  /** The table's strings at the last look, to notice what changed since. */
-  private known = new Map<number, string>();
+  private owned = new Map<number, Owned>();
+  private saves = 0;
 
   constructor(text: string) {
     this.saved = text;
     this.table = new StringTable(text);
     this.savedValues = new Map(this.table.entries());
-    this.sync();
   }
 
-  private sync() { this.known = new Map(this.table.entries()); }
-  private ep(n: number) { return this.epoch.get(n) ?? 0; }
-
-  set(n: number, text: string) { this.table.set(n, text); this.undone.delete(n); }
+  /** The editor changes a string. */
+  set(n: number, text: string) {
+    const was = this.table.get(n);
+    if (was === undefined || was === text) return;
+    const o = this.owned.get(n);
+    if (o) o.undone = false;
+    else this.owned.set(n, { text: was, since: this.saves, undone: false });
+    this.table.set(n, text);
+  }
 
   /** Whether a string differs from the saved file. */
   get dirty(): boolean {
@@ -47,47 +55,56 @@ export class WtsSession {
     return false;
   }
 
-  /** The editor's strings now, as a history entry. Call after each change. */
+  /** The editor's strings now, as a history entry. */
   snapshot(): WtsSnapshot {
-    for (const [n, v] of this.table.entries()) {
-      if (this.known.get(n) !== v && !this.origin.has(n) && this.known.has(n)) this.origin.set(n, this.known.get(n)!);
-    }
-    this.sync();
-    const out: WtsSnapshot = {};
-    for (const n of this.origin.keys()) out[n] = { e: this.ep(n), t: this.table.get(n)! };
-    return out;
+    const s: Record<number, string> = {};
+    for (const n of this.owned.keys()) s[n] = this.table.get(n)!;
+    return { v: this.saves, s };
   }
 
   /** Puts the editor's strings back to a snapshot; the others stay as they are. */
   restore(snap: WtsSnapshot) {
-    for (const [n, orig] of this.origin) {
-      const s = snap[n];
-      const to = s && s.e === this.ep(n) ? s.t : orig;
-      if (this.table.get(n) !== to) { this.table.set(n, to); this.undone.add(n); }
+    for (const [n, o] of this.owned) {
+      const entry = snap.v >= o.since ? snap.s[n] : undefined;
+      const to = entry ?? o.text;
+      if (this.table.get(n) === to) continue;
+      this.table.set(n, to);
+      o.undone = entry === undefined || snap.v < this.saves;
     }
-    this.sync();
   }
 
   /** Writes the editor's changes onto the file as it is now (other editors may have saved).
-   *  A failed read stops the save, as the merge needs the real file. */
-  async save(read: () => Promise<string>, write: (text: string) => Promise<void>) {
-    if (!this.dirty) return;
+   *  A failed read or write stops the save and leaves the session as it was. Returns whether a
+   *  string the editor shows changed (another editor's text was kept). */
+  async save(read: () => Promise<string>, write: (text: string) => Promise<void>): Promise<boolean> {
+    if (!this.dirty) return false;
     const current = await read();
-    const mine = new Map(this.table.entries());
     const disk = new StringTable(current);
-    for (const n of this.undone) {
-      if (disk.has(n) && norm(disk.get(n)) !== norm(this.savedValues.get(n))) this.table.set(n, disk.get(n)!);
+    const mine = new Map(this.table.entries());
+    // What to write: the editor's table, but another editor's newer text over an undo.
+    const edited = new StringTable(this.table.serialize());
+    for (const [n, o] of this.owned) {
+      if (o.undone && disk.has(n) && norm(disk.get(n)) !== norm(this.savedValues.get(n))) edited.set(n, disk.get(n)!);
     }
-    this.undone.clear();
-    const merged = StringTable.merge(this.saved, this.table, current);
+    const merged = StringTable.merge(this.saved, edited, current);
     if (merged !== current) await write(merged);
-    this.saved = merged;
-    this.table = new StringTable(merged);
-    this.savedValues = new Map(this.table.entries());
-    this.sync();
-    // A string another editor saved over the editor's: it is theirs now, and undo leaves it be.
-    for (const n of [...this.origin.keys()]) {
-      if (norm(this.table.get(n)) !== norm(mine.get(n))) { this.origin.delete(n); this.epoch.set(n, this.ep(n) + 1); }
+    // Written: now the session takes it over. Strings typed during the write stay the editor's.
+    const next = new StringTable(merged);
+    const typed = new Set<number>();
+    for (const [n, v] of this.table.entries()) {
+      if (v !== mine.get(n)) { next.set(n, v); typed.add(n); }
     }
+    let shown = false;
+    for (const [n, v] of mine) {
+      if (typed.has(n) || norm(next.get(n)) === norm(v)) continue;
+      this.owned.delete(n); // the other editor's now
+      shown = true;
+    }
+    for (const o of this.owned.values()) o.undone = false;
+    this.table = next;
+    this.saved = merged;
+    this.savedValues = new Map(new StringTable(merged).entries());
+    this.saves++;
+    return shown;
   }
 }
