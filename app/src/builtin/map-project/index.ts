@@ -78,6 +78,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // What's open in editors goes into the build too.
     const saved = await w3.editors.saveAll();
     if (saved) out.append(`saved ${saved} editor${saved === 1 ? "" : "s"} before packing`);
+    // The script follows saves a moment later; it has to be in this build. (The extension can be off.)
+    await w3.commands.execute("w3.script.settle").catch(() => {});
     if (check) {
       const problems = await w3.services.get<ProblemsService>(PROBLEMS_SERVICE).catch(() => null);
       const found = problems ? await w3.window.withProgress("Checking for problems", () => problems.run()) : [];

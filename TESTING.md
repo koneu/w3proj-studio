@@ -141,6 +141,8 @@ Each of these comes from a test on this project that looked fine and wasn't.
 - **Count what happened.** The damage tests fail if everything is accepted or everything is
   rejected: that would mean the damage reached nothing.
 - **Same input every run.** Random tests use a fixed seed and print it.
+- **Go through the front door.** `app-smoke` first packed with the backend call directly and passed;
+  the Build command it stood in for left out what had just been saved.
 - **Test the result, not the call.** A round trip or known answer, not "it didn't throw".
 - **Fixtures are made up.** Nothing from the game or other people's maps goes into the repository;
   `tests/fixtures` is handwritten and stays byte-exact through `.gitattributes`.
@@ -152,9 +154,10 @@ Each of these comes from a test on this project that looked fine and wasn't.
 
 In order of what I'd do next.
 
-1. **Editing by hand in the real app.** `app-smoke` opens a project, every editor, saves, packs and
-   unpacks with the real backend, but its one edit writes the file directly. Clicks and keys in the
-   terrain, trigger and object editors are still GUI rounds. New Map isn't covered either.
+1. **Editing by hand in the real app.** `app-smoke` opens a project and every editor, makes four new
+   maps, places objects, saves, builds and unpacks with the real backend, but through the app's API.
+   Clicks and keys in the terrain, trigger and object editors, and the New Map dialog, are still
+   GUI rounds.
 2. **Hostile input on the TypeScript side.** `mdx.ts`, the image decoders and the JASS parser
    read map files too. They can't corrupt memory, but they can freeze the app.
 3. **`war3map.wtg` in the mini map.** It stays raw without the game's TriggerData, so its codec is

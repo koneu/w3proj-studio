@@ -1,6 +1,7 @@
 // The real app, with its real Rust backend, on a scratch copy of the mini map: opens the project,
-// opens each file in its editor, saves, and packs. ui-smoke runs the front end on a fake; this is
-// what that can't reach.
+// opens each file in its editor, saves, and packs; then makes new maps, places objects, builds them
+// and holds the result against the CLI and the game's script API. ui-smoke runs the front end on a
+// fake; this is what that can't reach. New maps need the game installed (W3PROJ_GAME).
 //
 // It runs a build of its own, made with these changes to tauri.conf.json:
 //   - another identifier, so its settings folder isn't the one of the app you use
@@ -45,6 +46,111 @@ function freePort() {
   });
 }
 
+const game = process.env.W3PROJ_GAME;
+const installArgs = game ? ["--install", game] : [];
+
+/** What World Editor 3.0.1 writes for a new map, by project file. */
+const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.doo.json", "war3mapUnits.doo.json", "war3map.w3r.json", "war3map.w3c.json", "war3map.wtg.json", "war3map.wct.txt",
+  "war3map.wts", "war3map.mmp.json", "war3map.w3l.json", "war3map.w3grp", "conversation.json", "war3map.w3e.txt", "war3map.shd", "war3map.wpm", "war3mapMap.blp"];
+
+const NEW_MAPS = [
+  { args: { name: "Smoke Default" }, size: [96, 96] },
+  { args: { name: "Smoke Dungeon", tileset: "D", width: 64, height: 64, hills: true, cliffLevel: 4 }, size: [64, 64] },
+  { args: { name: "Smoke Lua", script: "lua", width: 128, height: 96, water: "deep" }, size: [128, 96] },
+  { args: { name: "Größe 金矿", width: 64, height: 128, water: "shallow" }, size: [64, 128] },
+];
+
+/** Creates maps as a user would, through the app, and holds what comes out against the tools. */
+async function newMaps(page, found) {
+  const folder = join(work, "new");
+  mkdirSync(folder, { recursive: true });
+  const tool = async (name, args = {}) => {
+    const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+    const reply = JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(message)})`));
+    const text = reply.result?.content?.[0]?.text ?? reply.error?.message ?? "";
+    if (reply.error || reply.result?.isError) throw new Error(`${name}: ${text}`);
+    return text;
+  };
+  // Stands for the user pressing Create map.
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
+
+  const scripts = [];
+  for (const { args, size } of NEW_MAPS) {
+    const fail = (what) => found.push(`new map "${args.name}": ${what}`);
+    try {
+      await tool("new_map", { ...args, folder });
+      const root = await page.evaluate(`w3.workspace.project()?.root`);
+      const names = new Set(walk(join(root, "map")).map((p) => relative(join(root, "map"), p).replaceAll("\\", "/")));
+      const scriptFile = args.script === "lua" ? "war3map.lua" : "war3map.j";
+      for (const n of [...NEW_MAP_FILES, scriptFile]) if (!names.has(n)) fail(`no ${n}`);
+      const active = await page.evaluate(`w3.editors.activePath()`);
+      if (active !== "map/war3map.w3e.txt") fail(`the terrain editor didn't open (active: ${active})`);
+
+      // The first doodad and the first unit: the files start empty.
+      await tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+      await tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+      await tool("save_project");
+
+      // Build, as the button does, right after the save: the map has to have what was just saved.
+      // Not awaited: the command waits for its toast's buttons.
+      const output = await page.evaluate(`w3.workspace.project().default_output`);
+      const map = resolve(root, output);
+      await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+      try {
+        await until("the build", () => existsSync(map), 20000);
+      } catch (e) {
+        throw new Error(`no map at ${map}: ${await page.evaluate(`[...document.querySelectorAll(".notification, .toast, .notifications *")].map((e) => e.textContent).join(" | ").slice(0, 300)`)}`);
+      }
+      await sleep(300);
+      const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+      if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
+
+      const cat = (name) => spawnSync(cli, ["cat", map, name], { maxBuffer: 1 << 28 });
+      const script = cat(scriptFile);
+      if (script.status !== 0) fail(`no ${scriptFile} in the map`);
+      const file = join(folder, `${scripts.length}-${scriptFile}`);
+      writeFileSync(file, script.stdout);
+      scripts.push(file);
+      // The script knows the unit, and the map the doodad.
+      if (!script.stdout.includes(args.script === "lua" ? 'FourCC("hfoo")' : "'hfoo'")) fail("the unit isn't in the script");
+      const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+      if (doo.doodads.length !== 1 || doo.doodads[0].id !== "LTlt") fail(`${doo.doodads.length} doodads`);
+      // Pathing covers the map: four cells per tile.
+      const wpm = cat("war3map.wpm").stdout;
+      const dims = [wpm.readUInt32LE(8), wpm.readUInt32LE(12)];
+      if (dims[0] !== size[0] * 4 || dims[1] !== size[1] * 4) fail(`pathing is ${dims.join(" × ")}`);
+
+      // It reads back as a project and comes out the same.
+      const back = join(folder, `back-${scripts.length}`), again = join(folder, `again-${scripts.length}.w3x`);
+      const unpack = spawnSync(cli, ["unpack", map, back, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+      const repack = spawnSync(cli, ["pack", back, "-o", again], { encoding: "utf8" });
+      if (unpack.status !== 0 || repack.status !== 0) fail(`round trip: ${unpack.stderr}${repack.stderr}`);
+      else if (hash(map) !== hash(again)) fail("pack, unpack and pack changed the map");
+
+      // Opening it again, as after a restart.
+      await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); await w3.editors.open("map/war3map.w3e.txt"); })()`);
+      await sleep(300);
+      const again2 = await page.evaluate(`w3.editors.activePath()`);
+      if (again2 !== "map/war3map.w3e.txt") fail("it doesn't open again");
+    } catch (e) {
+      fail(e.message);
+    }
+  }
+
+  // The scripts, against the game's own API.
+  const common = join(folder, "common.j"), blizzard = join(folder, "Blizzard.j");
+  for (const [path, file] of [["War3.w3mod:Scripts/common.j", common], ["War3.w3mod:Scripts/Blizzard.j", blizzard]]) {
+    const r = spawnSync(cli, ["game", ...installArgs, "cat", path], { maxBuffer: 1 << 28 });
+    if (r.status !== 0) throw new Error(`can't read ${path}`);
+    writeFileSync(file, r.stdout);
+  }
+  const check = spawnSync(process.execPath, ["--no-warnings", "--experimental-transform-types", "--import", new URL("./script-check/tsregister.mjs", import.meta.url).href,
+    join(app, "scripts", "script-check", "check-scripts.mts"), join(app, "src", "lib"), common, blizzard, ...scripts], { encoding: "utf8" });
+  if (check.status !== 0 || !check.stdout.includes(`${NEW_MAPS.length} scripts checked`)) found.push(`generated scripts: ${(check.stderr + check.stdout).trim().slice(0, 500)}`);
+  return scripts.length;
+}
+
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
@@ -68,7 +174,7 @@ async function run() {
   rmSync(configDir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
   // AI clients on this machine would connect to a server of this build.
-  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false }));
+  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true }));
   const port = await freePort();
   const child = spawn(exe, [], {
     stdio: "ignore",
@@ -145,13 +251,15 @@ async function run() {
 
     const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
     if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
+
+    const made = await newMaps(page, found);
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 
     const shot = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     if (shot) writeFileSync(join(work, "screen.png"), Buffer.from(shot.data, "base64"));
     page.ws.close();
-    console.log(`${info.files.length} files in "${info.name}", ${onDisk.length} opened`);
+    console.log(`${info.files.length} files in "${info.name}", ${onDisk.length} opened, ${made} new maps`);
     if (process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${JSON.stringify(r)}`);
     return found;
   } finally {

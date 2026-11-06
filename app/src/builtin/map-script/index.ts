@@ -242,6 +242,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   // Saves come in bursts (a map save writes several files): wait for the last one.
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** The file that started the waiting, while a run is due. */
+  let pending: string | null = null;
+  const afterSave = (path: string) => write(`saved ${path}`).catch((e) => {
+    // Nobody is watching a save's script run, and saving goes on working: say so once.
+    const key = `failed:${w3.workspace.project()?.root ?? ""}`;
+    if (warned.has(key)) return;
+    warned.add(key);
+    void w3.window.showWarning(`The map script couldn't be regenerated, so saved changes don't reach it: ${e instanceof Error ? e.message : String(e)}`);
+  });
   ctx.subscriptions.push(
     w3.mcp.registerTool("build_script", async () => {
       requireProject(w3);
@@ -265,13 +274,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.workspace.onDidSave((path) => {
       if (!INPUTS.test(path) || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
       clearTimeout(timer);
-      timer = setTimeout(() => void write(`saved ${path}`).catch((e) => {
-        // Nobody is watching a save's script run, and saving goes on working: say so once.
-        const key = `failed:${w3.workspace.project()?.root ?? ""}`;
-        if (warned.has(key)) return;
-        warned.add(key);
-        void w3.window.showWarning(`The map script couldn't be regenerated, so saved changes don't reach it: ${e instanceof Error ? e.message : String(e)}`);
-      }), 800);
+      pending = path;
+      timer = setTimeout(() => { pending = null; void afterSave(path); }, 800);
+    }),
+    // What packs the map first waits here: a script still due from the last save belongs in it.
+    w3.commands.register("w3.script.settle", async () => {
+      clearTimeout(timer);
+      const path = pending;
+      pending = null;
+      if (path) await afterSave(path);
+      await running.catch(() => true);
     }),
     // `quiet` (other extensions, e.g. New Map): no message afterwards.
     w3.commands.register("w3.script.generate", async (opts?: { quiet?: boolean }) => {
