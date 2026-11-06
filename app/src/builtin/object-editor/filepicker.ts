@@ -8,7 +8,7 @@ import { parseSlk } from "../../lib/formats/text";
 import { ModelPreview } from "../../lib/model/preview";
 import { SOUND_INFO } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
-import { folderTree, foldersOf, inFolder, labelFiles, storedSound, type Folder } from "./browse";
+import { findListed, folderTree, foldersOf, inFolder, labelFiles, storedSound, type Folder } from "./browse";
 
 const MAX_ROWS = 300;
 export type FileKind = "model" | "image";
@@ -169,8 +169,9 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
       rowsEl.children[active]?.scrollIntoView({ block: "nearest" });
       showPreview();
     };
-    // The current file's name, without folders and extension, as the first search.
-    const start = (opts.current.split(",")[0] ?? "").trim().replace(/^.*\\/, "").replace(/\.\w+$/, "");
+    // Lists without folders start from the current name. With folders that would hide nearly every
+    // file of every other folder: those open at the current file instead.
+    const start = opts.folders ? "" : (opts.current.split(",")[0] ?? "").trim().replace(/^.*\\/, "").replace(/\.\w+$/, "");
     const search = h("input.picker-search", {
       placeholder: opts.placeholder,
       value: start === "_" ? "" : start,
@@ -193,6 +194,11 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
     }, { root: rowsEl });
     const renderRows = () => {
       seen.disconnect();
+      if (!shown.length && all.length) {
+        rowsEl.replaceChildren(h("div.browse-empty.muted", {}, search.value.trim() ? `Nothing here matches "${search.value.trim()}". Clear the search to see this folder.` : "No files here."));
+        mark();
+        return;
+      }
       rowsEl.replaceChildren(...shown.slice(0, MAX_ROWS).map((f, i) => {
         const img = opts.images && opts.thumb ? h("img.picker-icon", { alt: "", "data-path": f.path }) : null;
         if (img) seen.observe(img);
@@ -242,12 +248,22 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
     void opts.load().then((files) => {
       all = files;
       if (opts.folders) {
-        tree = folderTree(files.map((f) => f.path));
-        // Open the tree where the current file is, when it's a path.
-        for (const f of foldersOf((opts.current.split(",")[0] ?? "").trim())) open.add(f);
+        const paths = files.map((f) => f.path);
+        tree = folderTree(paths);
+        // Open where the current file is, highlighted.
+        const listed = findListed(opts.current, paths);
+        if (listed) {
+          const parents = foldersOf(listed);
+          for (const f of parents) open.add(f);
+          folder = parents[parents.length - 1] ?? "";
+        }
         renderTree();
-      }
-      filter();
+        filter();
+        if (listed) {
+          active = Math.max(0, shown.findIndex((f) => f.path === listed));
+          mark();
+        }
+      } else filter();
     }, (e) => { countEl.textContent = String((e as Error).message ?? e); });
   });
 }

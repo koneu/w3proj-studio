@@ -328,7 +328,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return [
               h("div.obj-group", {}, h("span", {}, `${title} (${items.length})`), action ?? null),
               ...items.map((o) =>
-                h(`div.obj-item${selection.has(o) ? ".selected" : ""}`, { onclick: (e: MouseEvent) => clickItem(o, e) },
+                h(`div.obj-item${selection.has(o) ? ".selected" : ""}`, { onclick: (e: MouseEvent) => clickItem(o, e), oncontextmenu: (e: MouseEvent) => itemMenu(o, e) },
                   ICON_FIELD[kind] ? itemIcon(o) : null,
                   h("code", {}, o.id ? `${o.id}` : o.base),
                   o.id ? h("small", { title: stripColors(baseName(o)) }, `← ${o.base}`) : null,
@@ -366,6 +366,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             select(o);
           }
           renderDetail();
+        };
+
+        /** Right click: on an object outside the selection, that object alone. */
+        const itemMenu = (o: Obj, e: MouseEvent) => {
+          e.preventDefault();
+          if (!selection.has(o)) { select(o); renderDetail(); }
+          const many = selection.size > 1;
+          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [{
+            label: many ? `Remove ${selection.size} objects` : o.id ? "Delete" : "Remove changes",
+            hint: "Delete key does the same",
+            run: () => void removeSelection(),
+          }]);
         };
 
         /** Removes every selected object after one confirmation. */

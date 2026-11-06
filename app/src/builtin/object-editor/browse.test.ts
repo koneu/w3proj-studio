@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { folderTree, foldersOf, inFolder, labelFiles, storedSound } from "./browse";
+import { findListed, folderTree, foldersOf, inFolder, labelFiles, storedSound } from "./browse";
 
 const paths = ["Units\\Human\\Footman\\Footman.mdl", "Units\\Human\\Knight\\Knight.mdl", "units\\Orc\\Grunt\\Grunt.mdl", "Doodads\\Rock.mdl", "war3mapImported\\x.mdl", "Top.mdl"];
 
@@ -28,6 +28,14 @@ test("a folder holds what's under it, and no folder merely starting the same", (
 test("a path opens the tree down to its own folder", () => {
   assert.deepEqual(foldersOf("A\\B\\c.mdl"), ["A", "A\\B"]);
   assert.deepEqual(foldersOf("c.mdl"), []);
+});
+
+test("a field's value finds its file, without extension and in any case", () => {
+  assert.equal(findListed("units\\human\\footman\\footman", paths), "Units\\Human\\Footman\\Footman.mdl");
+  assert.equal(findListed("Units/Human/Knight/Knight.mdx", paths), "Units\\Human\\Knight\\Knight.mdl");
+  assert.equal(findListed("Doodads\\Rock.mdl, Other.mdl", paths), "Doodads\\Rock.mdl");
+  assert.equal(findListed("_", paths), null);
+  assert.equal(findListed("", paths), null);
 });
 
 test("a label plays its first file, and the first row of a label counts", () => {

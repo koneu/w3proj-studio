@@ -36,6 +36,12 @@ export function foldersOf(path: string): string[] {
   return parts.map((_, i) => parts.slice(0, i + 1).join("\\"));
 }
 
+/** The listed path a field's value means: values may lack the extension, and differ in case. */
+export function findListed(value: string, paths: readonly string[]) {
+  const wanted = (value.split(",")[0] ?? "").trim().replace(/\//g, "\\").replace(/\.\w+$/, "").toLowerCase();
+  return wanted ? paths.find((p) => p.replace(/\.\w+$/, "").toLowerCase() === wanted) ?? null : null;
+}
+
 const AUDIO = /\.(wav|mp3|flac|ogg)$/i;
 const stem = (path: string) => path.toLowerCase().replace(AUDIO, "");
 

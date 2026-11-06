@@ -23,7 +23,11 @@ function textureLoader(w3: W3Api, doc: EditorDocument) {
     } else if (w3.workspace.project()) {
       try { return await w3.workspace.readBytes(`map/${slash}`); } catch { /* next */ }
     }
-    return w3.game.read(path);
+    let failed: unknown;
+    for (const v of variants(path)) {
+      try { return await w3.game.read(v); } catch (e) { failed = e; }
+    }
+    throw failed;
   };
 }
 

@@ -191,9 +191,18 @@ async function run() {
     })()`);
     const commands = await page.evaluate(`w3Workbench.commands.all().map((c) => c.id)`);
     // The file browser: folders, list and preview come up, and Escape closes it.
-    await page.evaluate(`w3.services.get("w3.objects").then((o) => { window.__pick = o.pickFile(document.body, { title: "Smoke", kind: "model", current: "" }); })`);
+    // It opens at the current file with nothing searched: a search left in the box empties every other folder.
+    await page.evaluate(`(() => {
+      w3.game.list = async () => ["War3.w3mod:Units/Human/Footman/Footman.mdx", "War3.w3mod:Units/Human/Knight/Knight.mdx", "War3.w3mod:Units/Orc/Grunt/Grunt.mdx"];
+      const current = ["units", "human", "footman", "footman"].join(String.fromCharCode(92));
+      return w3.services.get("w3.objects").then((o) => { window.__pick = o.pickFile(document.body, { title: "Smoke", kind: "model", current }); });
+    })()`);
     await sleep(300);
     const browser_ = await page.evaluate(`[".browse-tree", ".picker-rows", ".browse-preview canvas"].map((c) => !!document.querySelector(c))`);
+    const browserStart = await page.evaluate(`JSON.stringify({ search: document.querySelector(".picker-search").value, row: document.querySelector(".picker-row.active")?.textContent ?? "", folder: document.querySelector(".browse-folder.active")?.textContent ?? "" })`);
+    await page.evaluate(`document.querySelectorAll(".browse-folder")[0].click()`);
+    await sleep(100);
+    const browserAll = await page.evaluate(`document.querySelectorAll(".picker-row").length`);
     await page.evaluate(`document.querySelector(".picker-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
     const browserClosed = await page.evaluate(`window.__pick.then((r) => r === null && !document.querySelector(".picker-browse"))`);
     const titleBarOk = await page.evaluate(`!!document.querySelector(".titlebar .menubar") && !!document.querySelector(".titlebar .titlebar-search") && document.querySelectorAll(".titlebar-button").length === 3 && document.querySelector(".titlebar").getBoundingClientRect().top === 0`);
@@ -225,6 +234,9 @@ async function run() {
     if (commands.length < 20) found.push(`only ${commands.length} commands`);
     if (menus.join() !== "File,Edit,View,Scenario,Module,Tools,Help") found.push(`the menu bar shows ${menus.join()}`);
     if (browser_.includes(false)) found.push(`the file browser came up without a panel: ${browser_}`);
+    const started = JSON.parse(browserStart);
+    if (started.search !== "" || !started.row.includes("Footman") || !started.folder.startsWith("▾Footman") && !started.folder.includes("Footman")) found.push(`the file browser didn't open at the current file: ${browserStart}`);
+    if (browserAll !== 3) found.push(`All files shows ${browserAll} of 3`);
     if (!browserClosed) found.push("the file browser didn't close");
     if (!titleBarOk) found.push("the title bar isn't complete, or not at the top");
     if (!fileMenu.some((t) => t.startsWith("New Map"))) found.push("the File menu has no New Map");
