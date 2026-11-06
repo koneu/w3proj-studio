@@ -8,6 +8,7 @@ import { toProjectPath } from "../formats/archivepath";
 import { decodeImage } from "../image/index.ts";
 import { parseMdx } from "./mdx";
 import { ModelRenderer, standClock, type Clock } from "./renderer";
+import { parseAnimProps } from "./stand";
 
 const div = (cls: string) => Object.assign(document.createElement("div"), { className: cls });
 
@@ -17,6 +18,7 @@ export class ModelPreview {
   private note: HTMLElement;
   private renderer: ModelRenderer | null = null;
   private path: string | null = null;
+  private props: string[] = [];
   private raf = 0;
   private started = performance.now();
   private drag: number | null = null;
@@ -45,8 +47,10 @@ export class ModelPreview {
   };
   private onUp = () => { this.drag = null; };
 
-  /** Shows a model (data path, with or without extension; .mdl names the game's .mdx); null: none. */
-  show(path: string | null) {
+  /** Shows a model (data path, with or without extension; .mdl names the game's .mdx); null: none.
+   *  `animProps` is the look to show, for a model that holds several. */
+  show(path: string | null, animProps = "") {
+    this.props = parseAnimProps(animProps);
     const mdx = path && path !== "_" ? path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx") : null;
     if (mdx === this.path) return;
     this.path = mdx;
@@ -102,7 +106,7 @@ export class ModelPreview {
     // Only while shown (a hidden tab or a closed pane has no size).
     if (!r || !this.canvas.isConnected || this.canvas.clientWidth === 0) return;
     if (this.drag === null) r.yaw += 0.004;
-    const stand = standClock(r.model);
+    const stand = standClock(r.model, this.props);
     const t = now - this.started, len = Math.max(1, stand.seqEnd - stand.seqStart);
     const clock: Clock = { ...stand, frame: stand.seqStart + (t % len), time: t };
     r.render(clock);

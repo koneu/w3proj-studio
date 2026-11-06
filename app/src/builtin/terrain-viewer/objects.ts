@@ -5,6 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
+import { parseAnimProps } from "../../lib/model/stand";
 import { bounds, ModelGpu, poseNodes, standClock, uploadTexture, type Mat4 } from "../../lib/model/renderer";
 import { parseIni } from "../../lib/formats/text";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
@@ -38,6 +39,19 @@ export interface Skin {
   fixedRot: number | null;
   /** Ground mark (Splats\UberSplatData.slk name; buildings), "" for none. */
   uberSplat: string;
+  /** The look of a model that holds several, as its words (Animprops, see lib/model/stand). */
+  animProps?: string[];
+}
+
+/** The tables with units' Animprops, which the skin table doesn't carry. */
+const UNIT_FUNC = ["Human", "Orc", "Undead", "NightElf", "Neutral", "Campaign"].map((r) => `Units\\${r}UnitFunc.txt`);
+
+/** Puts a unit table's Animprops on the skins. */
+export function addAnimProps(skins: Map<string, Skin>, text: string) {
+  for (const [id, sec] of parseIni(text)) {
+    const skin = skins.get(id.trim()), props = parseAnimProps(sec.get("animprops") ?? "");
+    if (skin && props.length) skin.animProps = props;
+  }
 }
 
 const SKIN_FILES: [string, string][] = [
@@ -70,6 +84,7 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
       });
     }
   }
+  for (const f of UNIT_FUNC) addAnimProps(out, await w3.game.readText(f).catch(() => ""));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
@@ -81,7 +96,7 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
 /** Object data fields that change a skin entry, per kind (UnitMetaData & co., "Profile" fields;
  *  units' alternate models umd1/umd2 and selection scale aren't drawn). */
 const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
-  w3u: { file: "umdl", modelScale: "usca", uberSplat: "uubs" },
+  w3u: { file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani" },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr" },
   w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr" },
@@ -112,6 +127,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         if (!m) continue;
         const n = Number(m.value);
         if (key === "file" || key === "texFile" || key === "uberSplat") skin[key] = String(m.value);
+        else if (key === "animProps") skin.animProps = parseAnimProps(String(m.value));
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale") && Number.isFinite(n)) skin[key] = n;
@@ -149,6 +165,8 @@ export interface ModelRequest {
   /** Replaceable texture id → path (e.g. a tree type's own texture). */
   replaceable: Record<number, string>;
   instances: ObjectInstance[];
+  /** The look to stand in (Animprops). */
+  props?: readonly string[];
   /** Swaps texture paths the game substitutes at runtime (HD cliff placeholders). */
   retexture?: (path: string) => string;
 }
@@ -244,14 +262,14 @@ export class ObjectLoader {
     const m = gpu.model;
     if (m.particleEmitters2.length || m.ribbons.length) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
     if (!m.skipped.includes("CORN")) return Promise.resolve(null);
-    const key = req.path.toLowerCase();
+    const key = `${req.path.toLowerCase()}|${req.props ?? ""}`;
     let e = this.effectSources.get(key);
     if (!e) {
       e = (async () => {
         let sd;
         try { sd = parseMdx(await this.readFile(`War3.w3mod:${req.path.replace(/\\/g, "/")}`)); } catch { return null; }
         if (!sd.particleEmitters2.length && !sd.ribbons.length) return null;
-        const clock = standClock(sd);
+        const clock = standClock(sd, req.props);
         const textures: (WebGLTexture | null)[] = sd.textures.map(() => null);
         sd.textures.forEach((t, i) => {
           if (t.replaceableId === 0 && t.path) void this.texture(t.path, t.flags).then((tex) => { textures[i] = tex; });
@@ -264,15 +282,15 @@ export class ObjectLoader {
   }
 
   private model(req: ModelRequest): Promise<ModelGpu> {
-    const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}`;
+    const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}|${req.props ?? ""}`;
     let m = this.models.get(key);
     if (!m) {
       m = (async () => {
         const model = parseMdx(await this.readFile(req.path));
         const gpu = new ModelGpu(this.gl, model);
-        // Stand still at the start of the first "Stand" animation.
-        const stand = model.sequences.find((s) => /^stand/i.test(s.name)) ?? model.sequences[0];
-        gpu.pose({ frame: stand?.start ?? 0, seqStart: stand?.start ?? 0, seqEnd: stand?.end ?? 0, time: 0 });
+        // Stand still at the start of its "Stand" animation.
+        gpu.props = req.props ?? [];
+        gpu.pose(standClock(model, gpu.props));
         gpu.texturePaths(req.replaceable).forEach((p, i) => {
           if (!p) return;
           const tex = req.retexture?.(p) ?? p;
@@ -291,7 +309,7 @@ export class ObjectLoader {
   /** The GPU model for a placed type (shared with the batches; for previews). */
   modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
     const replaceable = skinTextures(skin);
-    return this.model({ path: modelPath(skin, variation), replaceable, instances: [] });
+    return this.model({ path: modelPath(skin, variation), replaceable, props: skin.animProps, instances: [] });
   }
 
   /** Loads each requested model; failed ones are reported by index. */
@@ -339,11 +357,11 @@ export class ObjectLoader {
         continue;
       }
       const path = modelPath(skin, p.variation);
-      const key = `${path}|${skin.texFile}`;
+      const key = `${path}|${skin.texFile}|${skin.animProps ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = skinTextures(skin);
-        entry = { req: { path, replaceable, instances: [] }, items: [] };
+        entry = { req: { path, replaceable, props: skin.animProps, instances: [] }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);

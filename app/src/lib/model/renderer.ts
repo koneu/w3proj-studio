@@ -2,6 +2,7 @@
 // float texture), keyframe animation, Warcraft blend modes, team colour.
 // Particles, ribbons and texture animations are not drawn.
 
+import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
 import type { SceneLight } from "./dnclight";
@@ -165,9 +166,9 @@ export function poseNodes(model: Model, clock: Clock): Mat4[] {
   return world;
 }
 
-/** The start of a model's first Stand animation (or its first one): how placed objects stand. */
-export function standClock(model: Model): Clock {
-  const stand = model.sequences.find((s) => /^stand/i.test(s.name)) ?? model.sequences[0];
+/** The start of the Stand animation of a look (see ./stand): how placed objects stand. */
+export function standClock(model: Model, props: readonly string[] = []): Clock {
+  const stand = standSequence(model.sequences, props);
   return { frame: stand?.start ?? 0, seqStart: stand?.start ?? 0, seqEnd: stand?.end ?? 0, time: 0 };
 }
 
@@ -412,6 +413,8 @@ export class ModelGpu {
   /** Hidden geosets (by index); HD lower-detail copies start hidden. */
   readonly hidden = new Set<number>();
   readonly stats: Stats;
+  /** The look it stands in (the unit's Animprops): models with one are loaded once per look. */
+  props: readonly string[] = [];
   private sh: Shared;
   private geosets: GpuGeoset[] = [];
   private boneTex: WebGLTexture;

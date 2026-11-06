@@ -688,6 +688,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const variations = vf ? Number(effective(o, vf, 0)) || 1 : 1;
           return variations > 1 ? `${path.replace(/\.(mdl|mdx)$/i, "")}0` : path;
         };
+        /** The look it shows, for a model that holds several (Animprops). */
+        const looksOf = (o: Obj): string => {
+          const f = kind === "w3u" ? kd?.fieldById.get("uani") : undefined;
+          return f ? effective(o, f, 0) : "";
+        };
         const renderDetailInner = () => {
           // Edits can change names and the clean-up count in the list too.
           renderList();
@@ -735,7 +740,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           sections.push(rawTable(o, other, kd ? "Other modifications" : "Modifications"));
 
           const parts: (HTMLElement | null)[] = [
-            preview && kd ? (preview.show(modelOf(o)), preview.el) : null,
+            preview && kd ? (preview.show(modelOf(o), looksOf(o)), preview.el) : null,
             h("div.obj-detail-header", {},
               h("h2", {}, nameOf(o) || "(unnamed)"),
               h("code", {}, o.id ? `${o.id} (based on ${o.base}${baseName(o) ? ` · ${stripColors(baseName(o))}` : ""})` : o.base),

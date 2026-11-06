@@ -776,7 +776,7 @@ export class TerrainRenderer {
   /** Placed objects play their Stand animation in a loop, or stand still at its start. */
   setAnimate(on: boolean) {
     this.animate = on;
-    if (!on) for (const gpu of new Set(this.batches.map((b) => b.gpu))) gpu.pose(standClock(gpu.model));
+    if (!on) for (const gpu of new Set(this.batches.map((b) => b.gpu))) gpu.pose(standClock(gpu.model, gpu.props));
   }
 
   /** Poses every placed model at the current moment of its Stand animation (one pose per
@@ -789,11 +789,11 @@ export class TerrainRenderer {
       if (this.hiddenGroups.has(b.group)) continue;
       if (!posed.has(b.gpu) && b.gpu.model.sequences.length) {
         posed.add(b.gpu);
-        b.gpu.pose(at(standClock(b.gpu.model)));
+        b.gpu.pose(at(standClock(b.gpu.model, b.gpu.props)));
       }
       const fx = b.effects;
       if (fx?.classic) {
-        fx.clock = at(standClock(fx.model));
+        fx.clock = at(standClock(fx.model, b.gpu.props));
         fx.nodeWorld = poseNodes(fx.model, fx.clock);
       }
     }
