@@ -2,7 +2,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
-import { invoke, listen, NotUtf8Error } from "./backend";
+import { invoke, listen, NotUtf8Error, readBytes, writeBytes } from "./backend";
 import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
@@ -296,7 +296,7 @@ export class Workbench {
         read: (p, o) => wb.game.read(p, o?.tileset),
         readText: (p, o) => wb.game.readText(p, o?.tileset),
       },
-      backend: { invoke, listen },
+      backend: { invoke, listen, readBytes, writeBytes },
       lib: () => import("../extensions/lib"),
       mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), list: () => wb.mcp.list(), handle: (message) => wb.mcp.handle(message) },
       extensions: {

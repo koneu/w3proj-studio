@@ -17,7 +17,7 @@ import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/servic
 import { ident } from "../../lib/script/jass";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
-  allocItemId, parseWctText, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWctFile, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
+  allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -52,6 +52,12 @@ let startWithVariables = false;
 let startWithTrigger: string | null = null;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** The open Trigger Editor, opened if it isn't. */
+  const theView = async () => {
+    if (!openView) await w3.commands.execute("w3.triggers.open");
+    if (!openView) throw new Error("This project has no triggers to work with.");
+    return openView;
+  };
   /** The map's triggers for a tool. */
   const toolTriggers = async () => {
     requireProject(w3);
@@ -186,6 +192,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.triggers.overview")),
+    // The World Editor's files, a .wtg and its .wct beside it. Importing replaces everything, as there.
+    w3.commands.register("w3.triggers.export", async () => {
+      const view = await theView();
+      const path = await w3.window.pickSaveFile({ title: "Export triggers", defaultPath: "triggers.wtg", filters: [{ name: "Triggers (.wtg)", extensions: ["wtg"] }] });
+      if (!path) return;
+      await w3.backend.writeBytes(path, writeWtg(view.file));
+      await w3.backend.writeBytes(path.replace(/\.wtg$/i, "") + ".wct", writeWct(view.customFile()));
+      void w3.window.showInfo(`Exported ${textTriggers(view.file).length} triggers and ${view.file.variables.length} variables, with their .wct beside them.`);
+    }),
+    w3.commands.register("w3.triggers.import", async () => {
+      const view = await theView();
+      const path = await w3.window.pickFile({ title: "Import triggers", filters: [{ name: "Triggers (.wtg)", extensions: ["wtg"] }] });
+      if (!path) return;
+      const file = parseWtg(await w3.backend.readBytes(path), await triggerData(w3));
+      const scripts = await w3.backend.readBytes(path.replace(/\.wtg$/i, "") + ".wct").then((b) => parseWct(b, textTriggers(file).length)).catch(() => null);
+      if (!(await w3.window.confirm("Importing replaces all current triggers and variables. Ctrl+Z takes it back.", "Import", 60000))) return;
+      view.replaceAll(file, scripts);
+      void w3.window.showInfo(`Imported ${textTriggers(file).length} triggers and ${file.variables.length} variables${scripts ? "" : ", without a .wct: their custom scripts are empty"}.`);
+    }),
     w3.editors.registerProvider("w3.triggerEditor", {
       async resolve(el, doc) {
         el.classList.add("trig-editor");
@@ -384,6 +409,17 @@ class TriggerView {
   }
 
   dispose() { this.body?.dispose?.(); this.unsubscribe(); this.el.removeEventListener("keydown", this.keydown); }
+
+  /** Every trigger and variable from elsewhere, as one undo step. */
+  replaceAll(file: TriggerFile, custom: CustomTextFile | null) {
+    this.edit("Import triggers", () => {
+      this.file = file;
+      this.selected = { kind: "header" };
+      this.custom = custom;
+      this.header = custom?.header ?? null;
+      this.texts = new Map(textTriggers(file).map((t, i) => [t, custom?.texts[i] ?? null]));
+    });
+  }
 
   customFile(): CustomTextFile {
     const texts = textTriggers(this.file).map((t) => this.texts.get(t) ?? null);
@@ -637,8 +673,11 @@ class TriggerView {
     return h("div.trig-toolbar", {}, newMenu,
       h("button", { title: "Move up", onclick: () => this.move(-1) }, "↑"),
       h("button", { title: "Move down", onclick: () => this.move(1) }, "↓"),
-      h("button", { title: "Delete (Del)", onclick: () => this.deleteSelected() }, "Delete"));
+      h("button", { title: "Delete (Del)", onclick: () => this.deleteSelected() }, "Delete"),
+      h("button", { title: "Save all triggers and variables as a .wtg and .wct, which the World Editor can import too", onclick: () => this.run("w3.triggers.export") }, "Export…"),
+      h("button", { title: "Replace all triggers and variables with a .wtg and .wct", onclick: () => this.run("w3.triggers.import") }, "Import…"));
   }
+  private run(command: string) { this.w3.commands.execute(command).catch((e) => this.w3.window.showError(String((e as Error).message ?? e))); }
 
   // ---- tree -------------------------------------------------------------------------
   private row(label: string, cls: string, depth: number, sel: Selection, opts: { toggle?: number; title?: string; off?: boolean } = {}) {

@@ -339,6 +339,9 @@ export interface W3Api {
   backend: {
     invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
     listen<T = unknown>(event: string, handler: (payload: T) => void): Promise<Disposable>;
+    /** A file anywhere on disk, for what a person picks: exports and imports. */
+    readBytes(path: string): Promise<Uint8Array>;
+    writeBytes(path: string, bytes: Uint8Array): Promise<void>;
   };
   /** The parsers, writers and checks the built-ins use (see extensions/lib.ts), loaded on first
    *  use: `const { terrain } = await w3.lib(); terrain.parseW3e(bytes)`. Check `version`. */
