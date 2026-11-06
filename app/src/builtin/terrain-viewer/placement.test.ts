@@ -99,3 +99,19 @@ test("buildings stand where real maps have them: their edges on the 64 grid", ()
   for (const cells of [4, 6, 8, 12]) assert.equal(onBuildingGrid(onBuildingGrid(777, cells), cells), onBuildingGrid(777, cells), "stays put");
   assert.ok(Math.abs(onBuildingGrid(100, 6) - 100) <= 32, "the nearest spot");
 });
+
+test("a plain doodad has life 255, a destructable 100, also copied from each other", () => {
+  const f = file("doodads", 13, 11);
+  assert.equal((newEntry(f, "CPct", [0, 0, 0], undefined, "w3d") as unknown as { life: number }).life, 255);
+  assert.equal((newEntry(f, "LTlt", [0, 0, 0], undefined, "w3b") as unknown as { life: number }).life, 100);
+  f.list.push(newEntry(f, "LTlt", [0, 0, 0], undefined, "w3b"));
+  assert.equal((newEntry(f, "CPct", [64, 0, 0], undefined, "w3d") as unknown as { life: number }).life, 255);
+});
+
+test("items belong to Neutral Passive, whoever's turn it is", () => {
+  const f = file("units", 8, 11);
+  const owner = (e: unknown) => (e as { player: number }).player;
+  assert.equal(owner(newEntry(f, "ratf", [0, 0, 0], 3, "w3t")), 27);
+  assert.equal(owner(newEntry(f, "ratf", [0, 0, 0], undefined, "w3t")), 27);
+  assert.equal(owner(newEntry(f, "hfoo", [0, 0, 0], 3, "w3u")), 3);
+});

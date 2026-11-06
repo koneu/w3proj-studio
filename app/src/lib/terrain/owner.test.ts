@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { joinOwners, ownerOf, placedText, splitOwners } from "./owner";
+import { hasPlayerUnits, joinOwners, ownerOf, placedText, splitOwners } from "./owner";
 
 const UPROOTED = 0x10001;
 
@@ -39,4 +39,14 @@ test("joining doesn't touch what's being edited", () => {
   splitOwners(list);
   assert.equal(joinOwners(list[0]).player, UPROOTED);
   assert.equal(list[0].player, 1);
+});
+
+test("a unit of a player counts; start locations, items and neutrals don't", () => {
+  const item = (id: string) => id === "ratf";
+  assert.equal(hasPlayerUnits([{ id: "hfoo", player: 0 }], item), true);
+  assert.equal(hasPlayerUnits([{ id: "hfoo", player: 23 }], item), true);
+  assert.equal(hasPlayerUnits([{ id: "etol", player: 0x10002 }], item), true, "an uprooted Ancient is its player's");
+  assert.equal(hasPlayerUnits([{ id: "sloc", player: 0 }, { id: "ratf", player: 0 }], item), false);
+  assert.equal(hasPlayerUnits([{ id: "nogr", player: 24 }, { id: "ngol", player: 27 }], item), false);
+  assert.equal(hasPlayerUnits([], item), false);
 });

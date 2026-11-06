@@ -387,7 +387,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const seedOf = (seed: unknown) => (typeof seed === "number" ? seed : Math.floor(Math.random() * 1e9));
 
   const add = (f: PlacedFile, handle: TerrainEditorHandle, id: string, x: number, y: number, player: number | undefined, asked: Dressing, vary: boolean, random: () => number = Math.random) => {
-    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player);
+    const entry = newEntry(f, id, [x, y, heightAt(handle.terrain, x, y)], player, handle.objects.type(id)?.kind);
     dress(entry, handle.objects.type(id), asked, vary, random);
     f.list.push(entry);
     return entry;
@@ -2378,7 +2378,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             create: (kind, id, at) => {
               const f = kind === "w3u" || kind === "w3t" ? unitsFile : dooFile;
               if (!f) return `This project has no ${kind === "w3u" || kind === "w3t" ? "war3mapUnits.doo" : "war3map.doo"}.`;
-              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player);
+              const entry = newEntry(f, id, [at.x, at.y, heightAt(terrain, at.x, at.y)], at.player, kind);
               entry.angle = at.angle;
               repositioned.add(entry);
               entryFile.set(entry, f);

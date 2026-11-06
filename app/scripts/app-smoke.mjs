@@ -90,8 +90,9 @@ async function newMaps(page, found) {
       if (active !== "map/war3map.w3e.txt") fail(`the terrain editor didn't open (active: ${active})`);
 
       // The first doodad and the first unit: the files start empty.
-      await tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+      await tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "CPct", x: 512, y: 512 }], ignoreRoom: true });
       await tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+      await tool("place_objects", { objects: [{ id: "ratf", x: -256, y: 0, player: 1 }], ignoreRoom: true });
       await tool("save_project");
 
       // Build, as the button does, right after the save: the map has to have what was just saved.
@@ -116,8 +117,16 @@ async function newMaps(page, found) {
       scripts.push(file);
       // The script knows the unit, and the map the doodad.
       if (!script.stdout.includes(args.script === "lua" ? 'FourCC("hfoo")' : "'hfoo'")) fail("the unit isn't in the script");
+      // What the World Editor's files have: see lib/terrain/owner and terrain-viewer/placement.
+      const onDisk = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+      if (onDisk("war3map.w3i.json").flags & 4) fail("a map with a player's unit is still a melee map");
+      if (!script.stdout.includes("MAP_PLACEMENT_USE_MAP_SETTINGS")) fail("the script isn't using the map's settings for placement");
+      const lifeOf = (id) => onDisk("war3map.doo.json").doodads.find((d) => d.id === id)?.life;
+      if (lifeOf("CPct") !== 255 || lifeOf("LTlt") !== 100) fail(`doodad life: CPct ${lifeOf("CPct")}, LTlt ${lifeOf("LTlt")}`);
+      const item = onDisk("war3mapUnits.doo.json").units.find((u) => u.id === "ratf");
+      if (item?.player !== 27) fail(`the item belongs to ${item?.player}`);
       const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
-      if (doo.doodads.length !== 1 || doo.doodads[0].id !== "LTlt") fail(`${doo.doodads.length} doodads`);
+      if (doo.doodads.length !== 2 || doo.doodads[0].id !== "LTlt") fail(`${doo.doodads.length} doodads`);
       // Pathing covers the map: four cells per tile.
       const wpm = cat("war3map.wpm").stdout;
       const dims = [wpm.readUInt32LE(8), wpm.readUInt32LE(12)];

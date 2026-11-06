@@ -4,6 +4,7 @@
 // the raw file by the backend (`codec_write`).
 
 import type { W3Api } from "../../extensions/api";
+import { NEUTRAL_PASSIVE } from "../../lib/terrain/owner";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import type { Placed } from "./objects";
 
@@ -74,8 +75,9 @@ function blankEntry(f: PlacedFile): Entry {
 
 /** A new entry of type `id` at a position, modelled on an existing entry (same id if there is
  *  one), or a blank one, so every field the file version needs is present; per-object data is
- *  reset. */
-export function newEntry(f: PlacedFile, id: string, position: [number, number, number], player?: number): Placed {
+ *  reset. `kind` is the type's object kind: as in the World Editor's files, a plain doodad has life
+ *  255 where a destructable has its 100 percent, and items belong to Neutral Passive. */
+export function newEntry(f: PlacedFile, id: string, position: [number, number, number], player?: number, kind?: string): Placed {
   const list = f.list as Entry[];
   const simple = (e: Entry) => e.randomType === undefined || e.randomType === 0;
   const template = list.find((e) => e.id === id && simple(e)) ?? list.find((e) => e.id !== "sloc" && simple(e)) ?? list.find(simple) ?? blankEntry(f);
@@ -89,7 +91,7 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
   if ("itemTable" in e) e.itemTable = -1;
   if ("itemSets" in e) e.itemSets = [];
   if (f.key === "doodads") {
-    if ("life" in e) e.life = 100;
+    if ("life" in e) e.life = kind === "w3d" ? 255 : 100;
     if ("flags" in e) e.flags = 2;
     // v13: the first trailer dword is a sequential placement id.
     if (Array.isArray(e.trailer) && Number(f.doc.version) >= 13) {
@@ -99,7 +101,8 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
     Object.assign(e, { hp: -1, mana: -1, color: -1, waygate: -1, inventory: [], abilities: [] });
     // Copied from a start location it would be 0, from a camp's creep the camp setting.
     if ("targetAcquisition" in e) e.targetAcquisition = id === "sloc" ? 0 : -1;
-    if (player !== undefined) e.player = player;
+    if (kind === "w3t") e.player = NEUTRAL_PASSIVE;
+    else if (player !== undefined) e.player = player;
     if (id !== template.id) {
       if ("level" in e) e.level = 1;
       for (const k of ["strength", "agility", "intelligence"]) if (k in e) e[k] = 0;

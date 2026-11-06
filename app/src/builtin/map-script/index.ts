@@ -12,6 +12,7 @@ import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
+import { hasPlayerUnits } from "../../lib/terrain/owner";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
@@ -19,6 +20,10 @@ import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } 
 /** Hash of the script this app wrote last: a script that still has it holds nothing but what the
  *  map's triggers made, so it's replaced without looking (see lib/script/guard). */
 const STAMP = ".w3proj/generated-script";
+
+/** war3map.w3i flag: melee map. */
+const MELEE = 4;
+const INFO_JSON = "map/war3map.w3i.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
 const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
@@ -139,6 +144,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (c) return (c.bldg ?? g.buildings.has(c.base)) ? "building" : "unit";
       return g.buildings.has(id) ? "building" : "unit";
     };
+
+    // As the World Editor does when saving. Only ever off: the game's maps don't say when it comes
+    // back. An open, changed Map Properties gets its turn when that's saved.
+    const placed = (await json<{ units?: { id: string; player?: number }[] }>("map/war3mapUnits.doo"))?.units ?? [];
+    const flags = Number(info.flags);
+    if ((flags & MELEE) && hasPlayerUnits(placed, (id) => kindOf(id) === "item") && !w3.editors.isDirty(INFO_JSON)) {
+      info.flags = flags - MELEE;
+      const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()?.root, path: INFO_JSON, text: JSON.stringify(info) });
+      await w3.workspace.writeText(INFO_JSON, canonical);
+      out.append("war3map.w3i: not a melee map any more, players own units on it");
+    }
 
     const lightEnv = ((info.lightEnvironment as string) || (info.tileset as string)).toLowerCase();
     const light = (sec: string, kind: string) =>
