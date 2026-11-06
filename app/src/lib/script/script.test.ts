@@ -1,0 +1,582 @@
+// Known answers for the map script generator. The expected lines are the World Editor's own forms;
+// the whole of it is compared with real output by scripts/script-check.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { parseTriggerData } from "../triggers/triggerdata";
+import type { Eca, TriggerFile, TriggerItem } from "../triggers/wtg";
+import { destructablesSection, type DestructableJson } from "./destructables";
+import { dropFunction, dropFunctionOf, dropSection, itemTableFunction, randomGroupsSection } from "./drops";
+import { banner, generateScript, generateSections, header, ident, literal, parseSoundLabels, placedName, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
+import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
+import { abilityOrders, gameTeamColors, teamColors } from "./objects";
+import { AMBIENCE, configSection, mainSection, playersSection, type SetupInput } from "./setup";
+import { techTreeSection, upgradesSection } from "./techs";
+import { triggersSection } from "./triggers";
+import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
+
+const EOL = "\r\n";
+const data = parseTriggerData(`
+[TriggerTypes]
+integer=0,1,1,Integer
+string=0,1,1,String
+unitcode=0,1,1,Unit-Type,integer
+[TriggerParams]
+OperatorEqualENE=0,ComparisonOperator,==,Equal
+[TriggerEvents]
+MapInitializationEvent=0,nothing
+[TriggerConditions]
+OperatorCompareInteger=0,integer,ComparisonOperator,integer
+[TriggerActions]
+DoNothing=0,nothing
+KillUnit=0,unit
+`);
+
+const has = (text: string, line: string) => assert.ok(text.split(EOL).includes(line), `no line "${line}" in:\n${text}`);
+const hasNot = (text: string, part: string) => assert.ok(!text.includes(part), `"${part}" in:\n${text}`);
+
+// ---- numbers and names ------------------------------------------------------------------
+
+test("reals round like C: exact ties go to the even digit", () => {
+  assert.equal(fixed(185.25, 1), "185.2");
+  assert.equal(fixed(185.75, 1), "185.8");
+  assert.equal(fixed(-3722.25, 1), "-3722.2");
+  assert.equal(fixed(0.125, 2), "0.12");
+  assert.equal(fixed(1.26, 1), "1.3");
+});
+
+test("reals are 32-bit: what a float holds is what's written", () => {
+  assert.equal(fixed(0.1, 3), "0.100");
+  assert.equal(fixed(1650.0000001, 1), "1650.0");
+});
+
+test("names become identifiers as the World Editor makes them", () => {
+  assert.equal(ident("Spawn Point"), "Spawn_Point");
+  assert.equal(ident("Boss Room (2)"), "Boss_Room__2_u");
+  assert.equal(ident("Wave_"), "Wave_u");
+  assert.equal(ident("trailing  "), "trailing");
+  assert.equal(ident("Größe"), "Gr__e");
+});
+
+test("strings are quoted with their special characters escaped", () => {
+  assert.equal(str('say "hi"'), '"say \\"hi\\""');
+  assert.equal(str("Sound\\x.wav"), '"Sound\\\\x.wav"');
+});
+
+test("typed values become JASS source", () => {
+  assert.equal(literal(data, "string", "a"), '"a"');
+  assert.equal(literal(data, "unitcode", "hfoo"), "'hfoo'");
+  assert.equal(literal(data, "integer", "5"), "5");
+});
+
+test("placed objects are named by id and creation number", () => {
+  assert.equal(placedName({ id: "hfoo", editorId: 12 }, "unit"), "gg_unit_hfoo_0012");
+  // Doodad files v13 keep the number in the trailer.
+  assert.equal(placedName({ id: "LTlt", editorId: 3, trailer: [118, 0, 0] } as PlacedJson, "dest"), "gg_dest_LTlt_0118");
+});
+
+// ---- whole scripts ----------------------------------------------------------------------
+
+const info = (extra: object = {}) => ({
+  name: "Test Map", author: "Someone", description: "D", version: 25, flags: 0, tileset: "L", cameraBounds: [-1024, -1024, 1024, 1024], soundEnvironment: "", lightEnvironment: "",
+  players: [{ id: 0, controller: 1, race: 1, fixedStart: 0, name: "P", start: [0, 0], allyLow: 0, allyHigh: 0 }], forces: [{ flags: 0, players: 1, name: "F" }], ...extra,
+});
+const input = (extra: Partial<ScriptInput> = {}): ScriptInput => ({ info: info(), data, lights: { terrain: "T.mdl", unit: "U.mdl" }, ...extra });
+const trigger = (name: string, ecas: Eca[], extra: Partial<TriggerItem> = {}): TriggerItem =>
+  ({ type: 8, name, description: "", isComment: 0, id: 0, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0, ecas, ...extra });
+const wtg = (items: TriggerItem[]): TriggerFile => ({ reforged: false, version: 7, counts: [], unknown: 2, variables: [], items });
+const eca = (kind: number, name: string, params: Eca["params"] = [], extra: Partial<Eca> = {}): Eca => ({ kind, name, enabled: true, params, children: [], ...extra });
+
+test("the header names the map and its author, if any", () => {
+  const h = header(input());
+  has(h, "// Test Map");
+  has(h, "//   Map Author: Someone");
+  hasNot(header(input({ info: info({ author: "" }) })), "Map Author");
+  has(header(input({ string: (v) => (v === "Test Map" ? "Resolved" : v) })), "// Resolved");
+});
+
+test("splitting a script gives back the sections it was made of", () => {
+  const sections = generateSections(input());
+  const script = [...sections.values()].join("");
+  const again = splitSections(script);
+  for (const [k, v] of sections) if (v) assert.equal(again.get(k), v, k || "(header)");
+});
+
+test("banners read as the World Editor writes them", () => {
+  assert.equal(banner("Cameras").split(EOL)[2], "//*  Cameras");
+});
+
+test("sections come in the World Editor's order", () => {
+  const script = generateScript(input({ triggers: wtg([trigger("T", [])]), regions: [{ name: "R", index: 0, left: 0, bottom: 0, right: 1, top: 1, weather: "", sound: "" }] }));
+  const at = (s: string) => script.indexOf(s);
+  assert.ok(at("Global Variables") < at("function CreateRegions"));
+  assert.ok(at("function CreateRegions") < at("function InitTrig_T"));
+  assert.ok(at("function InitTrig_T") < at("function InitCustomPlayerSlots"));
+  assert.ok(at("function InitCustomPlayerSlots") < at("function main"));
+  assert.ok(at("function main") < at("function config"));
+});
+
+test("main doesn't call what isn't there", () => {
+  const script = generateScript(input());
+  for (const f of ["InitSounds", "CreateRegions", "CreateCameras", "InitUpgrades", "InitTechTree", "CreateAllDestructables", "CreateAllItems", "InitRandomGroups", "CreateAllUnits", "RunInitializationTriggers"]) hasNot(script, f);
+});
+
+test("a map without war3map.wtg doesn't call InitCustomTriggers", () => {
+  hasNot(generateScript(input()), "InitCustomTriggers");
+  assert.ok(generateScript(input({ triggers: wtg([]) })).includes("call InitCustomTriggers(  )"));
+});
+
+test("upgrade settings that apply to nobody make no InitUpgrades call", () => {
+  // Player 3 isn't in the map, so there's no function; main used to call it anyway.
+  const upgrades = [{ players: 1 << 3, id: "Rhme", level: 0, availability: 2 }];
+  hasNot(generateScript(input({ info: info({ upgrades }) })), "InitUpgrades");
+  // The default availability sets nothing either.
+  hasNot(generateScript(input({ info: info({ upgrades: [{ players: 1, id: "Rhme", level: 0, availability: 1 }] }) })), "InitUpgrades");
+  assert.ok(generateScript(input({ info: info({ upgrades: [{ players: 1, id: "Rhme", level: 0, availability: 2 }] }) })).includes("call InitUpgrades(  )"));
+});
+
+test("tech settings that apply to nobody make no InitTechTree call", () => {
+  hasNot(generateScript(input({ info: info({ techs: [{ players: 1 << 3, id: "hfoo" }] }) })), "InitTechTree");
+  assert.ok(generateScript(input({ info: info({ techs: [{ players: 1, id: "hfoo" }] }) })).includes("call InitTechTree(  )"));
+});
+
+// ---- globals ----------------------------------------------------------------------------
+
+const variable = (name: string, type: string, extra: object = {}) => ({ name, type, unknown: 0, isArray: false, arraySize: 0, initialized: false, initialValue: "", id: 0, parent: 0, ...extra });
+
+test("variables are declared and start with their type's default", () => {
+  const triggers = { ...wtg([]), variables: [variable("Score", "integer"), variable("Kind", "unitcode", { initialized: true, initialValue: "hfoo" }), variable("Grid", "integer", { isArray: true, arraySize: 3 })] };
+  const g = generateSections(input({ triggers })).get("Global Variables")!;
+  has(g, `    ${"integer".padEnd(24)}${"udg_Score".padEnd(26)} = 0`);
+  has(g, `    ${"integer array".padEnd(24)}udg_Grid`);
+  has(g, "    set udg_Score = 0");
+  has(g, "    set udg_Kind = 'hfoo'");
+  has(g, "        exitwhen (i > 3)");
+  has(g, "        set udg_Grid[i] = 0");
+});
+
+test("objects with the same name share one global", () => {
+  const r = (index: number) => ({ name: "Same Name", index, left: 0, bottom: 0, right: 1, top: 1, weather: "", sound: "" });
+  const g = generateSections(input({ regions: [r(0), r(1)] })).get("Global Variables")!;
+  assert.equal(g.split("gg_rct_Same_Name").length - 1, 1);
+});
+
+// ---- units --------------------------------------------------------------------------------
+
+const unit = (extra: Partial<UnitJson> = {}): UnitJson => ({
+  id: "hfoo", variation: 0, position: [100, 200, 0], angle: 0, player: 0, hp: -1, mana: -1, gold: 12500, targetAcquisition: -1, level: 1, inventory: [], abilities: [], color: -1, waygate: -1, editorId: 1, ...extra,
+});
+const units = (list: UnitJson[], extra: object = {}) => unitsSection({ units: list, kindOf: (id) => (id === "hbar" ? "building" : "unit"), referenced: new Set(), ...extra });
+
+test("a unit is created where it was placed", () => {
+  has(units([unit({ angle: Math.PI / 2 })]), "    set u = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 90.000, 'hfoo' )");
+  has(units([unit({ skinId: "hkni" })]), "    set u = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hkni' )");
+});
+
+test("a unit a trigger refers to is created into its global", () => {
+  has(units([unit()], { referenced: new Set(["gg_unit_hfoo_0001"]) }), "    set gg_unit_hfoo_0001 = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hfoo' )");
+});
+
+test("gold mines keep their gold, blighted ones have their own constructor", () => {
+  has(units([unit({ id: "ngol", gold: 5000 })]), "    call SetResourceAmount( u, 5000 )");
+  has(units([unit({ id: "ugol" })]), "    set u = CreateBlightedGoldmine( p, 100.0, 200.0, 0.000 )");
+  hasNot(units([unit()]), "SetResourceAmount");
+});
+
+test("placed changes are written, defaults aren't", () => {
+  const plain = units([unit()]);
+  for (const f of ["SetUnitAcquireRange", "SetHeroLevel", "SetUnitState", "SelectHeroSkill", "UnitAddItemToSlotById", "SetUnitColor", "Waygate"]) hasNot(plain, f);
+  const u = units([unit({ targetAcquisition: 300, level: 3, hp: 50, mana: 20, inventory: [{ slot: 1, id: "ratc" }] })]);
+  has(u, "    call SetUnitAcquireRange( u, 300.0 )");
+  has(u, "    call SetHeroLevel( u, 3, false )");
+  has(u, "    call SetUnitState( u, UNIT_STATE_LIFE, 0.50 * life )");
+  has(u, "    call SetUnitState( u, UNIT_STATE_MANA, 20 )");
+  has(u, "    call UnitAddItemToSlotById( u, 'ratc', 1 )");
+  // -2 is "camp": a fixed range.
+  has(units([unit({ targetAcquisition: -2 })]), "    call SetUnitAcquireRange( u, 200.0 )");
+});
+
+test("autocast is set as placed; a toggle like Defend is only ever switched on", () => {
+  const orders = (a: string) => (a === "AHhb" ? { on: "healon", off: "healoff" } : a === "Adef" ? { on: "defend" } : undefined);
+  const placed = (id: string, autocast: number) => units([unit({ abilities: [{ id, autocast, level: 0 }] })], { autocastOrders: orders });
+  has(placed("AHhb", 1), '    call IssueImmediateOrder( u, "healon" )');
+  has(placed("AHhb", 0), '    call IssueImmediateOrder( u, "healoff" )');
+  has(placed("Adef", 1), '    call IssueImmediateOrder( u, "defend" )');
+  hasNot(placed("Adef", 0), "IssueImmediateOrder");
+});
+
+test("orders come from the game's ability tables", () => {
+  const t = new Map([["AHhb", new Map([["orderon", "healon"], ["orderoff", "healoff"]])], ["Adef", new Map([["order", "defend"], ["unorder", "undefend"]])], ["Ablo", new Map([["order", "bloodlust"]])]]);
+  const o = abilityOrders([t, new Map([["AHhb", new Map([["orderon", "other"], ["orderoff", "other"]])]])]);
+  assert.deepEqual(o.get("AHhb"), { on: "healon", off: "healoff" });
+  assert.deepEqual(o.get("Adef"), { on: "defend" });
+  assert.equal(o.has("Ablo"), false);
+});
+
+test("a type's team colour goes on placed units, a unit's own colour wins", () => {
+  const teamColor = (id: string) => (id === "ntav" ? 12 : undefined);
+  has(units([unit({ id: "ntav" })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
+  has(units([unit({ id: "ntav", color: 3 })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(3) )");
+  hasNot(units([unit()], { teamColor }), "SetUnitColor");
+  has(units([unit({ id: "ntav" })], { teamColor }), "    call SetUnitColor( u, ConvertPlayerColor(12) )");
+  // Colour 0 is a colour.
+  has(units([unit({ id: "ntav" })], { teamColor: () => 0 }), "    call SetUnitColor( u, ConvertPlayerColor(0) )");
+});
+
+test("team colours: the game's, changed by the map, inherited by custom units", () => {
+  const game = gameTeamColors([{ unitUIID: "ntav", teamColor: "0" }, { unitUIID: "nmr2", teamColor: "12" }, { unitUIID: "hfoo", teamColor: "-1" }, { unitUIID: "hkni", teamColor: "" }, { unitUIID: "hpea" } as never]);
+  assert.deepEqual([...game], [["ntav", 0], ["nmr2", 12]]);
+  const utco = (value: number) => [{ field: "utco", value }];
+  const c = teamColors([{ original: [{ base: "hshy", mods: utco(3) }, { base: "ntav", mods: utco(5) }], custom: [{ id: "h000", base: "hshy" }, { id: "h001", base: "hshy", mods: utco(7) }, { id: "h002", base: "hfoo" }] }, null], game);
+  assert.equal(c.get("hshy"), 3);
+  assert.equal(c.get("ntav"), 5);
+  assert.equal(c.get("nmr2"), 12);
+  assert.equal(c.get("h000"), 3);
+  assert.equal(c.get("h001"), 7);
+  assert.equal(c.has("h002"), false);
+  assert.equal(game.get("ntav"), 0, "the game's table stays as it was");
+});
+
+test("waygates go to their region, if it still exists", () => {
+  const regionName = (n: number) => (n === 2 ? "gg_rct_Exit" : undefined);
+  const u = units([unit({ waygate: 2 })], { regionName });
+  has(u, "    call WaygateSetDestination( u, GetRectCenterX(gg_rct_Exit), GetRectCenterY(gg_rct_Exit) )");
+  has(u, "    call WaygateActivate( u, true )");
+  hasNot(units([unit({ waygate: 9 })], { regionName }), "Waygate");
+});
+
+test("units go to one function per player and kind, neutrals last", () => {
+  const s = units([unit({ player: 1 }), unit({ id: "hbar", player: 1, editorId: 2 }), unit({ player: 24, editorId: 3 }), unit({ player: 27, editorId: 4 })]);
+  for (const f of ["CreateBuildingsForPlayer1", "CreateUnitsForPlayer1", "CreateNeutralHostile", "CreateNeutralPassive", "CreatePlayerBuildings", "CreatePlayerUnits", "CreateAllUnits"]) assert.ok(s.includes(`function ${f} takes`), f);
+  has(s, "    local player p = Player(PLAYER_NEUTRAL_AGGRESSIVE)");
+});
+
+test("neutral buildings come first: hostile, then passive, then the players'", () => {
+  const s = units([unit({ id: "hbar", player: 24 }), unit({ id: "hbar", player: 27, editorId: 2 }), unit({ id: "hbar", player: 0, editorId: 3 })]);
+  const all = s.slice(s.indexOf("function CreateAllUnits"));
+  assert.ok(all.indexOf("CreateNeutralHostileBuildings") < all.indexOf("CreateNeutralPassiveBuildings"));
+  assert.ok(all.indexOf("CreateNeutralPassiveBuildings") < all.indexOf("CreatePlayerBuildings"));
+});
+
+test("units are created in placement order", () => {
+  const s = units([unit({ editorId: 5, position: [5, 0, 0] }), unit({ editorId: 2, position: [2, 0, 0] })]);
+  assert.ok(s.indexOf("'hfoo', 2.0") < s.indexOf("'hfoo', 5.0"));
+});
+
+test("code that doesn't compile needs no assignment: a disabled trigger's unit stays a plain u", () => {
+  const uses = (extra: Partial<TriggerItem>, action: Partial<Eca> = {}) => {
+    const triggers = wtg([trigger("T", [eca(2, "KillUnit", [{ type: 1, value: "gg_unit_hfoo_0001" }], action)], extra)]);
+    return generateSections(input({ triggers, units: [unit()] as unknown as PlacedJson[], kindOf: () => "unit" }));
+  };
+  const on = uses({}), off = uses({ enabled: false }), offAction = uses({}, { enabled: false });
+  has(on.get("Unit Creation")!, "    set gg_unit_hfoo_0001 = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hfoo' )");
+  has(off.get("Unit Creation")!, "    set u = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hfoo' )");
+  has(offAction.get("Unit Creation")!, "    set u = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hfoo' )");
+  // Still declared, as the World Editor does.
+  assert.ok(off.get("Global Variables")!.includes("gg_unit_hfoo_0001"));
+});
+
+// ---- items and destructables ----------------------------------------------------------------
+
+const items = (list: UnitJson[], editorVersion = 0) => itemsSection({ units: list, kindOf: () => "item", referenced: new Set(), editorVersion });
+
+test("items are created by type, then by number", () => {
+  const s = items([unit({ id: "zzzz", editorId: 1 }), unit({ id: "ratc", editorId: 9 }), unit({ id: "ratc", editorId: 2, position: [7, 0, 0] })]);
+  assert.ok(s.indexOf("'ratc', 7.0") < s.indexOf("'ratc', 100.0"));
+  assert.ok(s.indexOf("'ratc', 100.0") < s.indexOf("'zzzz'"));
+  has(s, "    call BlzCreateItemWithSkin( 'zzzz', 100.0, 200.0, 'zzzz' )");
+});
+
+test("newer editors colour every item", () => {
+  hasNot(items([unit()]), "ItemColor");
+  has(items([unit()], 7000), "    call SetItemColor( i, ConvertPlayerColor(0) )");
+  has(items([unit()], 7003), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+});
+
+const dest = (extra: Partial<DestructableJson> = {}): DestructableJson => ({ id: "LTlt", variation: 2, position: [1, 2, 3], angle: 0, scale: [1, 1, 1], flags: 0, life: 100, editorId: 1, ...extra });
+const dests = (list: DestructableJson[], extra: object = {}) => destructablesSection({ doodads: list, globalName: () => "gg_dest_x", referenced: new Set(["gg_dest_x"]), ...extra });
+
+test("a destructable nobody needs isn't in the script", () => {
+  assert.equal(dests([dest()], { referenced: new Set() }), "");
+  assert.equal(dests([dest({ flags: 2 })]), "");
+});
+
+test("destructables by version, height and state", () => {
+  has(dests([dest()]), "    set gg_dest_x = BlzCreateDestructableWithSkin( 'LTlt', 1.0, 2.0, 0.000, 1.000, 2, 'LTlt' )");
+  has(dests([dest({ flags: 4 })]), "    set gg_dest_x = BlzCreateDestructableZWithSkin( 'LTlt', 1.0, 2.0, 3.0, 0.000, 1.000, 2, 'LTlt' )");
+  has(dests([dest({ life: 0 })]), "    set gg_dest_x = BlzCreateDeadDestructableWithSkin( 'LTlt', 1.0, 2.0, 0.000, 1.000, 2, 'LTlt' )");
+  has(dests([dest()], { editorVersion: 6117 }), "    set gg_dest_x = BlzCreateDestructableWithSkinPitchRoll( 'LTlt', 1.0, 2.0, 0.000, 0.000, 0.000, 1.000, 2, 'LTlt' )");
+  const v7 = dests([dest()], { editorVersion: 7000 });
+  assert.ok(v7.includes("WithSkinPitchRollColor(") && v7.includes("ConvertPlayerColor(24)"));
+  has(v7, "    call SetDestructableVertexColor( gg_dest_x, 255, 255, 255, 255 )");
+  has(dests([dest({ life: 50 })]), "    call SetDestructableLife( gg_dest_x, 0.50 * life )");
+});
+
+test("a destructable with item sets gets a death trigger", () => {
+  const s = dests([dest({ itemSets: [[{ id: "ratc", chance: 100 }]] })], { referenced: new Set() });
+  has(s, "    call TriggerRegisterDeathEvent( t, d )");
+  has(s, "    call TriggerAddAction( t, function Doodad000000_DropItems )");
+});
+
+// ---- drops --------------------------------------------------------------------------------
+
+test("item sets: each item by chance, the rest to 100 drops nothing", () => {
+  const f = dropFunction("X", [[{ id: "ratc", chance: 40 }, { id: "ckng", chance: 35 }]]);
+  has(f, "        call RandomDistAddItem( 'ratc', 40 )");
+  has(f, "        call RandomDistAddItem( -1, 25 )");
+  hasNot(dropFunction("X", [[{ id: "ratc", chance: 100 }]]), "RandomDistAddItem( -1");
+});
+
+test("random items and empty slots", () => {
+  const f = (id: string, version = 0) => dropFunction("X", [[{ id, chance: 100 }]], version);
+  has(f("YiI2"), "        call RandomDistAddItem( ChooseRandomItemEx( ITEM_TYPE_PERMANENT, 2 ), 100 )");
+  has(f("YYI/"), "        call RandomDistAddItem( ChooseRandomItemEx( ITEM_TYPE_ANY, -1 ), 100 )");
+  has(f("YYI3", 7000), "        call RandomDistAddItem( ChooseRandomItem( 3 ), 100 )");
+  has(f("0x00000000"), "        call RandomDistAddItem( -1, 100 )");
+});
+
+test("drop functions are named after the table or the file position", () => {
+  assert.equal(itemTableFunction(3), "ItemTable000003_DropItems");
+  assert.equal(dropFunctionOf("Unit", { itemTable: 3 }, 7), "ItemTable000003_DropItems");
+  assert.equal(dropFunctionOf("Unit", { itemTable: -1, itemSets: [[{}]] }, 7), "Unit000007_DropItems");
+  assert.equal(dropFunctionOf("Unit", { itemTable: -1, itemSets: [[]] }, 7), undefined);
+  assert.equal(dropSection("Unit", [{ itemTable: 1, itemSets: [[{ id: "a", chance: 1 }]] }, { itemSets: [] }]), "");
+});
+
+test("random groups pick a line, and an empty slot creates nothing", () => {
+  const s = randomGroupsSection([{ number: 2, name: "Creeps", positions: [0, 1], lines: [{ chance: 60, ids: ["hfoo", "0x00000000"] }, { chance: 40, ids: ["hpea", "hkni"] }] }]);
+  has(s, "    // Group 2 - Creeps");
+  has(s, "    call RandomDistAddItem( 1, 40 )");
+  has(s, "        set gg_rg_002[0] = 'hfoo'");
+  has(s, "        set gg_rg_002[1] = -1");
+  has(s, "    elseif (curset == 1) then");
+  assert.equal(randomGroupsSection([]), "");
+});
+
+// ---- upgrades and tech -------------------------------------------------------------------
+
+test("upgrades: researched levels start done, unavailable ones cap them", () => {
+  const s = upgradesSection([0, 1], [
+    { players: 1, id: "Rhme", level: 0, availability: 2 }, { players: 1, id: "Rhme", level: 1, availability: 2 }, { players: 1, id: "Rhme", level: 2, availability: 0 },
+    { players: 2, id: "Rhar", level: 1, availability: 1 },
+  ]);
+  has(s, "    call SetPlayerTechResearched( Player(0), 'Rhme', 2 )");
+  has(s, "    call SetPlayerTechMaxAllowed( Player(0), 'Rhme', 2 )");
+  hasNot(s, "Player(1)");
+  has(s, "    call InitUpgrades_Player0(  )");
+});
+
+test("tech: abilities are switched off, units limited to 0", () => {
+  const s = techTreeSection([0], [{ players: 1, id: "hfoo" }, { players: 1, id: "AHhb" }], (id) => id.startsWith("A"));
+  has(s, "    call SetPlayerTechMaxAllowed( Player(0), 'hfoo', 0 )");
+  has(s, "    call SetPlayerAbilityAvailable( Player(0), 'AHhb', false )");
+  assert.equal(techTreeSection([0], []), "");
+});
+
+// ---- map setup ----------------------------------------------------------------------------
+
+const setup = (extra: object = {}, has_: object = {}): SetupInput => ({
+  info: { ...info(), ...extra } as SetupInput["info"], lights: { terrain: "T.mdl", unit: "U.mdl" },
+  has: { sounds: false, regions: false, cameras: false, upgrades: false, techs: false, destructables: false, items: false, randomGroups: false, units: false, triggers: true, initTriggers: false, ...has_ },
+});
+const player = (id: number, extra: object = {}) => ({ id, controller: 1, race: 1, fixedStart: 0, name: "P", start: [id * 100, 0], allyLow: 0, allyHigh: 0, ...extra });
+
+test("player slots", () => {
+  const s = playersSection(setup({ players: [player(0), player(3, { race: 4, controller: 2, fixedStart: 1 })] }));
+  has(s, "    call SetPlayerStartLocation( Player(3), 1 )");
+  has(s, "    call ForcePlayerStartLocation( Player(3), 1 )");
+  has(s, "    call SetPlayerRacePreference( Player(3), RACE_PREF_NIGHTELF )");
+  has(s, "    call SetPlayerController( Player(3), MAP_CONTROL_COMPUTER )");
+  has(s, "    call SetPlayerRaceSelectable( Player(3), true )");
+  // With fixed settings only "selectable" races can be changed.
+  has(playersSection(setup({ flags: 0x20 })), "    call SetPlayerRaceSelectable( Player(0), false )");
+});
+
+test("rescuable players can be rescued by every user player", () => {
+  const s = playersSection(setup({ players: [player(0), player(1, { controller: 4 })] }));
+  has(s, "    call SetPlayerAlliance( Player(1), Player(0), ALLIANCE_RESCUABLE, true )");
+});
+
+test("forces: empty ones are left out, alliances go both ways", () => {
+  const s = playersSection(setup({ players: [player(0), player(1)], forces: [{ flags: 0, players: 0, name: "Empty" }, { flags: 0x3, players: 3, name: "Team" }] }));
+  hasNot(s, "Force: Empty");
+  has(s, "    // Force: Team");
+  has(s, "    call SetPlayerTeam( Player(0), 1 )");
+  has(s, "    call SetPlayerState( Player(0), PLAYER_STATE_ALLIED_VICTORY, 1 )");
+  has(s, "    call SetPlayerAllianceStateAllyBJ( Player(0), Player(1), true )");
+  has(s, "    call SetPlayerAllianceStateAllyBJ( Player(1), Player(0), true )");
+});
+
+test("start location priorities exist only when set, and config calls them then", () => {
+  const none = setup({ players: [player(0), player(1)] });
+  hasNot(playersSection(none), "InitAllyPriorities");
+  hasNot(configSection(none), "InitAllyPriorities");
+  const some = setup({ players: [player(0, { allyLow: 2 }), player(1, { allyHigh: 1 })] });
+  const s = playersSection(some);
+  has(s, "    call SetStartLocPrioCount( 0, 1 )");
+  has(s, "    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_LOW )");
+  has(s, "    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )");
+  has(configSection(some), "    call InitAllyPriorities(  )");
+});
+
+test("main: camera bounds, tileset sound and the calls in their order", () => {
+  const s = mainSection(setup({}, { units: true, regions: true, initTriggers: true }));
+  assert.ok(s.includes("call SetCameraBounds( -1536.0 + GetCameraMargin(CAMERA_MARGIN_LEFT), -1280.0 + GetCameraMargin(CAMERA_MARGIN_BOTTOM), 1536.0 - GetCameraMargin(CAMERA_MARGIN_RIGHT), 1280.0 - GetCameraMargin(CAMERA_MARGIN_TOP)"));
+  has(s, '    call SetAmbientDaySound( "LordaeronSummerDay" )');
+  has(s, '    call NewSoundEnvironment( "Default" )');
+  assert.ok(s.indexOf("CreateRegions") < s.indexOf("CreateAllUnits"));
+  assert.ok(s.indexOf("CreateAllUnits") < s.indexOf("InitBlizzard"));
+  assert.ok(s.indexOf("InitCustomTriggers") < s.indexOf("RunInitializationTriggers"));
+  assert.equal(AMBIENCE.A, "Ashenvale");
+  hasNot(mainSection(setup({ tileset: "?" })), "SetAmbientDaySound");
+});
+
+test("weather, fog and water tint are written only when the map switches them on", () => {
+  const fog = { style: 0, start: 100, end: 2000, density: 0.5, color: [255, 128, 0, 255] };
+  hasNot(mainSection(setup({ fog })), "SetTerrainFog");
+  has(mainSection(setup({ fog, flags: 0x2000 })), "    call SetTerrainFogEx( 0, 100.0, 2000.0, 0.500, 0.000, 0.502, 1.000 )");
+  hasNot(mainSection(setup({ waterTint: [1, 2, 3, 4] })), "SetWaterBaseColor");
+  has(mainSection(setup({ waterTint: [1, 2, 3, 4], flags: 0x10000 })), "    call SetWaterBaseColor( 3, 2, 1, 4 )");
+  hasNot(mainSection(setup({ weather: "0x00000000" })), "AddWeatherEffect");
+  const w = mainSection(setup({ weather: "RAhr", cameraComplements: [6, 6, 4, 8] }));
+  has(w, "    set we = AddWeatherEffect( Rect(-2304.0,-1792.0,2304.0,2304.0), 'RAhr' )");
+  has(w, "    local weathereffect we");
+});
+
+test("config: players, teams and how the lobby sets them up", () => {
+  const s = configSection(setup({ players: [player(0), player(1, { controller: 2 })] }));
+  has(s, "    call SetPlayers( 2 )");
+  has(s, "    call DefineStartLocation( 1, 100.0, 0.0 )");
+  has(s, "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  has(s, "    call SetPlayerSlotAvailable( Player(1), MAP_CONTROL_COMPUTER )");
+  has(s, "    call InitGenericPlayerSlots(  )");
+  const forces = configSection(setup({ flags: 0x40 }));
+  has(forces, "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  has(forces, "    call InitCustomTeams(  )");
+  hasNot(forces, "InitGenericPlayerSlots");
+});
+
+// ---- sounds -------------------------------------------------------------------------------
+
+const sound = (extra: object = {}) => ({
+  name: "gg_snd_S", file: "Sound\\x.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 12, volume: 100, pitch: 1, pitchVariance: 1, priority: 0, channel: 2,
+  minDistance: 100, maxDistance: 1000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 127, coneOrientation: [0, 0, 1], ...extra,
+});
+const soundSection = (extra: object, more: Partial<ScriptInput> = {}) => generateSections(input({ sounds: [sound(extra)] as never, ...more })).get("Sound Assets")!;
+
+test("sounds: created, then only what's set", () => {
+  const s = soundSection({ flags: 1 | 2 });
+  has(s, '    set gg_snd_S = CreateSound( "Sound\\\\x.wav", true, true, false, 10, 12, "DefaultEAXON" )');
+  has(s, "    call SetSoundChannel( gg_snd_S, 2 )");
+  has(s, "    call SetSoundPitch( gg_snd_S, 1.0 )");
+  has(s, "    call SetSoundDistances( gg_snd_S, 100.0, 1000.0 )");
+  // Distances are for 3D sounds; unset values are 2^32.
+  hasNot(soundSection({}), "SetSoundDistances");
+  hasNot(soundSection({ pitch: 4294967300 }), "SetSoundPitch");
+});
+
+test("music is only its file path", () => {
+  has(soundSection({ flags: 8 }), '    set gg_snd_S = "Sound\\\\x.wav"');
+  assert.ok(generateSections(input({ sounds: [sound({ flags: 8 })] as never })).get("Global Variables")!.includes(`${"string".padEnd(24)}gg_snd_S`));
+});
+
+test("a labelled sound writes only what the label doesn't set", () => {
+  const label = () => ({ channel: 2, pitch: 1, minDistance: 100, maxDistance: 1000, distanceCutoff: 3000 });
+  const s = soundSection({ assetLabel: "Rain", flags: 2 }, { soundLabel: label });
+  has(s, '    call SetSoundParamsFromLabel( gg_snd_S, "Rain" )');
+  has(s, "    call SetSoundVolume( gg_snd_S, 100 )");
+  for (const f of ["SetSoundChannel", "SetSoundPitch", "SetSoundDistances", "SetSoundDistanceCutoff"]) hasNot(s, f);
+});
+
+test("a sound's length comes from outside, if known", () => {
+  has(soundSection({}, { soundDuration: () => 1234 }), "    call SetSoundDuration( gg_snd_S, 1234 )");
+  hasNot(soundSection({}), "SetSoundDuration");
+});
+
+test("sound labels come from the tables, first row wins", () => {
+  const slk = (pitch: number) => `ID;PWXL;N;E\nC;Y1;X1;K"SoundName"\nC;X2;K"Channel"\nC;X3;K"Pitch"\nC;X4;K"MinDistance"\nC;X5;K"MaxDistance"\nC;X6;K"DistanceCutoff"\nC;Y2;X1;K"Rain"\nC;X2;K1\nC;X3;K${pitch}\nC;X4;K0\nC;X5;K100\nC;X6;K50\nE\n`;
+  const l = parseSoundLabels([slk(1), slk(2)]);
+  assert.deepEqual(l.get("Rain"), { channel: 1, pitch: 1, minDistance: 0, maxDistance: 100, distanceCutoff: 50 });
+});
+
+// ---- regions and cameras ------------------------------------------------------------------
+
+test("a region with an ambient sound places it on the ground at its centre", () => {
+  const s = generateSections(input({ regions: [{ name: "Lake", index: 0, left: 0, bottom: 0, right: 100, top: 50, weather: "RAhr", sound: "gg_snd_W" }], groundHeight: (x, y) => x + y })).get("Regions")!;
+  has(s, "    set gg_rct_Lake = Rect( 0.0, 0.0, 100.0, 50.0 )");
+  has(s, "    set we = AddWeatherEffect( gg_rct_Lake, 'RAhr' )");
+  has(s, "    call SetSoundPosition( gg_snd_W, 50.0, 25.0, 75.0 )");
+  has(s, "    call RegisterStackedSound( gg_snd_W, true, 100.0, 50.0 )");
+});
+
+test("camera fields round like the rest", () => {
+  const s = generateSections(input({ cameras: [{ name: "Intro", targetX: 7468.25, targetY: 0, zOffset: 0, rotation: 185.25, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, farZ: 5000, nearZ: 16 }] })).get("Cameras")!;
+  has(s, "    call CameraSetupSetField( gg_cam_Intro, CAMERA_FIELD_ROTATION, 185.2, 0.0 )");
+  has(s, "    call CameraSetupSetDestPosition( gg_cam_Intro, 7468.2, 0.0, 0.0 )");
+});
+
+// ---- triggers -----------------------------------------------------------------------------
+
+const compile = (items: TriggerItem[], custom: { texts: (string | null)[] } | null = null) =>
+  triggersSection({ data, triggers: wtg(items), custom: custom as never });
+const equals = eca(1, "OperatorCompareInteger", [{ type: 3, value: "1" }, { type: 0, value: "OperatorEqualENE" }, { type: 3, value: "2" }]);
+
+test("a trigger becomes conditions, actions and its init function", () => {
+  const s = compile([trigger("Spawn Wave", [eca(0, "MapInitializationEvent"), equals, eca(2, "DoNothing")])]);
+  has(s, "function Trig_Spawn_Wave_Conditions takes nothing returns boolean");
+  has(s, "    if ( not ( 1 == 2 ) ) then");
+  has(s, "function Trig_Spawn_Wave_Actions takes nothing returns nothing");
+  has(s, "    call DoNothing(  )");
+  has(s, "function InitTrig_Spawn_Wave takes nothing returns nothing");
+  has(s, "    set gg_trg_Spawn_Wave = CreateTrigger(  )");
+  has(s, "    call InitTrig_Spawn_Wave(  )");
+  has(s, "    call ConditionalTriggerExecute( gg_trg_Spawn_Wave )");
+});
+
+test("disabled triggers and comments aren't compiled", () => {
+  const s = compile([trigger("Off", [], { enabled: false }), trigger("Note", [], { isComment: 1 })]);
+  hasNot(s, "Trig_Off");
+  hasNot(s, "InitTrig_Off");
+  hasNot(s, "InitTrig_Note");
+});
+
+test("custom text stays as written; without an InitTrig it's a library", () => {
+  const items = [trigger("Lib", [], { isCustom: true }), trigger("Own", [], { isCustom: true })];
+  const s = compile(items, { texts: ["function Helper takes nothing returns nothing\nendfunction", "function InitTrig_Own takes nothing returns nothing\nendfunction"] });
+  has(s, "function Helper takes nothing returns nothing");
+  hasNot(s, "InitTrig_Lib");
+  has(s, "    call InitTrig_Own(  )");
+});
+
+// ---- Lua ----------------------------------------------------------------------------------
+
+test("JASS expressions in Lua", () => {
+  assert.equal(expr("a != null"), "a ~= nil");
+  assert.equal(expr("CreateUnit( p, 'hfoo', 1, 2 )"), 'CreateUnit(p, FourCC("hfoo"), 1, 2)');
+  assert.equal(expr("TimerStart( t, 1.0, false, function F )"), "TimerStart(t, 1.0, false, F)");
+  assert.equal(expr(`a ${CONCAT} b ${INT_DIV} c`), "a .. b // c");
+});
+
+test("what's inside a string stays as it is", () => {
+  assert.equal(expr(`Print( "null != 'hfoo'" )`), `Print("null != 'hfoo'")`);
+  assert.equal(expr(`Print( "say \\"null\\"", null )`), `Print("say \\"null\\"", nil)`);
+});
+
+test("a JASS script becomes Lua line by line", () => {
+  const lua = jassToLua([
+    "globals", "    integer array udg_A", "    unit udg_U = null", "    integer udg_N = 0", "endglobals",
+    "function F takes integer a, unit b returns nothing", "    local integer i", "    local real r = 1.5", "    call G( a )", "    set i = 1", "    loop", "        exitwhen i > 3", "    endloop", "    if ( a ) then", "    endif", "endfunction",
+  ].join(EOL));
+  assert.deepEqual(lua.split(EOL), ["udg_A = __jarray(0)", "udg_U = nil", "udg_N = 0", "function F(a, b)", "local i", "local r = 1.5", "", "G(a)", "i = 1", "while (true) do", "if (i > 3) then break end", "end", "if (a) then", "end", "end", "", ""]);
+});
+
+test("Lua that's marked as the map's own is copied untouched", () => {
+  assert.equal(jassToLua(`${RAW}local x <const> = 'a' -- != null`), `local x <const> = 'a' -- != null${EOL}`);
+});
+
+test("a Lua map gets war3map.lua, with its own code left alone", () => {
+  const lua = generateScript(input({ info: info({ scriptType: 1 }), custom: { reforged: false, version: 1, comment: "", header: "local mine = 'x'", texts: [] }, triggers: wtg([]) }));
+  assert.ok(lua.includes("local mine = 'x'"));
+  assert.ok(lua.includes("function main()"));
+  hasNot(lua, "takes nothing");
+});

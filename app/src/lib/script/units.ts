@@ -31,8 +31,10 @@ export interface UnitsInput {
   regionName?: (index: number) => string | undefined;
   /** Whether a (custom) unit type is a gold mine; default: ngol, ugol, egol. */
   goldMine?: (id: string) => boolean;
+  /** Team colour a unit type has in the map's object data (lib/script/objects). */
+  teamColor?: (id: string) => number | undefined;
   /** The orders that turn an ability's autocast on and off, if it has one. */
-  autocastOrders?: (ability: string) => { on: string; off: string } | undefined;
+  autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
 }
 
 /** Fixed decimals of a 32-bit float, ties to even like C's printf (-3722.25 → -3722.2). */
@@ -70,15 +72,16 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   for (const a of u.abilities) {
     for (let l = 0; l < a.level; l++) lines.push(`    call SelectHeroSkill( ${v}, '${a.id}' )`);
     // Autocast abilities are switched on or off as placed.
-    const orders = i.autocastOrders?.(a.id);
-    if (orders) lines.push(`    call IssueImmediateOrder( ${v}, "${a.autocast ? orders.on : orders.off}" )`);
+    const orders = i.autocastOrders?.(a.id), order = a.autocast ? orders?.on : orders?.off;
+    if (order) lines.push(`    call IssueImmediateOrder( ${v}, "${order}" )`);
   }
   for (const it of u.inventory) lines.push(`    call UnitAddItemToSlotById( ${v}, '${it.id}', ${it.slot} )`);
   if (u.waygate >= 0) {
     const r = i.regionName?.(u.waygate);
     if (r) lines.push(`    call WaygateSetDestination( ${v}, GetRectCenterX(${r}), GetRectCenterY(${r}) )`, `    call WaygateActivate( ${v}, true )`);
   }
-  if (u.color !== -1) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${u.color}) )`);
+  const color = u.color !== -1 ? u.color : i.teamColor?.(u.id);
+  if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
   // Items drop from a map item table or the unit's own sets.
   const drops = dropFunctionOf("Unit", u, i.units.indexOf(u));
   if (drops) {
@@ -145,8 +148,8 @@ export function unitsSection(i: UnitsInput): string {
   neutral(NEUTRAL_PASSIVE, "NeutralPassive", "PLAYER_NEUTRAL_PASSIVE");
   const wrapper = (name: string, calls: string[]) => [SEP, `function ${name} takes nothing returns nothing`, ...calls.map((c) => `    call ${c}(  )`), "endfunction", ""].join(EOL);
   parts.push(wrapper("CreatePlayerBuildings", playerBuildings), wrapper("CreatePlayerUnits", playerUnits));
-  // Order of creation: neutral passive buildings, player buildings, neutral hostile, neutral passive, player units.
-  const order = ["CreateNeutralPassiveBuildings", "CreatePlayerBuildings", "CreateNeutralHostileBuildings", "CreateNeutralHostile", "CreateNeutralPassive", "CreatePlayerUnits"]
+  // Order of creation: neutral buildings, player buildings, neutral hostile, neutral passive, player units.
+  const order = ["CreateNeutralHostileBuildings", "CreateNeutralPassiveBuildings", "CreatePlayerBuildings", "CreateNeutralHostile", "CreateNeutralPassive", "CreatePlayerUnits"]
     .filter((n) => n === "CreatePlayerBuildings" || n === "CreatePlayerUnits" || all.includes(n));
   parts.push(wrapper("CreateAllUnits", order));
   return parts.join(EOL);

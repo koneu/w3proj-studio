@@ -25,7 +25,7 @@ export interface SetupInput {
   lights: { terrain: string; unit: string };
   /** Which object sections the script has (main calls their functions). */
   has: { sounds: boolean; regions: boolean; cameras: boolean; upgrades: boolean; techs: boolean;
-    destructables: boolean; items: boolean; randomGroups: boolean; units: boolean; initTriggers: boolean };
+    destructables: boolean; items: boolean; randomGroups: boolean; units: boolean; triggers: boolean; initTriggers: boolean };
 }
 
 /** Ambient sound sets (UI\SoundInfo\AmbientMusic.slk, "<name>Day"/"<name>Night") by tileset. */
@@ -35,7 +35,7 @@ export const AMBIENCE: Record<string, string> = {
   W: "LordaeronWinter", X: "Dalaran", Y: "CityScape", Z: "SunkenRuins",
 };
 
-const r1 = (v: number) => Math.fround(v).toFixed(1);
+const r1 = (v: number) => fixed(v, 1);
 const str = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const RACES = ["", "HUMAN", "ORC", "UNDEAD", "NIGHTELF"];
 const CONTROLLERS = ["", "USER", "COMPUTER", "NEUTRAL", "RESCUABLE"];
@@ -169,7 +169,9 @@ export function mainSection(i: SetupInput): string {
   if (h.items) lines.push(call("CreateAllItems"));
   if (h.randomGroups) lines.push(call("InitRandomGroups"));
   if (h.units) lines.push(call("CreateAllUnits"));
-  lines.push(call("InitBlizzard"), call("InitGlobals"), call("InitCustomTriggers"));
+  lines.push(call("InitBlizzard"), call("InitGlobals"));
+  // A map without war3map.wtg has no trigger section to call.
+  if (h.triggers) lines.push(call("InitCustomTriggers"));
   if (h.initTriggers) lines.push(call("RunInitializationTriggers"));
   lines.push("", "endfunction", "");
   return lines.join(EOL);

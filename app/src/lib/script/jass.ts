@@ -11,7 +11,7 @@ import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { scriptItems, triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
-import { itemsSection, unitsSection, type UnitJson } from "./units";
+import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
 import { dropSection, itemTablesSection, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
 import { destructablesSection, type DestructableJson } from "./destructables";
 import { techTreeSection, upgradesSection, type TechJson, type UpgradeJson } from "./techs";
@@ -56,8 +56,10 @@ export interface ScriptInput {
   string?: (value: string) => string;
   /** What an object id is (custom ids by their base and the map's changes). */
   kindOf?: (id: string) => "building" | "unit" | "item" | "sloc" | "ability" | undefined;
+  /** Team colour a unit type has in the map's object data (lib/script/objects). */
+  teamColor?: (id: string) => number | undefined;
   /** The orders that turn an ability's autocast on and off. */
-  autocastOrders?: (ability: string) => { on: string; off: string } | undefined;
+  autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
   lights?: { terrain: string; unit: string };
   /** Ground height at a point (for region ambient sounds). */
@@ -86,7 +88,7 @@ export const ident = (name: string) => {
   return s.endsWith("_") ? `${s}u` : s;
 };
 /** Reals with one decimal, as in Rect( 3936.0, … ). */
-const r1 = (v: number) => Math.fround(v).toFixed(1); // map values are 32-bit floats
+const r1 = (v: number) => fixed(v, 1); // map values are 32-bit floats
 /** A JASS string literal. */
 export const str = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 /** Unset sound values are 2^32 (4294967300 after a round trip through JSON). */
@@ -169,14 +171,15 @@ export const placedName = (p: PlacedJson, kind: string) => {
   return `gg_${kind}_${p.id}_${String(n).padStart(4, "0")}`;
 };
 
-/** Generated globals the triggers refer to (gg_unit_…, gg_item_…, gg_dest_…). */
-function referencedGlobals(i: ScriptInput): Set<string> {
+/** Generated globals the triggers refer to (gg_unit_…, gg_item_…, gg_dest_…). Disabled code
+ *  declares them too, but with `compiled` only what runs counts: that decides what gets assigned. */
+function referencedGlobals(i: ScriptInput, compiled = false): Set<string> {
   const out = new Set<string>();
   type P = { type: number; value: string; call?: { params: P[] }; index?: P };
-  type E = { params: P[]; children: E[] };
+  type E = { enabled: boolean; params: P[]; children: E[] };
   const visitP = (p: P) => { if (p.type === 1 && p.value.startsWith("gg_")) out.add(p.value); p.call?.params.forEach(visitP); if (p.index) visitP(p.index); };
-  const visit = (e: E) => { e.params.forEach(visitP); e.children.forEach(visit); };
-  for (const t of triggerItems(i)) t.ecas.forEach(visit);
+  const visit = (e: E) => { if (compiled && !e.enabled) return; e.params.forEach(visitP); e.children.forEach(visit); };
+  for (const t of triggerItems(i)) if (!compiled || (t.enabled && !t.isComment)) t.ecas.forEach(visit);
   return out;
 }
 
@@ -350,6 +353,7 @@ export function cameras(i: ScriptInput): string {
 /** The sections generated so far, keyed by banner title ("" = the header before the first). */
 export function generateSections(i: ScriptInput): Map<string, string> {
   const destructables = destructableObjects(i), items = placedItems(i), groups = randomGroups(i), units = unitCreation(i);
+  const techs = techSections(i);
   const sections = new Map([
     ["", header(i)],
     ["Global Variables", banner("Global Variables") + globals(i) + initGlobals(i)],
@@ -364,9 +368,9 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Cameras", cameras(i)],
     ["Items", items],
     ["Unit Creation", units],
-    ...techSections(i),
+    ...techs,
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom, lua: i.lua }) : ""],
-    ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups, units: !!units }),
+    ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups, units: !!units, upgrades: !!techs[0][1], techs: !!techs[1][1] }),
   ]);
   // Sections of functions end with a blank line, the drop tables with two.
   for (const [k, v] of sections) {
@@ -401,13 +405,13 @@ function destructableDrops(i: ScriptInput): string {
 
 function destructableObjects(i: ScriptInput): string {
   const body = destructablesSection({ doodads: (i.doodads ?? []) as unknown as DestructableJson[], globalName: (d) => placedName(d as unknown as PlacedJson, "dest"),
-    referenced: referencedGlobals(i), editorVersion: i.info.editorVersion as number | undefined });
+    referenced: referencedGlobals(i, true), editorVersion: i.info.editorVersion as number | undefined });
   return body ? banner("Destructable Objects") + body : "";
 }
 
 function placedItems(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
-  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i) });
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
   return body ? banner("Items") + body : "";
 }
 
@@ -415,7 +419,7 @@ function unitCreation(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
   const regions = i.regions ?? [];
   const body = unitsSection({
-    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i), autocastOrders: i.autocastOrders,
+    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, teamColor: i.teamColor,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });
   return body ? banner("Unit Creation") + body : "";
@@ -430,15 +434,15 @@ function techSections(i: ScriptInput): [string, string][] {
 
 /** `made`: which sections were written (main calls only functions that exist; start locations
  *  alone make no Unit Creation section). */
-function setupSections(i: ScriptInput, made: { destructables: boolean; items: boolean; randomGroups: boolean; units: boolean }): [string, string][] {
+function setupSections(i: ScriptInput, made: { destructables: boolean; items: boolean; randomGroups: boolean; units: boolean; upgrades: boolean; techs: boolean }): [string, string][] {
   const info = i.info as unknown as SetupInput["info"];
   const items = i.triggers?.items ?? [];
   const setup: SetupInput = {
     info, lights: i.lights ?? { terrain: "", unit: "" },
     has: {
       sounds: !!i.sounds?.length, regions: !!i.regions?.length, cameras: !!i.cameras?.length,
-      upgrades: !!(info.upgrades as unknown[] | undefined)?.length, techs: !!(info.techs as unknown[] | undefined)?.length,
       ...made,
+      triggers: !!i.triggers,
       initTriggers: items.some((t) => "ecas" in t && t.enabled && !t.isComment && (t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === 0 && e.name === "MapInitializationEvent"))),
     },
   };

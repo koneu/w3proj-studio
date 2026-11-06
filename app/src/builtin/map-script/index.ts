@@ -10,6 +10,7 @@ import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env
 import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
+import { abilityOrders, gameTeamColors, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -42,7 +43,8 @@ interface GameTables {
   buildings: Set<string>;
   items: Set<string>;
   abilities: Set<string>;
-  orders: Map<string, { on: string; off: string }>;
+  orders: Map<string, AbilityOrders>;
+  unitColors: Map<string, number>;
   worldEdit: Map<string, Map<string, string>>;
 }
 
@@ -64,19 +66,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     tables ??= (async () => {
       const text = (p: string) => w3.game.readText(p).catch(() => "");
       const balance = parseSlk(await text("Units\\UnitBalance.slk"));
-      const orders = new Map<string, { on: string; off: string }>();
-      for (const f of ABILITY_FUNC) {
-        for (const [id, sec] of parseIni(await text(f))) {
-          const on = sec.get("orderon"), off = sec.get("orderoff");
-          if (on && off && !orders.has(id)) orders.set(id, { on, off });
-        }
-      }
+      const orders = abilityOrders(await Promise.all(ABILITY_FUNC.map(async (f) => parseIni(await text(f)))));
       return {
         data: parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")),
         buildings: new Set(balance.filter((r) => r.isbldg === "1").map((r) => r.unitBalanceID)),
         items: new Set(parseSlk(await text("Units\\ItemData.slk")).map((r) => r.itemID)),
         abilities: new Set(parseSlk(await text("Units\\AbilityData.slk")).map((r) => r.alias)),
         orders,
+        unitColors: gameTeamColors(parseSlk(await text("Units\\unitUI.slk"))),
         worldEdit: parseIni(await text("UI\\WorldEditData.txt")),
         soundLabels: parseSoundLabels(await Promise.all(SOUND_INFO.map((n) => text(`UI\\SoundInfo\\${n}.slk`)))),
       };
@@ -124,8 +121,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
     type Objects = { custom?: { id: string; base: string; mods?: { field: string; value: unknown }[] }[] };
     const customUnits = new Map<string, { base: string; bldg?: boolean }>();
-    for (const f of ["map/war3map.w3u", "map/war3mapSkin.w3u"]) {
-      for (const o of (await json<Objects>(f))?.custom ?? []) {
+    const unitFiles = await Promise.all(["map/war3map.w3u", "map/war3mapSkin.w3u"].map((f) => json<Objects & ObjectFile>(f)));
+    const colors = teamColors(unitFiles, g.unitColors);
+    for (const file of unitFiles) {
+      for (const o of file?.custom ?? []) {
         const b = o.mods?.find((m) => m.field === "ubdg");
         customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
       }
@@ -149,7 +148,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const durations = await soundDurations(sounds.map((s) => s.file), path);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), teamColor: (id) => colors.get(id),
       lights: { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") },
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
       units: (await json<{ units: ScriptInput["units"] }>("map/war3mapUnits.doo"))?.units,
