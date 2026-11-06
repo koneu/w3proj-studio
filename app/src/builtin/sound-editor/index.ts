@@ -99,6 +99,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
+          undo: () => { history.undo(); },
+          redo: () => { history.redo(); },
           async save() {
             if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.sounds/1", ...sounds }) });
             else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(sounds) }));

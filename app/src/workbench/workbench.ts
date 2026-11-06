@@ -363,6 +363,9 @@ export class Workbench {
       if (pick.value) await this.editors.open(path, pick.value);
       this.notifications.show("info", pick.value ? `${glob} now opens with ${pick.label}.` : `Removed the default editor for ${glob}.`);
     }, { category: "File" });
+    // No keys: each editor binds Ctrl+Z itself, and bound here too they'd step twice.
+    c("workbench.undo", "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit" });
+    c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit" });
     c("workbench.openSettings", "Open Settings (JSON)", async () => {
       const p = this.settings.settingsPath();
       if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("worldEditor.path", this.settings.get("worldEditor.path"));

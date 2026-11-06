@@ -91,7 +91,11 @@ code { font-family: var(--mono); font-size: 12px; }
 
 /* Editors */
 .editor-area { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.tabs { display: flex; background: var(--bg-2); overflow-x: auto; flex-shrink: 0; min-height: 35px; }
+.tabs-row { display: flex; background: var(--bg-2); flex-shrink: 0; min-width: 0; }
+.tabs { display: flex; background: var(--bg-2); overflow-x: auto; flex: 1; min-width: 0; min-height: 35px; }
+.tabs-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; flex-shrink: 0; }
+.tabs-action { width: 26px; height: 26px; padding: 0; background: none; border: none; border-radius: 3px; color: var(--fg); font-size: 16px; cursor: pointer; }
+.tabs-action:hover { background: var(--bg-hover); }
 .tabs::-webkit-scrollbar { height: 3px; }
 .tab { display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; height: 35px; border-right: 1px solid var(--border); color: var(--fg-muted); cursor: pointer; white-space: nowrap; border-top: 1px solid transparent; }
 .tab.active { background: var(--bg); color: var(--fg); border-top-color: var(--accent); }

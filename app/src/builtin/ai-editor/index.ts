@@ -77,6 +77,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const view = new AiView(w3, el, ai, data, objects, gui, !doc.readOnly, (d) => doc.setDirty(d), doc.absolutePath ?? doc.path);
         current = view;
         return {
+          undo: () => view.undo(),
+          redo: () => view.redo(),
           save: async () => { await doc.writeBytes(writeWai(view.ai)); view.saved(); },
           focus: () => el.focus(),
           dispose: () => { if (current === view) current = null; },
@@ -180,14 +182,14 @@ class AiView {
     this.setDirty(this.undoStack.length !== this.savedAt);
     this.render();
   }
-  private undo() {
+  undo() {
     const prev = this.undoStack.pop();
     if (!prev) return;
     this.redoStack.push(this.ai);
     this.ai = prev;
     this.afterChange();
   }
-  private redo() {
+  redo() {
     const next = this.redoStack.pop();
     if (!next) return;
     this.undoStack.push(this.ai);

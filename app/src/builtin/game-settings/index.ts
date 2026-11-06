@@ -141,6 +141,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null), loadColumns(w3).catch(() => ({ defense: [], attack: [] }))]);
         const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), objects, cols);
         return {
+          undo: () => view.undo(),
+          redo: () => view.redo(),
           save: async () => {
             await doc.writeText(view.text);
             await view.saveStrings();
@@ -212,6 +214,8 @@ class SettingsView {
     this.setDirty(this.undoStack.length !== this.savedAt);
     this.render();
   }
+  undo() { this.step(this.undoStack, this.redoStack); }
+  redo() { this.step(this.redoStack, this.undoStack); }
   private step(from: State[], to: State[]) {
     const s = from.pop();
     if (!s) return;

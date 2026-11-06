@@ -907,6 +907,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         );
 
         return {
+          undo: () => step(-1),
+          redo: () => step(1),
           async save() {
             // The backend encodes the JSON to binary (validating it) and returns
             // it in canonical formatting, so diffs stay minimal.

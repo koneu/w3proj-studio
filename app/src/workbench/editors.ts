@@ -38,6 +38,9 @@ export interface DocumentIO {
 export class EditorService {
   readonly root = h("div.editor-area");
   private tabsEl = h("div.tabs");
+  private undoButton = h("button.tabs-action", { title: "Undo", "aria-label": "Undo", onclick: () => this.undo() }, "↶");
+  private redoButton = h("button.tabs-action", { title: "Redo", "aria-label": "Redo", onclick: () => this.redo() }, "↷");
+  private tabActions = h("div.tabs-actions", {}, this.undoButton, this.redoButton);
   private content = h("div.editor-content");
   private empty = h("div.editor-empty", {}, h("div.watermark", {}, "W3Proj Studio"), h("div.hint", {}, "Ctrl+Shift+P — Command Palette"));
   private contributions: (EditorContribution & { extensionId: string })[] = [];
@@ -69,7 +72,8 @@ export class EditorService {
 
   constructor(private io: DocumentIO) {
     this.content.append(this.empty);
-    this.root.append(this.tabsEl, this.content);
+    this.tabActions.hidden = true;
+    this.root.append(h("div.tabs-row", {}, this.tabsEl, this.tabActions), this.content);
   }
 
   contribute(extensionId: string, c: EditorContribution) {
@@ -110,6 +114,19 @@ export class EditorService {
   isDirty(path: string): boolean {
     return this.tabs.some((t) => t.path.toLowerCase() === path.toLowerCase() && t.dirty);
   }
+
+  /** Undoes in the active editor, wherever the focus is, and leaves the focus in it. False: it can't. */
+  undo() { return this.step("undo"); }
+  redo() { return this.step("redo"); }
+  private step(what: "undo" | "redo") {
+    const t = this.active?.instance;
+    if (!t?.[what]) return false;
+    t[what]!();
+    t.focus?.();
+    return true;
+  }
+  /** The buttons belong to the active editor: without undo of its own it shows none. */
+  private showActions() { this.tabActions.hidden = !this.active?.instance?.undo; }
 
   activePath(): string | null {
     return this.active?.path ?? null;
@@ -215,6 +232,7 @@ export class EditorService {
   private async load(tab: Tab) {
     try {
       tab.instance = await tab.provider!.resolve(tab.el, tab.doc!);
+      this.showActions();
       if (this.active === tab) tab.instance.focus?.();
     } catch (e) {
       tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e}`));
@@ -341,6 +359,7 @@ export class EditorService {
     this.tabs.splice(i, 1);
     if (this.active === tab) {
       this.active = null;
+      this.showActions();
       const next = this.tabs[Math.min(i, this.tabs.length - 1)];
       if (next) this.show(next);
       else {
@@ -360,6 +379,7 @@ export class EditorService {
     }
     tab.tabEl.scrollIntoView({ block: "nearest", inline: "nearest" });
     tab.instance?.focus?.();
+    this.showActions();
     this.onDidChangeActive.fire({ path: tab.path, editor: tab.providerId });
     this.remember();
     if (tab.pending) {

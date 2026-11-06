@@ -190,6 +190,8 @@ async function run() {
       return all.map((e) => ({ id: e.manifest.id, active: e.active, error: e.error ?? null }));
     })()`);
     const commands = await page.evaluate(`w3Workbench.commands.all().map((c) => c.id)`);
+    // With nothing open there's nothing to undo: the buttons by the tabs stay away.
+    const undoHidden = await page.evaluate(`document.querySelector(".tabs-actions")?.hidden === true`);
     const shown = [];
     for (let i = 0; i < views.length; i++) {
       await page.evaluate(`document.querySelectorAll("button.activity")[${i}].click()`);
@@ -210,6 +212,8 @@ async function run() {
       else if (!e.active) found.push(`extension ${e.id} didn't activate`);
     }
     if (commands.length < 20) found.push(`only ${commands.length} commands`);
+    if (!commands.includes("workbench.undo") || !commands.includes("workbench.redo")) found.push("no Undo and Redo commands");
+    if (!undoHidden) found.push("the undo buttons show with no editor open");
     shown.forEach((s, i) => s === "ok" || found.push(`view "${views[i]}" shows an error`));
 
     console.log(`${extensions.length} extensions active, ${views.length} views opened, ${commands.length} commands registered`);

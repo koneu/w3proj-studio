@@ -160,6 +160,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         openViews.add(view);
         const stop = w3.workspace.onDidChange(() => view.render());
         return {
+          undo: () => view.undo(),
+          redo: () => view.redo(),
           save,
           focus: () => el.focus(),
           dispose: () => { stop.dispose(); openViews.delete(view); },
@@ -219,6 +221,8 @@ class CampaignView {
     this.setDirty(this.undoStack.length !== this.savedAt);
     if (rerender) this.render();
   }
+  undo() { this.step(this.undoStack, this.redoStack); }
+  redo() { this.step(this.redoStack, this.undoStack); }
   private step(from: State[], to: State[]) {
     const s = from.pop();
     if (!s) return;

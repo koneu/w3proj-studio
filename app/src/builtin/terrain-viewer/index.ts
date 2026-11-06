@@ -2580,6 +2580,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const editorApi = {
+          undo,
+          redo,
           reloadFile,
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],

@@ -494,6 +494,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         loadGameLists(w3).then((l) => { lists = l; show(section); }, () => {});
 
         return {
+          undo: () => { history.undo(); },
+          redo: () => { history.redo(); },
           async save() {
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(info) });
             await doc.writeText(text);

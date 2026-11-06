@@ -133,6 +133,10 @@ export interface EditorInstance {
   save?(): Promise<void>;
   focus?(): void;
   dispose?(): void;
+  /** The editor's undo and redo, for the Edit commands and the buttons by the tabs: they work
+   *  wherever the focus is. An editor without them shows no buttons. */
+  undo?(): void;
+  redo?(): void;
   /** Its own file or a watched one was saved by something else, and it has no unsaved changes:
    *  takes the change in place, keeping what it has loaded. False: opened again, which is slow. */
   reloadFile?(path: string): Promise<boolean>;

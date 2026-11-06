@@ -233,6 +233,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (it) view.revealItem(it);
         }
         return {
+          undo: () => view.step(-1),
+          redo: () => view.step(1),
           save: async () => {
             await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, view.file);
             await writeWctFile(w3.workspace, view.customFile(), textTriggers(view.file).map((t) => t.name));
@@ -432,7 +434,7 @@ class TriggerView {
     this.renderTree();
     if (!opts.keepView) this.renderDetail();
   }
-  private step(dir: -1 | 1) {
+  step(dir: -1 | 1) {
     if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
     else if (dir > 0 && this.at < this.undo.length) this.restore(this.undo[this.at++].after);
     else return;

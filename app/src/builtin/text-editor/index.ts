@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { bracketMatching, foldGutter, indentOnInput, StreamLanguage, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { lua } from "@codemirror/legacy-modes/mode/lua";
@@ -237,6 +237,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (want) { pendingReveal.delete(doc.path); requestAnimationFrame(() => reveal(view, want)); }
         if (lint) { el.append(problems); lint.start(view); }
         return {
+          undo: () => { undo(view); },
+          redo: () => { redo(view); },
           async save() {
             if (doc.readOnly) return;
             const t = view.state.sliceDoc();

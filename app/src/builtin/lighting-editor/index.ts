@@ -270,6 +270,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         render();
         return {
+          undo: () => { history.undo(); },
+          redo: () => { history.redo(); },
           async save() {
             await doc.writeText(writeLightMdl(model));
             history.markSaved();
