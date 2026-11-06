@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { addCustomObject, fieldLevel, fieldValue, objectToEdit, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
 const file = (version = 3): EditFile => ({ format: "w3proj.objects/1", version, original: [], custom: [] });
@@ -68,4 +68,38 @@ test("new objects, and removing them or a game object's changes", () => {
   assert.equal(removeObject(f, "hpea"), true);
   assert.equal(removeObject(f, "hpea"), false);
   assert.deepEqual([f.custom.length, f.original.length], [0, 0]);
+});
+
+const text = (v: string) => (v === "TRIGSTR_007" ? "Hero of the Storm" : null);
+
+test("a copy holds its own text, and leaves the original alone", () => {
+  const o = { base: "hfoo", id: "h000", mods: [{ field: "unam", type: "string", value: "TRIGSTR_007" }, { field: "uhpm", type: "int", value: 500 }] };
+  const copy = copyOf(o, text);
+  assert.equal(copy.mods?.[0].value, "Hero of the Storm");
+  assert.equal(copy.mods?.[1].value, 500);
+  assert.equal(o.mods[0].value, "TRIGSTR_007");
+});
+
+test("a copy of an object with sets holds its texts too", () => {
+  const o = { base: "hfoo", sets: [{ flag: 0, mods: [{ field: "unam", type: "string", value: "TRIGSTR_007" }] }] };
+  assert.equal(copyOf(o, text).sets?.[0].mods[0].value, "Hero of the Storm");
+});
+
+test("a string that isn't a reference stays as it is", () => {
+  const o = { base: "hfoo", mods: [{ field: "umdl", type: "string", value: "units\\human\\Footman" }] };
+  assert.equal(copyOf(o, text).mods?.[0].value, "units\\human\\Footman");
+});
+
+test("a pasted object is new, whatever it was copied from", () => {
+  const custom = { base: "hfoo", id: "h000", mods: [{ field: "uhpm", type: "int", value: 500 }] };
+  const pasted = pastedObject(custom, "h001", 3);
+  assert.deepEqual([pasted.base, pasted.id, pasted.mods?.[0].value], ["hfoo", "h001", 500]);
+  assert.notEqual(pasted.mods, custom.mods, "a separate object: changing one mustn't change the other");
+  const standard = pastedObject({ base: "hfoo", mods: [] }, "h002", 3);
+  assert.deepEqual([standard.base, standard.id], ["hfoo", "h002"]);
+});
+
+test("older files keep their end marker right", () => {
+  assert.equal(pastedObject({ base: "hfoo", id: "h000", end: "h000", mods: [] }, "h001", 2).end, "h001");
+  assert.ok(!("end" in pastedObject({ base: "hfoo", id: "h000", end: "h000", mods: [] }, "h001", 3)));
 });

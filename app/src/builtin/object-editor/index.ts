@@ -1,4 +1,4 @@
-import type { ExtensionContext, W3Api } from "../../extensions/api";
+import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
@@ -12,7 +12,7 @@ import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, ty
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
-import { addCustomObject, fieldLevel, fieldValue, objectToEdit, removeObject, setObjectField, type EditFile } from "./objectedit";
+import { addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 
@@ -21,6 +21,9 @@ interface Mod { field: string; type: ValueType; level?: number; data?: number; v
 interface ObjSet { flag: number; mods: Mod[] }
 interface Obj { base: string; id?: string; end?: string; sets?: ObjSet[]; mods?: Mod[] }
 interface ObjectFile { format: string; version: number; original: Obj[]; custom: Obj[] }
+
+/** Copied objects by kind, for the session: they paste into any open map. */
+const clipboard: Record<string, Obj[]> = {};
 
 const FORMAT = "w3proj.objects/1";
 
@@ -372,13 +375,49 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Right click: on an object outside the selection, that object alone. */
         const itemMenu = (o: Obj, e: MouseEvent) => {
           e.preventDefault();
+          e.stopPropagation();
           if (!selection.has(o)) { select(o); renderDetail(); }
           const many = selection.size > 1;
-          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [{
-            label: many ? `Remove ${selection.size} objects` : o.id ? "Delete" : "Remove changes",
-            hint: "Delete key does the same",
-            run: () => void removeSelection(),
-          }]);
+          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
+            ...listMenu(),
+            { label: many ? `Copy ${selection.size} objects` : "Copy", shortcut: "Ctrl+C", run: copySelection },
+            "-",
+            { label: many ? `Remove ${selection.size} objects` : o.id ? "Delete" : "Remove changes", shortcut: "Del", run: () => void removeSelection() },
+          ]);
+        };
+        /** What the list offers anywhere: new objects. */
+        const listMenu = (): MenuItem[] => {
+          const held = clipboard[kind]?.length ?? 0;
+          return [
+            { label: "New…", run: () => void newObject() },
+            { label: held > 1 ? `Paste ${held} objects` : "Paste", shortcut: "Ctrl+V", disabled: !held, run: () => void paste() },
+          ];
+        };
+        listEl.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, listMenu());
+        });
+        const copySelection = () => {
+          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : table.get(ref) ?? null; };
+          clipboard[kind] = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
+        };
+        /** New custom objects from what was copied, each with the next free id. Copied from another
+         *  map too: ids in its fields, like its custom abilities, aren't followed. */
+        const paste = async () => {
+          const held = clipboard[kind];
+          if (!held?.length) return;
+          const taken = takenIds(), made: Obj[] = [];
+          for (const c of held) {
+            const id = await freeIdFor(c.base, taken);
+            taken.add(id);
+            made.push(pastedObject(c as EditObject, id, file.version) as Obj);
+          }
+          file.custom.push(...made);
+          selected = made[made.length - 1];
+          selection = new Set(made);
+          filter = "";
+          search.value = "";
+          markDirty(); renderDetail();
         };
 
         /** Removes every selected object after one confirmation. */
@@ -397,6 +436,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         listEl.addEventListener("keydown", (e) => {
           if (e.key === "Delete") { e.preventDefault(); removeSelection(); }
           else if (e.key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selection = new Set(visible); renderDetail(); }
+          else if (e.key === "c" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelection(); }
+          else if (e.key === "v" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void paste(); }
         });
 
         const hasMods = (o: Obj) => modLists(o).some((l) => l.mods.length > 0);
@@ -829,14 +870,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return null;
         };
+        const takenIds = () => new Set<string>([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...(kd?.baseIds ?? [])]);
+        /** The next free id, like the World Editor (also free among the other object types). */
+        const freeIdFor = async (base: string, taken: Set<string>) => {
+          let free = nextFreeId(kind, base, taken);
+          for (let n = 0; n < 50 && (await usedElsewhere(free)); n++) { taken.add(free); free = nextFreeId(kind, base, taken); }
+          return free;
+        };
         const newObject = async () => {
           const base = await pickBase(`New ${kindInfo?.singular ?? "object"} based on… (hold Shift to choose the id)`);
           if (!base || base.length !== 4) return;
           const askId = shiftHeld;
-          const taken = new Set<string>([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...(kd?.baseIds ?? [])]);
-          // The next free id, like the World Editor (also free among the other object types).
-          let free = nextFreeId(kind, base, taken);
-          for (let n = 0; n < 50 && (await usedElsewhere(free)); n++) { taken.add(free); free = nextFreeId(kind, base, taken); }
+          const taken = takenIds();
+          const free = await freeIdFor(base, taken);
           let id = free;
           if (askId) {
             const typed = await w3.window.inputBox({ prompt: `New ${kindInfo?.singular ?? "object"} id`, value: free });

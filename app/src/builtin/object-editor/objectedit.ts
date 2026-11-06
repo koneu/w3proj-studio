@@ -64,6 +64,27 @@ export function addCustomObject(file: EditFile, base: string, id: string): EditO
   return o;
 }
 
+/** What a copied object holds: its own texts, not references to this map's string table. Those would
+ *  mean nothing in another map, and here renaming the copy would rename the original. */
+export function copyOf(o: EditObject, text: (value: string) => string | null): EditObject {
+  const copy = structuredClone(o);
+  for (const mods of lists(copy)) {
+    for (const m of mods) {
+      const own = typeof m.value === "string" ? text(m.value) : null;
+      if (own !== null) m.value = own;
+    }
+  }
+  return copy;
+}
+
+/** A new custom object from a copy, standard or custom, under its own id. */
+export function pastedObject(copied: EditObject, id: string, version: number): EditObject {
+  const o = structuredClone(copied);
+  o.id = id;
+  if (version >= 3) delete o.end; else o.end = id;
+  return o;
+}
+
 /** Removes a custom object, or a game object's changes. False if the map has neither. */
 export function removeObject(file: EditFile, id: string): boolean {
   for (const [list, match] of [[file.custom, (o: EditObject) => o.id === id], [file.original, (o: EditObject) => o.base === id]] as const) {
