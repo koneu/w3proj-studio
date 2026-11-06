@@ -23,6 +23,8 @@ export interface UnitJson {
 
 export interface UnitsInput {
   units: UnitJson[];
+  /** The numbers of the map's item tables. */
+  itemTables?: ReadonlySet<number>;
   /** What an object id is (custom ids by their base and the map's changes). */
   kindOf: (id: string) => "building" | "unit" | "item" | "sloc" | undefined;
   /** war3map.w3i editorVersion: newer editors write more (item colours). */
@@ -110,7 +112,7 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   const color = waygate && u.color !== -1 ? u.color : i.teamColor?.(u.id);
   if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
   // Items drop from a map item table or the unit's own sets.
-  const drops = dropFunctionOf("Unit", u, i.units.indexOf(u));
+  const drops = dropFunctionOf("Unit", u, i.units.indexOf(u), i.itemTables);
   if (drops) {
     lines.push("    set t = CreateTrigger(  )", `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_DEATH )`,
       `    call TriggerRegisterUnitEvent( t, ${v}, EVENT_UNIT_CHANGE_OWNER )`, `    call TriggerAddAction( t, function ${drops} )`);

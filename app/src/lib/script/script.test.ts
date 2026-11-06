@@ -406,6 +406,11 @@ test("drop functions are named after the table or the file position", () => {
   assert.equal(dropFunctionOf("Unit", { itemTable: 3 }, 7), "ItemTable000003_DropItems");
   assert.equal(dropFunctionOf("Unit", { itemTable: -1, itemSets: [[{}]] }, 7), "Unit000007_DropItems");
   assert.equal(dropFunctionOf("Unit", { itemTable: -1, itemSets: [[]] }, 7), undefined);
+  const tables = new Set([3]);
+  assert.equal(dropFunctionOf("Unit", { itemTable: 3 }, 7, tables), "ItemTable000003_DropItems");
+  assert.equal(dropFunctionOf("Unit", { itemTable: 4 }, 7, tables), undefined, "a table that's gone drops nothing");
+  assert.equal(dropFunctionOf("Unit", { itemTable: 4, itemSets: [[{}]] }, 7, tables), "Unit000007_DropItems", "its own sets still count");
+  assert.equal(dropSection("Unit", [{ itemTable: 4, itemSets: [[{ id: "a", chance: 1 }]] }], 0, tables).includes("Unit000000_DropItems"), true);
   assert.equal(dropSection("Unit", [{ itemTable: 1, itemSets: [[{ id: "a", chance: 1 }]] }, { itemSets: [] }]), "");
 });
 

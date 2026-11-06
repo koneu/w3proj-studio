@@ -51,12 +51,16 @@ export function dropFunction(name: string, sets: DropItem[][], editorVersion = 0
 /** A placed object with its own item sets, or a map item table (`itemTable` ≥ 0). */
 export interface Dropper { itemSets?: unknown[]; itemTable?: number }
 
+/** Whether an object drops from a map item table. A table that's gone counts as none: its function
+ *  doesn't exist, and a script calling it wouldn't compile. `tables` are the map's own. */
+const usesTable = (p: Dropper, tables?: ReadonlySet<number>) => (p.itemTable ?? -1) >= 0 && (!tables || tables.has(p.itemTable!));
+
 /** The functions for every dropper with its own sets (`prefix` "Unit" or "Doodad"), named by file position. */
-export function dropSection(prefix: string, placed: Dropper[], editorVersion = 0): string {
+export function dropSection(prefix: string, placed: Dropper[], editorVersion = 0, tables?: ReadonlySet<number>): string {
   const parts: string[] = [];
   placed.forEach((p, index) => {
     const sets = (p.itemSets ?? []) as DropItem[][];
-    if ((p.itemTable ?? -1) >= 0 || !sets.some((s) => s.length)) return;
+    if (usesTable(p, tables) || !sets.some((s) => s.length)) return;
     parts.push(dropFunction(`${prefix}${String(index).padStart(6, "0")}_DropItems`, sets, editorVersion));
   });
   return parts.join(EOL);
@@ -68,8 +72,8 @@ export function itemTablesSection(tables: { number: number; sets: DropItem[][] }
 }
 
 /** The drop function a placed object's death triggers, if it drops anything. */
-export function dropFunctionOf(prefix: string, p: Dropper, index: number): string | undefined {
-  if ((p.itemTable ?? -1) >= 0) return itemTableFunction(p.itemTable!);
+export function dropFunctionOf(prefix: string, p: Dropper, index: number, tables?: ReadonlySet<number>): string | undefined {
+  if (usesTable(p, tables)) return itemTableFunction(p.itemTable!);
   if ((p.itemSets ?? []).some((s) => (s as unknown[]).length > 0)) return `${prefix}${String(index).padStart(6, "0")}_DropItems`;
   return undefined;
 }

@@ -223,11 +223,23 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
             list2.set(p.id, u);
           }
         }
+        // The script leaves a missing table out, so such objects drop nothing, and nobody would know.
+        const tables = new Set(((await readJson<{ itemTables?: { number: number }[] }>(w3, "map/war3map.w3i.json"))?.itemTables ?? []).map((t) => t.number));
+        const noTable = new Map<string, { n: number; x: number; y: number; file: string }>();
+        for (const [file, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
+          for (const p of (await readJson<Record<string, { id: string; position: number[]; itemTable?: number }[]>>(w3, file))?.[key] ?? []) {
+            if ((p.itemTable ?? -1) < 0 || tables.has(p.itemTable as number)) continue;
+            const u = noTable.get(p.id) ?? { n: 0, x: p.position[0], y: p.position[1], file };
+            u.n++;
+            noTable.set(p.id, u);
+          }
+        }
         const report = (list: typeof unknown, say: (id: string, u: { n: number }) => string) => [...list].map(([id, u]): Problem => ({
           severity: "warning", message: say(id, u), location: u.file.slice(4), reveal: { command: "w3.terrain.showPoint", args: [u.x, u.y] },
         }));
         return capped([
           ...report(unknown, (id, u) => `${id}: unknown object type (not in the game's or the map's object data), placed ${u.n}×`),
+          ...report(noTable, (id, u) => `${id}: drops from an item table the map no longer has, placed ${u.n}×: it drops nothing from it`),
           ...report(misplaced, (id, u) => `${id}: in the wrong placement file, placed ${u.n}×: units and items belong in war3mapUnits.doo, doodads and destructables in war3map.doo`),
         ], "unknown types");
       },

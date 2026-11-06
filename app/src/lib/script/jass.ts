@@ -393,18 +393,21 @@ function mapItemTables(i: ScriptInput): string {
   return body ? banner("Map Item Tables") + body : "";
 }
 
+/** The numbers of the map's item tables. */
+const tableNumbers = (i: ScriptInput) => new Set(((i.info.itemTables as { number: number }[] | undefined) ?? []).map((t) => t.number));
+
 function unitDrops(i: ScriptInput): string {
-  const body = dropSection("Unit", (i.units ?? []) as Dropper[], editorVersion(i));
+  const body = dropSection("Unit", (i.units ?? []) as Dropper[], editorVersion(i), tableNumbers(i));
   return body ? banner("Unit Item Tables") + body : "";
 }
 
 function destructableDrops(i: ScriptInput): string {
-  const body = dropSection("Doodad", (i.doodads ?? []) as Dropper[], editorVersion(i));
+  const body = dropSection("Doodad", (i.doodads ?? []) as Dropper[], editorVersion(i), tableNumbers(i));
   return body ? banner("Destructible Item Tables") + body : "";
 }
 
 function destructableObjects(i: ScriptInput): string {
-  const body = destructablesSection({ doodads: (i.doodads ?? []) as unknown as DestructableJson[], globalName: (d) => placedName(d as unknown as PlacedJson, "dest"),
+  const body = destructablesSection({ itemTables: tableNumbers(i), doodads: (i.doodads ?? []) as unknown as DestructableJson[], globalName: (d) => placedName(d as unknown as PlacedJson, "dest"),
     referenced: referencedGlobals(i, true), editorVersion: i.info.editorVersion as number | undefined });
   return body ? banner("Destructable Objects") + body : "";
 }
@@ -419,6 +422,7 @@ function unitCreation(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
   const regions = i.regions ?? [];
   const body = unitsSection({
+    itemTables: tableNumbers(i),
     units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });

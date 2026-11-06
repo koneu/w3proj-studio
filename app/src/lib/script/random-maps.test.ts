@@ -127,7 +127,7 @@ function randomMap(seed: number, lua: boolean): ScriptInput {
     id, editorId, variation: 0, position: [r.int(4000) - 2000 + 0.25, r.int(4000) - 2000, 0], angle: r.int(6), player: r.pick([...ids, 24, 27]), hp: r.pick([-1, 50]), mana: r.pick([-1, 100]),
     gold: 12500, targetAcquisition: r.pick([-1, -2, 300]), level: r.pick([0, 1, 3]), inventory: r.bool() ? [{ slot: 0, id: "ratc" }] : [],
     abilities: r.bool() ? [{ id: "AHhb", autocast: r.int(2), level: 1 + r.int(2) }] : [], color: r.pick([-1, 3]), waygate: r.pick([-1, 0]),
-    itemTable: hasTable ? r.pick([-1, -1, 0]) : -1, itemSets: r.bool() ? [[{ id: "ratc", chance: 40 }, { id: "YiI2", chance: 30 }]] : [], ...extra,
+    itemTable: r.pick([-1, -1, 0]), itemSets: r.bool() ? [[{ id: "ratc", chance: 40 }, { id: "YiI2", chance: 30 }]] : [], ...extra,
   });
   const randomUnit = (k: number) => placed(r.pick(["uDNR", "bDNR"]), 200 + k, r.pick<object>([{ randomType: 0, randomLevel: "020000" }, { randomType: 2, randomUnits: [{ id: "hfoo", chance: 100 }] }, ...(groups ? [{ randomType: 1, randomGroup: 2, randomPosition: 1 }] : [])]));
   const units = [...Array.from({ length: r.int(5) }, (_, k) => placed(r.pick(["hfoo", "hbar", "ngol", "ugol", "nwgt", "sloc"]), k)), ...Array.from({ length: r.int(3) }, (_, k) => randomUnit(k)), ...Array.from({ length: r.int(3) }, (_, k) => placed("ratc", 100 + k))];

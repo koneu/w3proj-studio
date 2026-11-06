@@ -13,6 +13,8 @@ export interface DestructableJson {
 }
 
 export interface DestructablesInput {
+  /** The numbers of the map's item tables. */
+  itemTables?: ReadonlySet<number>;
   doodads: DestructableJson[];
   /** Global name of a placement (gg_dest_ATg1_0118). */
   globalName: (d: DestructableJson) => string;
@@ -34,7 +36,7 @@ const deg = (rad: number) => fixed(Math.fround(Math.fround(rad) * Math.fround(18
 export function destructablesSection(i: DestructablesInput): string {
   // By object id; ties keep the file order (not always the World Editor's).
   const placed = i.doodads.map((d, index) => ({ d, index }))
-    .filter(({ d, index }) => !(d.flags & GAME_PLACED) && (i.referenced.has(i.globalName(d)) || dropFunctionOf("Doodad", d, index)))
+    .filter(({ d, index }) => !(d.flags & GAME_PLACED) && (i.referenced.has(i.globalName(d)) || dropFunctionOf("Doodad", d, index, i.itemTables)))
     .sort((a, b) => (a.d.id < b.d.id ? -1 : a.d.id > b.d.id ? 1 : a.index - b.index));
   if (!placed.length) return "";
   const ev = i.editorVersion ?? 0, pitchRoll = ev >= 6117, color = ev >= 7000;
@@ -53,7 +55,7 @@ export function destructablesSection(i: DestructablesInput): string {
     // Editors from 7000 on also set the tint (where some placements store another one is open).
     if (color) lines.push(`    call SetDestructableVertexColor( ${v}, 255, 255, 255, 255 )`);
     if (!dead && d.life !== 100) lines.push(`    set life = GetDestructableLife( ${v} )`, `    call SetDestructableLife( ${v}, ${(d.life / 100).toFixed(2)} * life )`);
-    const drops = dropFunctionOf("Doodad", d, index);
+    const drops = dropFunctionOf("Doodad", d, index, i.itemTables);
     if (drops) {
       lines.push("    set t = CreateTrigger(  )", `    call TriggerRegisterDeathEvent( t, ${v} )`, "    call TriggerAddAction( t, function SaveDyingWidget )",
         `    call TriggerAddAction( t, function ${drops} )`);
