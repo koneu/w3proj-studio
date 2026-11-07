@@ -11,11 +11,15 @@ export function printSections({ stats, broken, guarded, checked }) {
   for (const [m, lost] of guarded) console.log(`  ${m}: ${lost.length} (${lost.slice(0, 6).join(", ")})`);
 }
 
-/** jass-valid.mts. With `heads`, also the lines about common.j and Blizzard.j. */
-export function printValid({ common, blizzard, maps, clean, reports, kinds, ms }, { heads = false } = {}) {
+/** jass-valid.mts. With `heads`, also the lines about common.j and Blizzard.j, and the report lines
+ * the shards kept (run alone, jass-valid.mts prints those itself as it goes). */
+export function printValid({ common, blizzard, maps, clean, reports, kinds, ms, commonLines = [], blizzardLines = [], mapLines = [] }, { heads = false } = {}) {
   if (heads) {
     console.log(`common.j: ${common} reports`);
+    for (const l of commonLines) console.log(l);
     console.log(`Blizzard.j: ${blizzard} reports`);
+    for (const l of blizzardLines) console.log(l);
+    for (const l of mapLines) console.log(l);
   }
   console.log(`maps ${maps}, without reports ${clean}, reports ${reports}, ${ms} ms`);
   for (const [k, n] of [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(String(n).padStart(6), k);
@@ -45,5 +49,6 @@ export function mergeValid(shards) {
   const kinds = new Map();
   for (const s of shards) for (const [k, n] of s.kinds) kinds.set(k, (kinds.get(k) ?? 0) + n);
   const sum = (key) => shards.reduce((n, s) => n + s[key], 0);
-  return { common: sum("common"), blizzard: sum("blizzard"), maps: sum("maps"), clean: sum("clean"), reports: sum("reports"), kinds: [...kinds], ms: Math.max(...shards.map((s) => s.ms)) };
+  const lines = (key) => shards.flatMap((s) => s[key] ?? []);
+  return { commonLines: lines("commonLines"), blizzardLines: lines("blizzardLines"), mapLines: lines("mapLines"), common: sum("common"), blizzard: sum("blizzard"), maps: sum("maps"), clean: sum("clean"), reports: sum("reports"), kinds: [...kinds], ms: Math.max(...shards.map((s) => s.ms)) };
 }
