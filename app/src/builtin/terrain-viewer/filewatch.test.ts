@@ -82,17 +82,34 @@ test("only unit, destructable and doodad object data changes pathing footprints"
   for (const p of ["map/war3map.w3t.json", "map/war3mapSkin.w3u.json", "map/war3map.doo.json", "map/war3map.w3a.json"]) assert.equal(changesPathing(p), false, p);
 });
 
-test("saves that keep coming can't starve the wait: the reload runs after the longest wait", async () => {
-  let ranAt = 0;
-  const reload = new DebouncedReload(async () => { ranAt ||= Date.now(); }, () => {}, 30, 90);
+test("saves that keep coming can't starve the wait: the reload runs after the longest wait", async (t) => {
+  // A fake clock: the time is counted, not measured, so a loaded machine can't stretch it.
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  // setImmediate isn't faked: it lets the run's promise chain go on between turns of the clock.
+  const flush = () => new Promise<void>((r) => setImmediate(r));
+  const delay = 30, maxWait = 90, every = 10, savesFor = 500;
+  const runsAt: number[] = [];
+  const reload = new DebouncedReload(async () => { runsAt.push(Date.now()); }, () => {}, delay, maxWait);
   const start = Date.now();
-  reload.schedule();
-  const ticker = setInterval(() => reload.schedule(), 10);
-  // The saves stop after half a second; a reload that waited for that would have run after it.
-  await new Promise((r) => setTimeout(r, 500));
-  clearInterval(ticker);
-  await reload.settled();
-  assert.ok(ranAt > 0 && ranAt - start < 300, `first run after ${ranAt - start} ms`);
+  // A save every 10 ms, a third of the debounce delay, for half a second: without the longest
+  // wait, the delay never runs out until they stop.
+  for (let at = 0; at < savesFor; at += every) {
+    reload.schedule();
+    t.mock.timers.tick(every);
+    await flush();
+  }
+  assert.ok(runsAt.length > 0, `no reload while ${savesFor / every} saves kept coming`);
+  assert.ok(runsAt[0] - start <= maxWait, `first run after ${runsAt[0] - start} ms of saves, longer than the longest wait of ${maxWait}`);
+  // Each later run is as close to its predecessor: the saves never hold one back.
+  for (let i = 1; i < runsAt.length; i++) assert.ok(runsAt[i] - runsAt[i - 1] <= maxWait + every, `run ${i + 1} came ${runsAt[i] - runsAt[i - 1]} ms after the one before`);
+  // The saves stop: the last one's reload comes, and the wait ends with it.
+  let settled = false;
+  const w = reload.settled().then(() => { settled = true; });
+  t.mock.timers.tick(delay);
+  await flush();
+  await w;
+  assert.ok(settled);
+  assert.equal(runsAt.at(-1), start + savesFor + delay, "the last save's reload, a delay after it");
 });
 
 test("a save during a run gets its own run, and the wait covers both", async () => {
