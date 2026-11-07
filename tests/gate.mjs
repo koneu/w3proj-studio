@@ -296,7 +296,7 @@ const update = args.includes("--update-floor") ? " --update-floor" : "";
 // busy. `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
 const steps = [
   { id: "cli", name: "release CLI", tier: "corpus", weight: 6, locks: [["cargo", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
-  { id: "appsmoke", name: "the real app on a scratch project", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs", { cwd: app, env: { W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId } }) },
+  { id: "appsmoke", name: "the real app on a scratch project", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId } }) },
   { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
   { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, run: hostileRounds },
   { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
