@@ -56,7 +56,34 @@ node tests/gate.mjs all        # all of it: before merging to master
 The gate runs every step even after a failure and prints one table. Its exit code is the answer:
 **a check that can't run fails**, so green always means it ran. That rule exists because the
 easy mistakes here look like success: `check | tail; echo $?` reports `tail`'s exit code, and two
-coverage tools reported numbers for tests they hadn't measured.
+coverage tools reported numbers for tests they hadn't measured. The last line is
+`GATE_EXIT=<code>`, so the answer survives a pipe.
+
+**Steps run side by side.** Steps that don't need each other run together (about twice the cores' worth;
+`--jobs=<n>` changes that, `--serial` goes one at a time in the table's order). What one needs
+from another is written down in `tests/gate.mjs`: the release CLI comes before everything that runs
+it, one cargo command works in `target/` at a time, and the smoke tests, which rebuild `app/dist`
+(every build of the Tauri crate reads it), take turns with the cargo steps that build it. The real-app
+smoke test builds first, and the rest of the gate waits for that build, not for the whole test. A step whose prerequisite
+failed fails without running. Each step's output goes to `target/gate-logs/<tier>-<pid>/<step>.log`; the
+gate prints it, or its end and the path, when the step finishes. Times in the table are wall time,
+so they grow when steps compete for the cores.
+
+**Rust coverage is built in one folder for all worktrees** (`target/llvm-cov-shared` of the main
+checkout, or `W3PROJ_COV_TARGET_DIR`), so the dependencies are compiled once, not once per worktree.
+`cargo llvm-cov` collects every `.profraw` in its folder, so gates from different worktrees take
+turns on it through a lock folder next to it (`llvm-cov-shared.lock`): the second gate's coverage
+step says it is waiting, and takes the lock over if the first gate's process has gone.
+
+**The hostile-input watchdog counts processor time**, not the clock (`hostile.test.ts`): a worker's
+second thread reports the process's processor time, and a file that uses more than 4 s of it is
+killed and reported. With several gates on the machine a worker is held back for seconds at a time,
+and a clock would call that a hang; a parser stuck in a loop still burns the 4 s. A worker that
+neither finishes a file nor uses processor time for a minute is killed too.
+
+**`w3proj verify` over a folder** checks maps on all cores (`W3PROJ_VERIFY_JOBS=1` for one at a
+time), but prints in the order of the files. **A hostile-input failure** names its seed; run it
+alone with `W3PROJ_ROBUSTNESS_SEED=<n>`.
 
 Parts of it: `npm test`, `cargo test`, `npm run coverage`, `npm run ui-smoke`. Rounds of the
 hostile-input tests are set with `W3PROJ_ROBUSTNESS_ROUNDS`. The corpus tier finds its maps with
