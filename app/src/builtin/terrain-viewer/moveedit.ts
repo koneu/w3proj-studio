@@ -1,7 +1,7 @@
 // Moving placed objects: the undo step for a move, and keeping a moved group on the map.
 
 export interface Pose { position: [number, number, number]; angle: number }
-
+export interface Bounds { left: number; right: number; bottom: number; top: number }
 
 export interface MoveDeps<E> {
   setPlacement(entry: E, position: [number, number, number], angle: number): void;
@@ -19,4 +19,18 @@ export function pushMoveEdit<E>(entries: E[], before: Pose[], after: Pose[], dep
   };
   deps.pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });
   deps.refreshRings();
+}
+
+/** The shift (dx, dy) cut back so that every point stays inside its bounds, all by the same amount: a
+ *  group keeps its shape and stops at the edge together. A point already outside its bounds doesn't hold
+ *  the others back. */
+export function clampShift(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], dx: number, dy: number): [number, number] {
+  let loX = -Infinity, hiX = Infinity, loY = -Infinity, hiY = Infinity;
+  points.forEach(([x, y], i) => {
+    const b = bounds[i];
+    if (x < b.left || x > b.right || y < b.bottom || y > b.top) return;
+    loX = Math.max(loX, b.left - x); hiX = Math.min(hiX, b.right - x);
+    loY = Math.max(loY, b.bottom - y); hiY = Math.min(hiY, b.top - y);
+  });
+  return [Math.min(Math.max(dx, loX), hiX), Math.min(Math.max(dy, loY), hiY)];
 }

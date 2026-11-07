@@ -51,7 +51,7 @@ import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } fro
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
-import { pushMoveEdit } from "./moveedit";
+import { clampShift, pushMoveEdit } from "./moveedit";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
@@ -3041,7 +3041,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
         const dragObjects = (p: Vec3) => {
           if (!objDrag) return;
-          const dx = p[0] - objDrag.anchor[0], dy = p[1] - objDrag.anchor[1];
+          // The group keeps its shape and stops at the map's edge (the playable part, for units) together.
+          const whole = wholeMap(handle);
+          const [dx, dy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
+            objDrag.entries.map((e) => (dooFile?.list.includes(e) ? whole : playableEdge ?? whole)), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
             setPlacement(entry, [x + dx, y + dy, ownHeight(entry) ?? heightAt(terrain, x + dx, y + dy)], entry.angle);
