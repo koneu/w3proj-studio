@@ -149,3 +149,18 @@ test("Replace Internal Sound changes nothing when declined, cancelled, with the 
   await assert.rejects(replaceSound(bad.w3, "war3mapImported\\boom.wav"), /isn't a sound file/);
   assert.deepEqual(bad.log, []);
 });
+
+test("a replacement in another format that would overwrite another file of the map is refused", () => {
+  const projectFiles = ["map/Sound/x.wav", "map/Sound/x.mp3"];
+  assert.throws(() => planReplace({ soundFile: "Sound\\x.wav", sourceName: "new.mp3", projectFiles, imports: [] }), /Sound\\x\.mp3 is already in the map/);
+  // The same format replaces its own file; a free name is fine.
+  assert.equal(planReplace({ soundFile: "Sound\\x.wav", sourceName: "new.wav", projectFiles, imports: [] }).remove, null);
+  assert.equal(planReplace({ soundFile: "Sound\\x.wav", sourceName: "new.ogg", projectFiles, imports: [] }).remove, "map/Sound/x.wav");
+});
+
+test("Replace Internal Sound refused for a clash writes nothing", async () => {
+  const f = fake({ mapFiles: { "map/war3mapImported/boom.wav": bytes(1), "map/war3mapImported/boom.mp3": bytes(2) }, imp: IMP });
+  await assert.rejects(replaceSound(f.w3, "war3mapImported\\boom.wav"), /already in the map/);
+  assert.deepEqual(f.log, []);
+  assert.deepEqual([...f.map.get("map/war3mapImported/boom.mp3")!], [2]);
+});
