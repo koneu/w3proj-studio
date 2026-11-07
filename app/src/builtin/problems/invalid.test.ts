@@ -13,20 +13,22 @@ const doodads = (...ids: string[]) => JSON.stringify({ format: "w3proj.doodads/1
 const GAME: Record<string, string[]> = { w3u: ["hfoo"], w3t: ["ratf"], w3b: ["ATtr"], w3d: ["LTlt"] };
 const game: KindLoader = async (_w3, kind) => ({ baseIds: GAME[kind] ?? [] });
 
-function setup(files: Record<string, string>, opts: { answer?: boolean; unsaved?: string[]; raw?: string[] } = {}) {
+function setup(files: Record<string, string>, opts: { answer?: boolean; unsaved?: string[]; raw?: string[]; root?: string } = {}) {
   const fs = new Map(Object.entries(files));
   const log: string[] = [];
   const raw = new Set(opts.raw ?? []);
   const state = { asked: "" };
   const w3 = {
     workspace: {
-      project: () => ({ root: "C:\p" }),
+      project: () => ({ root: opts.root ?? "C:\\p" }),
+      resolve: (p: string) => p,
       readText: async (p: string) => { if (raw.has(p) || !fs.has(p)) throw new Error("no such file"); return fs.get(p)!; },
       writeText: async (p: string, t: string) => { log.push(`write ${p}`); fs.set(p, t); },
     },
     backend: {
       invoke: async (cmd: string, a: { path: string; text?: string }) => {
         if (cmd === "codec_decode") { const t = fs.get(`${a.path}.json`); if (t === undefined) throw new Error("no codec"); return t; }
+        if (cmd === "fs_exists") return fs.has(a.path) || fs.has(`${a.path}.json`);
         if (cmd === "codec_canonicalize") return a.text!;
         if (cmd === "codec_write") { log.push(`codec_write ${a.path}`); fs.set(`${a.path}.json`, a.text!); return null; }
         throw new Error(cmd);
@@ -126,4 +128,55 @@ test("a file the project keeps raw goes back through its codec", async () => {
   assert.equal(await deleteInvalid(w3, game), 1);
   assert.deepEqual(idsOf(fs, UNITS, "units"), ["hfoo"]);
   assert.ok(log.includes("codec_write map/war3mapUnits.doo"));
+});
+
+const CHAPTER = "C:\\camp\\maps\\Chapter 4.w3x";
+const customUnits = (...ids: string[]) => JSON.stringify({ custom: ids.map((id) => ({ id, base: "hfoo" })) });
+
+test("a chapter map knows its campaign's custom objects, also the skin ones, so none are invalid", async () => {
+  const { w3, fs, log } = setup({
+    [UNITS]: units("hfoo", "c001", "c002", "xxxx"), [DOODADS]: doodads("LTlt", "d001"),
+    "C:/camp/map/war3campaign.w3u.json": customUnits("c001"),
+    "C:/camp/map/war3campaignSkin.w3u.json": customUnits("c002"),
+    "C:/camp/map/war3campaign.w3d.json": JSON.stringify({ custom: [{ id: "d001", base: "LTlt" }] }),
+  }, { root: CHAPTER });
+  const plan = await planInvalid(w3, game);
+  assert.deepEqual([...plan.types], [["xxxx", 1]], "only the type nobody has");
+  await deleteInvalid(w3, game);
+  assert.deepEqual(idsOf(fs, UNITS, "units"), ["hfoo", "c001", "c002"]);
+  assert.deepEqual(idsOf(fs, DOODADS, "doodads"), ["LTlt", "d001"]);
+  assert.ok(log.length > 0);
+});
+
+test("a project that holds the campaign's object files itself knows them too", async () => {
+  const { w3 } = setup({
+    [UNITS]: units("hfoo", "c001", "c002"), [DOODADS]: doodads(),
+    "map/war3campaign.w3u.json": customUnits("c001"), "map/war3campaignSkin.w3u.json": customUnits("c002"),
+  });
+  assert.equal((await planInvalid(w3, game)).total, 0);
+});
+
+test("a map outside a campaign folder gets no campaign path", async () => {
+  const { campaignOf } = await import("./invalid");
+  assert.equal(campaignOf("C:\\camp\\maps\\Chapter 4.w3x"), "C:/camp");
+  assert.equal(campaignOf("C:\\camp\\maps\\Chapter 4.w3x\\"), "C:/camp");
+  assert.equal(campaignOf("/home/u/camp/maps/ch"), "/home/u/camp");
+  assert.equal(campaignOf("C:\\maps\\My Map"), "C:");
+  assert.equal(campaignOf("C:\\p"), undefined);
+  assert.equal(campaignOf(undefined), undefined);
+});
+
+test("an object file that is there but can't be read stops everything instead of making its objects unknown", async () => {
+  for (const bad of ["map/war3map.w3u.json", "map/war3mapSkin.w3u.json", "C:/camp/map/war3campaign.w3u.json"]) {
+    const { w3, fs, log } = setup({ [UNITS]: units("hfoo", "h000", "h001"), [DOODADS]: doodads("LTlt"), [bad]: "{ not json" }, { root: CHAPTER });
+    const before = fs.get(UNITS);
+    await assert.rejects(deleteInvalid(w3, game), (e: Error) => e.message.includes(bad) && /can't be read/.test(e.message), bad);
+    assert.equal(fs.get(UNITS), before);
+    assert.deepEqual(log, [], "no question, no checkpoint, no write");
+  }
+});
+
+test("a placement file that can't be read is refused too", async () => {
+  const { w3 } = setup({ [UNITS]: "{ broken", [DOODADS]: doodads("LTlt", "yyyy") });
+  await assert.rejects(planInvalid(w3, game), /war3mapUnits\.doo\.json is there but can't be read/);
 });

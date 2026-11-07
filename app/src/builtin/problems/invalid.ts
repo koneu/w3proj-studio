@@ -4,7 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { loadKind } from "../../lib/objects/metadata";
-import { readMapDoc } from "../../lib/formats/mapdoc";
+import { readMapDocStrict } from "../../lib/formats/mapdoc";
 
 /** How a kind's game data is loaded (a parameter so tests can stand in for the game). */
 export type KindLoader = (w3: W3Api, kind: string) => Promise<{ baseIds: string[] }>;
@@ -23,27 +23,31 @@ export const isRandomId = (id: string) => /^[uib]DNR$/.test(id) || /^Y.I\d$/.tes
  *  false when the game's object data could not be read: then "unknown" only means "not loaded". */
 export interface KnownTypes { known: Set<string>; inUnits: Set<string>; inDoodads: Set<string>; gameOk: boolean }
 
+/** The campaign project a chapter map's project sits in (<campaign>/maps/<chapter>), else undefined.
+ *  Forward slashes, which Windows takes too. */
+export function campaignOf(root: string | undefined): string | undefined {
+  const m = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
+  return m?.replace(/\\/g, "/");
+}
+
 export async function knownPlacedTypes(w3: W3Api, load: KindLoader = loadKind): Promise<KnownTypes> {
   // "sloc" is a start location: never unknown, never removed.
   const known = new Set<string>(["sloc"]);
   const inUnits = new Set<string>(["sloc"]), inDoodads = new Set<string>();
   let gameOk = true;
   const note = (kind: string, id: string) => { known.add(id); (kind === "w3u" || kind === "w3t" ? inUnits : inDoodads).add(id); };
-  const readJson = <T>(path: string) => readMapDoc<T>(w3, path);
+  const readJson = <T>(path: string) => readMapDocStrict<T>(w3, path);
+  // A chapter map also has its campaign's custom objects (the campaign project is two folders up).
+  const campaign = campaignOf(w3.workspace.project()?.root);
   for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
     const k = await load(w3, kind).catch(() => null);
     if (!k || !k.baseIds.length) gameOk = false;
     for (const id of k?.baseIds ?? []) note(kind, id);
-    for (const file of [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`]) {
+    const files = [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`];
+    if (campaign) files.push(`${campaign}/map/war3campaign.${kind}.json`, `${campaign}/map/war3campaignSkin.${kind}.json`);
+    // An object file that is there but unreadable throws: its objects would all look unknown.
+    for (const file of files) {
       for (const o of (await readJson<{ custom?: Obj[] }>(file))?.custom ?? []) if (o.id) note(kind, o.id);
-    }
-  }
-  // A campaign's chapter map also has the campaign's custom objects.
-  const root = w3.workspace.project()?.root;
-  const campaign = root ? /^(.*)[\/]maps[\/][^\/]+[\/]?$/.exec(root)?.[1] : undefined;
-  if (campaign) {
-    for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
-      for (const o of (await readJson<{ custom?: Obj[] }>(`${campaign}\map\war3campaign.${kind}.json`))?.custom ?? []) if (o.id) note(kind, o.id);
     }
   }
   return { known, inUnits, inDoodads, gameOk };
@@ -75,7 +79,7 @@ export async function planInvalid(w3: W3Api, load: KindLoader = loadKind): Promi
   if (!t.gameOk) throw new Error("The game's object data isn't available, so unknown types can't be told from types that just failed to load. Nothing was changed.");
   const plan: InvalidPlan = { files: [], types: new Map(), total: 0 };
   for (const [file, key] of PLACEMENT_FILES) {
-    const doc = await readMapDoc<Record<string, { id?: unknown }[]>>(w3, file);
+    const doc = await readMapDocStrict<Record<string, { id?: unknown }[]>>(w3, file);
     const list = doc?.[key];
     if (!Array.isArray(list)) continue;
     const { removed } = splitInvalid(list, t.known);
