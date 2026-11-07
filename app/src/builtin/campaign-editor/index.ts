@@ -9,6 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { addChapter } from "./chapters";
 import { StringTable } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { askNewCampaign, createCampaign } from "./newcampaign";
@@ -323,9 +324,7 @@ class CampaignView {
     }));
     await this.w3.workspace.refresh();
     this.change(() => {
-      this.info.chapters.push({ flags: 0, chapter: `Chapter ${this.info.chapters.length + 1}`, title: name.replace(/\.w3[mx]$/i, ""), map: name });
-      if (!this.info.mapOrder.some((m) => m.map.toLowerCase() === name.toLowerCase())) this.info.mapOrder.push({ unknown: "", map: name });
-      this.selected = this.info.chapters.length - 1;
+      this.selected = addChapter(this.info, name, name.replace(/\.w3[mx]$/i, ""));
     });
     void this.w3.window.showInfo(`${name} was unpacked into maps/ and added as a chapter. Save the campaign to keep the chapter.`);
   }
@@ -345,9 +344,7 @@ class CampaignView {
         const map = toArchiveName(o.dir.split(/[\\/]/).pop()!);
         if (this.campaignMaps().some((m) => m.name.toLowerCase() === map.toLowerCase())) throw new Error(`${map} is already in the campaign.`);
         this.change(() => {
-          this.info.chapters.push({ flags: 0, chapter: `Chapter ${this.info.chapters.length + 1}`, title: o.name, map });
-          if (!this.info.mapOrder.some((m) => m.map.toLowerCase() === map.toLowerCase())) this.info.mapOrder.push({ unknown: "", map });
-          this.selected = this.info.chapters.length - 1;
+          this.selected = addChapter(this.info, map, o.name);
         });
         await this.save();
       },
@@ -449,8 +446,7 @@ class CampaignView {
             h("button", { onclick: run(() => this.newMap()) }, "New map…"),
             h("button", { onclick: run(() => this.addMap()) }, "Add map…"),
             h("button", { disabled: !unused.length, onclick: () => this.change(() => {
-              c.chapters.push({ flags: 0, chapter: `Chapter ${c.chapters.length + 1}`, title: unused[0].name.replace(/\.w3[mx]$/i, ""), map: unused[0].name });
-              this.selected = c.chapters.length - 1;
+              this.selected = addChapter(c, unused[0].name, unused[0].name.replace(/\.w3[mx]$/i, ""));
             }) }, "New chapter button"),
             h("button", { disabled: !ch, onclick: () => this.change(() => { c.chapters.splice(i, 1); this.selected = Math.min(i, c.chapters.length - 1); }) }, "Remove button"),
             h("button", { disabled: i <= 0, onclick: () => move(-1) }, "Move up"),
