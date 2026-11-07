@@ -16,6 +16,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let running: Promise<string> | null = null;
   /** The last checkpoint's file: names go by the second, and a second one in the same second waits for the next. */
   let last = "";
+  /** Checkpoints being restored ("root|name", how many restores of it run): no pruning removes them meanwhile. */
+  const restoring = new Map<string, number>();
   /** Projects told that their automatic checkpoints fail. */
   const warned = new Set<string>();
 
@@ -26,20 +28,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const pack = async (project: ProjectInfo, settleFirst: boolean): Promise<string> => {
     if (settleFirst) await settle();
-    let at = new Date();
-    if (`${project.root}|${checkpointName(project.default_output, at)}` === last) {
-      await new Promise((r) => setTimeout(r, 1000 - at.getMilliseconds() + 5));
-      at = new Date();
+    // A loop, not one wait: a timer that fires early or a clock set back must not give the name again.
+    let name = checkpointName(project.default_output, new Date());
+    while (`${project.root}|${name}` === last) {
+      await new Promise((r) => setTimeout(r, 1000 - new Date().getMilliseconds() + 5));
+      name = checkpointName(project.default_output, new Date());
     }
-    const name = checkpointName(project.default_output, at);
     last = `${project.root}|${name}`;
     const target = `${project.root}\\build\\checkpoints\\${name}`;
     await w3.backend.invoke("project_pack", { root: project.root, output: target });
     const keep = w3.settings.get<number>("checkpoints.keep") ?? 10;
-    const old = toPrune(await list(project.root), keep);
-    // The project may have been changed meanwhile: its own root, not the current one.
-    for (const f of old) await w3.backend.invoke("fs_delete", { root: project.root, path: `${project.root}\\build\\checkpoints\\${f}` });
-    out.append(`checkpoint ${name}${old.length ? ` (${old.length} old one${old.length === 1 ? "" : "s"} removed)` : ""}`);
+    // A checkpoint being restored stays, however old: it's read after this one is made.
+    const old = toPrune(await list(project.root), keep).filter((f) => !restoring.has(`${project.root}|${f}`));
+    let removed = 0;
+    // The project may have been changed meanwhile: its own root, not the current one. The new
+    // checkpoint exists already, so an old one that can't go is only said.
+    for (const f of old) {
+      try {
+        await w3.backend.invoke("fs_delete", { root: project.root, path: `${project.root}\\build\\checkpoints\\${f}` });
+        removed++;
+      } catch (e) {
+        out.append(`checkpoint ${f} couldn't be removed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    out.append(`checkpoint ${name}${removed ? ` (${removed} old one${removed === 1 ? "" : "s"} removed)` : ""}`);
     return name;
   };
 
@@ -79,9 +91,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** Replaces the project's map files with a checkpoint's; what's there now is kept as one first. */
   const restore = async (project: ProjectInfo, name: string) => {
-    // Settled by the caller, before the editors closed: settling now would open the terrain editor again.
-    await create(project, false);
-    await w3.commands.execute("w3.project.syncFromMap", `${project.root}\\${FOLDER.replace("/", "\\")}\\${name}`);
+    // The editors closed after a question: the user may have opened another project meanwhile.
+    const still = () => {
+      if (w3.workspace.project()?.root !== project.root) throw new Error("Not restored: another project was opened meanwhile.");
+    };
+    still();
+    const key = `${project.root}|${name}`;
+    restoring.set(key, (restoring.get(key) ?? 0) + 1);
+    try {
+      // Settled by the caller, before the editors closed: settling now would open the terrain editor again.
+      await create(project, false);
+      still();
+      if (!(await list(project.root)).includes(name)) throw new Error(`Not restored: the checkpoint ${name} is gone.`);
+      await w3.commands.execute("w3.project.syncFromMap", `${project.root}\\${FOLDER.replace("/", "\\")}\\${name}`);
+    } finally {
+      const n = (restoring.get(key) ?? 1) - 1;
+      if (n > 0) restoring.set(key, n); else restoring.delete(key);
+    }
   };
 
   const timer = setInterval(() => void tick().catch(() => {}), POLL);
