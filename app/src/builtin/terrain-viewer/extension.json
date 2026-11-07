@@ -68,7 +68,8 @@
       { "id": "w3.terrain.toggleCameraObjects", "when": "project", "title": "Toggle Camera Object Display", "category": "Terrain" },
       { "id": "w3.terrain.toggleSmallGrid", "when": "project", "title": "Toggle Small Grid Display", "category": "Terrain" },
       { "id": "w3.terrain.toggleMediumGrid", "when": "project", "title": "Toggle Medium Grid Display", "category": "Terrain" },
-      { "id": "w3.terrain.toggleLargeGrid", "when": "project", "title": "Toggle Large Grid Display", "category": "Terrain" }
+      { "id": "w3.terrain.toggleLargeGrid", "when": "project", "title": "Toggle Large Grid Display", "category": "Terrain" },
+      { "id": "w3.terrain.togglePreserveCopiedHeight", "when": "project", "title": "Toggle Preserve Copied Object Height", "category": "Terrain" }
     ],
     "services": [{ "id": "w3.terrain", "description": "Tool groups (tabs) in the terrain editor: registerToolGroup." }],
     "configuration": {
@@ -76,6 +77,7 @@
       "properties": {
         "terrain.sky": { "type": "string", "default": "", "description": "Sky model shown in the terrain view, by its path; empty for none. A view setting: it isn't part of the map." },
         "terrain.fog": { "type": "boolean", "default": true, "description": "Show the map's fog in the terrain view, when the map has it on." },
+        "terrain.preserveCopiedHeight": { "type": "boolean", "default": true, "description": "Preserve Copied Object Height: a pasted doodad with a fixed height keeps its height over the ground; with this off every pasted object sits on the ground." },
         "terrain.boundary": { "type": "boolean", "default": true, "description": "Darken the part of the map past the playable area in the terrain view." },
         "terrain.animate": { "type": "boolean", "default": true, "description": "Placed objects play their Stand animation in the terrain view (off: they stand still)." },
         "terrain.lighting.enabled": { "type": "boolean", "default": true, "description": "Light the terrain view with the map's day/night lighting (off: an even light, e.g. when the map's lighting is very dark)." },

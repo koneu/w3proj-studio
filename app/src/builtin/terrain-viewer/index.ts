@@ -6,6 +6,7 @@ import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/a
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type ViewCommands } from "./toolhost";
+import { pastedFlags, pastedHeight } from "./objheights";
 import { h } from "../../workbench/dom";
 import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
@@ -149,6 +150,9 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
   }
   return { buf: await w3.game.read(path), name: path };
 }
+
+/** One of the Advanced switches: a boolean setting that is `standard` until it is set. */
+const switchedOn = (w3: W3Api, key: string, standard: boolean) => (standard ? w3.settings.get<boolean>(key, true) !== false : w3.settings.get<boolean>(key, false) === true);
 
 /** What Ctrl+C took: stays over tabs, so it can go into another open map. */
 let clipboard: Fragment | null = null;
@@ -977,6 +981,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const why = await run(view);
       if (why) void w3.window.showInfo(why);
     })),
+    // The Advanced switches are settings, so they hold for every terrain editor and stay for the next session.
+    ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", true]] as const)
+      .map(([id, key, standard]) => w3.commands.register(id, () => w3.settings.set(key, !switchedOn(w3, key, standard)))),
     w3.commands.register("w3.terrain.resetVariations", async () => {
       const path = w3.editors.activePath();
       const reset = path ? toolGroups.resetVariations.get(path) : undefined;
@@ -1128,6 +1135,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
           if (key === "terrain.sky") void showSkyChoice();
+          if (key === "terrain.preserveCopiedHeight") viewSyncs.forEach((f) => f());
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
         });
@@ -1146,6 +1154,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         // ---- editing ------------------------------------------------------------------
         const editable = !doc.readOnly;
+        // The World Editor's Advanced switch for pasting; the setting is shared by every terrain editor.
+        const preserveHeight = () => switchedOn(w3, "terrain.preserveCopiedHeight", true);
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
         /** Undo history; `at` edits are applied, `mark` knows which position the files match. */
@@ -2030,7 +2040,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [cx + o.at[0], cy + o.at[1]];
           if (!inArea(x, y, wholeMap(handle))) return null;
           const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0, ground = heightAt(terrain, x, y);
-          return [x, y, fixed ? ground + o.at[2] : ground];
+          return [x, y, pastedHeight(ground, o.at[2], fixed, preserveHeight())];
         };
         const showPaste = (g: Vec3) => {
           pasteAt = g;
@@ -2115,6 +2125,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const standing = spot && (o.list === "doodads" || !playableEdge || inArea(spot[0], spot[1], playableEdge));
             if (!file || !spot || !standing) { off++; continue; }
             const made = pastedEntry(file, o, spot);
+            if (typeof (made as Placed & { flags?: number }).flags === "number") (made as Placed & { flags?: number }).flags = pastedFlags((made as Placed & { flags: number }).flags, preserveHeight());
             file.list.push(made);
             repositioned.add(made);
             added.push({ entry: made, f: file });
@@ -3027,6 +3038,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           viewSyncs.push(() => { box.checked = viewState[layer]; });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };
+        /** A box for one of the Advanced switches; the command and the box are the same setting. */
+        const switchBox = (label: string, title: string, key: string, standard: boolean) => {
+          const box = h("input", { type: "checkbox", checked: switchedOn(w3, key, standard), onchange: () => { void w3.settings.set(key, box.checked); canvas.focus({ preventScroll: true }); } });
+          viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); });
+          return h("label.model-toggle", { title }, box, ` ${label}`);
+        };
         const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); canvas.focus({ preventScroll: true }); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
         viewSyncs.push(() => { gridSelect.value = viewState.grid; });
@@ -3052,6 +3069,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras"),
               layerBusy,
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
+              ...(editable ? [
+                switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", true),
+              ] : []),
               toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
               toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
               skySelect,

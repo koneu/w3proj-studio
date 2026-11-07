@@ -393,6 +393,100 @@ async function waterPathing(page, found) {
   if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
 }
 
+/** What the checks of the terrain viewer's height tools share: a new map opened in the editor, and the ways a person
+ *  works on it (commands, keys and mouse sent into the hidden window) with the saved files to judge by. */
+async function heightKit(page, name) {
+  const tool = mcpTool(page), hands = new Hands(page);
+  const folder = join(work, "heights", name);
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name, width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const kit = {
+    tool, hands, root, FIXED: 4,
+    run: (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then(() => null, (e) => String(e))`),
+    save: async () => { await page.evaluate(`w3.editors.saveAll()`); await sleep(500); },
+    read: (file) => JSON.parse(readFileSync(join(root, "map", file), "utf8")),
+    doodads: () => kit.read("war3map.doo.json").doodads,
+    units: () => kit.read("war3mapUnits.doo.json").units,
+    look: (x, y, ref) => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get("map/war3map.w3e.txt")(${x}, ${y}${ref ? `, ${JSON.stringify(ref)}` : ""}))()`),
+    tab: async (label) => { await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(label)}).click()`); await sleep(300); },
+    focusMap: () => page.evaluate(`document.querySelector(".model-stage canvas").focus()`),
+    setting: (key) => page.evaluate(`w3.settings.get(${JSON.stringify(key)})`),
+    box: (label) => page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === ${JSON.stringify(label)})?.querySelector("input")?.checked`),
+    toasts: () => page.evaluate(`[...document.querySelectorAll(".notification, .toast")].map((e) => e.textContent).join(" | ")`),
+    clearToasts: () => page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`),
+    docHash: () => hash(join(root, "map", "war3map.doo.json")),
+    /** Moves the pointer to the middle of the map view and clicks there: the point the view looks at. */
+    clickMiddle: async () => {
+      const c = await hands.where(".model-stage canvas");
+      await hands.mouse("mouseMoved", c.x, c.y);
+      await hands.click(".model-stage canvas");
+    },
+    /** Packs the saved project and has the CLI verify the map. */
+    verify: async (fail) => {
+      const map = join(folder, `${name}.w3x`);
+      await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(root)}, output: ${JSON.stringify(map)} })`);
+      await until("the pack", () => existsSync(map), 20000);
+      const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+      if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
+    },
+    /** The Advanced switches go back to what they were, for the next check. */
+    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds"].map((key) => page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined)`))),
+  };
+  return kit;
+}
+
+/** Preserve Copied Object Height: a doodad with a fixed height, 64 over the ground (four Ctrl+PageUp), copied and pasted
+ *  twice at the same kind of spot, first with the setting on and then off. The two pastes differ only by the setting,
+ *  which is what shows it made the difference. The toolbar box and the command are the same setting. */
+async function heightsPreserve(page, found) {
+  const fail = (what) => found.push(`height tools (preserve): ${what}`);
+  const k = await heightKit(page, "Preserve");
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }], ignoreRoom: true });
+  await k.save();
+  const ground = k.doodads()[0].position[2];
+  await k.tab("Select");
+  await k.look(256, 0, { id: "LTlt", x: 256, y: 0 });
+  await sleep(500);
+  await k.focusMap();
+  for (let i = 0; i < 4; i++) await k.hands.key("PageUp", "PageUp", 33, 2);
+  await k.save();
+  const fixedOne = k.doodads().find((d) => d.position[0] === 256);
+  if (fixedOne.position[2] !== ground + 64 || !(fixedOne.flags & k.FIXED)) return fail(`the fixed doodad to copy: ${JSON.stringify([fixedOne.position, fixedOne.flags])}`);
+  const known = new Set(k.doodads().map((d) => JSON.stringify(d.position)));
+  const fresh = () => k.doodads().filter((d) => !known.has(JSON.stringify(d.position)));
+  await k.hands.key("c", "KeyC", 67, 2);
+
+  if ((await k.setting("terrain.preserveCopiedHeight")) === false || (await k.box("Keep pasted height")) !== true) fail("Preserve Copied Object Height isn't on by default");
+  await k.look(-1024, 0);
+  await sleep(400);
+  await k.focusMap();
+  await k.hands.key("v", "KeyV", 86, 2);
+  await k.clickMiddle();
+  await k.save();
+  const kept = fresh();
+  if (kept.length !== 1 || kept[0].position[2] !== ground + 64 || !(kept[0].flags & k.FIXED)) fail(`a pasted fixed doodad with Preserve Copied Object Height on: ${JSON.stringify(kept.map((d) => [d.position, d.flags]))}`);
+
+  await k.run("w3.terrain.togglePreserveCopiedHeight");
+  if ((await k.setting("terrain.preserveCopiedHeight")) !== false || (await k.box("Keep pasted height")) !== false) fail("the toggle command didn't switch Preserve Copied Object Height off, or the toolbar box didn't follow");
+  await k.look(-1024, 512);
+  await sleep(400);
+  await k.clickMiddle();
+  await k.save();
+  const loose = fresh().filter((d) => JSON.stringify(d.position) !== JSON.stringify(kept[0]?.position));
+  if (loose.length !== 1 || loose[0].position[2] !== ground || (loose[0].flags & k.FIXED)) fail(`a pasted fixed doodad with Preserve Copied Object Height off: ${JSON.stringify(loose.map((d) => [d.position, d.flags]))}`);
+
+  // The toolbar box switches it on again, and gives the keys back to the map.
+  await k.hands.click(".model-toggle", "Keep pasted height");
+  if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box didn't switch Preserve Copied Object Height on");
+  if (!(await page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`))) fail("the Preserve Copied Object Height box kept the keyboard");
+  await k.hands.key("Escape", "Escape", 27);
+  await k.verify(fail);
+  await k.reset();
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -1149,6 +1243,7 @@ async function run() {
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
+    for (const check of [heightsPreserve]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     found.push(...problems(page.events));
