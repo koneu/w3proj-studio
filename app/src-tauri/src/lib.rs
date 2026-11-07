@@ -316,9 +316,11 @@ fn codec_canonicalize(app: AppHandle, root: String, path: String, text: String) 
 #[tauri::command]
 fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<String> {
     let rel = path.strip_prefix("map/").unwrap_or(&path);
+    // The file first: callers try this for files that may not be there (the raw form of a document
+    // whose JSON form is missing), and loading the format definitions for nothing is slow.
+    let bytes = std::fs::read(Path::new(&root).join(&path)).map_err(err)?;
     let registry = Registry::for_project(Path::new(&root), &user_format_dirs(&app)?).map_err(err)?;
     let name = w3proj::paths::to_archive_name(rel);
-    let bytes = std::fs::read(Path::new(&root).join(&path)).map_err(err)?;
     let mut last = format!("no format definition reads {name}");
     for codec in registry.for_archive_name(&name) {
         match codec.decode(&name, &bytes) {
