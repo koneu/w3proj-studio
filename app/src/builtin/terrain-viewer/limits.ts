@@ -1,0 +1,49 @@
+// The two limits the terrain viewer can hold edits to, with no editor state: how high or low water
+// can lie, and where objects may stand (the camera bounds). The viewer passes what it has; the tests
+// pass made-up values.
+
+import { WATER_LEVEL_MAX, WATER_LEVEL_MIN } from "../../lib/terrain/w3e";
+
+/** The water word of a corner: the flag and the stored level (low 14 bits). */
+export interface WaterWord { hasWater: boolean; rawWater: number }
+
+const levelOf = (c: WaterWord) => c.rawWater & 0x3fff;
+
+/**
+ * Enforce Water Height Limits: which corners an edit pushed against the limit of the stored level. The
+ * word holds 14 bits, so a surface that would lie higher or lower is cut off at the limit and the water
+ * no longer follows the shape that was meant. `before` and `after` are the same corners, in order;
+ * a corner counts if it has water at the limit now, and didn't before. Returns their positions.
+ */
+export function waterLimitHits(before: readonly WaterWord[], after: readonly WaterWord[]): number[] {
+  const atLimit = (c: WaterWord) => c.hasWater && (levelOf(c) <= WATER_LEVEL_MIN || levelOf(c) >= WATER_LEVEL_MAX);
+  const hits: number[] = [];
+  for (let i = 0; i < after.length; i++) if (atLimit(after[i]) && !(before[i] && atLimit(before[i]) && levelOf(before[i]) === levelOf(after[i]))) hits.push(i);
+  return hits;
+}
+
+import type { Bounds } from "./moveedit";
+export type { Bounds };
+
+/** The camera bounds of a map's w3i (left, bottom, right, top first), or null if it has none to trust. */
+export function cameraRect(info: { cameraBounds?: readonly number[] } | null | undefined): Bounds | null {
+  const b = info?.cameraBounds;
+  if (!Array.isArray(b) || b.length < 4 || !b.slice(0, 4).every((n) => Number.isFinite(n))) return null;
+  const [left, bottom, right, top] = b;
+  return left < right && bottom < top ? { left, bottom, right, top } : null;
+}
+
+/** Whether a point is inside the bounds (their edge too); everything is, without bounds. */
+export const insideBounds = (b: Bounds | null, x: number, y: number) => !b || (x >= b.left && x <= b.right && y >= b.bottom && y <= b.top);
+
+/** The point, or the nearest one inside the bounds. */
+export const clampPoint = (b: Bounds | null, x: number, y: number): [number, number] =>
+  b ? [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))] : [x, y];
+
+/** The bounds a moved object has to stay in: the map's own (the playable part, for a unit) and, when camera bounds
+ *  are enforced (`camera` is not null), the camera bounds as well, so where both reach. One rule for `clampShift`
+ *  in moveedit.ts, which cuts a group's shift to each entry's bounds. */
+export function limitTo(own: Bounds, camera: Bounds | null): Bounds {
+  if (!camera) return own;
+  return { left: Math.max(own.left, camera.left), right: Math.min(own.right, camera.right), bottom: Math.max(own.bottom, camera.bottom), top: Math.min(own.top, camera.top) };
+}

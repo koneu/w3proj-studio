@@ -537,6 +537,126 @@ async function heightsUniform(page, found) {
   await k.verify(fail);
 }
 
+/** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
+ *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
+ *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
+async function heightsLimits(page, found) {
+  const fail = (what) => found.push(`height tools (limits): ${what}`);
+  const k = await heightKit(page, "Limits");
+  const { hands } = k;
+  const bounds = k.read("war3map.w3i.json").cameraBounds;
+  const [bl, bb, br, bt] = bounds;
+  if (!(bl < br && bb < bt)) return fail(`camera bounds ${bounds}`);
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: br - 40, y: 0 }], ignoreRoom: true });
+  await k.save();
+  const count = () => k.doodads().length;
+  const nearEdge = () => k.doodads().find((d) => d.position[1] === 0 && d.position[0] > br - 100 && d.position[0] < br + 400);
+  await k.tab("Select");
+  await k.look(0, 0, { id: "LTlt", x: 0, y: 0 });
+  await sleep(500);
+  await k.focusMap();
+  await hands.key("c", "KeyC", 67, 2);
+
+  // A nudge: the doodad 40 inside the bound moves right.
+  await k.look(br - 40, 0, { id: "LTlt", x: br - 40, y: 0 });
+  await sleep(500);
+  await k.focusMap();
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
+  for (let i = 0; i < 3; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  await k.save();
+  if (nearEdge()?.position[0] !== br) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, the bound is ${br}`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await hands.key("ArrowRight", "ArrowRight", 39, 2);
+  await k.save();
+  if (nearEdge()?.position[0] !== br + 32) fail(`a nudge with Enforce Camera Bounds off left the doodad at ${nearEdge()?.position[0]}, wanted ${br + 32}`);
+
+  // A paste outside the bounds.
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await k.look(br + 400, 0);
+  await sleep(400);
+  await k.clearToasts();
+  const n0 = count();
+  await k.focusMap();
+  await hands.key("v", "KeyV", 86, 2);
+  await k.clickMiddle();
+  await k.save();
+  if (count() !== n0) fail("a paste outside the camera bounds placed a doodad with Enforce Camera Bounds on");
+  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await hands.click(".model-stage canvas");
+  await k.save();
+  if (count() !== n0 + 1) fail(`the same paste with Enforce Camera Bounds off placed ${count() - n0} doodads`);
+  await hands.key("Escape", "Escape", 27);
+
+  // A placement from the Objects tab: inside the bounds it works (control), outside it's refused.
+  const edgeX = nearEdge().position[0];
+  await k.look(edgeX, 0, { id: "LTlt", x: edgeX, y: 0 });
+  await sleep(400);
+  await k.run("w3.terrain.selectInPalette");
+  await sleep(300);
+  const hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
+  if (!/Placing/.test(hint ?? "")) return fail(`the Objects tab says "${hint}" after Select In Tool Palette`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await k.look(br - 1200, 256);
+  await sleep(400);
+  const n1 = count();
+  await hands.click(".model-stage canvas");
+  await sleep(500);
+  await k.save();
+  if (count() !== n1 + 1) fail(`a placement inside the camera bounds placed ${count() - n1} doodads (${await k.toasts()})`);
+  await k.look(br + 600, 256);
+  await sleep(400);
+  await k.clearToasts();
+  await hands.click(".model-stage canvas");
+  await sleep(500);
+  await k.save();
+  if (count() !== n1 + 1) fail("a placement outside the camera bounds worked with Enforce Camera Bounds on");
+  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused placement: "${await k.toasts()}"`);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await hands.click(".model-stage canvas");
+  await sleep(500);
+  await k.save();
+  if (count() !== n1 + 2) fail(`the same placement with Enforce Camera Bounds off placed ${count() - n1 - 1} doodads (${await k.toasts()})`);
+  await k.tab("Select");
+
+  // Water: four raises of 1000 make a mound whose top is past 2048, where the stored level of a surface at its height ends.
+  for (let i = 0; i < 4; i++) {
+    const raise = await k.tool("sculpt_terrain", { mode: "raise", amount: 1000, left: 256, bottom: 256, right: 2304, top: 2304, shape: "box" }).then(() => null, (e) => e.message);
+    if (raise) return fail(`raising the ground: ${raise}`);
+  }
+  await k.save();
+  const w3e = join(k.root, "map", "war3map.w3e.txt"), raised = hash(w3e);
+  await k.tab("Terrain");
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Deep:"]').click()`);
+  await k.clearToasts();
+  // The middle of the picture is the point looked at, which for the mound is its very tip; so a stroke on the mound
+  // starts a little below it, on the upper slope, which is above 2048 as well. `down` is how far, in pixels.
+  const stroke = async (x, y, down = 0) => {
+    await k.look(x, y);
+    await sleep(600);
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x - (down ? 6 : 40), y: c.y + down }, { x: c.x + (down ? 6 : 40), y: c.y + down });
+    await sleep(500);
+    await k.save();
+  };
+  await hands.click(".model-toggle", "Water limits");
+  if ((await k.setting("terrain.enforceWaterLimits")) !== true) fail("the toolbar box didn't switch Enforce Water Height Limits on");
+  await stroke(-1024, -1024);
+  const low = hash(w3e);
+  if (low === raised) fail("deep water on low ground changed nothing with Enforce Water Height Limits on");
+  await stroke(1280, 1280, 45);
+  if (hash(w3e) !== low) fail("deep water past the limit was drawn with Enforce Water Height Limits on");
+  if (!/water/i.test(await k.toasts())) fail(`no word on the refused water: "${await k.toasts()}"`);
+  await k.run("w3.terrain.toggleEnforceWaterLimits");
+  if ((await k.setting("terrain.enforceWaterLimits")) !== false || (await k.box("Water limits")) !== false) fail("the toggle command didn't switch Enforce Water Height Limits off");
+  await stroke(1280, 1280, 45);
+  if (hash(w3e) === low) fail("the same stroke with Enforce Water Height Limits off drew nothing");
+  await k.tab("Select");
+  await k.verify(fail);
+  await k.reset();
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -1293,7 +1413,7 @@ async function run() {
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
-    for (const check of [heightsPreserve, heightsUniform]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+    for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     found.push(...problems(page.events));

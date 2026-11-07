@@ -57,6 +57,9 @@ export interface Terrain {
 
 /** Water surfaces sit this far below their stored level. */
 export const WATER_OFFSET = 89.6;
+/** The stored water level is 14 bits: these are its lowest and highest values, and no surface lies beyond. */
+export const WATER_LEVEL_MIN = 0;
+export const WATER_LEVEL_MAX = 0x3fff;
 
 export function parseW3e(buf: Uint8Array): Terrain {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -146,7 +149,7 @@ export function setLayer(c: Corner, layer: number) {
 
 /** The stored water level word that puts the surface at world height `z`. */
 export function waterLevelAt(z: number): number {
-  return Math.max(0, Math.min(0x3fff, Math.round((z + WATER_OFFSET) * 4) + 0x2000));
+  return Math.max(WATER_LEVEL_MIN, Math.min(WATER_LEVEL_MAX, Math.round((z + WATER_OFFSET) * 4) + 0x2000));
 }
 
 /** Marks a corner as water with a stored level (keeping the word's unknown high bits). */

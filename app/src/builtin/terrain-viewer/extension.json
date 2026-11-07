@@ -71,7 +71,9 @@
       { "id": "w3.terrain.toggleLargeGrid", "when": "project", "title": "Toggle Large Grid Display", "category": "Terrain" },
       { "id": "w3.terrain.togglePreserveCopiedHeight", "when": "project", "title": "Toggle Preserve Copied Object Height", "category": "Terrain" },
       { "id": "w3.terrain.setUniformDoodadHeights", "when": "project", "title": "Set Uniform Doodad Heights", "category": "Terrain" },
-      { "id": "w3.terrain.resetFixedObjectHeights", "when": "project", "title": "Reset Fixed Object Heights", "category": "Terrain" }
+      { "id": "w3.terrain.resetFixedObjectHeights", "when": "project", "title": "Reset Fixed Object Heights", "category": "Terrain" },
+      { "id": "w3.terrain.toggleEnforceWaterLimits", "when": "project", "title": "Toggle Enforce Water Height Limits", "category": "Terrain" },
+      { "id": "w3.terrain.toggleEnforceCameraBounds", "when": "project", "title": "Toggle Enforce Camera Bounds", "category": "Terrain" }
     ],
     "services": [{ "id": "w3.terrain", "description": "Tool groups (tabs) in the terrain editor: registerToolGroup." }],
     "configuration": {
@@ -80,6 +82,8 @@
         "terrain.sky": { "type": "string", "default": "", "description": "Sky model shown in the terrain view, by its path; empty for none. A view setting: it isn't part of the map." },
         "terrain.fog": { "type": "boolean", "default": true, "description": "Show the map's fog in the terrain view, when the map has it on." },
         "terrain.preserveCopiedHeight": { "type": "boolean", "default": true, "description": "Preserve Copied Object Height: a pasted doodad with a fixed height keeps its height over the ground; with this off every pasted object sits on the ground." },
+        "terrain.enforceWaterLimits": { "type": "boolean", "default": false, "description": "Enforce Water Height Limits: an edit in the terrain view that would push water past the lowest or highest water height the game can store is refused, instead of being cut off at the limit." },
+        "terrain.enforceCameraBounds": { "type": "boolean", "default": false, "description": "Enforce Camera Bounds: in the terrain view, objects can't be placed, pasted or moved outside the map's camera bounds." },
         "terrain.boundary": { "type": "boolean", "default": true, "description": "Darken the part of the map past the playable area in the terrain view." },
         "terrain.animate": { "type": "boolean", "default": true, "description": "Placed objects play their Stand animation in the terrain view (off: they stand still)." },
         "terrain.lighting.enabled": { "type": "boolean", "default": true, "description": "Light the terrain view with the map's day/night lighting (off: an even light, e.g. when the map's lighting is very dark)." },

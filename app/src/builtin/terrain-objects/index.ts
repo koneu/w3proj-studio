@@ -61,6 +61,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const occ = await ed.objects.occupancy();
       ok = ed.objects.backdrop(kind, x, y) || await occ.fits(kind, id, x, y, angle);
     }
+    ok = ok && ed.objects.inBounds(x, y);
     if (seq !== ghostSeq) return;
     ed.objects.setGhost({ id, x, y, angle, player: kind === "w3u" ? owner : undefined, ok });
   };
@@ -73,6 +74,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const placeStart = (pos: [number, number, number]) => {
     if (owner >= 24) { w3.window.showWarning("Start locations are for players 1–24, not neutral players."); return; }
     const x = Math.round(pos[0] / 64) * 64, y = Math.round(pos[1] / 64) * 64;
+    if (!ed.objects.inBounds(x, y)) { w3.window.showWarning("Not placed: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it."); return; }
     const old = ed.objects.list().find((o) => o.id === START.id && o.player === owner);
     if (old) {
       const before = [...old.position] as [number, number, number], after: [number, number, number] = [x, y, heightAt(ed.terrain, x, y)];
@@ -104,6 +106,10 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (!stroke) {
       const angle = facing();
       const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, pos[0], pos[1]) : pos;
+      if (!ed.objects.inBounds(x, y)) {
+        w3.window.showWarning("Not placed: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it.");
+        return;
+      }
       if (respect() && fp && !ed.objects.backdrop(kind, x, y) && !(await occ!.fits(kind, id, x, y, angle))) {
         w3.window.showWarning(`No room for ${name} here (its footprint overlaps blocked ground or another object). Turn off "Respect pathing" to place it anyway.`);
         return;
@@ -121,6 +127,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           const angle = facing();
           // Snap to the pathing grid like the World Editor (cell centres for trees).
           const [sx, sy] = kind === "w3u" ? await ed.objects.buildingSpot(id, Math.round(x / 32) * 32, Math.round(y / 32) * 32) : [Math.round(x / 32) * 32, Math.round(y / 32) * 32];
+          if (!ed.objects.inBounds(sx, sy)) continue;
           if (fp) {
             if (respect()) {
               if (!ed.objects.backdrop(kind, sx, sy) && !(await occ!.fits(kind, id, sx, sy, angle))) continue;

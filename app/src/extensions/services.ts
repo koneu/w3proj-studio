@@ -213,6 +213,8 @@ export interface TerrainObjects {
   buildingSpot(id: string, x: number, y: number): Promise<[number, number]>;
   /** Whether an object here is the map's backdrop: doodads past the playable map stand on what counts as blocked. */
   backdrop(kind: string, x: number, y: number): boolean;
+  /** Whether an object may stand here: false past the camera bounds while Enforce Camera Bounds is on. */
+  inBounds(x: number, y: number): boolean;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a
    *  walking unit. Unlike occupancy(), units and items don't count. */
   blockers(): Promise<Uint8Array>;
