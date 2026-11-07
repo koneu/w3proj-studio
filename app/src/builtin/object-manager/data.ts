@@ -4,6 +4,7 @@
 import { ownerOf } from "../../lib/terrain/owner";
 import { placedName, ident, type PlacedJson } from "../../lib/script/jass";
 import type { TriggerFile } from "../../lib/triggers/wtg";
+import { idsUsedBy } from "../../lib/objects/refs";
 
 /** Tells which project (root) the rows belong to, and whether a finished build is still
  *  wanted: a build started for one project is dropped once the project changed, even if
@@ -59,7 +60,7 @@ const owner = (player?: number) => { const p = ownerOf(player); return p === und
 const at = (p: Placed) => `(${Math.round(p.position[0])}, ${Math.round(p.position[1])})`;
 
 /** What object data holds per object (field values are strings, ints, reals). */
-export interface ObjectEntry { id?: string; base: string; mods?: { value: unknown }[]; sets?: { mods: { value: unknown }[] }[] }
+export interface ObjectEntry { id?: string; base: string; mods?: { field?: string; value: unknown }[]; sets?: { mods: { field?: string; value: unknown }[] }[] }
 
 /** Which object uses which of `ids`: values of its fields ("Y01q,Y01w" for abilities and the
  *  like). Key: the id used; value: the users' labels with where they go. */
@@ -68,14 +69,10 @@ export function objectRefs(kinds: { ext: string; label: string; objects: ObjectE
   for (const { ext, label, objects } of kinds) {
     for (const o of objects) {
       const self = o.id ?? o.base;
-      for (const m of [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)]) {
-        if (typeof m.value !== "string") continue;
-        for (const token of m.value.split(/[,;\s]+/)) {
-          if (token === self || !ids.has(token)) continue;
-          let users = out.get(token);
-          if (!users) out.set(token, (users = new Map()));
-          users.set(`${label}: ${nameOf(self)}`, { kind: "object", ext, id: self });
-        }
+      for (const token of idsUsedBy(o, ids)) {
+        let users = out.get(token);
+        if (!users) out.set(token, (users = new Map()));
+        users.set(`${label}: ${nameOf(self)}`, { kind: "object", ext, id: self });
       }
     }
   }
