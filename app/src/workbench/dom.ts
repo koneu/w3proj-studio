@@ -139,3 +139,10 @@ export function copyButton(text: string | (() => string), cls = "copy-error"): H
   });
   return b;
 }
+
+/** The view an editor shows in place of itself when it can't open a file: the message, what can be
+ *  done about it (`extra`, e.g. a button) and a Copy button for the message. Use this for every
+ *  editor's failure, so the text can always be pasted into a report. */
+export function errorView(message: string, ...extra: (Node | string | null | undefined | false)[]): HTMLDivElement {
+  return h("div.editor-error", {}, `${message} `, ...extra, copyButton(message));
+}

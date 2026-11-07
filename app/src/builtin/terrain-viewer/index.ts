@@ -8,7 +8,7 @@ import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEdit
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, scaledNudge, waterLimitHits, type Bounds } from "./limits";
-import { h } from "../../workbench/dom";
+import { errorView, h } from "../../workbench/dom";
 import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -1069,8 +1069,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           savedW3e = await readTerrainBytes(doc.path, doc);
           terrain = parseW3e(savedW3e);
         } catch (e) {
-          el.append(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
-            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.append(errorView(`Can't read ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
         const canvas = h("canvas.model-canvas");
@@ -1078,7 +1077,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           renderer = new TerrainRenderer(canvas, terrain);
         } catch (e) {
-          el.append(h("div.editor-error", {}, `WebGL: ${(e as Error).message}`));
+          el.append(errorView(`WebGL: ${(e as Error).message}`));
           return {};
         }
         let dirty = true;

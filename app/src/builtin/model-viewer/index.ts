@@ -1,5 +1,5 @@
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
-import { formatBytes, h } from "../../workbench/dom";
+import { errorView, formatBytes, h } from "../../workbench/dom";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
@@ -40,8 +40,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           model = parseMdx(bytes);
         } catch (e) {
-          el.append(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
-            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.append(errorView(`Can't read ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
 
@@ -51,7 +50,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           renderer = new ModelRenderer(canvas, model);
         } catch (e) {
-          el.append(h("div.editor-error", {}, `WebGL: ${(e as Error).message}`));
+          el.append(errorView(`WebGL: ${(e as Error).message}`));
           return {};
         }
 

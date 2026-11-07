@@ -20,7 +20,7 @@ import {
   allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
-import { h } from "../../workbench/dom";
+import { errorView, h } from "../../workbench/dom";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
@@ -220,8 +220,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           file = await readWtgFile(doc, doc.path, async () => data);
         } catch (e) {
-          el.replaceChildren(h("div.editor-error", {}, `Can't read ${doc.path}: ${(e as Error).message} `,
-            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.replaceChildren(errorView(`Can't read ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
         const game = doc.path.startsWith("game:");

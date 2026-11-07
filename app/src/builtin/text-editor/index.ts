@@ -15,7 +15,7 @@ import { luaSymbols } from "../../lib/lua/symbols";
 import { gameJassEnv, jassSymbols } from "../../lib/jass/env";
 import { symbolTools } from "./jasstools";
 import { linter } from "./lint";
-import { h } from "../../workbench/dom";
+import { errorView, h } from "../../workbench/dom";
 import { jass } from "./jass";
 
 function language(path: string): Extension {
@@ -184,8 +184,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           text = await doc.readText();
         } catch (e) {
           if ((e as Error).name === "NotUtf8Error") {
-            el.append(h("div.editor-error", {}, "This file is not UTF-8 text. ",
-              h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+            el.append(errorView("This file is not UTF-8 text.", h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
             return {};
           }
           throw e;
