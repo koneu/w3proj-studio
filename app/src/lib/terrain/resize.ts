@@ -92,6 +92,12 @@ export function validPathingOverrides(file: unknown): file is PathingOverrides {
     && f.cells.every((c) => Array.isArray(c) && c.length === 4 && c.every((n) => Number.isInteger(n)));
 }
 
+/** The one test of "these overrides belong to a pathing map of `width`×`height` cells": the shape the
+ *  editor writes and that size. The Pathing Editor, the resize and the wpm all ask this. */
+export function overridesForSize(file: unknown, width: number, height: number): PathingOverrides | null {
+  return validPathingOverrides(file) && file.width === width && file.height === height ? file : null;
+}
+
 /** The overrides after `change`: each stays on the same ground cell (cells shift with the
  *  offset), those on cells that no longer exist are dropped. A file for another size than the
  *  terrain's (the editor ignores it already) is returned as it is. */
@@ -110,11 +116,17 @@ export function resizePathingOverrides(file: PathingOverrides, t: Terrain, chang
 }
 
 /** What a resize does with a parsed pathing.json read before the change. `null`: the file isn't
- *  this map's overrides (malformed, or for another size than the OLD terrain's, so possibly stale):
- *  neither applied nor rewritten. Otherwise the moved overrides, and `write` only when their size or
+ *  this map's overrides (malformed, or for a size that is neither the OLD terrain's nor the NEW one's: stale):
+ *  neither applied nor rewritten. A file already for the NEW size is applied, never rewritten. Otherwise the moved overrides, and `write` only when their size or
  *  cells differ from what was read (a camera-bounds-only change leaves the file's bytes alone). */
 export function planPathingOverrides(stored: unknown, t: Terrain, change: Sides): { file: PathingOverrides; write: boolean } | null {
-  if (!validPathingOverrides(stored) || stored.width !== (t.width - 1) * 4 || stored.height !== (t.height - 1) * 4) return null;
+  if (!validPathingOverrides(stored)) return null;
+  if (!overridesForSize(stored, (t.width - 1) * 4, (t.height - 1) * 4)) {
+    // For the NEW size already: the Pathing Editor adopts it as it is, so the wpm must carry it too
+    // (applied, never rewritten). Any other size is stale: left alone.
+    const [nw, nh] = resizedSize(t, change).map((n) => n * 4);
+    return overridesForSize(stored, nw, nh) ? { file: stored, write: false } : null;
+  }
   const file = resizePathingOverrides(stored, t, change);
   // The moved cells come sorted; a hand-written order alone is no reason to rewrite the file.
   const old = [...stored.cells].sort((a, b) => a[1] * stored.width + a[0] - (b[1] * stored.width + b[0]));
@@ -132,11 +144,12 @@ export function pathingOverridesText(file: PathingOverrides): string {
 /** Applies the overrides to a wpm (16-byte header, then one byte per cell) of terrain `t`.
  *  Returns false, changing nothing, when the file isn't valid or is for another size than `t`. */
 export function applyPathingOverrides(wpm: Uint8Array, file: unknown, t: Terrain): boolean {
-  if (!validPathingOverrides(file) || file.width !== (t.width - 1) * 4 || file.height !== (t.height - 1) * 4) return false;
+  const f = overridesForSize(file, (t.width - 1) * 4, (t.height - 1) * 4);
+  if (!f) return false;
   const cells = wpm.subarray(16);
-  for (const [x, y, set, clear] of file.cells) {
-    const i = y * file.width + x;
-    if (x >= 0 && x < file.width && y >= 0 && y < file.height && i < cells.length) cells[i] = (cells[i] | set) & ~clear;
+  for (const [x, y, set, clear] of f.cells) {
+    const i = y * f.width + x;
+    if (x >= 0 && x < f.width && y >= 0 && y < f.height && i < cells.length) cells[i] = (cells[i] | set) & ~clear;
   }
   return true;
 }

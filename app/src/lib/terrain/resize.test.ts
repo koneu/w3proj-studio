@@ -33,7 +33,7 @@ test("adding on the left and bottom moves the offset, not the world position", (
   assert.deepEqual(r.corners[r.width + 1], terrain(3, 3).corners[0]);
 });
 
-import { applyPathingOverrides, applyResizePathing, pathingOverridesText, planPathingOverrides, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
+import { overridesForSize, applyPathingOverrides, applyResizePathing, pathingOverridesText, planPathingOverrides, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
 
 // A 64×64-tile map is 256×256 pathing cells.
 const file = (t: Terrain, cells: PathingOverrides["cells"]): PathingOverrides => ({ format: "w3proj.pathing/1", width: (t.width - 1) * 4, height: (t.height - 1) * 4, cells });
@@ -132,14 +132,24 @@ test("applying moved overrides to the new wpm: only the new terrain's size match
   assert.equal(wpm.reduce((n, b) => n + (b ? 1 : 0), 0), 1);
 });
 
-test("pathing plan: a stale file whose size equals the NEW size is neither applied nor rewritten", () => {
+test("pathing plan: a file whose size equals the NEW size is applied to the wpm (the editor adopts it) but not rewritten", () => {
   const t = big(), change: Sides = [32, 0, 0, 0], next = resizeTerrain(t, change);
-  const stale = file(next, [[3, 4, 8, 0]]);
-  assert.equal(planPathingOverrides(stale, t, change), null);
+  const adopted = file(next, [[3, 4, 8, 0]]);
   const wpm = new Uint8Array(16 + 384 * 256);
-  const plan = planPathingOverrides(stale, t, change);
-  if (plan) applyPathingOverrides(wpm, plan.file, next);
-  assert.ok(wpm.every((b) => b === 0));
+  const plan = planPathingOverrides(adopted, t, change);
+  assert.equal(plan?.write, false);
+  assert.equal(applyResizePathing(wpm, plan, next, change), null);
+  assert.equal(wpm[16 + 4 * 384 + 3], 8, "the same cell the editor will show");
+  // another size, or a malformed file with the new size, is neither applied nor rewritten
+  assert.equal(planPathingOverrides({ ...adopted, width: 999 }, t, change), null);
+  assert.equal(planPathingOverrides({ ...adopted, cells: [[1, 2, 3]] }, t, change), null);
+});
+
+test("overridesForSize: the shared validity test", () => {
+  const t = big(), f = file(t, [[1, 1, 1, 0]]);
+  assert.equal(overridesForSize(f, 256, 256), f);
+  assert.equal(overridesForSize(f, 256, 128), null);
+  assert.equal(overridesForSize({ ...f, cells: "x" }, 256, 256), null);
 });
 
 test("pathing plan: a camera-bounds-only change keeps the file; a move or a dropped cell rewrites it", () => {
@@ -190,9 +200,9 @@ test("pathing file: fields other than format, width, height and cells are droppe
 test("applyResizePathing: what resizeMap applies and writes", () => {
   const t = big(), change: Sides = [32, 0, 0, 0], next = resizeTerrain(t, change);
   const wpm = () => new Uint8Array(16 + 384 * 256);
-  // stale / malformed: nothing applied, nothing written
+  // stale (another size) / malformed: nothing applied, nothing written
   let w = wpm();
-  assert.equal(applyResizePathing(w, planPathingOverrides(file(next, [[3, 4, 8, 0]]), t, change), next, change), null);
+  assert.equal(applyResizePathing(w, planPathingOverrides({ ...file(next, [[3, 4, 8, 0]]), width: 999 }, t, change), next, change), null);
   assert.ok(w.every((b) => b === 0));
   // real move: applied and written
   w = wpm();

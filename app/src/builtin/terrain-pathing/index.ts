@@ -7,7 +7,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import { pathingOverridesText } from "../../lib/terrain/resize";
+import { overridesForSize, pathingOverridesText, validPathingOverrides } from "../../lib/terrain/resize";
 import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
@@ -46,13 +46,16 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let loading: Promise<void> | null = null;
 
   const load = w3.workspace.readText(FILE).then((text) => {
-    const j = JSON.parse(text) as { format?: string; width: number; height: number; cells: [number, number, number, number][] };
+    const parsed = JSON.parse(text) as unknown;
     fileExists = true;
-    if (j.width !== W || j.height !== H) {
-      w3.window.showWarning(`${FILE} is for a ${j.width}×${j.height} pathing map, this map's is ${W}×${H}; its overrides are ignored.`);
+    const j = overridesForSize(parsed, W, H);
+    if (!j) {
+      w3.window.showWarning(validPathingOverrides(parsed)
+        ? `${FILE} is for a ${parsed.width}×${parsed.height} pathing map, this map's is ${W}×${H}; its overrides are ignored.`
+        : `${FILE} isn't a pathing overrides file; its overrides are ignored.`);
       return;
     }
-    for (const [x, y, set, clear] of j.cells) overrides.set(y * W + x, { set, clear });
+    for (const [x, y, set, clear] of j.cells) if (x >= 0 && x < W && y >= 0 && y < H) overrides.set(y * W + x, { set, clear });
   }).catch(() => { /* no overrides yet */ });
 
   const apply = (cells: Uint8Array) => {
