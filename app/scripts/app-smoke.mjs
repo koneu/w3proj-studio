@@ -62,17 +62,22 @@ const NEW_MAPS = [
   { args: { name: "Größe 金矿", width: 64, height: 128, water: "shallow" }, size: [64, 128] },
 ];
 
-/** Creates maps as a user would, through the app, and holds what comes out against the tools. */
-async function newMaps(page, found) {
-  const folder = join(work, "new");
-  mkdirSync(folder, { recursive: true });
-  const tool = async (name, args = {}) => {
+/** Calls an MCP tool of the app, as an AI client would; a tool error throws. Returns the reply's text. */
+function mcpTool(page) {
+  return async (name, args = {}) => {
     const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
     const reply = JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(message)})`));
     const text = reply.result?.content?.[0]?.text ?? reply.error?.message ?? "";
     if (reply.error || reply.result?.isError) throw new Error(`${name}: ${text}`);
     return text;
   };
+}
+
+/** Creates maps as a user would, through the app, and holds what comes out against the tools. */
+async function newMaps(page, found) {
+  const folder = join(work, "new");
+  mkdirSync(folder, { recursive: true });
+  const tool = mcpTool(page);
   // Stands for the user pressing Create map.
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
   await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
@@ -160,6 +165,163 @@ async function newMaps(page, found) {
     join(app, "scripts", "script-check", "check-scripts.mts"), join(app, "src", "lib"), common, blizzard, ...scripts], { encoding: "utf8" });
   if (check.status !== 0 || !check.stdout.includes(`${NEW_MAPS.length} scripts checked`)) found.push(`generated scripts: ${(check.stderr + check.stdout).trim().slice(0, 500)}`);
   return scripts.length;
+}
+
+/** Lets a project file's writes be held by the test: `hold` stops them where they begin, `release` lets them
+ *  go. `state` says how many ran and how many were running at once, and whether the file's editor has
+ *  unsaved changes. The writes are the workspace's, which every editor and tool saves through. */
+async function gateWrites(page, path) {
+  const key = JSON.stringify(path);
+  await page.evaluate(`(() => {
+    const path = ${key}, gates = (window.__gates ??= {});
+    const g = gates[path] = { hold: null, release: null, inflight: 0, max: 0, writes: 0 };
+    const space = w3Workbench.workspace, write = (space.__write ??= space.writeText);
+    space.writeText = async function (p, text) {
+      const g = gates[String(p).split(String.fromCharCode(92)).join("/")];
+      if (!g) return write.call(this, p, text);
+      g.writes++; g.max = Math.max(g.max, ++g.inflight);
+      try {
+        if (g.hold) await g.hold;
+        return await write.call(this, p, text);
+      } finally { g.inflight--; }
+    };
+  })()`);
+  return {
+    state: () => page.evaluate(`({ ...window.__gates[${key}], dirty: w3.editors.isDirty(${key}) })`),
+    hold: () => page.evaluate(`(() => { const g = window.__gates[${key}]; g.hold = new Promise((r) => { g.release = r; }); })()`),
+    release: () => page.evaluate(`(() => { const g = window.__gates[${key}]; g.release?.(); g.hold = null; })()`),
+  };
+}
+
+/** The terrain editor's wiring around its saves and reloads, which no unit test can reach: tools that
+ *  follow each other at once, footprints read again, and saves that run one at a time. */
+async function terrainWiring(page, found) {
+  const fail = (what) => found.push(`terrain wiring: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "wiring");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Wiring", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const json = async (name, args) => JSON.parse(await tool(name, args));
+  const place = (id, x, y) => json("place_objects", { objects: [{ id, x, y, player: 1 }] });
+
+  // A type made by create_object is placeable by the very next call, with no wait in between: the
+  // editor waits for the reload that the save of the object data sets off.
+  const made = (await json("create_object", { kind: "units", base: "hfoo" })).id;
+  const first = await json("place_objects", { objects: [{ id: made, x: 0, y: 0, player: 1 }], ignoreRoom: true }).catch((e) => ({ error: e.message }));
+  if (first.placed !== 1 || first.skipped?.length) fail(`a unit made by create_object, placed at once: ${JSON.stringify(first)}`);
+
+  // A footprint changed in the object data is seen with the editor still open. A big building stands
+  // in the way of a second one; once its footprint is made small, the second fits.
+  const hall = (await json("create_object", { kind: "units", base: "hbar" })).id;
+  const one = await place(hall, 1000, 1000).catch((e) => ({ error: e.message }));
+  if (one.placed !== 1) fail(`the first building: ${JSON.stringify(one)}`);
+  const blocked = await place(hall, 1100, 1000).then(() => null, (e) => e.message);
+  if (!/stands there/.test(blocked ?? "")) fail(`a building next to a big one wasn't refused (control): ${blocked}`);
+  await tool("set_object_fields", { kind: "units", id: hall, changes: [{ field: "upat", value: "PathTextures\\2x2Default.tga" }] });
+  const small = await place(hall, 1100, 1000).catch((e) => ({ error: e.message }));
+  if (small.placed !== 1) fail(`the footprint change wasn't seen without reopening: ${JSON.stringify(small)}`);
+
+  // Saves of the ground. The write of the file is held, to make an edit and another save while it runs.
+  const hands = new Hands(page);
+  const ground = join(root, "map", "war3map.w3e.txt");
+  const gate = await gateWrites(page, "map/war3map.w3e.txt");
+  const state = gate.state;
+  const hold = gate.hold, release = gate.release;
+  await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
+  await sleep(300);
+  const canvas = await hands.where(".terrain-view canvas, canvas");
+  let row = 0;
+  const paint = async () => {
+    row += 1;
+    await hands.drag({ x: canvas.x - 60, y: canvas.y - 120 + row * 40 }, { x: canvas.x + 60, y: canvas.y - 120 + row * 40 });
+    await sleep(200);
+  };
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const base = hash(ground);
+  await paint();
+  if (!(await state()).dirty) { fail("painting didn't mark the ground as changed"); return; }
+
+  try {
+    // A: an edit made while the save writes stays unsaved, and is saved by the next one.
+    await hold();
+    await page.evaluate(`void (window.__save = w3.editors.saveAll())`);
+    await until("the write", async () => (await state()).inflight === 1, 5000);
+    await paint();
+    await release();
+    await page.evaluate(`window.__save`);
+    await sleep(300);
+    const afterFirst = hash(ground);
+    if (afterFirst === base) fail("the save wrote nothing");
+    if (!(await state()).dirty) fail("an edit made during a save was marked as saved");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if ((await state()).dirty) fail("the next save left the ground marked as changed");
+    if (hash(ground) === afterFirst) fail("an edit made during a save was lost: the next save wrote the same file");
+
+    // B: saves run one at a time, even asked for while one runs.
+    await paint();
+    const writesBefore = (await state()).writes;
+    await hold();
+    await page.evaluate(`void (window.__save = w3.editors.saveAll())`);
+    await until("the write", async () => (await state()).inflight === 1, 5000);
+    await paint();
+    await page.evaluate(`void (window.__save2 = w3.editors.saveAll())`);
+    await sleep(500);
+    const during = await state();
+    if (during.writes - writesBefore !== 1 || during.inflight !== 1) fail(`a second save started while the first wrote: ${during.writes - writesBefore} writes, ${during.inflight} in flight`);
+    await release();
+    await page.evaluate(`Promise.all([window.__save, window.__save2])`);
+    await sleep(300);
+    const end = await state();
+    if (end.max > 1) fail(`${end.max} writes of the ground ran at once`);
+    if (end.writes - writesBefore !== 2) fail(`${end.writes - writesBefore} writes for two saves`);
+    if (end.dirty) fail("the ground is marked as changed after two saves");
+    if (hash(ground) === afterFirst) fail("the second save didn't write the edit made during the first");
+
+  } finally {
+    await release();
+  }
+
+  // The Object Editor's strings: a name kept in war3map.wts is saved there, and one typed while the
+  // file is written stays unsaved.
+  await tool("set_object_fields", { kind: "units", id: made, changes: [{ field: "unam", value: "TRIGSTR_001" }] });
+  await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", ${JSON.stringify(made)})`);
+  await until("the object's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000);
+  await hands.click("input.obj-field-search");
+  await hands.type("unam");
+  await until("the name field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  const strings = join(root, "map", "war3map.wts");
+  const wts = gateWrites(page, "map/war3map.wts"), objects = "map/war3map.w3u.json";
+  const gated = await wts;
+  const dirtyObjects = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(objects)})`);
+  await retype(hands, ".obj-table .obj-value-cell input", "First Name");
+  if (!(await dirtyObjects())) fail("changing a map string didn't mark the object file as changed");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  if (!readFileSync(strings, "utf8").includes("First Name")) fail("a changed map string wasn't saved into war3map.wts");
+  if (await dirtyObjects()) fail("the object file is still marked as changed after saving");
+  try {
+    await retype(hands, ".obj-table .obj-value-cell input", "Second Name");
+    await gated.hold();
+    await page.evaluate(`void (window.__save = w3.editors.saveAll())`);
+    await until("the write of the strings", async () => (await gated.state()).inflight === 1, 5000);
+    await retype(hands, ".obj-table .obj-value-cell input", "Third Name");
+    await gated.release();
+    await page.evaluate(`window.__save`);
+    await sleep(300);
+    if (!(await dirtyObjects())) fail("a string typed while war3map.wts was written was marked as saved");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if (await dirtyObjects()) fail("the next save left the object file marked as changed");
+    const text = readFileSync(strings, "utf8");
+    if (!text.includes("Third Name") || text.includes("Second Name")) fail("a string typed during a save was lost");
+  } finally {
+    await gated.release();
+  }
 }
 
 /** The New Map dialog and the terrain painter, by mouse and keyboard. */
@@ -446,6 +608,7 @@ async function run() {
     if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
 
     const made = await newMaps(page, found);
+    await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
