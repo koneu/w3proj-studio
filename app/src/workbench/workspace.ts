@@ -5,6 +5,12 @@ import { Emitter } from "./dom";
 export class WorkspaceService {
   private info: ProjectInfo | null = null;
   private fileList: FileInfo[] = [];
+  /** The file list's paths, lower case with forward slashes: the lookup for a written file. */
+  private listed = new Set<string>();
+  private setList(list: FileInfo[]) {
+    this.fileList = list;
+    this.listed = new Set(list.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+  }
   private folderList: string[] = [];
   readonly onDidChange = new Emitter<void>();
   /** A project file was written (its path as given, with forward slashes). */
@@ -34,7 +40,7 @@ export class WorkspaceService {
 
   close() {
     this.info = null;
-    this.fileList = [];
+    this.setList([]);
     this.folderList = [];
     void this.settings.loadProject(null);
     this.onDidChange.fire();
@@ -43,7 +49,7 @@ export class WorkspaceService {
   async refresh(fire = true) {
     if (!this.info) return;
     this.info = await invoke<ProjectInfo>("project_open", { path: this.info.root });
-    this.fileList = await invoke<FileInfo[]>("project_files", { root: this.info.root });
+    this.setList(await invoke<FileInfo[]>("project_files", { root: this.info.root }));
     this.folderList = await invoke<string[]>("project_folders", { root: this.info.root });
     this.ownWrites.clear();
     if (fire) this.onDidChange.fire();
@@ -68,7 +74,7 @@ export class WorkspaceService {
       if ((!b || b.size !== f.size || b.modified !== f.modified) && !own.has(k)) changed.add(k);
     }
     for (const k of before.keys()) if (!own.has(k)) changed.add(k);
-    this.fileList = after;
+    this.setList(after);
     this.ownWrites.clear();
     if (changed.size) {
       this.info = await invoke<ProjectInfo>("project_open", { path: root });
@@ -83,13 +89,6 @@ export class WorkspaceService {
     return joinPath(this.info.root, projectPath);
   }
 
-  /** A path as the file list has it (project-relative, forward slashes), lower case. */
-  private relative(p: string): string {
-    const abs = this.resolve(p).replace(/\\/g, "/").toLowerCase();
-    const root = (this.info?.root ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    return abs.startsWith(root + "/") ? abs.slice(root.length + 1) : abs;
-  }
-
   readText(p: string) {
     return readText(this.resolve(p));
   }
@@ -97,9 +96,26 @@ export class WorkspaceService {
     return readBytes(this.resolve(p));
   }
   async writeText(p: string, text: string) {
-    await writeText(this.resolve(p), text);
-    this.ownWrites.add(this.relative(p));
+    const root = this.info?.root, target = this.resolve(p);
+    await writeText(target, text);
+    this.noticeWrite(target, root, new TextEncoder().encode(text).length);
     this.onDidSave.fire(p.replace(/\\/g, "/"));
+  }
+  /** After a write to `target`, resolved against `root` before the write started: a file inside the
+   *  project that the list doesn't have yet (a new file, e.g. an export into map/Scripts/) is added
+   *  to it at once, alone: nothing else is re-read, so changes made by others stay to be noticed.
+   *  The write itself isn't an external change. Folders the list never has (build, .git,
+   *  node_modules at the top) are left out; so is a write that finished after a project switch. */
+  private noticeWrite(target: string, root: string | undefined, size: number) {
+    if (!root || this.info?.root !== root) return;
+    const abs = target.replace(/\\/g, "/"), base = root.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!abs.toLowerCase().startsWith(base.toLowerCase() + "/")) return;
+    const rel = abs.slice(base.length + 1), key = rel.toLowerCase();
+    if (/^(build|\.git|node_modules)\//.test(key)) return;
+    this.ownWrites.add(key);
+    if (this.listed.has(key)) return;
+    this.setList([...this.fileList, { path: rel, size, modified: Date.now() }].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
+    this.onDidChange.fire();
   }
   /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
   async delete(p: string) {
@@ -162,8 +178,9 @@ export class WorkspaceService {
     return invoke<string[]>("fs_list_tree", { path: this.resolve(path) });
   }
   async writeBytes(p: string, bytes: Uint8Array) {
-    await writeBytes(this.resolve(p), bytes);
-    this.ownWrites.add(this.relative(p));
+    const root = this.info?.root, target = this.resolve(p);
+    await writeBytes(target, bytes);
+    this.noticeWrite(target, root, bytes.length);
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
 }
