@@ -40,11 +40,13 @@ export class WorkspaceService {
     const seen = new Set([root.toLowerCase()]);
     const others = this.settings.get<string[]>("recentProjects", []).filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
     await this.settings.set("recentProjects", [root, ...others].slice(0, 10));
-    this.tidying = this.tidyRecents(root);
+    this.tidying = this.tidyRecents(root, ++this.openGen);
     this.onDidChange.fire();
   }
 
   private tidying: Promise<void> = Promise.resolve();
+  /** Counts the opens: a tidy that finishes after a later open is out of date and writes nothing. */
+  private openGen = 0;
   /** Resolves when the recent list has been tidied after the last open(). */
   recentsTidied() {
     return this.tidying;
@@ -52,12 +54,17 @@ export class WorkspaceService {
 
   /** Recent entries that are another spelling of one already listed go; each question to the disk
    *  has a time limit, since an offline share may never answer. */
-  private async tidyRecents(root: string) {
-    const spelled = await Promise.all(this.settings.get<string[]>("recentProjects", []).map((p) => timeLimit(invoke<string>("path_normalize", { path: p }), 2000).catch(() => p)));
-    if (this.info?.root !== root) return;
-    const seen = new Set<string>();
-    const list = spelled.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
-    if (list.length !== spelled.length || list.some((p, i) => p !== spelled[i])) await this.settings.set("recentProjects", list);
+  private async tidyRecents(root: string, gen: number) {
+    try {
+      const spelled = await Promise.all(this.settings.get<string[]>("recentProjects", []).map((p) => timeLimit(invoke<string>("path_normalize", { path: p }), 2000).catch(() => p)));
+      if (gen !== this.openGen || this.info?.root !== root) return;
+      const seen = new Set<string>();
+      const list = spelled.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
+      if (list.length !== spelled.length || list.some((p, i) => p !== spelled[i])) await this.settings.set("recentProjects", list);
+    } catch (e) {
+      // Only a tidier list is lost; the open itself went well.
+      console.warn(`could not tidy the recent projects: ${e}`);
+    }
   }
 
   close() {
@@ -72,21 +79,23 @@ export class WorkspaceService {
     if (!this.info) return;
     // Writes that finish while this reads are neither lost from the list nor left for the next
     // external-change check to report: only what was known when it started is cleared.
-    const ownBefore = new Set(this.ownWrites), listedBefore = this.listed;
+    const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
     this.info = await invoke<ProjectInfo>("project_open", { path: this.info.root });
     const list = await invoke<FileInfo[]>("project_files", { root: this.info.root });
     this.folderList = await invoke<string[]>("project_folders", { root: this.info.root });
     this.setList(this.keepNoticed(list, listedBefore, ownBefore));
-    for (const k of ownBefore) this.ownWrites.delete(k);
+    for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
     if (fire) this.onDidChange.fire();
   }
 
-  /** Files written through the workspace since the last refresh (lower case). */
-  private ownWrites = new Set<string>();
+  /** Files written through the workspace since the last check (lower case), with their size and time as
+   *  the disk had them right after the write (null: not known yet). The write counts as ours only while
+   *  the disk still matches: another program changing the file afterwards is an external change. */
+  private ownWrites = new Map<string, { size: number; modified: number } | null>();
 
   /** `list`, just read from the disk, plus the files our own writes added to the list since
    *  `listedBefore` (the read may have started before they existed). */
-  private keepNoticed(list: FileInfo[], listedBefore: ReadonlySet<string>, ownBefore: ReadonlySet<string>): FileInfo[] {
+  private keepNoticed(list: FileInfo[], listedBefore: ReadonlySet<string>, ownBefore: { has(k: string): boolean }): FileInfo[] {
     const have = new Set(list.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
     const extra = this.fileList.filter((f) => {
       const k = f.path.replace(/\\/g, "/").toLowerCase();
@@ -100,21 +109,27 @@ export class WorkspaceService {
   async externalChanges(): Promise<Set<string>> {
     if (!this.info) return new Set();
     const before = new Map(this.fileList.map((f) => [f.path.toLowerCase(), f]));
-    const own = new Set(this.ownWrites), ownBefore = new Set(own), listedBefore = this.listed;
+    const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
     const root = this.info.root;
     const after = await invoke<FileInfo[]>("project_files", { root });
     if (this.info?.root !== root) return new Set();
-    // Our own writes that finished during the read count as ours too, and stay in the list.
-    for (const k of this.ownWrites) own.add(k);
+    // Whether a difference is our own write: one that finished during the read always is (the read may
+    // have missed it); an earlier one only while the file still has the size and time it was left with.
+    const isOwn = (k: string, f?: FileInfo) => {
+      if (!this.ownWrites.has(k)) return false;
+      if (!ownBefore.has(k)) return true;
+      const stamp = ownBefore.get(k);
+      return !stamp || (!!f && f.size === stamp.size && f.modified === stamp.modified);
+    };
     const changed = new Set<string>();
     for (const f of after) {
       const k = f.path.toLowerCase(), b = before.get(k);
       before.delete(k);
-      if ((!b || b.size !== f.size || b.modified !== f.modified) && !own.has(k)) changed.add(k);
+      if ((!b || b.size !== f.size || b.modified !== f.modified) && !isOwn(k, f)) changed.add(k);
     }
-    for (const k of before.keys()) if (!own.has(k)) changed.add(k);
+    for (const k of before.keys()) if (!isOwn(k)) changed.add(k);
     this.setList(this.keepNoticed(after, listedBefore, ownBefore));
-    for (const k of ownBefore) this.ownWrites.delete(k);
+    for (const [k, v] of ownBefore) if (this.ownWrites.get(k) === v) this.ownWrites.delete(k);
     if (changed.size) {
       this.info = await invoke<ProjectInfo>("project_open", { path: root });
       this.onDidChange.fire();
@@ -137,7 +152,8 @@ export class WorkspaceService {
   async writeText(p: string, text: string) {
     const root = this.info?.root, target = this.resolve(p);
     await writeText(target, text);
-    this.noticeWrite(target, root, new TextEncoder().encode(text).length);
+    const key = this.noticeWrite(target, root, new TextEncoder().encode(text).length);
+    if (key) await this.stampWrite(key, target, root);
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
   /** After a write to `target`, resolved against `root` before the write started: a file inside the
@@ -145,16 +161,27 @@ export class WorkspaceService {
    *  to it at once, alone: nothing else is re-read, so changes made by others stay to be noticed.
    *  The write itself isn't an external change. Folders the list never has (build, .git,
    *  node_modules at the top) are left out; so is a write that finished after a project switch. */
-  private noticeWrite(target: string, root: string | undefined, size: number) {
-    if (!root || this.info?.root !== root) return;
+  private noticeWrite(target: string, root: string | undefined, size: number): string | null {
+    if (!root || this.info?.root !== root) return null;
     const abs = target.replace(/\\/g, "/"), base = root.replace(/\\/g, "/").replace(/\/+$/, "");
-    if (!abs.toLowerCase().startsWith(base.toLowerCase() + "/")) return;
+    if (!abs.toLowerCase().startsWith(base.toLowerCase() + "/")) return null;
     const rel = abs.slice(base.length + 1), key = rel.toLowerCase();
-    if (/^(build|\.git|node_modules)\//.test(key)) return;
-    this.ownWrites.add(key);
-    if (this.listed.has(key)) return;
-    this.setList([...this.fileList, { path: rel, size, modified: Date.now() }].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
-    this.onDidChange.fire();
+    if (/^(build|\.git|node_modules)\//.test(key)) return null;
+    this.ownWrites.set(key, null);
+    if (!this.listed.has(key)) {
+      this.setList([...this.fileList, { path: rel, size, modified: Date.now() }].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
+      this.onDidChange.fire();
+    }
+    return key;
+  }
+  /** One stat of the file just written: its size and time are what the write left, so that a later
+   *  change by another program is told from it (see ownWrites). Until it answers the write counts as ours. */
+  private async stampWrite(key: string, target: string, root: string | undefined) {
+    const st = await invoke<{ size: number; modified: number } | null>("fs_stat", { path: target }).catch(() => null);
+    if (!st || this.info?.root !== root || this.ownWrites.get(key) !== null) return;
+    this.ownWrites.set(key, st);
+    const at = this.fileList.findIndex((f) => f.path.replace(/\\/g, "/").toLowerCase() === key);
+    if (at >= 0) this.fileList[at] = { ...this.fileList[at], size: st.size, modified: st.modified };
   }
   /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
   async delete(p: string) {
@@ -219,7 +246,8 @@ export class WorkspaceService {
   async writeBytes(p: string, bytes: Uint8Array) {
     const root = this.info?.root, target = this.resolve(p);
     await writeBytes(target, bytes);
-    this.noticeWrite(target, root, bytes.length);
+    const key = this.noticeWrite(target, root, bytes.length);
+    if (key) await this.stampWrite(key, target, root);
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
 }

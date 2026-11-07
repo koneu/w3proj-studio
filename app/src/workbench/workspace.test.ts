@@ -29,6 +29,15 @@ g.__TAURI_INTERNALS__ = {
         return seen;
       }
       case "project_folders": return [];
+      case "fs_stat": {
+        const path = String(args.path);
+        for (const [root, list] of backend) {
+          if (!path.toLowerCase().startsWith(root.toLowerCase() + "\\")) continue;
+          const f = list.find((x) => x.path === path.slice(root.length + 1).replace(/\\/g, "/"));
+          return f ? { size: f.size, modified: f.modified } : null;
+        }
+        return null;
+      }
       case "path_normalize": if (normalizeGate) await normalizeGate; return String(args.path).replace(/konsta~1/i, "Konstantin");
       case "fs_write_text": {
         if (gate) await gate;
@@ -55,9 +64,10 @@ g.__TAURI_INTERNALS__ = {
 };
 
 const { WorkspaceService } = await import("./workspace");
-const make = (recent: string[] = []) => {
+const make = (recent: string[] = [], failSetAfter = Infinity) => {
   const saved: Record<string, unknown> = { recentProjects: recent };
-  const ws = new WorkspaceService({ loadProject: async () => {}, get: (k: string, d: unknown) => saved[k] ?? d, set: async (k: string, v: unknown) => { saved[k] = v; } } as never);
+  let sets = 0;
+  const ws = new WorkspaceService({ loadProject: async () => {}, get: (k: string, d: unknown) => saved[k] ?? d, set: async (k: string, v: unknown) => { if (++sets > failSetAfter) throw new Error("disk full"); saved[k] = v; } } as never);
   return { ws, saved };
 };
 
@@ -187,4 +197,62 @@ test("opening a project doesn't wait for the recent list's paths to be resolved"
   release();
   await ws.recentsTidied();
   assert.deepEqual(saved.recentProjects, [A, B, OFFLINE]);
+});
+
+test("a change by another program after our own write IS reported (different size)", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  await ws.writeText("war3map.j", "// ours");
+  const f = backend.get(A)!.find((x) => x.path === "war3map.j")!;
+  f.size += 40; f.modified += 1000; // the other program saves, and focus returns
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"]);
+});
+
+test("a same-size change at a new time after our own write IS reported", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  await ws.writeText("war3map.j", "// ours");
+  backend.get(A)!.find((x) => x.path === "war3map.j")!.modified += 5;
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"]);
+});
+
+test("our own write of an existing file isn't reported, and the next check is quiet too", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  await ws.writeText("war3map.j", "// ours, longer than before");
+  assert.equal((await ws.externalChanges()).size, 0);
+  assert.equal((await ws.externalChanges()).size, 0);
+});
+
+test("a stale tidy of the recent list (open A, B, A) writes nothing", async () => {
+  reset();
+  const SHORT_A = "C:\\Users\\KONSTA~1\\a", X = "//x/y/z";
+  const { ws, saved } = make([SHORT_A, X]);
+  let release!: () => void;
+  normalizeGate = new Promise<void>((r) => { release = r; });
+  await ws.open(A); // its tidy waits on the disk
+  normalizeGate = null;
+  await ws.open(B);
+  await ws.open(A);
+  await ws.recentsTidied();
+  assert.deepEqual(saved.recentProjects, [A, B, X]);
+  release(); // the first tidy ends now, with a list from before B was opened
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(saved.recentProjects, [A, B, X]);
+});
+
+test("a failing save of the tidied recent list is no unhandled rejection", async () => {
+  reset();
+  const seen: unknown[] = [];
+  const on = (e: unknown) => seen.push(e);
+  process.on("unhandledRejection", on);
+  const { ws } = make(["C:\\Users\\KONSTA~1\\a"], 1); // the open's own save works, the tidy's fails
+  await ws.open(A);
+  await ws.recentsTidied();
+  await new Promise((r) => setTimeout(r, 20));
+  process.off("unhandledRejection", on);
+  assert.deepEqual(seen, []);
 });

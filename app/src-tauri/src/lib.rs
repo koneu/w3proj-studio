@@ -108,6 +108,28 @@ struct FileInfo {
     modified: u64,
 }
 
+/// Size and last write of one file, as `project_files` reports them: what a write left, to tell it
+/// from a later change by another program. None when there is no such file.
+#[tauri::command]
+fn fs_stat(path: String) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some(Stamp { size: meta.len(), modified: modified_ms(&meta) })
+}
+
+#[derive(Serialize)]
+struct Stamp {
+    size: u64,
+    modified: u64,
+}
+
+fn modified_ms(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// All project files except build output and VCS metadata.
 #[tauri::command]
 fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
@@ -126,11 +148,7 @@ fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
             } else {
                 let meta = entry.metadata().ok();
                 let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                let modified = meta
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
+                let modified = meta.as_ref().map(modified_ms).unwrap_or(0);
                 out.push(FileInfo { path: rel, size, modified });
             }
         }
@@ -1051,6 +1069,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             project_open,
             path_normalize,
+            fs_stat,
             project_files,
             project_folders,
             project_unpack,
@@ -1132,6 +1151,17 @@ mod fs_tests {
     fn path_normalize_off_the_main_thread_gives_normal_paths_answer() {
         let (dir, root) = project();
         assert_eq!(tauri::async_runtime::block_on(path_normalize(root.clone())), normal_path(&root));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn fs_stat_reports_what_project_files_does() {
+        let (dir, root) = project();
+        let file = dir.join("map/sub/a.txt");
+        let st = fs_stat(file.to_string_lossy().into_owned()).unwrap();
+        let listed = project_files(root).unwrap().into_iter().find(|f| f.path == "map/sub/a.txt").unwrap();
+        assert_eq!((st.size, st.modified), (listed.size, listed.modified));
+        assert!(fs_stat(dir.join("nope").to_string_lossy().into_owned()).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
