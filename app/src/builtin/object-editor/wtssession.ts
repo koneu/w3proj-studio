@@ -186,3 +186,21 @@ export async function attempt<T>(work: () => Promise<T>): Promise<{ ok: true; va
     return { ok: false, error };
   }
 }
+
+/** The order of a save. The text is taken once, up front; `afterWrite` (strings) may take a while,
+ *  and an edit typed meanwhile must stay dirty, so `setSaved` gets the up-front text. The UI
+ *  follow-ups run last, after the saved state is recorded, so a failing one can't skip it. */
+export async function runSave(io: {
+  serialize: () => string;
+  canonicalize: (text: string) => Promise<string>;
+  write: (text: string) => Promise<void>;
+  afterWrite: () => Promise<void>;
+  setSaved: (text: string) => void;
+  followUps: () => Promise<void>;
+}): Promise<void> {
+  const snapshot = io.serialize();
+  await io.write(await io.canonicalize(snapshot));
+  await io.afterWrite();
+  io.setSaved(snapshot);
+  await io.followUps();
+}

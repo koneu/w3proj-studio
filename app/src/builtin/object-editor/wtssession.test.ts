@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, mapFolderGone, findPackedMap, isNotFoundError, recreatedMessage, attempt, isDirtyNow } from "./wtssession";
+import { WtsSession, fileIsMissing, mapFolderGone, findPackedMap, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave } from "./wtssession";
 
 // The editor only changes strings that are already in the file (it needs the number to be in the
 // table), so it never adds a string and numbers can't collide: neither is covered here.
@@ -356,17 +356,40 @@ test("saving stops when the map folder is gone, unless the file is new in a proj
   assert.equal(mapFolderGone({ folderExists: true, isNew: false, hasWts: true }), false);
 });
 
-test("an edit typed during a save stays dirty: saved is the text taken at the start", () => {
+test("runSave: an edit typed during the awaits stays dirty; saved is the text taken up front", async () => {
   let doc = "v1";
-  const snapshot = doc; // taken once at the start of save()
-  doc = "v2"; // typed while the awaits run
-  assert.equal(isDirtyNow(doc, snapshot, false), true);
-  // control: with no edit, the snapshot is clean (a clean save does not leave the editor dirty)
-  assert.equal(isDirtyNow("v1", snapshot, false), false);
-  // control: the old behaviour (saved taken after the awaits) would lose the edit
-  assert.equal(isDirtyNow(doc, doc, false), false);
-  // unsaved strings keep it dirty
-  assert.equal(isDirtyNow("v1", snapshot, true), true);
+  let saved = "";
+  const log: string[] = [];
+  await runSave({
+    serialize: () => doc,
+    canonicalize: async (t) => { log.push("canon"); return `canonical(${t})`; },
+    write: async (t) => { log.push(`write ${t}`); },
+    afterWrite: async () => { log.push("wts"); doc = "v2"; }, // typed while the strings are saved
+    setSaved: (t) => { log.push("setSaved"); saved = t; },
+    followUps: async () => { log.push("followUps"); },
+  });
+  assert.equal(saved, "v1");
+  assert.equal(isDirtyNow(doc, saved, false), true);
+  assert.deepEqual(log, ["canon", "write canonical(v1)", "wts", "setSaved", "followUps"]);
+});
+
+test("runSave: with no edit during the save the editor ends clean; unsaved strings keep it dirty", async () => {
+  let saved = "";
+  await runSave({
+    serialize: () => "v1", canonicalize: async (t) => t, write: async () => {},
+    afterWrite: async () => {}, setSaved: (t) => { saved = t; }, followUps: async () => {},
+  });
+  assert.equal(isDirtyNow("v1", saved, false), false);
+  assert.equal(isDirtyNow("v1", saved, true), true);
+});
+
+test("runSave: a failing follow-up still leaves saved recorded", async () => {
+  let saved = "";
+  await assert.rejects(runSave({
+    serialize: () => "v1", canonicalize: async (t) => t, write: async () => {},
+    afterWrite: async () => {}, setSaved: (t) => { saved = t; }, followUps: async () => { throw new Error("render"); },
+  }));
+  assert.equal(saved, "v1");
 });
 
 test("attempt only reports failures of the work it wraps", async () => {
