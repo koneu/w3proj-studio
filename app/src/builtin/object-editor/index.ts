@@ -257,10 +257,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             h("span.tree-label", {}, k.label),
             counts));
           if (path) {
+            // A file that is not valid JSON is "unreadable" too: the parse is inside the handler that says so.
             w3.workspace.readText(path).then((t) => {
               const j: ObjectFile = JSON.parse(t);
               counts.textContent = `${j.custom.length} custom · ${j.original.length} modified`;
-            }, () => { counts.textContent = "unreadable"; });
+            }).catch((e) => { counts.textContent = "unreadable"; counts.title = String(e instanceof Error ? e.message : e); });
           }
         }
       },
