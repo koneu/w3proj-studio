@@ -331,6 +331,8 @@ export interface W3Api {
     /** `tileset` (a letter, e.g. the map's): that tileset's own versions of files
      *  (`_Tilesets/<letter>.w3mod`, e.g. its water) win, as in the game. */
     resolve(path: string, opts?: GameReadOptions): Promise<string | null>;
+    /** `resolve` for many paths in one call (one backend round trip): each one's result, in order. */
+    resolveMany(paths: string[], opts?: GameReadOptions): Promise<(string | null)[]>;
     read(path: string, opts?: GameReadOptions): Promise<Uint8Array>;
     /** UTF-8 text with any byte-order mark removed. */
     readText(path: string, opts?: GameReadOptions): Promise<string>;

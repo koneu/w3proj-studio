@@ -803,6 +803,16 @@ async fn game_resolve(state: State<'_, Game>, install: String, path: String, mod
     Ok(g.resolve(&path, mode(&mode_name)?, tileset_letter(&tileset)).map(str::to_string))
 }
 
+/// `game_resolve` for many paths in one call (the Problems checks look up thousands): the stored
+/// full path of each, or null, in the order given.
+#[tauri::command]
+async fn game_resolve_many(state: State<'_, Game>, install: String, paths: Vec<String>, mode_name: String, tileset: Option<String>) -> CmdResult<Vec<Option<String>>> {
+    let g = game_data(&state, &install)?;
+    let mode = mode(&mode_name)?;
+    let tileset = tileset_letter(&tileset);
+    Ok(paths.iter().map(|p| g.resolve(p, mode, tileset).map(str::to_string)).collect())
+}
+
 /** A tileset letter ("L"), which adds that tileset's folders (`_Tilesets/L.w3mod`) to the lookup. */
 fn tileset_letter(t: &Option<String>) -> Option<char> {
     t.as_deref().and_then(|s| s.chars().next())
@@ -1147,6 +1157,7 @@ pub fn run() {
             game_info,
             game_list,
             game_resolve,
+            game_resolve_many,
             game_read,
             mcp::mcp_serve,
             mcp::mcp_respond,

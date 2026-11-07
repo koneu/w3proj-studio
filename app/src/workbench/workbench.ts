@@ -299,6 +299,7 @@ export class Workbench {
         info: () => wb.game.info(),
         list: () => wb.game.list(),
         resolve: (p, o) => wb.game.resolve(p, o?.tileset),
+        resolveMany: (paths, o) => wb.game.resolveMany(paths, o?.tileset),
         read: (p, o) => wb.game.read(p, o?.tileset),
         readText: (p, o) => wb.game.readText(p, o?.tileset),
       },

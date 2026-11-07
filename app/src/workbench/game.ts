@@ -47,6 +47,11 @@ export class GameService {
     return this.invoke<string | null>("game_resolve", { ...this.args(), path, tileset: tileset ?? null });
   }
 
+  /** `resolve` for many paths in one backend call: the full path or null of each, in order. */
+  resolveMany(paths: string[], tileset?: string): Promise<(string | null)[]> {
+    return invoke<(string | null)[]>("game_resolve_many", { ...this.args(), paths, tileset: tileset ?? null });
+  }
+
   async read(path: string, tileset?: string): Promise<Uint8Array> {
     return new Uint8Array(await this.invoke<ArrayBuffer>("game_read", { ...this.args(), path, tileset: tileset ?? null }));
   }
