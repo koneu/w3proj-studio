@@ -51,7 +51,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -169,6 +169,94 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
         }
     }
     Ok(out)
+}
+
+/// File bytes of maps being checked at once (W3PROJ_VERIFY_MEMORY_MB overrides). Checking a map
+/// takes about 4.5 times its size in memory (a 1 GB campaign peaked at 4.3 GB), and campaigns are
+/// 1-2 GB, so only so much runs together; a map above it runs alone. The default lets the two
+/// biggest campaigns of the corpus run side by side (about 12 GB) and nothing more.
+fn in_flight_bytes() -> u64 {
+    std::env::var("W3PROJ_VERIFY_MEMORY_MB").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3072) << 20
+}
+
+/// Threads for `verify`: the cores, or W3PROJ_VERIFY_JOBS (1 checks one map after the other).
+fn verify_threads() -> usize {
+    std::env::var("W3PROJ_VERIFY_JOBS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
+}
+
+/// Gives back a map's share of the memory budget, also when its check panics.
+struct Share<'a> {
+    state: &'a Mutex<(Vec<usize>, u64)>,
+    freed: &'a Condvar,
+    bytes: u64,
+}
+
+impl Drop for Share<'_> {
+    fn drop(&mut self) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).1 -= self.bytes;
+        self.freed.notify_all();
+    }
+}
+
+/// Runs `work` on every path on several threads, biggest files first and within the memory
+/// budget, and hands the results to `each` on this thread in the order of `paths`.
+fn in_order<R: Send>(paths: &[&std::path::Path], work: impl Fn(&std::path::Path) -> R + Sync, mut each: impl FnMut(usize, R)) {
+    let threads = verify_threads().min(paths.len());
+    if threads <= 1 {
+        for (i, p) in paths.iter().enumerate() {
+            each(i, work(p));
+        }
+        return;
+    }
+    let budget = in_flight_bytes();
+    let sizes: Vec<u64> = paths.iter().map(|p| std::fs::metadata(p).map_or(0, |m| m.len())).collect();
+    let mut queue: Vec<usize> = (0..paths.len()).collect();
+    queue.sort_by_key(|&i| std::cmp::Reverse(sizes[i]));
+    let state = Mutex::new((queue, 0u64));
+    let freed = Condvar::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            let (tx, state, freed, sizes, work, budget) = (tx.clone(), &state, &freed, &sizes, &work, budget);
+            s.spawn(move || loop {
+                let (i, _share) = {
+                    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+                    loop {
+                        if st.0.is_empty() {
+                            return;
+                        }
+                        let in_flight = st.1;
+                        // Nothing in flight: whatever comes next fits, however big.
+                        if let Some(at) = st.0.iter().position(|&i| in_flight == 0 || in_flight + sizes[i] <= budget) {
+                            let i = st.0.remove(at);
+                            st.1 += sizes[i];
+                            break (i, Share { state, freed, bytes: sizes[i] });
+                        }
+                        st = freed.wait(st).unwrap_or_else(|e| e.into_inner());
+                    }
+                };
+                if tx.send((i, work(paths[i]))).is_err() {
+                    return;
+                }
+            });
+        }
+        drop(tx);
+        let mut ready = BTreeMap::new();
+        let mut next = 0;
+        // A closed channel before all results: a worker panicked, and the scope reports it.
+        while next < paths.len() {
+            let Ok((i, r)) = rx.recv() else { break };
+            ready.insert(i, r);
+            while let Some(r) = ready.remove(&next) {
+                each(next, r);
+                next += 1;
+            }
+        }
+    });
 }
 
 /// A `--trigger-data` file that can't be read is an error, before any work starts.
@@ -382,8 +470,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let codecs = with_trigger_data(Registry::with_formats(&extra)?, &game, &trigger_data);
             let names = game_names(&game);
             let (mut ok, mut failed, mut incomplete) = (0, 0, 0);
-            for (map, key) in &maps {
-                let report = w3proj::verify(map, &codecs, names.as_ref());
+            // The maps are checked on all cores; their reports come back here in the order given,
+            // so the output is the same as one map after the other.
+            let paths: Vec<&std::path::Path> = maps.iter().map(|(p, _)| p.as_path()).collect();
+            let verify_one = |map: &std::path::Path| w3proj::verify(map, &codecs, names.as_ref());
+            in_order(&paths, verify_one, |i, report| {
+                let (map, key) = &maps[i];
                 if let (Some(_), Ok(r)) = (&baseline, &report) {
                     let now: BTreeMap<String, String> = r.codec_use.iter().cloned().collect();
                     if update_baseline {
@@ -431,7 +523,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         println!("FAIL {} — {e}", map.display());
                     }
                 }
-            }
+            });
             println!("{ok} ok ({incomplete} incomplete), {failed} failed");
             if let Some(path) = &baseline {
                 if update_baseline {

@@ -286,6 +286,42 @@ fn a_closed_pipe_does_not_hide_a_failing_verify() {
     assert!(!String::from_utf8_lossy(&o.stderr).contains("panicked"), "{}", text(&o));
 }
 
+/// `verify` on all cores prints what one map after the other prints, in the same order, with the
+/// failures in their places and the same exit code.
+#[test]
+fn verify_on_many_threads_prints_what_one_thread_prints() {
+    let dir = workdir("verify_threads");
+    let one = dir.join("one.w3x");
+    pack(&fixture(), &one);
+    let bytes = fs::read(&one).unwrap();
+    let maps = dir.join("maps");
+    fs::create_dir_all(maps.join("sub")).unwrap();
+    for i in 0..40 {
+        // Growing sizes, so that the biggest, which start first, finish last.
+        let mut b = bytes.clone();
+        b.extend(std::iter::repeat_n(0u8, i * 4096));
+        fs::write(maps.join(format!("m{i:02}.w3x")), b).unwrap();
+    }
+    fs::write(maps.join("m13_bad.w3x"), b"this is not an archive").unwrap();
+    fs::write(maps.join("sub/m99_bad.w3m"), &bytes[..bytes.len() / 2]).unwrap();
+    let run = |jobs: &str, quiet: bool| {
+        let mut args = vec!["verify", s(&maps), "--game", "none"];
+        if quiet {
+            args.push("-q");
+        }
+        let o = Command::new(env!("CARGO_BIN_EXE_w3proj")).args(&args).env("W3PROJ_VERIFY_JOBS", jobs).env_remove("W3PROJ_FORMATS").output().unwrap();
+        (o.status.code(), text(&o))
+    };
+    for quiet in [false, true] {
+        let (code1, one_thread) = run("1", quiet);
+        let (code8, many_threads) = run("8", quiet);
+        assert_eq!(code1, Some(1), "the bad maps must make it fail: {one_thread}");
+        assert_eq!(code1, code8);
+        assert!(one_thread.contains("m13_bad.w3x") && one_thread.contains("m39.w3x") || quiet, "{one_thread}");
+        assert_eq!(one_thread, many_threads);
+    }
+}
+
 #[test]
 fn the_trigger_codec_really_runs() {
     let dir = workdir("wtg");
