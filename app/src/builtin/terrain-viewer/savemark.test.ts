@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SaveMark, saveSnapshot, serial } from "./savemark";
+import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 
 test("an edit made while a save is in flight stays dirty", () => {
   const m = new SaveMark();
@@ -140,4 +140,33 @@ test("serial: control, the same two calls not chained start together", async () 
   await new Promise((r) => setTimeout(r, 5));
   releases[1](); await e;
   assert.deepEqual(order, ["start", "end", "start", "end"]);
+});
+
+test("Stale: an edit after the snapshot survives the draw's clean-up", () => {
+  const s = new Stale();
+  s.set();
+  const taken = s.take(); // the save's snapshot
+  s.set(); // an edit before the draw ends
+  s.clear(taken);
+  assert.equal(s.isSet(), true);
+});
+
+test("Stale: no edit since the snapshot, a finished draw cleans it; a failed draw leaves it", () => {
+  const s = new Stale();
+  s.set();
+  s.clear(s.take());
+  assert.equal(s.isSet(), false);
+  s.set();
+  s.take(); // the draw failed: clear is never called
+  assert.equal(s.isSet(), true);
+});
+
+test("Stale: an edit during the draw, then a later clean from a newer snapshot, cleans", () => {
+  const s = new Stale();
+  s.set();
+  const first = s.take();
+  s.set();
+  s.clear(first);
+  s.clear(s.take());
+  assert.equal(s.isSet(), false);
 });

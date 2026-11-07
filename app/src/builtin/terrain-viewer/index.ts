@@ -23,7 +23,7 @@ import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from 
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
-import { SaveMark, saveSnapshot, serial } from "./savemark";
+import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
@@ -1090,13 +1090,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let at = 0;
         const mark = new SaveMark();
         /** Set by every edit; the minimap is redrawn on the next save. */
-        let minimapStale = false;
+        const minimapStale = new Stale();
         /** Tool groups of other extensions, by group id. */
         const groupInsts = new Map<string, TerrainToolGroupInstance>();
         const notifyGroups = (e: Edit) => { for (const g of groupInsts.values()) g.changed?.({ terrain: e.terrain, objects: e.objects }); };
         const changed = (e: Edit) => {
           notifyGroups(e);
-          minimapStale = true;
+          minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           if (e.terrain && areaPanel) void showAreaPanel();
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
@@ -1112,7 +1112,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let keyStep: Edit | null = null;
         const pushEdit = (e: Edit) => {
           notifyGroups(e);
-          minimapStale = true;
+          minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && mark.isDirty(at) && !mark.pending(at)) {
             history[at - 1] = keyStep = joinSteps(keyStep, e);
@@ -1235,7 +1235,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void syncTileList();
           replanCliffs();
           renderer.terrainChanged();
-          minimapStale = true;
+          minimapStale.set();
           redraw();
         };
         /** What the tileset decides besides the tiles: blight, water, shoreline, default lighting. */
@@ -1315,7 +1315,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const added = terrain.groundTiles.length - 1;
           // Load in the background so the stroke starts right away.
           void tilePaths(w3).then((paths) => loadTile(added, paths));
-          minimapStale = true;
+          minimapStale.set();
           return terrain.groundTiles.length - 1;
         };
 
@@ -3098,7 +3098,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
          *  `baseDoodads` are the state the shadows were last updated for. */
-        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[]) => {
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take()) => {
           const rf = (p: string) => readFile(w3, doc, p);
           const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
           if (cfg<boolean>("pathing.regenerate")) try {
@@ -3123,13 +3123,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           // The minimap is redrawn when something changed since the last save (by default).
           const minimapMode = cfg<string>("minimap.regenerate");
-          if (minimapMode === "always" || (minimapMode !== "never" && minimapStale)) {
+          if (minimapMode === "always" || (minimapMode !== "never" && minimapStale.isSet())) {
             try {
-              // Cleared first: an edit made while it is drawn sets it again, and the next save redraws.
-              minimapStale = false;
               await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, now, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
+              // Clean only for what the snapshot had: an edit made since keeps it set, and the next save redraws.
+              minimapStale.clear(staleAt);
             } catch (e) {
-              minimapStale = true;
               w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
             }
           }
@@ -3186,7 +3185,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
             await ready();
-            minimapStale = true;
+            minimapStale.set();
             await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
           },
         };
@@ -3195,7 +3194,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const takeChange = async (path: string): Promise<boolean> => {
           const reopenInstead = () => { opened = null; return false; };
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
-          minimapStale = true;
+          minimapStale.set();
           // The editor's undo steps were for the map as it was.
           history.length = 0;
           at = 0;
@@ -3268,6 +3267,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,
                 doodads: dooFile ? structuredClone(dooFile.list) : null,
                 units: unitsFile ? structuredClone(unitsFile.list) : undefined,
+                stale: minimapStale.take(),
               }),
               write: async (t) => {
                 await writeTerrainBytes(doc.path, t.w3e, doc);
@@ -3289,7 +3289,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (startAdded) void rebuildObjects();
             // The derived files follow what was written, not what an edit made meanwhile changed.
             const doodads = snap.doodads ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
-            await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units);
+            await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units, snap.stale);
             savedW3e = snap.w3e;
             savedDoodads = snap.doodads ?? structuredClone(doodads);
             for (const g of groupInsts.values()) {

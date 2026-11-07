@@ -69,3 +69,27 @@ export function serial(work: () => Promise<void>): () => Promise<void> {
   let last: Promise<void> = Promise.resolve();
   return () => (last = last.catch(() => {}).then(work));
 }
+
+/** "Something changed since the last draw" for a file drawn from a snapshot. The save takes a
+ *  token with the snapshot and cleans with it after the draw; an edit made in between has set
+ *  the flag again, so it stays set and the next save draws again. */
+export class Stale {
+  private edits = 0;
+  private cleanAt = 0;
+
+  set(): void {
+    this.edits++;
+  }
+
+  isSet(): boolean {
+    return this.edits !== this.cleanAt;
+  }
+
+  take(): number {
+    return this.edits;
+  }
+
+  clear(taken: number): void {
+    if (taken >= this.cleanAt) this.cleanAt = taken;
+  }
+}
