@@ -19,7 +19,17 @@ test("without a number: id and position", () => {
   assert.equal(matchPlaced(list, { id: "hfoo", x: 900, y: 900 }), 3);
 });
 
-test("a stale number falls back to the position; nothing there is -1", () => {
+test("a stale number falls back to the position", () => {
   assert.equal(matchPlaced(list, { id: "hfoo", editorId: 99, x: 900, y: 900 }), 3);
-  assert.equal(matchPlaced(list, { id: "hfoo", editorId: 1, x: 5, y: 5 }), -1);
+});
+
+test("a unique number finds a moved object, and never a neighbour", () => {
+  assert.equal(matchPlaced(list, { id: "hfoo", editorId: 4, x: 100, y: 200 }), 3);
+  assert.equal(matchPlaced(list, { id: "hfoo", editorId: 1, x: 5, y: 5 }), 0);
+});
+
+test("a repeated number is told apart by position; nothing there is -1", () => {
+  const twins: PlacedLike[] = [{ id: "hfoo", editorId: 7, position: [0, 0, 0] }, { id: "hfoo", editorId: 7, position: [50, 50, 0] }];
+  assert.equal(matchPlaced(twins, { id: "hfoo", editorId: 7, x: 50, y: 50 }), 1);
+  assert.equal(matchPlaced(twins, { id: "hfoo", x: 5, y: 5 }), -1);
 });

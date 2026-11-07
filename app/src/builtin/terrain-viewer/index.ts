@@ -909,7 +909,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const pick: PlacedRef | undefined = ref ? { id: typeof ref.id === "string" ? ref.id : undefined, editorId: typeof ref.editorId === "number" ? ref.editorId : undefined, x, y } : undefined;
       toolGroups.pendingLook = [x, y, pick];
       await w3.commands.execute("w3.terrain.open");
-      if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y, pick); toolGroups.pendingLook = null; }
+      // The editor of the project's terrain, not whichever tab opened last.
+      const look = toolGroups.look.get(projectTerrain(w3) ?? "");
+      if (look && toolGroups.pendingLook) { look(x, y, pick); toolGroups.pendingLook = null; }
     }),
     w3.commands.register("w3.terrain.resetVariations", async () => {
       const path = w3.editors.activePath();
@@ -1416,6 +1418,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let objCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
         /** Set once an object was edited: the placement files are saved too. */
         let objectsTouched = false;
+        /** An object to select once the placed objects have models (Object Manager double-click). */
+        let pendingSel: PlacedRef | null = null;
         const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: p.position[2], rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
@@ -1501,6 +1505,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const again = entry ? findInstance(entry) : null;
             if (again) selectObject(again); else if (selected) clearSelection();
           }
+          if (pendingSel) trySelect(pendingSel);
+          pendingSel = null;
           redraw();
         }
         // Object data (models, scales, …), the import list or imported files saved elsewhere (the
@@ -2092,6 +2098,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
         let selected: ObjectInstance | null = null;
         const selectObject = (inst: ObjectInstance) => {
+          pendingSel = null;
           selected = inst;
           const p = inst.pick!, pl = p.placed;
           const iconEl = h("img.terrain-sel-icon", { alt: "", hidden: true });
@@ -2164,6 +2171,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** What was selected before the selection was cleared, for Space. */
         let lastSelected: Placed[] = [];
         const clearSelection = () => {
+          pendingSel = null;
           const was = selectedEntries();
           if (was.length) lastSelected = was;
           selected = null;
@@ -2227,6 +2235,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Selects these entries: none clears, one shows its details, more a summary. */
         const selectEntries = (entries: Placed[]) => {
+          pendingSel = null;
           const insts = entries.map(findInstance).filter((i): i is ObjectInstance => !!i?.pick);
           if (!insts.length) { clearSelection(); return; }
           if (insts.length === 1) { group = []; selectObject(insts[0]); return; }
@@ -2774,15 +2783,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         toolGroups.livePlacements = live;
         const look = (x: number, y: number, ref?: PlacedRef) => {
           renderer.target = [x, y, heightAt(terrain, x, y)];
-          if (ref) {
-            // Normal selection (side panel, keys); no undo step, nothing dirty.
-            const insts = renderer.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed);
-            const at = matchPlaced(insts.map((i) => i.pick!.placed as unknown as PlacedLike), ref);
-            if (at >= 0) { group = []; selectObject(insts[at]); }
-          }
+          // Normal selection (side panel, keys); no undo step, nothing dirty. Models may still be
+          // loading: then it waits for the end of rebuildObjects.
+          if (ref) { pendingSel = null; if (!trySelect(ref)) pendingSel = ref; }
           redraw();
         };
-        toolGroups.look = look;
+        function trySelect(ref: PlacedRef): boolean {
+          const insts = renderer.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed);
+          const at = matchPlaced(insts.map((i) => i.pick!.placed as unknown as PlacedLike), ref);
+          if (at < 0) return false;
+          endFacing(false);
+          group = [];
+          selectObject(insts[at]);
+          return true;
+        }
+        toolGroups.look.set(doc.path, look);
         const resetGround = () => {
           if (!editable) throw new Error("This terrain is read-only.");
           const log = new CornerUndo();
@@ -3265,7 +3280,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPick();
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
-            if (toolGroups.look === look) toolGroups.look = null;
+            if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);

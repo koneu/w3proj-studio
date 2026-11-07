@@ -20,7 +20,7 @@ export class TerrainToolRegistry implements TerrainService {
   placedObjects() { return this.livePlacements?.() ?? null; }
 
   /** Set by the open terrain editor: moves its camera to a point. */
-  look: ((x: number, y: number, ref?: PlacedRef) => void) | null = null;
+  readonly look = new Map<string, (x: number, y: number, ref?: PlacedRef) => void>();
   /** Set by each open terrain editor, by its file: Reset Texture Variations, as one undo step; false when nothing changed. */
   readonly resetVariations = new Map<string, () => boolean>();
   /** A point to show once the terrain editor has opened. */
