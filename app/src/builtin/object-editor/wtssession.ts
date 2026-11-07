@@ -171,3 +171,18 @@ export function recreatedMessage(packedMap: string | null): string {
 export function mapFolderGone(x: { folderExists: boolean; isNew: boolean; hasWts: boolean }): boolean {
   return !x.folderExists && (!x.isNew || x.hasWts);
 }
+
+/** Whether the editor has unsaved changes: the object text differs from the text last written,
+ *  or strings are waiting for war3map.wts. */
+export function isDirtyNow(current: string, saved: string, wtsDirty: boolean): boolean {
+  return current !== saved || wtsDirty;
+}
+
+/** Runs only the given work, so just its failure is reported; follow-up code stays outside. */
+export async function attempt<T>(work: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  try {
+    return { ok: true, value: await work() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}

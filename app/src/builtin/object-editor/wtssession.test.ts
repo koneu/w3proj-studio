@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, mapFolderGone, findPackedMap, isNotFoundError, recreatedMessage } from "./wtssession";
+import { WtsSession, fileIsMissing, mapFolderGone, findPackedMap, isNotFoundError, recreatedMessage, attempt, isDirtyNow } from "./wtssession";
 
 // The editor only changes strings that are already in the file (it needs the number to be in the
 // table), so it never adds a string and numbers can't collide: neither is covered here.
@@ -354,4 +354,24 @@ test("saving stops when the map folder is gone, unless the file is new in a proj
   assert.equal(mapFolderGone({ folderExists: false, isNew: true, hasWts: false }), false);
   assert.equal(mapFolderGone({ folderExists: true, isNew: true, hasWts: true }), false);
   assert.equal(mapFolderGone({ folderExists: true, isNew: false, hasWts: true }), false);
+});
+
+test("an edit typed during a save stays dirty: saved is the text taken at the start", () => {
+  let doc = "v1";
+  const snapshot = doc; // taken once at the start of save()
+  doc = "v2"; // typed while the awaits run
+  assert.equal(isDirtyNow(doc, snapshot, false), true);
+  // control: with no edit, the snapshot is clean (a clean save does not leave the editor dirty)
+  assert.equal(isDirtyNow("v1", snapshot, false), false);
+  // control: the old behaviour (saved taken after the awaits) would lose the edit
+  assert.equal(isDirtyNow(doc, doc, false), false);
+  // unsaved strings keep it dirty
+  assert.equal(isDirtyNow("v1", snapshot, true), true);
+});
+
+test("attempt only reports failures of the work it wraps", async () => {
+  assert.deepEqual(await attempt(async () => 5), { ok: true, value: 5 });
+  const bad = await attempt(async () => { throw new Error("boom"); });
+  assert.equal(bad.ok, false);
+  assert.match(String((bad as { error: unknown }).error), /boom/);
 });
