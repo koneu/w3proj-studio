@@ -93,6 +93,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const name = await create();
       if (name && !opts?.quiet) void w3.window.showInfo(`Checkpoint saved: ${name}`);
     }),
+    // For other extensions: the path of the newest checkpoint, null when there is none.
+    w3.commands.register("w3.checkpoints.newest", async () => {
+      const project = w3.workspace.project();
+      const newest = project ? newestFirst(await list(project.root))[0] : undefined;
+      return newest ? `${project!.root}\\build\\checkpoints\\${newest.name}` : null;
+    }),
     w3.commands.register("w3.checkpoints.restore", async () => {
       const project = w3.workspace.project();
       if (!project) throw new Error("Open or import a project first.");

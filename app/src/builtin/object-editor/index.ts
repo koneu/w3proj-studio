@@ -9,7 +9,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, type WtsSnapshot } from "./wtssession";
+import { WtsSession, findPackedMap, recreatedMessage, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -33,6 +33,16 @@ const FORMAT = "w3proj.objects/1";
 
 /** An object data file without objects, in the version of the map's other object data (else
  *  Reforged's). */
+/** The packed map to point at when war3map.wts had to be recreated (build output, else the newest checkpoint). */
+async function packedMapPath(w3: W3Api): Promise<string | null> {
+  const project = w3.workspace.project();
+  if (!project) return null;
+  const dir = project.default_output.replace(/[\\/][^\\/]*$/, "");
+  const siblings = await w3.workspace.listFolder(dir).catch(() => [] as string[]);
+  const newest = await w3.commands.execute<string | null>("w3.checkpoints.newest").catch(() => null);
+  return findPackedMap(project.default_output, siblings, newest);
+}
+
 async function emptyFile(w3: W3Api): Promise<ObjectFile> {
   const sibling = w3.workspace.files().find((f) => /^map\/war3map\.w3[utabdhq]\.json$/i.test(f.path));
   const version = sibling ? JSON.parse(await w3.workspace.readText(sibling.path)).version ?? 3 : 3;
@@ -1111,12 +1121,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (hasWts) {
               try {
                 // A text changed by the save (another editor's was kept) shows at once.
-                if (await wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t))) renderDetail();
+                // Only a file that is really gone is recreated; any other failed read stops the save.
+                const isMissing = async () => {
+                  await w3.workspace.refresh().catch(() => {});
+                  return !w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.wts");
+                };
+                if (await wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t), isMissing)) renderDetail();
+                if (wts.recreated) {
+                  await w3.workspace.refresh().catch(() => {});
+                  const packed = await packedMapPath(w3).catch(() => null);
+                  void w3.window.showWarning(recreatedMessage(packed));
+                }
               } catch (e) {
                 // The object file is written; saving again rewrites it unchanged and retries the strings.
                 await w3.workspace.refresh().catch(() => {});
-                const missing = !w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.wts");
-                w3.window.showError(missing ? "war3map.wts missing: strings not saved" : `war3map.wts: strings not saved (${e})`);
+                w3.window.showError(`war3map.wts: strings not saved (${e})`);
               }
             }
             saved = serialize();

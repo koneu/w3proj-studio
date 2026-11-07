@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession } from "./wtssession";
+import { WtsSession, findPackedMap, recreatedMessage } from "./wtssession";
 
 // The editor only changes strings that are already in the file (it needs the number to be in the
 // table), so it never adds a string and numbers can't collide: neither is covered here.
@@ -222,4 +222,89 @@ test("a string typed while the save is writing is kept, and the editor stays dir
   await a.save(d.read, d.write);
   assert.equal(get(d.text, 2), "late");
   assert.equal(a.dirty, false);
+});
+
+// --- war3map.wts gone missing ---
+
+const gone = async (): Promise<string> => { throw "os error 2"; };
+const locked = async (): Promise<string> => { throw "os error 32: file in use"; };
+
+test("a missing file is recreated from the editor's table, and the editor goes clean", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  let written = "";
+  await a.save(gone, async (t) => { written = t; }, async () => true);
+  assert.equal(get(written, 1), "ONE");
+  assert.equal(get(written, 2), "two");
+  assert.equal(a.recreated, true);
+  assert.equal(a.dirty, false);
+});
+
+test("after a recreate, undo past the save still works and the next save writes it", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); a.snapshot();
+  await a.save(gone, d.write, async () => true);
+  assert.equal(d.text.includes("ONE"), true);
+  a.restore(s0);
+  assert.equal(a.table.get(1), "one");
+  assert.equal(a.dirty, true);
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "one");
+  assert.equal(a.recreated, false);
+});
+
+test("a read that fails for another reason stops the save: nothing written, session unchanged", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); const snap = a.snapshot();
+  let writes = 0;
+  await assert.rejects(a.save(locked, async () => { writes++; }, async () => false), /os error 32/);
+  assert.equal(writes, 0);
+  assert.equal(a.dirty, true);
+  assert.equal(a.recreated, false);
+  assert.equal(a.table.get(1), "ONE");
+  assert.deepEqual(a.snapshot(), snap);
+});
+
+test("a retry after a non-missing failure saves normally", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); a.snapshot();
+  await assert.rejects(a.save(locked, d.write, async () => false));
+  await a.save(d.read, d.write, async () => false);
+  assert.equal(get(d.text, 1), "ONE");
+  assert.equal(a.dirty, false);
+  assert.equal(a.recreated, false);
+});
+
+test("a failed write while recreating leaves the session as it was", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  await assert.rejects(a.save(gone, async () => { throw "disk full"; }, async () => true), /disk full/);
+  assert.equal(a.dirty, true);
+  assert.equal(a.recreated, false);
+});
+
+test("without a missing check, a failed read always stops the save", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  await assert.rejects(a.save(gone, async () => {}), /os error 2/);
+});
+
+test("the warning names the packed map when there is one, and leaves the sentence out otherwise", () => {
+  const withMap = recreatedMessage("C:\\p\\build\\m.w3x");
+  assert.match(withMap, /war3map\.wts was missing and has been recreated/);
+  assert.match(withMap, /strings changed elsewhere/);
+  assert.match(withMap, /C:\\p\\build\\m\.w3x/);
+  const none = recreatedMessage(null);
+  assert.match(none, /recreated/);
+  assert.doesNotMatch(none, /\.w3x|found/);
+});
+
+test("the packed map is the build output if it exists, else the newest checkpoint", () => {
+  const out = "C:\\p\\build\\m.w3x", cp = "C:\\p\\build\\checkpoints\\m 2026-03-01 10-00-00.w3x";
+  assert.equal(findPackedMap(out, ["m.w3x"], cp), out);
+  assert.equal(findPackedMap(out, ["M.W3X"], cp), out);
+  assert.equal(findPackedMap(out, [], cp), cp);
+  assert.equal(findPackedMap(out, ["other.w3x"], null), null);
+  assert.equal(findPackedMap(out, [], null), null);
 });

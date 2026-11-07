@@ -32,6 +32,8 @@ export class WtsSession {
   private savedValues: Map<number, string>;
   private owned = new Map<number, Owned>();
   private saves = 0;
+  /** The last save found the file missing and wrote it anew from the editor's strings. */
+  recreated = false;
 
   constructor(text: string) {
     this.saved = text;
@@ -75,10 +77,27 @@ export class WtsSession {
 
   /** Writes the editor's changes onto the file as it is now (other editors may have saved).
    *  A failed read or write stops the save and leaves the session as it was. Returns whether a
-   *  string the editor shows changed (another editor's text was kept). */
-  async save(read: () => Promise<string>, write: (text: string) => Promise<void>): Promise<boolean> {
+   *  string the editor shows changed (another editor's text was kept).
+   *
+   *  A failed read is only forgiven when `isMissing` says the file is really gone (not locked, not
+   *  unreadable): the file is then written anew from the editor's strings, and `recreated` is set. */
+  async save(read: () => Promise<string>, write: (text: string) => Promise<void>, isMissing?: () => Promise<boolean>): Promise<boolean> {
+    this.recreated = false;
     if (!this.dirty) return false;
-    const current = await read();
+    let current: string | null;
+    try {
+      current = await read();
+    } catch (e) {
+      if (!isMissing || !(await isMissing())) throw e;
+      current = null;
+    }
+    if (current === null) {
+      // Nothing on disk to merge with: the editor's table is the file.
+      const text = this.table.serialize();
+      const mine = new Map(this.table.entries());
+      await write(text);
+      return this.took(text, mine, true);
+    }
     const disk = new StringTable(current);
     const mine = new Map(this.table.entries());
     // What to write: the editor's table, but another editor's newer text over an undo.
@@ -88,7 +107,11 @@ export class WtsSession {
     }
     const merged = StringTable.merge(this.saved, edited, current);
     if (merged !== current) await write(merged);
-    // Written: now the session takes it over. Strings typed during the write stay the editor's.
+    return this.took(merged, mine, false);
+  }
+
+  /** Written: now the session takes it over. Strings typed during the write stay the editor's. */
+  private took(merged: string, mine: Map<number, string>, recreated: boolean): boolean {
     const next = new StringTable(merged);
     const typed = new Set<number>();
     for (const [n, v] of this.table.entries()) {
@@ -105,6 +128,22 @@ export class WtsSession {
     this.saved = merged;
     this.savedValues = new Map(new StringTable(merged).entries());
     this.saves++;
+    this.recreated = recreated;
     return shown;
   }
+}
+
+/** The packed map to point the user at: the project's build output if it exists, else the newest
+ *  checkpoint (`newestCheckpoint`, a path), else null. `outputSiblings` are the names found next to
+ *  the output (any case). */
+export function findPackedMap(output: string, outputSiblings: string[], newestCheckpoint: string | null): string | null {
+  const file = output.split(/[\\/]/).pop() ?? "";
+  if (file && outputSiblings.some((n) => n.toLowerCase() === file.toLowerCase())) return output;
+  return newestCheckpoint;
+}
+
+/** The warning shown when war3map.wts was recreated. */
+export function recreatedMessage(packedMap: string | null): string {
+  return "war3map.wts was missing and has been recreated from what this editor holds; strings changed elsewhere since may be lost."
+    + (packedMap ? ` The old strings can be found in ${packedMap}.` : "");
 }

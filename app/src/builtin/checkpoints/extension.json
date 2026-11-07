@@ -13,7 +13,8 @@
     ],
     "commands": [
       { "id": "w3.checkpoints.create", "when": "project", "menu": "Tools:2:1", "title": "Create Checkpoint", "category": "Project" },
-      { "id": "w3.checkpoints.restore", "when": "project", "menu": "Tools:2:2", "title": "Restore Checkpoint…", "category": "Project" }
+      { "id": "w3.checkpoints.restore", "when": "project", "menu": "Tools:2:2", "title": "Restore Checkpoint…", "category": "Project" },
+      { "id": "w3.checkpoints.newest", "title": "Newest Checkpoint", "category": "Project", "hidden": true }
     ],
     "configuration": {
       "title": "Checkpoints",
