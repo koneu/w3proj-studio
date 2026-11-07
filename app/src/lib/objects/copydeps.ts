@@ -121,7 +121,7 @@ export function planPaste(set: CopySet, world: PasteWorld, policy: Policy, chose
   for (const c of all) {
     const id = c.object.id!;
     const there = world.existing(id);
-    if (world.game(id)) { fate.set(id, "renamed"); reason.set(id, "a game object has the id"); }
+    if (world.game(id)) { fate.set(id, "renamed"); reason.set(id, "a game or campaign object has the id"); }
     else if (!there) fate.set(id, "add");
     else if (there.ext !== c.ext) { fate.set(id, "renamed"); reason.set(id, "another kind of object has the id"); }
     else if (sameContent(there.object, c.object)) fate.set(id, "same");

@@ -127,7 +127,7 @@ test("an id a game object or another kind has can't be overwritten: the object g
   const p = planPaste(heroSet(), world([], ["A001"]), "overwrite");
   assert.deepEqual(p.conflicts, [], "nothing to ask: there is no choice");
   assert.deepEqual(idsOf(p), ["w3u:h000", "w3a:A000", "w3h:B001"]);
-  assert.match(p.items[1].reason ?? "", /game object/);
+  assert.match(p.items[1].reason ?? "", /game or campaign object/);
   const wrongKind = planPaste(heroSet(), world([obj("w3u", "B001", "hfoo")]), "keep");
   assert.deepEqual(idsOf(wrongKind), ["w3u:h000", "w3a:A001", "w3h:B000"]);
   assert.match(wrongKind.items[2].reason ?? "", /another kind/);
