@@ -1,4 +1,5 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { adoptOldTabKeys, tabsKey } from "./tabmemory";
 import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
@@ -125,7 +126,7 @@ export class Workbench {
     // in the project): files that are gone by the next start are left out.
     const memoryKey = () => {
       const root = this.workspace.project()?.root;
-      return root ? `w3.openEditors:${root.replace(/[\\/]+$/, "").toLowerCase()}` : null;
+      return root ? tabsKey(root) : null;
     };
     this.editors.memory = {
       load: () => {
@@ -193,6 +194,9 @@ export class Workbench {
       scannedRoot = root;
       if (!root) return;
       this.editors.projectOpened();
+      // Tabs saved under another spelling of this folder (8.3 short name) move to the key it has now,
+      // before anything (the extension scan) can open or close a tab. Storing is off until restore().
+      await adoptOldTabKeys(localStorage, root, (p) => invoke<string>("path_normalize", { path: p })).catch(() => 0);
       try {
         this.host.addExternal(await invoke("extensions_scan", { projectRoot: root }));
         await this.host.fire("onStartup");

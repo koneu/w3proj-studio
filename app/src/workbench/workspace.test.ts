@@ -106,3 +106,10 @@ test("a write that ends after a project switch leaves the new project alone", as
   backend.get(B)!.push({ path: "map/Scripts/x.ai", size: 9, modified: 5 });
   assert.deepEqual([...(await ws.externalChanges())], ["map/scripts/x.ai"]);
 });
+
+test("recent projects: another spelling of the opened root isn't listed twice", async () => {
+  reset();
+  const { ws, saved } = make(["C:\\Users\\KONSTA~1\\a", B, "c:\\users\\konsta~1\\b"]);
+  await ws.open(A);
+  assert.deepEqual(saved.recentProjects, [A, B]);
+});

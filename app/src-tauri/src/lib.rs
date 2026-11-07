@@ -45,9 +45,41 @@ fn project_root(path: &str) -> PathBuf {
     }
 }
 
+/// `\\?\C:\x` as `C:\x`, `\\?\UNC\server\share\x` as `\\server\share\x`: the verbatim prefix
+/// canonicalize puts on a Windows path, taken off again. Anything else stays as it is.
+fn strip_verbatim(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+/// A path in one spelling: symlinks and, on Windows, 8.3 short names resolved (`KONSTA~1` is
+/// `Konstantin`), without the `\\?\` prefix canonicalize adds. A path that can't be resolved
+/// (it isn't there) stays as it is. A path on a mapped network drive (`Z:\`) keeps its drive
+/// letter: canonicalize would turn it into the share's UNC name.
+fn normal_path(path: &str) -> String {
+    let Ok(p) = std::fs::canonicalize(path) else { return path.to_string() };
+    let s = strip_verbatim(&p.to_string_lossy());
+    let has_drive = path.as_bytes().get(1) == Some(&b':') && path.as_bytes()[0].is_ascii_alphabetic();
+    if has_drive && s.starts_with(r"\\") {
+        return path.trim_end_matches(['\\', '/']).to_string();
+    }
+    s
+}
+
+/// The path in one spelling (see `normal_path`): the key open tabs are remembered under.
+#[tauri::command]
+fn path_normalize(path: String) -> String {
+    normal_path(&path)
+}
+
 #[tauri::command]
 fn project_open(path: String) -> CmdResult<ProjectInfo> {
-    let root = project_root(&path);
+    let root = PathBuf::from(normal_path(&project_root(&path).to_string_lossy()));
     let manifest = project::Manifest::load(&root).map_err(err)?;
     Ok(ProjectInfo {
         name: manifest.display_name(&root),
@@ -1009,6 +1041,7 @@ pub fn run() {
         .manage(mcp::Mcp::default())
         .invoke_handler(tauri::generate_handler![
             project_open,
+            path_normalize,
             project_files,
             project_folders,
             project_unpack,
@@ -1075,6 +1108,44 @@ mod fs_tests {
     fn rand_suffix() -> usize {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[test]
+    fn strip_verbatim_takes_the_prefix_off() {
+        assert_eq!(strip_verbatim(r"\\?\C:\x\y"), r"C:\x\y");
+        assert_eq!(strip_verbatim(r"\\?\UNC\server\share\x"), r"\\server\share\x");
+        assert_eq!(strip_verbatim(r"C:\x"), r"C:\x");
+        assert_eq!(strip_verbatim("/home/x"), "/home/x");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn normal_path_has_a_drive_letter_and_no_verbatim_prefix() {
+        let (dir, root) = project();
+        let long = normal_path(&root);
+        let b = long.as_bytes();
+        assert!(!long.starts_with(r"\\"), "{long}");
+        assert!(b[1] == b':' && b[0].is_ascii_alphabetic(), "{long}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn normal_path_is_one_spelling_for_short_and_long_names() {
+        let (dir, root) = project();
+        let long = normal_path(&root);
+        // A trailing separator and a dotted detour are the same place.
+        assert_eq!(normal_path(&format!("{root}{}", std::path::MAIN_SEPARATOR)), long);
+        assert_eq!(normal_path(&dir.join("map").join("..").to_string_lossy()), long);
+        #[cfg(windows)]
+        {
+            assert_eq!(normal_path(&root.to_uppercase()).to_lowercase(), long.to_lowercase());
+            // The 8.3 name of the folder, as the shell hands it out.
+            let out = Command::new("cmd").args(["/C", "for", "%I", "in"]).arg(format!("({root})")).args(["do", "@echo", "%~sI"]).output().unwrap();
+            let short = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            assert_eq!(normal_path(&short).to_lowercase(), long.to_lowercase(), "short {short}");
+        }
+        assert_eq!(normal_path("Z:/no/such/place"), "Z:/no/such/place");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

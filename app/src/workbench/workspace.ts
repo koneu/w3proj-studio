@@ -33,7 +33,10 @@ export class WorkspaceService {
     this.info = await invoke<ProjectInfo>("project_open", { path });
     await this.refresh(false);
     await this.settings.loadProject(this.info.root);
-    const recent = this.settings.get<string[]>("recentProjects", []).filter((p) => p.toLowerCase() !== this.info!.root.toLowerCase());
+    // Entries saved under another spelling of a folder (8.3 short name) are the same project.
+    const spelled = await Promise.all(this.settings.get<string[]>("recentProjects", []).map((p) => invoke<string>("path_normalize", { path: p }).catch(() => p)));
+    const seen = new Set([this.info.root.toLowerCase()]);
+    const recent = spelled.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
     await this.settings.set("recentProjects", [this.info.root, ...recent].slice(0, 10));
     this.onDidChange.fire();
   }
