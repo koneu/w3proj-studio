@@ -21,6 +21,9 @@ export class ProjectGuard {
     this.gen++;
     return true;
   }
+  /** Is `root` open without the guard having been told yet (the workspace sets the project
+   *  first and fires its change event later, and fires none if opening fails half way)? */
+  stale(root: string | null): boolean { return root !== this.current; }
   /** Is the build of `token` still for the open project? */
   valid(token: number, root: string | null): boolean { return token === this.gen && root === this.current; }
   /** Does something made for `root` (a rendered row) still belong to the open project? */

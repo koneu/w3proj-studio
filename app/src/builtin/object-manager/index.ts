@@ -27,10 +27,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const rootNow = () => w3.workspace.project()?.root ?? null;
   const guard = new ProjectGuard(rootNow());
-  const load = () => {
+  let loadingToken = 0;
+  /** Drops the old project's rows and state. */
+  const reset = () => {
+    tree = null; refs = new Map(); users = new Map(); unusedCount = 0; error = ""; selected = ""; query = ""; loading = null; open.clear();
+    w3.views.refresh(VIEW);
+  };
+  /** `force`: the user asked (Refresh); then a project the guard hasn't heard of is taken as the new one. */
+  const load = (force = false) => {
     if (!w3.workspace.project()) return Promise.resolve();
+    if (guard.stale(rootNow())) {
+      // open() sets the project before its change event: that event starts the build. Without
+      // it (open failed half way) only a Refresh gets here again, and starts over.
+      if (!force) return Promise.resolve();
+      guard.switched(rootNow());
+      reset();
+    }
     loading ??= (async () => {
       const token = guard.begin(), root = rootNow();
+      loadingToken = token;
       error = "";
       let failed = "", result: { tree: TreeNode[]; refs: Map<string, Set<string>>; users: typeof users; unusedCount: number } | null = null;
       try {
@@ -46,7 +61,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         failed = String((e as Error).message ?? e);
       }
       // The project changed meanwhile: its reset already started the next build.
-      if (!guard.valid(token, root)) return;
+      if (!guard.valid(token, root)) { if (loadingToken === token) loading = null; return; }
       error = failed;
       if (result) ({ tree, refs, users, unusedCount } = result);
       loading = null;
@@ -59,8 +74,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     clearTimeout(timer);
     if (guard.switched(rootNow())) {
       // Another project: drop the old rows at once, build the new tree without the delay.
-      tree = null; refs = new Map(); users = new Map(); unusedCount = 0; error = ""; selected = ""; query = ""; loading = null; open.clear();
-      w3.views.refresh(VIEW);
+      reset();
       void load();
       return;
     }
@@ -79,13 +93,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   ctx.subscriptions.push(
-    w3.commands.register("w3.objectManager.refresh", () => load()),
+    w3.commands.register("w3.objectManager.refresh", () => load(true)),
     w3.workspace.onDidChange(reload),
     w3.workspace.onDidSave(reload),
     w3.views.register(VIEW, {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its objects.")); return; }
-        if (!tree && !error) { el.append(h("div.view-empty", {}, "Reading the map…")); void load(); return; }
+        if (!tree && !error) { el.append(h("div.view-empty", {}, "Reading the map…"), h("button", { onclick: () => void load(true) }, "Refresh")); void load(); return; }
         const search = h("input.om-search", { type: "search", placeholder: "Filter", value: query,
           oninput: () => { query = search.value; draw(); } });
         const rows = h("div.tree.om-tree");
@@ -140,7 +154,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         draw();
         const unusedBox = h("input", { type: "checkbox", checked: unusedOnly, onchange: () => { unusedOnly = unusedBox.checked; draw(); } });
-        el.append(h("div.om-view", {}, h("div.om-toolbar", {}, search, h("button.icon-button", { title: "Refresh", onclick: () => void load() }, "⟳")),
+        el.append(h("div.om-view", {}, h("div.om-toolbar", {}, search, h("button.icon-button", { title: "Refresh", onclick: () => void load(true) }, "⟳")),
           h("label.om-filter", { title: "Custom objects no placed object, other object, trigger or script uses" }, unusedBox, ` Unused only (${unusedCount})`),
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },

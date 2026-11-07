@@ -65,3 +65,11 @@ test("project guard: rows of another project are not owned", () => {
   assert.equal(g.owns("A"), false);
   assert.equal(g.owns("B"), true);
 });
+
+test("project guard: a project that is open but not yet announced is stale until switched", () => {
+  const g = new ProjectGuard("A");
+  assert.equal(g.stale("A"), false);
+  assert.equal(g.stale("B"), true, "open() already set B, onDidChange has not fired");
+  g.switched("B");
+  assert.equal(g.stale("B"), false);
+});
