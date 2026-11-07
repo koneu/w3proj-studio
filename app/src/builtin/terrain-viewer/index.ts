@@ -75,9 +75,11 @@ const SETTLE_LIMIT = 5 * 60_000;
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
 /** TEAM_COLORS index used for neutral players. */
 const NEUTRAL = 20;
-/** While objects load: the shortest time between two frames, and how long after the last input
- *  every frame is drawn again. */
-const LOADING_FRAME_MS = 250, LOADING_INPUT_MS = 500;
+/** While objects load: the shortest time between two frames the load or animation asks for. */
+const LOADING_FRAME_MS = 250;
+/** How long a picture waits for models and textures at most: a backend call that never answers
+ *  mustn't hang the screenshot tool. What isn't in by then is left out. */
+const PICTURE_WAIT_MS = 120_000;
 
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
@@ -1101,8 +1103,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(errorView(`WebGL: ${(e as Error).message}`));
           return {};
         }
-        let dirty = true;
+        let dirty = true, loadDirty = false;
         const redraw = () => { dirty = true; };
+        /** A texture or other art came in: drawn with the next frame the load lets through (see tick). */
+        const loadRedraw = () => { loadDirty = true; };
         /** Art that loads besides the loader's models and textures (ground, water, ground marks): a
          *  picture waits for it as for the models, or a goldmine's mark could be missing from it. */
         const artLoads = new Set<Promise<unknown>>();
@@ -1342,7 +1346,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             renderer.setGroundTexture(i, mip);
             row.title = name;
             status(row, "ok");
-            redraw();
+            loadRedraw();
           }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`)));
         };
         /** Decoded ground textures by tile id. */
@@ -1407,7 +1411,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!path) return;
           const { buf, name } = await readGroundTexture(w3, doc, `${path}.blp`);
           renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name));
-          redraw();
+          loadRedraw();
         }).catch(() => { /* blight shows as the placeholder colour */ }));
         tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
@@ -1429,7 +1433,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (let i = 0; i < frames; i++) {
             const path = frames > 1 ? `${row.texFile}${String(i).padStart(2, "0")}.blp` : `${row.texFile}.blp`;
             // The tileset's own water frames (`_Tilesets/<letter>.w3mod`) where it has them.
-            void artLoad(readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path)); redraw(); }, () => {}));
+            void artLoad(readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path)); loadRedraw(); }, () => {}));
           }
         }).catch(() => { /* the default water colour */ }));
         };
@@ -1489,7 +1493,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const problems = h("div.model-list");
         const texInfo = h("div.muted");
         const loader = new ObjectLoader(renderer.gl, (p) => readFile(w3, doc, p, terrain.tileset), () => {
-          redraw();
+          loadRedraw();
           const list = [...loader.missing];
           // Click: the placed objects whose model uses the texture.
           const users = (tex: string) => {
@@ -1613,7 +1617,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const tex of new Set(splats.map((s) => s.def.texture))) {
             if (splatImages.has(tex.toLowerCase())) continue;
             splatImages.add(tex.toLowerCase());
-            void artLoad(readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex)); redraw(); }, () => {}));
+            void artLoad(readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex)); loadRedraw(); }, () => {}));
           }
           redraw();
         };
@@ -3536,20 +3540,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Static scene: draw only when something changed (or the size did).
         let raf = 0, lastSize = "", lastFrame = 0;
         // While models and textures stream in, each one asks for a frame, and drawing thousands of
-        // objects every frame took time the loading needed (GoldRush: about 2 s of 7). Then a few
-        // frames a second show the progress, unless the person is steering the view.
-        let lastInput = -Infinity;
-        const steered = () => { lastInput = performance.now(); };
-        for (const type of ["pointerdown", "pointermove", "wheel", "keydown"]) el.addEventListener(type, steered, { capture: true, passive: true });
+        // objects every frame took time the loading needed (GoldRush: about 2 s of 7). Frames asked
+        // for by the load (loadRedraw) and by animation then come a few times a second; a change
+        // someone makes (the camera, an edit, a panel, a command: redraw) is drawn at once.
         const tick = (now: number) => {
           const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
           const loading = loader.busy || artLoads.size > 0;
-          const throttled = loading && now - lastInput > LOADING_INPUT_MS && now - lastFrame < LOADING_FRAME_MS;
+          const byItself = loadDirty || renderer.animating;
+          const due = dirty || size !== lastSize || (byItself && !(loading && now - lastFrame < LOADING_FRAME_MS));
           // Particle effects move by themselves: then every frame is drawn.
-          if (canvas.clientWidth > 0 && (dirty || size !== lastSize || renderer.animating) && (size !== lastSize || !throttled)) {
+          if (canvas.clientWidth > 0 && due) {
             renderer.render();
             placeLabels();
-            dirty = false;
+            dirty = loadDirty = false;
             lastSize = size;
             lastFrame = now;
           }
@@ -3600,9 +3603,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         const ready = () => Promise.all([objectsPlaced.catch(() => {}), objectReload.settled()]).then(() => {});
         const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => {
-          await ready();
-          await loader.settled();
-          await artSettled();
+          let timer = 0;
+          const inTime = await Promise.race([
+            (async () => { await ready(); await loader.settled(); await artSettled(); return true; })(),
+            new Promise<false>((done) => { timer = window.setTimeout(() => done(false), PICTURE_WAIT_MS); }),
+          ]);
+          clearTimeout(timer);
+          if (!inTime) void w3.window.showWarning(`Some models or textures were still loading after ${PICTURE_WAIT_MS / 1000} seconds: the terrain picture leaves them out.`);
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
           const before = handle.view();
           if (area) {
