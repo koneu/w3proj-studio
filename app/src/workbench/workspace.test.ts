@@ -7,6 +7,7 @@ const A = "C:\\Users\\Konstantin\\a", B = "C:\\Users\\Konstantin\\b";
 const backend = new Map<string, F[]>();
 const calls = { projectFiles: 0 };
 let gate: Promise<void> | null = null;
+let filesGate: Promise<void> | null = null;
 const reset = () => {
   backend.set(A, [{ path: "war3map.j", size: 1, modified: 1 }]);
   backend.set(B, [{ path: "other.txt", size: 1, modified: 1 }]);
@@ -19,7 +20,13 @@ g.__TAURI_INTERNALS__ = {
   async invoke(command: string, args: Record<string, unknown>, options?: { headers?: Record<string, string> }) {
     switch (command) {
       case "project_open": return { root: args.path, name: "p" };
-      case "project_files": calls.projectFiles++; return (backend.get(String(args.root)) ?? []).map((f) => ({ ...f }));
+      case "project_files": {
+        calls.projectFiles++;
+        // What the disk holds when the read starts; a held read answers with that, later.
+        const seen = (backend.get(String(args.root)) ?? []).map((f) => ({ ...f }));
+        if (filesGate) await filesGate;
+        return seen;
+      }
       case "project_folders": return [];
       case "path_normalize": return String(args.path).replace(/konsta~1/i, "Konstantin");
       case "fs_write_text": {
@@ -112,4 +119,53 @@ test("recent projects: another spelling of the opened root isn't listed twice", 
   const { ws, saved } = make(["C:\\Users\\KONSTA~1\\a", B, "c:\\users\\konsta~1\\b"]);
   await ws.open(A);
   assert.deepEqual(saved.recentProjects, [A, B]);
+});
+
+/** Holds the next directory reads until the returned function is called. */
+const holdReads = () => {
+  let release!: () => void;
+  filesGate = new Promise<void>((r) => { release = r; });
+  return () => { filesGate = null; release(); };
+};
+
+test("a file written while externalChanges reads stays listed and isn't reported", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  const release = holdReads();
+  const checking = ws.externalChanges();
+  await new Promise((r) => setTimeout(r, 5));
+  await ws.writeText("map/Scripts/x.ai", "// ai"); // the read began before this file existed
+  release();
+  const changed = await checking;
+  assert.equal(changed.size, 0, "not an external change");
+  assert.ok(ws.files().some((f) => f.path === "map/Scripts/x.ai"), "still listed");
+  assert.equal((await ws.externalChanges()).size, 0, "nor on the next check");
+});
+
+test("a file written while refresh reads stays listed, and isn't reported later", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  const release = holdReads();
+  const refreshing = ws.refresh();
+  await new Promise((r) => setTimeout(r, 5));
+  await ws.writeText("map/Scripts/x.ai", "// ai");
+  release();
+  await refreshing;
+  assert.ok(ws.files().some((f) => f.path === "map/Scripts/x.ai"), "still listed");
+  assert.equal((await ws.externalChanges()).size, 0);
+});
+
+test("a write during the read doesn't hide someone else's change from the same read", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  backend.get(A)!.push({ path: "by-git.txt", size: 5, modified: 3 });
+  const release = holdReads();
+  const checking = ws.externalChanges();
+  await new Promise((r) => setTimeout(r, 5));
+  await ws.writeText("map/Scripts/x.ai", "// ai");
+  release();
+  assert.deepEqual([...(await checking)], ["by-git.txt"]);
 });

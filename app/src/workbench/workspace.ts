@@ -51,25 +51,42 @@ export class WorkspaceService {
 
   async refresh(fire = true) {
     if (!this.info) return;
+    // Writes that finish while this reads are neither lost from the list nor left for the next
+    // external-change check to report: only what was known when it started is cleared.
+    const ownBefore = new Set(this.ownWrites), listedBefore = this.listed;
     this.info = await invoke<ProjectInfo>("project_open", { path: this.info.root });
-    this.setList(await invoke<FileInfo[]>("project_files", { root: this.info.root }));
+    const list = await invoke<FileInfo[]>("project_files", { root: this.info.root });
     this.folderList = await invoke<string[]>("project_folders", { root: this.info.root });
-    this.ownWrites.clear();
+    this.setList(this.keepNoticed(list, listedBefore, ownBefore));
+    for (const k of ownBefore) this.ownWrites.delete(k);
     if (fire) this.onDidChange.fire();
   }
 
   /** Files written through the workspace since the last refresh (lower case). */
   private ownWrites = new Set<string>();
 
+  /** `list`, just read from the disk, plus the files our own writes added to the list since
+   *  `listedBefore` (the read may have started before they existed). */
+  private keepNoticed(list: FileInfo[], listedBefore: ReadonlySet<string>, ownBefore: ReadonlySet<string>): FileInfo[] {
+    const have = new Set(list.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+    const extra = this.fileList.filter((f) => {
+      const k = f.path.replace(/\\/g, "/").toLowerCase();
+      return !listedBefore.has(k) && this.ownWrites.has(k) && !ownBefore.has(k) && !have.has(k);
+    });
+    return extra.length ? [...list, ...extra].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())) : list;
+  }
+
   /** Re-reads the file list and returns the files changed, added or removed by something else
    *  (git, another program) since the last refresh, lower case; fires onDidChange if any. */
   async externalChanges(): Promise<Set<string>> {
     if (!this.info) return new Set();
     const before = new Map(this.fileList.map((f) => [f.path.toLowerCase(), f]));
-    const own = new Set(this.ownWrites);
+    const own = new Set(this.ownWrites), ownBefore = new Set(own), listedBefore = this.listed;
     const root = this.info.root;
     const after = await invoke<FileInfo[]>("project_files", { root });
     if (this.info?.root !== root) return new Set();
+    // Our own writes that finished during the read count as ours too, and stay in the list.
+    for (const k of this.ownWrites) own.add(k);
     const changed = new Set<string>();
     for (const f of after) {
       const k = f.path.toLowerCase(), b = before.get(k);
@@ -77,8 +94,8 @@ export class WorkspaceService {
       if ((!b || b.size !== f.size || b.modified !== f.modified) && !own.has(k)) changed.add(k);
     }
     for (const k of before.keys()) if (!own.has(k)) changed.add(k);
-    this.setList(after);
-    this.ownWrites.clear();
+    this.setList(this.keepNoticed(after, listedBefore, ownBefore));
+    for (const k of ownBefore) this.ownWrites.delete(k);
     if (changed.size) {
       this.info = await invoke<ProjectInfo>("project_open", { path: root });
       this.onDidChange.fire();
