@@ -10,7 +10,7 @@ import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
-import { buildTree, idsInText, markUnused, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
+import { ProjectGuard, buildTree, idsInText, markUnused, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
 
 const VIEW = "w3.objectManager.tree";
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
@@ -25,27 +25,47 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const open = new Set<string>();
   let query = "", selected = "";
 
+  const rootNow = () => w3.workspace.project()?.root ?? null;
+  const guard = new ProjectGuard(rootNow());
   const load = () => {
+    if (!w3.workspace.project()) return Promise.resolve();
     loading ??= (async () => {
+      const token = guard.begin(), root = rootNow();
       error = "";
+      let failed = "", result: { tree: TreeNode[]; refs: Map<string, Set<string>>; users: typeof users; unusedCount: number } | null = null;
       try {
         const c = await contents(w3);
-        tree = buildTree(c);
-        refs = c.triggers ? triggerRefs(c.triggers) : new Map();
+        const tree = buildTree(c);
+        const refs = c.triggers ? triggerRefs(c.triggers) : new Map();
         const customIds = new Set(c.custom.flatMap((k) => k.ids.map((o) => o.id)));
-        users = objectRefs(c.objects, customIds, c.nameOf);
+        const users = objectRefs(c.objects, customIds, c.nameOf);
         const mentioned = new Set(c.texts.flatMap((t) => idsInText(t, customIds)));
-        unusedCount = markUnused(tree, (id) => mentioned.has(id) || users.has(id) || refs.has(id));
+        const unusedCount = markUnused(tree, (id) => mentioned.has(id) || users.has(id) || refs.has(id));
+        result = { tree, refs, users, unusedCount };
       } catch (e) {
-        error = String((e as Error).message ?? e);
+        failed = String((e as Error).message ?? e);
       }
+      // The project changed meanwhile: its reset already started the next build.
+      if (!guard.valid(token, root)) return;
+      error = failed;
+      if (result) ({ tree, refs, users, unusedCount } = result);
       loading = null;
       w3.views.refresh(VIEW);
     })();
     return loading;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const reload = () => { clearTimeout(timer); timer = setTimeout(() => void load(), 1000); };
+  const reload = () => {
+    clearTimeout(timer);
+    if (guard.switched(rootNow())) {
+      // Another project: drop the old rows at once, build the new tree without the delay.
+      tree = null; refs = new Map(); users = new Map(); unusedCount = 0; error = ""; selected = ""; query = ""; loading = null; open.clear();
+      w3.views.refresh(VIEW);
+      void load();
+      return;
+    }
+    timer = setTimeout(() => void load(), 1000);
+  };
 
   const go = async (t: Target) => {
     switch (t.kind) {
@@ -69,6 +89,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const search = h("input.om-search", { type: "search", placeholder: "Filter", value: query,
           oninput: () => { query = search.value; draw(); } });
         const rows = h("div.tree.om-tree");
+        const rowsRoot = rootNow();
         const info = h("div.om-info");
         const q = () => query.trim().toLowerCase();
         const matches = (n: TreeNode): boolean => (!unusedOnly || n.unused === true) && `${n.label} ${n.detail ?? ""}`.toLowerCase().includes(q()) || (n.children ?? []).some(matches);
@@ -91,7 +112,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   showInfo(n);
                   draw();
                 },
-                ondblclick: () => { if (n.target) void go(n.target).catch((e) => w3.window.showError(String(e))); },
+                ondblclick: () => { if (n.target && guard.owns(rowsRoot)) void go(n.target).catch((e) => w3.window.showError(String(e))); },
               },
               h("span.tree-icon", {}, kids.length ? (isOpen ? "▾" : "▸") : ""),
               h("span.tree-label", {}, n.label),

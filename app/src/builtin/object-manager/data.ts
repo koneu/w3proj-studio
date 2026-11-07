@@ -5,6 +5,28 @@ import { ownerOf } from "../../lib/terrain/owner";
 import { placedName, ident, type PlacedJson } from "../../lib/script/jass";
 import type { TriggerFile } from "../../lib/triggers/wtg";
 
+/** Tells which project (root) the rows belong to, and whether a finished build is still
+ *  wanted: a build started for one project is dropped once the project changed, even if
+ *  the user switched back to it (the newer build is the one that counts). */
+export class ProjectGuard {
+  private gen = 0;
+  private current: string | null;
+  constructor(root: string | null) { this.current = root; }
+  /** Starts a build: the token to give back to `valid`. */
+  begin(): number { return ++this.gen; }
+  /** Call on every workspace change; true when the project is another one now. */
+  switched(root: string | null): boolean {
+    if (root === this.current) return false;
+    this.current = root;
+    this.gen++;
+    return true;
+  }
+  /** Is the build of `token` still for the open project? */
+  valid(token: number, root: string | null): boolean { return token === this.gen && root === this.current; }
+  /** Does something made for `root` (a rendered row) still belong to the open project? */
+  owns(root: string | null): boolean { return root === this.current; }
+}
+
 /** Where a double-click goes. */
 export type Target =
   | { kind: "object"; ext: string; id: string }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { idsInText, markUnused, objectRefs, type Node } from "./data";
+import { ProjectGuard, idsInText, markUnused, objectRefs, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -34,4 +34,34 @@ test("only custom objects count, wherever they are in the tree", () => {
   assert.equal(units[0].unused, false);
   assert.equal(units[1].unused, true);
   assert.equal(tree[1].unused, undefined);
+});
+
+test("project guard: a build for the previous project is dropped after a switch", () => {
+  const g = new ProjectGuard("A");
+  const slow = g.begin();
+  assert.equal(g.valid(slow, "A"), true);
+  assert.equal(g.switched("A"), false, "same project: no switch");
+  assert.equal(g.switched("B"), true);
+  assert.equal(g.valid(slow, "B"), false, "old build, even though the root now differs from its own");
+  assert.equal(g.valid(slow, "A"), false);
+  const fresh = g.begin();
+  assert.equal(g.valid(fresh, "B"), true);
+});
+
+test("project guard: switching back and forth keeps only the last build", () => {
+  const g = new ProjectGuard("A");
+  const a1 = g.begin();
+  g.switched("B"); const b = g.begin();
+  g.switched("A"); const a2 = g.begin();
+  assert.equal(g.valid(a1, "A"), false);
+  assert.equal(g.valid(b, "A"), false);
+  assert.equal(g.valid(a2, "A"), true);
+});
+
+test("project guard: rows of another project are not owned", () => {
+  const g = new ProjectGuard("A");
+  assert.equal(g.owns("A"), true);
+  g.switched("B");
+  assert.equal(g.owns("A"), false);
+  assert.equal(g.owns("B"), true);
 });
