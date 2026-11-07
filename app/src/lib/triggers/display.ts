@@ -33,7 +33,8 @@ function generatedName(value: string, ctx: DisplayContext): string | null {
   return `${m[2].replace(/_/g, " ")} <gen>`;
 }
 
-export function paramText(p: Param, ctx: DisplayContext, argType?: string): string {
+/** A parameter's text without its array index, and the index separately (for callers that draw it as its own link). */
+export function paramParts(p: Param, ctx: DisplayContext, argType?: string): { text: string; index: Param | undefined } {
   let text: string;
   switch (p.type) {
     case 0: text = ctx.data.presets.get(p.value)?.name ?? p.value; break;
@@ -47,7 +48,12 @@ export function paramText(p: Param, ctx: DisplayContext, argType?: string): stri
     }
     default: text = p.value || "<Empty>";
   }
-  return p.index ? `${text}[${paramText(p.index, ctx, "integer")}]` : text;
+  return { text, index: p.index };
+}
+
+export function paramText(p: Param, ctx: DisplayContext, argType?: string): string {
+  const { text, index } = paramParts(p, ctx, argType);
+  return index ? `${text}[${paramText(index, ctx, "integer")}]` : text;
 }
 
 /** A function and its arguments through its _Parameters pattern. */

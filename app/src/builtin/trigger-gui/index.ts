@@ -10,7 +10,7 @@ import {
   TRIGGER_GUI_SERVICE, TRIGGERS_SERVICE,
   type TriggerEditorHandle, type TriggerGuiService, type TriggerParamEditor, type TriggersService,
 } from "../../extensions/services";
-import { branchLabels, paramText } from "../../lib/triggers/display";
+import { branchLabels, paramParts, paramText } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
 import type { Eca, Param, TriggerItem } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
@@ -392,7 +392,7 @@ class GuiView {
       const unset = !p || p.type < 0;
       const content: (HTMLElement | string)[] = p && p.type === FUNCTION && p.call
         ? ["(", ...this.sentence(p.call.kind, p.call.name, p.call.params), ")"]
-        : [unset ? `<${f?.args[i] ?? "?"}>` : paramText(p, ed.display, type)];
+        : [unset ? `<${f?.args[i] ?? "?"}>` : paramParts(p, ed.display, type).text];
       if (p?.index) {
         const idx = p.index;
         content.push("[", h(`span.trig-param${ed.editable ? ".editable" : ""}`, {
