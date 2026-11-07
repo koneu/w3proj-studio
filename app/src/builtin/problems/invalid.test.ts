@@ -193,6 +193,18 @@ test("an object file that is there but can't be read stops everything instead of
   }
 });
 
+test("of two object files that can't be read, the error names the first in order, also when it is read last", async () => {
+  const first = "map/war3map.w3u.json", second = "map/war3map.w3d.json";
+  const { w3 } = setup({ [UNITS]: units("hfoo"), [DOODADS]: doodads("LTlt"), [first]: "{ not json", [second]: "{ not json" });
+  // The files are read at the same time: the first one's answer comes last.
+  const read = w3.workspace.readText;
+  (w3.workspace as { readText: unknown }).readText = async (p: string) => { if (p === first) await new Promise((r) => setTimeout(r, 30)); return read(p); };
+  await assert.rejects(deleteInvalid(w3, game), (e: Error) => e.message.includes(first) && !e.message.includes(second));
+  // Control: with only the second one broken, it is the one named.
+  const { w3: other } = setup({ [UNITS]: units("hfoo"), [DOODADS]: doodads("LTlt"), [second]: "{ not json" });
+  await assert.rejects(deleteInvalid(other, game), (e: Error) => e.message.includes(second));
+});
+
 test("a placement file that can't be read is refused too", async () => {
   const { w3 } = setup({ [UNITS]: "{ broken", [DOODADS]: doodads("LTlt", "yyyy") });
   await assert.rejects(planInvalid(w3, game), /war3mapUnits\.doo\.json is there but can't be read/);

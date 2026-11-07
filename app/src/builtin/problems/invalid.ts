@@ -51,15 +51,26 @@ export async function knownPlacedTypes(w3: W3Api, load: KindLoader = loadKind, r
   const readJson = <T>(path: string) => read(path) as Promise<T | null>;
   // A chapter map also has its campaign's custom objects (the campaign project is two folders up).
   const campaign = await findCampaign(w3);
-  for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
-    const k = await load(w3, kind).catch(() => null);
-    if (!k || !k.baseIds.length) gameOk = false;
-    for (const id of k?.baseIds ?? []) note(kind, id);
+  const kinds = ["w3u", "w3t", "w3b", "w3d"];
+  const filesOf = (kind: string) => {
     const files = [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`];
     if (campaign) files.push(`${campaign}/map/war3campaign.${kind}.json`, `${campaign}/map/war3campaignSkin.${kind}.json`);
+    return files;
+  };
+  // Everything is read at once, and then gone through in order: the game's data and the files of each
+  // kind, so a failure is the first one in that order, as when they were read one after another.
+  const [loaded, docs] = await Promise.all([
+    Promise.all(kinds.map((kind) => load(w3, kind).catch(() => null))),
+    Promise.all(kinds.map((kind) => Promise.allSettled(filesOf(kind).map((file) => readJson<{ custom?: Obj[] }>(file))))),
+  ]);
+  for (const [i, kind] of kinds.entries()) {
+    const k = loaded[i];
+    if (!k || !k.baseIds.length) gameOk = false;
+    for (const id of k?.baseIds ?? []) note(kind, id);
     // An object file that is there but unreadable throws: its objects would all look unknown.
-    for (const file of files) {
-      for (const o of (await readJson<{ custom?: Obj[] }>(file))?.custom ?? []) if (o.id) note(kind, o.id);
+    for (const doc of docs[i]) {
+      if (doc.status === "rejected") throw doc.reason;
+      for (const o of doc.value?.custom ?? []) if (o.id) note(kind, o.id);
     }
   }
   return { known, inUnits, inDoodads, gameOk };
