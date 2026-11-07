@@ -21,7 +21,8 @@ import { connect, problems, sleep, until } from "./cdp.mjs";
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
 const exeName = process.platform === "win32" ? ".exe" : "";
-const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
+// W3_BENCH_EXE: another build (a copy of an older one, made the same way), to hold against this one.
+const exe = process.env.W3_BENCH_EXE ?? join(repo, "target", "debug", `w3proj-studio${exeName}`);
 const cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
 const IDENTIFIER = process.env.W3_SMOKE_ID ?? "dev.w3proj.studio.smoke";
 const work = process.env.W3_BENCH_DIR ?? join(tmpdir(), `problems-bench-${IDENTIFIER}`);
@@ -124,7 +125,7 @@ const RUN = `(async () => {
 
 async function main() {
   mkdirSync(work, { recursive: true });
-  if (!process.argv.includes("--no-build")) build();
+  if (!process.argv.includes("--no-build") && !process.env.W3_BENCH_EXE) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
   const list = projects();
   const result = { identifier: IDENTIFIER, maps: {} };
