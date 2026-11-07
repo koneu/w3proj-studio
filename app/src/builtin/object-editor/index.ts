@@ -14,6 +14,7 @@ import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, ty
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
+import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -220,6 +221,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.objects.kinds")),
 
+    w3.commands.register("w3.objects.exportAll", () => exportAllObjectData(w3)),
+    w3.commands.register("w3.objects.importAll", () => importObjectData(w3)),
     // `focusId` (optional) shows that object, e.g. when coming from the terrain view.
     w3.commands.register("w3.objectEditor.open", async (ext?: string, focusId?: string) => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
@@ -404,6 +407,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
             ...listMenu(),
             { label: many ? `Copy ${selection.size} objects` : "Copy", shortcut: "Ctrl+C", run: copySelection },
+            { label: many ? `Export ${selection.size} objects…` : "Export Object…", run: () => void exportSelection().catch(failed) },
             "-",
             { label: many ? `Remove ${selection.size} objects` : o.id ? "Delete" : "Remove changes", shortcut: "Del", run: () => void removeSelection() },
           ]);
@@ -1063,6 +1067,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, text)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
+        };
+        /** The selected objects as a .w3o of their own. */
+        const exportSelection = async () => {
+          const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
+          await exportObjects(w3, kind, file as unknown as EditFile, [...selection] as unknown as EditObject[], text);
         };
         const importFile = async () => {
           const path = await w3.window.pickFile({ title: `Import ${kindInfo?.label ?? kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });

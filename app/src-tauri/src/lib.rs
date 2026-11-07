@@ -273,6 +273,29 @@ fn objects_import(name: String, path: String) -> CmdResult<String> {
     String::from_utf8(json).map_err(err)
 }
 
+/// One kind's object data (project JSON) in a `.w3o`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct W3oPart {
+    kind: String,
+    text: String,
+}
+
+/// Writes all given kinds of object data into one `.w3o` file.
+#[tauri::command]
+fn w3o_export(parts: Vec<W3oPart>, path: String) -> CmdResult<()> {
+    let parts: Vec<(String, String)> = parts.into_iter().map(|p| (p.kind, p.text)).collect();
+    let bin = w3proj::w3o::pack_json(&parts).map_err(err)?;
+    std::fs::write(&path, bin).map_err(err)
+}
+
+/// Reads a `.w3o` as the project JSON of each kind it holds.
+#[tauri::command]
+fn w3o_import(path: String) -> CmdResult<Vec<W3oPart>> {
+    let bin = std::fs::read(&path).map_err(err)?;
+    let parts = w3proj::w3o::unpack_json(&bin).map_err(err)?;
+    Ok(parts.into_iter().map(|(kind, text)| W3oPart { kind, text }).collect())
+}
+
 /// Validates a codec-backed project file (e.g. `map/war3map.w3i.json`) by
 /// encoding it to the archive format, and returns it in canonical form.
 #[tauri::command]
@@ -1091,6 +1114,8 @@ pub fn run() {
             objects_canonicalize,
             objects_export,
             objects_import,
+            w3o_export,
+            w3o_import,
             codec_canonicalize,
             codec_decode,
             codec_write,

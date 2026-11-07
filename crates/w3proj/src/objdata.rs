@@ -207,6 +207,16 @@ fn read_mods(r: &mut Reader, opt_ints: bool) -> Result<Vec<Mod>> {
 }
 
 pub fn decode(bytes: &[u8], opt_ints: bool) -> Result<ObjectFile> {
+    let (file, used) = decode_prefix(bytes, opt_ints)?;
+    if used != bytes.len() {
+        return Err(Error::Format("trailing bytes after object data".into()));
+    }
+    Ok(file)
+}
+
+/// Reads the object data file at the start of `bytes` and says how many bytes it took: the files
+/// inside a `.w3o` follow each other.
+pub fn decode_prefix(bytes: &[u8], opt_ints: bool) -> Result<(ObjectFile, usize)> {
     let mut r = Reader { d: bytes, p: 0 };
     let version = r.u32()?;
     if !(1..=3).contains(&version) {
@@ -249,17 +259,15 @@ pub fn decode(bytes: &[u8], opt_ints: bool) -> Result<ObjectFile> {
         }
         tables.push(objs);
     }
-    if r.p != bytes.len() {
-        return Err(Error::Format("trailing bytes after object data".into()));
-    }
     let custom = tables.pop().unwrap();
     let original = tables.pop().unwrap();
-    Ok(ObjectFile {
+    let file = ObjectFile {
         format: FORMAT.into(),
         version,
         original,
         custom,
-    })
+    };
+    Ok((file, r.p))
 }
 
 /// Moves the most common end token to the object and drops it from mods

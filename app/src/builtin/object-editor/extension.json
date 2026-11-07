@@ -49,6 +49,8 @@
       }
     ],
     "commands": [
+      { "id": "w3.objects.exportAll", "when": "project", "menu": "File:3:1", "title": "Export All Object Data…", "category": "Object Editor" },
+      { "id": "w3.objects.importAll", "when": "project", "menu": "File:3:2", "title": "Import Object Data (.w3o)…", "category": "Object Editor" },
       {
         "id": "w3.objectEditor.open", "when": "project", "menu": "Module:1:2",
         "title": "Open Object Editor…",

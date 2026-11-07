@@ -295,3 +295,33 @@ fn verify_never_reports_a_silent_change() {
     report(failures);
     assert!(changed.is_empty(), "packed differently:\n{}", changed.join("\n"));
 }
+
+/// A `.w3o` of several kinds, made from the fixture's unit data.
+fn w3o_bytes() -> Vec<u8> {
+    let text = fs::read_to_string(fixture().join("map/war3map.w3u.json")).unwrap();
+    let parts: Vec<(String, String)> = ["w3u", "w3t", "w3a", "w3q"].iter().map(|k| (k.to_string(), text.clone())).collect();
+    w3proj::w3o::pack_json(&parts).unwrap()
+}
+
+/// The all-in-one object data file is read from strangers too: it never panics, and whatever is
+/// accepted puts back together as the same bytes.
+#[test]
+fn w3o_survives_damaged_files() {
+    let bytes = w3o_bytes();
+    assert_eq!(w3proj::w3o::unpack(&bytes).unwrap().len(), 4, "the undamaged file must read: else rejecting means nothing");
+    let mut failures = BTreeMap::new();
+    let (mut accepted, mut rejected) = (0, 0);
+    for seed in 0..rounds() * 5 {
+        let bad = damage(&bytes, &mut Rng::new(seed + 1));
+        guarded(&mut failures, || format!("seed {seed}"), || match w3proj::w3o::unpack(&bad) {
+            Ok(parts) => {
+                accepted += 1;
+                assert_eq!(w3proj::w3o::pack(&parts).unwrap(), bad, "seed {seed}: accepted but not the same bytes");
+                let _ = w3proj::w3o::unpack_json(&bad);
+            }
+            Err(_) => rejected += 1,
+        });
+    }
+    report(failures);
+    assert!(accepted > 0 && rejected > 0, "the damage reached nothing: {accepted} accepted, {rejected} rejected");
+}
