@@ -57,6 +57,13 @@ fn strip_verbatim(s: &str) -> String {
     }
 }
 
+/// A path on a mapped drive as the user wrote it, without trailing separators. A bare drive
+/// (`Z:`) means the current folder on that drive, so the drive's root keeps its separator.
+fn keep_spelling(path: &str) -> String {
+    let t = path.trim_end_matches(['\\', '/']);
+    if t.len() == 2 { format!(r"{t}\") } else { t.to_string() }
+}
+
 /// A path in one spelling: symlinks and, on Windows, 8.3 short names resolved (`KONSTA~1` is
 /// `Konstantin`), without the `\\?\` prefix canonicalize adds. A path that can't be resolved
 /// (it isn't there) stays as it is. A path on a mapped network drive (`Z:\`) keeps its drive
@@ -66,15 +73,17 @@ fn normal_path(path: &str) -> String {
     let s = strip_verbatim(&p.to_string_lossy());
     let has_drive = path.as_bytes().get(1) == Some(&b':') && path.as_bytes()[0].is_ascii_alphabetic();
     if has_drive && s.starts_with(r"\\") {
-        return path.trim_end_matches(['\\', '/']).to_string();
+        return keep_spelling(path);
     }
     s
 }
 
-/// The path in one spelling (see `normal_path`): the key open tabs are remembered under.
+/// The path in one spelling (see `normal_path`): the key open tabs are remembered under. Off the
+/// UI thread: an offline share can take a long time to answer.
 #[tauri::command]
-fn path_normalize(path: String) -> String {
-    normal_path(&path)
+async fn path_normalize(path: String) -> String {
+    let fallback = path.clone();
+    tauri::async_runtime::spawn_blocking(move || normal_path(&path)).await.unwrap_or(fallback)
 }
 
 #[tauri::command]
@@ -1108,6 +1117,22 @@ mod fs_tests {
     fn rand_suffix() -> usize {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[test]
+    fn a_mapped_drive_keeps_its_spelling_and_its_root_separator() {
+        assert_eq!(keep_spelling(r"Z:\"), r"Z:\");
+        assert_eq!(keep_spelling("Z:/"), r"Z:\");
+        assert_eq!(keep_spelling(r"Z:"), r"Z:\");
+        assert_eq!(keep_spelling(r"Z:\maps\p\"), r"Z:\maps\p");
+        assert_eq!(keep_spelling("Z:/maps/p"), "Z:/maps/p");
+    }
+
+    #[test]
+    fn path_normalize_off_the_main_thread_gives_normal_paths_answer() {
+        let (dir, root) = project();
+        assert_eq!(tauri::async_runtime::block_on(path_normalize(root.clone())), normal_path(&root));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
