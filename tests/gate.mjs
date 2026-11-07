@@ -7,6 +7,7 @@
 //
 // Every step runs even after a failure, and the exit code is non-zero if any step failed or
 // couldn't run. A check that is missing what it needs FAILS: a green result always means it ran.
+// The last line is GATE_EXIT=<code>, also when the output went through a pipe.
 //
 // Needs for `coverage`: cargo-llvm-cov and the llvm-tools component.
 // Needs for `corpus`: the maps (W3PROJ_CORPUS, default smoketest_maps next to the main checkout)
@@ -119,4 +120,7 @@ console.log(`\n--- gate: ${tier}`);
 for (const r of results) console.log(`${r.ok ? "pass" : "FAIL"}  ${String(r.seconds).padStart(4)}s  ${r.name}`);
 const failed = results.filter((r) => !r.ok).length;
 console.log(failed ? `${failed} of ${results.length} FAILED` : `all ${results.length} passed`);
-process.exit(failed ? 1 : 0);
+// The answer once more, as the last line, so that it survives a pipe (`gate | tail` reports tail's code).
+const code = failed ? 1 : 0;
+console.log(`GATE_EXIT=${code}`);
+process.exitCode = code;
