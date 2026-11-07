@@ -9,8 +9,10 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mergeSections, mergeValid, printSections, printValid } from "./report.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, "..", "..");
@@ -85,23 +87,64 @@ async function prepare() {
   writeFileSync(stamp, build);
 }
 
-/** A check in the extraction folder; it writes what it measured as JSON. */
-function check(script, ...args) {
-  const out = join(work, `${script}.json`);
-  rmSync(out, { force: true });
-  const r = spawnSync(process.execPath, ["--no-warnings", "--experimental-transform-types", "--import", new URL("./tsregister.mjs", import.meta.url).href, join(here, script), join(app, "src", "lib"), ...args], {
-    cwd: work, stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, SCRIPT_CHECK_JSON: out },
+/**
+ * A check in the extraction folder; it writes what it measured as JSON. With `shards` above 1 the
+ * maps are split into that many runs of maps, one process each (SCRIPT_CHECK_SHARD), and the
+ * details come back in the order of the shards, that is of the maps. What a shard prints on stderr
+ * is shown in that order too, its stdout only with `echo` (for a check that doesn't go by maps).
+ */
+async function check(script, shards, echo, ...args) {
+  const runs = Array.from({ length: shards }, (_, i) => {
+    const out = join(work, `${script}.${i}.json`);
+    rmSync(out, { force: true });
+    return new Promise((done) => {
+      const p = spawn(process.execPath, ["--no-warnings", "--experimental-transform-types", "--import", new URL("./tsregister.mjs", import.meta.url).href, join(here, script), join(app, "src", "lib"), ...args], {
+        cwd: work, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SCRIPT_CHECK_JSON: out, SCRIPT_CHECK_SHARD: `${i}/${shards}` },
+      });
+      let stdout = "", stderr = "";
+      p.stdout.on("data", (d) => (stdout += d));
+      p.stderr.on("data", (d) => (stderr += d));
+      p.on("error", (e) => done({ out, status: 1, stdout, stderr: stderr + e }));
+      p.on("close", (status) => done({ out, status, stdout, stderr }));
+    });
   });
-  if (r.status !== 0 || !existsSync(out)) throw new Error(`${script} failed`);
-  return JSON.parse(readFileSync(out, "utf8"));
+  const results = await Promise.all(runs);
+  // Shown later, by the caller, so that the report doesn't depend on which check ends first.
+  const shown = () => {
+    for (const r of results) {
+      if (echo) process.stdout.write(r.stdout);
+      process.stderr.write(r.stderr);
+    }
+  };
+  if (results.some((r) => r.status !== 0 || !existsSync(r.out))) {
+    shown();
+    throw new Error(`${script} failed`);
+  }
+  return { details: results.map((r) => JSON.parse(readFileSync(r.out, "utf8"))), shown };
 }
 
 await prepare();
 readTables();
+const cores = availableParallelism();
+const shards = Number(process.env.SCRIPT_CHECK_SHARDS) || Math.max(1, Math.min(8, cores >> 1));
+// The three checks run side by side; the report below is in a fixed order whichever ends first.
+const [sectionRuns, validRuns, mistakeRuns] = await Promise.all([
+  check("sections.mts", shards, false, "", "0"),
+  check("jass-valid.mts", shards, false, "0"),
+  check("jass-mistakes.mts", 1, true),
+]);
+const sections = mergeSections(sectionRuns.details);
+const valid = mergeValid(validRuns.details);
+const [mistakes] = mistakeRuns.details;
+sectionRuns.shown();
+printSections(sections);
+validRuns.shown();
+printValid(valid, { heads: true });
+mistakeRuns.shown();
 const measured = {
-  sections: check("sections.mts", "", "0"),
-  valid: check("jass-valid.mts", "0"),
-  mistakes: check("jass-mistakes.mts"),
+  sections: { identical: sections.stats, problems: sections.broken.length, guarded: sections.guarded.length, checked: sections.checked },
+  valid: { common: valid.common, blizzard: valid.blizzard, maps: valid.maps, clean: valid.clean, reports: valid.reports },
+  mistakes,
 };
 
 if (update) {

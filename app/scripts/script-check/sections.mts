@@ -3,6 +3,7 @@
 // Args: <path to app/src/lib> [section to show diffs for] [number of diffs]
 import { readFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { printSections } from "./report.mjs";
 const L = process.argv[2];
 const only = process.argv[3] ?? "";
 const showN = Number(process.argv[4] ?? 1);
@@ -38,18 +39,23 @@ const stats: Record<string, [number, number]> = {};
 const guarded: [string, string[]][] = [];
 let checked = 0;
 // The Problems view's trigger references and Lua check: what the World Editor made has no such problems.
+const luaBroken: string[] = [];
 const broken: string[] = [];
-for (const m of readdirSync("ws")) {
+// SCRIPT_CHECK_SHARD=<i>/<n>: only the i-th of n runs of maps (run.mjs puts the shards together).
+const [shardI, shardN] = (process.env.SCRIPT_CHECK_SHARD ?? "0/1").split("/").map(Number);
+const allMaps = readdirSync("ws");
+const maps = allMaps.slice(Math.floor((shardI * allMaps.length) / shardN), Math.floor(((shardI + 1) * allMaps.length) / shardN));
+for (const m of maps) {
   const f = `ws/${m}/map/war3map.lua`;
   if (!existsSync(f)) continue;
   const p = checkLua(read(f));
-  if (p.length) broken.push(`${m} lua: ${p[0].message}`);
+  if (p.length) luaBroken.push(`${m} lua: ${p[0].message}`);
 }
 let shown = 0;
 const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
 const norm = (x: string) => x.replace(/SetSoundDuration\( (\w+), \d+ \)/g, "SetSoundDuration( $1, 0 )").replace(/\s+$/g, "");
 
-for (const m of readdirSync("ws")) {
+for (const m of maps) {
   const d = `ws/${m}/map`;
   const scriptFile = existsSync(`${d}/war3map.j`) ? `${d}/war3map.j` : `${d}/war3map.lua`;
   if (!existsSync(scriptFile) || !existsSync(`${d}/war3map.wtg`)) continue;
@@ -140,9 +146,7 @@ for (const m of readdirSync("ws")) {
     }
   }
 }
-for (const [k, [ok, n]] of Object.entries(stats)) console.log(`${(k || "(header)").padEnd(20)} ${ok}/${n}`);
-console.log(`problems: ${broken.length} in the game's maps`);
-for (const b of broken.slice(0, 20)) console.log(`  ${b}`);
-console.log(`guard: ${guarded.length} of ${checked} maps would keep their script`);
-for (const [m, lost] of guarded) console.log(`  ${m}: ${lost.length} (${lost.slice(0, 6).join(", ")})`);
-if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify({ identical: stats, problems: broken.length, guarded: guarded.length, checked }));
+const detail = { stats, broken: [...luaBroken, ...broken], guarded, checked, luaBroken, otherBroken: broken };
+// Under run.mjs (SCRIPT_CHECK_SHARD set) nothing is printed here: it puts the shards' details together and prints that.
+if (!process.env.SCRIPT_CHECK_SHARD) printSections(detail);
+if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify(detail));
