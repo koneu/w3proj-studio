@@ -233,6 +233,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       w3.window.showInfo(`Warcraft III ${i.version} · locale ${i.locale} · ${i.stored} of ${i.entries} files stored locally · graphics mode ${w3.settings.get("game.graphicsMode")}`);
       if (!loaded || loadError) await load();
     }),
+    w3.commands.register("w3.game.reload", async () => {
+      w3.game.reload();
+      await load();
+      w3.window.showInfo("The game's data is read anew: files read before (and files that weren't there) are asked again. Editors already open keep what they loaded; open a map again to see it.");
+    }),
     w3.commands.register("w3.game.setMode", async () => {
       const pick = await w3.window.quickPick(
         [

@@ -336,6 +336,9 @@ export interface W3Api {
     read(path: string, opts?: GameReadOptions): Promise<Uint8Array>;
     /** UTF-8 text with any byte-order mark removed. */
     readText(path: string, opts?: GameReadOptions): Promise<string>;
+    /** Forgets the files read so far (they're kept for the session, and a file not found stays
+     *  not found): for an install patched while the app runs. */
+    reload(): void;
   };
   /** Escape hatch to the Rust backend commands. */
   backend: {

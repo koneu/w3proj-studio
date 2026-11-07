@@ -302,6 +302,7 @@ export class Workbench {
         resolveMany: (paths, o) => wb.game.resolveMany(paths, o?.tileset),
         read: (p, o) => wb.game.read(p, o?.tileset),
         readText: (p, o) => wb.game.readText(p, o?.tileset),
+        reload: () => wb.game.reload(),
       },
       backend: { invoke: (command, args) => backendInvoke(wb.workspace, command, args), listen, readBytes, writeBytes: (path, bytes) => writeBytes(path, bytes).then(() => {}) },
       lib: () => import("../extensions/lib"),
