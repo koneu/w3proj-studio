@@ -410,7 +410,16 @@ async function heightKit(page, name) {
     read: (file) => JSON.parse(readFileSync(join(root, "map", file), "utf8")),
     doodads: () => kit.read("war3map.doo.json").doodads,
     units: () => kit.read("war3mapUnits.doo.json").units,
-    look: (x, y, ref) => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get("map/war3map.w3e.txt")(${x}, ${y}${ref ? `, ${JSON.stringify(ref)}` : ""}))()`),
+    look: async (x, y, ref) => {
+      await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get("map/war3map.w3e.txt")(${x}, ${y}${ref ? `, ${JSON.stringify(ref)}` : ""}))()`);
+      // The object is selected once the view has drawn it, which can be later: the keys and commands that follow act on
+      // the selection. Its position boxes show where it stands.
+      if (ref) {
+        const at = `(() => { const i = document.querySelectorAll(".terrain-sel-triple input"); return i.length >= 2 ? [Number(i[0].value), Number(i[1].value)] : null; })()`;
+        await until(`${ref.id} at ${ref.x}, ${ref.y} selected`, async () => { const p = await page.evaluate(at); return p && Math.abs(p[0] - ref.x) <= 32 && Math.abs(p[1] - ref.y) <= 32; }, 20000)
+          .catch(async (e) => { throw new Error(`${e.message} (the position boxes say ${JSON.stringify(await page.evaluate(at))})`); });
+      }
+    },
     tab: async (label) => { await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(label)}).click()`); await sleep(300); },
     focusMap: () => page.evaluate(`document.querySelector(".model-stage canvas").focus()`),
     setting: (key) => page.evaluate(`w3.settings.get(${JSON.stringify(key)})`),
@@ -1371,7 +1380,7 @@ async function moduleFunctions(page, found) {
     if (err) fail(`Delete Invalid Objects in a chapter: ${err}`);
     if ((await asked()).length) fail(`Delete Invalid Objects in a chapter offered: ${(await asked())[0]}`);
     if (readFileSync(join(chapter, "map", "war3mapUnits.doo.json"), "utf8") !== before) fail("Delete Invalid Objects changed a chapter's valid objects");
-    if (existsSync(join(chapter, "build", "checkpoints"))) fail("Delete Invalid Objects made a checkpoint with nothing to delete");
+    if (existsSync(join(chapter, "build", "checkpoints"))) fail(`Delete Invalid Objects made a checkpoint with nothing to delete: ${readdirSync(join(chapter, "build", "checkpoints")).join(", ")}`);
   }
   if (process.env.W3_SMOKE_CHAPTER) {
     const [campSrc, chapterRel] = process.env.W3_SMOKE_CHAPTER.split("|");
@@ -1560,37 +1569,44 @@ async function objectCopy(page, found) {
   const newMap = async (name) => {
     await tool("new_map", { name, width: 64, height: 64, folder: join(folder, name) });
     await until("the new map", () => page.evaluate(`w3.workspace.project()?.name === ${JSON.stringify(name)}`), 30000);
-    await sleep(500);
+    // A new map opens its terrain editor: closed only once it is there, or it would open later over what follows.
+    await until("the new map's terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 30000);
     await page.evaluate(`w3.editors.closeAll()`);
     return rootOf();
   };
   const openEditor = async (ext) => {
     await page.evaluate(`w3.editors.closeAll()`);
     await page.evaluate(`w3.commands.execute("w3.objectEditor.open", ${JSON.stringify(ext)})`);
-    await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
-    await sleep(500);
+    await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search") && !!document.querySelector(".obj-list .obj-group")`), 30000);
   };
-  /** Clicks an object of the list by its id, so the list has the keyboard. */
+  /** How many edits the edit log of the open project holds. A paste that changes several files is one edit, which joins
+   *  the log after the last of its writes: the files are read only then, not between two of its writes. */
+  const edits = async () => JSON.parse(await tool("list_edits")).length;
+  /** Clicks an object of the list by its id, so the list has the keyboard. The list can still be drawn again under the
+   *  pointer (a click would then pick its neighbour, and Ctrl+C copy that): clicked until it is the one selected. */
   const pickItem = async (id) => {
-    const at = await page.evaluate(`(() => {
-      const e = [...document.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === ${JSON.stringify(id)});
-      if (!e) return null;
-      e.scrollIntoView({ block: "center" });
-      const r = e.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    })()`);
-    if (!at) throw new Error(`no ${id} in the list`);
-    await hands.mouse("mouseMoved", at.x, at.y);
-    await hands.mouse("mousePressed", at.x, at.y, 1);
-    await hands.mouse("mouseReleased", at.x, at.y);
-    await sleep(100);
+    const selected = () => page.evaluate(`[...document.querySelectorAll(".obj-item.selected")].map((x) => x.querySelector("code")?.textContent)`);
+    await until(`${id} selected in the list`, async () => {
+      const at = await page.evaluate(`(() => {
+        const e = [...document.querySelectorAll(".obj-item")].find((x) => x.querySelector("code")?.textContent === ${JSON.stringify(id)});
+        if (!e) return null;
+        e.scrollIntoView({ block: "center" });
+        const r = e.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      if (!at) throw new Error(`no ${id} in the list`);
+      await hands.mouse("mouseMoved", at.x, at.y);
+      await hands.mouse("mousePressed", at.x, at.y, 1);
+      await hands.mouse("mouseReleased", at.x, at.y);
+      return (await selected()).join() === id;
+    }, 20000).catch(async (e) => { throw new Error(`${e.message} (selected: ${JSON.stringify(await selected())})`); });
   };
   // No wait after it: the copy is finished while the next map is being made, and must still be the first map's.
   const copyKey = () => hands.key("c", "KeyC", 67, 2);
   const pasteKey = () => hands.key("v", "KeyV", 86, 2);
   /** The question a paste asks: its choices, and clicks one. */
-  const answer = async (label) => {
-    const choices = await until("the paste question", () => page.evaluate(`(() => { if (document.querySelector(".quick-input")?.hidden) return null; const l = [...document.querySelectorAll(".quick-input-item .label")].map((e) => e.textContent); return l.length ? l : null; })()`), 30000).catch(async (e) => { throw new Error(`${e.message} (waiting to answer ${label}) | unsaved: ${await page.evaluate(`JSON.stringify(w3.editors.unsavedPaths())`)} active: ${await page.evaluate(`w3.editors.activePath() + " " + (document.activeElement?.className ?? "")`)} project: ${await page.evaluate(`w3.workspace.project()?.name`)} | toasts: ${await page.evaluate(`[...document.querySelectorAll(".toast")].map((t) => t.textContent).join(" | ")`)}`); });
+  const answer = async (label, step = label) => {
+    const choices = await until("the paste question", () => page.evaluate(`(() => { if (document.querySelector(".quick-input")?.hidden) return null; const l = [...document.querySelectorAll(".quick-input-item .label")].map((e) => e.textContent); return l.length ? l : null; })()`), 30000).catch(async (e) => { throw new Error(`${e.message} (waiting to answer ${label}, ${step}) | unsaved: ${await page.evaluate(`JSON.stringify(w3.editors.unsavedPaths())`)} active: ${await page.evaluate(`w3.editors.activePath() + " " + (document.activeElement?.className ?? "")`)} project: ${await page.evaluate(`w3.workspace.project()?.name`)} | toasts: ${await page.evaluate(`[...document.querySelectorAll(".toast")].map((t) => t.textContent).join(" | ")`)}`); });
     if (label) await hands.click(".quick-input-item .label", label);
     return choices;
   };
@@ -1621,7 +1637,7 @@ async function objectCopy(page, found) {
   await openEditor("w3u");
   await hands.click(".obj-list");
   await pasteKey();
-  const choices = await answer(null);
+  const choices = await answer(null, "the hero into map B");
   const detail = await detailOfQuestion();
   if (!choices.some((c) => /^Paste with 2 objects it refers to$/.test(c)) || !choices.some((c) => /without/.test(c))) fail(`the question for the hero offers ${JSON.stringify(choices)}`);
   if (!detail.includes("Smoke Slow") || !detail.includes("Smoke Buff")) fail(`the question doesn't list what comes along: ${detail}`);
@@ -1678,11 +1694,13 @@ async function objectCopy(page, found) {
   await until("map B again", () => page.evaluate(`w3.workspace.project()?.name === "CopyTo"`), 30000);
   await openEditor("w3u");
   const before = { u: JSON.stringify(customs(b, "w3u")), a: JSON.stringify(customs(b, "w3a")), h: JSON.stringify(customs(b, "w3h")) };
+  const editsBeforeNewIds = await edits();
   await hands.click(".obj-list");
   await pasteKey();
-  const conflict = await answer(null);
+  const conflict = await answer(null, "the hero with a changed buff");
   for (const want of [/^Keep this map's versions$/, /^Overwrite them/, /^Paste them under new ids$/, /^Paste without/]) if (!conflict.some((c) => want.test(c))) fail(`the question about a differing buff lacks ${want}: ${JSON.stringify(conflict)}`);
   await hands.click(".quick-input-item .label", "Paste them under new ids");
+  await until("the paste under new ids, written", async () => (await edits()) > editsBeforeNewIds, 20000);
   await until("new ids", () => customs(b, "w3h").length === 2, 20000);
   const hs = customs(b, "w3h"), as = customs(b, "w3a"), us = customs(b, "w3u");
   const newBuff = hs.find((o) => o.id !== buff), newAbility = as.find((o) => o.id !== ability);
@@ -1698,12 +1716,15 @@ async function objectCopy(page, found) {
   // Overwrite: B's buff takes the copied content under the same id, and B's old Skin entry for it goes.
   await skinFile(b, [{ base: "Bslo", id: buff, mods: [{ field: "ftip", type: "string", value: "stale" }, { field: "fnam", type: "string", value: "stale name" }] }]);
   await openEditor("w3u");
+  const editsBeforeOverwrite = await edits();
   await hands.click(".obj-list");
   await pasteKey();
-  const overwriteChoices = await answer(null);
+  const overwriteChoices = await answer(null, "the overwrite");
   const overwriteDetail = await detailOfQuestion();
   if (!/B\w+: \d+ objects?, \d+ placed/.test(overwriteDetail) || !overwriteChoices.some((c) => /^Overwrite/.test(c))) fail(`the overwrite choice doesn't say what uses the buff: ${overwriteDetail}`);
   await hands.click(".quick-input-item .label", "Overwrite them with the copied versions");
+  // The buff's file is written before its Skin file: the Skin file is judged once the whole edit is in.
+  await until("the overwrite, written", async () => (await edits()) > editsBeforeOverwrite, 20000).catch(() => fail("the overwrite made no edit"));
   await until("the overwrite", () => customs(b, "w3u").length === 5 && JSON.stringify(customs(b, "w3h")).includes("Smoke Buff Changed"), 20000).catch(() => { /* said below */ });
   if (customs(b, "w3h").length !== 1 || !JSON.stringify(customs(b, "w3h")[0]).includes("Smoke Buff Changed")) fail(`overwriting the buff: ${JSON.stringify(customs(b, "w3h"))}`);
   if ((readIn(b, "war3mapSkin.w3h.json").custom ?? []).some((o) => o.id === buff)) fail("the overwritten buff kept its old Skin entry");
@@ -1718,15 +1739,22 @@ async function objectCopy(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
   await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
-  await sleep(1500);
   const terrainKeys = async () => {
     await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select")?.click()`);
-    await sleep(300);
+    await until("the Select tab", () => page.evaluate(`[...document.querySelectorAll(".terrain-tab.on")].some((b) => b.textContent === "Select")`), 10000);
     await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
   };
+  const selectionText = () => page.evaluate(`document.querySelector(".terrain-selection")?.textContent ?? ""`);
+  /** The placed objects the open terrain editor holds, start locations left out. */
+  const placedLive = () => page.evaluate(`(async () => ((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).filter((u) => u.id !== "sloc").length)()`);
   await terrainKeys();
-  await hands.key("a", "KeyA", 65, 2);
-  await sleep(300);
+  // Ctrl+A selects the objects the view has drawn. Until the hero is drawn it selects nothing, and Ctrl+C would leave
+  // the clipboard of an earlier check: pressed again until the hero is the selection.
+  await until("the hero, selected by Ctrl+A", async () => {
+    await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+    await hands.key("a", "KeyA", 65, 2);
+    return (await selectionText()).includes(`· ${hero}`);
+  }, 30000).catch(async (e) => { throw new Error(`${e.message} (the selection says "${await selectionText()}")`); });
   await hands.key("c", "KeyC", 67, 2);
   await sleep(1500);
   const c = await newMap("CopyTerrain");
@@ -1734,24 +1762,27 @@ async function objectCopy(page, found) {
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3u.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: hero, mods: [] }] }))}).then(() => w3.workspace.refresh())`);
   await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
   await until("the terrain editor of C", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
-  await sleep(1500);
   await terrainKeys();
-  await hands.key("v", "KeyV", 86, 2);
-  await sleep(300);
+  await until("the paste to start", async () => {
+    await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+    await hands.key("v", "KeyV", 86, 2);
+    return (await selectionText()).startsWith("Pasting");
+  }, 30000).catch(async (e) => { throw new Error(`${e.message} (the selection says "${await selectionText()}")`); });
+  if (!(await selectionText()).startsWith("Pasting 1 object.")) fail(`the paste in map C isn't the copied hero: "${await selectionText()}"`);
   const canvas = await hands.where(".model-stage canvas");
   await hands.mouse("mouseMoved", canvas.x, canvas.y);
   await hands.click(".model-stage canvas");
-  const terrainChoices = await answer(null);
+  const terrainChoices = await answer(null, "the terrain paste into map C");
   if (!terrainChoices.some((x) => /^Paste them under new ids$/.test(x))) fail(`the terrain paste asks ${JSON.stringify(terrainChoices)}`);
   await hands.click(".quick-input-item .label", "Paste them under new ids");
   await until("the types in map C", () => customs(c, "w3u").length === 2 && customs(c, "w3a").length === 1 && customs(c, "w3h").length === 1, 20000);
-  await sleep(800);
+  await until("the first pasted hero", async () => (await placedLive()) === 1, 20000).catch(async () => fail(`the first click of the paste placed ${await placedLive()} objects`));
   // The same paste session places again: no new question, no second copy of the types.
   await hands.click(".model-stage canvas");
-  await sleep(1500);
+  await until("the second pasted hero, or a question", async () => (await asking()) || (await placedLive()) === 2, 20000).catch(() => { /* said below */ });
   if (await asking()) fail("a second click of the same paste asked again");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(600);
+  await until("the saved heroes", () => (readIn(c, "war3mapUnits.doo.json").units?.filter((u) => u.id !== "sloc") ?? []).length === 2, 10000).catch(() => { /* said below */ });
   const terrainHero = customs(c, "w3u").find((o) => o.base === "Hpal");
   const placed = readIn(c, "war3mapUnits.doo.json").units?.filter((u) => u.id !== "sloc") ?? [];
   if (!terrainHero || terrainHero.id === hero) fail(`map C's hero type: ${JSON.stringify(customs(c, "w3u").map((o) => o.id))}`);
@@ -2004,8 +2035,11 @@ async function run() {
   const configDir = join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
   rmSync(configDir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
-  // AI clients on this machine would connect to a server of this build.
-  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true }));
+  // AI clients on this machine would connect to a server of this build. Automatic checkpoints come by the clock
+  // (the first one at the first 20-second poll that finds a project without one): which project got one, and
+  // whether a command's own checkpoint was skipped because one was being made, would depend on how fast the
+  // machine is. The checks count the checkpoints that commands make.
+  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true, "checkpoints.enabled": false }));
   const port = await freePort();
   const child = spawn(exe, [], {
     stdio: "ignore",
@@ -2023,7 +2057,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, gameReadsOnce })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, gameReadsOnce, moduleFunctions })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
