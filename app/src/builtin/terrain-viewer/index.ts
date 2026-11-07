@@ -1100,6 +1100,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         let dirty = true;
         const redraw = () => { dirty = true; };
+        /** Art that loads besides the loader's models and textures (ground, water, ground marks): a
+         *  picture waits for it as for the models, or a goldmine's mark could be missing from it. */
+        const artLoads = new Set<Promise<unknown>>();
+        const artLoad = <T,>(load: Promise<T>): Promise<T> => {
+          artLoads.add(load);
+          const done = () => { artLoads.delete(load); };
+          load.then(done, done);
+          return load;
+        };
+        const artSettled = async () => { while (artLoads.size) await Promise.allSettled([...artLoads]); };
         const labelLayer = h("div.terrain-labels");
         let labels: { x: number; y: number; el: HTMLElement }[] = [];
 
@@ -1323,14 +1333,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             img = readGroundTexture(w3, doc, path).then(({ buf, name }) => ({ img: decodeImage(buf, name), name }));
             tileImages.set(id, img);
           }
-          img.then(({ img: mip, name }) => {
+          void artLoad(img.then(({ img: mip, name }) => {
             // The list may have changed meanwhile; only the current index gets it.
             if (terrain.groundTiles[i] !== id) return;
             renderer.setGroundTexture(i, mip);
             row.title = name;
             status(row, "ok");
             redraw();
-          }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`));
+          }).catch((e) => status(row, "missing", `${path}: ${(e as Error).message ?? e}`)));
         };
         /** Decoded ground textures by tile id. */
         const tileImages = new Map<string, Promise<{ img: DecodedImage; name: string }>>();
@@ -1388,19 +1398,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** What the tileset decides besides the tiles: blight, water, shoreline, default lighting. */
         const loadTilesetArt = () => {
         // The tileset's blight texture (UI\WorldEditData.txt, [TileSets]: name,texture).
-        w3.game.readText("UI\\WorldEditData.txt").then(async (text) => {
+        void artLoad(w3.game.readText("UI\\WorldEditData.txt").then(async (text) => {
           const entry = parseIni(text).get("TileSets")?.get(terrain.tileset.toLowerCase());
           const path = entry?.split(",")[1]?.trim();
           if (!path) return;
           const { buf, name } = await readGroundTexture(w3, doc, `${path}.blp`);
           renderer.setGroundTexture(BLIGHT_TEXTURE, decodeImage(buf, name));
           redraw();
-        }).catch(() => { /* blight shows as the placeholder colour */ });
+        }).catch(() => { /* blight shows as the placeholder colour */ }));
         tilePaths(w3).then((paths) => terrain.groundTiles.forEach((_, i) => loadTile(i, paths)))
           .catch((e) => texList.replaceChildren(h("div.model-warn", {}, `Terrain.slk: ${(e as Error).message ?? e}`)));
         // The tileset's water (TerrainArt\Water.slk, row "<tileset>Sha"): animation frames
         // <texFile>00…, frames per second, and the shallow/deep colour ramp (alpha, r, g, b).
-        w3.game.readText("TerrainArt\\Water.slk").then((text) => {
+        void artLoad(w3.game.readText("TerrainArt\\Water.slk").then((text) => {
           const rows = parseSlk(text);
           const row = rows.find((r) => r.waterID === `${terrain.tileset}Sha`) ?? rows.find((r) => r.waterID?.toLowerCase() === `${terrain.tileset}sha`.toLowerCase());
           if (!row) return;
@@ -1416,9 +1426,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (let i = 0; i < frames; i++) {
             const path = frames > 1 ? `${row.texFile}${String(i).padStart(2, "0")}.blp` : `${row.texFile}.blp`;
             // The tileset's own water frames (`_Tilesets/<letter>.w3mod`) where it has them.
-            readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path)); redraw(); }, () => {});
+            void artLoad(readFile(w3, doc, path, terrain.tileset).then((buf) => { renderer.setWaterFrame(i, decodeImage(buf, path)); redraw(); }, () => {}));
           }
-        }).catch(() => { /* the default water colour */ });
+        }).catch(() => { /* the default water colour */ }));
         };
         loadTilesetArt();
         const thumbCache = new Map<string, Promise<string | null>>();
@@ -1600,7 +1610,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const tex of new Set(splats.map((s) => s.def.texture))) {
             if (splatImages.has(tex.toLowerCase())) continue;
             splatImages.add(tex.toLowerCase());
-            readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex)); redraw(); }, () => {});
+            void artLoad(readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex)); redraw(); }, () => {}));
           }
           redraw();
         };
@@ -1642,7 +1652,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (gen !== rebuildGen) return;
           renderer.setGroup("doodads", d.batches);
           renderer.setGroup("units", u.batches);
-          void showSplats();
+          void artLoad(showSplats());
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.
           unresolvedDoodads = d.unresolved;
@@ -3580,6 +3590,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => {
           await ready();
           await loader.settled();
+          await artSettled();
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
           const before = handle.view();
           if (area) {
