@@ -4,6 +4,7 @@ import { timeLimit } from "./timelimit";
 import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
+import { backendInvoke } from "./trackedinvoke";
 import { invoke, listen, NotUtf8Error, readBytes, writeBytes } from "./backend";
 import { CommandService } from "./commands";
 import { h, showContextMenu } from "./dom";
@@ -301,7 +302,7 @@ export class Workbench {
         read: (p, o) => wb.game.read(p, o?.tileset),
         readText: (p, o) => wb.game.readText(p, o?.tileset),
       },
-      backend: { invoke, listen, readBytes, writeBytes },
+      backend: { invoke: (command, args) => backendInvoke(wb.workspace, command, args), listen, readBytes, writeBytes: (path, bytes) => writeBytes(path, bytes).then(() => {}) },
       lib: () => import("../extensions/lib"),
       mcp: { registerTool: (name, handler) => wb.mcp.registerTool(name, handler), list: () => wb.mcp.list(), handle: (message) => wb.mcp.handle(message) },
       extensions: {

@@ -1,6 +1,9 @@
 import type { ConfigurationProperty, FileInfo, ProjectInfo, SettingInfo, Settings, SettingsTarget, Disposable } from "../extensions/api";
 import { invoke, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
 import { Emitter } from "./dom";
+
+/** A file's size and last write (ms) as the backend reports them. */
+export interface Stamp { size: number; modified: number }
 import { timeLimit } from "./timelimit";
 
 export class WorkspaceService {
@@ -91,7 +94,7 @@ export class WorkspaceService {
   /** Files written through the workspace since the last check (lower case), with their size and time as
    *  the disk had them right after the write (null: not known yet). The write counts as ours only while
    *  the disk still matches: another program changing the file afterwards is an external change. */
-  private ownWrites = new Map<string, { size: number; modified: number } | null>();
+  private ownWrites = new Map<string, { stamp: Stamp | null; seq: number }>();
 
   /** `list`, just read from the disk, plus the files our own writes added to the list since
    *  `listedBefore` (the read may have started before they existed). */
@@ -116,11 +119,22 @@ export class WorkspaceService {
     // Whether a difference is our own write: one that finished during the read always is (the read may
     // have missed it); an earlier one only while the file still has the size and time it was left with.
     const isOwn = (k: string, f?: FileInfo) => {
+      if (this.writing.get(k)) return true;
       if (!this.ownWrites.has(k)) return false;
       if (!ownBefore.has(k)) return true;
-      const stamp = ownBefore.get(k);
+      const stamp = ownBefore.get(k)!.stamp;
       return !stamp || (!!f && f.size === stamp.size && f.modified === stamp.modified);
     };
+    // The listing and a stat of the file can differ in time or size (Windows takes the listing's from the
+    // directory entry): where an own write seems changed, the file itself is asked, and if it still has
+    // what the write left, the listing is the one that lags and its entry is corrected.
+    for (const [k, own] of ownBefore) {
+      const i = own.stamp ? after.findIndex((f) => f.path.toLowerCase() === k) : -1;
+      if (i < 0 || (after[i].size === own.stamp!.size && after[i].modified === own.stamp!.modified)) continue;
+      const truth = await invoke<Stamp | null>("fs_stat", { path: this.resolve(after[i].path) }).catch(() => null);
+      if (truth && truth.size === own.stamp!.size && truth.modified === own.stamp!.modified) after[i] = { ...after[i], ...truth };
+    }
+    if (this.info?.root !== root) return new Set();
     const changed = new Set<string>();
     for (const f of after) {
       const k = f.path.toLowerCase(), b = before.get(k);
@@ -150,39 +164,53 @@ export class WorkspaceService {
     return readBytes(this.resolve(p));
   }
   async writeText(p: string, text: string) {
-    const root = this.info?.root, target = this.resolve(p);
-    await writeText(target, text);
-    const key = this.noticeWrite(target, root, new TextEncoder().encode(text).length);
-    if (key) await this.stampWrite(key, target, root);
+    await this.tracked(p, new TextEncoder().encode(text).length, (target) => writeText(target, text));
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
-  /** After a write to `target`, resolved against `root` before the write started: a file inside the
-   *  project that the list doesn't have yet (a new file, e.g. an export into map/Scripts/) is added
-   *  to it at once, alone: nothing else is re-read, so changes made by others stay to be noticed.
-   *  The write itself isn't an external change. Folders the list never has (build, .git,
-   *  node_modules at the top) are left out; so is a write that finished after a project switch. */
-  private noticeWrite(target: string, root: string | undefined, size: number): string | null {
-    if (!root || this.info?.root !== root) return null;
+  /** The key a file is known by in `ownWrites` and the list: project-relative, `/`, lower case. Null for a
+   *  file outside the project or in a folder the list never has (build, .git, node_modules at the top). */
+  private keyOf(target: string, root: string | undefined): { rel: string; key: string } | null {
+    if (!root) return null;
     const abs = target.replace(/\\/g, "/"), base = root.replace(/\\/g, "/").replace(/\/+$/, "");
     if (!abs.toLowerCase().startsWith(base.toLowerCase() + "/")) return null;
     const rel = abs.slice(base.length + 1), key = rel.toLowerCase();
-    if (/^(build|\.git|node_modules)\//.test(key)) return null;
-    this.ownWrites.set(key, null);
-    if (!this.listed.has(key)) {
-      this.setList([...this.fileList, { path: rel, size, modified: Date.now() }].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
+    return /^(build|\.git|node_modules)\//.test(key) ? null : { rel, key };
+  }
+  /** Runs a write of project file `p` that answers with the size and time it left (every backend write
+   *  of a project file does), and notes it: the file counts as ours while the write runs, and afterwards
+   *  while the disk still has that size and time, so that a change by another program is told from it.
+   *  Of overlapping writes to one file the one that started last has the last word. A file the list
+   *  doesn't have yet (an export into map/Scripts/) is added to it at once, alone: nothing else is
+   *  re-read, so what others changed stays to be noticed. A write that ends after a project switch
+   *  is not noted. `size`: what the file will be, for the list until the answer comes. */
+  async tracked(p: string, size: number, write: (target: string) => Promise<Stamp | void>): Promise<void> {
+    const root = this.info?.root, target = this.resolve(p), at = this.keyOf(target, root);
+    if (!at) { await write(target); return; }
+    const seq = ++this.writeSeq;
+    this.writing.set(at.key, (this.writing.get(at.key) ?? 0) + 1);
+    let stamp: Stamp | void;
+    try {
+      stamp = await write(target);
+    } finally {
+      const left = (this.writing.get(at.key) ?? 1) - 1;
+      if (left > 0) this.writing.set(at.key, left); else this.writing.delete(at.key);
+    }
+    if (this.info?.root !== root) return;
+    const known = this.ownWrites.get(at.key);
+    if (known && known.seq > seq) return;
+    this.ownWrites.set(at.key, { stamp: stamp ?? null, seq });
+    const entry: FileInfo = { path: at.rel, size: stamp ? stamp.size : size, modified: stamp ? stamp.modified : Date.now() };
+    const i = this.listed.has(at.key) ? this.fileList.findIndex((f) => f.path.replace(/\\/g, "/").toLowerCase() === at.key) : -1;
+    if (i >= 0) {
+      if (stamp) this.fileList[i] = { ...this.fileList[i], size: entry.size, modified: entry.modified };
+    } else {
+      this.setList([...this.fileList, entry].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())));
       this.onDidChange.fire();
     }
-    return key;
   }
-  /** One stat of the file just written: its size and time are what the write left, so that a later
-   *  change by another program is told from it (see ownWrites). Until it answers the write counts as ours. */
-  private async stampWrite(key: string, target: string, root: string | undefined) {
-    const st = await invoke<{ size: number; modified: number } | null>("fs_stat", { path: target }).catch(() => null);
-    if (!st || this.info?.root !== root || this.ownWrites.get(key) !== null) return;
-    this.ownWrites.set(key, st);
-    const at = this.fileList.findIndex((f) => f.path.replace(/\\/g, "/").toLowerCase() === key);
-    if (at >= 0) this.fileList[at] = { ...this.fileList[at], size: st.size, modified: st.modified };
-  }
+  private writeSeq = 0;
+  /** Own writes under way, per key. */
+  private writing = new Map<string, number>();
   /** Deletes a project file (empty folders it leaves go too); the file list is refreshed. */
   async delete(p: string) {
     if (!this.info) throw new Error("no project is open");
@@ -244,10 +272,7 @@ export class WorkspaceService {
     return invoke<string[]>("fs_list_tree", { path: this.resolve(path) });
   }
   async writeBytes(p: string, bytes: Uint8Array) {
-    const root = this.info?.root, target = this.resolve(p);
-    await writeBytes(target, bytes);
-    const key = this.noticeWrite(target, root, bytes.length);
-    if (key) await this.stampWrite(key, target, root);
+    await this.tracked(p, bytes.length, (target) => writeBytes(target, bytes));
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
 }

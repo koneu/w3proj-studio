@@ -9,7 +9,25 @@ const calls = { projectFiles: 0 };
 let gate: Promise<void> | null = null;
 let filesGate: Promise<void> | null = null;
 let normalizeGate: Promise<void> | null = null;
+/** Answers for a file written at once: what the listing then has. */
+const holds = new Map<string, Promise<void>>();
+/** Entries whose listing lags: the directory shows these values, the file itself has the true ones. */
+const listingLag = new Map<string, { size: number; modified: number }>();
+/** A write lands: the file has this size, and a time that follows from it. */
+const land = (path: string, size: number) => {
+  const p = path.replace(/\\/g, "/");
+  for (const [root, list] of backend) {
+    const r = root.replace(/\\/g, "/");
+    if (!p.toLowerCase().startsWith(r.toLowerCase() + "/")) continue;
+    const rel = p.slice(r.length + 1), stamp = { size, modified: 100 * size }, f = list.find((x) => x.path === rel);
+    if (f) Object.assign(f, stamp); else list.push({ path: rel, ...stamp });
+    return stamp;
+  }
+  return { size, modified: 100 * size };
+};
 const reset = () => {
+  holds.clear();
+  listingLag.clear();
   backend.set(A, [{ path: "war3map.j", size: 1, modified: 1 }]);
   backend.set(B, [{ path: "other.txt", size: 1, modified: 1 }]);
   calls.projectFiles = 0;
@@ -24,7 +42,7 @@ g.__TAURI_INTERNALS__ = {
       case "project_files": {
         calls.projectFiles++;
         // What the disk holds when the read starts; a held read answers with that, later.
-        const seen = (backend.get(String(args.root)) ?? []).map((f) => ({ ...f }));
+        const seen = (backend.get(String(args.root)) ?? []).map((f) => ({ ...f, ...listingLag.get(f.path) }));
         if (filesGate) await filesGate;
         return seen;
       }
@@ -41,22 +59,13 @@ g.__TAURI_INTERNALS__ = {
       case "path_normalize": if (normalizeGate) await normalizeGate; return String(args.path).replace(/konsta~1/i, "Konstantin");
       case "fs_write_text": {
         if (gate) await gate;
-        const path = String(args.path);
-        for (const [root, list] of backend) {
-          if (path.toLowerCase().startsWith(root.toLowerCase() + "\\")) {
-            const rel = path.slice(root.length + 1).replace(/\\/g, "/");
-            if (!list.some((f) => f.path === rel)) list.push({ path: rel, size: String(args.text).length, modified: 2 });
-          }
-        }
-        return;
+        const stamp = land(String(args.path), String(args.text).length);
+        const hold = holds.get(String(args.text));
+        if (hold) await hold; // the write has landed, its answer comes late
+        return stamp;
       }
-      case "fs_write_bytes": {
-        const path = decodeURIComponent(options!.headers!.path);
-        for (const [root, list] of backend) {
-          if (path.toLowerCase().startsWith(root.toLowerCase() + "\\")) list.push({ path: path.slice(root.length + 1).replace(/\\/g, "/"), size: (args as unknown as Uint8Array).length, modified: 2 });
-        }
-        return;
-      }
+      case "codec_write": return land(`${String(args.root)}/${String(args.path)}`, String(args.text).length);
+      case "fs_write_bytes": return land(decodeURIComponent(options!.headers!.path), (args as unknown as Uint8Array).length);
       default: throw `unexpected ${command}`;
     }
   },
@@ -255,4 +264,70 @@ test("a failing save of the tidied recent list is no unhandled rejection", async
   await new Promise((r) => setTimeout(r, 20));
   process.off("unhandledRejection", on);
   assert.deepEqual(seen, []);
+});
+
+const { backendInvoke } = await import("./trackedinvoke");
+/** What another program does: the file has other contents; both the listing and the file show it. */
+const outside = (path: string, size: number, modified: number) => {
+  const f = backend.get(A)!.find((x) => x.path === path)!;
+  Object.assign(f, { size, modified });
+};
+
+test("a save through codec_write (w3.backend.invoke) isn't reported on focus; a later outside change is", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  const out = await backendInvoke<{ size: number }>(ws, "codec_write", { root: A, path: "war3map.j", text: "0123456789" });
+  assert.equal(out.size, 10, "the caller still gets the backend's answer");
+  assert.equal((await ws.externalChanges()).size, 0, "our own save");
+  await backendInvoke(ws, "codec_write", { root: A, path: "map/new.doo", text: "abc" });
+  assert.equal((await ws.externalChanges()).size, 0, "a new file made by it");
+  assert.ok(ws.files().some((f) => f.path === "map/new.doo"));
+  await backendInvoke(ws, "codec_write", { root: A, path: "war3map.j", text: "again!" });
+  outside("war3map.j", 6, 123456); // the same size, another time
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"]);
+});
+
+test("overlapping writes to one file: the one that started last keeps the last word", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  let release!: () => void;
+  holds.set("A", new Promise<void>((r) => { release = r; }));
+  const first = ws.writeText("war3map.j", "A"); // lands first, answers last
+  await new Promise((r) => setTimeout(r, 5));
+  await ws.writeText("war3map.j", "BB"); // lands last
+  release();
+  await first;
+  assert.equal((await ws.externalChanges()).size, 0, "the file is what the later write left");
+  outside("war3map.j", 7, 777);
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"], "and a change after both is seen");
+});
+
+test("a write under way counts as ours", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  let release!: () => void;
+  holds.set("AAAA", new Promise<void>((r) => { release = r; }));
+  const writing = ws.writeText("war3map.j", "AAAA");
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal((await ws.externalChanges()).size, 0, "the file already has the new contents, the answer isn't here yet");
+  release();
+  await writing;
+});
+
+test("a listing that lags behind the file doesn't make our own save look like an outside change", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  await ws.writeText("war3map.j", "12345");
+  listingLag.set("war3map.j", { size: 5, modified: 3 }); // the directory entry hasn't caught up with the file
+  assert.equal((await ws.externalChanges()).size, 0);
+  listingLag.clear();
+  assert.equal((await ws.externalChanges()).size, 0, "nor when the listing catches up");
+  await ws.writeText("war3map.j", "1234567");
+  listingLag.set("war3map.j", { size: 3, modified: 3 });
+  outside("war3map.j", 3, 3); // but when the file itself is not what we left, it is reported
+  assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"]);
 });

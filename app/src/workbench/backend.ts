@@ -31,12 +31,12 @@ export async function readText(path: string): Promise<string> {
   }
 }
 
-export function writeText(path: string, text: string): Promise<void> {
+export function writeText(path: string, text: string): Promise<{ size: number; modified: number }> {
   return invoke("fs_write_text", { path, text });
 }
 
 /** Binary files go as the raw request body (no JSON number arrays). */
-export function writeBytes(path: string, bytes: Uint8Array): Promise<void> {
+export function writeBytes(path: string, bytes: Uint8Array): Promise<{ size: number; modified: number }> {
   return tauriInvoke("fs_write_bytes", bytes, { headers: { path: encodeURIComponent(path) } });
 }
 

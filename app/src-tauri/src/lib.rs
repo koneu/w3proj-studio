@@ -112,8 +112,14 @@ struct FileInfo {
 /// from a later change by another program. None when there is no such file.
 #[tauri::command]
 fn fs_stat(path: String) -> Option<Stamp> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some(Stamp { size: meta.len(), modified: modified_ms(&meta) })
+    stamp_of(Path::new(&path)).ok()
+}
+
+/// The file's size and time right after we wrote it: what the workspace compares later to tell our
+/// own save from a change by another program.
+fn stamp_of(path: &Path) -> CmdResult<Stamp> {
+    let meta = std::fs::metadata(path).map_err(err)?;
+    Ok(Stamp { size: meta.len(), modified: modified_ms(&meta) })
 }
 
 #[derive(Serialize)]
@@ -303,14 +309,18 @@ fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<String>
 /// Encodes JSON (as produced by `codec_decode`) back to the archive format
 /// and writes it to a raw project file (e.g. `map/war3map.doo`).
 #[tauri::command]
-fn codec_write(app: AppHandle, root: String, path: String, text: String) -> CmdResult<()> {
+fn codec_write(app: AppHandle, root: String, path: String, text: String) -> CmdResult<Stamp> {
     let rel = path.strip_prefix("map/").unwrap_or(&path);
     let registry = Registry::for_project(Path::new(&root), &user_format_dirs(&app)?).map_err(err)?;
     let name = w3proj::paths::to_archive_name(rel);
     let mut last = format!("no format definition writes {name}");
     for codec in registry.for_archive_name(&name) {
         match codec.encode(&name, text.as_bytes()) {
-            Ok(bin) => return std::fs::write(Path::new(&root).join(&path), bin).map_err(err),
+            Ok(bin) => {
+                let file = Path::new(&root).join(&path);
+                std::fs::write(&file, bin).map_err(err)?;
+                return stamp_of(&file);
+            }
             Err(e) => last = e.to_string(),
         }
     }
@@ -378,17 +388,18 @@ fn fs_read_text(path: String) -> CmdResult<String> {
 }
 
 #[tauri::command]
-fn fs_write_text(path: String, text: String) -> CmdResult<()> {
+fn fs_write_text(path: String, text: String) -> CmdResult<Stamp> {
     if let Some(parent) = Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
     }
-    std::fs::write(&path, text).map_err(err)
+    std::fs::write(&path, text).map_err(err)?;
+    stamp_of(Path::new(&path))
 }
 
 /// Writes the raw request body to the file named by the (URI-encoded) `path`
 /// header; binary files skip JSON encoding this way.
 #[tauri::command]
-fn fs_write_bytes(request: tauri::ipc::Request<'_>) -> CmdResult<()> {
+fn fs_write_bytes(request: tauri::ipc::Request<'_>) -> CmdResult<Stamp> {
     let path = request
         .headers()
         .get("path")
@@ -401,7 +412,8 @@ fn fs_write_bytes(request: tauri::ipc::Request<'_>) -> CmdResult<()> {
     if let Some(parent) = Path::new(&path).parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
     }
-    std::fs::write(&path, bytes).map_err(err)
+    std::fs::write(&path, bytes).map_err(err)?;
+    stamp_of(Path::new(&path))
 }
 
 /// Decodes `%XX` escapes (as produced by encodeURIComponent).
@@ -1162,6 +1174,11 @@ mod fs_tests {
         let listed = project_files(root).unwrap().into_iter().find(|f| f.path == "map/sub/a.txt").unwrap();
         assert_eq!((st.size, st.modified), (listed.size, listed.modified));
         assert!(fs_stat(dir.join("nope").to_string_lossy().into_owned()).is_none());
+        // A write answers with the stamp of what it left.
+        let w = dir.join("new/dir/w.txt").to_string_lossy().into_owned();
+        let wrote = fs_write_text(w.clone(), "hello".into()).unwrap();
+        let st = fs_stat(w).unwrap();
+        assert_eq!((wrote.size, wrote.modified), (5, st.modified));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
