@@ -4,7 +4,7 @@
 
 import { FOG_FS, FOG_VS, setFog, type Fog } from "./fog";
 import type { DecodedImage } from "../image/index";
-import { createTexture } from "./gltexture";
+import { createTexture, isOpaqueTexture } from "./gltexture";
 import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
@@ -393,6 +393,14 @@ export interface HeightMap {
   height: number;
 }
 
+/** The filter mode a layer is drawn with. A blend layer (2) with a texture that has no transparency, at full
+ *  opacity, covers what is behind it like an opaque one does: drawn as one, it goes under the blended layers
+ *  in front of it and hides what is behind it, instead of being painted over all of them in the file's order
+ *  (ShimmeringPortal's disc). Any fade (alpha under 1) is the layer blending again. */
+export function effectiveFilterMode(filterMode: number, alpha: number, opaqueTexture: boolean): number {
+  return filterMode === 2 && alpha >= 0.999 && opaqueTexture ? 0 : filterMode;
+}
+
 type Layer = Model["materials"][number]["layers"][number];
 
 /** One model's GPU resources in a WebGL2 context: pose it for a moment of an
@@ -410,7 +418,7 @@ export class ModelGpu {
   private boneTex: WebGLTexture;
   private boneData: Float32Array;
   private nodeOrder: number[];
-  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean }[] = [];
+  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean; mode: number }[] = [];
   private geoAlpha = new Map<number, number>();
   private geoColor = new Map<number, number[]>();
   private clock: Clock = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
@@ -546,9 +554,24 @@ export class ModelGpu {
       if (this.hidden.has(g.geosetId) || (this.geoAlpha.get(g.geosetId) ?? 1) <= 0.01) continue;
       const mat = m.materials[g.materialId];
       if (!mat) continue;
-      for (const layer of mat.layers) this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2 });
+      for (const layer of mat.layers) this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2, mode: layer.filterMode });
     }
-    this.draws.sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
+  }
+
+  /** The posed layers with the filter mode each is drawn with, opaque ones first. Decided at every draw,
+   *  not at the pose: textures arrive after the first pose, and a still model is posed only once. */
+  private classified() {
+    const m = this.model, clock = this.clock;
+    for (const d of this.draws) {
+      if (d.layer.filterMode !== 2) continue;
+      const { layer } = d;
+      const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(d.g.geosetId) ?? 1);
+      const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
+      const tex = m.textures[texIndex];
+      d.mode = effectiveFilterMode(2, alpha, !tex?.replaceableId && isOpaqueTexture(this.textures[texIndex]));
+      d.blended = d.mode >= 2;
+    }
+    return this.draws.slice().sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
   }
 
   /** Draws the posed model with a world transform. */
@@ -582,7 +605,7 @@ export class ModelGpu {
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);
 
-    for (const { g, layer, blended } of this.draws) {
+    for (const { g, layer, blended, mode } of this.classified()) {
       if ((pass === "opaque" && blended) || (pass === "blended" && !blended)) continue;
       const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1);
       if (alpha <= 0.01) continue;
@@ -608,8 +631,8 @@ export class ModelGpu {
       gl.uniform1f(u.uUnshaded, sf & 0x1 ? 1 : 0);
       if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
       if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
-      gl.uniform1f(u.uAlphaTest, (layer.filterMode === 1 ? 0.75 : 0.01) * (opts.tint?.[3] ?? 1));
-      switch (layer.filterMode) {
+      gl.uniform1f(u.uAlphaTest, (mode === 1 ? 0.75 : 0.01) * (opts.tint?.[3] ?? 1));
+      switch (mode) {
         case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
         case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;
         case 3: case 4: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.depthMask(false); break;
@@ -618,7 +641,7 @@ export class ModelGpu {
       }
       if (sf & 0x80) gl.depthMask(false);
       if (opts.onTop) gl.disable(gl.DEPTH_TEST);
-      if (opts.tint && layer.filterMode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
+      if (opts.tint && mode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
       if (opts.wireframe) {
         gl.bindVertexArray(g.wireVao);
         gl.drawElements(gl.LINES, g.wireCount, gl.UNSIGNED_SHORT, 0);

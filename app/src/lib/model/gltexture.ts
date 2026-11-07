@@ -79,9 +79,53 @@ function decoded(gl: WebGL2RenderingContext, image: DecodedImage, options: Textu
   return texture;
 }
 
+/** Largest image checked for transparency: the ones that matter (a flat white plane) are small, and a
+ *  big photo-like texture isn't worth a walk over every block. */
+const OPAQUE_CHECK_PIXELS = 128 * 128;
+
+/** Whether every texel of the file's top level is fully opaque, read off the blocks without decoding. */
+export function blocksOpaque(image: BlockImage): boolean {
+  const top = image.levels[0];
+  if (!top) return false;
+  const size = blockDataSize(image.format, top.width, top.height), d = top.data;
+  if (d.length < size) return false;
+  const stride = image.format === "bc1" ? 8 : 16;
+  for (let o = 0; o < size; o += stride) {
+    if (image.format === "bc1") {
+      // Three colours and transparent black (index 3) when the first end point isn't above the second.
+      if ((d[o] | (d[o + 1] << 8)) > (d[o + 2] | (d[o + 3] << 8))) continue;
+      const bits = d[o + 4] | (d[o + 5] << 8) | (d[o + 6] << 16) | (d[o + 7] << 24);
+      for (let i = 0; i < 16; i++) if (((bits >>> (i * 2)) & 3) === 3) return false;
+    } else if (image.format === "bc2") {
+      for (let i = 0; i < 8; i++) if (d[o + i] !== 0xff) return false;
+    } else {
+      const a0 = d[o], a1 = d[o + 1];
+      // Eight alpha values from the two end points (or six, with 0 and 255 at the end).
+      const pal = [a0, a1, 0, 0, 0, 0, 0, 0];
+      if (a0 > a1) for (let i = 1; i < 7; i++) pal[i + 1] = ((7 - i) * a0 + i * a1 + 3) / 7 | 0;
+      else { for (let i = 1; i < 5; i++) pal[i + 1] = ((5 - i) * a0 + i * a1 + 2) / 5 | 0; pal[6] = 0; pal[7] = 255; }
+      const lo = d[o + 2] | (d[o + 3] << 8) | (d[o + 4] << 16), hi = d[o + 5] | (d[o + 6] << 8) | (d[o + 7] << 16);
+      for (let i = 0; i < 16; i++) if (pal[((i < 8 ? lo : hi) >>> ((i & 7) * 3)) & 7] !== 255) return false;
+    }
+  }
+  return true;
+}
+
+/** Textures whose every texel is opaque (small ones only). */
+const opaque = new WeakSet<WebGLTexture>();
+
+/** Whether a texture made by createTexture is known to have no transparency at all. Unknown counts as no. */
+export function isOpaqueTexture(texture: WebGLTexture | null | undefined): boolean {
+  return !!texture && opaque.has(texture);
+}
+
 /** A texture for an image. It stays bound. */
 export function createTexture(gl: WebGL2RenderingContext, image: DecodedImage, options: TextureOptions): WebGLTexture {
-  return compressed(gl, image, options) ?? decoded(gl, image, options);
+  const small = image.width * image.height <= OPAQUE_CHECK_PIXELS;
+  const viaBlocks = compressed(gl, image, options);
+  const texture = viaBlocks ?? decoded(gl, image, options);
+  if (small && (viaBlocks && image.blocks ? blocksOpaque(image.blocks) : !viaBlocks && !image.hasAlpha)) opaque.add(texture);
+  return texture;
 }
 
 /** The textures a model's drawing can touch. A Reforged layer also lists a normal map, and possibly
