@@ -27,11 +27,15 @@ export function toProjectPath(archiveName: string): string {
   return comps.map(escapeComponent).join("/");
 }
 
+/** U+FEFF, the byte-order mark (built from its code: the character itself is invisible in the source). */
+const BOM = String.fromCharCode(0xfeff);
+
 /** Project path below the map folder → archive name. */
 export function toArchiveName(projectPath: string): string {
-  // Nothing escaped and no lone surrogate (which the UTF-8 round trip below would replace): the
-  // name is the path with "\" (most paths, and the Problems checks turn thousands per run).
-  if (!projectPath.includes("%") && !/[\uD800-\uDFFF]/.test(projectPath)) return projectPath.split("/").join("\\");
+  // Nothing escaped, no surrogate (which the UTF-8 round trip below would replace) and no U+FEFF (which
+  // its decoder drops at the start of a component): the name is the path with "\" (most paths, and
+  // the Problems checks turn thousands per run).
+  if (!projectPath.includes("%") && !/[\uD800-\uDFFF]/.test(projectPath) && !projectPath.includes(BOM)) return projectPath.split("/").join("\\");
   return projectPath.split("/").map((part) => {
     const bytes: number[] = [];
     for (let i = 0; i < part.length;) {
