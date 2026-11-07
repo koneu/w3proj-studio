@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { areaBetween, changeArea, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
+import { areaBetween, changeArea, tileOf, centreOf, fragmentOf, FRAGMENT_FORMAT, groundOf, groundOrigin, snapped, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnGround, turnOffset, type FragmentGround } from "./fragment";
 import { parseW3e, setGroundHeight, setWaterLevel, writeW3e, type Corner, type Terrain } from "./w3e";
 
 const tree = (x: number, y: number, z = 0, angle = 0) => ({ list: "doodads" as const, entry: { id: "LTlt", position: [x, y, z], angle, scale: [1, 1, 1], life: 100 } });
@@ -246,4 +246,21 @@ test("changing an area touches only what's in it and what's asked for, and undoe
   assert.deepEqual(t.corners.map((c) => c.texture), was);
   st.redo();
   assert.equal(t.corners[5].texture, 5);
+});
+
+test("tiles added for a paste that is refused go again, to the last cliff type and the custom-tilesets flag", () => {
+  const t = land(3, 3);
+  const before = tileSnapshot(t);
+  t.groundTiles.push("Lrok");
+  t.cliffTiles.push("CLrk");
+  t.customTilesets = true;
+  t.customTilesetsRaw = 1;
+  restoreTiles(t, before);
+  assert.deepEqual(t.groundTiles, ["Ldrt", "Lgrs"]);
+  assert.deepEqual(t.cliffTiles, before.cliffs);
+  assert.equal(t.customTilesets, before.custom);
+  assert.equal(t.customTilesetsRaw, before.raw);
+  // The snapshot is a copy: tiles added after it don't change it.
+  t.groundTiles.push("Lrok");
+  assert.deepEqual(before.ground, ["Ldrt", "Lgrs"]);
 });

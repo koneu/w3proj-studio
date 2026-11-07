@@ -7,7 +7,7 @@ import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, limitTo, waterLimitHits, type Bounds } from "./limits";
+import { cameraRect, clampPoint, insideBounds, limitTo, scaledNudge, waterLimitHits, type Bounds } from "./limits";
 import { h } from "../../workbench/dom";
 import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
@@ -36,7 +36,7 @@ import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
-import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, snapped, stampGround, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
+import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, snapped, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -153,6 +153,8 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 }
 
 /** One of the Advanced switches: a boolean setting that is `standard` until it is set. */
+/** Flips a switch where its value is kept: a project's own setting (.w3proj/settings.json) wins over the user's, so writing the user's would do nothing. */
+const setSwitch = (w3: W3Api, key: string, value: boolean) => w3.settings.set(key, value, w3.settings.inspect(key).project !== undefined ? "project" : "user");
 const switchedOn = (w3: W3Api, key: string, standard: boolean) => (standard ? w3.settings.get<boolean>(key, true) !== false : w3.settings.get<boolean>(key, false) === true);
 
 /** What Ctrl+C took: stays over tabs, so it can go into another open map. */
@@ -1007,7 +1009,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // The Advanced switches are settings, so they hold for every terrain editor and stay for the next session.
     ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", true], ["w3.terrain.toggleEnforceWaterLimits", "terrain.enforceWaterLimits", false], ["w3.terrain.toggleEnforceCameraBounds", "terrain.enforceCameraBounds", false]] as const)
-      .map(([id, key, standard]) => w3.commands.register(id, () => w3.settings.set(key, !switchedOn(w3, key, standard)))),
+      .map(([id, key, standard]) => w3.commands.register(id, () => setSwitch(w3, key, !switchedOn(w3, key, standard)))),
     w3.commands.register("w3.terrain.resetVariations", async () => {
       const path = w3.editors.activePath();
       const reset = path ? toolGroups.resetVariations.get(path) : undefined;
@@ -1156,7 +1158,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         renderer.showWeather = w3.settings.get<boolean>("terrain.weather", true) !== false;
         void loadWeather();
         const stopWeatherWatch = w3.workspace.onDidChange(() => void loadWeather());
-        const stopWeatherSaves = w3.workspace.onDidSave((path) => { if (/war3map\.w3[ir]\.json$/i.test(path)) void loadWeather(); });
+        const stopWeatherSaves = w3.workspace.onDidSave((path) => { if (/war3map\.w3[ir]\.json$/i.test(path)) void loadWeather(); if (/war3map\.w3i\.json$/i.test(path)) void loadBorder(); });
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
           if (key === "terrain.sky") void showSkyChoice();
@@ -1245,7 +1247,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** A finished terrain stroke as one undo step; objects on the edited
          *  ground follow it (doodads with a fixed height, flag 4, keep theirs). */
-        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }) => {
+        const commitTerrain = (st: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean => {
           if (enforceWater()) {
             // Enforce Water Height Limits: water pushed against the limit of the stored level is cut off
             // there and loses its shape, so the whole edit is refused instead.
@@ -1258,7 +1260,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               renderer.terrainChanged();
               redraw();
               void w3.window.showWarning(`Not done: the water at ${hits.length} corner${hits.length === 1 ? "" : "s"} would go past the game's lowest or highest water height. Turn off Enforce Water Height Limits to have it cut off there.`);
-              return;
+              return false;
             }
             st.redo();
           }
@@ -1276,6 +1278,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (st.cliffs) replanCliffs(); else void replanShore();
           renderer.terrainChanged();
           redraw();
+          return true;
         };
 
         // ---- side panel ---------------------------------------------------------
@@ -1847,7 +1850,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Sets `field` of every entry to the expression's value; returns an error message or null. */
         const massEdit = (entries: Placed[], field: MassField, src: string): string | null => {
-          let node;
+          let node, heldBack = 0;
           try { node = compileExpr(src); } catch (e) { return (e as Error).message; }
           const vals = entries.map((p, i) => { const v = varsOf(p); return evalFor(node, v, v[field], i, entries.length); });
           if (vals.some((v) => !Number.isFinite(v))) return "the expression gives no number for some objects";
@@ -1855,7 +1858,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const v = vals[i];
             switch (field) {
               case "x": case "y": {
-                const [x, y] = clampPoint(heldTo(), field === "x" ? v : p.position[0], field === "y" ? v : p.position[1]);
+                const wantX = field === "x" ? v : p.position[0], wantY = field === "y" ? v : p.position[1];
+                const [x, y] = clampPoint(heldTo(), wantX, wantY);
+                if (x !== wantX || y !== wantY) heldBack++;
                 return { position: [x, y, heightAt(terrain, x, y)] };
               }
               case "z": return { position: [p.position[0], p.position[1], v] };
@@ -1865,6 +1870,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               case "owner": return p.player !== undefined ? { player: Math.max(0, Math.min(27, Math.round(v) - 1)) } : null;
             }
           });
+          if (heldBack) void w3.window.showWarning(`${heldBack} object${heldBack === 1 ? "" : "s"} stopped at the camera bounds. Turn off Enforce Camera Bounds to go past them.`);
           return null;
         };
         /** Every placed object with a model (the groups not hidden). */
@@ -1903,11 +1909,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ("rotate" in key) rotateSelected(key.rotate);
           else if ("nudge" in key) {
             const before = entries.map(poseOf);
-            const [sx, sy] = clampShift(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), key.nudge[0], key.nudge[1]);
-            for (const p of entries) {
-              // The building grid is twice as fine as a nudge: half a step would round back one way.
-              const step = buildingCells.get(p.id) ? 2 : 1;
-              const x = p.position[0] + sx * step, y = p.position[1] + sy * step;
+            // The building grid is twice as fine as a nudge: half a step would round back one way. The bounds
+            // are applied to the nudge as it will be moved, steps and all.
+            const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), entries.map((p) => (buildingCells.get(p.id) ? 2 : 1)), key.nudge);
+            for (const [i, p] of entries.entries()) {
+              const x = p.position[0] + moves[i][0], y = p.position[1] + moves[i][1];
               setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], p.angle);
             }
             moveEdits(entries, before);
@@ -2190,12 +2196,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const placePaste = async (g: Vec3) => {
           const f = pasting;
           if (!f) return;
+          // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
+          const tiles = tileSnapshot(terrain);
           const stamped = await placeGround(f, g);
           // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
           // own step: without clearing keyStep this click would join the one before.
           keyStep = null;
           keyPress = "first";
-          if (stamped?.corners.length) commitTerrain({ ...stamped, cliffs: true });
+          const applied = stamped?.corners.length ? commitTerrain({ ...stamped, cliffs: true }) : true;
+          if (!applied) {
+            // Neither the ground nor the objects that stand on it.
+            keyPress = null;
+            restoreTiles(terrain, tiles);
+            return;
+          }
           keyPress = "repeat";
           try { placeObjects(f, g); } finally { keyPress = null; keyStep = null; }
         };
@@ -2349,7 +2363,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             row("Type", `${KIND_LABELS[p.kind] ?? p.kind} · ${p.id}${p.base ? ` ← ${p.base}` : ""}`),
             ...(editable ? [
               ...(pl.player !== undefined ? [field("Owner", choice(pl.player, ownerOptions(), (v) => editProps(pl, { player: v })))] : []),
-              field("Position", triple(pl.position, "16", (v) => editProps(pl, { position: v }))),
+              field("Position", triple(pl.position, "16", (v) => {
+                if (!insideBounds(heldTo(), v[0], v[1])) {
+                  void w3.window.showWarning("Not done: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it.");
+                  // The boxes show where the object is again, not what was typed.
+                  if (selected) selectObject(selected);
+                  return;
+                }
+                editProps(pl, { position: v });
+              })),
               field("Facing", num((pl.angle * 180) / Math.PI, "15", (v) => editProps(pl, { angle: (v * Math.PI) / 180 }))),
               field("Scale", triple(pl.scale, "0.1", (v) => editProps(pl, { scale: v }))),
               numVar > 1
@@ -2428,7 +2450,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Until the size is known: a modest share of the model bounds.
           const r = radiusOf(inst.pick!.kind, inst.pick!.id) ?? Math.min(96, Math.max(24, sr * 0.4));
           // Centred on the object position (model bounds can be off-centre).
-          return { x: pl.position[0], y: pl.position[1], r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
+          return { x: pl.position[0], y: pl.position[1], z: ((flagsOf(pl) ?? 0) & FIXED_HEIGHT) !== 0 ? pl.position[2] : undefined, r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
         };
         /** Click target per object: the same radius as its selection ring. */
         const pickRadius = (inst: ObjectInstance) =>
@@ -2706,6 +2728,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
             for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) if (!inside(pl.start[0], pl.start[1])) [pl.start[0], pl.start[1]] = clamp(pl.start[0], pl.start[1]);
           });
+          void loadBorder();
           // Regions are clipped to the map (those left outside go).
           await editDoc("war3map.w3r", (d) => {
             type R = { left: number; right: number; bottom: number; top: number };
@@ -3124,7 +3147,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** A box for one of the Advanced switches; the command and the box are the same setting. */
         const switchBox = (label: string, title: string, key: string, standard: boolean) => {
-          const box = h("input", { type: "checkbox", checked: switchedOn(w3, key, standard), onchange: () => { void w3.settings.set(key, box.checked); canvas.focus({ preventScroll: true }); } });
+          const box = h("input", { type: "checkbox", checked: switchedOn(w3, key, standard), onchange: () => { void setSwitch(w3, key, box.checked); canvas.focus({ preventScroll: true }); } });
           viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };

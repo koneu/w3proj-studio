@@ -142,7 +142,8 @@ export interface TerrainEditorHandle {
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore
    *  the corners; objects standing on the changed `corners` (indices) follow the
    *  ground; `cliffs` re-plans cliff and ramp models. */
-  commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): void;
+  /** Puts a finished stroke on the undo stack. False when it was refused (Enforce Water Height Limits): the ground is as it was. */
+  commitTerrain(stroke: { corners: number[]; undo(): void; redo(): void; cliffs?: boolean }): boolean;
   /** The ground tile of each cliff type number a corner can have (empty until the game's cliff types are read). */
   cliffGroundTiles(): string[];
   /** The game's tilesets with their own ground tiles (the tile list New Map gives them). */

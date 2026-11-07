@@ -156,6 +156,8 @@ void main() {
 export interface Ring {
   x: number;
   y: number;
+  /** Height of the ring when it doesn't follow the ground: round a doodad that has a height of its own. */
+  z?: number;
   r: number;
   rgb: Vec3;
   /** A square outline (half side `r`) instead of a circle. */
@@ -841,7 +843,7 @@ export class TerrainRenderer {
       // Square: the same directions pushed out to the square's edge.
       if (r.square) { const m = Math.max(Math.abs(dx), Math.abs(dy)); dx /= m; dy /= m; }
       const x = r.x + dx * r.r, y = r.y + dy * r.r;
-      data.push(x, y, this.groundHeight(x, y) + 4, r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255, 1);
+      data.push(x, y, (r.z ?? this.groundHeight(x, y)) + 4, r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255, 1);
     }
     return this.colorMesh(data);
   }

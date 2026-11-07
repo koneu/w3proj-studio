@@ -433,7 +433,7 @@ async function heightKit(page, name) {
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
     },
     /** The Advanced switches go back to what they were, for the next check. */
-    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds"].map((key) => page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined)`))),
+    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined, ${JSON.stringify(layer)})`)))),
   };
   return kit;
 }
@@ -483,6 +483,13 @@ async function heightsPreserve(page, found) {
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box didn't switch Preserve Copied Object Height on");
   if (!(await page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`))) fail("the Preserve Copied Object Height box kept the keyboard");
   await k.hands.key("Escape", "Escape", 27);
+
+  // A project that keeps its own value (.w3proj/settings.json) wins over the user's: the switch has to change that one.
+  await page.evaluate(`w3.settings.set("terrain.preserveCopiedHeight", true, "project")`);
+  await k.run("w3.terrain.togglePreserveCopiedHeight");
+  if ((await k.setting("terrain.preserveCopiedHeight")) !== false || (await k.box("Keep pasted height")) !== false) fail("the toggle command did nothing while the project keeps its own Preserve Copied Object Height");
+  await k.hands.click(".model-toggle", "Keep pasted height");
+  if ((await k.setting("terrain.preserveCopiedHeight")) !== true) fail("the toolbar box did nothing while the project keeps its own Preserve Copied Object Height");
   await k.verify(fail);
   await k.reset();
 }
@@ -620,6 +627,28 @@ async function heightsLimits(page, found) {
   if (count() !== n1 + 2) fail(`the same placement with Enforce Camera Bounds off placed ${count() - n1 - 1} doodads (${await k.toasts()})`);
   await k.tab("Select");
 
+  // A typed position: inside the bounds it's taken. Once the bounds are narrowed in the w3i (saved elsewhere, so the
+  // editor has to read them again) the same kind of number is refused with a word, and the box shows the real position again.
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  const at = (x) => k.doodads().some((d) => d.position[0] === x && d.position[1] === 0);
+  const typeX = async (x) => { await k.look(...(x.from)); await sleep(500); await k.clearToasts(); await retype(hands, ".terrain-sel-triple input", String(x.to)); await k.save(); };
+  await typeX({ from: [0, 0, { id: "LTlt", x: 0, y: 0 }], to: br - 300 });
+  if (!at(br - 300)) fail("a typed X inside the camera bounds wasn't taken");
+  const w3i = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+  const narrow = JSON.parse(w3i);
+  narrow.cameraBounds[2] = br - 400; narrow.cameraBounds[6] = br - 400;
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(narrow))})`);
+  await sleep(800);
+  await typeX({ from: [br - 300, 0, { id: "LTlt", x: br - 300, y: 0 }], to: br - 100 });
+  if (at(br - 100) || !at(br - 300)) fail("a typed X past the narrowed camera bounds was taken: the editor still has the old bounds");
+  if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused position: "${await k.toasts()}"`);
+  const shown = await page.evaluate(`document.querySelector(".terrain-sel-triple input")?.value`);
+  if (Number(shown) !== br - 300) fail(`the position box kept the refused text: "${shown}"`);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(w3i)})`);
+  await sleep(800);
+  await k.run("w3.terrain.toggleEnforceCameraBounds");
+  await k.save();
+
   // Water: four raises of 1000 make a mound whose top is past 2048, where the stored level of a surface at its height ends.
   for (let i = 0; i < 4; i++) {
     const raise = await k.tool("sculpt_terrain", { mode: "raise", amount: 1000, left: 256, bottom: 256, right: 2304, top: 2304, shape: "box" }).then(() => null, (e) => e.message);
@@ -652,6 +681,43 @@ async function heightsLimits(page, found) {
   if ((await k.setting("terrain.enforceWaterLimits")) !== false || (await k.box("Water limits")) !== false) fail("the toggle command didn't switch Enforce Water Height Limits off");
   await stroke(1280, 1280, 45);
   if (hash(w3e) === low) fail("the same stroke with Enforce Water Height Limits off drew nothing");
+  await k.tab("Select");
+
+  // A paste whose ground would put water past the limit is refused whole, with the objects that stand on it. The source is the
+  // mound with the water drawn on it above, and trees over it (the area dragged out below covers some of them).
+  const trees = [];
+  for (let x = 896; x <= 1664; x += 128) for (let y = 896; y <= 1664; y += 128) trees.push({ id: "LTlt", x, y });
+  await k.tool("place_objects", { objects: trees, ignoreRoom: true });
+  await k.save();
+  await k.clearToasts();
+  await hands.click(".chip", "Area");
+  await k.look(1280, 1280);
+  await sleep(700);
+  const c = await hands.where(".model-stage canvas");
+  await hands.drag({ x: c.x - 15, y: c.y + 45 }, { x: c.x + 15, y: c.y + 75 });
+  const areaShown = () => page.evaluate(`/\\d+ × \\d+ tiles/.test(document.querySelector(".terrain-selection")?.textContent ?? "")`);
+  await until("the area", areaShown, 8000).catch(() => fail("no area was selected for the copy"));
+  await k.focusMap();
+  await hands.key("c", "KeyC", 67, 2);
+  await hands.key("Escape", "Escape", 27);
+  await k.look(1024, -1536);
+  await sleep(500);
+  await k.run("w3.terrain.toggleEnforceWaterLimits");
+  if ((await k.setting("terrain.enforceWaterLimits")) !== true) fail("Enforce Water Height Limits wasn't switched on again");
+  const w3eNow = hash(w3e), treesNow = count();
+  await k.clearToasts();
+  await k.focusMap();
+  await hands.key("v", "KeyV", 86, 2);
+  await k.clickMiddle();
+  await k.save();
+  if (hash(w3e) !== w3eNow) fail("a paste with water past the limit changed the ground with Enforce Water Height Limits on");
+  if (count() !== treesNow) fail("a paste whose ground was refused still placed its objects");
+  if (!/water/i.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
+  await k.run("w3.terrain.toggleEnforceWaterLimits");
+  await k.clickMiddle();
+  await k.save();
+  if (hash(w3e) === w3eNow || count() <= treesNow) fail(`the same paste with Enforce Water Height Limits off: ground ${hash(w3e) === w3eNow ? "unchanged" : "changed"}, ${count() - treesNow} objects`);
+  await hands.key("Escape", "Escape", 27);
   await k.tab("Select");
   await k.verify(fail);
   await k.reset();

@@ -22,7 +22,7 @@ export function waterLimitHits(before: readonly WaterWord[], after: readonly Wat
   return hits;
 }
 
-import type { Bounds } from "./moveedit";
+import { clampShift, type Bounds } from "./moveedit";
 export type { Bounds };
 
 /** The camera bounds of a map's w3i (left, bottom, right, top first), or null if it has none to trust. */
@@ -39,6 +39,17 @@ export const insideBounds = (b: Bounds | null, x: number, y: number) => !b || (x
 /** The point, or the nearest one inside the bounds. */
 export const clampPoint = (b: Bounds | null, x: number, y: number): [number, number] =>
   b ? [Math.min(b.right, Math.max(b.left, x)), Math.min(b.top, Math.max(b.bottom, y))] : [x, y];
+
+/**
+ * A nudge for a group, held to the bounds. `steps` is how many nudges long each entry moves (a building goes
+ * twice as far, on its finer grid), so the group is cut back by the longest step first and each entry takes its
+ * share: nothing ends up past its bound, whatever its step.
+ */
+export function scaledNudge(points: readonly (readonly [number, number])[], bounds: readonly Bounds[], steps: readonly number[], nudge: readonly [number, number]): [number, number][] {
+  const longest = Math.max(1, ...steps);
+  const [dx, dy] = clampShift(points, bounds, nudge[0] * longest, nudge[1] * longest);
+  return steps.map((s) => [(dx * s) / longest, (dy * s) / longest]);
+}
 
 /** The bounds a moved object has to stay in: the map's own (the playable part, for a unit) and, when camera bounds
  *  are enforced (`camera` is not null), the camera bounds as well, so where both reach. One rule for `clampShift`

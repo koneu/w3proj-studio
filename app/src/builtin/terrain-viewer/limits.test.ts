@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampPoint, cameraRect, insideBounds, limitTo, waterLimitHits } from "./limits";
+import { clampPoint, cameraRect, insideBounds, limitTo, scaledNudge, waterLimitHits } from "./limits";
 import { clampShift } from "./moveedit";
 import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, waterLevelAt } from "../../lib/terrain/w3e";
 
@@ -61,4 +61,26 @@ test("one clampShift holds a group to both: the camera bounds when enforced, the
   // A unit already past the camera bounds but inside the map doesn't hold the others back.
   const out: [number, number][] = [[150, 10], [20, 10]];
   assert.deepEqual(clampShift(out, out.map(() => limitTo(map, box)), -30, 0), [-20, 0], "the one inside stops at the left bound");
+});
+
+test("water at the lowest stored level is a hit, one step above it is not", () => {
+  // Level 0 is the surface at -2137.6; the ground can go lower than that.
+  const at = (z: number) => ({ hasWater: true, rawWater: waterLevelAt(z) });
+  assert.equal(waterLevelAt(-2137.6), WATER_LEVEL_MIN);
+  assert.deepEqual(waterLimitHits([at(-100)], [at(-2137.6)]), [0]);
+  assert.deepEqual(waterLimitHits([at(-100)], [at(-5000)]), [0], "ground far below the limit is cut off at it");
+  assert.deepEqual(waterLimitHits([at(-100)], [at(-2137)]), [], "a quarter unit above is stored as it is");
+  assert.deepEqual(waterLimitHits([at(-5000)], [at(-5000)]), [], "water that was at the limit already isn't a new hit");
+});
+
+test("a nudge is held to the bounds with its steps: a building, which goes twice as far, stops at the edge too", () => {
+  const bounds = { left: 0, bottom: 0, right: 100, top: 100 };
+  // Both 40 from the right edge, nudged 32: a plain object ends 8 short of it, a building would be 24 past it.
+  const moves = scaledNudge([[60, 50], [60, 50]], [bounds, bounds], [1, 2], [32, 0]);
+  assert.ok(60 + moves[1][0] <= 100 && 60 + moves[0][0] <= 100, "neither passes the edge");
+  assert.equal(60 + moves[1][0], 100, "the building goes as far as the edge allows");
+  assert.equal(moves[0][0] * 2, moves[1][0], "and each keeps its share of the step");
+  // Not held back: the full steps.
+  assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[32, 0], [64, 0]]);
+  assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [0, -32]), [[0, -50]], "down to the bottom edge, 50 away, where 64 were asked");
 });

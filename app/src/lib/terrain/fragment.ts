@@ -152,6 +152,17 @@ export function groundOrigin(t: Terrain, g: FragmentGround, x: number, y: number
   return [Math.round((x + g.at[0] - t.offsetX) / TILE), Math.round((y + g.at[1] - t.offsetY) / TILE)];
 }
 
+/** The map's lists of ground and cliff tiles, to put back if the edit that added to them is refused. */
+export function tileSnapshot(t: Terrain) {
+  return { ground: [...t.groundTiles], cliffs: [...t.cliffTiles], custom: t.customTilesets, raw: t.customTilesetsRaw };
+}
+export function restoreTiles(t: Terrain, s: ReturnType<typeof tileSnapshot>) {
+  t.groundTiles.splice(0, t.groundTiles.length, ...s.ground);
+  t.cliffTiles.splice(0, t.cliffTiles.length, ...s.cliffs);
+  t.customTilesets = s.custom;
+  t.customTilesetsRaw = s.raw;
+}
+
 /** Puts ground on the map, with corner (0, 0) at corner `origin`; what falls off the map is left out. The
  *  border marks stay the map's own. `tiles` and `cliffs` give this map's number for the fragment's. */
 export function stampGround(t: Terrain, g: FragmentGround, origin: readonly [number, number], tiles: readonly number[], cliffs: readonly number[]) {
