@@ -15,6 +15,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
+import { exportMinimap } from "./minimapexport";
 import { buildMinimap, buildMinimapIcons, minimapSettings } from "./minimapgen";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
@@ -912,6 +913,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { removed };
     }),
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
+    w3.commands.register("w3.terrain.exportMinimap", () => exportMinimap(w3)),
     w3.commands.register("w3.terrain.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       const path = projectTerrain(w3);
