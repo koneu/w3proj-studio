@@ -121,6 +121,31 @@ test("several unclosed blocks in a row", () => {
   assert.deepEqual(all("STRING 1\n{\na}\nSTRING 2\n{\nb}\n\n\nSTRING 3\n{\nc\n}\n"), [[1, "a"], [2, "b"], [3, "c"]]);
 });
 
-test("a file without any brace line stays unread, as before", () => {
-  assert.deepEqual(all("STRING 1\n{\nfoo}\nSTRING 2\n{\nx"), []);
+
+test("blocks followed by a header are recovered even with no brace line anywhere after them", () => {
+  assert.deepEqual(all("STRING 1\n{\nfoo}\nSTRING 2\n{\nbar}\n\nSTRING 3\n{\nlast"), [[1, "foo"], [2, "bar"]]);
+});
+
+test("a last unclosed block with no header after it, and no brace line, stays unread", () => {
+  assert.deepEqual(all("STRING 1\n{\nfoo}\n"), []);
+  assert.deepEqual(all("STRING 1\n{\nfoo\nbar"), []);
+});
+
+test("a header that doesn't qualify is skipped, a later one that does is used", () => {
+  assert.deepEqual(all("STRING 1\n{\nsee\nSTRING 7\n{\nfoo}\nSTRING 2\n{\nx\n}\n"), [[1, "see\nSTRING 7\n{\nfoo"], [2, "x"]]);
+});
+
+test("many unclosed blocks are read in one pass, not one search to the end each", () => {
+  const n = 30000;
+  let text = "";
+  for (let i = 1; i <= n; i++) text += `STRING ${i}\r\n{\r\nName ${i}}\r\n\r\n`;
+  text += "STRING 0\r\n{\r\nEnd\r\n}\r\n";
+  const t0 = Date.now();
+  const table = new StringTable(text);
+  assert.equal(table.get(n), `Name ${n}`);
+  assert.equal(table.get(0), "End");
+  assert.equal([...table.entries()].length, n + 1);
+  table.set(n, "x");
+  assert.ok(table.serialize().includes("x\r\n}"));
+  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
 });

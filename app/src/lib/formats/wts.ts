@@ -5,7 +5,7 @@
 const HEADER = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/g;
 const CLOSE = /\r?\n\}/g;
 // A `}` that ends a text line, with the next block's header right after it (blank lines allowed).
-const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/;
+const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/g;
 
 /** One `STRING n { text }` block: `text.slice(from, to)` is the text, `text.slice(to, end)` what closes it. */
 interface Block { num: number; from: number; to: number; end: number; closed: boolean }
@@ -13,22 +13,27 @@ interface Block { num: number; from: number; to: number; end: number; closed: bo
 /** The blocks of a file. A block ends at the first line that starts with `}`. Some real files have
  *  a block whose `}` sits at the end of its last text line, with the next STRING block right after;
  *  there the first such `}` ends the block (before the next header, never anywhere else), so the next
- *  string isn't swallowed. */
+ *  string isn't swallowed. That also holds when no `}` line follows at all. A last block without a
+ *  header after it stays unread, as it is without a `}` line.
+ *
+ *  The next `}` line and the next unclosed `}` are each searched for once and kept while they still
+ *  lie ahead, so a file of many unclosed blocks is read in one pass. */
 function scan(text: string): Block[] {
   const blocks: Block[] = [];
   let pos = 0;
+  let c: RegExpExecArray | null | undefined, u: RegExpExecArray | null | undefined; // undefined: not searched yet
   for (;;) {
     HEADER.lastIndex = pos;
     const h = HEADER.exec(text);
     if (!h) return blocks;
     const from = h.index + h[0].length;
-    CLOSE.lastIndex = from;
-    const c = CLOSE.exec(text);
-    if (!c) return blocks;
-    const u = UNCLOSED.exec(text.slice(from, c.index));
-    if (u) {
-      blocks.push({ num: Number(h[1]), from, to: from + u.index, end: from + u.index + 1, closed: false });
-      pos = from + u.index + 1;
+    if (c === undefined || (c && c.index < from)) { CLOSE.lastIndex = from; c = CLOSE.exec(text); }
+    if (u === undefined || (u && u.index < from)) { UNCLOSED.lastIndex = from; u = UNCLOSED.exec(text); }
+    if (u && (!c || u.index < c.index)) {
+      blocks.push({ num: Number(h[1]), from, to: u.index, end: u.index + 1, closed: false });
+      pos = u.index + 1;
+    } else if (!c) {
+      return blocks;
     } else {
       blocks.push({ num: Number(h[1]), from, to: c.index, end: c.index + c[0].length, closed: true });
       pos = c.index + c[0].length;
