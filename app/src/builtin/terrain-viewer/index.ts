@@ -1016,8 +1016,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lighting: MapLighting | null = null;
         const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
         const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
-        const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); canvas.focus(); } });
-        const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); canvas.focus(); } },
+        const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); canvas.focus({ preventScroll: true }); } });
+        const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); canvas.focus({ preventScroll: true }); } },
           ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
         const applyLight = () => {
           const on = lightOn(), hour = lightHour();
@@ -1043,7 +1043,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         renderer.showBorder = showBoundary();
         renderer.showFog = w3.settings.get<boolean>("terrain.fog", true) !== false;
         /** The game's skies, for the view: a map doesn't keep one, the World Editor has it as a preference. */
-        const skySelect = h("select", { title: "The sky in this view. It isn't part of the map", onchange: () => { void w3.settings.set("terrain.sky", skySelect.value); canvas.focus(); } }, h("option", { value: "" }, "No sky"));
+        const skySelect = h("select", { title: "The sky in this view. It isn't part of the map", onchange: () => { void w3.settings.set("terrain.sky", skySelect.value); canvas.focus({ preventScroll: true }); } }, h("option", { value: "" }, "No sky"));
         const showSkyChoice = async () => {
           const path = w3.settings.get<string>("terrain.sky", "") ?? "";
           skySelect.value = path;
@@ -1822,7 +1822,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!kinds.size) return;
           const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
           const chosen = await objects.pick(el, { title: `Replace ${entries.length === 1 ? "this" : `these ${entries.length}`} with…`, kinds: replaceableKinds(kinds.values()) });
-          canvas.focus();
+          canvas.focus({ preventScroll: true });
           if (!chosen) return;
           const swapped = entries.filter((p) => replaceableBy(kinds.get(p) as string, chosen.kind) && p.id !== chosen.id);
           if (!swapped.length) return;
@@ -2115,7 +2115,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!editable || !entries.length) return;
           facing = { entries, before: entries.map(poseOf) };
           modeHint.textContent = "Facing the pointer: click to apply · Esc to cancel";
-          canvas.focus();
+          canvas.focus({ preventScroll: true });
         };
         const faceToward = (g: Vec3) => {
           for (const p of facing!.entries) setPlacement(p, [...p.position], Math.atan2(g[1] - p.position[1], g[0] - p.position[0]));
@@ -2223,9 +2223,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The same order as for several objects below, with Delete last.
             h("div.terrain-sel-actions.wrap", {},
               h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
-              h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => { void viewSelection(); canvas.focus(); } }, "View"),
+              h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => { void viewSelection(); canvas.focus({ preventScroll: true }); } }, "View"),
               ...(editable ? [
-                h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); canvas.focus(); }) }, "Select in palette"),
+                h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); canvas.focus({ preventScroll: true }); }) }, "Select in palette"),
                 h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(),
                 h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
               ] : [])),
@@ -2454,12 +2454,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const standing = h("input", { type: "checkbox", checked: withObjects, onchange: () => {
             withObjects = standing.checked;
             if (terrainArea) terrainArea = { ...terrainArea, objects: withObjects };
-            canvas.focus();
+            canvas.focus({ preventScroll: true });
           } });
           const standingWrap = h("label.terrain-tool-opt", { title: "Copy the units, items and doodads standing on the area along with its ground" }, standing, " With objects");
           const kindsWrap = h("span.terrain-tool-opt", { title: "Kinds of objects a selection box picks up" }, "Box selects:",
               ...([["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"]] as const).map(([k, label]) => {
-                const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus(); } });
+                const cb = h("input", { type: "checkbox", checked: boxKinds.has(k), onchange: () => { if (cb.checked) boxKinds.add(k); else boxKinds.delete(k); canvas.focus({ preventScroll: true }); } });
                 return h("label.terrain-place-opt", {}, cb, ` ${label}`);
               }));
           const filterRun = h("button", { title: "Select every object matching the filter", onclick: () => void runFilter() }, "Select matching");
@@ -2472,7 +2472,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             dragHint.textContent = area ? "Drag: select an area" : "Drag: select box · Hold A and drag: select an area";
             setArea(null);
             clearSelection();
-            canvas.focus();
+            canvas.focus({ preventScroll: true });
           };
           objectsOnly.classList.add("on");
           standingWrap.hidden = true;
@@ -2761,7 +2761,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const v = new DataView(wpm.buffer, wpm.byteOffset);
             return { cells: wpm.slice(16), width: v.getUint32(8, true), height: v.getUint32(12, true) };
           },
-          focus: () => canvas.focus(),
+          focus: () => canvas.focus({ preventScroll: true }),
           lookAt: (x, y) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); },
           view: () => ({ target: [...renderer.target], yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov }),
           setView: (v) => {
@@ -2983,16 +2983,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         toolGroups.viewCommands.set(doc.path, viewCommands);
         const layerToggle = (label: string, title: string, layer: "naval" | "heights" | "cameras") => {
-          const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); canvas.focus(); } });
+          const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); canvas.focus({ preventScroll: true }); } });
           viewSyncs.push(() => { box.checked = viewState[layer]; });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };
-        const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); canvas.focus(); } },
+        const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); canvas.focus({ preventScroll: true }); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
         viewSyncs.push(() => { gridSelect.value = viewState.grid; });
 
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
-          const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); canvas.focus(); } });
+          const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); canvas.focus({ preventScroll: true }); } });
           return h("label.model-toggle", {}, box, ` ${label}`);
         };
         el.append(h("div.model-viewer", {},
@@ -3016,9 +3016,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
               skySelect,
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
-              h("button", { title: "Reset camera", onclick: () => { resetCamera(); canvas.focus(); } }, "⟲"),
-              h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); canvas.focus(); } }, "⛶"),
-              h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); canvas.focus(); } }, "◎"),
+              h("button", { title: "Reset camera", onclick: () => { resetCamera(); canvas.focus({ preventScroll: true }); } }, "⟲"),
+              h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); canvas.focus({ preventScroll: true }); } }, "⛶"),
+              h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); canvas.focus({ preventScroll: true }); } }, "◎"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas, labelLayer)),
@@ -3066,7 +3066,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Where the left button went down; a release close by is a click (select). */
         let press: { x: number; y: number } | null = null;
         canvas.addEventListener("mousedown", (e) => {
-          canvas.focus();
+          canvas.focus({ preventScroll: true });
           if (toolGroups.picking && e.button === 0) {
             e.preventDefault();
             const g = groundAt(e);
@@ -3478,7 +3478,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
           }) : undefined,
-          focus: () => canvas.focus(),
+          focus: () => canvas.focus({ preventScroll: true }),
           dispose: () => {
             stopGroups();
             stopPick();

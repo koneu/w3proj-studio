@@ -458,25 +458,50 @@ async function viewCommands(page, fail, shots) {
     lagged0 = exact;
   }
 
-  // No growth: more strokes with every layer on make no more buffers or arrays than they free.
+  // No growth: strokes and object edits with every layer on keep as many buffers and arrays alive as after the first.
+  // The ones made after the counting starts are kept in sets, so an old free can't hide a new leak.
   await run("w3.terrain.toggleHeightMap");
   await run("w3.terrain.toggleSmallGrid");
   await run("w3.terrain.toggleCameraObjects");
   await sleep(2500);
   await page.evaluate(`(() => {
-    const gl = WebGL2RenderingContext.prototype, live = (window.__live = { buffers: 0, arrays: 0 });
+    const gl = WebGL2RenderingContext.prototype, live = (window.__live = { buffers: new Set(), arrays: new Set() });
     for (const [make, free, key] of [["createBuffer", "deleteBuffer", "buffers"], ["createVertexArray", "deleteVertexArray", "arrays"]]) {
       const m = gl[make], f = gl[free];
-      gl[make] = function (...a) { live[key]++; return m.apply(this, a); };
-      gl[free] = function (...a) { if (a[0]) live[key]--; return f.apply(this, a); };
+      gl[make] = function (...a) { (live[key + "Made"] = (live[key + "Made"] || 0) + 1); const o = m.apply(this, a); if (o) live[key].add(o); return o; };
+      gl[free] = function (...a) { live[key].delete(a[0]); return f.apply(this, a); };
     }
   })()`);
-  for (const dy of [-120, -40, 40, 120]) { await stroke(dy); await sleep(1500); }
-  await sleep(2500);
-  const grown = await page.evaluate(`window.__live`);
-  if (grown.buffers > 0 || grown.arrays > 0) bad(`four strokes left ${grown.buffers} more GPU buffers and ${grown.arrays} more vertex arrays in use`);
+  const openTab = (name) => page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(name)}).click()`);
+  /** Deleting the unit and undoing it (object edits, which rebuild the placed objects), then strokes of the Dry tool. */
+  const edits = async (nudges, dys) => {
+    await openTab("Select");
+    await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+    for (let i = 0; i < nudges; i++) {
+      await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
+      await sleep(600);
+      await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+      await hands.key("Delete", "Delete", 46);
+      await sleep(800);
+      await run("workbench.undo");
+      await sleep(1000);
+    }
+    await openTab("Terrain");
+    await sleep(300);
+    for (const dy of dys) { await stroke(dy); await sleep(1500); }
+    await sleep(2500);
+  };
+  const count = () => page.evaluate(`({ buffers: window.__live.buffers.size, arrays: window.__live.arrays.size })`);
+  await edits(1, [-120]);
+  const warm = await count();
+  await edits(3, [-40, 40, 120]);
+  const grown = await count();
+  if (grown.buffers > warm.buffers || grown.arrays > warm.arrays) bad(`three strokes and three deleted and restored objects left ${grown.buffers - warm.buffers} more GPU buffers and ${grown.arrays - warm.arrays} more vertex arrays in use`);
   for (const id of ["w3.terrain.toggleHeightMap", "w3.terrain.toggleSmallGrid", "w3.terrain.toggleCameraObjects", "w3.terrain.toggleNavalPathing"]) await run(id);
+  // Every stroke is one step, and the nudges were undone: undoing the strokes leaves the project as it was saved.
   for (let i = 0; i < 6; i++) await run("workbench.undo");
+  await sleep(500);
+  if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt") || w3.editors.unsavedPaths().length > 0`)) bad("undoing the strokes and objects of the view test left unsaved changes");
   await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select").click()`);
   await sleep(300);
 
@@ -487,7 +512,9 @@ async function viewCommands(page, fail, shots) {
   if (Math.hypot(whole.camera.target[0], whole.camera.target[1]) > 200) bad(`View Entire Map looks at ${whole.camera.target}`);
   if (!(near.camera.distance < whole.camera.distance / 2)) bad(`View Selection stays far away (${near.camera.distance} against ${whole.camera.distance})`);
   await picture("entire-map");
-  // Select In Tool Palette: the Objects tab opens, with the unit's type chosen.
+  // Select In Tool Palette (the unit is selected again: deleting it took the selection away): the Objects tab opens, with the unit's type chosen.
+  await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
+  await sleep(500);
   await run("w3.terrain.selectInPalette");
   await sleep(300);
   const tab = await page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent`), hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);

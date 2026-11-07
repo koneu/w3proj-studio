@@ -254,6 +254,7 @@ export class TerrainRenderer {
   showBorder = true;
   /** What the View toggles show over the ground (Height Map, Pathing - Naval, Camera Objects), one texture; tools keep `overlay`. */
   private viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
+  private held: { viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null } | null = null;
   /** Grid lines every this many world units (0: none). */
   gridStep = 0;
   private gridProg: WebGLProgram | null = null;
@@ -358,7 +359,7 @@ export class TerrainRenderer {
     this.water = this.buildWater();
     this.wire = this.buildWire();
     // Same size, new heights: the overlays' meshes only get new positions.
-    for (const layer of [this.overlay, this.border, this.viewLayer, this.gridMesh]) if (layer) this.reshapeOverlay(layer.pos);
+    for (const layer of [this.overlay, this.border, this.viewLayer, this.held?.viewLayer, this.gridMesh]) if (layer) this.reshapeOverlay(layer.pos);
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
   }
@@ -579,6 +580,8 @@ export class TerrainRenderer {
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
     const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep } = this;
+    // The view layer is put aside, not dropped: a layer set while this lasts goes there, and is what comes back.
+    this.held = { viewLayer };
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
@@ -592,7 +595,9 @@ export class TerrainRenderer {
     this.showWeather = false;
     return () => {
       this.setGroundOverlay(null);
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep });
+      const held = this.held;
+      this.held = null;
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer: held?.viewLayer ?? null, gridStep });
     };
   }
 
@@ -614,14 +619,16 @@ export class TerrainRenderer {
   /** The View toggles' picture (one texel per pathing cell, rows from the south); null removes it. */
   setViewLayer(rgba: Uint8Array | null, width = 0, height = 0) {
     const gl = this.gl;
+    // While showEverything lasts the layer lives in `held`; the picture taken doesn't show it.
+    const slot = this.held ?? (this as unknown as NonNullable<TerrainRenderer["held"]>);
     if (!rgba) {
-      if (this.viewLayer) { this.freeVao(this.viewLayer.vao); gl.deleteTexture(this.viewLayer.tex); }
-      this.viewLayer = null;
+      if (slot.viewLayer) { this.freeVao(slot.viewLayer.vao); gl.deleteTexture(slot.viewLayer.tex); }
+      slot.viewLayer = null;
       return;
     }
     this.overlayProg ??= compile(gl, OVERLAY_VS, OVERLAY_FS);
-    this.viewLayer ??= { ...this.overlayMesh(), tex: gl.createTexture()! };
-    this.uploadOverlay(this.viewLayer.tex, rgba, width, height);
+    slot.viewLayer ??= { ...this.overlayMesh(), tex: gl.createTexture()! };
+    this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
   }
 
   /** The border's shade, one texel per tile. */
@@ -699,6 +706,8 @@ export class TerrainRenderer {
 
   /** Replaces a named group of point markers (e.g. "doodads", "units"). */
   setMarkers(name: string, markers: Marker[]) {
+    const old = this.markers.get(name);
+    if (old) this.freeVao(old.vao);
     this.markers.set(name, this.colorMesh(markers.flatMap((m) => [m.x, m.y, m.z + 8, m.rgb[0] / 255, m.rgb[1] / 255, m.rgb[2] / 255, 1])));
   }
 
