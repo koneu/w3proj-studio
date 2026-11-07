@@ -9,6 +9,9 @@
 //! for each kind in KINDS order (units, items, destructables, doodads, abilities, buffs, upgrades):
 //!     u32 present (0 or 1), and if 1 the kind's object file, as in war3map.w3u and the like
 //! ```
+//!
+//! The export folds each object's fields from the map's `war3mapSkin.w3?` file (names, models, art,
+//! tooltips) into its entry. Where Reforged's editor puts those fields in a `.w3o` is **not verified**.
 
 use crate::objdata;
 use crate::{Error, Result};

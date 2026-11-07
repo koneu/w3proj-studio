@@ -73,10 +73,12 @@ interface Options { unsaved?: string[]; confirm?: boolean; pick?: string | null;
 function fake(files: Record<string, string>, opts: Options = {}) {
   const fs = new Map(Object.entries(files));
   const log: string[] = [];
+  const asked: string[] = [];
   const exported: { parts: { kind: string; text: string }[]; path: string }[] = [];
   const w3 = {
     workspace: {
       project: () => ({ name: "My Map", root: "C:\\p" }),
+      resolve: (p: string) => p,
       files: () => [...fs.keys()].map((path) => ({ path, size: 1, modified: 0 })),
       readText: async (p: string) => { if (!fs.has(p)) throw new Error("no such file"); return fs.get(p)!; },
       writeText: async (p: string, t: string) => { log.push(`write ${p}`); fs.set(p, t); },
@@ -84,6 +86,7 @@ function fake(files: Record<string, string>, opts: Options = {}) {
     },
     backend: {
       invoke: async (cmd: string, a: { parts?: { kind: string; text: string }[]; path?: string; text?: string }) => {
+        if (cmd === "fs_exists") return fs.has(a.path!) || fs.has(`${a.path}.json`);
         if (cmd === "w3o_export") { exported.push({ parts: a.parts!, path: a.path! }); return null; }
         if (cmd === "w3o_import") return opts.w3o ?? [];
         if (cmd === "objects_canonicalize") return JSON.stringify(JSON.parse(a.text!), null, 2) + "\n";
@@ -95,11 +98,11 @@ function fake(files: Record<string, string>, opts: Options = {}) {
     window: {
       pickSaveFile: async () => (opts.save === undefined ? "C:\\out\\all" : opts.save),
       pickFile: async () => (opts.pick === undefined ? "C:\\in\\x.w3o" : opts.pick),
-      confirm: async () => { log.push("confirm"); return opts.confirm ?? true; },
+      confirm: async (m: string) => { log.push("confirm"); asked.push(m); return opts.confirm ?? true; },
       showInfo: async () => undefined,
     },
   } as unknown as W3Api;
-  return { w3, fs, log, exported };
+  return { w3, fs, log, exported, asked };
 }
 
 const J = (f: EditFile) => JSON.stringify(f, null, 2);
@@ -165,4 +168,87 @@ test("Import changes nothing when declined, cancelled, unsaved, or of another ve
   await assert.rejects(importObjectData(other.w3), /can't be mixed/);
   assert.equal(other.fs.get("map/war3map.w3u.json"), mine, "the kind that could be merged was not written either");
   assert.deepEqual(other.log.filter((l) => l.startsWith("write")), []);
+});
+
+import { mergeSkin } from "./w3o";
+
+test("mergeSkin puts Skin fields into their objects, main's value first, and adds Skin-only objects when asked", () => {
+  const main = file(3, [std("hfoo", 5)], [{ base: "hfoo", id: "h000", mods: [mod("unam", "Main name"), { field: "uico", type: "string", value: "main.blp" }] }]);
+  const skin = file(3, [{ base: "hfoo", mods: [mod("unam", "Skin base name"), { field: "umdl", type: "string", value: "foot.mdx" }] }],
+    [{ base: "hfoo", id: "h000", mods: [mod("unam", "Skin name"), { field: "uico", type: "string", value: "skin.blp" }, { field: "utip", type: "string", value: "Tip" }] }, { base: "hpea", id: "h001", mods: [mod("unam", "Only skin")] }]);
+  const merged = mergeSkin(main, skin, { addSkinOnly: true });
+  assert.deepEqual(merged.custom[0].mods!.map((m) => [m.field, m.value]), [["unam", "Main name"], ["uico", "main.blp"], ["utip", "Tip"]]);
+  assert.deepEqual(merged.original[0].mods!.map((m) => [m.field, m.value]), [["uhpm", 5], ["unam", "Skin base name"], ["umdl", "foot.mdx"]]);
+  assert.deepEqual(merged.custom.map((o) => o.id), ["h000", "h001"]);
+  assert.equal(main.custom[0].mods!.length, 2, "main is not changed");
+  assert.deepEqual(mergeSkin(main, skin, { addSkinOnly: false }).custom.map((o) => o.id), ["h000"]);
+  assert.deepEqual(mergeSkin(main, null, { addSkinOnly: true }), main);
+});
+
+test("mergeSkin keeps levels apart, follows version 3 sets, and an end token that differs", () => {
+  const lvl = (level: number, value: string) => ({ field: "atp1", type: "string", level, data: 0, value });
+  const main = file(3, [], [{ base: "AHbz", id: "A000", sets: [{ flag: 0, mods: [lvl(1, "main1")] }] }]);
+  const skin = file(3, [], [{ base: "AHbz", id: "A000", end: "A000", sets: [{ flag: 0, mods: [lvl(1, "skin1"), lvl(2, "skin2")] }] }]);
+  const merged = mergeSkin(main, skin, { addSkinOnly: false });
+  assert.deepEqual(merged.custom[0].sets![0].mods.map((m) => [m.level, m.value, m.end]), [[1, "main1", undefined], [2, "skin2", "A000"]]);
+  // Nothing to put the fields in: an object with no mods of its own gets a list.
+  assert.equal(mergeSkin(file(3, [], [{ base: "hfoo", id: "h000" }]), file(3, [], [unit("h000", "N")]), { addSkinOnly: false }).custom[0].mods![0].value, "N");
+});
+
+test("Export All Object Data takes the Skin file's fields, also for an object the main file lacks", async () => {
+  const { w3, exported } = fake({
+    "map/war3map.w3u.json": J(file(3, [], [bare("hfoo", "h000")])),
+    "map/war3mapSkin.w3u.json": J(file(3, [], [unit("h000", "TRIGSTR_001"), unit("h001", "Skin only")])),
+    "map/war3map.wts": "STRING 1\n{\nLieutenant\n}\n",
+  });
+  await exportAllObjectData(w3);
+  const u = JSON.parse(exported[0].parts[0].text) as EditFile;
+  assert.deepEqual(u.custom.map((o) => [o.id, o.mods![0].value]), [["h000", "Lieutenant"], ["h001", "Skin only"]]);
+  // A kind that only the Skin file has is exported too.
+  const only = fake({ "map/war3mapSkin.w3t.json": J(file(3, [], [{ base: "ratf", id: "I000", mods: [mod("unam", "Item")] }])) });
+  await exportAllObjectData(only.w3);
+  assert.deepEqual(only.exported[0].parts.map((p) => p.kind), ["w3t"]);
+});
+
+test("Export Object takes the Skin fields of the chosen objects only", async () => {
+  const a = bare("hfoo", "h000"), b = bare("hfoo", "h001");
+  const { w3, exported } = fake({ "map/war3mapSkin.w3u.json": J(file(3, [], [unit("h000", "Named"), unit("h001", "Other"), unit("h002", "Unchosen")])) });
+  await exportObjects(w3, "w3u", file(3, [], [a, b]), [a], () => null);
+  const sent = JSON.parse(exported[0].parts[0].text) as EditFile;
+  assert.deepEqual(sent.custom.map((o) => [o.id, o.mods?.[0]?.value]), [["h000", "Named"]]);
+});
+
+test("an object file that is there but can't be read stops Export All and Import instead of passing for empty", async () => {
+  const good = J(file(3, [], [unit("h000", "x")]));
+  const ex = fake({ "map/war3map.w3u.json": good, "map/war3map.w3a.json": "{ broken" });
+  await assert.rejects(exportAllObjectData(ex.w3), /war3map\.w3a\.json is there but can't be read/);
+  assert.equal(ex.exported.length, 0, "no half export reported as success");
+  const skinBroken = fake({ "map/war3map.w3u.json": good, "map/war3mapSkin.w3u.json": "nope" });
+  await assert.rejects(exportAllObjectData(skinBroken.w3), /war3mapSkin\.w3u\.json/);
+
+  const w3o = [{ kind: "w3u", text: J(file(3, [], [unit("h009", "N")])) }];
+  const im = fake({ "map/war3map.w3u.json": "{ broken" }, { w3o });
+  await assert.rejects(importObjectData(im.w3), /war3map\.w3u\.json is there but can't be read/);
+  assert.equal(im.fs.get("map/war3map.w3u.json"), "{ broken", "the unreadable file is not overwritten");
+  assert.deepEqual(im.log.filter((l) => l.startsWith("write") || l.startsWith("command")), []);
+});
+
+test("the question names ids that an imported object takes from an object of another base", async () => {
+  const mine = J(file(3, [], [unit("h000", "Mine"), { base: "hpea", id: "h003", mods: [] }]));
+  const w3o = [{ kind: "w3u", text: J(file(3, [], [{ base: "hkni", id: "h000", mods: [] }, { base: "hpea", id: "h003", mods: [] }])) }];
+  const f = fake({ "map/war3map.w3u.json": mine }, { w3o });
+  await importObjectData(f.w3);
+  assert.match(f.asked[0], /h000 \(hfoo becomes hkni\)/);
+  assert.doesNotMatch(f.asked[0], /h003/, "same base is the same object");
+  const calm = fake({ "map/war3map.w3u.json": mine }, { w3o: [{ kind: "w3u", text: J(file(3, [], [unit("h007", "N")])) }] });
+  await importObjectData(calm.w3);
+  assert.doesNotMatch(calm.asked[0], /already used/);
+});
+
+test("mergeSkin puts a Skin set's fields into the set with the same flag", () => {
+  const f = (flag: number, value: string) => ({ field: "unam", type: "string", value, level: flag });
+  const main = file(3, [], [{ base: "hfoo", id: "h000", sets: [{ flag: 0, mods: [] }, { flag: 1, mods: [] }] }]);
+  const skin = file(3, [], [{ base: "hfoo", id: "h000", sets: [{ flag: 1, mods: [f(1, "one")] }, { flag: 0, mods: [f(0, "zero")] }] }]);
+  const merged = mergeSkin(main, skin, { addSkinOnly: false }).custom[0].sets!;
+  assert.deepEqual(merged.map((s) => s.mods.map((m) => m.value)), [["zero"], ["one"]]);
 });

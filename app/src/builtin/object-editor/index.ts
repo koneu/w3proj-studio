@@ -15,6 +15,7 @@ import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
+import { mergeSkin } from "./w3o";
 import { mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -1064,7 +1065,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!path) return;
           // Its own texts: references to this map's string table mean nothing in another.
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, text)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
+          // The fields the map keeps in its Skin file (names, models, art) belong in the exported file.
+          const merged = mergeSkin(file as unknown as EditFile, await readMapDoc<EditFile>(w3, `map/war3mapSkin.${kind}.json`), { addSkinOnly: true }) as unknown as ObjectFile;
+          const own = { ...merged, custom: merged.custom.map((o) => copyOf(o as EditObject, text)), original: merged.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
         };
