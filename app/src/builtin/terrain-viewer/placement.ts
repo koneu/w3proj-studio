@@ -34,9 +34,9 @@ export async function loadPlacedFile(w3: W3Api, name: string, key: "doodads" | "
   return { name, key, doc, list, json, dirty: false };
 }
 
-export async function savePlacedFile(w3: W3Api, f: PlacedFile): Promise<void> {
+/** `text` is the file as taken earlier; without it the file is serialized now. */
+export async function savePlacedFile(w3: W3Api, f: PlacedFile, text: string = placedText(f.doc)): Promise<void> {
   const root = w3.workspace.project()!.root, path = `map/${f.name}`;
-  const text = placedText(f.doc);
   if (f.json) {
     // Canonical formatting keeps diffs minimal (and validates by encoding).
     const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text });

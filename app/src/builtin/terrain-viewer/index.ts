@@ -23,6 +23,7 @@ import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from 
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { SaveMark } from "./savemark";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
@@ -1084,9 +1085,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const editable = !doc.readOnly;
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
-        /** Undo history; `at` edits are applied, `savedAt` matches the files. */
+        /** Undo history; `at` edits are applied, `mark` knows which position the files match. */
         const history: Edit[] = [];
-        let at = 0, savedAt = 0;
+        let at = 0;
+        const mark = new SaveMark();
         /** Set by every edit; the minimap is redrawn on the next save. */
         let minimapStale = false;
         /** Tool groups of other extensions, by group id. */
@@ -1099,7 +1101,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (e.terrain && areaPanel) void showAreaPanel();
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
-          doc.setDirty(at !== savedAt);
+          doc.setDirty(mark.isDirty(at));
           redraw();
         };
         const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } };
@@ -1112,15 +1114,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           notifyGroups(e);
           minimapStale = true;
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
-          if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && at !== savedAt) {
+          if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && mark.isDirty(at)) {
             history[at - 1] = keyStep = joinSteps(keyStep, e);
             return;
           }
+          mark.truncated(at);
           history.length = at;
           history.push(e);
           at = history.length;
           keyStep = keyPress ? e : null;
-          doc.setDirty(at !== savedAt);
+          doc.setDirty(mark.isDirty(at));
         };
         /** Runs a key's edit; however long the key is held, it's one undo step. */
         const byKey = (e: KeyboardEvent, edit: () => void) => {
@@ -3119,9 +3122,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const minimapMode = cfg<string>("minimap.regenerate");
           if (minimapMode === "always" || (minimapMode !== "never" && minimapStale)) {
             try {
-              await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
+              // Cleared first: an edit made while it is drawn sets it again, and the next save redraws.
               minimapStale = false;
+              await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
             } catch (e) {
+              minimapStale = true;
               w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
             }
           }
@@ -3190,7 +3195,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           minimapStale = true;
           // The editor's undo steps were for the map as it was.
           history.length = 0;
-          at = savedAt = 0;
+          at = 0;
+          mark.reset();
           if (path === doc.path.toLowerCase()) {
             const bytes = await readTerrainBytes(doc.path, doc), fresh = parseW3e(bytes);
             const same = fresh.width === terrain.width && fresh.height === terrain.height && fresh.tileset === terrain.tileset
@@ -3246,14 +3252,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               objectsTouched = true;
               void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
             }
+            if (objectsTouched) await settleMoved();
+            // Everything the save writes is taken here, in one go with no await, so the files agree with
+            // each other and with the undo position. An edit made while they are written is not in them,
+            // and stays unsaved.
             const w3e = writeW3e(terrain);
-            await writeTerrainBytes(doc.path, w3e, doc);
-            if (objectsTouched) {
-              await settleMoved();
-              for (const f of [dooFile, unitsFile]) if (f) await savePlacedFile(w3, f);
+            const token = mark.begin(at);
+            const placed = objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => ({ f, text: placedText(f.doc) })) : [];
+            const starts = objectsTouched && unitsFile ? startLocations(unitsFile.list) : null;
+            const doodadsTaken = dooFile ? structuredClone(dooFile.list) : null;
+            try {
+              await writeTerrainBytes(doc.path, w3e, doc);
+              for (const { f, text } of placed) await savePlacedFile(w3, f, text);
               // Placed, moved or deleted start locations add, move or remove the map's players.
-              if (unitsFile) {
-                const starts = startLocations(unitsFile.list);
+              if (starts) {
                 let changes: string[] = [];
                 await editDoc("war3map.w3i", (info) => {
                   changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
@@ -3262,14 +3274,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 savedStarts = starts;
                 if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
               }
+            } catch (e) {
+              mark.abort(token);
+              throw e;
             }
-            savedAt = at;
-            doc.setDirty(false);
+            mark.finish(token);
+            doc.setDirty(mark.isDirty(at));
             if (startAdded) void rebuildObjects();
             const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
             await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads);
             savedW3e = w3e;
-            savedDoodads = structuredClone(doodads);
+            savedDoodads = doodadsTaken ?? structuredClone(doodads);
             for (const g of groupInsts.values()) {
               await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
