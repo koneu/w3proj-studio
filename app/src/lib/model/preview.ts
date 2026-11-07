@@ -23,6 +23,8 @@ export class ModelPreview {
   private raf = 0;
   private started = performance.now();
   private drag: number | null = null;
+  /** Bumped by every show and setPrefer: a load that finishes under an older number is dropped. */
+  private token = 0;
 
   constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd" } = {}) {
     this.canvas = this.newCanvas();
@@ -39,7 +41,10 @@ export class ModelPreview {
   setPrefer(prefer: "classic" | "reforged" | "de" | "hd") {
     if (this.opts.prefer === prefer) return;
     this.opts = { ...this.opts, prefer };
+    this.token++;
     this.path = null;
+    this.renderer?.dispose();
+    this.renderer = null;
   }
 
   private newCanvas(): HTMLCanvasElement {
@@ -62,13 +67,14 @@ export class ModelPreview {
     const mdx = path && path !== "_" ? path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx") : null;
     if (mdx === this.path) return;
     this.path = mdx;
+    const token = ++this.token;
     this.renderer?.dispose();
     this.renderer = null;
     this.note.textContent = mdx ? "Loading…" : "No model";
     this.note.title = mdx ?? "";
     if (!mdx) return;
-    void this.load(mdx).catch((e) => {
-      if (this.path === mdx) this.note.textContent = `Can't show ${mdx.split(/[\\/]/).pop()}: ${(e as Error).message ?? e}`;
+    void this.load(mdx, token).catch((e) => {
+      if (this.token === token) this.note.textContent = `Can't show ${mdx.split(/[\\/]/).pop()}: ${(e as Error).message ?? e}`;
     });
   }
 
@@ -92,13 +98,14 @@ export class ModelPreview {
     throw last;
   }
 
-  private async load(mdx: string) {
+  private async load(mdx: string, token: number) {
     const model = parseMdx(await this.read(mdx));
-    if (this.path !== mdx) return;
+    if (this.token !== token) return;
     // A fresh canvas per model: a disposed renderer's WebGL context can't be used again.
     const canvas = this.newCanvas();
     this.canvas.replaceWith(canvas);
     this.canvas = canvas;
+    this.renderer?.dispose();
     const r = new ModelRenderer(canvas, model);
     r.showGrid = false;
     this.renderer = r;
