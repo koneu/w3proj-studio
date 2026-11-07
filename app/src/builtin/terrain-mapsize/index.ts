@@ -3,16 +3,63 @@
 // unplayable border; the map shows what stays playable (clear), the border
 // (shaded) and what would be cut off (red). Applying goes through the
 // terrain editor host (handle.resizeMap), which rewrites the map's files and
-// reopens the editor.
+// reopens the editor. The files a resize rewrites are kept for the session
+// (lib/terrain/resizeundo), so Ctrl+Z in the reopened editor, or Undo Resize,
+// puts them back, and Redo Resize does it again.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
+import { resizeHistory, resizeLoss, workspaceIO } from "../../lib/terrain/resizeundo";
 import { h } from "../../workbench/dom";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
+/** Undo or redo the last map resize: the kept files are written back and the editor opens again on them. */
+function stepResize(w3: W3Api, which: "undo" | "redo", quiet: boolean): () => Promise<boolean> {
+  let busy = false;
+  return async () => {
+    const project = w3.workspace.project();
+    const next = project ? (which === "undo" ? resizeHistory.nextUndo(project.root) : resizeHistory.nextRedo(project.root)) : null;
+    if (!project || !next) {
+      if (!quiet) void w3.window.showInfo(`There is no map resize to ${which}.`);
+      return false;
+    }
+    if (busy) return false;
+    const word = which === "undo" ? "Undo" : "Redo";
+    const unsaved = w3.editors.unsavedPaths();
+    if (unsaved.length) {
+      void w3.window.showWarning(`${word} Resize: save or discard the changes in ${unsaved.join(", ")} first; the resize's files would replace them.`);
+      return false;
+    }
+    busy = true;
+    try {
+      const ask = async (changed: string[]) =>
+        (await w3.window.showWarning(`${word} the map resize? ${changed.length} file${changed.length === 1 ? " has" : "s have"} changed since (${changed.slice(0, 4).join(", ")}${changed.length > 4 ? ", …" : ""}); those changes are lost.`, `${word} anyway`, "Cancel")) === `${word} anyway`;
+      const done = await resizeHistory[which](workspaceIO(w3.workspace), project.root, ask);
+      if (!done) return false;
+      await w3.workspace.refresh();
+      await w3.editors.close(done.editor);
+      await w3.editors.open(done.editor, "w3.terrainViewer");
+      void w3.window.showInfo(`Map resize ${which === "undo" ? "undone" : "redone"}.`);
+      return true;
+    } catch (e) {
+      void w3.window.showError(`${word} Resize: ${(e as Error).message ?? e}`);
+      return false;
+    } finally {
+      busy = false;
+    }
+  };
+}
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  // The terrain editor's Ctrl+Z / Ctrl+Shift+Z go on to these (quiet) when it has nothing of its own to undo or redo.
+  const undo = stepResize(w3, "undo", false), redo = stepResize(w3, "redo", false);
+  const undoQuiet = stepResize(w3, "undo", true), redoQuiet = stepResize(w3, "redo", true);
+  ctx.subscriptions.push(
+    w3.commands.register("w3.terrainMapSize.undo", (opts?: { quiet?: boolean }) => (opts?.quiet ? undoQuiet() : undo())),
+    w3.commands.register("w3.terrainMapSize.redo", (opts?: { quiet?: boolean }) => (opts?.quiet ? redoQuiet() : redo())),
+  );
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((s) => {
     ctx.subscriptions.push(s.registerToolGroup({ id: "mapsize", title: "Map Size", order: 40, create: (ed) => mapSize(w3, ed) }));
   });
@@ -70,11 +117,17 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
 
   const run = async () => {
     const grow = change.filter((c) => c > 0).length, shrink = change.filter((c) => c < 0).length;
+    const lost = resizeLoss(t, change as Sides, ed.objects.list());
+    const undoable = "Ctrl+Z in the terrain editor or Undo Resize takes it back while Studio stays open";
     const c = await w3.window.showWarning(
-      `${grow || shrink ? `Resize the map${shrink ? " (objects in the red area are removed)" : ""}` : "Change the camera bounds"}? The map is saved first; this can't be undone with Ctrl+Z.`,
+      lost.length
+        ? `Shrink the map? This removes ${lost.join(" and ")}. The map is saved first and a checkpoint is made. ${undoable}; after a restart, restore the checkpoint.`
+        : `${grow || shrink ? "Resize the map" : "Change the camera bounds"}? The map is saved first. ${undoable}.`,
       "Apply", "Cancel");
     if (c !== "Apply") return;
     try {
+      // A restart forgets the kept files; what a shrink cuts off stays in a checkpoint.
+      if (lost.length) await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${(e as Error).message ?? e}).`); });
       const r = await w3.window.withProgress("Changing the map size", () => ed.resizeMap([...change], [...complements]));
       void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} outside the new map removed` : ""}.`);
     } catch (e) {

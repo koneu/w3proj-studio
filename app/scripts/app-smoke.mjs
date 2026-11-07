@@ -723,6 +723,112 @@ async function heightsLimits(page, found) {
   await k.reset();
 }
 
+/** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
+ *  each undone with Ctrl+Z in the reopened editor (and the command), then redone, with every file of the map byte for byte
+ *  what it was before the resize / after it. A shrink names what it cuts off and makes a checkpoint. */
+async function resizeUndo(page, found) {
+  const fail = (what) => found.push(`resize undo: ${what}`);
+  const tool = mcpTool(page), hands = new Hands(page);
+  const folder = join(work, "resize-undo");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; window.__warned = []; w3.window.showWarning = async (m) => { window.__warned.push(m); return "Apply"; }; })()`);
+  await tool("new_map", { name: "ResizeUndo", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const state = () => {
+    const files = snapshot(join(root, "map"));
+    const pathing = join(root, ".w3proj", "pathing.json");
+    return new Map([...files, ...(existsSync(pathing) ? [[".w3proj/pathing.json", hash(pathing)]] : [])]);
+  };
+  const differ = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((k) => a.get(k) !== b.get(k));
+  const size = () => { const w3e = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"); return w3e.length; };
+  /** The editor on the file is open again and drawn. */
+  const editorUp = async () => {
+    await sleep(800);
+    await until("the editor to open again", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+    await sleep(1500);
+  };
+  const settledState = async () => { await sleep(1500); return state(); };
+  /** Waits until the files are what `want` is (an undo is asynchronous), then lets them settle and checks again. */
+  const reaches = async (want, label) => {
+    let last = [];
+    try { await until(label, async () => (last = differ(state(), want)).length === 0, 30000); } catch { fail(`${label}: differs in ${last.join(", ")}`); return false; }
+    await editorUp();
+    last = differ(await settledState(), want);
+    if (last.length) { fail(`${label}: changed again after the editor opened: ${last.join(", ")}`); return false; }
+    return true;
+  };
+  const ctrl = async (key, code, vk, shift) => {
+    await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
+    await hands.key(key, code, vk, 2 | (shift ? 8 : 0));
+  };
+  const doodadIds = () => JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads.map((d) => d.id);
+
+  // Something in the strip that a shrink from the left will cut off.
+  await tool("place_objects", { objects: [{ id: "LPwb", x: -3900, y: 0 }], ignoreRoom: true });
+  await tool("save_project");
+  await sleep(500);
+  if (!doodadIds().includes("LPwb")) { fail("the doodad wasn't placed (control)"); return; }
+  const base = await settledState();
+  const baseSize = size();
+
+  // Larger, by the tool; undone by Ctrl+Z.
+  await tool("resize_map", { right: 32, top: 32 });
+  await editorUp();
+  const grown = await settledState();
+  if (size() <= baseSize || !differ(base, grown).includes("war3map.w3e.txt")) { fail("the resize changed nothing (control)"); return; }
+  await ctrl("z", "KeyZ", 90, false);
+  if (await reaches(base, "undo of the larger map by Ctrl+Z")) {
+    await ctrl("z", "KeyZ", 90, true);
+    await reaches(grown, "redo of the larger map by Ctrl+Shift+Z");
+  }
+  // The same by the commands, and Ctrl+Z with nothing left to undo does nothing.
+  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
+  const err = await run("w3.terrainMapSize.undo");
+  if (err) fail(`Undo Resize: ${err}`);
+  if (await reaches(base, "undo of the larger map by the command")) {
+    await ctrl("z", "KeyZ", 90, false);
+    await sleep(1500);
+    const still = differ(state(), base);
+    if (still.length) fail(`Ctrl+Z with no resize to undo changed ${still.join(", ")}`);
+    const again = await run("w3.terrainMapSize.redo");
+    if (again) fail(`Redo Resize: ${again}`);
+    await reaches(grown, "redo of the larger map by the command");
+  }
+
+  // Smaller, by the Map Size tab: it names what is cut off, and the shrink is undone.
+  await page.evaluate(`window.__warned.length = 0`);
+  await hands.click(".terrain-tab", "Map Size");
+  await sleep(500);
+  await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[0]; i.value = "-32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  await sleep(200);
+  await hands.click(".mapsize-buttons button.primary");
+  await until("the question", () => page.evaluate(`window.__warned.length > 0`), 10000).catch(() => fail("the Map Size tab asked nothing"));
+  const question = await page.evaluate(`window.__warned[0] ?? ""`);
+  if (!/Shrink the map\? This removes 3072 tiles of terrain .* and 1 object /.test(question)) fail(`the shrink asked "${question}"`);
+  if (!/checkpoint/.test(question) || !/Ctrl\+Z/.test(question)) fail(`the shrink question doesn't say how it is taken back: "${question}"`);
+  await editorUp();
+  const shrunk = await settledState();
+  if (doodadIds().includes("LPwb")) fail("the shrink didn't remove the doodad outside (control)");
+  if (!differ(grown, shrunk).includes("war3map.doo.json")) fail("the shrink didn't change the doodads (control)");
+  const checkpoints = existsSync(join(root, "build", "checkpoints")) ? readdirSync(join(root, "build", "checkpoints")) : [];
+  if (!checkpoints.length) fail("the shrink made no checkpoint");
+  await ctrl("z", "KeyZ", 90, false);
+  if (await reaches(grown, "undo of the shrink by Ctrl+Z")) {
+    if (!doodadIds().includes("LPwb")) fail("the doodad cut off by the shrink isn't back after the undo");
+    await ctrl("z", "KeyZ", 90, true);
+    await reaches(shrunk, "redo of the shrink by Ctrl+Shift+Z");
+  }
+  const kit = { root };
+  const map = join(folder, "ResizeUndo.w3x");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(kit.root)}, output: ${JSON.stringify(map)} })`);
+  await until("the pack", () => existsSync(map), 20000);
+  const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
+  if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -1913,6 +2019,7 @@ async function run() {
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+    await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));

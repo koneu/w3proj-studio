@@ -4,5 +4,11 @@
   "version": "0.1.0",
   "description": "A Map Size tab in the terrain editor: grow or shrink the map per side and set the unplayable border (camera bounds), with a preview on the map, like the World Editor's Map Size and Camera Bounds.",
   "activationEvents": ["onEditor:w3.terrainViewer"],
-  "extensionDependencies": ["w3.terrainViewer"]
+  "extensionDependencies": ["w3.terrainViewer"],
+  "contributes": {
+    "commands": [
+      { "id": "w3.terrainMapSize.undo", "when": "project", "title": "Undo Resize", "category": "Terrain" },
+      { "id": "w3.terrainMapSize.redo", "when": "project", "title": "Redo Resize", "category": "Terrain" }
+    ]
+  }
 }

@@ -56,6 +56,7 @@ import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHei
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
+import { beginResize } from "../../lib/terrain/resizeundo";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
@@ -559,9 +560,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(grows ? { note: "New ground continues the map's edge: the same tile and height as far as it reaches, and the tiles repeat. Paint it afterwards to hide that." } : {}),
       };
       if (dryRun === true) return result;
-      await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}?`, "Resize map", "mcp.confirmResize");
+      await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}? Undo Resize in Studio takes it back until Studio closes.`, "Resize map", "mcp.confirmResize");
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
-      return { ...result, objectsRemoved: done.removed };
+      return { ...result, objectsRemoved: done.removed, undo: "undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; the checkpoint just made stays." };
     }),
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
@@ -1212,8 +1213,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           doc.setDirty(mark.isDirty(at));
           redraw();
         };
-        const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } };
-        const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } };
+        // Past its own steps, undo and redo go on to a map resize (Map Size), which reopens the editor.
+        const resizeStep = (which: "undo" | "redo") => void w3.commands.execute(`w3.terrainMapSize.${which}`, { quiet: true }).catch(() => {});
+        const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } else resizeStep("undo"); };
+        const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } else resizeStep("redo"); };
         /** While a key edits: whether it's the first press or a repeat of a held key. */
         let keyPress: "first" | "repeat" | null = null;
         /** The undo step a held key is building; a repeat joins it. */
@@ -2729,6 +2732,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (problem) throw new Error(problem);
           // Everything (terrain, objects, other tabs) saved first: the files are rewritten below.
           await editorApi.save?.();
+          // Every file the resize rewrites is kept, for Undo Resize (Map Size); if it fails halfway they go back.
+          const session = await beginResize(w3.workspace, doc.path, "Resize map");
+          // The editor opens again on the new terrain (or, after a failure, on the old).
+          const reopen = () => void (async () => {
+            await w3.editors.close(doc.path);
+            await w3.editors.open(doc.path, "w3.terrainViewer");
+          })().catch((e) => w3.window.showError(String(e)));
+          try {
+            const r = await applyResize(change, complements);
+            await session.finish();
+            reopen();
+            return r;
+          } catch (e) {
+            await session.abort().catch((x) => w3.window.showError(`The map's files couldn't be put back after the failed resize: ${(x as Error).message ?? x}. Restore the checkpoint.`));
+            reopen();
+            throw e;
+          }
+        };
+        const applyResize = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           const next = resizeTerrain(terrain, change);
           // Read and moved before anything is written; a bad file is left alone (see planPathingOverrides).
           const stored = await w3.workspace.readText(".w3proj/pathing.json").then((x) => JSON.parse(x) as unknown).catch(() => null);
@@ -2789,11 +2811,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (pathingText !== null) await w3.workspace.writeText(".w3proj/pathing.json", pathingText);
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
           await updateMinimapIcons(next);
-          // The editor opens again on the new terrain.
-          void (async () => {
-            await w3.editors.close(doc.path);
-            await w3.editors.open(doc.path, "w3.terrainViewer");
-          })().catch((e) => w3.window.showError(String(e)));
           return { removed };
         };
         const handle: TerrainEditorHandle = {
