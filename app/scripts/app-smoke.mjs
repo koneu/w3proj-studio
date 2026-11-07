@@ -807,6 +807,7 @@ async function moduleFunctions(page, found) {
     const camp = join(dir, "camp");
     const chapter = join(camp, "maps", "Chapter 1.w3x");
     cpSync(FIXTURE, chapter, { recursive: true });
+    put(join(camp, "map", "war3campaign.w3f.json"), {});
     put(join(camp, "map", "war3campaign.w3u.json"), { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "c001", mods: [{ field: "unam", type: "string", value: "Campaign Footman" }] }] });
     put(join(camp, "map", "war3campaignSkin.w3u.json"), { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "c002", mods: [] }] });
     const units = json(join(chapter, "map", "war3mapUnits.doo.json"));
