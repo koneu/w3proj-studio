@@ -7,7 +7,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
-import { h } from "../../workbench/dom";
+import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
@@ -94,7 +94,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(h("div.camp-side-head.problems-head", { onclick: () => { if (fold) folded.delete(g.check.id); else folded.add(g.check.id); w3.views.refresh("w3.problems.list"); } },
             `${fold ? "▸" : "▾"} ${g.check.title}`, h("small", {}, g.error ? " (failed)" : ` ${n}`)));
           if (fold) continue;
-          if (g.error) { el.append(h("div.view-empty.problems-failed", {}, `The check failed: ${g.error}`)); continue; }
+          if (g.error) { el.append(h("div.view-empty.problems-failed", {}, `The check failed: ${g.error} `, copyButton(`${g.check.title}: the check failed: ${g.error}`))); continue; }
           if (!n) { el.append(h("div.view-empty", {}, "OK")); continue; }
           el.append(h("div.tree", {}, ...g.problems.map((p) => h(`div.problem-row.${p.severity}${p.reveal ? ".clickable" : ""}`, {
             title: [p.message, p.location].filter(Boolean).join("\n"),

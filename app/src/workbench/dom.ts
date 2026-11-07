@@ -117,3 +117,25 @@ export function showContextMenu(at: { x: number; y: number }, items: import("../
   window.addEventListener("mousedown", outside, true);
   window.addEventListener("keydown", key, true);
 }
+
+/** The part of the browser's clipboard that copying needs (so a test can stand in for it). */
+export interface ClipboardLike { writeText(text: string): Promise<void> }
+
+/** Puts text on the clipboard. Resolves false (never throws) when there is no clipboard or it
+ *  refuses, so a button can say so instead of failing silently. */
+export async function copyText(text: string, clip: ClipboardLike | undefined = globalThis.navigator?.clipboard): Promise<boolean> {
+  if (!clip) return false;
+  try { await clip.writeText(text); return true; } catch { return false; }
+}
+
+/** A small "Copy" button for error messages: it copies `text()` and briefly says what happened. */
+export function copyButton(text: string | (() => string), cls = "copy-error"): HTMLButtonElement {
+  const b = h(`button.${cls}`, { title: "Copy this error message to the clipboard" }, "Copy") as HTMLButtonElement;
+  b.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const ok = await copyText(typeof text === "function" ? text() : text);
+    b.textContent = ok ? "Copied" : "Copy failed";
+    setTimeout(() => { b.textContent = "Copy"; }, 1500);
+  });
+  return b;
+}

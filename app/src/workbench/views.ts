@@ -1,5 +1,5 @@
 import type { Disposable, ViewContainerContribution, ViewContribution, ViewProvider } from "../extensions/api";
-import { disposable, h } from "./dom";
+import { copyButton, disposable, h } from "./dom";
 
 interface ViewState {
   contribution: ViewContribution;
@@ -94,7 +94,7 @@ export class ViewService {
       try {
         v.rendered = v.provider.render(v.body);
       } catch (e) {
-        v.body.append(h("div.view-error", {}, `View failed: ${e}`));
+        v.body.append(h("div.view-error", {}, `View failed: ${e} `, copyButton(`View failed: ${e}`)));
       }
     }
   }

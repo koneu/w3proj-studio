@@ -1,4 +1,4 @@
-import { h } from "./dom";
+import { copyButton, h } from "./dom";
 
 type Severity = "info" | "warning" | "error";
 
@@ -56,6 +56,8 @@ export class Notifications {
           "div.toast-actions",
           {},
           ...actions.map((a) => h("button", { onclick: () => close(a) }, a === byKey ? `${a} (Del)` : a)),
+          // An error can be pasted into a report.
+          severity === "error" ? copyButton(message) : null,
           h("button.toast-close", { title: "Close", onclick: () => close() }, "×"),
         ),
       );

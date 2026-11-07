@@ -890,3 +890,4 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .model-pick-right .obj-preview { float: none; margin: 0 0 8px; width: 250px; height: 230px; }
 .model-pick-caption { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-pick-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.copy-error { margin-left: 6px; padding: 0 6px; font-size: 11px; }

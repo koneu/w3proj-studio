@@ -1,7 +1,7 @@
 import { capped } from "../../lib/formats/mapdoc";
 import { findGameFiles } from "./filesearch";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { h } from "../../workbench/dom";
+import { copyButton, h } from "../../workbench/dom";
 import { CATEGORIES, categoryOf, LAYERS } from "./filters";
 
 interface Node {
@@ -157,7 +157,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const renderBody = () => {
       body.replaceChildren();
       if (loadError) {
-        body.append(h("div.view-error", {}, loadError), h("div.view-empty", {}, "Check \"game.installDir\" in Preferences: Open Settings (JSON)."));
+        body.append(h("div.view-error", {}, loadError, " ", copyButton(loadError)), h("div.view-empty", {}, "Check \"game.installDir\" in Preferences: Open Settings (JSON)."));
         return;
       }
       if (!loaded) {

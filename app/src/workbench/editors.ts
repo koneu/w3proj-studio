@@ -1,5 +1,5 @@
 import type { Disposable, EditorContribution, EditorDocument, EditorInstance, EditorProvider } from "../extensions/api";
-import { disposable, Emitter, globMatch, h } from "./dom";
+import { copyButton, disposable, Emitter, globMatch, h } from "./dom";
 
 interface Tab {
   path: string;
@@ -239,7 +239,7 @@ export class EditorService {
       this.showActions();
       if (this.active === tab) tab.instance.focus?.();
     } catch (e) {
-      tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e}`));
+      tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e} `, copyButton(`Could not open ${tab.path}: ${e}`)));
     }
   }
 
@@ -389,7 +389,7 @@ export class EditorService {
     if (tab.pending) {
       tab.pending = false;
       this.provider(tab.providerId, tab.path).then((p) => this.resolveTab(tab, p),
-        (e) => tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e instanceof Error ? e.message : e}`)));
+        (e) => tab.el.replaceChildren(h("div.editor-error", {}, `Could not open ${tab.path}: ${e instanceof Error ? e.message : e} `, copyButton(`Could not open ${tab.path}: ${e instanceof Error ? e.message : e}`))));
     }
   }
 }
