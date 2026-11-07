@@ -48,7 +48,9 @@ async function zlibDeflate(data: Uint8Array): Promise<Uint8Array> {
   if (!Stream) return zlibStored(data);
   const stream = new Stream("deflate");
   const writer = stream.writable.getWriter();
-  void writer.write(data as unknown as BufferSource as never).then(() => writer.close());
+  const written = writer.write(data as unknown as BufferSource as never).then(() => writer.close());
+  // A failed write is reported below, once the reader is through; until then it is not left unhandled.
+  written.catch(() => {});
   const chunks: Uint8Array[] = [];
   const reader = stream.readable.getReader();
   for (;;) {
@@ -56,6 +58,7 @@ async function zlibDeflate(data: Uint8Array): Promise<Uint8Array> {
     if (done) break;
     chunks.push(value);
   }
+  await written;
   const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
   let o = 0;
   for (const c of chunks) { out.set(c, o); o += c.length; }
@@ -71,9 +74,13 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
   return out;
 }
 
+/** Most pixels one PNG may hold (8192 × 4096): the pixels are copied once and compressed once, in memory. */
+export const MAX_PNG_PIXELS = 1 << 25;
+
 /** An RGBA image (rows top to bottom) as a PNG file. `compress: false` stores the pixels as they are. */
 export async function encodePng(width: number, height: number, rgba: ArrayLike<number>, opts: { compress?: boolean } = {}): Promise<Uint8Array> {
   if (!(width > 0 && height > 0) || !Number.isInteger(width) || !Number.isInteger(height) || width > 65535 || height > 65535) throw new Error(`can't write a PNG of ${width}×${height}`);
+  if (width * height > MAX_PNG_PIXELS) throw new Error(`a PNG of ${width}×${height} is more than ${MAX_PNG_PIXELS} pixels`);
   if (rgba.length !== width * height * 4) throw new Error(`a ${width}×${height} image needs ${width * height * 4} values, got ${rgba.length}`);
   const raw = new Uint8Array(height * (1 + width * 4));
   for (let y = 0; y < height; y++) {

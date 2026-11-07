@@ -61,3 +61,50 @@ test("wrong sizes are refused", async () => {
 test("a side past what the writer's tests cover is refused instead of written wrong", async () => {
   await assert.rejects(encodePng(65536, 1, new Uint8Array(65536 * 4)), /can't write/);
 });
+
+test("an image past the pixel cap is refused before anything is allocated", async () => {
+  const huge = { length: 8193 * 4096 * 4 } as ArrayLike<number>;
+  await assert.rejects(encodePng(8193, 4096, huge), /more than \d+ pixels/);
+  await assert.rejects(encodePng(65535, 65535, { length: 0 } as ArrayLike<number>), /more than \d+ pixels/);
+  assert.equal((await encodePng(2, 2, new Uint8Array(16))).length > 40, true, "at the cap's other side an image is written");
+});
+
+test("a failing compressor is an error of encodePng, not an unhandled rejection or a silent empty image", async () => {
+  const real = globalThis.CompressionStream;
+  const unhandled: unknown[] = [];
+  const on = (e: unknown) => unhandled.push(e);
+  process.on("unhandledRejection", on);
+  class Broken {
+    writable = { getWriter: () => ({ write: () => Promise.reject(new Error("deflate broke")), close: async () => {} }) };
+    readable = { getReader: () => ({ read: async () => ({ done: true, value: undefined }) }) };
+  }
+  (globalThis as { CompressionStream?: unknown }).CompressionStream = Broken;
+  try {
+    await assert.rejects(encodePng(2, 2, new Uint8Array(16)), /deflate broke/);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    (globalThis as { CompressionStream?: unknown }).CompressionStream = real;
+    process.off("unhandledRejection", on);
+  }
+});
+
+test("when the reader fails first, the write's later failure is not left unhandled", async () => {
+  const real = globalThis.CompressionStream;
+  const unhandled: unknown[] = [];
+  const on = (e: unknown) => unhandled.push(e);
+  process.on("unhandledRejection", on);
+  class Broken {
+    writable = { getWriter: () => ({ write: () => new Promise((_, no) => setTimeout(() => no(new Error("late")), 5)), close: async () => {} }) };
+    readable = { getReader: () => ({ read: async () => { throw new Error("read broke"); } }) };
+  }
+  (globalThis as { CompressionStream?: unknown }).CompressionStream = Broken;
+  try {
+    await assert.rejects(encodePng(2, 2, new Uint8Array(16)), /read broke/);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    (globalThis as { CompressionStream?: unknown }).CompressionStream = real;
+    process.off("unhandledRejection", on);
+  }
+});
