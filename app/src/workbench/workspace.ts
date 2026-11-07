@@ -284,6 +284,7 @@ const CORE_SETTINGS: Record<string, ConfigurationProperty> = {
   "game.path": { type: "string", scope: "user", default: "C:\\Program Files (x86)\\Warcraft III\\_retail_\\x86_64\\Warcraft III.exe", description: "Game executable (Test Map, Ctrl+F5)." },
   "game.installDir": { type: "string", scope: "user", default: "C:\\Program Files (x86)\\Warcraft III", description: "Game install folder whose data (CASC) is read." },
   "game.graphicsMode": { type: "string", scope: "user", default: "hd", enum: ["sd", "hd", "de"], enumDescriptions: ["Classic", "Reforged HD", "Reforged (DE)"], description: "Art set used to resolve game files (models, textures)." },
+  "game.cacheMegabytes": { type: "number", scope: "user", default: 1024, description: "Game files read are kept in memory up to this size, so a map opened again reads nothing from the game's storage. Less than what a map reads (GoldRush in HD: about 600 MB) keeps little of it. 0 keeps nothing." },
   "project.syncOnWorldEditorSave": { type: "string", scope: "user", default: "ask", enum: ["ask", "always", "never"], description: "Sync the project back when the World Editor saves the map." },
   "recentProjects": { type: "array", scope: "user", default: [], description: "Recently opened projects (Welcome page)." },
   "extensions.disabled": { type: "array", scope: "user", default: [], description: "Extension ids that aren't loaded (built-ins included). Applies after a reload." },

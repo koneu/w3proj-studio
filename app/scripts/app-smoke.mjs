@@ -1943,6 +1943,48 @@ async function graphicsModes(page, found) {
   if (!copy) fail("an error toast has no Copy button");
 }
 
+/** Game files are read once a session: opening a map's terrain again, with its doodads, units,
+ *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
+async function gameReadsOnce(page, found) {
+  const fail = (what) => found.push(`game reads: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const root = join(work, "game-reads");
+  rmSync(root, { recursive: true, force: true });
+  cpSync(FIXTURE, root, { recursive: true });
+  // A tree, a goldmine (a ground mark) and a footman: models, textures and splats from the game.
+  const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+  doo.doodads.push({ ...doo.doodads[0], id: "LTlt", skinId: "LTlt", variation: 0, position: [256, 256, 0], editorId: 900 });
+  writeFileSync(join(root, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
+  const units = JSON.parse(readFileSync(join(root, "map", "war3mapUnits.doo.json"), "utf8"));
+  const unit = units.units.find((u) => u.id !== "sloc") ?? units.units[0];
+  if (unit) {
+    units.units.push({ ...unit, id: "ngol", skinId: "ngol", player: 24, position: [-512, -512, 0], gold: 12500, editorId: 901 }, { ...unit, id: "hfoo", skinId: "hfoo", player: 0, position: [512, -512, 0], editorId: 902 });
+    writeFileSync(join(root, "map", "war3mapUnits.doo.json"), JSON.stringify(units, null, 2));
+  }
+  const tool = mcpTool(page);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  const reads = () => page.evaluate(`w3Workbench.game.backendReads`);
+  // The picture waits until every model and texture is in.
+  const before = await reads();
+  await tool("terrain_screenshot", { maxSize: 64 });
+  const first = (await reads()) - before;
+  const reopen = async () => {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await sleep(300);
+    const at = await reads();
+    await tool("terrain_screenshot", { maxSize: 64 });
+    return (await reads()) - at;
+  };
+  // Something besides the terrain can read a table of its own for the first time meanwhile
+  // (the ability data, once): the third opening has nothing left to read.
+  const second = await reopen(), third = await reopen();
+  // The control: the first opening did read the game's files.
+  if (first < 10) fail(`the first opening read ${first} game files: the map's models didn't come from the game`);
+  if (second > 2 || third !== 0) fail(`opening the terrain again read ${second}, then ${third} game files (the first opening read ${first})`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -1981,7 +2023,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, gameReadsOnce })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2064,6 +2106,7 @@ async function run() {
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
+    await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 

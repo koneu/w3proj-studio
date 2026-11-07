@@ -5,15 +5,50 @@ import { gameDataError } from "./gameerror";
 /** Documents with this prefix are files from the game's storage. */
 export const GAME_SCHEME = "game:";
 
-/** Read-only access to the installed game's data via the backend. */
+/** The setting with the cache's size, in megabytes (see GameService). */
+export const GAME_CACHE_SETTING = "game.cacheMegabytes";
+export const GAME_CACHE_DEFAULT_MB = 1024;
+
+/** Read-only access to the installed game's data via the backend. The game's files don't change
+ *  while the app runs, so what was read is kept (up to `game.cacheMegabytes`, the least recently
+ *  read go first) and a file that isn't there is remembered as such: a map opened again, another
+ *  editor showing the same model, or a reload of the object data asks the backend nothing.
+ *  `reload` forgets it all, for an install that changed underneath (a patch). */
 export class GameService {
   private listCache: Promise<string[]> | null = null;
+  /** Reads by install, graphics mode, tileset and path, in the order last used. */
+  private files = new Map<string, Promise<Uint8Array>>();
+  /** Size of each finished read in `files`. */
+  private sizes = new Map<string, number>();
+  private cachedBytes = 0;
+  /** Reads that went to the backend: for tests and the app smoke's guard. */
+  backendReads = 0;
 
-  constructor(private settings: Settings) {
+  /** `cacheBytes`: a fixed size instead of the setting's (tests). */
+  constructor(private settings: Settings, private cacheBytes?: number) {
     settings.onDidChange((k) => {
-      if (k === "game.installDir") this.listCache = null;
+      if (k === "game.installDir") this.reload();
+      if (k === GAME_CACHE_SETTING) this.trim();
     });
   }
+
+  /** Forgets every file read and the file list: the next reads ask the game's storage again. */
+  reload() {
+    this.listCache = null;
+    this.files.clear();
+    this.sizes.clear();
+    this.cachedBytes = 0;
+  }
+
+  /** Bytes of game files kept at most. */
+  get cacheLimit(): number {
+    if (this.cacheBytes !== undefined) return this.cacheBytes;
+    const mb = Number(this.settings.get<number>(GAME_CACHE_SETTING) ?? GAME_CACHE_DEFAULT_MB);
+    return Number.isFinite(mb) && mb >= 0 ? mb * 1024 * 1024 : GAME_CACHE_DEFAULT_MB * 1024 * 1024;
+  }
+
+  /** Bytes kept now. */
+  get cachedSize(): number { return this.cachedBytes; }
 
   /** A backend call; a game data that can't be opened is said in words a person can act on (see gameerror). */
   private invoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
@@ -52,8 +87,54 @@ export class GameService {
     return this.invoke<(string | null)[]>("game_resolve_many", { ...this.args(), paths, tileset: tileset ?? null });
   }
 
+  /** Each caller gets its own copy: one that changes its bytes can't change another's. */
   async read(path: string, tileset?: string): Promise<Uint8Array> {
-    return new Uint8Array(await this.invoke<ArrayBuffer>("game_read", { ...this.args(), path, tileset: tileset ?? null }));
+    const args = this.args();
+    // As the backend looks paths up: either slash, any case.
+    const key = [args.install ?? "", args.modeName ?? "", tileset ?? "", path.replace(/\\/g, "/").toLowerCase()].join("|");
+    let read = this.files.get(key);
+    if (read) {
+      this.files.delete(key);
+      this.files.set(key, read);
+    } else {
+      this.backendReads++;
+      const started = this.invoke<ArrayBuffer>("game_read", { ...args, path, tileset: tileset ?? null }).then((b) => new Uint8Array(b));
+      read = started;
+      this.files.set(key, started);
+      started.then((bytes) => this.keep(key, started, bytes.byteLength), (e) => {
+        // Only "not there" is for good; another failure (game data that can't be opened, the
+        // storage busy) is tried again next time.
+        const message = typeof e === "string" ? e : String((e as Error)?.message ?? e);
+        if (!/^not found: /.test(message) && this.files.get(key) === started) this.files.delete(key);
+      });
+    }
+    return (await read).slice();
+  }
+
+  /** Counts a finished read in, and lets the least recently used go past the limit. */
+  private keep(key: string, read: Promise<Uint8Array>, size: number) {
+    // Cleared or replaced meanwhile.
+    if (this.files.get(key) !== read) return;
+    if (size > this.cacheLimit / 4) {
+      this.files.delete(key);
+      return;
+    }
+    this.sizes.set(key, size);
+    this.cachedBytes += size;
+    this.trim();
+  }
+
+  /** Lets the least recently used go until the cache fits its limit. */
+  private trim() {
+    const limit = this.cacheLimit;
+    for (const old of this.files.keys()) {
+      if (this.cachedBytes <= limit) break;
+      const n = this.sizes.get(old);
+      if (n === undefined) continue;
+      this.files.delete(old);
+      this.sizes.delete(old);
+      this.cachedBytes -= n;
+    }
   }
 
   async readText(path: string, tileset?: string): Promise<string> {
