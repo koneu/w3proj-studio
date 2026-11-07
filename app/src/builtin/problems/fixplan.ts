@@ -59,9 +59,12 @@ export function planModelEdit(input: {
   if (input.skin !== null) {
     const sdoc = parseDoc(input.skin, `map/war3mapSkin.${kind}.json`);
     const so = entryOf(sdoc, base, id);
-    if (so?.mods?.some((m) => m.field === fields.model)) {
-      set(so, fields.model, "string", model);
-      if (fields.variations && so.mods.some((m) => m.field === fields.variations)) set(so, fields.variations, "int", variations);
+    const setsModel = so?.mods?.some((m) => m.field === fields.model);
+    const setsVariations = !!fields.variations && !!so?.mods?.some((m) => m.field === fields.variations);
+    // Either field in the skin file would win over the main file's.
+    if (so && (setsModel || setsVariations)) {
+      if (setsModel) set(so, fields.model, "string", model);
+      if (setsVariations) set(so, fields.variations!, "int", variations);
       skin = sdoc;
     }
   }

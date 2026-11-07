@@ -487,8 +487,9 @@ async function useClassicModel(
 async function prepareModel(w3: W3Api, kind: string, base: string, id: string, model: string, variations: number): Promise<() => Promise<void>> {
   const path = `map/war3map.${kind}.json`, skinPath = `map/war3mapSkin.${kind}.json`;
   const names = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
-  const main = await w3.workspace.readText(path).catch(() => null);
-  const skin = await w3.workspace.readText(skinPath).catch(() => null);
+  // A file that is listed but can't be read is not an absent one: writing a fresh document over it would destroy it.
+  const main = await readListed(w3, names, path);
+  const skin = await readListed(w3, names, skinPath);
   if (skin === null && names.has(skinPath.slice(0, -5).toLowerCase())) throw new Error(`war3mapSkin.${kind} is kept raw in this project; set the model in the Object Editor.`);
   const plan = planModelEdit({ kind, base, id, model, variations, fields: MODEL_FIELDS[kind], main, mainRaw: names.has(path.slice(0, -5).toLowerCase()), skin });
   const canon = (p: string, doc: unknown) => w3.backend.invoke<string>("objects_canonicalize", { name: p, text: JSON.stringify(doc) });
@@ -500,14 +501,25 @@ async function prepareModel(w3: W3Api, kind: string, base: string, id: string, m
   };
 }
 
+/** The text of a project file that is in the file list: null only when it is not listed. A listed
+ *  file that can't be read throws, naming it. */
+export async function readListed(w3: W3Api, names: Set<string>, path: string): Promise<string | null> {
+  if (!names.has(path.toLowerCase())) return null;
+  try { return await w3.workspace.readText(path); } catch (e) { throw new Error(`${path} can't be read (${(e as Error).message ?? e}); nothing was changed.`); }
+}
+
 /** Model and variation count fields of a kind's object data. */
 const MODEL_FIELDS: Record<string, { model: string; variations?: string }> = ART;
 
 /** Works out the import list with `names` added and returns the function that writes it. */
 async function prepareImports(w3: W3Api, names: string[]): Promise<() => Promise<void>> {
   const root = w3.workspace.project()!.root;
-  const json = await w3.workspace.readText("map/war3map.imp.json").catch(() => null);
-  const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" }).catch(() => null) : null;
+  const listed = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const json = await readListed(w3, listed, "map/war3map.imp.json");
+  let raw: string | null = null;
+  if (json === null && listed.has("map/war3map.imp")) {
+    try { raw = await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" }); } catch (e) { throw new Error(`map/war3map.imp can't be read (${(e as Error).message ?? e}); nothing was changed.`); }
+  }
   const { doc, asRaw } = planImports(json, raw, names);
   if (asRaw) return async () => { await w3.backend.invoke("codec_write", { root, path: "map/war3map.imp", text: JSON.stringify(doc) }); };
   const text = await w3.backend.invoke<string>("codec_canonicalize", { root, path: "map/war3map.imp.json", text: JSON.stringify(doc) });
@@ -522,6 +534,32 @@ async function readReforged(w3: W3Api, path: string, source: Source, modelPath =
   const candidates = isTexture ? textureCandidates(path, modelPath) : [path.replace(/\\/g, "/")];
   const { name, bytes } = await readLayered(candidates, source, (full) => w3.game.read(full), path);
   return { name, bytes };
+}
+
+/** Writes a fix's files, then its steps (import list, object data), checking before each write that
+ *  the project is still the one the fix was found in. If something fails before the first step is
+ *  done, the files this fix newly created are removed again; later, the files and the entries made
+ *  so far stay, and the error says so. */
+export async function writeFix(w3: W3Api, root: string | undefined, files: Map<string, Uint8Array>, isNew: (archive: string) => boolean, steps: (() => Promise<void>)[]) {
+  const created: string[] = [];
+  let stepsDone = 0;
+  try {
+    for (const [archive, bytes] of files) {
+      sameProject(w3, root);
+      const path = `map/${toProjectPath(archive)}`;
+      await w3.workspace.writeBytes(path, bytes);
+      if (isNew(archive)) created.push(path);
+    }
+    for (const step of steps) { sameProject(w3, root); await step(); stepsDone++; }
+  } catch (e) {
+    const why = (e as Error).message ?? String(e);
+    if (stepsDone === 0 && w3.workspace.project()?.root === root) {
+      const failed: string[] = [];
+      for (const p of created) await w3.workspace.delete(p).catch(() => failed.push(p));
+      throw new Error(`${why} The files this fix had written were removed${failed.length ? ` (except ${failed.length}, which are left)` : ""}.`);
+    }
+    throw new Error(`${why} Files and entries already written are left in the map.`);
+  }
 }
 
 /** A lookup of the map's files as they are now (the project's file list, read again). */
@@ -563,9 +601,7 @@ async function importReforged(
     if (!inMap(archive)) files.set(archive, renamed.size ? renameTextures(bytes, (p) => renamed.get(p) ?? p) : bytes);
   }
   const applyImports = await prepareImports(w3, [...files.keys()]);
-  sameProject(w3, root);
-  for (const [archive, bytes] of files) await w3.workspace.writeBytes(`map/${toProjectPath(archive)}`, bytes);
-  await applyImports();
+  await writeFix(w3, root, files, (a) => !inMap(a), [applyImports]);
   await w3.workspace.refresh();
   return [...files.values()].reduce((n, b) => n + b.length, 0);
 }
@@ -625,7 +661,8 @@ async function convertToClassic(
     for (const [path, { target, owner }] of textures) files.set(target, await blpOf(path, owner));
     return files;
   };
-  const existing = async (archive: string) => (lookup.inMap(archive) ? w3.workspace.readBytes(`map/${toProjectPath(archive)}`).catch(() => null) : null);
+  // Absent is null; a file the map has that can't be read throws (it would look free and be overwritten).
+  const existing = async (archive: string) => (lookup.inMap(archive) ? w3.workspace.readBytes(`map/${toProjectPath(archive)}`) : null);
   const { dir, files } = await chooseFolder(name, build, existing);
   // The converted models must find every texture they name, in the map.
   const have = new Set([...files.keys()].map((f) => f.toLowerCase()));
@@ -637,11 +674,7 @@ async function convertToClassic(
   // Everything that can fail comes before the first write.
   const applyImports = await prepareImports(w3, [...files.keys()]);
   const applyModel = await prepareModel(w3, kind, base, id, modelFieldValue(kind, `${dir}\\${name}`), count);
-  sameProject(w3, root);
-  for (const [archive, bytes] of files) await w3.workspace.writeBytes(`map/${toProjectPath(archive)}`, bytes);
-  await applyImports();
-  sameProject(w3, root);
-  await applyModel();
+  await writeFix(w3, root, files, (a) => !lookup.inMap(a), [applyImports, applyModel]);
   await w3.workspace.refresh();
   return [...files.values()].reduce((n, b) => n + b.length, 0);
 }

@@ -1681,8 +1681,12 @@ async function graphicsModes(page, found) {
   for (const id of TYPES) {
     if (!w3d.original.some((o) => o.base === id && o.mods.some((m) => m.field === "dfil" && /^war3mapImported.Classic/.test(m.value)))) fail(`${id}'s model is not in the object data after converting all at once`);
   }
-  for (const stem of ["capitalbridge0", "citywallendcap0", "pillartall0"]) {
-    if (!imports.some((p) => p.includes(`classic${String.fromCharCode(92)}${stem}`) || p.includes(stem))) fail(`${stem} is missing from the import list after converting all at once`);
+  // The exact files each conversion lists: its folder, its first variation, and a texture.
+  for (const [folder, first] of [["CapitalBridge", "CapitalBridge0"], ["CityWallEndcap", "CityWallEndcap0"], ["PillarTall", "PillarTall0"], ["CapitalTower", "CapitalTower"]]) {
+    const want = ["war3mapImported", "Classic", folder, first + ".mdx"].join(String.fromCharCode(92)).toLowerCase();
+    if (!imports.includes(want)) fail(`${want} is missing from the import list after converting all at once`);
+    const prefix = ["war3mapImported", "Classic", folder, ""].join(String.fromCharCode(92)).toLowerCase();
+    if (!imports.some((p) => p.startsWith(prefix) && p.endsWith(".blp"))) fail(`no texture of ${folder} is in the import list`);
   }
   list = await check();
   if (list.length) fail(`after converting, still reported: ${list.map((p) => p.message).join(" | ").slice(0, 600)}`);
