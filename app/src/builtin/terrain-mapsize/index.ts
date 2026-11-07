@@ -10,29 +10,46 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
-import { resizeHistory, resizeLoss, workspaceIO } from "../../lib/terrain/resizeundo";
+import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO } from "../../lib/terrain/resizeundo";
 import { h } from "../../workbench/dom";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
-/** Undo or redo the last map resize: the kept files are written back and the editor opens again on them. */
+/** Warnings about the map script that the resize caused, which an undo makes stale: answered as "Keep it", which does nothing. */
+function withdrawScriptWarnings() {
+  for (const toast of document.querySelectorAll(".toast")) {
+    if (!/functions? that the map's triggers don't make/.test(toast.textContent ?? "")) continue;
+    for (const b of toast.querySelectorAll("button")) if (b.textContent === "Keep it") { (b as HTMLButtonElement).click(); break; }
+  }
+}
+
+/** Undo or redo the last map resize: the kept files are written back and the editor opens again on them.
+ *  It runs after every resize, undo and redo before it (one lock), and after the derived files
+ *  (pathing, shadows, minimap, script) of the last edit are written, which would land on the old files otherwise. */
 function stepResize(w3: W3Api, which: "undo" | "redo", quiet: boolean): () => Promise<boolean> {
-  let busy = false;
-  return async () => {
+  const word = which === "undo" ? "Undo" : "Redo";
+  return () => resizeHistory.exclusive(async () => {
     const project = w3.workspace.project();
-    const next = project ? (which === "undo" ? resizeHistory.nextUndo(project.root) : resizeHistory.nextRedo(project.root)) : null;
-    if (!project || !next) {
+    if (!project) return false;
+    // Work still due from the last edit belongs to the files as they are now.
+    try {
+      await settleWithin(() => w3.commands.execute("w3.terrain.settle"), 5 * 60_000);
+    } catch (e) {
+      void w3.window.showError(`${word} Resize: ${(e as Error).message}`);
+      return false;
+    }
+    await w3.commands.execute("w3.script.settle").catch(() => {});
+    const next = which === "undo" ? resizeHistory.nextUndo(project.root) : resizeHistory.nextRedo(project.root);
+    if (!next) {
       if (!quiet) void w3.window.showInfo(`There is no map resize to ${which}.`);
       return false;
     }
-    if (busy) return false;
-    const word = which === "undo" ? "Undo" : "Redo";
     const unsaved = w3.editors.unsavedPaths();
     if (unsaved.length) {
-      void w3.window.showWarning(`${word} Resize: save or discard the changes in ${unsaved.join(", ")} first; the resize's files would replace them.`);
+      // Ctrl+Z in an editor with changes of its own: those are for the editor, not a message.
+      if (warnsAboutUnsaved(unsaved, next.editor, quiet)) void w3.window.showWarning(`${word} Resize: save or discard the changes in ${unsaved.join(", ")} first; the resize's files would replace them.`);
       return false;
     }
-    busy = true;
     try {
       const ask = async (changed: string[]) =>
         (await w3.window.showWarning(`${word} the map resize? ${changed.length} file${changed.length === 1 ? " has" : "s have"} changed since (${changed.slice(0, 4).join(", ")}${changed.length > 4 ? ", …" : ""}); those changes are lost.`, `${word} anyway`, "Cancel")) === `${word} anyway`;
@@ -40,16 +57,18 @@ function stepResize(w3: W3Api, which: "undo" | "redo", quiet: boolean): () => Pr
       if (!done) return false;
       await w3.workspace.refresh();
       await w3.editors.close(done.editor);
+      // What was still due was for the terrain that was just replaced.
+      await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
+      await w3.commands.execute("w3.script.settle").catch(() => {});
+      withdrawScriptWarnings();
       await w3.editors.open(done.editor, "w3.terrainViewer");
       void w3.window.showInfo(`Map resize ${which === "undo" ? "undone" : "redone"}.`);
       return true;
     } catch (e) {
       void w3.window.showError(`${word} Resize: ${(e as Error).message ?? e}`);
       return false;
-    } finally {
-      busy = false;
     }
-  };
+  });
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -126,9 +145,12 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       "Apply", "Cancel");
     if (c !== "Apply") return;
     try {
-      // A restart forgets the kept files; what a shrink cuts off stays in a checkpoint.
-      if (lost.length) await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${(e as Error).message ?? e}).`); });
-      const r = await w3.window.withProgress("Changing the map size", () => ed.resizeMap([...change], [...complements]));
+      // A restart forgets the kept files; what a shrink cuts off stays in a checkpoint. The checkpoint is part of the
+      // progress shown: packing a big map takes a while, and nothing else says that something is happening.
+      const r = await w3.window.withProgress(lost.length ? "Saving a checkpoint, then changing the map size" : "Changing the map size", async () => {
+        if (lost.length) await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${(e as Error).message ?? e}).`); });
+        return ed.resizeMap([...change], [...complements]);
+      });
       void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} outside the new map removed` : ""}.`);
     } catch (e) {
       void w3.window.showError(`Map size: ${(e as Error).message ?? e}`);

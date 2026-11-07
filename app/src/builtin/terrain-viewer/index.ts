@@ -56,8 +56,11 @@ import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHei
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
-import { beginResize } from "../../lib/terrain/resizeundo";
+import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
+
+/** How long a resize or its undo waits for the rebuild due from the last edit. */
+const SETTLE_LIMIT = 5 * 60_000;
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
@@ -224,6 +227,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrain.settle", async () => {
       clearTimeout(rebuildTimer);
       await runRebuild();
+    }),
+    // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
+    w3.commands.register("w3.terrain.dropRebuild", () => {
+      clearTimeout(rebuildTimer);
+      rebuild = null;
     }),
   );
 
@@ -2726,17 +2734,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         };
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
-        const resizeMap = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
+        /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
+        const resizeMap = (change: Sides, complements: Sides): Promise<{ removed: number }> => resizeHistory.exclusive(() => resizeLocked(change, complements));
+        const resizeLocked = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           if (!editable) throw new Error("This map is read-only.");
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
-          // Everything (terrain, objects, other tabs) saved first: the files are rewritten below.
-          await editorApi.save?.();
+          // Work still due from the last edit (pathing, shadows, minimap, script) is done first: it would land on the new files otherwise.
+          await settleWithin(() => w3.commands.execute("w3.terrain.settle"), SETTLE_LIMIT);
+          await w3.commands.execute("w3.script.settle").catch(() => {});
+          // This editor's own unsaved changes are saved first: the files are rewritten below. A saved editor isn't saved
+          // again: a save redoes pathing, shadows and the minimap, which takes minutes on a big map, and the resize
+          // makes them anew below.
+          if (mark.isDirty(at)) await editorApi.save?.();
           // Every file the resize rewrites is kept, for Undo Resize (Map Size); if it fails halfway they go back.
           const session = await beginResize(w3.workspace, doc.path, "Resize map");
           // The editor opens again on the new terrain (or, after a failure, on the old).
           const reopen = () => void (async () => {
             await w3.editors.close(doc.path);
+            // A rebuild still planned is for the terrain this editor had.
+            await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
             await w3.editors.open(doc.path, "w3.terrainViewer");
           })().catch((e) => w3.window.showError(String(e)));
           try {

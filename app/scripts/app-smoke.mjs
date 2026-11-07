@@ -819,6 +819,39 @@ async function resizeUndo(page, found) {
     await ctrl("z", "KeyZ", 90, true);
     await reaches(shrunk, "redo of the shrink by Ctrl+Shift+Z");
   }
+  // An edit by a tool and a resize straight after it: the rebuild of pathing, shadows and minimap still due is done first
+  // (not on the new files), the undo that follows is not met by a question about files changed since, and nothing is written
+  // to the old terrain afterwards (the three grids all have the size of the terrain).
+  await tool("place_objects", { objects: [{ id: "LPwb", x: 1500, y: 1500 }], ignoreRoom: true });
+  await tool("resize_map", { right: 32 });
+  await editorUp();
+  const raced = await settledState();
+  await page.evaluate(`window.__warned.length = 0`);
+  await ctrl("z", "KeyZ", 90, false);
+  await until("the undo after the edit", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 30000);
+  await editorUp();
+  const undone = await settledState();
+  if ((await page.evaluate(`window.__warned.length`)) > 0) fail(`the undo straight after an edit and a resize asked: ${await page.evaluate(`window.__warned[0]`)}`);
+  if (!differ(raced, undone).includes("war3map.w3e.txt")) fail("the undo after the edit and the resize changed nothing (control)");
+  // Longer than the delay of the rebuild: a late one would write over the restored files.
+  await sleep(5000);
+  const late = differ(undone, state());
+  if (late.length) fail(`files changed after the undo, by a rebuild still due from before: ${late.join(", ")}`);
+  const grid = () => {
+    const w3e = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8");
+    const [, w, h] = /corners ([0-9]+) ([0-9]+)/.exec(w3e) ?? [];
+    const wpm = readFileSync(join(root, "map", "war3map.wpm"));
+    const shd = readFileSync(join(root, "map", "war3map.shd"));
+    return { tiles: [Number(w) - 1, Number(h) - 1], wpm: [wpm.readUInt32LE(8), wpm.readUInt32LE(12)], shd: shd.length };
+  };
+  const g = grid();
+  if (g.wpm[0] !== g.tiles[0] * 4 || g.wpm[1] !== g.tiles[1] * 4) fail(`the pathing map is ${g.wpm.join(" x ")} cells for a terrain of ${g.tiles.join(" x ")} tiles`);
+  if (g.shd !== g.tiles[0] * 4 * g.tiles[1] * 4) fail(`the shadow map has ${g.shd} cells for a terrain of ${g.tiles.join(" x ")} tiles`);
+  if (!doodadIds().includes("LPwb")) fail("the doodad placed before the resize is gone after the undo");
+  // What is due after the undo changes nothing: the files were already what the rebuild makes.
+  await page.evaluate(`w3.commands.execute("w3.terrain.settle")`);
+  const after = differ(undone, state());
+  if (after.length) fail(`the files weren't up to date after the undo: ${after.join(", ")} changed when the rebuild ran`);
   const kit = { root };
   const map = join(folder, "ResizeUndo.w3x");
   await page.evaluate(`w3.editors.saveAll()`);

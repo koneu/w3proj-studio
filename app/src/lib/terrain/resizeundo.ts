@@ -27,9 +27,10 @@ export interface ResizeRecord {
 }
 
 /** The project files a resize may rewrite: the map's own files at its root (war3map*), the
- *  terrain editor's file and the Pathing Editor's overrides. Case doesn't matter. */
+ *  terrain editor's file, the Pathing Editor's overrides and the stamp of the generated script
+ *  (which says whether war3map.j / .lua is still the generated one). Case doesn't matter. */
 export function resizeCandidates(projectFiles: readonly string[], editor: string): string[] {
-  const out = new Set<string>([editor, ".w3proj/pathing.json"]);
+  const out = new Set<string>([editor, ".w3proj/pathing.json", ".w3proj/generated-script"]);
   for (const f of projectFiles) {
     const p = f.replace(/\\/g, "/");
     const m = /^map\/([^/]+)$/i.exec(p);
@@ -87,18 +88,43 @@ export async function restoreFiles(io: FileIO, files: Files): Promise<void> {
   }
 }
 
+/** The bytes a record keeps. */
+export function recordBytes(r: ResizeRecord): number {
+  let n = 0;
+  for (const side of [r.before, r.after]) for (const b of side.values()) n += b?.length ?? 0;
+  return n;
+}
+
 export class ResizeHistory {
   private list: ResizeRecord[] = [];
   private at = 0;
-  constructor(private keep = 5) {}
+  private queue: Promise<unknown> = Promise.resolve();
+  private held = false;
+  /** Keeps at most `keep` steps and `maxBytes` of files (the newest step always stays). */
+  constructor(private keep = 5, private maxBytes = 200 * 1024 * 1024) {}
+
+  /** Runs one task at a time: a resize, an undo and a redo all rewrite the same files, and the step
+   *  they move along is only right if no other one runs between its checks and its writes. */
+  exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(async () => {
+      this.held = true;
+      try { return await task(); } finally { this.held = false; }
+    });
+    this.queue = run.catch(() => {});
+    return run;
+  }
 
   record(r: ResizeRecord) {
     this.list.length = this.at;
     this.list.push(r);
-    if (this.list.length > this.keep) this.list.shift();
+    while (this.list.length > this.keep) this.list.shift();
+    let total = this.list.reduce((n, x) => n + recordBytes(x), 0);
+    while (total > this.maxBytes && this.list.length > 1) total -= recordBytes(this.list.shift()!);
     this.at = this.list.length;
   }
   clear() { this.list = []; this.at = 0; }
+  /** The steps kept, for showing and testing. */
+  get steps(): readonly ResizeRecord[] { return this.list; }
   /** What Undo would take back, for a project; null when there is nothing (another project's steps stay out of reach). */
   nextUndo(root: string): ResizeRecord | null {
     const r = this.list[this.at - 1];
@@ -108,22 +134,27 @@ export class ResizeHistory {
     const r = this.list[this.at];
     return r && r.root === root ? r : null;
   }
-  /** Writes the files from before the resize. `ask` is given the files changed since, which would be lost;
+  /** Writes the files from before the resize (inside `exclusive`). `ask` is given the files changed since, which would be lost;
    *  when it says no nothing is written. Resolves with the record, or null when there was nothing or the answer was no. */
   async undo(io: FileIO, root: string, ask: (changed: string[]) => Promise<boolean>): Promise<ResizeRecord | null> {
+    if (!this.held) throw new Error("undo runs inside exclusive()");
     const r = this.nextUndo(root);
     if (!r) return null;
     const changed = await drifted(io, r.after);
     if (changed.length && !(await ask(changed))) return null;
+    // The answer took time; the step must still be the one asked about.
+    if (this.nextUndo(root) !== r) return null;
     await restoreFiles(io, r.before);
     this.at--;
     return r;
   }
   async redo(io: FileIO, root: string, ask: (changed: string[]) => Promise<boolean>): Promise<ResizeRecord | null> {
+    if (!this.held) throw new Error("redo runs inside exclusive()");
     const r = this.nextRedo(root);
     if (!r) return null;
     const changed = await drifted(io, r.before);
     if (changed.length && !(await ask(changed))) return null;
+    if (this.nextRedo(root) !== r) return null;
     await restoreFiles(io, r.after);
     this.at++;
     return r;
@@ -154,12 +185,16 @@ export function resizeLoss(t: Terrain, change: Sides, objects: readonly { id?: s
 
 type Workspace = Pick<W3Api["workspace"], "project" | "files" | "readBytes" | "writeBytes" | "delete" | "refresh">;
 
-/** The project's files as the history reads and writes them. A file that isn't in the project reads as
- *  missing; one that is but can't be read is an error (it must not be taken for absent and deleted later). */
+/** Whether a backend error says the file isn't there (the operating system's error 2 or 3, in any language). */
+export function isNotFound(e: unknown): boolean {
+  return /(os error (2|3))/.test(e instanceof Error ? e.message : String(e));
+}
+
+/** The project's files as the history reads and writes them. A file that isn't there reads as missing;
+ *  one that is there but can't be read is an error (it must not be taken for absent and deleted later). */
 export function workspaceIO(ws: Workspace): FileIO {
-  const listed = (path: string) => ws.files().some((f) => f.path.toLowerCase() === path.toLowerCase());
   return {
-    read: (path) => ws.readBytes(path).catch((e) => { if (listed(path)) throw e; return null; }),
+    read: (path) => ws.readBytes(path).catch((e) => { if (isNotFound(e)) return null; throw e; }),
     write: (path, bytes) => ws.writeBytes(path, bytes),
     remove: (path) => ws.delete(path),
   };
@@ -191,4 +226,25 @@ export async function beginResize(ws: Workspace, editor: string, title: string):
       await restoreFiles(io, changedFiles(before, after).before);
     },
   };
+}
+
+/** Waits for work that must be done before a resize or an undo (the rebuild of the derived files due from an
+ *  edit). A rebuild that doesn't end within \`ms\` must not hold the resize for ever: it fails with a message. */
+export async function settleWithin(settle: () => Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Pathing, shadows and the minimap from the last edit are still being rebuilt after ${Math.round(ms / 1000)} s. Nothing was changed; try again when that is done.`)), ms);
+  });
+  try {
+    await Promise.race([settle().catch(() => {}), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Whether an undo or redo that finds unsaved documents says so. Ctrl+Z reaches it when the editor has nothing of its
+ *  own left to undo: if the editor's own changes are all that is unsaved, they are the editor's business, not a message. */
+export function warnsAboutUnsaved(unsaved: readonly string[], editor: string, quiet: boolean): boolean {
+  if (!unsaved.length) return false;
+  return !(quiet && unsaved.length === 1 && unsaved[0] === editor);
 }
