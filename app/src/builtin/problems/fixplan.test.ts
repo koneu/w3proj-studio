@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { chooseFolder, mergedValues, modelExists, modelFieldValue, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
 
 const FIELDS = { model: "dfil", variations: "dvar" };
-const entry = (base: string, model: string, extra: object[] = []) => ({ base, mods: [{ field: "dfil", type: "string", level: 0, data: 0, value: model }, ...extra] });
+const entry = (base: string, model: string, extra: { field: string; type: string; level: number; data: number; value: number }[] = []) => ({ base, mods: [{ field: "dfil", type: "string", level: 0, data: 0, value: model }, ...extra] });
 const docOf = (original: object[], custom: object[] = []) => JSON.stringify({ version: 3, original, custom });
 const plan = (over: Record<string, unknown>) => planModelEdit({ kind: "w3d", base: "LCcb", id: "LCcb", model: "m\\New", variations: 1, fields: FIELDS, main: docOf([]), mainRaw: false, skin: null, ...over } as never);
 
@@ -100,7 +100,7 @@ test("variations: every numbered model has to be there", async () => {
 });
 
 test("the variation count merges the main and the skin file", () => {
-  const main = { original: [entry("A", "m", [{ field: "dvar", type: "int", value: 2 }])] };
+  const main = { original: [entry("A", "m", [{ field: "dvar", type: "int", level: 0, data: 0, value: 2 }])] };
   const skin = { original: [{ base: "A", mods: [{ field: "dvar", type: "int", value: 5 }] }], custom: [{ base: "A", id: "x001", mods: [{ field: "dvar", type: "int", value: 3 }] }] };
   const v = mergedValues([main, skin, null], "dvar");
   assert.equal(v.get("A"), "5");
