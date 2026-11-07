@@ -398,3 +398,236 @@ test("attempt only reports failures of the work it wraps", async () => {
   assert.equal(bad.ok, false);
   assert.match(String((bad as { error: unknown }).error), /boom/);
 });
+
+// --- gaps found in review: each test names the branch of WtsSession it pins ---
+
+const crlf = (s: string) => s.replace(/\n/g, "\r\n");
+
+test("set ignores a number the file doesn't have and a text that is already there", () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(99, "x");
+  assert.equal(a.table.has(99), false);
+  a.set(1, "one");
+  assert.equal(a.dirty, false);
+  assert.deepEqual(a.snapshot(), { v: 0, s: {} }, "neither string became the editor's");
+});
+
+test("a snapshot holds the editor's own strings and the save count, not the whole file", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  assert.deepEqual(a.snapshot(), { v: 0, s: {} });
+  a.set(2, "TWO");
+  assert.deepEqual(a.snapshot(), { v: 0, s: { 2: "TWO" } });
+  await a.save(d.read, d.write);
+  assert.equal(a.snapshot().v, 1, "a save counts");
+  await a.save(d.read, d.write); // clean: no save
+  assert.equal(a.snapshot().v, 1);
+});
+
+test("a save with nothing to merge in writes nothing, even though the editor was dirty", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); a.snapshot();
+  d.b(1, "ONE"); // another editor saved the very same text
+  let writes = 0;
+  const r = await a.save(d.read, async (t) => { writes++; await d.write(t); });
+  assert.equal(writes, 0, "the file already is what it should be");
+  assert.equal(r.shown, false);
+  assert.equal(r.recreated, false);
+  assert.equal(a.dirty, false, "and the session still takes it as saved");
+  assert.equal(a.snapshot().v, 1);
+});
+
+test("a save tells when another editor's text replaced one the editor never touched", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); a.snapshot();
+  d.b(2, "B2"); // string 2 is not the editor's
+  const r = await a.save(d.read, d.write);
+  assert.equal(r.shown, true, "the editor shows string 2, which changed");
+  assert.equal(a.table.get(2), "B2");
+  assert.equal(get(d.text, 1), "ONE");
+  // control: nothing changed elsewhere, nothing shown
+  const d2 = disk(), a2 = new WtsSession(d2.text);
+  a2.set(1, "ONE");
+  assert.equal((await a2.save(d2.read, d2.write)).shown, false);
+});
+
+test("a string typed during the write stays the editor's: not handed over, not reported as shown", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); a.snapshot(); await a.save(d.read, d.write);
+  d.b(1, "B1");
+  a.restore(s0); // string 1 goes back past the save; B's text is to be kept
+  a.set(2, "TWO"); a.snapshot(); // something to write
+  const r = await a.save(d.read, async (t) => { a.set(1, "LATE"); await d.write(t); });
+  assert.equal(get(d.text, 1), "B1", "the write carried B's text");
+  assert.equal(get(d.text, 2), "TWO");
+  assert.equal(r.shown, false, "string 1 was typed, so what the editor shows is its own");
+  assert.equal(a.table.get(1), "LATE");
+  assert.equal(a.dirty, true);
+  a.restore(s0);
+  assert.equal(a.table.get(1), "one", "string 1 is still the editor's, so undo reaches it");
+  // control: without typing during the write, string 1 is B's and undo leaves it alone
+  const d2 = disk(), b = new WtsSession(d2.text);
+  const t0 = b.snapshot();
+  b.set(1, "ONE"); b.snapshot(); await b.save(d2.read, d2.write);
+  d2.b(1, "B1");
+  b.restore(t0);
+  b.set(2, "TWO"); b.snapshot();
+  assert.equal((await b.save(d2.read, d2.write)).shown, true);
+  b.restore(t0);
+  assert.equal(b.table.get(1), "B1");
+});
+
+test("a save in a CRLF file keeps its line endings, including in a multi-line string, and ends clean", async () => {
+  const d = disk(crlf(wts("one", "two"))), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "x\ny"); a.snapshot();
+  const r = await a.save(d.read, d.write);
+  assert.equal(d.text, crlf(wts("x\ny", "two")), "every line ending is CRLF, nothing else changed");
+  assert.equal(r.shown, false, "x\r\ny is the same text as x\ny");
+  assert.equal(a.dirty, false);
+  a.restore(s0);
+  assert.equal(a.dirty, true);
+  await a.save(d.read, d.write);
+  assert.equal(d.text, crlf(wts("one", "two")));
+  assert.equal(a.dirty, false);
+});
+
+test("a CRLF file where the other editor saved the same text in the other line ending writes nothing", async () => {
+  const d = disk(crlf(wts("one", "two"))), a = new WtsSession(d.text);
+  a.set(1, "x\ny"); a.snapshot();
+  d.text = crlf(wts("x\ny", "two"));
+  let writes = 0;
+  await a.save(d.read, async () => { writes++; });
+  assert.equal(writes, 0);
+  assert.equal(a.dirty, false);
+});
+
+test("the retry waits retryMs, reads again, and asks about the second error too", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  const asked: unknown[] = [];
+  let reads = 0, writes = 0;
+  const t0 = Date.now();
+  const r = await a.save(
+    async () => { reads++; throw `gone ${reads} (os error 2)`; },
+    async () => { writes++; },
+    async (e) => { asked.push(e); return isNotFoundError(e); },
+    60,
+  );
+  assert.ok(Date.now() - t0 >= 50, "waited before the second read");
+  assert.equal(reads, 2);
+  assert.equal(writes, 1);
+  assert.equal(r.recreated, true);
+  assert.deepEqual(asked, ["gone 1 (os error 2)", "gone 2 (os error 2)"]);
+});
+
+test("a first read that is not 'missing' is not retried", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  let reads = 0;
+  await assert.rejects(a.save(async () => { reads++; throw "locked (os error 32)"; }, async () => {}, async (e) => isNotFoundError(e), 0), /os error 32/);
+  assert.equal(reads, 1);
+});
+
+test("a retry that fails for another reason stops the save: nothing written, session unchanged", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); const snap = a.snapshot();
+  let reads = 0, writes = 0;
+  await assert.rejects(
+    a.save(async () => { throw reads++ === 0 ? "gone (os error 2)" : "locked (os error 32)"; }, async () => { writes++; }, async (e) => isNotFoundError(e), 0),
+    /os error 32/,
+  );
+  assert.equal(reads, 2);
+  assert.equal(writes, 0);
+  assert.equal(a.dirty, true);
+  assert.deepEqual(a.snapshot(), snap);
+});
+
+test("a recreate writes the editor's whole table, counts as a save, and a string typed during it stays dirty", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  let written = "";
+  const r = await a.save(gone, async (t) => { written = t; a.set(2, "late"); }, yes, 0);
+  assert.equal(written, wts("ONE", "two"));
+  assert.equal(r.shown, false);
+  assert.equal(r.recreated, true);
+  assert.equal(a.snapshot().v, 1);
+  assert.equal(a.table.get(2), "late");
+  assert.equal(a.dirty, true, "string 2 is not in the recreated file yet");
+});
+
+test("undo to the entry the session started with puts back every string the editor changed", () => {
+  const a = new WtsSession(wts("one", "two"));
+  const s0 = a.snapshot();
+  a.set(1, "x"); a.set(2, "y"); a.snapshot();
+  a.restore(s0);
+  assert.equal(a.table.get(1), "one");
+  assert.equal(a.table.get(2), "two");
+  assert.equal(a.dirty, false);
+});
+
+test("typing a string again after undoing it makes it a normal edit: the last save wins", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); a.snapshot(); await a.save(d.read, d.write);
+  a.restore(s0); // undone: another editor's later text would be kept
+  d.b(1, "B1");
+  a.set(1, "X"); a.snapshot(); // typed since
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "X");
+});
+
+test("restoring to what the string already is changes nothing, not even whether it counts as undone", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "X"); const sX = a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "Y"); a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "X"); a.snapshot(); // typed: not undone
+  d.b(1, "B1");
+  a.restore(sX); // an entry from before the saves, but it is already what the string is
+  assert.equal(a.table.get(1), "X");
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "X", "a typed text, last save wins");
+});
+
+test("undoing to an entry from before a save keeps another editor's later text", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); const s1 = a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "TWO"); a.snapshot(); await a.save(d.read, d.write);
+  d.b(1, "B1");
+  a.restore(s1);
+  assert.equal(a.table.get(1), "ONE");
+  const r = await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "B1");
+  assert.equal(r.shown, true);
+});
+
+test("dirty ignores line endings inside a multi-line string", () => {
+  const a = new WtsSession(crlf(wts("a\nb", "two")));
+  a.set(1, "a\nb"); // the same text, as the editor holds it
+  assert.equal(a.dirty, false);
+  a.set(1, "a\nc");
+  assert.equal(a.dirty, true);
+});
+
+test("a string the other editor's file no longer has is not brought back by an undo", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  const s0 = a.snapshot();
+  a.set(1, "ONE"); a.snapshot(); await a.save(d.read, d.write);
+  d.text = "STRING 2\n{\ntwo\n}\n"; // string 1 is gone from the file
+  a.restore(s0);
+  a.set(2, "TWO"); a.snapshot();
+  const r = await a.save(d.read, d.write);
+  assert.equal(get(d.text, 2), "TWO");
+  assert.equal(new StringTable(d.text).has(1), false);
+  assert.equal(r.shown, true, "the editor's string 1 is no longer there");
+});
+
+test("another editor's line-ending-only rewrite of a string is not 'their text': the undo still applies", async () => {
+  const d = disk(crlf(wts("a\nb", "two"))), a = new WtsSession(d.text);
+  a.set(1, "X"); const sX = a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "a\nb"); a.snapshot(); await a.save(d.read, d.write);
+  d.text = d.text.replace(/\r\n/g, "\n"); // same strings, other line endings
+  a.restore(sX);
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "X");
+});
