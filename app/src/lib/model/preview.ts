@@ -133,6 +133,9 @@ export class ModelPreview {
     cancelAnimationFrame(this.raf);
     window.removeEventListener("mousemove", this.onMove);
     window.removeEventListener("mouseup", this.onUp);
+    // A load still running must not build a renderer on a canvas nobody shows.
+    this.token++;
     this.renderer?.dispose();
+    this.renderer = null;
   }
 }
