@@ -744,8 +744,16 @@ async function viewCommands(page, fail, shots) {
     const load = (data) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + data; });
     const pixels = async (data) => { const i = await load(data), c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d"); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
     const [p, q] = await Promise.all([pixels(${JSON.stringify(a)}), pixels(${JSON.stringify(b)})]);
+    const pixelsWidth = (await load(${JSON.stringify(a)})).width;
     let n = 0;
-    for (let i = 0; i < p.length; i += 4) if (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]) > 24) n++;
+    // Not the outer two rows and columns: the canvas sits at a fraction of a pixel, and its edge pixels come out as
+    // part page, part picture, which now and then differs between two captures of the same scene. Everything inside is compared.
+    const w = pixelsWidth, margin = 2;
+    for (let i = 0; i < p.length; i += 4) {
+      const x = (i / 4) % w, y = Math.floor(i / 4 / w);
+      if (x < margin || y < margin || x >= w - margin || y >= p.length / 4 / w - margin) continue;
+      if (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]) > 24) n++;
+    }
     return n;
   })()`);
   // No water (it ripples) and no animation, so that the same view is the same picture.
