@@ -78,8 +78,9 @@ step says it is waiting, and takes the lock over if the first gate's process has
 **The hostile-input watchdog counts processor time**, not the clock (`hostile.test.ts`): a worker's
 second thread reports the process's processor time, and a file that uses more than 4 s of it is
 killed and reported. With several gates on the machine a worker is held back for seconds at a time,
-and a clock would call that a hang; a parser stuck in a loop still burns the 4 s. A worker that
-neither finishes a file nor uses processor time for a minute is killed too.
+and a clock would call that a hang; a parser stuck in a loop still burns the 4 s. The count starts
+when the worker is ready, so its start-up isn't charged to the first file. A file that takes 2
+minutes on the clock is killed too: that catches a parser blocked without working.
 
 **`w3proj verify` over a folder** checks maps on all cores (`W3PROJ_VERIFY_JOBS=1` for one at a
 time), but prints in the order of the files. **A hostile-input failure** names its seed; run it
