@@ -709,6 +709,25 @@ async function triggerByHand(page, hands, root, fail) {
   if (!script.includes("BlzCreateUnitWithSkin") && !script.includes("function main")) fail("the script looks empty");
 }
 
+/** Test Map when the game can't start: the user is told why, whichever way it was asked for, and
+ *  nothing is left uncaught in the page (the run's `problems` list would show it). */
+async function testMapWithoutGame(page, found) {
+  const hands = new Hands(page);
+  await page.evaluate(`w3.settings.set("game.path", "C:/no/such/Warcraft III.exe")`);
+  const ways = {
+    "the command": () => page.evaluate(`w3Workbench.run("w3.project.testMap")`),
+    "the status bar": () => hands.click('.statusbar-item[data-id="w3.project.test"]'),
+    "Ctrl+F5": () => hands.key("F5", "F5", 116, 2),
+  };
+  for (const [way, go] of Object.entries(ways)) {
+    await page.evaluate(`document.querySelectorAll(".toast").forEach((t) => t.remove())`);
+    await go();
+    const toast = await until(`the error toast (${way})`, () => page.evaluate(`document.querySelector(".toast.error")?.textContent ?? null`), 60000);
+    if (!/not found/.test(toast)) found.push(`test map (${way}): the toast says "${toast.slice(0, 200)}"`);
+    await sleep(500);
+  }
+}
+
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
@@ -813,6 +832,7 @@ async function run() {
 
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
+    await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
