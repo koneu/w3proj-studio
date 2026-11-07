@@ -11,12 +11,15 @@ import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
+import { resultsStale } from "./projectkey";
 
 interface Group { check: ProblemCheck; problems: Problem[]; error?: string }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const checks: ProblemCheck[] = [];
   let groups: Group[] = [];
+  /** The project root the results are for. */
+  let ranFor: string | null = null;
   let ran = false, running: Promise<Problem[]> | null = null;
   const folded = new Set<string>();
   const status = w3.statusBar.add({ id: "w3.problems.status", text: "", command: "w3.problems.show", align: "right", priority: 60 });
@@ -37,7 +40,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     },
     run() {
       running ??= (async () => {
-        if (!w3.workspace.project()) { groups = []; return []; }
+        const root = w3.workspace.project()?.root ?? null;
+        if (!root) { groups = []; return []; }
         const result: Group[] = [];
         // One failing check doesn't stop the others.
         for (const check of [...checks]) {
@@ -45,7 +49,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             result.push({ check, problems: [], error: String(e instanceof Error ? e.message : e) });
           }
         }
+        // The project was closed or changed while the checks ran: these results are not its own.
+        if (resultsStale(root, w3.workspace.project()?.root ?? null)) return [];
         groups = result;
+        ranFor = root;
         ran = true;
         updateStatus();
         return all();
@@ -74,7 +81,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (await deleteInvalid(w3)) await service.run();
     }),
     w3.commands.register("w3.problems.open", async (path: string) => { await w3.editors.open(path); }),
-    w3.workspace.onDidChange(() => { if (!w3.workspace.project()) { ran = false; groups = []; } updateStatus(); }),
+    w3.workspace.onDidChange(() => {
+      // Another map or project: the found problems of the previous one must not show.
+      if (ran && resultsStale(ranFor, w3.workspace.project()?.root ?? null)) {
+        ran = false; groups = []; ranFor = null;
+        w3.views.refresh("w3.problems.list");
+      }
+      updateStatus();
+    }),
     w3.views.register("w3.problems.list", {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open a project to check it.")); return; }
