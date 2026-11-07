@@ -23,7 +23,7 @@ import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from 
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
-import { SaveMark } from "./savemark";
+import { SaveMark, saveSnapshot, serial } from "./savemark";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
@@ -1114,8 +1114,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           notifyGroups(e);
           minimapStale = true;
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
-          if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && mark.isDirty(at)) {
+          if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && mark.isDirty(at) && !mark.pending(at)) {
             history[at - 1] = keyStep = joinSteps(keyStep, e);
+            doc.setDirty(true);
             return;
           }
           mark.truncated(at);
@@ -1612,14 +1613,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (x !== p.position[0] || y !== p.position[1]) p.position = [x, y, heightAt(terrain, x, y)];
           }
           if (!dooFile || !repositioned.size) return;
+          // Taken out before the await: what is moved meanwhile stays in the set for the next save.
+          const moved = new Set(repositioned);
+          repositioned.clear();
           const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
-          if (!info) return;
+          if (!info) { for (const p of moved) repositioned.add(p); return; }
           const edge = playableArea(info, terrain);
           for (const p of dooFile.list) {
             const flags = flagsOf(p);
-            if (repositioned.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
+            if (moved.has(p) && flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
           }
-          repositioned.clear();
         };
         const deleteSelected = () => deleteEntries(selectedEntries());
         /** Deletes placements as one undo step. */
@@ -2449,10 +2452,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The minimap icons (war3map.mmp) of the placed units on a terrain, written only when they
          *  differ from the stored ones by more than order and rounding. */
-        const updateMinimapIcons = async (t: Terrain) => {
-          if (!unitsFile) return;
+        const updateMinimapIcons = async (t: Terrain, units: Placed[] | undefined = unitsFile?.list) => {
+          if (!unitsFile || !units) return;
           try {
-            const icons = await buildMinimapIcons(w3, t, unitsFile.list);
+            const icons = await buildMinimapIcons(w3, t, units);
             const stored = await readMapJson<{ icons?: MinimapIcon[] }>(w3, "war3map.mmp").catch(() => null);
             if (!stored) {
               const text = JSON.stringify({ format: "w3proj.minimap/1", version: 0, icons });
@@ -3095,11 +3098,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
          *  `baseDoodads` are the state the shadows were last updated for. */
-        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[]) => {
+        const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[]) => {
           const rf = (p: string) => readFile(w3, doc, p);
           const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
           if (cfg<boolean>("pathing.regenerate")) try {
-            const { wpm, missing } = await buildPathingMap(w3, terrain, doodads, rf, cfg<number>("pathing.deepWater"));
+            const { wpm, missing } = await buildPathingMap(w3, now, doodads, rf, cfg<number>("pathing.deepWater"));
             filterPathing(wpm);
             await w3.workspace.writeBytes("map/war3map.wpm", wpm);
             if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
@@ -3111,7 +3114,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const skins = objCtx?.skins ?? new Map(), baseOf = (id: string) => objCtx?.bases.get(id);
             const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
             const before = await predictShadows(baseTerrain, baseDoodads, skins, baseOf, rf, sun);
-            const after = await predictShadows(terrain, doodads, skins, baseOf, rf, sun);
+            const after = await predictShadows(now, doodads, skins, baseOf, rf, sun);
             const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
             const shd = updateShadows(stored, before, after);
             if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
@@ -3124,7 +3127,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             try {
               // Cleared first: an edit made while it is drawn sets it again, and the next save redraws.
               minimapStale = false;
-              await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, terrain, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
+              await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, now, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
             } catch (e) {
               minimapStale = true;
               w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
@@ -3132,7 +3135,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           // Its icons (gold mines, neutral buildings, start locations) follow the placed units;
           // written only when they differ from the stored ones by more than order and rounding.
-          if (minimapMode !== "never") await updateMinimapIcons(terrain);
+          if (minimapMode !== "never") await updateMinimapIcons(now, units);
         };
 
         const ready = () => objectsPlaced.catch(() => {});
@@ -3240,7 +3243,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           reloadFile,
           // Saved by something else (an AI tool), they'd go stale here, and be written back so.
           watches: ["map/war3map.doo.json", "map/war3mapUnits.doo.json", "map/war3map.w3r.json", "map/war3map.w3c.json"],
-          save: editable ? async () => {
+          // One save at a time, each taking its own snapshot: a later write can't be overtaken by an older one.
+          save: editable ? serial(async () => {
             // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
             if (edgeInfo?.cameraComplements) markMapEdge(terrain, edgeInfo.cameraComplements);
@@ -3253,42 +3257,45 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
             }
             if (objectsTouched) await settleMoved();
-            // Everything the save writes is taken here, in one go with no await, so the files agree with
+            // Below, everything the save writes is taken in one go with no await, so the files agree with
             // each other and with the undo position. An edit made while they are written is not in them,
             // and stays unsaved.
-            const w3e = writeW3e(terrain);
-            const token = mark.begin(at);
-            const placed = objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => ({ f, text: placedText(f.doc) })) : [];
-            const starts = objectsTouched && unitsFile ? startLocations(unitsFile.list) : null;
-            const doodadsTaken = dooFile ? structuredClone(dooFile.list) : null;
-            try {
-              await writeTerrainBytes(doc.path, w3e, doc);
-              for (const { f, text } of placed) await savePlacedFile(w3, f, text);
-              // Placed, moved or deleted start locations add, move or remove the map's players.
-              if (starts) {
-                let changes: string[] = [];
-                await editDoc("war3map.w3i", (info) => {
-                  changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
-                  return changes.length > 0;
-                });
-                savedStarts = starts;
-                if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
-              }
-            } catch (e) {
-              mark.abort(token);
-              throw e;
-            }
-            mark.finish(token);
-            doc.setDirty(mark.isDirty(at));
+            const snap = await saveSnapshot(mark, {
+              at: () => at,
+              take: () => ({
+                w3e: writeW3e(terrain),
+                placed: objectsTouched ? [dooFile, unitsFile].filter((f): f is PlacedFile => !!f).map((f) => ({ f, text: placedText(f.doc) })) : [],
+                starts: objectsTouched && unitsFile ? startLocations(unitsFile.list) : null,
+                doodads: dooFile ? structuredClone(dooFile.list) : null,
+                units: unitsFile ? structuredClone(unitsFile.list) : undefined,
+              }),
+              write: async (t) => {
+                await writeTerrainBytes(doc.path, t.w3e, doc);
+                for (const { f, text } of t.placed) await savePlacedFile(w3, f, text);
+                // Placed, moved or deleted start locations add, move or remove the map's players.
+                if (t.starts) {
+                  const starts = t.starts;
+                  let changes: string[] = [];
+                  await editDoc("war3map.w3i", (info) => {
+                    changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
+                    return changes.length > 0;
+                  });
+                  savedStarts = starts;
+                  if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
+                }
+              },
+              saved: () => doc.setDirty(mark.isDirty(at)),
+            });
             if (startAdded) void rebuildObjects();
-            const doodads = dooFile?.list ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
-            await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads);
-            savedW3e = w3e;
-            savedDoodads = doodadsTaken ?? structuredClone(doodads);
+            // The derived files follow what was written, not what an edit made meanwhile changed.
+            const doodads = snap.doodads ?? (await loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null))?.list ?? [];
+            await updateDerived(doodads, parseW3e(savedW3e), savedDoodads ?? doodads, parseW3e(snap.w3e), snap.units);
+            savedW3e = snap.w3e;
+            savedDoodads = snap.doodads ?? structuredClone(doodads);
             for (const g of groupInsts.values()) {
               await g.save?.().catch((e) => w3.window.showError(`Saving failed: ${(e as Error).message ?? e}`));
             }
-          } : undefined,
+          }) : undefined,
           focus: () => canvas.focus(),
           dispose: () => {
             stopGroups();
