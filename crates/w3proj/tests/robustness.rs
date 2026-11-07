@@ -96,7 +96,8 @@ fn registry() -> Registry {
 }
 
 fn tmp(name: &str) -> PathBuf {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("robustness");
+    // The gate runs the debug and the release build of these tests at once: one folder each run.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("robustness-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     dir.join(name)
 }
