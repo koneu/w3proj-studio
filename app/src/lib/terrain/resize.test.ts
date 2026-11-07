@@ -33,7 +33,7 @@ test("adding on the left and bottom moves the offset, not the world position", (
   assert.deepEqual(r.corners[r.width + 1], terrain(3, 3).corners[0]);
 });
 
-import { applyPathingOverrides, pathingOverridesText, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
+import { applyPathingOverrides, pathingOverridesText, planPathingOverrides, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
 
 // A 64×64-tile map is 256×256 pathing cells.
 const file = (t: Terrain, cells: PathingOverrides["cells"]): PathingOverrides => ({ format: "w3proj.pathing/1", width: (t.width - 1) * 4, height: (t.height - 1) * 4, cells });
@@ -130,4 +130,33 @@ test("applying moved overrides to the new wpm: only the new terrain's size match
   assert.equal(applyPathingOverrides(wpm, moved, next), true);
   assert.equal(wpm[16 + 4 * 384 + 131], 8);
   assert.equal(wpm.reduce((n, b) => n + (b ? 1 : 0), 0), 1);
+});
+
+test("pathing plan: a stale file whose size equals the NEW size is neither applied nor rewritten", () => {
+  const t = big(), change: Sides = [32, 0, 0, 0], next = resizeTerrain(t, change);
+  const stale = file(next, [[3, 4, 8, 0]]);
+  assert.equal(planPathingOverrides(stale, t, change), null);
+  const wpm = new Uint8Array(16 + 260 * 256);
+  const plan = planPathingOverrides(stale, t, change);
+  if (plan) applyPathingOverrides(wpm, plan.file, next);
+  assert.ok(wpm.every((b) => b === 0));
+});
+
+test("pathing plan: a camera-bounds-only change keeps the file; a move or a dropped cell rewrites it", () => {
+  const t = big();
+  const same = planPathingOverrides(file(t, [[3, 4, 8, 0], [9, 9, 1, 2]]), t, [0, 0, 0, 0]);
+  assert.ok(same && !same.write);
+  assert.deepEqual(same.file.cells, [[3, 4, 8, 0], [9, 9, 1, 2]]);
+  assert.equal(planPathingOverrides(file(t, [[3, 4, 8, 0]]), t, [32, 0, 0, 0])?.write, true);
+  assert.equal(planPathingOverrides(file(t, [[255, 4, 8, 0]]), t, [0, -32, 0, 0])?.write, true);
+  assert.equal(planPathingOverrides(file(t, []), t, [32, 0, 0, 0])?.write, true, "the size changed");
+  // Hand-written order is kept when nothing changes.
+  const unsorted = planPathingOverrides(file(t, [[9, 9, 1, 0], [3, 4, 8, 0]]), t, [0, 0, 0, 0]);
+  assert.ok(unsorted && !unsorted.write);
+});
+
+test("pathing plan: a malformed file is left alone", () => {
+  const t = big();
+  for (const bad of [null, "x", 5, {}, { width: 256, height: 256 }, { width: 256, height: 256, cells: [[1, 2, 3]] }, { width: 256, height: 256, cells: [[1, 2, 3, "4"]] }, { width: 1.5, height: 256, cells: [] }])
+    assert.equal(planPathingOverrides(bad, t, [32, 0, 0, 0]), null, JSON.stringify(bad));
 });

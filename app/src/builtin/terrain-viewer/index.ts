@@ -48,7 +48,7 @@ import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } fro
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
-import { cameraBounds, pathingOverridesText, playableSize, resizeGrid, resizePathingOverrides, resizeProblem, resizeTerrain, validPathingOverrides, applyPathingOverrides, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, pathingOverridesText, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, applyPathingOverrides, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
@@ -2458,9 +2458,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Everything (terrain, objects, other tabs) saved first: the files are rewritten below.
           await editorApi.save?.();
           const next = resizeTerrain(terrain, change);
-          // Read and moved before anything is written; a bad file is left alone (see resizePathingOverrides).
+          // Read and moved before anything is written; a bad file is left alone (see planPathingOverrides).
           const stored = await w3.workspace.readText(".w3proj/pathing.json").then((x) => JSON.parse(x) as unknown).catch(() => null);
-          const moved = validPathingOverrides(stored) ? resizePathingOverrides(stored, terrain, change) : null;
+          const plan = planPathingOverrides(stored, terrain, change);
           const rect = worldRect(next);
           const inside = (x: number, y: number) => x >= rect.left && x <= rect.right && y >= rect.bottom && y <= rect.top;
           // Start locations aren't removed but moved into the map (a player needs one).
@@ -2511,9 +2511,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const { wpm } = await buildPathingMap(w3, next, doodads, rf, w3.settings.get<number>("terrain.pathing.deepWater"));
           // Same size: the tool groups' own filters, as everywhere else.
           if (change.every((c) => c === 0)) filterPathing(wpm);
-          else if (moved) applyPathingOverrides(wpm, moved, next);
+          else if (plan) applyPathingOverrides(wpm, plan.file, next);
           await w3.workspace.writeBytes("map/war3map.wpm", wpm);
-          if (moved && moved !== stored) await w3.workspace.writeText(".w3proj/pathing.json", pathingOverridesText(moved));
+          if (plan?.write) await w3.workspace.writeText(".w3proj/pathing.json", pathingOverridesText(plan.file));
           await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, next, doodads, rf, minimapSettings(w3), w3.settings.get<number>("terrain.minimap.jpegQuality")));
           await updateMinimapIcons(next);
           // The editor opens again on the new terrain.

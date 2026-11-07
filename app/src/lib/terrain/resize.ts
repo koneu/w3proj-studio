@@ -109,6 +109,20 @@ export function resizePathingOverrides(file: PathingOverrides, t: Terrain, chang
   return { ...file, width: w, height: h, cells };
 }
 
+/** What a resize does with a parsed pathing.json read before the change. `null`: the file isn't
+ *  this map's overrides (malformed, or for another size than the OLD terrain's, so possibly stale):
+ *  neither applied nor rewritten. Otherwise the moved overrides, and `write` only when their size or
+ *  cells differ from what was read (a camera-bounds-only change leaves the file's bytes alone). */
+export function planPathingOverrides(stored: unknown, t: Terrain, change: Sides): { file: PathingOverrides; write: boolean } | null {
+  if (!validPathingOverrides(stored) || stored.width !== (t.width - 1) * 4 || stored.height !== (t.height - 1) * 4) return null;
+  const file = resizePathingOverrides(stored, t, change);
+  // The moved cells come sorted; a hand-written order alone is no reason to rewrite the file.
+  const old = [...stored.cells].sort((a, b) => a[1] * stored.width + a[0] - (b[1] * stored.width + b[0]));
+  const same = file.width === stored.width && file.height === stored.height && file.cells.length === old.length
+    && file.cells.every((c, i) => c.every((n, j) => n === old[i][j]));
+  return { file, write: !same };
+}
+
 /** The file's text, one cell per line to keep diffs small. */
 export function pathingOverridesText(file: PathingOverrides): string {
   const { cells } = file;
