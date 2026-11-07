@@ -17,7 +17,8 @@ import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { type ModeChoices, pickClassicModel } from "./modelpick";
-import { conversionSources, missingTextures, modelExists, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
+import { chooseFolder, mergedValues, modelExists, modelFieldValue, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
+import { conversionSources, missingTextures, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
 
@@ -134,18 +135,22 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
         const out: Problem[] = [];
         /** Whether the file an object field names exists. A doodad or destructable with several
          *  variations names its model without the number; the files are X0.mdx, X1.mdx… */
-        const pathExists = async (p: string, type: string, kind: string, base: string, mods: Mod[], meta: NonNullable<Awaited<ReturnType<typeof loadKind>>>) => {
+        const pathExists = async (p: string, type: string, id: string, base: string, vars: Map<string, string>, meta: NonNullable<Awaited<ReturnType<typeof loadKind>>>, variationsField?: string) => {
           const what = type.startsWith("model") ? "model" : type === "icon" || type.endsWith("exture") ? "texture" : "file";
-          const field = what === "model" ? ART[kind]?.variations : undefined;
           let variations = 1;
-          if (field) {
-            const given = mods.find((m) => m.field === field), f = meta.fieldById.get(field);
-            variations = Number(given ? given.value : f ? meta.defaultValue(base, f, 0) : 1) || 1;
+          if (what === "model" && variationsField) {
+            // The count as the game merges the main and the skin file; else the base type's.
+            const f = meta.fieldById.get(variationsField);
+            variations = Number(vars.get(id) ?? (f ? meta.defaultValue(base, f, 0) : 1)) || 1;
           }
           return modelExists(p, variations, (x) => files.exists(x, what));
         };
         for (const kind of KINDS) {
           let meta: Awaited<ReturnType<typeof loadKind>> | null = null;
+          const variationsField = ART[kind]?.variations;
+          const vars = variationsField
+            ? mergedValues(await Promise.all([`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`].map((f) => readJson<{ original?: Obj[]; custom?: Obj[] }>(w3, f))), variationsField)
+            : new Map<string, string>();
           for (const file of [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`]) {
             const data = await readJson<{ original?: Obj[]; custom?: Obj[] }>(w3, file);
             if (!data) continue;
@@ -165,7 +170,7 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
                   const at = `${name} (${id}) › ${f.label}${m.level ? ` (level ${m.level})` : ""}`;
                   const reveal = { command: "w3.objectEditor.open", args: [kind, id] };
                   if (isAbsolute(p)) out.push({ severity: "error", message: `${p}: a path on someone's disk, not in the map`, location: at, reveal });
-                  else if (!(await pathExists(p, f.type, kind, o.base, mods, meta))) {
+                  else if (!(await pathExists(p, f.type, id, o.base, vars, meta, variationsField))) {
                     out.push({ severity: "warning", message: `${p} not found (neither in the map nor in the game)`, location: at, reveal });
                   }
                 }
@@ -309,6 +314,8 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
     }
   }
   const files = new FileLookup(w3);
+  // The project the problems were found in: the fixes write into no other.
+  const root = w3.workspace.project()?.root;
   const kinds = new Map<string, Awaited<ReturnType<typeof loadKind>>>();
   for (const kind of Object.keys(ART)) { const k = await loadKind(w3, kind).catch(() => null); if (k) kinds.set(kind, k); }
   // The map's own objects and skin changes: id → [kind, base, field → value].
@@ -383,12 +390,12 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
         fixes.push({
           label: `Convert${pick} to a Classic model`,
           title: `Writes a Classic copy of the ${set} model (and its colour textures) into the map and points the type at it; every graphics mode shows it, with the Classic look (no Reforged extra maps or effects)`,
-          run: async () => {
+          run: () => serial(async () => {
             const model = value(id, kind, ART[kind].model) ?? "";
             const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
-            const bytes = await convertToClassic(w3, kind, base, id, model, variations, source);
+            const bytes = await convertToClassic(w3, root, kind, base, id, model, variations, source);
             void w3.window.showInfo(`Converted ${name} from the ${set} model to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
-          },
+          }),
         });
       }
       // Without Classic, the Reforged model itself can be imported: both Reforged modes draw it.
@@ -397,17 +404,18 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
         fixes.push({
           label: `Import the${pick} Reforged model`,
           title: `Copies the ${set} model (and the textures ${where} lacks) into the map, at the path the type names; the map doesn't support Classic, which couldn't draw it`,
-          run: async () => {
+          run: () => serial(async () => {
             const lacking = supported.filter((m) => m.layer && modes.has(m.name)).map((m) => m.layer!);
-            const bytes = await importReforged(w3, [...paths], source, (cands) => lacking.some((l) => !cands.some((c) => stored.get(null)!.has(c.toLowerCase()) || stored.get(l)!.has(c.toLowerCase()))));
+            // A texture the map has itself (the user's own import) is not lacking.
+            const bytes = await importReforged(w3, root, [...paths], source, (cands, inMap) => textureLacking(cands, inMap, lacking, (l, k) => stored.get(l)!.has(k)));
             void w3.window.showInfo(`Imported ${name}'s ${set} model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
-          },
+          }),
         });
       }
       fixes.push({
         label: "Replace with a Classic game model…",
         title: "Pick one of the game's own Classic models for this type (every graphics mode can load those); it's written into the map's object data (a modified standard object), and the type's Reforged model is no longer used",
-        run: () => useClassicModel(w3, kind, base, id, name, [...paths][0] ?? "", classicModels, reforgedModels, sources),
+        run: () => useClassicModel(w3, root, kind, base, id, name, [...paths][0] ?? "", classicModels, reforgedModels, sources),
       }, {
         label: `Remove the ${items.length} placed`,
         title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
@@ -430,15 +438,21 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
 const removePlaced = (w3: W3Api, file: string, key: string, id: string) =>
   editPlacedFile(w3, file, (doc) => { doc[key] = (doc[key] ?? []).filter((p) => p.id !== id); });
 
-/** Model and variation count fields of a kind's object data. */
-const MODEL_FIELDS: Record<string, { model: string; variations?: string }> = ART;
+/** Fixes run one at a time: each reads and writes war3map.imp and the object data. */
+const serial = serialQueue();
+
+/** The fix was found in a project; it must not write into another one opened since. */
+function sameProject(w3: W3Api, root: string | undefined) {
+  if (!root || w3.workspace.project()?.root !== root) throw new Error("Another project is open than the one this was found in; nothing was changed. Run the check again.");
+}
 
 /** Asks for one of the game's models (best name matches first), from the Classic files or, to be
  *  converted, a Reforged set's, and writes it into the type's model field in the map's object data
  *  (a modified standard object, or the custom object itself); variations are set to 1 (the chosen
- *  model has no numbered variants). A Reforged model is converted to a Classic one first. */
+ *  model has no numbered variants). A Reforged model is converted to a Classic one first. Only the
+ *  type the picker was opened for changes. */
 async function useClassicModel(
-  w3: W3Api, kind: string, base: string, id: string, name: string, current: string,
+  w3: W3Api, root: string | undefined, kind: string, base: string, id: string, name: string, current: string,
   classic: Set<string>, reforged: Record<Source, Set<string>>, preferred: Source[],
 ) {
   // Words of the current model's file name ("Wood_Debris_Barrels_01" → wood, debris, barrels).
@@ -455,42 +469,49 @@ async function useClassicModel(
   const pick = await pickClassicModel(w3, { title: `Model for ${name} (${id})`, current: current || null, modes });
   if (!pick) return;
   if (pick.mode === "classic") {
-    await setModel(w3, kind, base, id, pick.path.replace(/\.mdx$/i, ".mdl"), 1);
+    await serial(async () => {
+      sameProject(w3, root);
+      const apply = await prepareModel(w3, kind, base, id, modelFieldValue(kind, pick.path), 1);
+      sameProject(w3, root);
+      await apply();
+      await w3.workspace.refresh();
+    });
     return;
   }
-  const bytes = await convertToClassic(w3, kind, base, id, pick.path, 1, pick.mode);
-  void w3.window.showInfo(`Converted ${pick.path.split("\\").pop()} from the ${SOURCE_NAME[pick.mode]} files to a Classic model for ${name} (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+  const bytes = await serial(() => convertToClassic(w3, root, kind, base, id, pick.path, 1, pick.mode as Source));
+  void w3.window.showInfo(`Converted ${pick.path.split("\\").pop()} from the ${SOURCE_NAME[pick.mode as Source]} files to a Classic model for ${name} (${(bytes / 1048576).toFixed(1)} MB in the map).`);
 }
 
-/** Writes a model (and, for doodads/destructables, the variation count) into a type's object
- *  data: a modified standard object, or the custom object's own entry. */
-async function setModel(w3: W3Api, kind: string, base: string, id: string, model: string, variations: number) {
-  const fields = MODEL_FIELDS[kind];
-  const path = `map/war3map.${kind}.json`;
-  const text = await w3.workspace.readText(path).catch(() => null);
-  if (text === null && w3.workspace.files().some((f) => f.path.toLowerCase() === `map/war3map.${kind}`)) {
-    throw new Error(`war3map.${kind} is kept raw in this project; set the model in the Object Editor.`);
-  }
-  type Mod = { field: string; type: string; level?: number; data?: number; value: number | string };
-  type O = { base: string; id?: string; end?: string; mods?: Mod[] };
-  const doc = JSON.parse(text ?? '{"format":"w3proj.objects/1","version":3,"original":[],"custom":[]}') as { version: number; original: O[]; custom: O[] };
-  // Standard types are changed as "original" entries; a custom type in its own entry.
-  const isCustom = id !== base;
-  let o = isCustom ? doc.custom.find((x) => x.id === id) : doc.original.find((x) => x.base === id);
-  if (!o) {
-    o = doc.version >= 3 ? { base: id, mods: [] } : { base: id, end: id, mods: [] };
-    doc.original.push(o);
-  }
-  // Doodads (and abilities, upgrades) store a level and data column with every field.
-  const levels = ["w3d", "w3a", "w3q"].includes(kind);
-  const set = (field: string, type: string, value: number | string) => {
-    o!.mods = (o!.mods ?? []).filter((m) => m.field !== field);
-    o!.mods.push(levels ? { field, type, level: 0, data: 0, value } : { field, type, value });
+/** Works out a type's model edit (see planModelEdit) and returns the function that writes it: every
+ *  check that can fail happens here, before the caller writes its first file. */
+async function prepareModel(w3: W3Api, kind: string, base: string, id: string, model: string, variations: number): Promise<() => Promise<void>> {
+  const path = `map/war3map.${kind}.json`, skinPath = `map/war3mapSkin.${kind}.json`;
+  const names = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+  const main = await w3.workspace.readText(path).catch(() => null);
+  const skin = await w3.workspace.readText(skinPath).catch(() => null);
+  if (skin === null && names.has(skinPath.slice(0, -5).toLowerCase())) throw new Error(`war3mapSkin.${kind} is kept raw in this project; set the model in the Object Editor.`);
+  const plan = planModelEdit({ kind, base, id, model, variations, fields: MODEL_FIELDS[kind], main, mainRaw: names.has(path.slice(0, -5).toLowerCase()), skin });
+  const canon = (p: string, doc: unknown) => w3.backend.invoke<string>("objects_canonicalize", { name: p, text: JSON.stringify(doc) });
+  const mainText = await canon(path, plan.main);
+  const skinText = plan.skin ? await canon(skinPath, plan.skin) : null;
+  return async () => {
+    await w3.workspace.writeText(path, mainText);
+    if (skinText !== null) await w3.workspace.writeText(skinPath, skinText);
   };
-  set(fields.model, "string", model);
-  if (fields.variations) set(fields.variations, "int", variations);
-  await w3.workspace.writeText(path, await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(doc) }));
-  await w3.workspace.refresh();
+}
+
+/** Model and variation count fields of a kind's object data. */
+const MODEL_FIELDS: Record<string, { model: string; variations?: string }> = ART;
+
+/** Works out the import list with `names` added and returns the function that writes it. */
+async function prepareImports(w3: W3Api, names: string[]): Promise<() => Promise<void>> {
+  const root = w3.workspace.project()!.root;
+  const json = await w3.workspace.readText("map/war3map.imp.json").catch(() => null);
+  const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" }).catch(() => null) : null;
+  const { doc, asRaw } = planImports(json, raw, names);
+  if (asRaw) return async () => { await w3.backend.invoke("codec_write", { root, path: "map/war3map.imp", text: JSON.stringify(doc) }); };
+  const text = await w3.backend.invoke<string>("codec_canonicalize", { root, path: "map/war3map.imp.json", text: JSON.stringify(doc) });
+  return async () => { await w3.workspace.writeText("map/war3map.imp.json", text); };
 }
 
 /** The game's copy of a file from the Reforged set `source` (else the other one, else Classic's), for
@@ -503,11 +524,24 @@ async function readReforged(w3: W3Api, path: string, source: Source, modelPath =
   return { name, bytes };
 }
 
+/** A lookup of the map's files as they are now (the project's file list, read again). */
+async function freshLookup(w3: W3Api): Promise<FileLookup> {
+  const lookup = new FileLookup(w3);
+  await lookup.exists("war3mapImported", "file");
+  return lookup;
+}
+
 /** Imports Reforged models as they are (from the set `source`) at their own paths, with the textures
  *  `lacks` (the game paths a texture may have) says some mode doesn't have; a texture stored as .dds
  *  under another name is imported as .dds and the model renamed to it. A texture path of a build
- *  machine ("C:/Users/…/Art/HD//Doodads/…") is rewritten to the game path in it. Returns the bytes written. */
-async function importReforged(w3: W3Api, models: string[], source: Source, lacks: (candidates: string[]) => boolean): Promise<number> {
+ *  machine ("C:/Users/…/Art/HD//Doodads/…") is rewritten to the game path in it. A file the map
+ *  already has under an archive name is never written over (the user's own import stays). Returns the
+ *  bytes written. */
+async function importReforged(
+  w3: W3Api, root: string | undefined, models: string[], source: Source, lacks: (candidates: string[], inMap: (p: string) => boolean) => boolean,
+): Promise<number> {
+  const lookup = await freshLookup(w3);
+  const inMap = (p: string) => lookup.inMap(p.replace(/\//g, "\\"));
   const files = new Map<string, Uint8Array>();
   for (const model of models) {
     const { bytes } = await readReforged(w3, model, source);
@@ -515,62 +549,84 @@ async function importReforged(w3: W3Api, models: string[], source: Source, lacks
     for (const t of parseMdx(bytes).textures) {
       if (t.replaceableId || !t.path) continue;
       const candidates = textureCandidates(t.path, model);
-      if (lacks(candidates)) {
+      if (lacks(candidates, inMap)) {
         const tex = await readReforged(w3, t.path, source, model);
         const archive = tex.name.replace(/\//g, "\\");
-        files.set(archive, tex.bytes);
+        if (!inMap(archive)) files.set(archive, tex.bytes);
         if (archive.toLowerCase() !== t.path.replace(/\//g, "\\").toLowerCase()) renamed.set(t.path, archive);
       } else if (isMachinePath(t.path)) {
         const game = gamePartOf(t.path);
         if (game) renamed.set(t.path, game.replace(/\//g, "\\"));
       }
     }
-    files.set(model.replace(/\//g, "\\"), renamed.size ? renameTextures(bytes, (p) => renamed.get(p) ?? p) : bytes);
+    const archive = model.replace(/\//g, "\\");
+    if (!inMap(archive)) files.set(archive, renamed.size ? renameTextures(bytes, (p) => renamed.get(p) ?? p) : bytes);
   }
+  const applyImports = await prepareImports(w3, [...files.keys()]);
+  sameProject(w3, root);
   for (const [archive, bytes] of files) await w3.workspace.writeBytes(`map/${toProjectPath(archive)}`, bytes);
-  await addImports(w3, [...files.keys()]);
+  await applyImports();
   await w3.workspace.refresh();
   return [...files.values()].reduce((n, b) => n + b.length, 0);
 }
 
 /** Converts the type's Reforged models (every variation, from the set `source`) to Classic ones in
  *  the map (war3mapImported\Classic\<name>\…: the model as MDX 800, its colour textures as BLP, at
- *  most 512 px), lists them as imports and points the type's model field at them. Nothing is written
- *  unless every texture the new models name is among the files written. */
-async function convertToClassic(w3: W3Api, kind: string, base: string, id: string, model: string, variations: number, source: Source): Promise<number> {
+ *  most 512 px), lists them as imports and points the type's model field at them. The folder is a
+ *  free one (see chooseFolder). Nothing is written unless every texture the new models name is among
+ *  the files written, the object data and the import list can be changed, and the project is still
+ *  the one the problem was found in. */
+async function convertToClassic(
+  w3: W3Api, root: string | undefined, kind: string, base: string, id: string, model: string, variations: number, source: Source,
+): Promise<number> {
   const stem = model.replace(/\.(mdl|mdx)$/i, "").replace(/\//g, "\\");
   const name = stem.split("\\").pop()!;
-  const dir = `war3mapImported\\Classic\\${name}`;
-  const files = new Map<string, Uint8Array>();
-  // Where each source texture goes, and which names are taken.
-  const textures = new Map<string, { target: string; model: string }>();
-  const used = new Set<string>();
-  for (let v = 0; v < Math.max(1, variations); v++) {
+  const lookup = await freshLookup(w3);
+  const count = Math.max(1, variations);
+  const parsedModels: { modelPath: string; suffix: string; parsed: ReturnType<typeof parseMdx> }[] = [];
+  for (let v = 0; v < count; v++) {
     const suffix = variations > 1 ? String(v) : "";
     const modelPath = `${stem}${suffix}.mdx`;
-    const parsed = parseMdx((await readReforged(w3, modelPath, source)).bytes);
-    const mdx = toClassicMdx(parsed, (i) => {
-      const t = parsed.textures[i];
-      if (!t.path) return null;
-      const known = textures.get(t.path);
-      if (known) return known.target;
-      // The file name only: the path may be a build machine's.
-      const file = (t.path.split(/[\\/]/).pop() ?? "").replace(/\.\w+$/, "");
-      const target = uniqueName(dir, `${file}.blp`, used);
-      textures.set(t.path, { target, model: modelPath });
-      return target;
-    });
-    files.set(`${dir}\\${name}${suffix}.mdx`, mdx);
+    parsedModels.push({ modelPath, suffix, parsed: parseMdx((await readReforged(w3, modelPath, source)).bytes) });
   }
-  for (const [path, { target, model: owner }] of textures) {
+  // The converted textures, by source path (the same for every folder).
+  const blps = new Map<string, Uint8Array>();
+  const blpOf = async (path: string, owner: string) => {
+    const known = blps.get(path);
+    if (known) return known;
     const tex = await readReforged(w3, path, source, owner);
     const img = decodeImage(tex.bytes, tex.name);
     // The first level at most 512 px wide and high (Reforged textures are 1–2k).
     let k = 0;
     while (k < img.mipCount - 1 && Math.max(img.mip(k).width, img.mip(k).height) > 512) k++;
     const m = img.mip(k);
-    files.set(target, encodeBlp1Jpeg(m.width, m.height, m.rgba, 90, { alpha: true, mipmaps: true }));
-  }
+    const blp = encodeBlp1Jpeg(m.width, m.height, m.rgba, 90, { alpha: true, mipmaps: true });
+    blps.set(path, blp);
+    return blp;
+  };
+  const build = async (dir: string) => {
+    const files = new Map<string, Uint8Array>();
+    const textures = new Map<string, { target: string; owner: string }>();
+    const used = new Set<string>();
+    for (const { modelPath, suffix, parsed } of parsedModels) {
+      const mdx = toClassicMdx(parsed, (i) => {
+        const t = parsed.textures[i];
+        if (!t.path) return null;
+        const known = textures.get(t.path);
+        if (known) return known.target;
+        // The file name only: the path may be a build machine's.
+        const file = (t.path.split(/[\\/]/).pop() ?? "").replace(/\.\w+$/, "");
+        const target = uniqueName(dir, `${file}.blp`, used);
+        textures.set(t.path, { target, owner: modelPath });
+        return target;
+      });
+      files.set(`${dir}\\${name}${suffix}.mdx`, mdx);
+    }
+    for (const [path, { target, owner }] of textures) files.set(target, await blpOf(path, owner));
+    return files;
+  };
+  const existing = async (archive: string) => (lookup.inMap(archive) ? w3.workspace.readBytes(`map/${toProjectPath(archive)}`).catch(() => null) : null);
+  const { dir, files } = await chooseFolder(name, build, existing);
   // The converted models must find every texture they name, in the map.
   const have = new Set([...files.keys()].map((f) => f.toLowerCase()));
   for (const [file, bytes] of files) {
@@ -578,22 +634,14 @@ async function convertToClassic(w3: W3Api, kind: string, base: string, id: strin
     const missing = missingTextures(parseMdx(bytes).textures, (n) => have.has(n));
     if (missing.length) throw new Error(`${file}: texture ${missing[0]} was not written, nothing changed`);
   }
+  // Everything that can fail comes before the first write.
+  const applyImports = await prepareImports(w3, [...files.keys()]);
+  const applyModel = await prepareModel(w3, kind, base, id, modelFieldValue(kind, `${dir}\\${name}`), count);
+  sameProject(w3, root);
   for (const [archive, bytes] of files) await w3.workspace.writeBytes(`map/${toProjectPath(archive)}`, bytes);
-  await addImports(w3, [...files.keys()]);
-  await setModel(w3, kind, base, id, `${dir}\\${name}`, Math.max(1, variations));
+  await applyImports();
+  sameProject(w3, root);
+  await applyModel();
+  await w3.workspace.refresh();
   return [...files.values()].reduce((n, b) => n + b.length, 0);
-}
-
-/** Adds archive names to war3map.imp (either project form; created when missing). */
-async function addImports(w3: W3Api, names: string[]) {
-  const root = w3.workspace.project()!.root;
-  type Imports = { format?: string; version: number; files: { flags: number; path: string }[] };
-  const json = await w3.workspace.readText("map/war3map.imp.json").catch(() => null);
-  const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" }).catch(() => null) : null;
-  const doc: Imports = JSON.parse(json ?? raw ?? '{"format":"w3proj.imports/1","version":1,"files":[]}');
-  const have = new Set(doc.files.map((f) => f.path.toLowerCase()));
-  // Flag 21 as the Import Manager writes new entries.
-  for (const n of names) if (!have.has(n.toLowerCase())) doc.files.push({ flags: 21, path: n });
-  if (raw !== null) await w3.backend.invoke("codec_write", { root, path: "map/war3map.imp", text: JSON.stringify(doc) });
-  else await w3.workspace.writeText("map/war3map.imp.json", await w3.backend.invoke<string>("codec_canonicalize", { root, path: "map/war3map.imp.json", text: JSON.stringify(doc) }));
 }

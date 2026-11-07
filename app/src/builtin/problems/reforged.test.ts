@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { conversionSources, layerOrder, missingTextures, modelExists, readLayered, sourcesText, uniqueName } from "./reforged";
+import { conversionSources, layerOrder, missingTextures, readLayered, sourcesText, uniqueName } from "./reforged";
 import { textureCandidates } from "../../lib/model/texpath";
 
 /** A game with these full paths stored. */
@@ -53,14 +53,4 @@ test("missingTextures names the colour textures the map lacks", () => {
   const have = new Set(["d\\a.blp"]);
   const t = [{ path: "d\\A.blp", replaceableId: 0 }, { path: "C:/x/b.blp", replaceableId: 0 }, { path: "", replaceableId: 0 }, { path: "ReplaceableTextures\\TeamColor\\TeamColor00.blp", replaceableId: 1 }];
   assert.deepEqual(missingTextures(t, (n) => have.has(n)), ["C:/x/b.blp"]);
-});
-
-test("a type with variations names its model without the number", async () => {
-  const files = new Set(["m\\x0.mdx", "m\\x1.mdx"]);
-  const exists = async (p: string) => files.has(p.toLowerCase());
-  assert.equal(await modelExists("m\\X", 2, exists), true);
-  assert.equal(await modelExists("m\\X.mdl", 2, exists), true);
-  // Control: with one variation the number isn't added, so the file isn't found.
-  assert.equal(await modelExists("m\\X", 1, exists), false);
-  assert.equal(await modelExists("m\\Y", 2, exists), false);
 });

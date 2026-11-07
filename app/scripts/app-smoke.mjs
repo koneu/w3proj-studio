@@ -1625,7 +1625,7 @@ async function graphicsModes(page, found) {
   };
   await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
   // The doodads: a bridge, a wall end cap (two variations) and a tall pillar (nine), all with Reforged models.
-  const TYPES = ["LCcb", "YSw5", "LCpt"];
+  const TYPES = ["LCcb", "YSw5", "LCpt", "LCct"];
   const make = (name, modes) => {
     const root = join(dir, name);
     cpSync(FIXTURE, root, { recursive: true });
@@ -1671,9 +1671,18 @@ async function graphicsModes(page, found) {
     if (p.fixes.some((f) => /^Use a Classic model/.test(f))) fail("the old \"Use a Classic model\" label is still there");
     if (!p.fixes.some((f) => /^Replace with a Classic game model/.test(f))) fail(`no "Replace with a Classic game model" fix: ${p.fixes.join(", ")}`);
   }
+  // All at once, as a user clicking the buttons one after the other while the first still works:
+  // they have to queue, or the import list and the object data lose entries.
+  const errs = await Promise.all(TYPES.map((id) => fix(`(${id})`, "Convert")));
+  TYPES.forEach((id, i) => { if (errs[i]) fail(`converting ${id}: ${errs[i]}`); });
+  const objectData = async (root) => json(join(root, "map", "war3map.w3d.json"));
+  const imports = json(join(classic, "map", "war3map.imp.json")).files.map((f) => f.path.toLowerCase());
+  const w3d = await objectData(classic);
   for (const id of TYPES) {
-    const err = await fix(`(${id})`, "Convert");
-    if (err) fail(`converting ${id}: ${err}`);
+    if (!w3d.original.some((o) => o.base === id && o.mods.some((m) => m.field === "dfil" && /^war3mapImported.Classic/.test(m.value)))) fail(`${id}'s model is not in the object data after converting all at once`);
+  }
+  for (const stem of ["capitalbridge0", "citywallendcap0", "pillartall0"]) {
+    if (!imports.some((p) => p.includes(`classic${String.fromCharCode(92)}${stem}`) || p.includes(stem))) fail(`${stem} is missing from the import list after converting all at once`);
   }
   list = await check();
   if (list.length) fail(`after converting, still reported: ${list.map((p) => p.message).join(" | ").slice(0, 600)}`);
@@ -1695,28 +1704,70 @@ async function graphicsModes(page, found) {
   if (list.length) fail(`after importing, still reported: ${list.map((p) => p.message).join(" | ").slice(0, 600)}`);
   verify(hd, "hd");
 
-  // ---- The picker: a model of another graphics mode is converted ---------------------------
+  // ---- The picker: a model of another graphics mode is converted, for the one type only --------
+  /** Opens the picker from the fix of the type `id`, chooses the model whose path has all `words`
+   *  in the set `mode`, and answers with what the fix said. */
+  const pickFor = async (id, mode, words) => {
+    await page.evaluate(`(async () => {
+      const svc = await w3.services.get("w3.problems");
+      const p = svc.problems().find((q) => q.message.includes("(${id})"));
+      window.__picked = p.fixes.find((f) => f.label.startsWith("Replace with a Classic game model")).run().then(() => "done", (e) => String(e && e.message || e));
+    })()`);
+    await until("the picker", () => page.evaluate(`!!document.querySelector(".model-pick")`));
+    const modes = await page.evaluate(`[...document.querySelectorAll(".model-pick select.model-pick-mode option")].map((o) => o.value)`);
+    if (modes.join() !== "classic,de,hd") fail(`the picker offers the modes ${modes.join()}`);
+    await page.evaluate(`(() => { const s = document.querySelector(".model-pick select.model-pick-mode"); s.value = "${mode}"; s.dispatchEvent(new Event("change")); })()`);
+    await page.evaluate(`(() => { const i = document.querySelector(".model-pick input.model-pick-search"); i.value = "${words}"; i.dispatchEvent(new Event("input")); })()`);
+    if (!(await page.evaluate(`document.querySelectorAll(".model-pick .model-pick-row").length`))) fail(`the ${mode} list of the picker has nothing for ${words}`);
+    await page.evaluate(`[...document.querySelectorAll(".model-pick button")].find((b) => /Use this model/.test(b.textContent)).click()`);
+    return page.evaluate(`window.__picked`);
+  };
   const pick = make("pick", 1);
+  // A user's own import in the folder the first conversion would take, which must stay as it is.
+  const mine = join(pick, "map", "war3mapImported", "Classic", "GrassBridgeExtraLarge45");
+  mkdirSync(mine, { recursive: true });
+  writeFileSync(join(mine, "GrassBridgeExtraLarge45.mdx"), "my own model");
   await openProject(pick);
+  await check();
+  const w3dBefore = existsSync(join(pick, "map", "war3map.w3d.json")) ? readFileSync(join(pick, "map", "war3map.w3d.json"), "utf8") : null;
+  let picked = await pickFor("LCct", "de", "citybridgeextralarge45 grassbridge");
+  if (picked !== "done") fail(`choosing a DE model failed: ${picked}`);
+  let after1 = await objectData(pick);
+  if (after1.original.some((o) => o.base !== "LCct")) fail(`the picker opened from LCct changed other types: ${after1.original.map((o) => o.base).join()} (before: ${w3dBefore ? "a file" : "none"})`);
+  if (!after1.original.some((o) => o.base === "LCct")) fail("the picker opened from LCct did not change LCct");
+  list = await check();
+  if (list.some((p) => p.message.includes("(LCct)"))) fail("after choosing a DE model, the type is still reported");
+  if (!list.some((p) => p.message.includes("(LCcb)"))) fail("a type the picker was not opened for lost its problem");
+  if (readFileSync(join(mine, "GrassBridgeExtraLarge45.mdx"), "utf8") !== "my own model") fail("a conversion overwrote the user's own import");
+  // The same file name from another folder gets another folder.
+  picked = await pickFor("LCcb", "de", "overgrownbridgeextralarge45 grassbridge");
+  if (picked !== "done") fail(`choosing the second DE model failed: ${picked}`);
+  after1 = await objectData(pick);
+  const dfil = (base) => after1.original.find((o) => o.base === base)?.mods.find((m) => m.field === "dfil")?.value;
+  if (!dfil("LCct") || !dfil("LCcb") || dfil("LCct") === dfil("LCcb")) fail(`two models with one file name share a folder: ${dfil("LCct")} / ${dfil("LCcb")}`);
+  const classicFiles = await page.evaluate(`w3.workspace.files().map((f) => f.path.toLowerCase()).filter((p) => p.includes("classic/grassbridgeextralarge45"))`);
+  if (classicFiles.length < 3) fail(`the conversions left ${classicFiles.length} files in their folders`);
+
+  // ---- A fix does not write into another project opened since the check ------------------------
+  const away = make("away", 1);
+  await openProject(away);
   await check();
   await page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
-    const p = svc.problems().find((q) => q.message.includes("(LCcb)"));
-    window.__picked = p.fixes.find((f) => f.label.startsWith("Replace with a Classic game model")).run().then(() => "done", (e) => String(e && e.message || e));
+    window.__old = svc.problems().find((q) => q.message.includes("(LCcb)")).fixes.find((f) => f.label.startsWith("Convert"));
   })()`);
-  await until("the picker", () => page.evaluate(`!!document.querySelector(".model-pick")`));
-  const modes = await page.evaluate(`[...document.querySelectorAll(".model-pick select.model-pick-mode option")].map((o) => o.value)`);
-  if (modes.join() !== "classic,de,hd") fail(`the picker offers the modes ${modes.join()}`);
-  await page.evaluate(`(() => { const s = document.querySelector(".model-pick select.model-pick-mode"); s.value = "de"; s.dispatchEvent(new Event("change")); })()`);
-  const rows = await page.evaluate(`document.querySelectorAll(".model-pick .model-pick-row").length`);
-  if (!rows) fail("the DE list of the picker is empty");
-  await page.evaluate(`(() => { const i = document.querySelector(".model-pick input.model-pick-search"); i.value = "CapitalBridge0"; i.dispatchEvent(new Event("input")); })()`);
-  await page.evaluate(`[...document.querySelectorAll(".model-pick button")].find((b) => /Use this model/.test(b.textContent)).click()`);
-  const picked = await page.evaluate(`window.__picked`);
-  if (picked !== "done") fail(`choosing a DE model failed: ${picked}`);
-  list = await check();
-  if (list.some((p) => p.message.includes("(LCcb)"))) fail("after choosing a DE model, the type is still reported");
-  if (!(await page.evaluate(`w3.workspace.files().some((f) => f.path.toLowerCase().includes("classic/capitalbridge0/capitalbridge0.mdx"))`))) fail("the chosen DE model was not converted into the map");
+  await openProject(hd);
+  const refused = await page.evaluate(`window.__old.run().then(() => null, (e) => String(e && e.message || e))`);
+  if (!refused || !/Another project/.test(refused)) fail(`a fix from another project ran in this one (${refused})`);
+  if (await page.evaluate(`w3.workspace.files().some((f) => f.path.toLowerCase().includes("classic/capitalbridge"))`)) fail("a fix from another project wrote into this one");
+
+  // ---- An editor that can't open a file offers to copy the message --------------------------
+  writeFileSync(join(hd, "map", "war3mapImported", "broken.mdx"), "not a model");
+  await openProject(hd);
+  await page.evaluate(`w3.editors.open("map/war3mapImported/broken.mdx", "w3.modelViewer").catch(() => {})`);
+  const errView = await until("the editor's error", () => page.evaluate(`!!document.querySelector(".editor-error button.copy-error")`)).catch(() => false);
+  if (!errView) fail("an editor's error view has no Copy button");
+  await page.evaluate(`w3.editors.closeAll()`);
 
   // ---- Another project drops the first one's problems ---------------------------------------
   await openProject(make("stale", 1));

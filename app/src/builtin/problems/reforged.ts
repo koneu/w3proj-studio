@@ -52,15 +52,6 @@ export function missingTextures(textures: { path: string; replaceableId: number 
   return textures.filter((t) => !t.replaceableId && t.path && !have(t.path.replace(/\//g, "\\").toLowerCase())).map((t) => t.path);
 }
 
-/** Whether a model path given in object data names a model when the type has `variations` of them:
- *  the game appends the number, so "X" means X0.mdx, X1.mdx… `exists` tells whether a file does. */
-export async function modelExists(path: string, variations: number, exists: (p: string) => Promise<boolean>): Promise<boolean> {
-  if (await exists(path)) return true;
-  if (variations <= 1) return false;
-  const stem = path.replace(/\.(mdl|mdx)$/i, "");
-  return exists(`${stem}0.mdx`);
-}
-
 /** The models to say in the message: "the DE model X (or HD)". */
 export function sourcesText(sources: Source[], firstPath: string): string {
   if (!sources.length) return "";
