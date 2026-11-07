@@ -75,6 +75,8 @@ export interface TerrainToolGroupInstance {
   toolbar: HTMLElement;
   activate?(): void;
   deactivate?(): void;
+  /** Select In Tool Palette: makes this placed object's type the one the group's palette has chosen, as if picked there. False when the group can't use it. */
+  select?(what: { kind: string; id: string; player?: number }): Promise<boolean>;
   /** Left button pressed on the map; return true to take the drag (no selection box). */
   pointerDown?(p: TerrainPointer): boolean;
   /** Pointer moved over the map (`p.down` while a taken drag is in progress). */

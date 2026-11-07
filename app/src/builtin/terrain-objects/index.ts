@@ -184,6 +184,17 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     update();
     ed.focus();
   };
+  const select = async (what: { kind: string; id: string; player?: number }) => {
+    if (what.id === START.id) placing = START;
+    else {
+      const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+      placing = { kind: what.kind, id: what.id, name: await objects.name(what.id, [what.kind]).catch(() => undefined) ?? what.id };
+    }
+    if (what.kind === "w3u" && typeof what.player === "number" && what.player >= 0 && what.player < 28) { owner = what.player; ownerSel.value = String(owner); }
+    update();
+    void showGhost(null);
+    return true;
+  };
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "Choose a unit, item, doodad or destructable", onclick: () => void choose() }, "Place…"),
     h("button", { title: "Place or move a player's start location; saving adds, moves or removes the map's players to match",
@@ -199,6 +210,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
 
   return {
     toolbar,
+    select,
     activate() { if (!placing) void choose(); },
     deactivate() { ed.setBrush(null); void showGhost(null); },
     pointerDown(p) {

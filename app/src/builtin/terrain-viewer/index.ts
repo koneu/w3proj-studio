@@ -5,8 +5,9 @@ import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
-import { TerrainToolRegistry } from "./toolhost";
+import { TerrainToolRegistry, type ViewCommands } from "./toolhost";
 import { h } from "../../workbench/dom";
+import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
@@ -149,6 +150,19 @@ async function readGroundTexture(w3: W3Api, doc: EditorDocument, path: string): 
 
 /** What Ctrl+C took: stays over tabs, so it can go into another open map. */
 let clipboard: Fragment | null = null;
+
+/** The View commands: id and what each does to an editor; text back is what to tell the person. */
+const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<string | null>][] = [
+  ["w3.terrain.viewSelection", (v) => v.viewSelection()],
+  ["w3.terrain.viewEntireMap", (v) => { v.viewEntireMap(); return null; }],
+  ["w3.terrain.selectInPalette", (v) => v.selectInPalette()],
+  ["w3.terrain.toggleNavalPathing", (v) => { v.toggleLayer("naval"); return null; }],
+  ["w3.terrain.toggleHeightMap", (v) => { v.toggleLayer("heights"); return null; }],
+  ["w3.terrain.toggleCameraObjects", (v) => { v.toggleLayer("cameras"); return null; }],
+  ["w3.terrain.toggleSmallGrid", (v) => { v.toggleGrid("small"); return null; }],
+  ["w3.terrain.toggleMediumGrid", (v) => { v.toggleGrid("medium"); return null; }],
+  ["w3.terrain.toggleLargeGrid", (v) => { v.toggleGrid("large"); return null; }],
+];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
@@ -914,6 +928,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const look = toolGroups.look.get(projectTerrain(w3) ?? "");
       if (look && toolGroups.pendingLook) { look(x, y, pick); toolGroups.pendingLook = null; }
     }),
+    // The View commands act on the terrain editor that has the focus (else the project's open one).
+    ...viewCommandList.map(([id, run]) => w3.commands.register(id, async () => {
+      const path = w3.editors.activePath();
+      const view = (path ? toolGroups.viewCommands.get(path) : undefined) ?? toolGroups.viewCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("Switch to a terrain editor first.");
+      const why = await run(view);
+      if (why) void w3.window.showInfo(why);
+    })),
     w3.commands.register("w3.terrain.resetVariations", async () => {
       const path = w3.editors.activePath();
       const reset = path ? toolGroups.resetVariations.get(path) : undefined;
@@ -1101,6 +1123,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (e.terrain && areaPanel) void showAreaPanel();
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
+          refreshLayersSoon();
           doc.setDirty(mark.isDirty(at));
           redraw();
         };
@@ -2198,7 +2221,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The same order as for several objects below, with Delete last.
             h("div.terrain-sel-actions.wrap", {},
               h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
+              h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => void viewSelection() }, "View"),
               ...(editable ? [
+                h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); }) }, "Select in palette"),
                 h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(),
                 h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
               ] : [])),
@@ -2851,6 +2876,108 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (toolGroups.pendingLook) { const [px, py, pref] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py, pref)); }
         if (editable) queueMicrotask(syncGroups);
 
+        // ---- View commands: View Selection, View Entire Map, Select In Tool Palette, grids and layers -----------
+        const viewState = { grid: "none" as GridSize, naval: false, heights: false, cameras: false };
+        /** Redraws the toolbar's boxes after a command changed what they show. */
+        const viewSyncs: (() => void)[] = [];
+        const maxDistance = () => terrain.width * 300;
+        const cornerHeights = (x0: number, y0: number, x1: number, y1: number) => {
+          const zs: number[] = [];
+          for (let y = Math.max(0, y0); y <= Math.min(terrain.height - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(terrain.width - 1, x1); x++) zs.push(terrain.corners[y * terrain.width + x].height);
+          return zs.length ? [Math.min(...zs), Math.max(...zs)] : [0, 0];
+        };
+        const frameBox = (box: Box, opts: { margin?: number; minDistance?: number }) => {
+          const v = viewOfBox(box, renderer, canvas.clientWidth / Math.max(1, canvas.clientHeight), { ...opts, maxDistance: maxDistance() });
+          renderer.target = v.target;
+          renderer.distance = v.distance;
+          redraw();
+        };
+        const viewEntireMap = () => {
+          const [lo, hi] = cornerHeights(0, 0, terrain.width, terrain.height);
+          frameBox({ minX: terrain.offsetX, maxX: terrain.offsetX + (terrain.width - 1) * 128, minY: terrain.offsetY, maxY: terrain.offsetY + (terrain.height - 1) * 128, minZ: lo, maxZ: hi }, { margin: 1.05, minDistance: 200 });
+        };
+        /** The camera moves to what's selected: the selected objects, else the area drawn on the ground. */
+        const viewSelection = (): string | null => {
+          const entries = selectedEntries();
+          if (entries.length) {
+            const box = boxOf(entries.map((e) => e.position), 96);
+            if (box) { frameBox(box, { margin: 1.3, minDistance: 700 }); return null; }
+          }
+          if (terrainArea) {
+            const a = terrainArea, [lo, hi] = cornerHeights(a.x0, a.y0, a.x1, a.y1);
+            frameBox({ minX: terrain.offsetX + a.x0 * 128, maxX: terrain.offsetX + a.x1 * 128, minY: terrain.offsetY + a.y0 * 128, maxY: terrain.offsetY + a.y1 * 128, minZ: lo, maxZ: hi }, { margin: 1.15, minDistance: 500 });
+            return null;
+          }
+          return "Nothing is selected: click an object, or select an area, first.";
+        };
+        const kindOfPlaced = (p: Placed) => renderer.batches.flatMap((b) => b.instances).find((i) => i.pick?.placed === p)?.pick?.kind;
+        /** The selected object's type becomes what the Objects tab places, and that tab opens. */
+        const selectInPalette = async (): Promise<string | null> => {
+          const first = selectedEntries()[0];
+          if (!first) return "Nothing is selected: click an object first.";
+          if (!editable) return "This terrain is read-only: it has no tool palette.";
+          const kind = kindOfPlaced(first);
+          const palette = groupInsts.get("objects");
+          if (!kind || !palette?.select) return "The Objects palette isn't available.";
+          const ok = await palette.select({ kind, id: first.id, player: (first as { player?: number }).player });
+          if (!ok) return "The Objects palette can't take this object.";
+          showTab("objects");
+          return null;
+        };
+        // The layers share one picture over the ground; it is made again after edits and saves, once they stop.
+        let layerSeq = 0, layerTimer: ReturnType<typeof setTimeout> | undefined;
+        const refreshLayers = async () => {
+          const seq = ++layerSeq;
+          if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); redraw(); return; }
+          const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
+          // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
+          const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
+          const show = () => {
+            if (seq !== layerSeq) return;
+            const rgba = composeLayers(parts);
+            if (rgba) renderer.setViewLayer(rgba, W, H); else renderer.setViewLayer(null);
+            redraw();
+          };
+          show();
+          const late: Promise<void>[] = [];
+          if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
+          if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
+          const failed = (await Promise.allSettled(late)).find((r): r is PromiseRejectedResult => r.status === "rejected");
+          if (failed && seq === layerSeq) w3.window.showError(`The view layers couldn't be drawn: ${(failed.reason as Error)?.message ?? failed.reason}`);
+        };
+        const refreshLayersSoon = () => {
+          if (!viewState.naval && !viewState.heights && !viewState.cameras) return;
+          clearTimeout(layerTimer);
+          layerTimer = setTimeout(() => void refreshLayers(), 400);
+        };
+        const applyGrid = () => {
+          // The tile grid is the ground's own mesh, so it follows cliffs and ramps; the others are lines per pixel.
+          renderer.wireframe = viewState.grid === "medium";
+          renderer.gridStep = viewState.grid === "small" || viewState.grid === "large" ? GRID_STEP[viewState.grid] : 0;
+          redraw();
+        };
+        const setGrid = (g: GridSize) => { viewState.grid = g; applyGrid(); viewSyncs.forEach((f) => f()); };
+        const toggleLayer = (layer: "naval" | "heights" | "cameras") => {
+          viewState[layer] = !viewState[layer];
+          viewSyncs.forEach((f) => f());
+          void refreshLayers();
+          return viewState[layer];
+        };
+        const viewCommands: ViewCommands = {
+          viewSelection, viewEntireMap, selectInPalette, toggleLayer,
+          toggleGrid: (size) => { setGrid(toggleGrid(viewState.grid, size)); return viewState.grid; },
+          state: () => ({ ...viewState, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance } }),
+        };
+        toolGroups.viewCommands.set(doc.path, viewCommands);
+        const layerToggle = (label: string, title: string, layer: "naval" | "heights" | "cameras") => {
+          const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); } });
+          viewSyncs.push(() => { box.checked = viewState[layer]; });
+          return h("label.model-toggle", { title }, box, ` ${label}`);
+        };
+        const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => setGrid(gridSelect.value as GridSize) },
+          ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
+        viewSyncs.push(() => { gridSelect.value = viewState.grid; });
+
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
           const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); } });
           return h("label.model-toggle", {}, box, ` ${label}`);
@@ -2866,13 +2993,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
               toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
               h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
-              toggle("Tile grid", () => renderer.wireframe, (v) => { renderer.wireframe = v; }),
+              gridSelect,
+              layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights"),
+              layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval"),
+              layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras"),
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
               toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
               skySelect,
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
+              h("button", { title: "View Entire Map", onclick: () => viewEntireMap() }, "⛶"),
+              h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); } }, "◎"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas, labelLayer)),
@@ -3340,6 +3472,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
+            if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);
+            clearTimeout(layerTimer);
+            layerSeq++;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             if (opened?.screenshot === takeScreenshot) opened = null;

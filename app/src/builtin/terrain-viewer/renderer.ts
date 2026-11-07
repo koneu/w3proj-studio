@@ -133,6 +133,25 @@ precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
 ${FOG_FS}
 void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
 
+// Grid lines over the ground, drawn per pixel so any map size costs the same: lines every uStep world units
+// from the map's corner, fading out once the cells are too small to tell apart.
+const GRID_VS = `#version 300 es
+in vec3 aPos;
+uniform mat4 uViewProj;
+out vec2 vW;
+${FOG_VS}
+void main() { vW = aPos.xy; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+const GRID_FS = `#version 300 es
+precision mediump float; in vec2 vW; uniform vec2 uOrigin; uniform float uStep; uniform vec4 uColor; out vec4 outColor;
+${FOG_FS}
+void main() {
+  vec2 g = (vW - uOrigin) / uStep, w = max(fwidth(g), vec2(1e-6));
+  vec2 d = abs(fract(g - 0.5) - 0.5) / w;
+  float line = (1.0 - min(min(d.x, d.y), 1.0)) * (1.0 - smoothstep(0.2, 0.45, max(w.x, w.y)));
+  if (line < 0.02) discard;
+  outColor = vec4(fogged(uColor.rgb), uColor.a * line);
+}`;
+
 /** A ground-following circle (selection, brush outline). */
 export interface Ring {
   x: number;
@@ -233,6 +252,12 @@ export class TerrainRenderer {
   /** The dark over the map's border: its own layer, as tools use the overlay. */
   private border: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
   showBorder = true;
+  /** What the View toggles show over the ground (Height Map, Pathing - Naval, Camera Objects), one texture; tools keep `overlay`. */
+  private viewLayer: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
+  /** Grid lines every this many world units (0: none). */
+  gridStep = 0;
+  private gridProg: WebGLProgram | null = null;
+  private gridMesh: { vao: WebGLVertexArrayObject; count: number } | null = null;
   /** The map's fog, and whether it's shown. */
   fog: Fog | null = null;
   showFog = true;
@@ -334,6 +359,8 @@ export class TerrainRenderer {
     this.wire = this.buildWire();
     if (this.overlay) this.overlay = { ...this.overlayMesh(), tex: this.overlay.tex };
     if (this.border) this.border = { ...this.overlayMesh(), tex: this.border.tex };
+    if (this.viewLayer) this.viewLayer = { ...this.overlayMesh(), tex: this.viewLayer.tex };
+    if (this.gridMesh) { gl.deleteVertexArray(this.gridMesh.vao); this.gridMesh = null; }
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
   }
@@ -553,19 +580,21 @@ export class TerrainRenderer {
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather } = this;
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep } = this;
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
     this.wireframe = false;
     this.overlay = null;
+    this.viewLayer = null;
+    this.gridStep = 0;
     this.showBorder = false;
     this.showFog = false;
     this.showSky = false;
     this.showWeather = false;
     return () => {
       this.setGroundOverlay(null);
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather });
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep });
     };
   }
 
@@ -582,6 +611,19 @@ export class TerrainRenderer {
       this.overlay = { ...this.overlayMesh(), tex };
     }
     this.uploadOverlay(this.overlay.tex, rgba, width, height);
+  }
+
+  /** The View toggles' picture (one texel per pathing cell, rows from the south); null removes it. */
+  setViewLayer(rgba: Uint8Array | null, width = 0, height = 0) {
+    const gl = this.gl;
+    if (!rgba) {
+      if (this.viewLayer) { gl.deleteVertexArray(this.viewLayer.vao); gl.deleteTexture(this.viewLayer.tex); }
+      this.viewLayer = null;
+      return;
+    }
+    this.overlayProg ??= compile(gl, OVERLAY_VS, OVERLAY_FS);
+    this.viewLayer ??= { ...this.overlayMesh(), tex: gl.createTexture()! };
+    this.uploadOverlay(this.viewLayer.tex, rgba, width, height);
   }
 
   /** The border's shade, one texel per tile. */
@@ -603,8 +645,8 @@ export class TerrainRenderer {
   }
 
   /** Ground-hugging tile quads for the overlay (positions only). */
-  private overlayMesh(): { vao: WebGLVertexArrayObject; count: number } {
-    const t = this.terrain, gl = this.gl, prog = this.overlayProg!;
+  private overlayMesh(prog = this.overlayProg!): { vao: WebGLVertexArrayObject; count: number } {
+    const t = this.terrain, gl = this.gl;
     const pos = new Float32Array(t.width * t.height * 3);
     for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
       const o = (y * t.width + x) * 3;
@@ -904,7 +946,7 @@ export class TerrainRenderer {
       gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.offset * 4);
     }
 
-    for (const layer of [this.overlay, this.showBorder ? this.border : null]) {
+    for (const layer of [this.viewLayer, this.overlay, this.showBorder ? this.border : null]) {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
@@ -922,6 +964,8 @@ export class TerrainRenderer {
       gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
       gl.depthMask(true);
     }
+
+    if (this.gridStep > 0) this.drawGrid(viewProj);
 
     // Building ground marks, on the ground under the objects.
     if (this.splats.length && !this.hiddenGroups.has("units")) {
@@ -1020,6 +1064,26 @@ export class TerrainRenderer {
     }
     gl.enable(gl.DEPTH_TEST);
     gl.bindVertexArray(null);
+  }
+
+  /** Grid lines over the ground; the larger the cell, the stronger the line. */
+  private drawGrid(viewProj: Mat4) {
+    const gl = this.gl, t = this.terrain;
+    this.gridProg ??= compile(gl, GRID_VS, GRID_FS);
+    this.gridMesh ??= this.overlayMesh(this.gridProg);
+    gl.useProgram(this.gridProg);
+    setFog(gl, (name) => gl.getUniformLocation(this.gridProg as WebGLProgram, name), null);
+    gl.uniformMatrix4fv(gl.getUniformLocation(this.gridProg, "uViewProj"), false, viewProj);
+    gl.uniform2f(gl.getUniformLocation(this.gridProg, "uOrigin"), t.offsetX, t.offsetY);
+    gl.uniform1f(gl.getUniformLocation(this.gridProg, "uStep"), this.gridStep);
+    const colour = this.gridStep >= 512 ? [1, 0.9, 0.3, 0.95] : this.gridStep >= 128 ? [1, 1, 1, 0.7] : [0.75, 0.9, 1, 0.45];
+    gl.uniform4fv(gl.getUniformLocation(this.gridProg, "uColor"), colour);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    gl.bindVertexArray(this.gridMesh.vao);
+    gl.drawElements(gl.TRIANGLES, this.gridMesh.count, gl.UNSIGNED_INT, 0);
+    gl.depthMask(true);
   }
 
   dispose() {

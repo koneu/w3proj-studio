@@ -111,6 +111,7 @@ async function newMaps(page, found) {
         throw new Error(`no map at ${map}: ${await page.evaluate(`[...document.querySelectorAll(".notification, .toast, .notifications *")].map((e) => e.textContent).join(" | ").slice(0, 300)`)}`);
       }
       await sleep(300);
+      if (args.water === "deep") await viewCommands(page, fail, join(work, "view-shots"));
       const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
 
@@ -322,6 +323,111 @@ async function terrainWiring(page, found) {
   } finally {
     await gated.release();
   }
+}
+
+/** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
+ *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
+ *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
+async function viewCommands(page, fail, shots) {
+  const bad = (what) => fail(`view commands: ${what}`);
+  mkdirSync(shots, { recursive: true });
+  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
+  const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+  /** The map's part of the window, as PNG data. */
+  const picture = async (name) => {
+    await sleep(700);
+    const r = await page.evaluate(`(() => { const b = document.querySelector(".model-stage canvas").getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height, scale: 1 }; })()`);
+    const shot = await page.send("Page.captureScreenshot", { format: "png", clip: r });
+    writeFileSync(join(shots, `${name}.png`), Buffer.from(shot.data, "base64"));
+    return shot.data;
+  };
+  /** How many pixels two pictures differ in, by more than rounding: counted in the page, which can decode PNGs. */
+  const differ = (a, b) => page.evaluate(`(async () => {
+    const load = (data) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + data; });
+    const pixels = async (data) => { const i = await load(data), c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d"); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+    const [p, q] = await Promise.all([pixels(${JSON.stringify(a)}), pixels(${JSON.stringify(b)})]);
+    let n = 0;
+    for (let i = 0; i < p.length; i += 4) if (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]) > 24) n++;
+    return n;
+  })()`);
+  // No water (it ripples) and no animation, so that the same view is the same picture.
+  await page.evaluate(`w3.settings.set("terrain.animate", false)`);
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
+  await sleep(300);
+  const start = await state();
+  if (!start) return bad("the terrain editor has no view commands");
+  // A camera object to see (close to the unit placed at 256, 0), kept to put back.
+  const cameras = await page.evaluate(`w3.workspace.readText("map/war3map.w3c.json")`);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3c.json", JSON.stringify({ format: "w3proj.cameras/1", version: 3, cameras: [{ name: "Smoke Camera", targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 600, roll: 0, fieldOfView: 70, farZ: 5000, nearZ: 100 }] }))`);
+  // Closing the toasts: they sit over the map.
+  await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
+
+  /** Each of these changes the picture, and pressing it again brings the plain picture back. */
+  const trial = async (plain, noise, id, key, name, least) => {
+    const err = await run(id);
+    if (err) return bad(`${id}: ${err}`);
+    const on = await state();
+    if (!on[key] || (key === "grid" && on.grid !== name.slice(5))) bad(`${id} didn't switch ${key} on (${JSON.stringify(on[key])})`);
+    const changed = await differ(plain, await picture(name));
+    if (changed < least + noise) bad(`${name} changed ${changed} pixels on screen`);
+    await run(id);
+    if (key === "grid" ? (await state()).grid !== "none" : (await state())[key]) bad(`${id} twice left ${key} on`);
+    const back = await differ(plain, await picture(`${name}-off`));
+    if (back > noise + 100) bad(`${name} off isn't the plain picture again (${back} pixels differ)`);
+  };
+  /** The same view twice differs by almost nothing: the control that tells a layer's difference from noise. */
+  const settle = async (name) => {
+    // Textures and models load while the first pictures are taken: let the view settle first.
+    await sleep(1500);
+    await picture(`${name}-warmup`);
+    const plain = await picture(name), noise = await differ(plain, await picture(`${name}-again`));
+    if (noise > 200) bad(`the same view gave two pictures ${noise} pixels apart, so no layer can be judged`);
+    return { plain, noise };
+  };
+
+  // The whole map, water and all: the layers that cover ground.
+  await run("w3.terrain.viewEntireMap");
+  const far = await settle("plain");
+  await trial(far.plain, far.noise, "w3.terrain.toggleNavalPathing", "naval", "naval", 2000);
+  await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
+
+  // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
+  await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
+  await sleep(300);
+  const nothing = await run("w3.terrain.viewSelection");
+  if (nothing) bad(`View Selection with a selection: ${nothing}`);
+  const near = await state();
+  if (Math.hypot(near.camera.target[0] - 256, near.camera.target[1]) > 120) bad(`View Selection looks at ${near.camera.target}`);
+  const close = await settle("selection");
+  await trial(close.plain, close.noise, "w3.terrain.toggleCameraObjects", "cameras", "cameras", 150);
+  await trial(close.plain, close.noise, "w3.terrain.toggleSmallGrid", "grid", "grid-small", 400);
+  await trial(close.plain, close.noise, "w3.terrain.toggleMediumGrid", "grid", "grid-medium", 400);
+  await trial(close.plain, close.noise, "w3.terrain.toggleLargeGrid", "grid", "grid-large", 400);
+  // The grid box in the toolbar and the commands are the same thing.
+  await run("w3.terrain.toggleSmallGrid");
+  const shown = await page.evaluate(`document.querySelector('select[title^="Grid"] option:checked')?.textContent`);
+  await run("w3.terrain.toggleSmallGrid");
+  if (!/^Small grid/.test(shown ?? "")) bad(`the grid box said "${shown}" after Toggle Small Grid`);
+
+  // The whole map is in view from further away than an object, and centred (new maps lie around the origin).
+  const err = await run("w3.terrain.viewEntireMap");
+  if (err) bad(`View Entire Map: ${err}`);
+  const whole = await state();
+  if (Math.hypot(whole.camera.target[0], whole.camera.target[1]) > 200) bad(`View Entire Map looks at ${whole.camera.target}`);
+  if (!(near.camera.distance < whole.camera.distance / 2)) bad(`View Selection stays far away (${near.camera.distance} against ${whole.camera.distance})`);
+  await picture("entire-map");
+  // Select In Tool Palette: the Objects tab opens, with the unit's type chosen.
+  await run("w3.terrain.selectInPalette");
+  await sleep(300);
+  const tab = await page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent`), hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
+  if (tab !== "Objects") bad(`Select In Tool Palette left the "${tab}" tab open`);
+  if (!/Placing .*hfoo/.test(hint ?? "")) bad(`the Objects tab says "${hint}" after Select In Tool Palette`);
+  await picture("palette");
+  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select").click()`);
+  await sleep(200);
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3c.json", ${JSON.stringify(cameras)})`);
+  await page.evaluate(`w3.settings.set("terrain.animate", true)`);
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
 }
 
 /** The New Map dialog and the terrain painter, by mouse and keyboard. */

@@ -5,6 +5,19 @@ import type { PlacedRef } from "./pickmatch";
 
 import type { TerrainService, TerrainToolGroup } from "../../extensions/services";
 
+/** The View commands of one open terrain editor. Each returns what to tell the person when it can't run, else null. */
+export interface ViewCommands {
+  viewSelection(): string | null;
+  viewEntireMap(): void;
+  selectInPalette(): Promise<string | null>;
+  /** Pathing - Naval, Height Map, Camera Objects: flips the layer and returns whether it's shown now. */
+  toggleLayer(layer: "naval" | "heights" | "cameras"): boolean;
+  /** Small, Medium or Large Grid Display: the same size again switches the grid off. Returns the grid shown now. */
+  toggleGrid(size: "small" | "medium" | "large"): "none" | "small" | "medium" | "large";
+  /** What is shown, for the status line and tests. */
+  state(): { grid: "none" | "small" | "medium" | "large"; naval: boolean; heights: boolean; cameras: boolean; camera: { target: [number, number, number]; distance: number } };
+}
+
 type Point = { x: number; y: number; object?: unknown };
 type PickObjects = { file: "units" | "doodads"; accept(entry: unknown): boolean; radius?: number };
 
@@ -23,6 +36,8 @@ export class TerrainToolRegistry implements TerrainService {
   readonly look = new Map<string, (x: number, y: number, ref?: PlacedRef) => void>();
   /** Set by each open terrain editor, by its file: Reset Texture Variations, as one undo step; false when nothing changed. */
   readonly resetVariations = new Map<string, () => boolean>();
+  /** Set by each open terrain editor, by its file: the View commands (command palette) on that editor. */
+  readonly viewCommands = new Map<string, ViewCommands>();
   /** A point to show once the terrain editor has opened. */
   pendingLook: [number, number, PlacedRef?] | null = null;
 

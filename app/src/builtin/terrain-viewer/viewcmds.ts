@@ -1,0 +1,124 @@
+// What the terrain viewer's View commands work out, with no editor state: where the camera goes to
+// show a selection or the whole map, which grid is drawn, and the picture of the toggled layers.
+// The viewer passes what it read; the tests pass made-up maps.
+
+import { NO_WATER } from "../../lib/terrain/pathing";
+
+export interface Box { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number }
+/** The camera's direction: `yaw` and `pitch` point from the target to the eye, `fov` is vertical. */
+export interface Angle { yaw: number; pitch: number; fov: number }
+
+/** The box around points (x, y, z), grown by `pad` in x and y. Null for none. */
+export function boxOf(points: readonly (readonly number[])[], pad = 0): Box | null {
+  if (!points.length) return null;
+  const box: Box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const [x, y, z = 0] of points) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    box.minX = Math.min(box.minX, x - pad); box.maxX = Math.max(box.maxX, x + pad);
+    box.minY = Math.min(box.minY, y - pad); box.maxY = Math.max(box.maxY, y + pad);
+    box.minZ = Math.min(box.minZ, z); box.maxZ = Math.max(box.maxZ, z);
+  }
+  return box.minX <= box.maxX ? box : null;
+}
+
+/**
+ * Where the camera has to stand so that the box fills the view, from the angle it already looks at:
+ * the target is the box's middle, and the distance the smallest at which all eight corners are inside
+ * the picture (exact for this angle, `margin` is the extra room around, 1.1 = 10%).
+ */
+export function viewOfBox(box: Box, angle: Angle, aspect: number, opts: { margin?: number; minDistance?: number; maxDistance?: number } = {}) {
+  const { margin = 1.1, minDistance = 0, maxDistance = Infinity } = opts;
+  const target: [number, number, number] = [(box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2, (box.minZ + box.maxZ) / 2];
+  const cp = Math.cos(angle.pitch), sp = Math.sin(angle.pitch), cy = Math.cos(angle.yaw), sy = Math.sin(angle.yaw);
+  // The camera's axes: back (target to eye), right and up.
+  const back = [cp * cy, cp * sy, sp], right = [-sy, cy, 0], up = [-sp * cy, -sp * sy, cp];
+  const ty = Math.tan(angle.fov / 2), tx = ty * Math.max(0.1, aspect);
+  let need = 0;
+  for (const x of [box.minX, box.maxX]) for (const y of [box.minY, box.maxY]) for (const z of [box.minZ, box.maxZ]) {
+    const d = [x - target[0], y - target[1], z - target[2]];
+    const dot = (v: number[]) => d[0] * v[0] + d[1] * v[1] + d[2] * v[2];
+    // A point `c` behind the target is `distance - c` in front of the eye, and must stay inside both half widths.
+    need = Math.max(need, dot(back) + Math.max(Math.abs(dot(right)) / tx, Math.abs(dot(up)) / ty));
+  }
+  return { target, distance: Math.min(maxDistance, Math.max(minDistance, need * margin)) };
+}
+
+// ---- grids -------------------------------------------------------------------------------
+
+export type GridSize = "none" | "small" | "medium" | "large";
+/** Distance between grid lines: small is the pathing cell, medium the tile, large four tiles. */
+export const GRID_STEP: Record<GridSize, number> = { none: 0, small: 32, medium: 128, large: 512 };
+
+/** What a "Toggle ... Grid" does: the same size again switches the grid off, another one replaces it. */
+export const toggleGrid = (current: GridSize, size: Exclude<GridSize, "none">): GridSize => (current === size ? "none" : size);
+
+// ---- layers ------------------------------------------------------------------------------
+
+/** Where ships can sail (per pathing cell, rows from the south): deep water strongly, shallow water lightly. */
+export function navalColors(cells: ArrayLike<number>): Uint8Array {
+  const rgba = new Uint8Array(cells.length * 4);
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c & NO_WATER) continue;
+    rgba.set(c & 0x02 ? [20, 70, 255, 200] : [90, 220, 255, 150], i * 4);
+  }
+  return rgba;
+}
+
+export interface CameraObject { name?: string; targetX: number; targetY: number; rotation: number; distance: number; angleOfAttack: number; fieldOfView: number }
+
+const RAD = Math.PI / 180;
+/** Where a camera object's eye is over the ground (x, y): `distance` back from the target along its rotation. */
+export const cameraEye = (c: CameraObject): [number, number] => {
+  const d = c.distance * Math.abs(Math.cos(c.angleOfAttack * RAD));
+  return [c.targetX - d * Math.cos(c.rotation * RAD), c.targetY - d * Math.sin(c.rotation * RAD)];
+};
+
+/** The camera objects drawn on the ground, one texel per pathing cell: target, eye, the line between and the field of view. */
+export function cameraColors(cameras: readonly CameraObject[], width: number, height: number, offsetX: number, offsetY: number): Uint8Array {
+  const rgba = new Uint8Array(width * height * 4);
+  const dot = (x: number, y: number, r: number, c: number[]) => {
+    const cx = Math.floor((x - offsetX) / 32), cy = Math.floor((y - offsetY) / 32);
+    for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) {
+      const px = cx + i, py = cy + j;
+      if (i * i + j * j <= r * r + r && px >= 0 && py >= 0 && px < width && py < height) rgba.set(c, (py * width + px) * 4);
+    }
+  };
+  const line = (x0: number, y0: number, x1: number, y1: number, c: number[]) => {
+    const n = Math.min(4096, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 16));
+    for (let k = 0; k <= n; k++) dot(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n, 0, c);
+  };
+  for (const c of cameras) {
+    if (![c.targetX, c.targetY, c.rotation, c.distance, c.angleOfAttack, c.fieldOfView].every(Number.isFinite)) continue;
+    const [ex, ey] = cameraEye(c);
+    const len = Math.hypot(c.targetX - ex, c.targetY - ey);
+    const half = Math.min(80, Math.max(1, c.fieldOfView / 2)) * RAD;
+    for (const s of [-1, 1]) {
+      const a = c.rotation * RAD + s * half;
+      line(ex, ey, ex + (len / Math.cos(half)) * Math.cos(a), ey + (len / Math.cos(half)) * Math.sin(a), [255, 150, 60, 130]);
+    }
+    line(ex, ey, c.targetX, c.targetY, [255, 190, 60, 230]);
+    dot(c.targetX, c.targetY, 2, [255, 190, 60, 255]);
+    dot(ex, ey, 1, [255, 255, 255, 255]);
+  }
+  return rgba;
+}
+
+/** Layers of equal size laid over each other, the first at the bottom (alpha over); null leaves a layer out. Null when none is left. */
+export function composeLayers(layers: readonly (Uint8Array | null)[]): Uint8Array | null {
+  const shown = layers.filter((l): l is Uint8Array => !!l);
+  if (!shown.length) return null;
+  if (shown.length === 1) return shown[0];
+  const out = new Uint8Array(shown[0].length);
+  for (let i = 0; i < out.length; i += 4) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for (const l of shown) {
+      const la = l[i + 3] / 255;
+      if (!la) continue;
+      const na = la + a * (1 - la);
+      r = (l[i] * la + r * a * (1 - la)) / na; g = (l[i + 1] * la + g * a * (1 - la)) / na; b = (l[i + 2] * la + b * a * (1 - la)) / na; a = na;
+    }
+    out.set([Math.round(r), Math.round(g), Math.round(b), Math.round(a * 255)], i);
+  }
+  return out;
+}
