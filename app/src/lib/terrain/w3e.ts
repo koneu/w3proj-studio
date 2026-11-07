@@ -200,6 +200,23 @@ export function rampLift(t: Terrain, x: number, y: number): number {
   return 0;
 }
 
+/** Unit normal of the ground at a corner, from central differences of its neighbours.
+ *  A cliff's layers (128 per step) are left out of the difference unless both corners are ramp corners: the
+ *  ground beside a cliff is flat, while a ramp really climbs from one layer to the next. */
+export function cornerNormal(t: Terrain, x: number, y: number): [number, number, number] {
+  const at = (cx: number, cy: number): [Corner, number, number] => {
+    const qx = Math.min(t.width - 1, Math.max(0, cx)), qy = Math.min(t.height - 1, Math.max(0, cy));
+    return [t.corners[qy * t.width + qx], qx, qy];
+  };
+  const diff = (a: [Corner, number, number], b: [Corner, number, number]) =>
+    a[0].ramp && b[0].ramp
+      ? a[0].height + rampLift(t, a[1], a[2]) - (b[0].height + rampLift(t, b[1], b[2]))
+      : groundHeight(a[0]) - groundHeight(b[0]);
+  const dx = diff(at(x + 1, y), at(x - 1, y)), dy = diff(at(x, y + 1), at(x, y - 1));
+  const l = Math.hypot(dx, dy, 256);
+  return [-dx / l, -dy / l, 256 / l];
+}
+
 /** Height of the ground at a world position: bilinear over the tile's
  *  corners (layers and ramps included). Doodads without a fixed height sit
  *  exactly there in World Editor maps (97% within half a unit). */

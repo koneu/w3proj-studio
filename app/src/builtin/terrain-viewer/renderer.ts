@@ -14,7 +14,7 @@ const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
-import { heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
+import { cornerNormal, heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -312,15 +312,7 @@ export class TerrainRenderer {
 
   /** Normal at a corner from its neighbours' heights. */
   private normal(x: number, y: number): Vec3 {
-    const t = this.terrain;
-    const hz = (cx: number, cy: number) => {
-      const qx = Math.min(t.width - 1, Math.max(0, cx)), qy = Math.min(t.height - 1, Math.max(0, cy));
-      return this.corner(qx, qy).height + rampLift(t, qx, qy);
-    };
-    const dx = hz(x + 1, y) - hz(x - 1, y), dy = hz(x, y + 1) - hz(x, y - 1);
-    const n: Vec3 = [-dx, -dy, 256];
-    const l = Math.hypot(...n);
-    return [n[0] / l, n[1] / l, n[2] / l];
+    return cornerNormal(this.terrain, x, y);
   }
 
   /** Rebuilds the ground without the tiles that cliff models cover, with
