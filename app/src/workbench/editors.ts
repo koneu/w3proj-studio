@@ -138,18 +138,27 @@ export class EditorService {
 
   async open(path: string, providerId?: string) {
     const opened = () => this.tabs.find((t) => t.path === path && (!providerId || t.providerId === providerId));
+    /** The file's tab in another editor is closed first: false when that's cancelled (unsaved changes). */
+    const closeOther = async () => {
+      const other = this.tabs.find((t) => t.path === path);
+      return !other || !providerId || this.close(other);
+    };
     const existing = opened();
     if (existing) return this.show(existing);
-    const sameFile = this.tabs.find((t) => t.path === path);
-    if (sameFile && providerId) await this.close(sameFile);
+    if (!(await closeOther())) return;
 
     let id = providerId ?? this.associated(path) ?? this.candidates(path).find((c) => c.priority !== "option")?.id;
     id ??= await this.fallback(path);
     const provider = await this.provider(id, path);
     // Opened meanwhile, while the editor's extension started: by the project's tabs coming back
-    // (restore) or another open of the same file. That tab, not a second editor loading it all again.
-    const meanwhile = opened();
-    if (meanwhile) return this.show(meanwhile);
+    // (restore) or another open of the same file. That tab, not a second editor loading it all
+    // again; in another editor, it's closed as above, and if that's cancelled nothing opens.
+    for (;;) {
+      const meanwhile = opened();
+      if (meanwhile) return this.show(meanwhile);
+      if (!this.tabs.some((t) => t.path === path)) break;
+      if (!(await closeOther())) return;
+    }
     const tab = this.addTab(path, id);
     this.show(tab);
     await this.resolveTab(tab, provider);
@@ -240,7 +249,10 @@ export class EditorService {
 
   private async load(tab: Tab) {
     try {
-      tab.instance = await tab.provider!.resolve(tab.el, tab.doc!);
+      const instance = await tab.provider!.resolve(tab.el, tab.doc!);
+      // The tab was closed while its editor loaded: nobody would dispose it (GPU buffers, timers, listeners).
+      if (!this.tabs.includes(tab)) { instance.dispose?.(); return; }
+      tab.instance = instance;
       this.showActions();
       if (this.active === tab) tab.instance.focus?.();
     } catch (e) {
@@ -355,16 +367,21 @@ export class EditorService {
     }
   }
 
-  private async close(tab: Tab, force = false) {
+  /** True when the tab is gone (closed here or meanwhile), false when closing it was cancelled. */
+  private async close(tab: Tab, force = false): Promise<boolean> {
+    if (!this.tabs.includes(tab)) return true;
     if (tab.dirty && !force) {
       const r = await this.confirm(`Save changes to ${tab.path}?`, "Save", "Don't Save");
       if (r === "Save" && tab.instance?.save) await this.own(tab, () => tab.instance!.save!());
-      else if (r !== "Don't Save") return;
+      else if (r !== "Don't Save") return false;
     }
+    // Closed by something else while the question was open: splice(-1) would take another tab.
+    const i = this.tabs.indexOf(tab);
+    if (i < 0) return true;
     tab.instance?.dispose?.();
+    tab.instance = undefined;
     tab.el.remove();
     tab.tabEl.remove();
-    const i = this.tabs.indexOf(tab);
     this.tabs.splice(i, 1);
     if (this.active === tab) {
       this.active = null;
@@ -377,6 +394,7 @@ export class EditorService {
       }
     }
     this.remember();
+    return true;
   }
 
   private show(tab: Tab) {

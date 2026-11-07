@@ -2060,6 +2060,87 @@ async function gameReadsOnce(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
+ *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
+ *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
+async function editorTabRaces(page, found, root) {
+  const fail = (what) => found.push(`editor tabs: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  const r = await page.evaluate(`(async () => {
+    const ed = w3Workbench.editors, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const files = w3.workspace.files().map((f) => f.path).filter((p) => p.startsWith("map/"));
+    // A file two editors can show.
+    const path = files.find((p) => ed.candidates(p).length >= 2);
+    if (!path) return { error: "no file with two editors" };
+    const [one, other] = ed.candidates(path).map((c) => c.id);
+    const tabsOf = (p) => ed.tabs.filter((t) => t.path === p);
+    const out = {};
+    const memory = ed.memory, activate = ed.activate, confirm = ed.confirm;
+    try {
+      // 1. Opened with one editor while the restore brings the file back in the other, with
+      //    unsaved changes, and closing that is cancelled: no second tab.
+      await w3.editors.closeAll();
+      ed.memory = { load: () => ({ tabs: [{ path, editor: other }], active: path }), store: (s) => memory?.store(s) };
+      ed.activate = async (e) => { await wait(400); return activate.call(ed, e); };
+      ed.confirm = async () => undefined;
+      const opening = ed.open(path, one);
+      await wait(100);
+      await ed.restore();
+      tabsOf(path)[0].dirty = true;
+      await opening.catch(() => {});
+      out.cancelled = tabsOf(path).map((t) => t.providerId);
+      ed.activate = activate;
+      ed.confirm = confirm;
+      for (const t of tabsOf(path)) t.dirty = false;
+      await w3.editors.closeAll();
+
+      // 2. A close asking about unsaved changes, while the tab is closed by something else: the
+      //    other tabs stay.
+      const second = files.find((p) => p !== path && ed.candidates(p).length);
+      await ed.open(path, one);
+      await ed.open(second);
+      const tab = tabsOf(path)[0];
+      tab.dirty = true;
+      let answer;
+      ed.confirm = () => new Promise((r) => { answer = r; });
+      const asking = ed.close(tab);
+      await wait(50);
+      await ed.close(tab, true);
+      answer("Don't Save");
+      await asking;
+      ed.confirm = confirm;
+      out.afterDoubleClose = ed.tabs.map((t) => t.path);
+      out.second = second;
+      await w3.editors.closeAll();
+
+      // 3. An editor whose tab is closed while it loads is disposed when it arrives.
+      const provider = ed.providers.get(one);
+      let disposed = 0;
+      ed.providers.set(one, { ...provider, resolve: async (el, doc) => {
+        await wait(400);
+        const inst = await provider.resolve(el, doc);
+        const d = inst.dispose;
+        inst.dispose = () => { disposed++; d?.call(inst); };
+        return inst;
+      } });
+      try {
+        const loading = ed.open(path, one);
+        await wait(100);
+        await ed.close(tabsOf(path)[0], true);
+        await loading;
+      } finally { ed.providers.set(one, provider); }
+      out.disposed = disposed;
+    } finally { ed.memory = memory; ed.activate = activate; ed.confirm = confirm; }
+    await w3.editors.closeAll();
+    return { path, one, other, ...out };
+  })()`);
+  if (r.error) return fail(r.error);
+  if (r.cancelled.length !== 1) fail(`${r.path} opened in ${r.one} while it came back in ${r.other} (closing it cancelled): ${r.cancelled.length} tabs (${r.cancelled.join(", ")})`);
+  if (!r.afterDoubleClose.includes(r.second)) fail(`closing ${r.path} twice at once closed ${r.second} too (left: ${r.afterDoubleClose.join(", ") || "nothing"})`);
+  if (r.disposed !== 1) fail(`an editor whose tab closed while it loaded was disposed ${r.disposed} times`);
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -2101,7 +2182,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, gameReadsOnce, moduleFunctions })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, gameReadsOnce, moduleFunctions, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2185,6 +2266,7 @@ async function run() {
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
+    await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 
