@@ -126,13 +126,39 @@ export function mergeObjects(file: EditFile, imported: Pick<EditFile, "original"
   return { added, replaced };
 }
 
+/** Holds the plan against the ids the map has now (`ids`: id to kind, custom objects of every kind, Skin-only
+ *  ones too, and the game's and campaign's): a new object must not take an id that is used, and an overwrite
+ *  must find an object of its own kind. Throws, naming the id, when the map changed since the plan was made. */
+export function assertPlanFits(plan: Plan, ids: ReadonlyMap<string, string>): void {
+  for (const w of plan.writes) {
+    const has = ids.get(w.object.id!);
+    if (w.overwrites ? has !== w.ext : has !== undefined) throw new Error(`${w.object.id} ${has === undefined ? "is gone from" : "is used in"} the map (it changed while the paste was being asked). Nothing was pasted.`);
+  }
+}
+
+/** A Skin file without the entries of objects that were overwritten: the fields they had there are in the
+ *  object written, and an entry left behind would go on supplying values the new object doesn't have.
+ *  Null when it holds none of them. */
+export function withoutSkinEntries(skin: EditFile, ids: ReadonlySet<string | undefined>): EditFile | null {
+  if (!skin.custom.some((o) => ids.has(o.id))) return null;
+  return { ...skin, custom: skin.custom.filter((o) => !ids.has(o.id)) };
+}
+
 /** The kinds a plan writes to. */
 export const kindsOf = (plan: Plan) => [...new Set(plan.writes.map((w) => w.ext))];
 
 /** Puts a plan's objects into a file: new ones at the end, overwritten ones in place. */
 export function writeInto(file: EditFile, ext: string, plan: Plan): CopyObject[] {
   const made: CopyObject[] = [];
-  for (const w of plan.writes.filter((x) => x.ext === ext)) {
+  const mine = plan.writes.filter((x) => x.ext === ext);
+  // Checked before anything is written, against the file as it is now: the plan was made earlier,
+  // and an id used since then must stop the paste, not be pushed a second time.
+  for (const w of mine) {
+    const taken = file.custom.some((x) => x.id === w.object.id);
+    if (!w.overwrites && taken) throw new Error(`${w.object.id} is used in the map already (it changed while the paste was being asked). Nothing was pasted.`);
+    if (w.overwrites && w.object.id !== w.overwrites) throw new Error(`An overwrite of ${w.overwrites} would write ${w.object.id}.`);
+  }
+  for (const w of mine) {
     const o = pastedObject(w.object as EditObject, w.object.id!, file.version) as CopyObject;
     const at = w.overwrites ? file.custom.findIndex((x) => x.id === w.overwrites) : -1;
     if (at >= 0) file.custom[at] = o as EditObject; else file.custom.push(o as EditObject);

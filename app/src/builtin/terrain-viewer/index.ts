@@ -15,6 +15,7 @@ import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
+import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
 import { exportMinimap } from "./minimapexport";
@@ -2015,8 +2016,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Custom types among the copied objects need their abilities and the like in another map: the clipboard takes
          *  them from this map's object data as it goes on. */
         const takeTypes = (f: Fragment) => {
-          const ids = [...new Set(f.objects.map((o) => String(o.entry.id)))];
-          void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.typesFor(ids)).then((types) => { if (types.length) f.types = types; }, () => { /* pastes without them */ });
+          // The type of each, and what it carries, can do, drops or picks from.
+          const ids = [...new Set(f.objects.flatMap((o) => entryIds(o.entry)))];
+          void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.typesFor(ids)).then((types) => { if (types.length) f.types = types; },
+            (e) => void w3.window.showWarning(`The custom objects these refer to couldn't be gathered (${(e as Error).message ?? e}). Pasting them elsewhere won't bring their abilities and the like.`));
         };
         const copySelection = () => {
           const entries = copyable();
@@ -2156,7 +2159,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           redraw();
         };
-        /** The types of what's being pasted, once this map has them (asked once per paste, however often it's placed). */
+        /** The types of what's being pasted, in this map: asked at every click. The service answers at once while
+         *  what it did before is still there (an undo may have taken it away, then it asks again); only a question
+         *  still open is shared, so a double click doesn't ask twice. */
         let bringing: { types: Fragment["types"]; renames: Promise<Map<string, string> | null> } | null = null;
         const bringTypes = (f: Fragment) => {
           if (!f.types?.length) return Promise.resolve(new Map<string, string>());
@@ -2165,14 +2170,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const renames = w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.bringTypes(f.types!, label));
             const mine = { types: f.types, renames };
             bringing = mine;
-            // Cancelled or failed: the next click asks again.
-            void renames.then((r) => { if (!r && bringing === mine) bringing = null; }, () => { if (bringing === mine) bringing = null; });
+            const done = () => { if (bringing === mine) bringing = null; };
+            void renames.then(done, done);
           }
           return bringing.renames;
         };
         const startPaste = () => {
           if (!clipboard) return false;
-          bringing = null;
           setArea(null);
           showTab(null);
           clearSelection();
@@ -2220,8 +2224,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const f = pasting;
           if (!f) return;
           // What the pasted objects are made of, before anything is placed: the user may refuse.
+          const root = w3.workspace.project()?.root;
           const renames = await bringTypes(f).catch((e) => { void w3.window.showError(String(e)); return null; });
-          if (!renames || pasting !== f) return;
+          // Another project, or the paste ended, while the question was open: nothing is placed.
+          if (!renames || pasting !== f || w3.workspace.project()?.root !== root) return;
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           const tiles = tileSnapshot(terrain);
           const stamped = await placeGround(f, g);
@@ -2247,8 +2253,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Units and items can't stand past the playable map, trees and doodads can.
             const standing = spot && (o.list === "doodads" || !playableEdge || inArea(spot[0], spot[1], playableEdge));
             if (!file || !spot || !standing || !insideBounds(heldTo(), spot[0], spot[1])) { off++; continue; }
-            const renamed = renames.get(String(o.entry.id));
-            const made = pastedEntry(file, renamed ? { ...o, entry: { ...o.entry, id: renamed } } : o, spot);
+            // A type given another id here: its skin, and the items and abilities the object has, follow.
+            const made = pastedEntry(file, renames.size ? { ...o, entry: renamedEntry(o.entry, renames) } : o, spot);
             if (typeof (made as Placed & { flags?: number }).flags === "number") (made as Placed & { flags?: number }).flags = pastedFlags((made as Placed & { flags: number }).flags, preserveHeight());
             file.list.push(made);
             repositioned.add(made);

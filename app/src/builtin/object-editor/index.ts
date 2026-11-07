@@ -19,7 +19,7 @@ import { mergeSkin } from "./w3o";
 import { summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
-import { applyPlan, gatherAlong, settle, viewMap } from "./copyalong";
+import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
@@ -30,7 +30,10 @@ interface ObjectFile { format: string; version: number; original: Obj[]; custom:
 
 /** Copied objects by kind, for the session: they paste into any open map. `along` is what they refer to
  *  in the map they were copied from (its custom abilities and the like), found while the user goes on. */
-const clipboard: Record<string, { objects: Obj[]; along: Promise<Copied[]> }> = {};
+const clipboard: Record<string, { count: number; ready: Promise<{ objects: Obj[]; along: Copied[] }> }> = {};
+/** What the terrain view was told about types, per project and set of types: the answer to the question
+ *  and the ids it left in the map. A later paste of the same asks nothing while those are still there. */
+const answered = new Map<string, { renames: Map<string, string>; targets: string[] }>();
 /** A field value copied by the field menu: goes into any field of the same type. */
 let fieldClip: { type: string; value: number | string } | null = null;
 
@@ -198,14 +201,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     },
     async bringTypes(types: readonly Copied[], label: string) {
       if (!types.length) return new Map<string, string>();
+      const root = w3.workspace.project()?.root ?? "";
+      const key = `${root}\n${JSON.stringify(types)}`;
+      const before = answered.get(key);
+      if (before) {
+        // Asked about this already: the answer holds as long as what it left in the map is still there (an undo takes it away).
+        const view = await viewMap(w3);
+        if (before.targets.every((id) => view.customs.has(id))) return new Map(before.renames);
+        answered.delete(key);
+      }
+      if (!(await settleEditors(w3))) return null;
       const settled = await settle(w3, { chosen: [], along: [...types] }, label, undefined, false);
       if (!settled) return null;
       const plan = settled.plan;
+      const remember = () => {
+        if (answered.size >= 20) answered.delete(answered.keys().next().value as string);
+        answered.set(key, { renames: new Map(plan.renames), targets: plan.items.flatMap((i) => (i.to && i.fate !== "chosen" ? [i.to] : [])) });
+      };
       if (plan.writes.length) {
         const title = `Add ${plan.writes.length} object${plan.writes.length === 1 ? "" : "s"} for ${label}`;
         if (!(await applyPlan(w3, plan, title, async () => emptyFile(w3) as Promise<EditFile>))) return null;
+        remember();
         void w3.window.showInfo(summaryTypes(plan), "Undo").then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
       }
+      if (!plan.writes.length) remember();
       return plan.renames;
     },
   });
@@ -352,6 +371,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           restore(history[at]);
         };
 
+        /** Set when this editor is closed: a paste that was asking something doesn't go on into it. */
+        let closed = false;
         const listEl = h("div.obj-list");
         // Created once and re-attached on every render, so typing keeps focus
         // and caret (a fresh input per render lost both after each key).
@@ -436,7 +457,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** What the list offers anywhere: new objects. */
         const listMenu = (): MenuItem[] => {
-          const held = clipboard[kind]?.objects.length ?? 0;
+          const held = clipboard[kind]?.count ?? 0;
           return [
             { label: "New…", run: () => void newObject() },
             { label: held > 1 ? `Paste ${held} objects` : "Paste", shortcut: "Ctrl+V", disabled: !held, run: () => void paste() },
@@ -449,32 +470,45 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const copySelection = () => {
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
           const objects = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
-          clipboard[kind] = { objects, along: gatherAlong(w3, objects.map((object) => ({ ext: kind, object })), { ext: kind, file }).catch(() => []) };
+          // The copy is made from the editor as it is now, and finished while the user goes on.
+          const live = { ext: kind, file: { version: file.version, custom: structuredClone(file.custom), original: structuredClone(file.original) }, text };
+          const ready = prepareCopy(w3, kind, objects, live, w3.workspace.project()?.root) as Promise<{ objects: Obj[]; along: Copied[] }>;
+          ready.catch((e) => void w3.window.showError(`Copying: ${(e as Error).message ?? e} Pasting this copy will not work.`));
+          clipboard[kind] = { count: objects.length, ready };
         };
         /** New custom objects from what was copied, each with the next free id. What they refer to in
          *  the map they come from (custom abilities, buffs, units they train, …) comes along: see copyalong.ts. */
         const paste = async () => {
           const held = clipboard[kind];
-          if (!held?.objects.length) return;
-          const along = await held.along;
+          if (!held?.count) return;
+          const root = w3.workspace.project()?.root;
+          const here = () => !closed && w3.workspace.project()?.root === root;
+          let ready: Awaited<typeof held.ready>;
+          try { ready = await held.ready; } catch { return; }
+          const { along, objects: copies } = ready;
           const taken = takenIds();
           let made: Obj[] = [];
           if (along.length) {
-            const chosen = held.objects.map((object) => ({ ext: kind, object }));
-            const label = chosen.length === 1 ? nameOf(held.objects[0]) || held.objects[0].base : `${chosen.length} objects`;
-            const settled = await settle(w3, { chosen, along }, label, { ext: kind, file });
-            if (!settled) return;
-            const plan = settled.plan;
-            if (plan.writes.some((x) => x.ext !== kind)) {
-              // Other kinds too: the files change together, as one edit with one undo.
-              const done = await applyPlan(w3, plan, `Paste ${label} with what it refers to`, async () => emptyFile(w3) as Promise<EditFile>);
-              if (done) void w3.window.showInfo(summary(plan), "Undo").then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
-              return;
-            }
-            made = writeInto(file as EditFile, kind, plan).slice(0, chosen.length) as Obj[];
-            if (plan.items.some((i) => i.fate !== "chosen")) void w3.window.showInfo(summary(plan));
+            const chosen = copies.map((object) => ({ ext: kind, object }));
+            const label = chosen.length === 1 ? nameOf(copies[0]) || copies[0].base : `${chosen.length} objects`;
+            try {
+              // The plan reads every kind's saved data: other editors' unsaved changes are saved first.
+              if (!(await settleEditors(w3, doc.path)) || !here()) return;
+              const settled = await settle(w3, { chosen, along }, label, { ext: kind, file, text: resolveStr }, true, here);
+              if (!settled) return;
+              const plan = settled.plan;
+              if (plan.writes.some((x) => x.ext !== kind || x.overwrites)) {
+                // Other kinds too, or an overwrite (which changes the Skin file): the files change together, as one edit with one undo.
+                const done = await applyPlan(w3, plan, `Paste ${label} with what it refers to`, async () => emptyFile(w3) as Promise<EditFile>, here);
+                if (done) void w3.window.showInfo(summary(plan), "Undo").then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
+                return;
+              }
+              if (!here()) return;
+              made = writeInto(file as EditFile, kind, plan).slice(0, chosen.length) as Obj[];
+              if (plan.items.some((i) => i.fate !== "chosen")) void w3.window.showInfo(summary(plan));
+            } catch (e) { void w3.window.showError(String((e as Error).message ?? e)); return; }
           } else {
-            for (const c of held.objects) {
+            for (const c of copies) {
               const id = await freeIdFor(c.base, taken);
               taken.add(id);
               made.push(pastedObject(c as EditObject, id, file.version) as Obj);
@@ -1228,7 +1262,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
           },
           focus: () => search.focus(),
-          dispose: () => { focusers.delete(doc.path); preview?.dispose(); sounds.stop(); },
+          dispose: () => { closed = true; focusers.delete(doc.path); preview?.dispose(); sounds.stop(); },
           watches: ["map/war3map.wts"],
         };
       },

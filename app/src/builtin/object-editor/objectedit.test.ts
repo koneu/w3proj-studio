@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, kindsOf, summary, summaryTypes, writeInto, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, assertPlanFits, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
 import type { Plan, PlanItem } from "../../lib/objects/copydeps";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
@@ -169,4 +169,39 @@ test("the message after a paste counts what was pasted, what came along and what
 
 test("the message after a map piece's paste counts overwritten and renamed objects as added", () => {
   assert.equal(summaryTypes(plan([], ["add", "overwritten", "renamed", "kept"])), "Added 3 objects to the map for the pasted ones; 1 was there already.");
+});
+
+test("an id that came into the file since the plan was made stops the paste, and nothing is pushed", () => {
+  const f = file();
+  f.custom.push({ base: "AHhb", id: "A003", mods: [] });
+  const p = plan([
+    { ext: "w3a", object: { base: "AHhb", id: "A002" } },
+    { ext: "w3a", object: { base: "AHhb", id: "A003" } },
+  ]);
+  assert.throws(() => writeInto(f, "w3a", p), /A003 is used in the map already/);
+  assert.deepEqual(f.custom.map((o) => o.id), ["A003"], "the first object wasn't pushed either");
+  const over = plan([{ ext: "w3a", object: { base: "AHhb", id: "A003" }, overwrites: "A003" }]);
+  assert.doesNotThrow(() => writeInto(f, "w3a", over));
+  assert.throws(() => writeInto(f, "w3a", plan([{ ext: "w3a", object: { base: "AHhb", id: "A004" }, overwrites: "A003" }])), /would write A004/);
+});
+
+test("the plan is held against the ids the map has when it is written", () => {
+  const ids = new Map([["A001", "w3a"], ["h000", "w3u"], ["hfoo", "w3u"]]);
+  const add = (id: string) => plan([{ ext: "w3a", object: { base: "AHhb", id } }]);
+  assert.doesNotThrow(() => assertPlanFits(add("A002"), ids));
+  assert.throws(() => assertPlanFits(add("A001"), ids), /A001 is used in the map/, "taken by a custom object since");
+  assert.throws(() => assertPlanFits(add("hfoo"), ids), /hfoo is used/, "a game object's id");
+  const over = (id: string, ext = "w3a") => plan([{ ext, object: { base: "AHhb", id }, overwrites: id }]);
+  assert.doesNotThrow(() => assertPlanFits(over("A001"), ids));
+  assert.throws(() => assertPlanFits(over("A009"), ids), /A009 is gone/);
+  assert.throws(() => assertPlanFits(over("h000"), ids), /h000 is used/, "an overwrite finds another kind's object");
+});
+
+test("overwritten objects lose their Skin entry; a Skin file without them is left alone", () => {
+  const skin: EditFile = { format: "w3proj.objects/1", version: 3, original: [{ base: "hfoo", mods: [] }], custom: [{ base: "AHhb", id: "A001", mods: [{ field: "anam", type: "string", value: "skin" }] }, { base: "AHhb", id: "A002", mods: [] }] };
+  const rest = withoutSkinEntries(skin, new Set(["A001", undefined]))!;
+  assert.deepEqual(rest.custom.map((o) => o.id), ["A002"]);
+  assert.equal(rest.original.length, 1);
+  assert.equal(skin.custom.length, 2, "the Skin file given is untouched");
+  assert.equal(withoutSkinEntries(skin, new Set(["A009"])), null);
 });
