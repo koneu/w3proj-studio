@@ -98,7 +98,7 @@ export function soundLabels(w3: W3Api): Promise<string[]> {
   return labels;
 }
 
-export function objectsService(w3: W3Api): ObjectsService {
+export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFor" | "bringTypes">): ObjectsService {
   const icons = iconLoader(w3);
   const images = imageLoader(w3);
   // Callers ask for names one by one, a whole map's worth at once: the files are read once per
@@ -115,6 +115,7 @@ export function objectsService(w3: W3Api): ObjectsService {
   /** Tab last used per set of kinds, so the browser reopens where it was. */
   const lastTab = new Map<string, number>();
   const service: ObjectsService = {
+    ...copying,
     pickFile: (host, opts) => pickFile(w3, host, { ...opts, thumb: images }),
     pickSoundLabel: (host, opts) => pickLabel(w3, host, { ...opts, labels: () => soundLabels(w3) }),
     image: (path) => images(/\.\w+$/.test(path) ? path : `${path}.blp`),

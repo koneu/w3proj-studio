@@ -16,8 +16,10 @@ import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terra
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { mergeSkin } from "./w3o";
-import { mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
+import { referencedBy, type Copied } from "../../lib/objects/copydeps";
+import { applyPlan, gatherAlong, settle, viewMap } from "./copyalong";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
@@ -26,8 +28,9 @@ interface ObjSet { flag: number; mods: Mod[] }
 interface Obj { base: string; id?: string; end?: string; sets?: ObjSet[]; mods?: Mod[] }
 interface ObjectFile { format: string; version: number; original: Obj[]; custom: Obj[] }
 
-/** Copied objects by kind, for the session: they paste into any open map. */
-const clipboard: Record<string, Obj[]> = {};
+/** Copied objects by kind, for the session: they paste into any open map. `along` is what they refer to
+ *  in the map they were copied from (its custom abilities and the like), found while the user goes on. */
+const clipboard: Record<string, { objects: Obj[]; along: Promise<Copied[]> }> = {};
 /** A field value copied by the field menu: goes into any field of the same type. */
 let fieldClip: { type: string; value: number | string } | null = null;
 
@@ -187,7 +190,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   for (const t of ["keydown", "keyup", "mousedown"] as const) window.addEventListener(t, trackShift, true);
   ctx.subscriptions.push({ dispose: () => { for (const t of ["keydown", "keyup", "mousedown"] as const) window.removeEventListener(t, trackShift, true); } });
   const images = imageLoader(w3);
-  const objects = objectsService(w3);
+  const objects = objectsService(w3, {
+    async typesFor(ids: readonly string[]) {
+      const view = await viewMap(w3);
+      const seeds = [...new Set(ids)].flatMap((id) => view.customs.get(id) ?? []);
+      return [...seeds, ...referencedBy(seeds, view.customs, view.holdsIds)];
+    },
+    async bringTypes(types: readonly Copied[], label: string) {
+      if (!types.length) return new Map<string, string>();
+      const settled = await settle(w3, { chosen: [], along: [...types] }, label, undefined, false);
+      if (!settled) return null;
+      const plan = settled.plan;
+      if (plan.writes.length) {
+        const title = `Add ${plan.writes.length} object${plan.writes.length === 1 ? "" : "s"} for ${label}`;
+        if (!(await applyPlan(w3, plan, title, async () => emptyFile(w3) as Promise<EditFile>))) return null;
+        void w3.window.showInfo(summaryTypes(plan), "Undo").then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
+      }
+      return plan.renames;
+    },
+  });
   /** Open editors by document path: show an object (filter the list to it and select it). */
   const focusers = new Map<string, (id: string) => void>();
   /** Object to show once an editor that is being opened has loaded. */
@@ -415,7 +436,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** What the list offers anywhere: new objects. */
         const listMenu = (): MenuItem[] => {
-          const held = clipboard[kind]?.length ?? 0;
+          const held = clipboard[kind]?.objects.length ?? 0;
           return [
             { label: "New…", run: () => void newObject() },
             { label: held > 1 ? `Paste ${held} objects` : "Paste", shortcut: "Ctrl+V", disabled: !held, run: () => void paste() },
@@ -427,20 +448,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         const copySelection = () => {
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          clipboard[kind] = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
+          const objects = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
+          clipboard[kind] = { objects, along: gatherAlong(w3, objects.map((object) => ({ ext: kind, object })), { ext: kind, file }).catch(() => []) };
         };
-        /** New custom objects from what was copied, each with the next free id. Copied from another
-         *  map too: ids in its fields, like its custom abilities, aren't followed. */
+        /** New custom objects from what was copied, each with the next free id. What they refer to in
+         *  the map they come from (custom abilities, buffs, units they train, …) comes along: see copyalong.ts. */
         const paste = async () => {
           const held = clipboard[kind];
-          if (!held?.length) return;
-          const taken = takenIds(), made: Obj[] = [];
-          for (const c of held) {
-            const id = await freeIdFor(c.base, taken);
-            taken.add(id);
-            made.push(pastedObject(c as EditObject, id, file.version) as Obj);
+          if (!held?.objects.length) return;
+          const along = await held.along;
+          const taken = takenIds();
+          let made: Obj[] = [];
+          if (along.length) {
+            const chosen = held.objects.map((object) => ({ ext: kind, object }));
+            const label = chosen.length === 1 ? nameOf(held.objects[0]) || held.objects[0].base : `${chosen.length} objects`;
+            const settled = await settle(w3, { chosen, along }, label, { ext: kind, file });
+            if (!settled) return;
+            const plan = settled.plan;
+            if (plan.writes.some((x) => x.ext !== kind)) {
+              // Other kinds too: the files change together, as one edit with one undo.
+              const done = await applyPlan(w3, plan, `Paste ${label} with what it refers to`, async () => emptyFile(w3) as Promise<EditFile>);
+              if (done) void w3.window.showInfo(summary(plan), "Undo").then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
+              return;
+            }
+            made = writeInto(file as EditFile, kind, plan).slice(0, chosen.length) as Obj[];
+            if (plan.items.some((i) => i.fate !== "chosen")) void w3.window.showInfo(summary(plan));
+          } else {
+            for (const c of held.objects) {
+              const id = await freeIdFor(c.base, taken);
+              taken.add(id);
+              made.push(pastedObject(c as EditObject, id, file.version) as Obj);
+            }
+            file.custom.push(...made);
           }
-          file.custom.push(...made);
           selected = made[made.length - 1];
           selection = new Set(made);
           filter = "";

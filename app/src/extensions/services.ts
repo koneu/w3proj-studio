@@ -30,7 +30,18 @@ export interface ObjectsService {
   image(path: string): Promise<string | null>;
   /** The object editor's control for a field holding object ids (one, or a comma list). */
   objectField(host: HTMLElement, opts: { kinds: string[]; list: boolean; current: string; onCommit: (value: string) => void }): HTMLElement;
+  /** The map's own objects that placed objects of these types need: the custom ones among `ids` and whatever
+   *  they refer to, abilities and the like, however far. Taken from the open map at copy time, to be handed to
+   *  `bringTypes` in whichever map is open when the objects are pasted. */
+  typesFor(ids: readonly string[]): Promise<CopiedObject[]>;
+  /** Makes sure the open map has copied types: those it has the same are used, the rest are added, and when it
+   *  has other content under an id the user decides (keep, overwrite, new ids). One edit, one undo. Resolves
+   *  with the ids that changed (old to new), or null if the user cancelled. */
+  bringTypes(types: readonly CopiedObject[], label: string): Promise<Map<string, string> | null>;
 }
+
+/** An object of the object data with its kind ("w3u", …), as copied. */
+export type CopiedObject = import("../lib/objects/copydeps").Copied;
 
 export interface PickedObject {
   kind: string;

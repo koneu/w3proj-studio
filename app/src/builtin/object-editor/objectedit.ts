@@ -1,6 +1,7 @@
 // Changing object data for the MCP tools, the way the Object Editor changes it.
 
 import type { FieldMeta } from "../../lib/objects/metadata";
+import type { CopyObject, Plan } from "../../lib/objects/copydeps";
 
 export interface EditMod { field: string; type: string; level?: number; data?: number; value: number | string; end?: string }
 export interface EditObject { base: string; id?: string; end?: string; sets?: { flag: number; mods: EditMod[] }[]; mods?: EditMod[] }
@@ -123,4 +124,34 @@ export function mergeObjects(file: EditFile, imported: Pick<EditFile, "original"
   take(file.custom, imported.custom ?? [], (a, b) => a.id === b.id);
   take(file.original, imported.original ?? [], (a, b) => a.base === b.base);
   return { added, replaced };
+}
+
+/** The kinds a plan writes to. */
+export const kindsOf = (plan: Plan) => [...new Set(plan.writes.map((w) => w.ext))];
+
+/** Puts a plan's objects into a file: new ones at the end, overwritten ones in place. */
+export function writeInto(file: EditFile, ext: string, plan: Plan): CopyObject[] {
+  const made: CopyObject[] = [];
+  for (const w of plan.writes.filter((x) => x.ext === ext)) {
+    const o = pastedObject(w.object as EditObject, w.object.id!, file.version) as CopyObject;
+    const at = w.overwrites ? file.custom.findIndex((x) => x.id === w.overwrites) : -1;
+    if (at >= 0) file.custom[at] = o as EditObject; else file.custom.push(o as EditObject);
+    made.push(o);
+  }
+  return made;
+}
+
+/** One line telling what pasting a map piece did: its objects all come as the types the placed objects use. */
+export function summaryTypes(plan: Plan): string {
+  const added = plan.items.filter((i) => i.fate === "add" || i.fate === "overwritten" || i.fate === "renamed").length;
+  const used = plan.items.filter((i) => i.fate === "same" || i.fate === "kept").length;
+  return `Added ${added} object${added === 1 ? "" : "s"} to the map for the pasted ones${used ? `; ${used} ${used === 1 ? "was" : "were"} there already` : ""}.`;
+}
+
+/** One line telling what a paste did. */
+export function summary(plan: Plan): string {
+  const count = (fates: string[]) => plan.items.filter((i) => fates.includes(i.fate)).length;
+  const chosen = count(["chosen"]), along = count(["add", "overwritten", "renamed"]), used = count(["same", "kept"]);
+  const n = (k: number, what: string) => `${k} ${what}${k === 1 ? "" : "s"}`;
+  return `Pasted ${n(chosen, "object")}${along ? ` and ${n(along, "object")} they refer to` : ""}${used ? `; ${n(used, "object")} they refer to ${used === 1 ? "was" : "were"} in the map already` : ""}.`;
 }

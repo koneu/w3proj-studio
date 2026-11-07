@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, kindsOf, summary, summaryTypes, writeInto, type EditFile, type EditObject } from "./objectedit";
+import type { Plan, PlanItem } from "../../lib/objects/copydeps";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
 const file = (version = 3): EditFile => ({ format: "w3proj.objects/1", version, original: [], custom: [] });
@@ -126,4 +127,46 @@ test("importing replaces by id or base, adds the rest, and shares nothing", () =
   assert.equal(file.original[0].mods![0].value, 9);
   incoming.original[0].mods![0].value = 1;
   assert.equal(file.original[0].mods![0].value, 9);
+});
+
+const item = (fate: PlanItem["fate"]): PlanItem => ({ ext: "w3a", object: { base: "AHhb", id: "A001" }, fate });
+const plan = (writes: Plan["writes"], fates: PlanItem["fate"][] = []): Plan => ({ items: fates.map(item), conflicts: [], renames: new Map(), writes });
+
+test("a paste's objects go into the file of their kind: new ones at the end, overwritten ones in place", () => {
+  const f = file();
+  f.custom.push({ base: "AHhb", id: "A001", mods: [{ field: "anam", type: "string", value: "old" }] }, { base: "AHhb", id: "A002", mods: [] });
+  const p = plan([
+    { ext: "w3a", object: { base: "AHhb", id: "A001", mods: [{ field: "anam", type: "string", value: "new" }] }, overwrites: "A001" },
+    { ext: "w3a", object: { base: "AHhb", id: "A003", end: "A003" } },
+    { ext: "w3u", object: { base: "hfoo", id: "h000" } },
+  ]);
+  assert.deepEqual(kindsOf(p), ["w3a", "w3u"]);
+  const made = writeInto(f, "w3a", p);
+  assert.deepEqual(f.custom.map((o) => o.id), ["A001", "A002", "A003"]);
+  assert.equal(f.custom[0].mods![0].value, "new");
+  assert.equal(made.length, 2);
+  assert.equal(f.custom[2].end, undefined, "a version 3 file has no end marker");
+  const old = file(2);
+  writeInto(old, "w3a", plan([{ ext: "w3a", object: { base: "AHhb", id: "A009" } }]));
+  assert.equal(old.custom[0].end, "A009", "an older file keeps its end marker");
+  assert.equal(f.custom.length, 3, "the file of another kind is left alone");
+  assert.deepEqual(writeInto(file(), "w3q", p), []);
+});
+
+test("an overwrite of an id the file no longer has adds the object", () => {
+  const f = file();
+  writeInto(f, "w3a", plan([{ ext: "w3a", object: { base: "AHhb", id: "A001" }, overwrites: "A001" }]));
+  assert.deepEqual(f.custom.map((o) => o.id), ["A001"]);
+});
+
+test("the message after a paste counts what was pasted, what came along and what was there", () => {
+  assert.equal(summary(plan([], ["chosen"])), "Pasted 1 object.");
+  assert.equal(summary(plan([], ["chosen", "chosen", "add", "renamed", "same"])), "Pasted 2 objects and 2 objects they refer to; 1 object they refer to was in the map already.");
+  assert.equal(summary(plan([], ["chosen", "overwritten", "kept", "same"])), "Pasted 1 object and 1 object they refer to; 2 objects they refer to were in the map already.");
+  assert.equal(summaryTypes(plan([], ["add", "add", "same"])), "Added 2 objects to the map for the pasted ones; 1 was there already.");
+  assert.equal(summaryTypes(plan([], ["add"])), "Added 1 object to the map for the pasted ones.");
+});
+
+test("the message after a map piece's paste counts overwritten and renamed objects as added", () => {
+  assert.equal(summaryTypes(plan([], ["add", "overwritten", "renamed", "kept"])), "Added 3 objects to the map for the pasted ones; 1 was there already.");
 });
