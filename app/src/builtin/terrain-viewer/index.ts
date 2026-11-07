@@ -36,7 +36,7 @@ import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, ground
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
-import { changedTypes, changesImports, changesObjectData, DebouncedReload } from "./filewatch";
+import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -1471,13 +1471,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const cells = buildingCells.get(id);
           return cells ? [onBuildingGrid(x, cells[0]), onBuildingGrid(y, cells[1])] : [x, y];
         };
+        /** Object data being taken in by a reload, until it's drawn. */
+        let nextCtx: { skins: Awaited<ReturnType<typeof loadSkins>>; bases: Map<string, string> } | null = null;
+        /** Each rebuild takes a number: one that is overtaken by a later one drops its result, or an older
+         *  load finishing last would draw old skins over new. */
+        let rebuildGen = 0;
         async function rebuildObjects() {
-          if (!objCtx) return;
-          const { skins, bases } = objCtx;
+          const ctx = nextCtx ?? objCtx;
+          if (!ctx) return;
+          const gen = ++rebuildGen;
+          const { skins, bases } = ctx;
           const doodads = dooFile?.list ?? [], units = unitsFile?.list ?? [];
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
           const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf), loader.load("units", units, skins, team, baseOf)]);
+          // The later rebuild does the selection and the rest.
+          if (gen !== rebuildGen) return;
           const others = renderer.batches.filter((b) => b.group !== "doodads" && b.group !== "units");
           renderer.batches.length = 0;
           renderer.batches.push(...others, ...d.batches, ...u.batches);
@@ -1519,26 +1528,45 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let importsChanged = false;
         // Waited for by ready(): a tool that follows the save (create_object, then place_objects)
         // sees the new types. Selection, camera, undo steps and the dirty flag aren't touched.
+        let pathingChanged = false;
         const objectReload = new DebouncedReload(async () => {
-          const imports = importsChanged;
-          importsChanged = false;
-          if (imports) loader.reset();
-          const before = objCtx;
-          const [skins, { bases, art: data }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-          const next = { skins: withObjectArt(skins, data), bases };
-          objCtx = next;
-          // Only what is placed with a type that looks different is drawn again; models stay loaded.
-          const placedTypes = new Set([...(dooFile?.list ?? []), ...(unitsFile?.list ?? [])].map((p) => p.id));
-          const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
-          for (const id of changed) buildingCells.delete(id);
-          if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
-          if (imports || changed.size) await rebuildObjects();
-        }, (e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
+          const imports = importsChanged, pathing = pathingChanged;
+          importsChanged = pathingChanged = false;
+          try {
+            if (imports) loader.reset();
+            // Footprints come from the object data, which the skins don't show: read them again.
+            if (pathing) {
+              pathingData = null;
+              buildingCells.clear();
+              occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+            }
+            const before = objCtx;
+            const [skins, { bases, art: data }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
+            const next = { skins: withObjectArt(skins, data), bases };
+            // Only what is placed with a type that looks different is drawn again; models stay loaded.
+            const placedTypes = new Set([...(dooFile?.list ?? []), ...(unitsFile?.list ?? [])].map((p) => p.id));
+            const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
+            for (const id of changed) buildingCells.delete(id);
+            if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+            // A rebuild that starts meanwhile (a file taken in place) draws with the new data too.
+            nextCtx = next;
+            try {
+              if (imports || changed.size) await rebuildObjects();
+              objCtx = next;
+            } finally { nextCtx = null; }
+          } catch (e) {
+            // What changed is still to be taken in: the next reload compares against what is drawn.
+            importsChanged ||= imports;
+            pathingChanged ||= pathing;
+            throw e;
+          }
+        },(e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
           const art = changesObjectData(p);
           const imported = changesImports(p);
           if (!objCtx || (!art && !imported)) return;
           importsChanged ||= imported;
+          pathingChanged ||= changesPathing(p);
           objectReload.schedule();
         });
         let objectsPlaced: Promise<void> = Promise.resolve();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { changedTypes, changesImports, changesObjectData, DebouncedReload } from "./filewatch";
+import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import type { Skin } from "./objects";
 
 test("the generated minimap isn't an import, or every save would reload all models", () => {
@@ -75,4 +75,37 @@ test("cancelling ends the wait without running", async () => {
   await w;
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(runs, 0);
+});
+
+test("only unit, destructable and doodad object data changes pathing footprints", () => {
+  for (const p of ["map/war3map.w3u.json", "map/war3map.w3d.json", "map/war3map.w3b.json", "map/war3map.w3u", "MAP/WAR3MAP.W3B.JSON"]) assert.equal(changesPathing(p), true, p);
+  for (const p of ["map/war3map.w3t.json", "map/war3mapSkin.w3u.json", "map/war3map.doo.json", "map/war3map.w3a.json"]) assert.equal(changesPathing(p), false, p);
+});
+
+test("saves that keep coming can't starve the wait: the reload runs after the longest wait", async () => {
+  let ranAt = 0;
+  const reload = new DebouncedReload(async () => { ranAt ||= Date.now(); }, () => {}, 30, 90);
+  const start = Date.now();
+  reload.schedule();
+  const ticker = setInterval(() => reload.schedule(), 10);
+  // The saves stop after half a second; a reload that waited for that would have run after it.
+  await new Promise((r) => setTimeout(r, 500));
+  clearInterval(ticker);
+  await reload.settled();
+  assert.ok(ranAt > 0 && ranAt - start < 300, `first run after ${ranAt - start} ms`);
+});
+
+test("a save during a run gets its own run, and the wait covers both", async () => {
+  const order: string[] = [];
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  let n = 0;
+  const reload = new DebouncedReload(async () => { const me = ++n; order.push(`start ${me}`); if (me === 1) await gate; order.push(`end ${me}`); }, () => {}, 5, 50);
+  reload.schedule();
+  await new Promise((r) => setTimeout(r, 30));
+  reload.schedule();
+  const w = reload.settled();
+  open();
+  await w;
+  assert.deepEqual(order, ["start 1", "end 1", "start 2", "end 2"]);
 });

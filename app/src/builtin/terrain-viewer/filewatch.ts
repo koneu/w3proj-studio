@@ -17,6 +17,11 @@ export function changesObjectData(path: string): boolean {
   return /^map\/war3map(skin)?\.w3[udbt](\.json)?$/.test(path.replace(/\\/g, "/").toLowerCase());
 }
 
+/** Object data that gives types their pathing footprint (placement grid, occupancy, walkability). */
+export function changesPathing(path: string): boolean {
+  return /^map\/war3map\.w3[udb](\.json)?$/.test(path.replace(/\\/g, "/").toLowerCase());
+}
+
 interface ObjectContext { skins: Map<string, Skin>; bases: Map<string, string> }
 
 /** Of the given ids, those that look different, or are no longer or newly known, between two loads
@@ -41,13 +46,17 @@ export class DebouncedReload {
   private pending: Promise<void> | undefined;
   private release: (() => void) | undefined;
   private running: Promise<void> = Promise.resolve();
+  /** When the oldest save still waiting came: the wait ends `maxWait` after it, however many follow. */
+  private firstAt: number | undefined;
 
-  constructor(private run: () => Promise<void>, private onError: (e: unknown) => void, private delay = 300) {}
+  constructor(private run: () => Promise<void>, private onError: (e: unknown) => void, private delay = 300, private maxWait = 1500) {}
 
   schedule() {
     clearTimeout(this.timer);
     this.pending ??= new Promise<void>((done) => { this.release = done; });
-    this.timer = setTimeout(() => void this.fire(), this.delay);
+    const now = Date.now();
+    this.firstAt ??= now;
+    this.timer = setTimeout(() => void this.fire(), Math.max(0, Math.min(this.delay, this.firstAt + this.maxWait - now)));
   }
 
   settled(): Promise<void> {
@@ -57,12 +66,12 @@ export class DebouncedReload {
   /** Drops what is waiting (a reload that runs already goes on) and ends the wait for it. */
   cancel() {
     clearTimeout(this.timer);
-    this.timer = undefined;
+    this.timer = this.firstAt = undefined;
     this.finish();
   }
 
   private async fire() {
-    this.timer = undefined;
+    this.timer = this.firstAt = undefined;
     this.running = this.running.then(() => this.run()).catch((e) => this.onError(e));
     await this.running;
     // Saved again while it ran: the next run is on its way, and it ends the wait.
