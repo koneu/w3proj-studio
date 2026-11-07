@@ -17,6 +17,7 @@ import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { pickClassicModel } from "./modelpick";
+import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
 
 const KINDS = ["w3u", "w3t", "w3a", "w3h", "w3b", "w3d", "w3q"];
 /** Object data field types that hold file paths (shadow textures are names, not paths). */
@@ -188,27 +189,8 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       id: "placements",
       title: "Placed objects",
       async run() {
-        const known = new Set<string>(["sloc"]);
-        /** By the placement file each belongs in. */
-        const inUnits = new Set<string>(["sloc"]), inDoodads = new Set<string>();
-        const note = (kind: string, id: string) => { known.add(id); (kind === "w3u" || kind === "w3t" ? inUnits : inDoodads).add(id); };
-        for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
-          const k = await loadKind(w3, kind).catch(() => null);
-          for (const id of k?.baseIds ?? []) note(kind, id);
-          for (const file of [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`]) {
-            for (const o of (await readJson<{ custom?: Obj[] }>(w3, file))?.custom ?? []) if (o.id) note(kind, o.id);
-          }
-        }
-        // A campaign's chapter map also has the campaign's custom objects.
-        const root = w3.workspace.project()?.root;
-        const campaign = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-        if (campaign) {
-          for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
-            for (const o of (await readJson<{ custom?: Obj[] }>(w3, `${campaign}\\map\\war3campaign.${kind}.json`))?.custom ?? []) if (o.id) note(kind, o.id);
-          }
-        }
-        // Random units/items/buildings ("uDNR", "iDNR", "bDNR") and random items by level ("YiI1").
-        const random = (id: string) => /^[uib]DNR$/.test(id) || /^Y.I\d$/.test(id);
+        const { known, inUnits, inDoodads } = await knownPlacedTypes(w3);
+        const random = isRandomId;
         const unknown = new Map<string, { n: number; x: number; y: number; file: string }>();
         const misplaced = new Map<string, { n: number; x: number; y: number; file: string }>();
         for (const [file, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
@@ -415,17 +397,8 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
 }
 
 /** Deletes every placed object of a type from a placement file (JSON form or raw). */
-async function removePlaced(w3: W3Api, file: string, key: string, id: string) {
-  const root = w3.workspace.project()!.root;
-  const raw = file.replace(/\.json$/, "");
-  const json = await w3.workspace.readText(file).catch(() => null);
-  const text = json ?? await w3.backend.invoke<string>("codec_decode", { root, path: raw });
-  const doc = JSON.parse(text) as Record<string, PlacedEntry[]>;
-  doc[key] = (doc[key] ?? []).filter((p) => p.id !== id);
-  if (json !== null) await w3.workspace.writeText(file, await w3.backend.invoke<string>("codec_canonicalize", { root, path: file, text: JSON.stringify(doc) }));
-  else await w3.backend.invoke("codec_write", { root, path: raw, text: JSON.stringify(doc) });
-}
-
+const removePlaced = (w3: W3Api, file: string, key: string, id: string) =>
+  editPlacedFile(w3, file, (doc) => { doc[key] = (doc[key] ?? []).filter((p) => p.id !== id); });
 
 /** Model and variation count fields of a kind's object data. */
 const MODEL_FIELDS: Record<string, { model: string; variations?: string }> = ART;

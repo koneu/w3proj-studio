@@ -9,6 +9,7 @@
     "views": [{ "id": "w3.problems.list", "title": "Problems", "container": "problems" }],
     "commands": [
       { "id": "w3.problems.run", "when": "project", "menu": "Tools:1:1", "title": "Check Project for Problems", "category": "Project" },
+      { "id": "w3.problems.deleteInvalid", "when": "project", "menu": "Tools:1:9", "title": "Delete Invalid Objects…", "category": "Project" },
       { "id": "w3.problems.show", "menu": "View:2:3", "title": "Show Problems", "category": "Project" },
       { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
     ],

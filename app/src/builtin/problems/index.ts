@@ -9,6 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
+import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
 
 interface Group { check: ProblemCheck; problems: Problem[]; error?: string }
@@ -69,6 +70,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.problems.run", async () => { await w3.views.show("problems"); await service.run(); }),
     w3.commands.register("w3.problems.show", async () => { await w3.views.show("problems"); if (!ran) await service.run(); }),
+    w3.commands.register("w3.problems.deleteInvalid", async () => {
+      if (await deleteInvalid(w3)) await service.run();
+    }),
     w3.commands.register("w3.problems.open", async (path: string) => { await w3.editors.open(path); }),
     w3.workspace.onDidChange(() => { if (!w3.workspace.project()) { ran = false; groups = []; } updateStatus(); }),
     w3.views.register("w3.problems.list", {
@@ -77,6 +81,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const total = all(), errors = total.filter((p) => p.severity === "error").length;
         el.append(h("div.camp-side-actions", {},
           h("button", { disabled: !!running, onclick: run(() => service.run()) }, running ? "Checking…" : ran ? "Check again" : "Check now"),
+          groups.some((g) => g.check.id === "placements" && g.problems.some((p) => / unknown object type /.test(p.message)))
+            ? h("button", { title: "Removes placed objects whose type neither the game nor the map has. Start locations stay.", onclick: run(() => w3.commands.execute("w3.problems.deleteInvalid")) }, "Delete Invalid Objects…") : null,
           h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${errors} error${errors === 1 ? "" : "s"}, ${total.length - errors} warning${total.length - errors === 1 ? "" : "s"}` : " No problems found.") : "")));
         if (!ran) {
           el.append(h("div.view-empty", {}, "Checks the map script, files used by object data, imported models' textures, placed objects and imports. Build runs them too."));
