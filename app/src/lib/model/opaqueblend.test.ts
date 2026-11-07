@@ -64,4 +64,10 @@ test("the class follows textures that land after the pose", async () => {
   const opaque = { format: "bc3" as const, levels: [{ width: 4, height: 4, data: new Uint8Array(bc3(255, 255, 0)) }] };
   gpu.textures[0] = createTexture(gl, { format: "t", width: 4, height: 4, hasAlpha: true, mipCount: 1, blocks: opaque, mip() { throw new Error("no decode"); } }, { repeat: [false, false] });
   assert.deepEqual(modes(), [0], "the texture landed, with no new pose: opaque");
+  const list = () => (gpu as unknown as { classified(): unknown[] }).classified();
+  assert.equal(list(), list(), "nothing changed: the same list again, not a new sort");
+  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+  assert.deepEqual(modes(), [0], "a new pose keeps it");
+  gpu.textures[0] = null;
+  assert.deepEqual(modes(), [2], "the texture going away is seen too");
 });

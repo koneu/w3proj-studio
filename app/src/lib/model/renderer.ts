@@ -418,7 +418,12 @@ export class ModelGpu {
   private boneTex: WebGLTexture;
   private boneData: Float32Array;
   private nodeOrder: number[];
-  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean; mode: number }[] = [];
+  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean; mode: number; alpha: number; texIndex: number }[] = [];
+  /** The posed layers in the order their file modes give, and those of them that are blend layers. */
+  private base: ModelGpu["draws"] = [];
+  private blend2: ModelGpu["draws"] = [];
+  private poseSeq = 0;
+  private classCache: { pose: number; refs: (WebGLTexture | null)[]; list: ModelGpu["draws"] } | null = null;
   private geoAlpha = new Map<number, number>();
   private geoColor = new Map<number, number[]>();
   private clock: Clock = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
@@ -554,24 +559,38 @@ export class ModelGpu {
       if (this.hidden.has(g.geosetId) || (this.geoAlpha.get(g.geosetId) ?? 1) <= 0.01) continue;
       const mat = m.materials[g.materialId];
       if (!mat) continue;
-      for (const layer of mat.layers) this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2, mode: layer.filterMode });
+      for (const layer of mat.layers) {
+        const two = layer.filterMode === 2;
+        const alpha = two ? sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1) : 1;
+        const texIndex = !two ? 0 : layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
+        this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2, mode: layer.filterMode, alpha, texIndex });
+      }
     }
+    this.blend2 = this.draws.filter((d) => d.layer.filterMode === 2);
+    this.base = this.draws.slice().sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
+    this.poseSeq++;
+    this.classCache = null;
   }
 
-  /** The posed layers with the filter mode each is drawn with, opaque ones first. Decided at every draw,
-   *  not at the pose: textures arrive after the first pose, and a still model is posed only once. */
+  /** The posed layers with the filter mode each is drawn with, opaque ones first. A blend layer's class
+   *  depends on its texture, which arrives after the first pose (and a still model is posed once), so
+   *  it is checked at every draw, but only redone when a pose or one of those textures has changed. */
   private classified() {
-    const m = this.model, clock = this.clock;
-    for (const d of this.draws) {
-      if (d.layer.filterMode !== 2) continue;
-      const { layer } = d;
-      const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(d.g.geosetId) ?? 1);
-      const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
-      const tex = m.textures[texIndex];
-      d.mode = effectiveFilterMode(2, alpha, !tex?.replaceableId && isOpaqueTexture(this.textures[texIndex]));
-      d.blended = d.mode >= 2;
+    if (!this.blend2.length) return this.base;
+    const c = this.classCache, refs = this.blend2.map((d) => this.textures[d.texIndex]);
+    if (c && c.pose === this.poseSeq && refs.every((t, i) => t === c.refs[i])) return c.list;
+    const m = this.model;
+    let changed = false;
+    for (const [i, d] of this.blend2.entries()) {
+      const tex = m.textures[d.texIndex];
+      const mode = effectiveFilterMode(2, d.alpha, !tex?.replaceableId && isOpaqueTexture(refs[i]));
+      if (mode !== d.mode) changed = true;
+      d.mode = mode;
+      d.blended = mode >= 2;
     }
-    return this.draws.slice().sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio);
+    const list = changed ? this.draws.slice().sort((a, b) => Number(a.blended) - Number(b.blended) || a.prio - b.prio) : this.base;
+    this.classCache = { pose: this.poseSeq, refs, list };
+    return list;
   }
 
   /** Draws the posed model with a world transform. */
