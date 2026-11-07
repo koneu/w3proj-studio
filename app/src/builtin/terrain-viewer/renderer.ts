@@ -138,11 +138,11 @@ void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; out
 const GRID_VS = `#version 300 es
 in vec3 aPos;
 uniform mat4 uViewProj;
-out vec2 vW;
+out highp vec2 vW;
 ${FOG_VS}
 void main() { vW = aPos.xy; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const GRID_FS = `#version 300 es
-precision mediump float; in vec2 vW; uniform vec2 uOrigin; uniform float uStep; uniform vec4 uColor; out vec4 outColor;
+precision highp float; in vec2 vW; uniform vec2 uOrigin; uniform float uStep; uniform vec4 uColor; out vec4 outColor;
 ${FOG_FS}
 void main() {
   vec2 g = (vW - uOrigin) / uStep, w = max(fwidth(g), vec2(1e-6));
@@ -248,16 +248,16 @@ export class TerrainRenderer {
   private splats: { texture: string; blend: number; color: number[]; vao: WebGLVertexArrayObject; count: number }[] = [];
   private splatTextures = new Map<string, WebGLTexture>();
   private overlayProg: WebGLProgram | null = null;
-  private overlay: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
+  private overlay: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   /** The dark over the map's border: its own layer, as tools use the overlay. */
-  private border: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
+  private border: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   showBorder = true;
   /** What the View toggles show over the ground (Height Map, Pathing - Naval, Camera Objects), one texture; tools keep `overlay`. */
-  private viewLayer: { vao: WebGLVertexArrayObject; count: number; tex: WebGLTexture } | null = null;
+  private viewLayer: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   /** Grid lines every this many world units (0: none). */
   gridStep = 0;
   private gridProg: WebGLProgram | null = null;
-  private gridMesh: { vao: WebGLVertexArrayObject; count: number } | null = null;
+  private gridMesh: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer } | null = null;
   /** The map's fog, and whether it's shown. */
   fog: Fog | null = null;
   showFog = true;
@@ -345,7 +345,7 @@ export class TerrainRenderer {
   setCliffTiles(tiles: Set<number>, overrides = new Map<number, number>()) {
     this.cliffTiles = tiles;
     this.groundOverrides = overrides;
-    this.gl.deleteVertexArray(this.ground);
+    this.freeVao(this.ground);
     this.ranges = [];
     this.ground = this.buildGround(tiles, overrides);
   }
@@ -354,13 +354,11 @@ export class TerrainRenderer {
   terrainChanged() {
     const gl = this.gl;
     this.setCliffTiles(this.cliffTiles, this.groundOverrides);
-    for (const m of [this.water, this.wire]) gl.deleteVertexArray(m.vao);
+    for (const m of [this.water, this.wire]) this.freeVao(m.vao);
     this.water = this.buildWater();
     this.wire = this.buildWire();
-    if (this.overlay) this.overlay = { ...this.overlayMesh(), tex: this.overlay.tex };
-    if (this.border) this.border = { ...this.overlayMesh(), tex: this.border.tex };
-    if (this.viewLayer) this.viewLayer = { ...this.overlayMesh(), tex: this.viewLayer.tex };
-    if (this.gridMesh) { gl.deleteVertexArray(this.gridMesh.vao); this.gridMesh = null; }
+    // Same size, new heights: the overlays' meshes only get new positions.
+    for (const layer of [this.overlay, this.border, this.viewLayer, this.gridMesh]) if (layer) this.reshapeOverlay(layer.pos);
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
   }
@@ -421,7 +419,7 @@ export class TerrainRenderer {
 
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
-    const vb = gl.createBuffer();
+    const vb = this.buf(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, vb);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
     const attr = (name: string, size: number, offset: number) => {
@@ -431,7 +429,7 @@ export class TerrainRenderer {
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 40, offset * 4);
     };
     attr("aPos", 3, 0); attr("aNormal", 3, 3); attr("aLocal", 2, 6); attr("aCell", 1, 8); attr("aShade", 1, 9);
-    const ib = gl.createBuffer();
+    const ib = this.buf(vao);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, index, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
@@ -452,7 +450,7 @@ export class TerrainRenderer {
   private colorMesh(data: number[]): Mesh {
     const gl = this.gl, vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
-    const b = gl.createBuffer();
+    const b = this.buf(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, b);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
     const pos = gl.getAttribLocation(this.colorProg, "aPos"), col = gl.getAttribLocation(this.colorProg, "aColor");
@@ -491,7 +489,7 @@ export class TerrainRenderer {
     }
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
-    const vb = gl.createBuffer();
+    const vb = this.buf(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, vb);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(out), gl.STATIC_DRAW);
     const attr = (name: string, size: number, offset: number) => {
@@ -509,7 +507,7 @@ export class TerrainRenderer {
    *  cells, grouped by texture, blend mode and colour. */
   setSplats(list: { x: number; y: number; scale: number; texture: string; blend: number; color: number[] }[]) {
     const gl = this.gl, t = this.terrain;
-    for (const s of this.splats) gl.deleteVertexArray(s.vao);
+    for (const s of this.splats) this.freeVao(s.vao);
     const groups = new Map<string, { texture: string; blend: number; color: number[]; data: number[] }>();
     for (const s of list) {
       const key = `${s.texture}|${s.blend}|${s.color.join(",")}`;
@@ -528,7 +526,7 @@ export class TerrainRenderer {
     this.splats = [...groups.values()].map((g) => {
       const vao = gl.createVertexArray()!;
       gl.bindVertexArray(vao);
-      const vb = gl.createBuffer();
+      const vb = this.buf(vao);
       gl.bindBuffer(gl.ARRAY_BUFFER, vb);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(g.data), gl.STATIC_DRAW);
       const attr = (name: string, size: number, offset: number) => {
@@ -601,7 +599,7 @@ export class TerrainRenderer {
   setGroundOverlay(rgba: Uint8Array | null, width = 0, height = 0) {
     const gl = this.gl;
     if (!rgba) {
-      if (this.overlay) { gl.deleteVertexArray(this.overlay.vao); gl.deleteTexture(this.overlay.tex); }
+      if (this.overlay) { this.freeVao(this.overlay.vao); gl.deleteTexture(this.overlay.tex); }
       this.overlay = null;
       return;
     }
@@ -617,7 +615,7 @@ export class TerrainRenderer {
   setViewLayer(rgba: Uint8Array | null, width = 0, height = 0) {
     const gl = this.gl;
     if (!rgba) {
-      if (this.viewLayer) { gl.deleteVertexArray(this.viewLayer.vao); gl.deleteTexture(this.viewLayer.tex); }
+      if (this.viewLayer) { this.freeVao(this.viewLayer.vao); gl.deleteTexture(this.viewLayer.tex); }
       this.viewLayer = null;
       return;
     }
@@ -644,14 +642,41 @@ export class TerrainRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
-  /** Ground-hugging tile quads for the overlay (positions only). */
-  private overlayMesh(prog = this.overlayProg!): { vao: WebGLVertexArrayObject; count: number } {
-    const t = this.terrain, gl = this.gl;
+  /** Every buffer made for a vertex array, so that dropping the array drops them too. */
+  private vaoBuffers = new Map<WebGLVertexArrayObject, WebGLBuffer[]>();
+  private buf(vao: WebGLVertexArrayObject): WebGLBuffer {
+    const b = this.gl.createBuffer()!;
+    const list = this.vaoBuffers.get(vao);
+    if (list) list.push(b); else this.vaoBuffers.set(vao, [b]);
+    return b;
+  }
+  private freeVao(vao: WebGLVertexArrayObject) {
+    for (const b of this.vaoBuffers.get(vao) ?? []) this.gl.deleteBuffer(b);
+    this.vaoBuffers.delete(vao);
+    this.gl.deleteVertexArray(vao);
+  }
+
+  /** Corner positions for the overlay meshes, a little above the ground. */
+  private overlayPositions(): Float32Array {
+    const t = this.terrain;
     const pos = new Float32Array(t.width * t.height * 3);
     for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
       const o = (y * t.width + x) * 3;
       pos[o] = t.offsetX + x * 128; pos[o + 1] = t.offsetY + y * 128; pos[o + 2] = this.corner(x, y).height + rampLift(t, x, y) + 2;
     }
+    return pos;
+  }
+
+  /** The ground changed height: the same mesh, new positions. */
+  private reshapeOverlay(pos: WebGLBuffer) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, pos);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.overlayPositions());
+  }
+
+  /** Ground-hugging tile quads for the overlay (positions only). */
+  private overlayMesh(prog = this.overlayProg!): { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer } {
+    const t = this.terrain, gl = this.gl;
     const idx = new Uint32Array((t.width - 1) * (t.height - 1) * 6);
     let k = 0;
     for (let y = 0; y < t.height - 1; y++) for (let x = 0; x < t.width - 1; x++) {
@@ -660,15 +685,16 @@ export class TerrainRenderer {
     }
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+    const pos = this.buf(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pos);
+    gl.bufferData(gl.ARRAY_BUFFER, this.overlayPositions(), gl.DYNAMIC_DRAW);
     const loc = gl.getAttribLocation(prog, "aPos");
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 12, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.buf(vao));
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
-    return { vao, count: idx.length };
+    return { vao, count: idx.length, pos };
   }
 
   /** Replaces a named group of point markers (e.g. "doodads", "units"). */
@@ -772,7 +798,7 @@ export class TerrainRenderer {
 
   /** Marks spots with rings that follow the ground; null or [] clears them. */
   setSelection(sel: Ring | Ring[] | null) {
-    for (const m of this.selection) this.gl.deleteVertexArray(m.vao);
+    for (const m of this.selection) this.freeVao(m.vao);
     const rings = sel === null ? [] : Array.isArray(sel) ? sel : [sel];
     this.selection = rings.map((r) => this.ring(r, rings.length > 50 ? 16 : 64));
   }
@@ -794,7 +820,7 @@ export class TerrainRenderer {
 
   /** The brush outline (editing tools); null hides it. */
   setBrush(b: Ring | null) {
-    if (this.brush) this.gl.deleteVertexArray(this.brush.vao);
+    if (this.brush) this.freeVao(this.brush.vao);
     this.brush = b ? this.ring(b) : null;
   }
 

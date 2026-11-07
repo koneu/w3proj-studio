@@ -409,6 +409,77 @@ async function viewCommands(page, fail, shots) {
   await run("w3.terrain.toggleSmallGrid");
   if (!/^Small grid/.test(shown ?? "")) bad(`the grid box said "${shown}" after Toggle Small Grid`);
 
+  const hands = new Hands(page);
+  const canvasFocused = () => page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`);
+
+  // Focus: after a click on a toolbar control the keys belong to the map again, so an arrow key pans.
+  const before = (await state()).camera.target;
+  await hands.click(".model-toggle", "Camera objects");
+  if (!(await canvasFocused())) bad("a toolbar box kept the keyboard");
+  await hands.key("ArrowRight", "ArrowRight", 39);
+  const after = (await state()).camera.target;
+  if (Math.hypot(after[0] - before[0], after[1] - before[1]) < 1) bad("an arrow key after a click on a toolbar box didn't pan");
+  await hands.click(".model-toggle", "Camera objects");
+  await hands.click(".model-toggle", "Fog");
+  if (!(await canvasFocused())) bad("the Fog box kept the keyboard");
+  await hands.click(".model-toggle", "Fog");
+  await page.evaluate(`(() => { const s = document.querySelector('select[title^="Grid"]'); s.focus(); s.value = "large"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  if (!(await canvasFocused())) bad("the grid box kept the keyboard");
+  if ((await state()).grid !== "large") bad("the grid box didn't set the grid");
+  await run("w3.terrain.toggleLargeGrid");
+  await hands.click("button[title='View Entire Map']");
+  if (!(await canvasFocused())) bad("the View Entire Map button kept the keyboard");
+
+  // The naval layer follows ground painting: after a stroke it shows what a fresh toggle shows.
+  await run("w3.terrain.viewSelection");
+  await run("w3.terrain.toggleNavalPathing");
+  const painted0 = await picture("naval-before-paint");
+  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Terrain").click()`);
+  await sleep(300);
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Dry:"]').click()`);
+  const c = await hands.where(".model-stage canvas");
+  const stroke = (dy) => hands.drag({ x: c.x - 120, y: c.y + dy }, { x: c.x + 120, y: c.y + dy });
+  const afresh = async (name) => {
+    await run("w3.terrain.toggleNavalPathing");
+    await sleep(300);
+    await run("w3.terrain.toggleNavalPathing");
+    await sleep(2500);
+    return picture(name);
+  };
+  let lagged0 = painted0;
+  for (const [i, dy] of [[1, -80], [2, 80]]) {
+    await stroke(dy);
+    await sleep(2500);
+    const lagged = await picture(`paint-${i}`);
+    if ((await differ(lagged0, lagged)) < 300) bad(`stroke ${i} changed nothing on screen`);
+    const exact = await afresh(`paint-${i}-fresh`);
+    const gap = await differ(lagged, exact);
+    if (gap > close.noise + 100) bad(`after stroke ${i} the naval layer differs from a fresh one in ${gap} pixels`);
+    lagged0 = exact;
+  }
+
+  // No growth: more strokes with every layer on make no more buffers or arrays than they free.
+  await run("w3.terrain.toggleHeightMap");
+  await run("w3.terrain.toggleSmallGrid");
+  await run("w3.terrain.toggleCameraObjects");
+  await sleep(2500);
+  await page.evaluate(`(() => {
+    const gl = WebGL2RenderingContext.prototype, live = (window.__live = { buffers: 0, arrays: 0 });
+    for (const [make, free, key] of [["createBuffer", "deleteBuffer", "buffers"], ["createVertexArray", "deleteVertexArray", "arrays"]]) {
+      const m = gl[make], f = gl[free];
+      gl[make] = function (...a) { live[key]++; return m.apply(this, a); };
+      gl[free] = function (...a) { if (a[0]) live[key]--; return f.apply(this, a); };
+    }
+  })()`);
+  for (const dy of [-120, -40, 40, 120]) { await stroke(dy); await sleep(1500); }
+  await sleep(2500);
+  const grown = await page.evaluate(`window.__live`);
+  if (grown.buffers > 0 || grown.arrays > 0) bad(`four strokes left ${grown.buffers} more GPU buffers and ${grown.arrays} more vertex arrays in use`);
+  for (const id of ["w3.terrain.toggleHeightMap", "w3.terrain.toggleSmallGrid", "w3.terrain.toggleCameraObjects", "w3.terrain.toggleNavalPathing"]) await run(id);
+  for (let i = 0; i < 6; i++) await run("workbench.undo");
+  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select").click()`);
+  await sleep(300);
+
   // The whole map is in view from further away than an object, and centred (new maps lie around the origin).
   const err = await run("w3.terrain.viewEntireMap");
   if (err) bad(`View Entire Map: ${err}`);

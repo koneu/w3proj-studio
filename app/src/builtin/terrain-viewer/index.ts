@@ -928,10 +928,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const look = toolGroups.look.get(projectTerrain(w3) ?? "");
       if (look && toolGroups.pendingLook) { look(x, y, pick); toolGroups.pendingLook = null; }
     }),
-    // The View commands act on the terrain editor that has the focus (else the project's open one).
+    // The View commands act on the terrain editor in front: another tab's would change what no one sees.
     ...viewCommandList.map(([id, run]) => w3.commands.register(id, async () => {
       const path = w3.editors.activePath();
-      const view = (path ? toolGroups.viewCommands.get(path) : undefined) ?? toolGroups.viewCommands.get(projectTerrain(w3) ?? "");
+      const view = path ? toolGroups.viewCommands.get(path) : undefined;
       if (!view) throw new Error("Switch to a terrain editor first.");
       const why = await run(view);
       if (why) void w3.window.showInfo(why);
@@ -1016,8 +1016,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let lighting: MapLighting | null = null;
         const lightOn = () => w3.settings.get<boolean>("terrain.lighting.enabled", true) !== false;
         const lightHour = () => Math.max(0, Math.min(23, Math.round(Number(w3.settings.get<number>("terrain.lighting.hour", 12)) || 0)));
-        const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => void w3.settings.set("terrain.lighting.enabled", lightBox.checked) });
-        const lightSelect = h("select", { onchange: () => void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)) },
+        const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); canvas.focus(); } });
+        const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); canvas.focus(); } },
           ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
         const applyLight = () => {
           const on = lightOn(), hour = lightHour();
@@ -1043,7 +1043,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         renderer.showBorder = showBoundary();
         renderer.showFog = w3.settings.get<boolean>("terrain.fog", true) !== false;
         /** The game's skies, for the view: a map doesn't keep one, the World Editor has it as a preference. */
-        const skySelect = h("select", { title: "The sky in this view. It isn't part of the map", onchange: () => void w3.settings.set("terrain.sky", skySelect.value) }, h("option", { value: "" }, "No sky"));
+        const skySelect = h("select", { title: "The sky in this view. It isn't part of the map", onchange: () => { void w3.settings.set("terrain.sky", skySelect.value); canvas.focus(); } }, h("option", { value: "" }, "No sky"));
         const showSkyChoice = async () => {
           const path = w3.settings.get<string>("terrain.sky", "") ?? "";
           skySelect.value = path;
@@ -1134,6 +1134,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The undo step a held key is building; a repeat joins it. */
         let keyStep: Edit | null = null;
         const pushEdit = (e: Edit) => {
+          // A stroke commits here, not through changed(): the view layers follow every edit.
+          refreshLayersSoon();
           notifyGroups(e);
           minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
@@ -2221,9 +2223,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The same order as for several objects below, with Delete last.
             h("div.terrain-sel-actions.wrap", {},
               h("button", { title: "Select every object of this type", onclick: selectSameTypes }, "Select all of this type"),
-              h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => void viewSelection() }, "View"),
+              h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => { void viewSelection(); canvas.focus(); } }, "View"),
               ...(editable ? [
-                h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); }) }, "Select in palette"),
+                h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); canvas.focus(); }) }, "Select in palette"),
                 h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(),
                 h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
               ] : [])),
@@ -2910,7 +2912,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return "Nothing is selected: click an object, or select an area, first.";
         };
-        const kindOfPlaced = (p: Placed) => renderer.batches.flatMap((b) => b.instances).find((i) => i.pick?.placed === p)?.pick?.kind;
+        /** The object's kind by the file it's placed in: units and items, or doodads and destructables. Models don't come into it. */
+        const kindOfPlaced = (p: Placed) => {
+          const skin = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
+          if (unitsFile?.list.includes(p)) return skin(p.id)?.kind === "w3t" ? "w3t" : "w3u";
+          if (dooFile?.list.includes(p)) return skin(p.id)?.kind === "w3b" ? "w3b" : "w3d";
+          return undefined;
+        };
         /** The selected object's type becomes what the Objects tab places, and that tab opens. */
         const selectInPalette = async (): Promise<string | null> => {
           const first = selectedEntries()[0];
@@ -2926,9 +2934,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         // The layers share one picture over the ground; it is made again after edits and saves, once they stop.
         let layerSeq = 0, layerTimer: ReturnType<typeof setTimeout> | undefined;
+        /** Shown while a layer is being worked out (the pathing of a big map takes seconds). */
+        const layerBusy = h("span.muted", { hidden: true }, "Working…");
         const refreshLayers = async () => {
           const seq = ++layerSeq;
-          if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); redraw(); return; }
+          if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); layerBusy.hidden = true; redraw(); return; }
           const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
           // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
           const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
@@ -2942,7 +2952,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const late: Promise<void>[] = [];
           if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
           if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
-          const failed = (await Promise.allSettled(late)).find((r): r is PromiseRejectedResult => r.status === "rejected");
+          layerBusy.hidden = !late.length;
+          const settled = await Promise.allSettled(late);
+          if (seq === layerSeq) layerBusy.hidden = true;
+          const failed = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
           if (failed && seq === layerSeq) w3.window.showError(`The view layers couldn't be drawn: ${(failed.reason as Error)?.message ?? failed.reason}`);
         };
         const refreshLayersSoon = () => {
@@ -2970,16 +2983,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         toolGroups.viewCommands.set(doc.path, viewCommands);
         const layerToggle = (label: string, title: string, layer: "naval" | "heights" | "cameras") => {
-          const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); } });
+          const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); canvas.focus(); } });
           viewSyncs.push(() => { box.checked = viewState[layer]; });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };
-        const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => setGrid(gridSelect.value as GridSize) },
+        const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); canvas.focus(); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
         viewSyncs.push(() => { gridSelect.value = viewState.grid; });
 
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
-          const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); } });
+          const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); canvas.focus(); } });
           return h("label.model-toggle", {}, box, ` ${label}`);
         };
         el.append(h("div.model-viewer", {},
@@ -2997,14 +3010,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights"),
               layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval"),
               layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras"),
+              layerBusy,
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
               toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
               skySelect,
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
-              h("button", { title: "Reset camera", onclick: () => resetCamera() }, "⟲"),
-              h("button", { title: "View Entire Map", onclick: () => viewEntireMap() }, "⛶"),
-              h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); } }, "◎"),
+              h("button", { title: "Reset camera", onclick: () => { resetCamera(); canvas.focus(); } }, "⟲"),
+              h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); canvas.focus(); } }, "⛶"),
+              h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); canvas.focus(); } }, "◎"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas, labelLayer)),
