@@ -201,20 +201,40 @@ export function rampLift(t: Terrain, x: number, y: number): number {
 }
 
 /** Unit normal of the ground at a corner, from central differences of its neighbours.
- *  A cliff's layers (128 per step) are left out of the difference unless both corners are ramp corners: the
- *  ground beside a cliff is flat, while a ramp really climbs from one layer to the next. */
+ *  A cliff's layers (128 per step) are left out of a difference, since the ground beside a cliff is flat. A ramp
+ *  really climbs from one layer to the next, so the full height (ramp lift included) is used when a ramp corner is
+ *  involved, its layer is at most one off the other corner's, and the ramp runs along that axis (a ramp corner
+ *  with a ramp neighbour in that direction); that leaves a ramp's sides and a cliff beside it flat. */
 export function cornerNormal(t: Terrain, x: number, y: number): [number, number, number] {
-  const at = (cx: number, cy: number): [Corner, number, number] => {
-    const qx = Math.min(t.width - 1, Math.max(0, cx)), qy = Math.min(t.height - 1, Math.max(0, cy));
-    return [t.corners[qy * t.width + qx], qx, qy];
+  const corner = (cx: number, cy: number): Corner | undefined =>
+    cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : undefined;
+  const rampAlong = (cx: number, cy: number, ax: number, ay: number) =>
+    [1, -1].some((s) => corner(cx + ax * s, cy + ay * s)?.ramp);
+  const slope = (ax: number, ay: number) => {
+    const clamp = (v: number, max: number) => Math.min(max, Math.max(0, v));
+    const [px, py] = [clamp(x + ax, t.width - 1), clamp(y + ay, t.height - 1)];
+    const [mx, my] = [clamp(x - ax, t.width - 1), clamp(y - ay, t.height - 1)];
+    const steps = Math.abs(px - mx) + Math.abs(py - my);
+    if (steps === 0) return 0;
+    const a = corner(px, py)!, b = corner(mx, my)!;
+    const along = (c: Corner, cx: number, cy: number) => !c.ramp || rampAlong(cx, cy, ax, ay);
+    const ramp = (a.ramp || b.ramp) && Math.abs(a.layer - b.layer) <= 1 && along(a, px, py) && along(b, mx, my);
+    const lift = (c: Corner, cx: number, cy: number) => {
+      if (!c.ramp) return 0;
+      for (const s of [1, -1]) {
+        const up = corner(cx + ax * s, cy + ay * s), down = corner(cx - ax * s, cy - ay * s);
+        if (up && down && up.ramp && down.ramp && up.layer === c.layer + 1 && down.layer === c.layer) return 64;
+      }
+      return 0;
+    };
+    const dh = ramp
+      ? a.height + lift(a, px, py) - (b.height + lift(b, mx, my))
+      : groundHeight(a) - groundHeight(b);
+    return dh / (128 * steps);
   };
-  const diff = (a: [Corner, number, number], b: [Corner, number, number]) =>
-    a[0].ramp && b[0].ramp
-      ? a[0].height + rampLift(t, a[1], a[2]) - (b[0].height + rampLift(t, b[1], b[2]))
-      : groundHeight(a[0]) - groundHeight(b[0]);
-  const dx = diff(at(x + 1, y), at(x - 1, y)), dy = diff(at(x, y + 1), at(x, y - 1));
-  const l = Math.hypot(dx, dy, 256);
-  return [-dx / l, -dy / l, 256 / l];
+  const sx = slope(1, 0), sy = slope(0, 1);
+  const l = Math.hypot(sx, sy, 1);
+  return [-sx / l, -sy / l, 1 / l];
 }
 
 /** Height of the ground at a world position: bilinear over the tile's

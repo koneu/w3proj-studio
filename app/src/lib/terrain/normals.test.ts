@@ -44,3 +44,30 @@ test("ground beside a ramp is not tilted by the ramp's layers", () => {
   const t = land(["22222", "2rRR3", "22222"]);
   assert.ok(tilt(cornerNormal(t, 0, 1)) < 1e-6);
 });
+
+const deg = (slope: number) => (Math.atan(slope) * 180) / Math.PI;
+
+test("a one-row ramp shades its end corners as the slope they draw", () => {
+  const t = land(["22233", "2rrR3", "22222"]);
+  // Drawn heights along the row: 0, 0, 64, 128, 128 at 128 per tile.
+  assert.ok(Math.abs(tilt(cornerNormal(t, 1, 1)) - deg(64 / 256)) < 1e-6, `low end ${tilt(cornerNormal(t, 1, 1))}`);
+  assert.ok(Math.abs(tilt(cornerNormal(t, 3, 1)) - deg(64 / 256)) < 1e-6, `high end ${tilt(cornerNormal(t, 3, 1))}`);
+  assert.ok(Math.abs(tilt(cornerNormal(t, 2, 1)) - deg(128 / 256)) < 1e-6, "middle");
+});
+
+test("the sides of a ramp and a cliff beside it stay upright across the ramp", () => {
+  const t = land(["22233", "2rrR3", "22222"]);
+  for (const x of [1, 2, 3]) for (const y of [0, 2]) {
+    const n = cornerNormal(t, x, y);
+    assert.ok(Math.abs(n[1]) < 1e-6, `corner ${x},${y} has no tilt across the ramp (${n[1]})`);
+  }
+  assert.ok(Math.abs(cornerNormal(t, 3, 1)[1]) < 1e-6, "ramp corner next to the cliff");
+});
+
+test("an edge corner tilts as much as the slope it is on", () => {
+  const t = land(["22222", "22222", "22222"], 32);
+  const want = deg(32 / 128);
+  assert.ok(Math.abs(tilt(cornerNormal(t, 0, 1)) - want) < 1e-6, `west edge ${tilt(cornerNormal(t, 0, 1))}`);
+  assert.ok(Math.abs(tilt(cornerNormal(t, 4, 1)) - want) < 1e-6, "east edge");
+  assert.ok(Math.abs(tilt(cornerNormal(t, 2, 1)) - want) < 1e-6, "inside");
+});
