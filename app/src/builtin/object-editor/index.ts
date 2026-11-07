@@ -9,7 +9,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, findPackedMap, isNotFoundError, recreatedMessage, type WtsSnapshot } from "./wtssession";
+import { WtsSession, fileIsMissing, findPackedMap, mapFolderGone, isNotFoundError, recreatedMessage, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -1115,6 +1115,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => step(-1),
           redo: () => step(1),
           async save() {
+            // Nothing is written into a vanished map folder: it would leave a lone file there.
+            const root = w3.workspace.project()?.root;
+            if (root) {
+              const folderExists = await w3.backend.invoke<boolean>("fs_exists", { path: `${root}\\map` }).catch(() => true);
+              if (mapFolderGone({ folderExists, isNew, hasWts })) {
+                w3.window.showError("The map folder is missing, so nothing was saved. Restore it (a checkpoint or the packed map has the files) and save again.");
+                return;
+              }
+            }
             // The backend encodes the JSON to binary (validating it) and returns
             // it in canonical formatting, so diffs stay minimal.
             const text = await w3.backend.invoke<string>("objects_canonicalize", { name: doc.path, text: serialize() });
@@ -1133,7 +1142,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     error,
                     refreshed,
                     listed: paths.includes("map/war3map.wts"),
-                    otherMapFiles: paths.some((p) => p.startsWith("map/") && p !== "map/war3map.wts"),
+                    otherMapFiles: paths.some((p) => p.startsWith("map/") && p !== "map/war3map.wts" && p !== doc.path.toLowerCase()),
                   });
                 };
                 const r = await wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t), isMissing);

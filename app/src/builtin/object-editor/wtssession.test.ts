@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, findPackedMap, isNotFoundError, recreatedMessage } from "./wtssession";
+import { WtsSession, fileIsMissing, mapFolderGone, findPackedMap, isNotFoundError, recreatedMessage } from "./wtssession";
 
 // The editor only changes strings that are already in the file (it needs the number to be in the
 // table), so it never adds a string and numbers can't collide: neither is covered here.
@@ -345,4 +345,13 @@ test("the packed map is the build output if it exists, else the newest checkpoin
   assert.equal(findPackedMap(out, true, cp), out);
   assert.equal(findPackedMap(out, false, cp), cp);
   assert.equal(findPackedMap(out, false, null), null);
+});
+
+test("saving stops when the map folder is gone, unless the file is new in a project that never had one", () => {
+  assert.equal(mapFolderGone({ folderExists: false, isNew: false, hasWts: true }), true);
+  assert.equal(mapFolderGone({ folderExists: false, isNew: false, hasWts: false }), true);
+  assert.equal(mapFolderGone({ folderExists: false, isNew: true, hasWts: true }), true);
+  assert.equal(mapFolderGone({ folderExists: false, isNew: true, hasWts: false }), false);
+  assert.equal(mapFolderGone({ folderExists: true, isNew: true, hasWts: true }), false);
+  assert.equal(mapFolderGone({ folderExists: true, isNew: false, hasWts: true }), false);
 });

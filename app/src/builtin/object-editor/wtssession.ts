@@ -165,3 +165,9 @@ export function recreatedMessage(packedMap: string | null): string {
   return "war3map.wts was missing and has been recreated from what this editor holds; strings added or changed elsewhere since may be lost."
     + (packedMap ? ` ${packedMap} may hold the old strings.` : "");
 }
+
+/** Whether a save must stop because the map folder is gone (writing would create a lone file in a
+ *  half project). A new object file in a project that never had a map folder is fine. */
+export function mapFolderGone(x: { folderExists: boolean; isNew: boolean; hasWts: boolean }): boolean {
+  return !x.folderExists && (!x.isNew || x.hasWts);
+}
