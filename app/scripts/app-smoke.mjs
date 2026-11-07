@@ -1431,11 +1431,12 @@ async function objectCopy(page, found) {
     await hands.mouse("mouseReleased", at.x, at.y);
     await sleep(100);
   };
+  // No wait after it: the copy is finished while the next map is being made, and must still be the first map's.
   const copyKey = () => hands.key("c", "KeyC", 67, 2);
   const pasteKey = () => hands.key("v", "KeyV", 86, 2);
   /** The question a paste asks: its choices, and clicks one. */
   const answer = async (label) => {
-    const choices = await until("the paste question", () => page.evaluate(`(() => { if (document.querySelector(".quick-input")?.hidden) return null; const l = [...document.querySelectorAll(".quick-input-item .label")].map((e) => e.textContent); return l.length ? l : null; })()`), 30000);
+    const choices = await until("the paste question", () => page.evaluate(`(() => { if (document.querySelector(".quick-input")?.hidden) return null; const l = [...document.querySelectorAll(".quick-input-item .label")].map((e) => e.textContent); return l.length ? l : null; })()`), 30000).catch(async (e) => { throw new Error(`${e.message} (waiting to answer ${label}) | unsaved: ${await page.evaluate(`JSON.stringify(w3.editors.unsavedPaths())`)} active: ${await page.evaluate(`w3.editors.activePath() + " " + (document.activeElement?.className ?? "")`)} project: ${await page.evaluate(`w3.workspace.project()?.name`)} | toasts: ${await page.evaluate(`[...document.querySelectorAll(".toast")].map((t) => t.textContent).join(" | ")`)}`); });
     if (label) await hands.click(".quick-input-item .label", label);
     return choices;
   };
@@ -1453,6 +1454,9 @@ async function objectCopy(page, found) {
   const trainee = await idOf("create_object", { kind: "units", base: "hfoo", name: "Smoke Trainee" });
   await tool("set_object_fields", { kind: "units", id: barracks, changes: [{ field: "utra", value: trainee }] });
   await save();
+  // Reforged maps keep names, art and tooltips of objects in war3mapSkin.*: the buff has a tooltip only there.
+  const skinFile = (root, entries) => page.evaluate(`(async () => { await w3.workspace.writeText("map/war3mapSkin.w3h.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.objects/1", version: readIn(root, "war3map.w3h.json").version ?? 3, original: [], custom: entries }))}); await w3.workspace.refresh(); })()`);
+  await skinFile(a, [{ base: "Bslo", id: buff, mods: [{ field: "ftip", type: "string", value: "Skin Tip" }] }]);
 
   // Map B has none of it. The hero is pasted.
   await openEditor("w3u");
@@ -1475,6 +1479,7 @@ async function objectCopy(page, found) {
   if (abilityB.base !== "Aslo" || field(abilityB, "abuf") !== buffB.id || buffB.base !== "Bslo") fail(`the pasted ability and buff: ${JSON.stringify([abilityB, buffB])}`);
   if (abilityB.id !== ability || buffB.id !== buff) fail(`the ability and buff should keep their ids in a map without them: ${abilityB.id} ${buffB.id}`);
   if (field(buffB, "fnam") !== "Smoke Buff" && !JSON.stringify(buffB).includes("Smoke Buff")) fail(`the pasted buff lost its name: ${JSON.stringify(buffB)}`);
+  if (field(buffB, "ftip") !== "Skin Tip") fail(`the pasted buff lost its Skin fields: ${JSON.stringify(buffB)}`);
   await until("the toast", () => page.evaluate(`[...document.querySelectorAll(".toast")].some((t) => /Pasted 1 object and 2 objects they refer to/.test(t.textContent))`), 10000).catch(() => fail("no message about what was pasted"));
   await verify(b, "CopyTo-1");
 
@@ -1536,13 +1541,19 @@ async function objectCopy(page, found) {
   await until("the undo", () => JSON.stringify(customs(b, "w3h")) === before.h && JSON.stringify(customs(b, "w3a")) === before.a && JSON.stringify(customs(b, "w3u")) === before.u, 20000)
     .catch(() => fail("one undo didn't take the paste back in all three files"));
 
-  // Overwrite: B's buff takes the copied content under the same id.
+  // Overwrite: B's buff takes the copied content under the same id, and B's old Skin entry for it goes.
+  await skinFile(b, [{ base: "Bslo", id: buff, mods: [{ field: "ftip", type: "string", value: "stale" }, { field: "fnam", type: "string", value: "stale name" }] }]);
   await openEditor("w3u");
   await hands.click(".obj-list");
   await pasteKey();
-  await answer("Overwrite them with the copied versions");
+  const overwriteChoices = await answer(null);
+  const overwriteDetail = await detailOfQuestion();
+  if (!/B\w+: \d+ objects?, \d+ placed/.test(overwriteDetail) || !overwriteChoices.some((c) => /^Overwrite/.test(c))) fail(`the overwrite choice doesn't say what uses the buff: ${overwriteDetail}`);
+  await hands.click(".quick-input-item .label", "Overwrite them with the copied versions");
   await until("the overwrite", () => customs(b, "w3u").length === 5 && JSON.stringify(customs(b, "w3h")).includes("Smoke Buff Changed"), 20000).catch(() => { /* said below */ });
   if (customs(b, "w3h").length !== 1 || !JSON.stringify(customs(b, "w3h")[0]).includes("Smoke Buff Changed")) fail(`overwriting the buff: ${JSON.stringify(customs(b, "w3h"))}`);
+  if ((readIn(b, "war3mapSkin.w3h.json").custom ?? []).some((o) => o.id === buff)) fail("the overwritten buff kept its old Skin entry");
+  if (field(customs(b, "w3h")[0], "ftip") !== "Skin Tip") fail(`the overwritten buff: ${JSON.stringify(customs(b, "w3h")[0])}`);
   await verify(b, "CopyTo-4");
 
   // Placed custom units copied in the terrain view bring their types into a third map.
@@ -1565,6 +1576,8 @@ async function objectCopy(page, found) {
   await hands.key("c", "KeyC", 67, 2);
   await sleep(1500);
   const c = await newMap("CopyTerrain");
+  // C has another unit under the hero's id, so the paste has to give the hero a new one.
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3u.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: hero, mods: [] }] }))}).then(() => w3.workspace.refresh())`);
   await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
   await until("the terrain editor of C", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   await sleep(1500);
@@ -1575,14 +1588,21 @@ async function objectCopy(page, found) {
   await hands.mouse("mouseMoved", canvas.x, canvas.y);
   await hands.click(".model-stage canvas");
   const terrainChoices = await answer(null);
-  if (!terrainChoices.some((x) => /^Paste with 3 objects it refers to$/.test(x))) fail(`the terrain paste asks ${JSON.stringify(terrainChoices)}`);
-  await hands.click(".quick-input-item .label", "Paste with 3 objects it refers to");
-  await until("the types in map C", () => customs(c, "w3u").length === 1 && customs(c, "w3a").length === 1 && customs(c, "w3h").length === 1, 20000);
-  await sleep(500);
-  await save();
-  const placed = readIn(c, "war3mapUnits.doo.json").units?.filter((u) => u.id === hero) ?? [];
-  if (placed.length !== 1) fail(`the placed hero in map C: ${JSON.stringify(placed.map((u) => u.id))}`);
-  if (customs(c, "w3u")[0]?.id !== hero) fail(`map C's hero type: ${customs(c, "w3u")[0]?.id}`);
+  if (!terrainChoices.some((x) => /^Paste them under new ids$/.test(x))) fail(`the terrain paste asks ${JSON.stringify(terrainChoices)}`);
+  await hands.click(".quick-input-item .label", "Paste them under new ids");
+  await until("the types in map C", () => customs(c, "w3u").length === 2 && customs(c, "w3a").length === 1 && customs(c, "w3h").length === 1, 20000);
+  await sleep(800);
+  // The same paste session places again: no new question, no second copy of the types.
+  await hands.click(".model-stage canvas");
+  await sleep(1500);
+  if (await asking()) fail("a second click of the same paste asked again");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(600);
+  const terrainHero = customs(c, "w3u").find((o) => o.base === "Hpal");
+  const placed = readIn(c, "war3mapUnits.doo.json").units?.filter((u) => u.id !== "sloc") ?? [];
+  if (!terrainHero || terrainHero.id === hero) fail(`map C's hero type: ${JSON.stringify(customs(c, "w3u").map((o) => o.id))}`);
+  if (customs(c, "w3u").length !== 2) fail(`a second click added another copy of the types: ${customs(c, "w3u").length} units`);
+  if (placed.length !== 2 || placed.some((u) => u.id !== terrainHero?.id || (u.skinId !== undefined && u.skinId !== terrainHero?.id))) fail(`the placed heroes in map C: ${JSON.stringify(placed.map((u) => [u.id, u.skinId]))}`);
   await verify(c, "CopyTerrain");
 }
 
