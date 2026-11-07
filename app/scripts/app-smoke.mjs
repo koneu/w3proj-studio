@@ -1606,6 +1606,134 @@ async function objectCopy(page, found) {
   await verify(c, "CopyTerrain");
 }
 
+/** The Problems view's "Graphics modes" fixes on made-up maps (the mini map plus Reforged-only
+ *  doodads), the way a user clicks them: the message names the model Classic is made from, the
+ *  conversion writes models whose every texture is in the map, nothing else is reported for them,
+ *  and the packed map verifies against the game. Also: error toasts carry a Copy button, and the
+ *  found problems of one project don't show in the next. Needs the game (W3PROJ_GAME). */
+async function graphicsModes(page, found) {
+  const fail = (what) => found.push(`graphics modes: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const dir = join(work, "graphics-modes");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const put = (p, o) => writeFileSync(p, JSON.stringify(o, null, 2));
+  const openProject = async (root) => {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  };
+  await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
+  // The doodads: a bridge, a wall end cap (two variations) and a tall pillar (nine), all with Reforged models.
+  const TYPES = ["LCcb", "YSw5", "LCpt"];
+  const make = (name, modes) => {
+    const root = join(dir, name);
+    cpSync(FIXTURE, root, { recursive: true });
+    const doo = json(join(root, "map", "war3map.doo.json"));
+    TYPES.forEach((id, i) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position: [256 + i * 128, 256, 0] }));
+    put(join(root, "map", "war3map.doo.json"), doo);
+    const w3i = json(join(root, "map", "war3map.w3i.json"));
+    w3i.supportedModes = modes;
+    put(join(root, "map", "war3map.w3i.json"), w3i);
+    return root;
+  };
+  const verify = (root, label) => {
+    const map = join(dir, `${label}.w3x`);
+    const packed = spawnSync(cli, ["pack", root, "-o", map], { encoding: "utf8" });
+    const r = packed.status === 0 ? spawnSync(cli, ["verify", map, "--game", game], { encoding: "utf8" }) : packed;
+    const text = (r.stdout ?? "") + (r.stderr ?? "");
+    if (r.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(text)) fail(`${label}: verify: ${text.trim().slice(-400)}`);
+    else if (/missing|not found/i.test(text)) fail(`${label}: verify reports missing files: ${text.trim().slice(-400)}`);
+  };
+  const check = () => page.evaluate(`(async () => {
+    const svc = await w3.services.get("w3.problems");
+    await svc.run();
+    // The mini map's script has problems of its own; this is about the objects.
+    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "")).map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
+  })()`);
+  const fix = (match, label) => page.evaluate(`(async () => {
+    const svc = await w3.services.get("w3.problems");
+    const p = svc.problems().find((q) => q.message.includes(${JSON.stringify(match)}) && (q.fixes ?? []).some((f) => f.label.startsWith(${JSON.stringify(label)})));
+    if (!p) return "no problem " + ${JSON.stringify(match)} + " with a fix " + ${JSON.stringify(label)};
+    await p.fixes.find((f) => f.label.startsWith(${JSON.stringify(label)})).run();
+    return null;
+  })().catch((e) => String(e && e.message || e))`);
+
+  // ---- Classic only: convert every type ----------------------------------------------------
+  const classic = make("classic", 1);
+  await openProject(classic);
+  let list = await check();
+  const missing = list.filter((p) => /no model in Classic/.test(p.message));
+  if (missing.length !== TYPES.length) fail(`Classic only: ${missing.length} of ${TYPES.length} types reported: ${list.map((p) => p.message).join(" | ").slice(0, 300)}`);
+  for (const p of missing) {
+    if (!/Classic can be made from the (DE|HD) model /.test(p.message)) fail(`the message doesn't say which model it converts from: ${p.message}`);
+    if (!p.fixes.some((f) => /^Convert/.test(f))) fail(`no convert fix: ${p.message}`);
+    if (p.fixes.some((f) => /^Use a Classic model/.test(f))) fail("the old \"Use a Classic model\" label is still there");
+    if (!p.fixes.some((f) => /^Replace with a Classic game model/.test(f))) fail(`no "Replace with a Classic game model" fix: ${p.fixes.join(", ")}`);
+  }
+  for (const id of TYPES) {
+    const err = await fix(`(${id})`, "Convert");
+    if (err) fail(`converting ${id}: ${err}`);
+  }
+  list = await check();
+  if (list.length) fail(`after converting, still reported: ${list.map((p) => p.message).join(" | ").slice(0, 600)}`);
+  const imported = await page.evaluate(`w3.workspace.files().map((f) => f.path).filter((p) => /\\.mdx$/i.test(p))`);
+  if (imported.length < 3) fail(`only ${imported.length} converted models in the map`);
+  verify(classic, "classic");
+
+  // ---- HD only: import the Reforged model ------------------------------------------------
+  const hd = make("hd", 2);
+  await openProject(hd);
+  list = await check();
+  const gaps = list.filter((p) => /no model in Reforged \(HD\)/.test(p.message));
+  for (const p of gaps) {
+    const id = /\((\w{4})\)/.exec(p.message)?.[1];
+    const err = await fix(`(${id})`, "Import");
+    if (err) fail(`importing ${id}: ${err}`);
+  }
+  list = await check();
+  if (list.length) fail(`after importing, still reported: ${list.map((p) => p.message).join(" | ").slice(0, 600)}`);
+  verify(hd, "hd");
+
+  // ---- The picker: a model of another graphics mode is converted ---------------------------
+  const pick = make("pick", 1);
+  await openProject(pick);
+  await check();
+  await page.evaluate(`(async () => {
+    const svc = await w3.services.get("w3.problems");
+    const p = svc.problems().find((q) => q.message.includes("(LCcb)"));
+    window.__picked = p.fixes.find((f) => f.label.startsWith("Replace with a Classic game model")).run().then(() => "done", (e) => String(e && e.message || e));
+  })()`);
+  await until("the picker", () => page.evaluate(`!!document.querySelector(".model-pick")`));
+  const modes = await page.evaluate(`[...document.querySelectorAll(".model-pick select.model-pick-mode option")].map((o) => o.value)`);
+  if (modes.join() !== "classic,de,hd") fail(`the picker offers the modes ${modes.join()}`);
+  await page.evaluate(`(() => { const s = document.querySelector(".model-pick select.model-pick-mode"); s.value = "de"; s.dispatchEvent(new Event("change")); })()`);
+  const rows = await page.evaluate(`document.querySelectorAll(".model-pick .model-pick-row").length`);
+  if (!rows) fail("the DE list of the picker is empty");
+  await page.evaluate(`(() => { const i = document.querySelector(".model-pick input.model-pick-search"); i.value = "CapitalBridge0"; i.dispatchEvent(new Event("input")); })()`);
+  await page.evaluate(`[...document.querySelectorAll(".model-pick button")].find((b) => /Use this model/.test(b.textContent)).click()`);
+  const picked = await page.evaluate(`window.__picked`);
+  if (picked !== "done") fail(`choosing a DE model failed: ${picked}`);
+  list = await check();
+  if (list.some((p) => p.message.includes("(LCcb)"))) fail("after choosing a DE model, the type is still reported");
+  if (!(await page.evaluate(`w3.workspace.files().some((f) => f.path.toLowerCase().includes("classic/capitalbridge0/capitalbridge0.mdx"))`))) fail("the chosen DE model was not converted into the map");
+
+  // ---- Another project drops the first one's problems ---------------------------------------
+  await openProject(make("stale", 1));
+  await check();
+  const before = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.problems().length)`);
+  await openProject(hd);
+  await sleep(300);
+  const after = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.problems().length)`);
+  if (before === 0) fail("the project to leave had no problems, so staleness isn't tested");
+  if (after !== 0) fail(`the previous project's ${after} problems show in the next (${before} before)`);
+
+  // ---- Error toasts can be copied ---------------------------------------------------------
+  await page.evaluate(`void w3.window.showError("Smoke error to copy")`);
+  const copy = await until("the toast", () => page.evaluate(`!!document.querySelector(".toast.error button.copy-error")`)).catch(() => false);
+  if (!copy) fail("an error toast has no Copy button");
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -1711,6 +1839,12 @@ async function run() {
     const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
     if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
 
+    if (process.argv.includes("--only=graphics")) {
+      await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
+      found.push(...problems(page.events));
+      page.ws.close();
+      return found;
+    }
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
@@ -1719,6 +1853,7 @@ async function run() {
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
+    await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 

@@ -16,8 +16,8 @@ import { checkLua } from "../../lib/lua/check";
 import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
-import { pickClassicModel } from "./modelpick";
-import { missingTextures, modelExists, readLayered, type Source, textureCandidates, uniqueName } from "./reforged";
+import { type ModeChoices, pickClassicModel } from "./modelpick";
+import { conversionSources, missingTextures, modelExists, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
 
@@ -297,11 +297,16 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
   const stored = new Map<string | null, Set<string>>(MODES.map((m) => [m.layer, new Set()]));
   // The Classic models (as stored, for the picker of the fix).
   const classicModels = new Set<string>();
+  // The Reforged models by set, for the picker of the fix (they are converted when chosen).
+  const reforgedModels: Record<Source, Set<string>> = { de: new Set(), hd: new Set() };
   for (const full of await w3.game.list()) {
     const path = full.slice(full.lastIndexOf(":") + 1);
     const layer = /:_(hd|de)\.w3mod:/i.exec(full)?.[1].toLowerCase();
     stored.get(layer ? `_${layer}` : null)!.add(path.replace(/\\/g, "/").toLowerCase());
-    if (!layer && /\.mdx$/i.test(path) && !/_portrait\.mdx$/i.test(path)) classicModels.add(path.replace(/\//g, "\\"));
+    if (/\.mdx$/i.test(path) && !/_portrait\.mdx$/i.test(path)) {
+      if (!layer) classicModels.add(path.replace(/\//g, "\\"));
+      else if (/:_(hd|de)\.w3mod:[^:]*$/i.test(full)) reforgedModels[layer as Source].add(path.replace(/\//g, "\\"));
+    }
   }
   const files = new FileLookup(w3);
   const kinds = new Map<string, Awaited<ReturnType<typeof loadKind>>>();
@@ -367,32 +372,42 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
       const base = custom.get(id)?.base ?? id;
       const name = kinds.get(kind)?.names.get(base) ?? id;
       const where = MODES.filter((m) => modes.has(m.name)).map((m) => m.name).join(", ");
-      const reforged = [...paths].every(inReforged);
+      // The Reforged sets that have every model of the type: a Classic model can be made from each.
+      const sources = conversionSources([...paths], (s, key) => stored.get(`_${s}`)!.has(key));
+      // Models split over both sets: taken from whichever has each.
+      if (!sources.length && [...paths].every(inReforged)) sources.push("de");
       const fixes: ProblemFix[] = [];
-      if (reforged) fixes.push({
-        label: "Convert to a Classic model",
-        title: "Writes a Classic copy of the Reforged model (and its colour textures) into the map and points the type at it; every graphics mode shows it, with the Classic look (no Reforged extra maps or effects)",
-        run: async () => {
-          const model = value(id, kind, ART[kind].model) ?? "";
-          const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
-          const bytes = await convertToClassic(w3, kind, base, id, model, variations, "de");
-          void w3.window.showInfo(`Converted ${name} to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
-        },
-      });
+      // One button per set to take the model from, when there is a choice.
+      for (const source of sources) {
+        const set = SOURCE_NAME[source], pick = sources.length > 1 ? ` from ${set}` : "";
+        fixes.push({
+          label: `Convert${pick} to a Classic model`,
+          title: `Writes a Classic copy of the ${set} model (and its colour textures) into the map and points the type at it; every graphics mode shows it, with the Classic look (no Reforged extra maps or effects)`,
+          run: async () => {
+            const model = value(id, kind, ART[kind].model) ?? "";
+            const variations = Number(ART[kind].variations ? value(id, kind, ART[kind].variations!) : 1) || 1;
+            const bytes = await convertToClassic(w3, kind, base, id, model, variations, source);
+            void w3.window.showInfo(`Converted ${name} from the ${set} model to a Classic model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+          },
+        });
+      }
       // Without Classic, the Reforged model itself can be imported: both Reforged modes draw it.
-      if (reforged && !modes.has("Classic")) fixes.push({
-        label: "Import the Reforged model",
-        title: `Copies the model (and the textures ${where} lacks) from the other Reforged folder into the map, at the path the type names; the map doesn't support Classic, which couldn't draw it`,
-        run: async () => {
-          const lacking = supported.filter((m) => m.layer && modes.has(m.name)).map((m) => m.layer!);
-          const bytes = await importReforged(w3, [...paths], "de", (cands) => lacking.some((l) => !cands.some((c) => stored.get(null)!.has(c.toLowerCase()) || stored.get(l)!.has(c.toLowerCase()))));
-          void w3.window.showInfo(`Imported ${name}'s Reforged model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
-        },
-      });
+      for (const source of modes.has("Classic") ? [] : sources) {
+        const set = SOURCE_NAME[source], pick = sources.length > 1 ? ` ${set}` : "";
+        fixes.push({
+          label: `Import the${pick} Reforged model`,
+          title: `Copies the ${set} model (and the textures ${where} lacks) into the map, at the path the type names; the map doesn't support Classic, which couldn't draw it`,
+          run: async () => {
+            const lacking = supported.filter((m) => m.layer && modes.has(m.name)).map((m) => m.layer!);
+            const bytes = await importReforged(w3, [...paths], source, (cands) => lacking.some((l) => !cands.some((c) => stored.get(null)!.has(c.toLowerCase()) || stored.get(l)!.has(c.toLowerCase()))));
+            void w3.window.showInfo(`Imported ${name}'s ${set} model (${(bytes / 1048576).toFixed(1)} MB in the map).`);
+          },
+        });
+      }
       fixes.push({
-        label: "Use a Classic model instead…",
-        title: "Pick one of the game's Classic models for this type (every graphics mode can load those); it's written into the map's object data (a modified standard object)",
-        run: () => useClassicModel(w3, kind, base, id, name, [...paths][0] ?? "", classicModels),
+        label: "Replace with a Classic game model…",
+        title: "Pick one of the game's own Classic models for this type (every graphics mode can load those); it's written into the map's object data (a modified standard object), and the type's Reforged model is no longer used",
+        run: () => useClassicModel(w3, kind, base, id, name, [...paths][0] ?? "", classicModels, reforgedModels, sources),
       }, {
         label: `Remove the ${items.length} placed`,
         title: `Deletes every placed ${name} (${id}) from ${file.slice(4)}`,
@@ -400,7 +415,8 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
       });
       out.push({
         severity: "warning",
-        message: `${name} (${id}): no model in ${where} graphics, invisible there; placed ${items.length}×`,
+        message: `${name} (${id}): no model in ${where} graphics, invisible there; placed ${items.length}×`
+          + (sources.length ? `. ${sourcesText(sources, [...paths][0])}` : ""),
         location: file.slice(4),
         reveal: { command: "w3.terrain.showPoint", args: [items[0].position[0], items[0].position[1]] },
         fixes,
@@ -417,23 +433,33 @@ const removePlaced = (w3: W3Api, file: string, key: string, id: string) =>
 /** Model and variation count fields of a kind's object data. */
 const MODEL_FIELDS: Record<string, { model: string; variations?: string }> = ART;
 
-/** Asks for one of the game's Classic models (best name matches first) and writes it into the
- *  type's model field in the map's object data (a modified standard object, or the custom
- *  object itself); variations are set to 1 (the chosen model has no numbered variants). */
-async function useClassicModel(w3: W3Api, kind: string, base: string, id: string, name: string, current: string, models: Set<string>) {
+/** Asks for one of the game's models (best name matches first), from the Classic files or, to be
+ *  converted, a Reforged set's, and writes it into the type's model field in the map's object data
+ *  (a modified standard object, or the custom object itself); variations are set to 1 (the chosen
+ *  model has no numbered variants). A Reforged model is converted to a Classic one first. */
+async function useClassicModel(
+  w3: W3Api, kind: string, base: string, id: string, name: string, current: string,
+  classic: Set<string>, reforged: Record<Source, Set<string>>, preferred: Source[],
+) {
   // Words of the current model's file name ("Wood_Debris_Barrels_01" → wood, debris, barrels).
   const words = (current.split(/[\\/]/).pop() ?? "").replace(/\.\w+$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2);
   const score = (p: string) => { const l = p.toLowerCase(); return words.reduce((n, w) => n + (l.includes(w) ? 1 : 0), 0); };
-  const list = [...models].map((p) => ({ p, s: score(p) })).sort((x, y) => y.s - x.s || x.p.localeCompare(y.p));
-  const pick = await pickClassicModel(w3, {
-    title: `Classic model for ${name} (${id})`,
-    current: current || null,
-    choices: list.map(({ p, s }) => ({
-      path: p, label: p.split("\\").pop()!.replace(/\.mdx$/i, ""), detail: p.replace(/\\[^\\]+$/, "") + (s ? "  ·  name match" : ""),
-    })),
-  });
+  const choices = (models: Set<string>) => [...models].map((p) => ({ p, s: score(p) })).sort((x, y) => y.s - x.s || x.p.localeCompare(y.p)).map(({ p, s }) => ({
+    path: p, label: p.split("\\").pop()!.replace(/\.mdx$/i, ""), detail: p.replace(/\\[^\\]+$/, "") + (s ? "  ·  name match" : ""),
+  }));
+  const modes: ModeChoices[] = [{ mode: "classic", label: "Classic", choices: choices(classic) }];
+  // The set the type's own Reforged model comes from first.
+  for (const s of [...preferred, ...(["de", "hd"] as const).filter((x) => !preferred.includes(x))]) {
+    if (reforged[s].size) modes.push({ mode: s, label: `Reforged (${SOURCE_NAME[s]}), converted to Classic`, choices: choices(reforged[s]) });
+  }
+  const pick = await pickClassicModel(w3, { title: `Model for ${name} (${id})`, current: current || null, modes });
   if (!pick) return;
-  await setModel(w3, kind, base, id, pick.replace(/\.mdx$/i, ".mdl"), 1);
+  if (pick.mode === "classic") {
+    await setModel(w3, kind, base, id, pick.path.replace(/\.mdx$/i, ".mdl"), 1);
+    return;
+  }
+  const bytes = await convertToClassic(w3, kind, base, id, pick.path, 1, pick.mode);
+  void w3.window.showInfo(`Converted ${pick.path.split("\\").pop()} from the ${SOURCE_NAME[pick.mode]} files to a Classic model for ${name} (${(bytes / 1048576).toFixed(1)} MB in the map).`);
 }
 
 /** Writes a model (and, for doodads/destructables, the variation count) into a type's object

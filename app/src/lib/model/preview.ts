@@ -24,7 +24,7 @@ export class ModelPreview {
   private started = performance.now();
   private drag: number | null = null;
 
-  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" } = {}) {
+  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd" } = {}) {
     this.canvas = this.newCanvas();
     this.note = div("obj-preview-note muted");
     this.el = div("obj-preview");
@@ -33,6 +33,13 @@ export class ModelPreview {
     window.addEventListener("mousemove", this.onMove);
     window.addEventListener("mouseup", this.onUp);
     this.raf = requestAnimationFrame(this.tick);
+  }
+
+  /** Which files win from now on (a model shown stays; the next `show` uses it). */
+  setPrefer(prefer: "classic" | "reforged" | "de" | "hd") {
+    if (this.opts.prefer === prefer) return;
+    this.opts = { ...this.opts, prefer };
+    this.path = null;
   }
 
   private newCanvas(): HTMLCanvasElement {
@@ -75,7 +82,9 @@ export class ModelPreview {
     }
     let last: unknown = new Error(`${path} not found`);
     // Classic: the base folder exactly; Reforged: its DE, then HD folder; then as the game resolves it.
-    const layers = this.opts.prefer === "classic" ? ["War3.w3mod:"] : this.opts.prefer === "reforged" ? ["War3.w3mod:_DE.w3mod:", "War3.w3mod:_HD.w3mod:"] : [];
+    const layers = this.opts.prefer === "classic" ? ["War3.w3mod:"]
+      : this.opts.prefer === "hd" ? ["War3.w3mod:_HD.w3mod:", "War3.w3mod:_DE.w3mod:"]
+      : this.opts.prefer === "reforged" || this.opts.prefer === "de" ? ["War3.w3mod:_DE.w3mod:", "War3.w3mod:_HD.w3mod:"] : [];
     const tries = variants.flatMap((v) => [...layers.map((l) => l + v.replace(/\\/g, "/")), v]);
     for (const v of tries) {
       try { return await this.w3.game.read(v); } catch (e) { last = e; }
