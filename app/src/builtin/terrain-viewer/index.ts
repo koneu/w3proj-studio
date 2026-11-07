@@ -2012,10 +2012,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const MAX_GHOSTS = 300;
         /** What's copied: start locations belong to their players. */
         const copyable = () => selectedEntries().filter((p) => p.id !== "sloc");
+        /** Custom types among the copied objects need their abilities and the like in another map: the clipboard takes
+         *  them from this map's object data as it goes on. */
+        const takeTypes = (f: Fragment) => {
+          const ids = [...new Set(f.objects.map((o) => String(o.entry.id)))];
+          void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.typesFor(ids)).then((types) => { if (types.length) f.types = types; }, () => { /* pastes without them */ });
+        };
         const copySelection = () => {
           const entries = copyable();
           if (!entries.length) return false;
           clipboard = fragmentOf(entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry })), (x, y) => heightAt(terrain, x, y));
+          takeTypes(clipboard);
           return true;
         };
         /** The block of ground Ctrl+C takes. */
@@ -2116,6 +2123,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const items = !a.objects ? [] : ([["doodads", dooFile], ["units", unitsFile]] as const).flatMap(([list, f]) => (f?.list ?? [])
             .filter((p) => p.id !== "sloc" && inArea(p.position[0], p.position[1], inside)).map((entry) => ({ list, entry })));
           clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), centre), ground: groundOf(terrain, a, centre) };
+          takeTypes(clipboard);
         };
         /** Where the fragment's centre lands for a pointer on the ground: ground goes on whole tiles. */
         const pasteCentre = (f: Fragment, g: Vec3): [number, number] => {
@@ -2148,8 +2156,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           redraw();
         };
+        /** The types of what's being pasted, once this map has them (asked once per paste, however often it's placed). */
+        let bringing: { types: Fragment["types"]; renames: Promise<Map<string, string> | null> } | null = null;
+        const bringTypes = (f: Fragment) => {
+          if (!f.types?.length) return Promise.resolve(new Map<string, string>());
+          if (bringing?.types !== f.types) {
+            const label = `${f.objects.length} copied object${f.objects.length === 1 ? "" : "s"}`;
+            const renames = w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.bringTypes(f.types!, label));
+            const mine = { types: f.types, renames };
+            bringing = mine;
+            // Cancelled or failed: the next click asks again.
+            void renames.then((r) => { if (!r && bringing === mine) bringing = null; }, () => { if (bringing === mine) bringing = null; });
+          }
+          return bringing.renames;
+        };
         const startPaste = () => {
           if (!clipboard) return false;
+          bringing = null;
           setArea(null);
           showTab(null);
           clearSelection();
@@ -2196,6 +2219,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const placePaste = async (g: Vec3) => {
           const f = pasting;
           if (!f) return;
+          // What the pasted objects are made of, before anything is placed: the user may refuse.
+          const renames = await bringTypes(f).catch((e) => { void w3.window.showError(String(e)); return null; });
+          if (!renames || pasting !== f) return;
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           const tiles = tileSnapshot(terrain);
           const stamped = await placeGround(f, g);
@@ -2211,9 +2237,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return;
           }
           keyPress = "repeat";
-          try { placeObjects(f, g); } finally { keyPress = null; keyStep = null; }
+          try { placeObjects(f, g, renames); } finally { keyPress = null; keyStep = null; }
         };
-        const placeObjects = (f: Fragment, g: Vec3) => {
+        const placeObjects = (f: Fragment, g: Vec3, renames: ReadonlyMap<string, string> = new Map()) => {
           const added: { entry: Placed; f: PlacedFile }[] = [];
           let off = 0;
           for (const o of f.objects) {
@@ -2221,7 +2247,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Units and items can't stand past the playable map, trees and doodads can.
             const standing = spot && (o.list === "doodads" || !playableEdge || inArea(spot[0], spot[1], playableEdge));
             if (!file || !spot || !standing || !insideBounds(heldTo(), spot[0], spot[1])) { off++; continue; }
-            const made = pastedEntry(file, o, spot);
+            const renamed = renames.get(String(o.entry.id));
+            const made = pastedEntry(file, renamed ? { ...o, entry: { ...o.entry, id: renamed } } : o, spot);
             if (typeof (made as Placed & { flags?: number }).flags === "number") (made as Placed & { flags?: number }).flags = pastedFlags((made as Placed & { flags: number }).flags, preserveHeight());
             file.list.push(made);
             repositioned.add(made);

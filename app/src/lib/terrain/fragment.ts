@@ -3,6 +3,7 @@
 // relative to its centre, and refers to nothing in an open map, so it can be saved, pasted into another
 // map, or turned. Tile and cliff types are kept by name, as a map numbers them its own way.
 
+import type { Copied } from "../objects/copydeps";
 import { setGroundHeight, setLayer, setWaterLevel, groundHeight, type Corner, type Terrain } from "./w3e";
 
 export const FRAGMENT_FORMAT = "w3proj.fragment/1";
@@ -48,6 +49,8 @@ export interface FragmentGround {
 
 export interface Fragment {
   format: typeof FRAGMENT_FORMAT;
+  /** The custom object types the objects use, with what those refer to, from the map they were copied in. */
+  types?: Copied[];
   objects: FragmentObject[];
   ground?: FragmentGround;
 }
