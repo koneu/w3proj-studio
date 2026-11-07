@@ -2141,6 +2141,79 @@ async function editorTabRaces(page, found, root) {
   if (r.disposed !== 1) fail(`an editor whose tab closed while it loaded was disposed ${r.disposed} times`);
 }
 
+/** Drawing many objects costs no more draw calls than drawing a few: the copies of a model are drawn
+ *  together, one call per layer (and player colour where it shows), and what's out of view isn't drawn.
+ *  Counted on the terrain canvas's WebGL calls of one frame, not timed, so it isn't flaky. Needs the game. */
+async function drawCalls(page, found) {
+  const fail = (what) => found.push(`draw calls: ${what}`);
+  if (!game) { fail("needs W3PROJ_GAME"); return; }
+  const base = {
+    doo: JSON.parse(readFileSync(join(FIXTURE, "map", "war3map.doo.json"), "utf8")),
+    units: JSON.parse(readFileSync(join(FIXTURE, "map", "war3mapUnits.doo.json"), "utf8")),
+  };
+  const footman = base.units.units.find((u) => u.id === "hfoo");
+  /** A copy of the fixture with `n` trees and `n` footmen (players 0 to 5 in turn) more, on and around the small map. */
+  const write = (root, n) => {
+    rmSync(root, { recursive: true, force: true });
+    cpSync(FIXTURE, root, { recursive: true });
+    const doo = structuredClone(base.doo), units = structuredClone(base.units);
+    for (let i = 0; i < n; i++) {
+      const x = -128 + (i % 8) * 64, y = -64 + Math.floor(i / 8) * 48;
+      doo.doodads.push({ ...doo.doodads[0], id: "LTlt", skinId: "LTlt", variation: i % 3, position: [x, y, 0], editorId: 1000 + i });
+      units.units.push({ ...footman, position: [x + 32, y + 24, 0], player: i % 6, editorId: 2000 + i });
+    }
+    writeFileSync(join(root, "map", "war3map.doo.json"), JSON.stringify(doo, null, 2));
+    writeFileSync(join(root, "map", "war3mapUnits.doo.json"), JSON.stringify(units, null, 2));
+  };
+  const tool = mcpTool(page);
+  /** Opens a copy with `n` more of each in the terrain, and waits until every model and texture is in. */
+  const open = async (n) => {
+    const root = join(work, `draw-calls-${n}`);
+    write(root, n);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+    await tool("terrain_screenshot", { maxSize: 64 });
+  };
+  // Counts the calls of each frame drawn on the terrain canvas; a frame starts with its clear.
+  await page.evaluate(`(() => {
+    if (window.__drawCount) return;
+    const P = WebGL2RenderingContext.prototype, c = window.__drawCount = { frames: 0, current: null, last: null };
+    const ours = (gl) => !!gl.canvas.closest?.(".model-stage");
+    const wrap = (name, count) => { const f = P[name]; P[name] = function (...a) { if (ours(this) && c.current) count(c.current, a); return f.apply(this, a); }; };
+    const clear = P.clear;
+    P.clear = function (m) { if (ours(this)) { c.last = c.current; c.current = { elements: 0, instanced: 0, instances: 0, worldUploads: 0 }; c.frames++; } return clear.call(this, m); };
+    wrap("drawElements", (f) => { f.elements++; });
+    wrap("drawElementsInstanced", (f, a) => { f.elements++; f.instanced++; f.instances += a[4]; });
+    wrap("uniformMatrix4fv", (f) => { f.worldUploads++; });
+  })()`);
+  /** The counts of one whole frame, drawn with the camera looking at (x, y). */
+  const frame = async (x, y) => {
+    const path = await page.evaluate(`w3.editors.activePath()`);
+    const before = await page.evaluate(`window.__drawCount.frames`);
+    // Each look asks for a frame. Once the second has begun, the first is complete, with the new view.
+    for (const n of [1, 2]) {
+      await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(${JSON.stringify(path)})(${x}, ${y}))()`);
+      await until("a frame", () => page.evaluate(`window.__drawCount.frames >= ${before + n}`), 20000);
+    }
+    return page.evaluate(`window.__drawCount.last`);
+  };
+  const few = 6, many = 30;
+  await open(few);
+  const a = await frame(128, 64);
+  await open(many);
+  const b = await frame(128, 64);
+  // Far off the map, where nothing stands.
+  const away = await frame(40000, 40000);
+  await page.evaluate(`w3.editors.closeAll()`);
+  if (process.argv.includes("--verbose")) console.log(`  draw calls: ${JSON.stringify({ few: a, many: b, away })}`);
+  const placed = 2 * (many - few);
+  // The control: the added trees and footmen were drawn, so the count below is about drawing them.
+  if (b.instances - a.instances < placed) return fail(`${placed} objects more drew ${b.instances - a.instances} more instances (${a.instances}, then ${b.instances}): they weren't drawn as instances`);
+  if (b.elements !== a.elements) fail(`${placed} objects more took ${b.elements - a.elements} more draw calls (${a.elements}, then ${b.elements})`);
+  if (b.worldUploads !== a.worldUploads) fail(`${placed} objects more uploaded ${b.worldUploads - a.worldUploads} more matrices (${a.worldUploads}, then ${b.worldUploads})`);
+  if (away.instances >= b.instances / 4) fail(`looking away from the objects still drew ${away.instances} of ${b.instances} instances`);
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -2182,7 +2255,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, gameReadsOnce, moduleFunctions, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, gameReadsOnce, moduleFunctions, drawCalls, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2267,6 +2340,7 @@ async function run() {
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
+    await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 
