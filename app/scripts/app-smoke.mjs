@@ -799,6 +799,46 @@ async function moduleFunctions(page, found) {
     verify(a, "invalid");
   }
 
+  // ---- Delete Invalid Objects in a chapter of a campaign ----------------------------------------
+  // The chapter's objects come from the campaign project two folders up: none of its placed
+  // objects may count as invalid. W3_SMOKE_CHAPTER (a folder holding the campaign's `map` and the
+  // chapter, as "campaign|maps/Chapter.w3x") runs the same on a real campaign.
+  {
+    const camp = join(dir, "camp");
+    const chapter = join(camp, "maps", "Chapter 1.w3x");
+    cpSync(FIXTURE, chapter, { recursive: true });
+    put(join(camp, "map", "war3campaign.w3u.json"), { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "c001", mods: [{ field: "unam", type: "string", value: "Campaign Footman" }] }] });
+    put(join(camp, "map", "war3campaignSkin.w3u.json"), { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "c002", mods: [] }] });
+    const units = json(join(chapter, "map", "war3mapUnits.doo.json"));
+    units.units.push({ ...units.units[0], id: "c001", skinId: "c001" }, { ...units.units[0], id: "c002", skinId: "c002" });
+    put(join(chapter, "map", "war3mapUnits.doo.json"), units);
+    await openProject(chapter);
+    await answer({});
+    const before = readFileSync(join(chapter, "map", "war3mapUnits.doo.json"), "utf8");
+    const err = await run("w3.problems.deleteInvalid");
+    if (err) fail(`Delete Invalid Objects in a chapter: ${err}`);
+    if ((await asked()).length) fail(`Delete Invalid Objects in a chapter offered: ${(await asked())[0]}`);
+    if (readFileSync(join(chapter, "map", "war3mapUnits.doo.json"), "utf8") !== before) fail("Delete Invalid Objects changed a chapter's valid objects");
+    if (existsSync(join(chapter, "build", "checkpoints"))) fail("Delete Invalid Objects made a checkpoint with nothing to delete");
+  }
+  if (process.env.W3_SMOKE_CHAPTER) {
+    const [campSrc, chapterRel] = process.env.W3_SMOKE_CHAPTER.split("|");
+    const camp = join(dir, "real-camp");
+    mkdirSync(join(camp, "maps"), { recursive: true });
+    cpSync(join(campSrc, "map"), join(camp, "map"), { recursive: true });
+    cpSync(join(campSrc, chapterRel), join(camp, chapterRel), { recursive: true });
+    const chapter = join(camp, chapterRel);
+    const unitsFile = join(chapter, "map", "war3mapUnits.doo.json");
+    const doodadsFile = join(chapter, "map", "war3map.doo.json");
+    const placed = (existsSync(unitsFile) ? json(unitsFile).units.length : 0) + (existsSync(doodadsFile) ? json(doodadsFile).doodads.length : 0);
+    await openProject(chapter);
+    await answer({});
+    const err = await run("w3.problems.deleteInvalid");
+    if (err) fail(`real chapter: ${err}`);
+    console.log(`real chapter: ${placed} placed objects, question asked: ${JSON.stringify((await asked())[0] ?? null)}`);
+    if ((await asked()).length) fail(`the real chapter offered to delete: ${(await asked())[0]}`);
+  }
+
   // ---- Export Minimap -----------------------------------------------------------------------
   const b = join(dir, "minimap");
   cpSync(FIXTURE, b, { recursive: true });
