@@ -5,6 +5,7 @@
 // redo the second. The history lives as long as the session.
 
 import type { W3Api } from "../../extensions/api";
+import { isNotFoundError } from "../oserror";
 import type { Terrain } from "./w3e";
 import type { Sides } from "./resize";
 
@@ -22,6 +23,8 @@ export interface ResizeRecord {
   /** The terrain editor's file, which is closed and opened again around an undo. */
   editor: string;
   title: string;
+  /** What was on screen when the resize started (the toasts): what came after is the resize's, and an undo withdraws it. */
+  shownBefore?: ReadonlySet<unknown>;
   before: Files;
   after: Files;
 }
@@ -185,10 +188,8 @@ export function resizeLoss(t: Terrain, change: Sides, objects: readonly { id?: s
 
 type Workspace = Pick<W3Api["workspace"], "project" | "files" | "readBytes" | "writeBytes" | "delete" | "refresh">;
 
-/** Whether a backend error says the file isn't there (the operating system's error 2 or 3, in any language). */
-export function isNotFound(e: unknown): boolean {
-  return /(os error (2|3))/.test(e instanceof Error ? e.message : String(e));
-}
+/** Whether a backend error says the file isn't there (see lib/oserror). */
+export const isNotFound = isNotFoundError;
 
 /** The project's files as the history reads and writes them. A file that isn't there reads as missing;
  *  one that is there but can't be read is an error (it must not be taken for absent and deleted later). */
@@ -209,7 +210,7 @@ export interface ResizeSession {
 
 /** Keeps every file a resize may rewrite, to undo it later (or at once, if it fails). Reads all
  *  of them before returning, so call it before the first write. */
-export async function beginResize(ws: Workspace, editor: string, title: string): Promise<ResizeSession> {
+export async function beginResize(ws: Workspace, editor: string, title: string, shownBefore?: ReadonlySet<unknown>): Promise<ResizeSession> {
   const io = workspaceIO(ws);
   const root = ws.project()!.root;
   const before = await takeSnapshot(io, resizeCandidates(ws.files().map((f) => f.path), editor));
@@ -218,7 +219,7 @@ export async function beginResize(ws: Workspace, editor: string, title: string):
       await ws.refresh();
       const after = await takeSnapshot(io, resizeCandidates(ws.files().map((f) => f.path), editor));
       const kept = changedFiles(before, after);
-      if (kept.before.size) resizeHistory.record({ root, editor, title, before: kept.before, after: kept.after });
+      if (kept.before.size) resizeHistory.record({ root, editor, title, shownBefore, before: kept.before, after: kept.after });
     },
     async abort() {
       await ws.refresh();

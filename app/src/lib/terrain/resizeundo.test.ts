@@ -271,3 +271,24 @@ test("the quiet Ctrl+Z path stays silent about the editor's own unsaved changes 
   assert.equal(warnsAboutUnsaved(["e", "other"], "e", true), true, "another document too: said");
   assert.equal(warnsAboutUnsaved(["other"], "e", true), true);
 });
+
+test("a file another program holds open, or a bad name, is there: it reads as an error, never as missing", async () => {
+  for (const n of [32, 33, 22, 267, 20, 21, 23, 24]) {
+    const io = workspaceIO({ ...fakeWorkspace({}).ws, readBytes: async () => { throw `Der Prozess kann nicht auf die Datei zugreifen. (os error ${n})`; } });
+    await assert.rejects(() => io.read("map/war3map.w3e"), (e) => String(e).endsWith(`(os error ${n})`), `os error ${n}`);
+  }
+  // A plain string rejection of error 2 is still "missing".
+  const io = workspaceIO({ ...fakeWorkspace({}).ws, readBytes: async () => { throw "The system cannot find the file specified. (os error 2)"; } });
+  assert.equal(await io.read("map/war3map.w3e"), null);
+});
+
+test("the session keeps what was on screen when the resize started, for the undo to leave alone", async () => {
+  resizeHistory.clear();
+  const { m, ws } = fakeWorkspace({ "map/war3map.w3e": [1] });
+  const old = {};
+  const session = await beginResize(ws, "map/war3map.w3e", "Resize map", new Set([old]));
+  m.files.set("map/war3map.w3e", bytes(2));
+  await session.finish();
+  assert.ok(resizeHistory.nextUndo("P")?.shownBefore?.has(old));
+  resizeHistory.clear();
+});

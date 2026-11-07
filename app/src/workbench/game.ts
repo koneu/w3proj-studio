@@ -1,5 +1,6 @@
 import type { GameInfo, Settings } from "../extensions/api";
-import { invoke } from "./backend";
+import { invoke as backendInvoke } from "./backend";
+import { gameDataError } from "./gameerror";
 
 /** Documents with this prefix are files from the game's storage. */
 export const GAME_SCHEME = "game:";
@@ -14,6 +15,11 @@ export class GameService {
     });
   }
 
+  /** A backend call; a game data that can't be opened is said in words a person can act on (see gameerror). */
+  private invoke<T>(command: string, args: Record<string, unknown>): Promise<T> {
+    return backendInvoke<T>(command, args).catch((e) => { throw gameDataError(e, this.settings.get<string>("game.installDir")); });
+  }
+
   private args() {
     return {
       install: this.settings.get<string>("game.installDir"),
@@ -22,11 +28,11 @@ export class GameService {
   }
 
   info(): Promise<GameInfo> {
-    return invoke<GameInfo>("game_info", { install: this.args().install });
+    return this.invoke<GameInfo>("game_info", { install: this.args().install });
   }
 
   list(): Promise<string[]> {
-    this.listCache ??= invoke<string>("game_list", { install: this.args().install }).then(
+    this.listCache ??= this.invoke<string>("game_list", { install: this.args().install }).then(
       (s) => s.split("\n"),
       (e) => {
         this.listCache = null;
@@ -38,11 +44,11 @@ export class GameService {
 
   /** `tileset`: a tileset letter; its folders (`_Tilesets/<letter>.w3mod`) are searched first, as the game does for a map of that tileset. */
   resolve(path: string, tileset?: string): Promise<string | null> {
-    return invoke<string | null>("game_resolve", { ...this.args(), path, tileset: tileset ?? null });
+    return this.invoke<string | null>("game_resolve", { ...this.args(), path, tileset: tileset ?? null });
   }
 
   async read(path: string, tileset?: string): Promise<Uint8Array> {
-    return new Uint8Array(await invoke<ArrayBuffer>("game_read", { ...this.args(), path, tileset: tileset ?? null }));
+    return new Uint8Array(await this.invoke<ArrayBuffer>("game_read", { ...this.args(), path, tileset: tileset ?? null }));
   }
 
   async readText(path: string, tileset?: string): Promise<string> {

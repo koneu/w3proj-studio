@@ -15,10 +15,12 @@ import { h } from "../../workbench/dom";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
-/** Warnings about the map script that the resize caused, which an undo makes stale: answered as "Keep it", which does nothing. */
-function withdrawScriptWarnings() {
+/** Warnings about the map script that the resize caused, which an undo makes stale: answered as "Keep it", which does
+ *  nothing. Only those that came after the resize started: one about an earlier edit is still the person's to answer. */
+function withdrawScriptWarnings(shownBefore: ReadonlySet<unknown> | undefined) {
+  if (!shownBefore) return;
   for (const toast of document.querySelectorAll(".toast")) {
-    if (!/functions? that the map's triggers don't make/.test(toast.textContent ?? "")) continue;
+    if (shownBefore.has(toast) || !/functions? that the map's triggers don't make/.test(toast.textContent ?? "")) continue;
     for (const b of toast.querySelectorAll("button")) if (b.textContent === "Keep it") { (b as HTMLButtonElement).click(); break; }
   }
 }
@@ -60,7 +62,7 @@ function stepResize(w3: W3Api, which: "undo" | "redo", quiet: boolean): () => Pr
       // What was still due was for the terrain that was just replaced.
       await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
       await w3.commands.execute("w3.script.settle").catch(() => {});
-      withdrawScriptWarnings();
+      withdrawScriptWarnings(done.shownBefore);
       await w3.editors.open(done.editor, "w3.terrainViewer");
       void w3.window.showInfo(`Map resize ${which === "undo" ? "undone" : "redone"}.`);
       return true;

@@ -1,4 +1,5 @@
 import { StringTable } from "../../lib/formats/wts";
+import { isNotFoundError } from "../../lib/oserror";
 
 /** A history entry: the editor's strings at the time, and how many saves had happened. */
 export interface WtsSnapshot { v: number; s: Record<number, string> }
@@ -141,11 +142,8 @@ export class WtsSession {
   }
 }
 
-/** Whether a failed read says the file is not there: Windows error 2 (file) or 3 (path). The
- *  Rust error text ends in "(os error N)" whatever the system language. */
-export function isNotFoundError(e: unknown): boolean {
-  return /\(os error (2|3)\)/.test(String(e)) || /^os error (2|3)$/.test(String(e));
-}
+/** Whether a failed read says the file is not there (see lib/oserror). */
+export { isNotFoundError };
 
 /** Whether war3map.wts is really gone, and not just unreadable or in the middle of being replaced:
  *  the read said not found, the file list was refreshed (so it can be trusted) and doesn't have

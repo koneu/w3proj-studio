@@ -59,6 +59,15 @@ import { clampShift, pushMoveEdit } from "./moveedit";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
+/** Failures already shown, by message: one cause that fails many small reads is said once. */
+const reported = new Set<string>();
+const reportOnce = (w3: W3Api, what: string, e: unknown) => {
+  const text = `${what}: ${e instanceof Error ? e.message : String(e)}`;
+  if (reported.has(text)) return;
+  reported.add(text);
+  void w3.window.showError(text);
+};
+
 /** How long a resize or its undo waits for the rebuild due from the last edit. */
 const SETTLE_LIMIT = 5 * 60_000;
 
@@ -2740,6 +2749,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!editable) throw new Error("This map is read-only.");
           const problem = resizeProblem(terrain, change, complements);
           if (problem) throw new Error(problem);
+          // The messages already on screen: an undo withdraws only those the resize brought.
+          const shownBefore = new Set<unknown>(document.querySelectorAll(".toast"));
           // Work still due from the last edit (pathing, shadows, minimap, script) is done first: it would land on the new files otherwise.
           await settleWithin(() => w3.commands.execute("w3.terrain.settle"), SETTLE_LIMIT);
           await w3.commands.execute("w3.script.settle").catch(() => {});
@@ -2748,22 +2759,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // makes them anew below.
           if (mark.isDirty(at)) await editorApi.save?.();
           // Every file the resize rewrites is kept, for Undo Resize (Map Size); if it fails halfway they go back.
-          const session = await beginResize(w3.workspace, doc.path, "Resize map");
-          // The editor opens again on the new terrain (or, after a failure, on the old).
-          const reopen = () => void (async () => {
-            await w3.editors.close(doc.path);
-            // A rebuild still planned is for the terrain this editor had.
-            await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
-            await w3.editors.open(doc.path, "w3.terrainViewer");
-          })().catch((e) => w3.window.showError(String(e)));
+          const session = await beginResize(w3.workspace, doc.path, "Resize map", shownBefore);
+          // The editor opens again on the new terrain (or, after a failure, on the old), still inside the lock: an undo
+          // waiting for it finds the editor of the new files, not this one closing.
+          const reopen = async () => {
+            try {
+              await w3.editors.close(doc.path);
+              // A rebuild still planned is for the terrain this editor had.
+              await w3.commands.execute("w3.terrain.dropRebuild").catch(() => {});
+              await w3.editors.open(doc.path, "w3.terrainViewer");
+            } catch (e) {
+              void w3.window.showError(`The terrain editor couldn't be opened again: ${(e as Error).message ?? e}`);
+            }
+          };
           try {
             const r = await applyResize(change, complements);
             await session.finish();
-            reopen();
+            await reopen();
             return r;
           } catch (e) {
             await session.abort().catch((x) => w3.window.showError(`The map's files couldn't be put back after the failed resize: ${(x as Error).message ?? x}. Restore the checkpoint.`));
-            reopen();
+            await reopen();
             throw e;
           }
         };
@@ -2875,8 +2891,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             changeTileList(tiles, (old) => shift(old === index ? replacement : old));
           },
           groundTileThumb: async (id) => {
-            const path = (await tilePaths(w3)).get(id);
-            return path ? tileThumb(path) : null;
+            try {
+              const path = (await tilePaths(w3)).get(id);
+              return path ? await tileThumb(path) : null;
+            } catch (e) {
+              // Every tile of every palette asks: without the game's data they'd all fail, unseen. Said once, as an error.
+              reportOnce(w3, "The ground tile pictures couldn't be read", e);
+              return null;
+            }
           },
           objects: {
             type: (id) => {
