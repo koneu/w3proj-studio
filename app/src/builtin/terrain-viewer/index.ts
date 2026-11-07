@@ -36,7 +36,7 @@ import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, ground
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
-import { changesImports } from "./filewatch";
+import { changedTypes, changesImports, changesObjectData, DebouncedReload } from "./filewatch";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -1516,22 +1516,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Object data (models, scales, …), the import list or imported files saved elsewhere (the
         // Object Editor, a Problems fix, the Import Manager): the placed objects are loaded
         // again, imports read anew, and the problem list follows.
-        let objectReload: ReturnType<typeof setTimeout> | undefined;
         let importsChanged = false;
+        // Waited for by ready(): a tool that follows the save (create_object, then place_objects)
+        // sees the new types. Selection, camera, undo steps and the dirty flag aren't touched.
+        const objectReload = new DebouncedReload(async () => {
+          const imports = importsChanged;
+          importsChanged = false;
+          if (imports) loader.reset();
+          const before = objCtx;
+          const [skins, { bases, art: data }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
+          const next = { skins: withObjectArt(skins, data), bases };
+          objCtx = next;
+          // Only what is placed with a type that looks different is drawn again; models stay loaded.
+          const placedTypes = new Set([...(dooFile?.list ?? []), ...(unitsFile?.list ?? [])].map((p) => p.id));
+          const changed = before ? changedTypes(before, next, placedTypes) : placedTypes;
+          for (const id of changed) buildingCells.delete(id);
+          if (changed.size) occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
+          if (imports || changed.size) await rebuildObjects();
+        }, (e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
-          const l = p.replace(/\\/g, "/").toLowerCase();
-          const art = /^map\/war3map(skin)?\.w3[udbt](\.json)?$/.test(l);
-          const imported = changesImports(l);
+          const art = changesObjectData(p);
+          const imported = changesImports(p);
           if (!objCtx || (!art && !imported)) return;
           importsChanged ||= imported;
-          clearTimeout(objectReload);
-          objectReload = setTimeout(async () => {
-            if (importsChanged) loader.reset();
-            importsChanged = false;
-            const [skins, { bases, art: data }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
-            objCtx = { skins: withObjectArt(skins, data), bases };
-            await rebuildObjects();
-          }, 300);
+          objectReload.schedule();
         });
         let objectsPlaced: Promise<void> = Promise.resolve();
         if (!doc.path.startsWith("game:") && w3.workspace.project()) {
@@ -3137,7 +3145,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (minimapMode !== "never") await updateMinimapIcons(now, units);
         };
 
-        const ready = () => objectsPlaced.catch(() => {});
+        const ready = () => Promise.all([objectsPlaced.catch(() => {}), objectReload.settled()]).then(() => {});
         const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => {
           await ready();
           await loader.settled();
@@ -3310,7 +3318,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             lastView = { key: viewKey, view: handle.view() };
             stopLightWatch.dispose();
             stopObjectWatch.dispose();
-            clearTimeout(objectReload);
+            objectReload.cancel();
             stopLightSettings.dispose();
             stopWeatherWatch.dispose();
             stopWeatherSaves.dispose();
