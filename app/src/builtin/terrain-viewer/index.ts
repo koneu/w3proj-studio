@@ -180,7 +180,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const key = w3.workspace.project()?.root ?? "";
     if (rebuild?.key !== key) rebuild = { key, from: from() };
     clearTimeout(rebuildTimer);
-    rebuildTimer = setTimeout(() => void runRebuild(), REBUILD_DELAY);
+    // A failure is shown by the rebuild itself.
+    rebuildTimer = setTimeout(() => void runRebuild().catch(() => {}), REBUILD_DELAY);
   };
   /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back). */
   let rebuilding: Promise<void> = Promise.resolve();
@@ -190,10 +191,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!job || job.key !== w3.workspace.project()?.root) return;
       // The editor of the project's own terrain; closed since the edit, it is opened again: the work is
       // done there (the derived files need what the editor has loaded).
-      const editor = ownEditor() ?? await liveEditor().catch(() => null);
-      if (!editor) return;
+      const failed = (why: unknown) => {
+        const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
+        w3.window.showError(text);
+        return new Error(text);
+      };
+      let editor = ownEditor();
+      if (!editor) {
+        try { editor = await liveEditor(); } catch (e) { throw failed(e); }
+      }
+      // The wait was long enough for another project to be opened: its job and editor are not this one's.
+      if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
       rebuild = null;
-      await editor.derive(job.from).catch((e) => { w3.window.showError(`Rebuilding the map's derived files failed: ${e}`); });
+      await editor.derive(job.from).catch((e) => { throw failed(e); });
     });
     rebuilding = run.catch(() => {});
     return run;
@@ -209,6 +219,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   );
 
   interface OpenedEditor {
+    /** The project it belongs to. */
+    root: string;
     handle: TerrainEditorHandle; ready: () => Promise<void>;
     screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => Promise<string>;
     /** Rebuilds the derived files; without `before` shadows stay, as nothing is known to have changed. */
@@ -217,7 +229,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
   /** The editor of the project's own terrain, which is the only one that writes into the project. */
-  const ownEditor = () => { const p = projectTerrain(w3); return (p && openedBy.get(p)) || null; };
+  const ownEditor = () => {
+    const p = projectTerrain(w3), found = p ? openedBy.get(p) : undefined;
+    return found && found.root === w3.workspace.project()?.root ? found : null;
+  };
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
   let lastView: { key: string; view: TerrainView } | null = null;
 
@@ -3391,6 +3406,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         };
         const record: OpenedEditor = {
+          root: w3.workspace.project()?.root ?? "",
           handle, ready, screenshot: takeScreenshot,
           // Tools change the files: what's open is the result already.
           derive: async (from) => {

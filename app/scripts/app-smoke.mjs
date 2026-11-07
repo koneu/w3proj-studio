@@ -376,6 +376,21 @@ async function waterPathing(page, found) {
   let tree = false;
   for (let y = 46; y <= 50; y++) for (let x = 46; x <= 50; x++) if (cell(closed, x, y) & 0x02) tree = true;
   if (!tree) fail("a doodad placed just before the terrain tab was closed doesn't block in the packed pathing map");
+
+  // A commit straight after a tool's edit takes the rebuilt pathing map with it: nothing of the project is left uncommitted.
+  const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8" });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  await page.evaluate(`(() => { w3.window.inputBox = async () => "lake"; })()`);
+  await tool("save_project");
+  await page.evaluate(`w3.commands.execute("w3.scm.refresh").catch(() => {})`);
+  await tool("set_water", { mode: "lake", left: 1536, bottom: -2560, right: 2560, top: -1536 });
+  const err = await page.evaluate(`w3.commands.execute("w3.scm.commit").then(() => null, (e) => String(e))`);
+  if (err) fail(`commit: ${err}`);
+  const left = git("status", "--porcelain").stdout.trim();
+  if (left) fail(`a commit straight after a tool's edit left changes uncommitted: ${left.split(/[\r\n]+/).slice(0, 4).join(" | ")}`);
+  if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
 }
 
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is

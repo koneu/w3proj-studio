@@ -85,14 +85,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const failed = (e: unknown) => void w3.window.showError(String(e instanceof Error ? e.message : e));
   const commit = async () => {
     const r = root();
-    const selected = status?.changes.filter((c) => !unticked.has(c.path)) ?? [];
-    if (!r || !status || !selected.length) return;
-    const msg = message.trim() || await w3.window.inputBox({ prompt: "Commit message", placeholder: "What changed" });
-    if (!msg?.trim()) return;
-    // What a terrain edit by a tool still has to write (pathing, shadows, minimap) belongs in the commit.
+    if (!r) return;
+    // What a terrain edit by a tool still has to write (pathing, shadows, minimap) belongs in the commit: it comes
+    // first, so the changes below are the ones that exist now.
     await w3.commands.execute("w3.terrain.settle").catch(() => {});
     await w3.editors.saveAll();
+    await refreshing?.catch(() => {});
     await refresh();
+    const selected = status?.changes.filter((c) => !unticked.has(c.path)) ?? [];
+    if (!status || !selected.length) return;
+    const msg = message.trim() || await w3.window.inputBox({ prompt: "Commit message", placeholder: "What changed" });
+    if (!msg?.trim()) return;
     busy = true;
     w3.views.refresh("w3.scm.changes");
     try {
