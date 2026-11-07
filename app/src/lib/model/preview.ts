@@ -7,6 +7,7 @@ import type { W3Api } from "../../extensions/api";
 import { toProjectPath } from "../formats/archivepath";
 import { decodeImage } from "../image/index.ts";
 import { parseMdx } from "./mdx";
+import { textureCandidates } from "./texpath";
 import { ModelRenderer, standClock, type Clock } from "./renderer";
 import { parseAnimProps } from "./stand";
 
@@ -66,7 +67,7 @@ export class ModelPreview {
 
   /** The map's import of a path, else the game's file (Reforged .tif/.blp textures ship as .dds). */
   private async read(path: string): Promise<Uint8Array> {
-    const variants = /\.(blp|tif|tga)$/i.test(path) ? [path, path.replace(/\.\w+$/, ".dds")] : [path];
+    const variants = /\.(blp|tif|tiff|tga|png)$/i.test(path) ? textureCandidates(path) : [path];
     const files = new Set(this.w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
     for (const v of variants) {
       const own = `map/${toProjectPath(v.replace(/\//g, "\\"))}`;
