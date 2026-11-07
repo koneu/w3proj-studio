@@ -51,6 +51,7 @@ import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } fro
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { pushMoveEdit } from "./moveedit";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** The project's terrain file (binary war3map.w3e or text war3map.w3e.txt), or null. */
@@ -1673,11 +1674,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         type Pose = { position: [number, number, number]; angle: number };
         const poseOf = (p: Placed): Pose => ({ position: [...p.position] as [number, number, number], angle: p.angle });
         /** One undo step for moving/turning several entries. */
-        const moveEdits = (entries: Placed[], before: Pose[]) => {
-          const after = entries.map(poseOf);
-          const apply = (poses: Pose[]) => { entries.forEach((e, i) => setPlacement(e, [...poses[i].position], poses[i].angle)); refreshGroupRings(); };
-          pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });
-        };
+        const moveEdits = (entries: Placed[], before: Pose[]) =>
+          pushMoveEdit(entries, before, entries.map(poseOf), { setPlacement, refreshRings: refreshGroupRings, pushEdit });
         /** Sets the border flag of what was placed or moved, from where it ended up, and puts any building
          *  that got past the keys and the mouse on its grid: typed coordinates and the "Edit all" fields. */
         const settleMoved = async () => {
