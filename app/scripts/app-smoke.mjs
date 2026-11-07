@@ -487,6 +487,56 @@ async function heightsPreserve(page, found) {
   await k.reset();
 }
 
+/** Set Uniform Doodad Heights and Reset Fixed Object Heights, by command on a selection made with Ctrl+A: the height is
+ *  asked for (a word that isn't a number changes nothing), the doodads take it and hold it, a unit in the selection is
+ *  left alone, and each is one undo step. A reset with nothing fixed makes no change at all. */
+async function heightsUniform(page, found) {
+  const fail = (what) => found.push(`height tools (uniform): ${what}`);
+  const k = await heightKit(page, "Uniform");
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 256, y: 0 }, { id: "LTlt", x: 0, y: 512 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 512, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const start = k.doodads(), footman = k.units().find((u) => u.id === "hfoo");
+  if (start.length !== 3 || !footman) return fail(`the map has ${start.length} doodads and ${footman ? "a" : "no"} footman`);
+  const ground = start[0].position[2], hash0 = k.docHash();
+  if (start.some((d) => d.flags & k.FIXED)) fail("a doodad is placed with a fixed height");
+  await k.tab("Select");
+  await k.focusMap();
+  await k.hands.key("a", "KeyA", 65, 2);
+  await sleep(300);
+
+  await page.evaluate(`(() => { window.__typed = "abc"; w3.window.inputBox = async () => window.__typed; })()`);
+  await k.run("w3.terrain.setUniformDoodadHeights");
+  await k.save();
+  if (k.docHash() !== hash0) fail("a height that isn't a number changed the doodads");
+  await page.evaluate(`window.__typed = "150"`);
+  const err = await k.run("w3.terrain.setUniformDoodadHeights");
+  if (err) fail(`Set Uniform Doodad Heights: ${err}`);
+  await k.save();
+  const uniform = k.doodads();
+  if (uniform.some((d) => d.position[2] !== 150 || !(d.flags & k.FIXED))) fail(`uniform heights: ${uniform.map((d) => `${d.position[2]}/${d.flags}`).join(" ")}`);
+  if (k.units().find((u) => u.id === "hfoo").position[2] !== footman.position[2]) fail("Set Uniform Doodad Heights moved a unit");
+  await k.run("workbench.undo");
+  await k.save();
+  if (k.docHash() !== hash0) fail("one undo didn't take Set Uniform Doodad Heights back");
+  await k.run("workbench.redo");
+  await k.save();
+  if (k.doodads().some((d) => d.position[2] !== 150)) fail("redo didn't set the uniform heights again");
+
+  const none = await k.run("w3.terrain.resetFixedObjectHeights");
+  if (none) fail(`Reset Fixed Object Heights: ${none}`);
+  await k.save();
+  if (k.doodads().some((d, i) => d.position[2] !== ground || (d.flags & k.FIXED) || d.position[0] !== start[i].position[0])) fail(`reset heights: ${k.doodads().map((d) => `${d.position[2]}/${d.flags}`).join(" ")}`);
+  await k.run("w3.terrain.resetFixedObjectHeights");
+  if (await page.evaluate(`w3.editors.isDirty("map/war3map.doo.json") || w3.editors.unsavedPaths().length > 0`)) fail("a reset with nothing fixed made a change");
+  await k.run("workbench.undo");
+  await k.save();
+  if (k.doodads().some((d) => d.position[2] !== 150 || !(d.flags & k.FIXED))) fail("one undo didn't take Reset Fixed Object Heights back");
+  await k.run("workbench.redo");
+  await k.save();
+  await k.verify(fail);
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -1243,7 +1293,7 @@ async function run() {
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
-    for (const check of [heightsPreserve]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+    for (const check of [heightsPreserve, heightsUniform]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     found.push(...problems(page.events));

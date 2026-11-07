@@ -18,6 +18,16 @@ export interface ViewCommands {
   state(): { grid: "none" | "small" | "medium" | "large"; naval: boolean; heights: boolean; cameras: boolean; camera: { target: [number, number, number]; distance: number } };
 }
 
+/** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */
+export interface HeightCommands {
+  /** Set Uniform Doodad Heights: the selected doodads to one height (world units; the first one's height when none is given). */
+  setUniformHeights(height?: number): Promise<string | null>;
+  /** Reset Fixed Object Heights: the selected objects with a height of their own back onto the ground. */
+  resetFixedHeights(): string | null;
+  /** The height the first selected doodad stands at, for a prompt's start value; null with none selected. */
+  firstDoodadHeight(): number | null;
+}
+
 type Point = { x: number; y: number; object?: unknown };
 type PickObjects = { file: "units" | "doodads"; accept(entry: unknown): boolean; radius?: number };
 
@@ -38,6 +48,8 @@ export class TerrainToolRegistry implements TerrainService {
   readonly resetVariations = new Map<string, () => boolean>();
   /** Set by each open terrain editor, by its file: the View commands (command palette) on that editor. */
   readonly viewCommands = new Map<string, ViewCommands>();
+  /** Set by each open terrain editor, by its file: Set Uniform Doodad Heights and Reset Fixed Object Heights. */
+  readonly heightCommands = new Map<string, HeightCommands>();
   /** A point to show once the terrain editor has opened. */
   pendingLook: [number, number, PlacedRef?] | null = null;
 

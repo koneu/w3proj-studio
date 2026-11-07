@@ -5,8 +5,8 @@ import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
-import { TerrainToolRegistry, type ViewCommands } from "./toolhost";
-import { pastedFlags, pastedHeight } from "./objheights";
+import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
 import { h } from "../../workbench/dom";
 import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
@@ -981,6 +981,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const why = await run(view);
       if (why) void w3.window.showInfo(why);
     })),
+    // Object heights, on the terrain editor that has the focus.
+    w3.commands.register("w3.terrain.setUniformDoodadHeights", async (given?: number) => {
+      const view = (w3.editors.activePath() ? toolGroups.heightCommands.get(w3.editors.activePath()!) : undefined) ?? toolGroups.heightCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("Switch to a terrain editor first.");
+      let height = typeof given === "number" ? given : undefined;
+      if (height === undefined) {
+        const first = view.firstDoodadHeight();
+        if (first === null) { void w3.window.showInfo("No doodads are selected: select doodads or destructables first."); return; }
+        const typed = await w3.window.inputBox({ prompt: "Height for every selected doodad (world units, over the map's zero)", value: String(Math.round(first * 100) / 100) });
+        if (typed === undefined) return;
+        const n = parseHeight(typed);
+        if (n === null) { void w3.window.showWarning(`"${typed}" isn't a height: type a number.`); return; }
+        height = n;
+      }
+      const why = await view.setUniformHeights(height);
+      if (why) void w3.window.showInfo(why);
+    }),
+    w3.commands.register("w3.terrain.resetFixedObjectHeights", () => {
+      const view = (w3.editors.activePath() ? toolGroups.heightCommands.get(w3.editors.activePath()!) : undefined) ?? toolGroups.heightCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("Switch to a terrain editor first.");
+      const why = view.resetFixedHeights();
+      if (why) void w3.window.showInfo(why);
+    }),
     // The Advanced switches are settings, so they hold for every terrain editor and stay for the next session.
     ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", true]] as const)
       .map(([id, key, standard]) => w3.commands.register(id, () => w3.settings.set(key, !switchedOn(w3, key, standard)))),
@@ -1912,6 +1935,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("button", { title: "Swap what's selected for another type, where it stands", onclick: () => void replaceSelected().catch((e) => w3.window.showError(String(e))) }, "Replace…"),
         ];
 
+        // ---- heights: Set Uniform Doodad Heights, Reset Fixed Object Heights ---------------------
+        const selectedDoodads = () => selectedEntries().filter((p) => dooFile?.list.includes(p));
+        const heightCommands: HeightCommands = {
+          firstDoodadHeight: () => selectedDoodads()[0]?.position[2] ?? null,
+          setUniformHeights: async (height) => {
+            if (!editable) return "This terrain is read-only.";
+            const doodads = selectedDoodads();
+            if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
+            const z = height ?? doodads[0].position[2];
+            if (!Number.isFinite(z)) return "That isn't a height.";
+            const steps = history.length, atBefore = at;
+            applyMass(doodads, (p) => uniformHeight({ position: p.position, flags: flagsOf(p) }, z));
+            return history.length === steps && at === atBefore ? "The selected doodads stand at that height already." : null;
+          },
+          resetFixedHeights: () => {
+            if (!editable) return "This terrain is read-only.";
+            const doodads = selectedDoodads();
+            if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
+            const steps = history.length, atBefore = at;
+            applyMass(doodads, (p) => resetFixedHeight({ position: p.position, flags: flagsOf(p) }, heightAt(terrain, p.position[0], p.position[1])));
+            return history.length === steps && at === atBefore ? "None of the selected doodads has a fixed height." : null;
+          },
+        };
+        toolGroups.heightCommands.set(doc.path, heightCommands);
+        const heightButtons = () => !selectedDoodads().length ? [] : [
+          h("button", { title: "Put the selected doodads at one height (command: Set Uniform Doodad Heights)", onclick: () => void w3.commands.execute("w3.terrain.setUniformDoodadHeights").then(() => canvas.focus({ preventScroll: true })) }, "Set height…"),
+          h("button", { title: "Put the selected doodads that have a height of their own back onto the ground (command: Reset Fixed Object Heights)", onclick: () => void w3.commands.execute("w3.terrain.resetFixedObjectHeights").then(() => canvas.focus({ preventScroll: true })) }, "Reset height"),
+        ];
+
         // ---- copy and paste ----------------------------------------------------------------
         /** While pasting: what's being pasted. Each click places a copy, until Esc. */
         let pasting: Fragment | null = null;
@@ -2288,7 +2340,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => { void viewSelection(); canvas.focus({ preventScroll: true }); } }, "View"),
               ...(editable ? [
                 h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); canvas.focus({ preventScroll: true }); }) }, "Select in palette"),
-                h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(),
+                h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(), ...heightButtons(),
                 h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
               ] : [])),
             ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete · Ctrl+C, then Ctrl+V to copy")] : []),
@@ -2436,7 +2488,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("div.terrain-sel-actions.wrap", {},
                 quick("Select all of these types", "Select every object of the selected types", selectSameTypes),
                 quick("Face point", "Turn every selected object toward the pointer (F); click to apply", startFacing),
-                ...turnButtons(),
+                ...turnButtons(), ...heightButtons(),
                 quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
                 quick("Random variation", "A random model variation for each object", () => applyMass(group, (p) => {
                   const n = skinOf(p)?.numVar ?? 1;
@@ -3553,6 +3605,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);
+            if (toolGroups.heightCommands.get(doc.path) === heightCommands) toolGroups.heightCommands.delete(doc.path);
             clearTimeout(layerTimer);
             layerSeq++;
             for (const g of groupInsts.values()) g.dispose?.();
