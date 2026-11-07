@@ -26,8 +26,8 @@ export class ProjectGuard {
   stale(root: string | null): boolean { return root !== this.current; }
   /** Is the build of `token` still for the open project? */
   valid(token: number, root: string | null): boolean { return token === this.gen && root === this.current; }
-  /** Does something made for `root` (a rendered row) still belong to the open project? */
-  owns(root: string | null): boolean { return root === this.current; }
+  /** Does something made for `root` (a rendered row) still belong to the project `open` now? */
+  owns(root: string | null, open: string | null): boolean { return root === this.current && open === this.current; }
 }
 
 /** Where a double-click goes. */

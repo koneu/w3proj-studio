@@ -126,7 +126,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   showInfo(n);
                   draw();
                 },
-                ondblclick: () => { if (n.target && guard.owns(rowsRoot)) void go(n.target).catch((e) => w3.window.showError(String(e))); },
+                ondblclick: () => { if (n.target && guard.owns(rowsRoot, rootNow())) void go(n.target).catch((e) => w3.window.showError(String(e))); },
               },
               h("span.tree-icon", {}, kids.length ? (isOpen ? "▾" : "▸") : ""),
               h("span.tree-label", {}, n.label),

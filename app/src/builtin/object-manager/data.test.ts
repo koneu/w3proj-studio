@@ -60,10 +60,17 @@ test("project guard: switching back and forth keeps only the last build", () => 
 
 test("project guard: rows of another project are not owned", () => {
   const g = new ProjectGuard("A");
-  assert.equal(g.owns("A"), true);
+  assert.equal(g.owns("A", "A"), true);
   g.switched("B");
-  assert.equal(g.owns("A"), false);
-  assert.equal(g.owns("B"), true);
+  assert.equal(g.owns("A", "B"), false);
+  assert.equal(g.owns("B", "B"), true);
+});
+
+test("project guard: rows aren't owned while another project is open but unannounced", () => {
+  const g = new ProjectGuard("A");
+  // Opening B failed half way: the workspace holds B, the guard was never told, A's rows still show.
+  assert.equal(g.owns("A", "B"), false);
+  assert.equal(g.owns("A", "A"), true);
 });
 
 test("project guard: a project that is open but not yet announced is stale until switched", () => {
