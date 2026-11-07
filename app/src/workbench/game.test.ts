@@ -53,6 +53,7 @@ test("a game file read twice is asked of the backend once, by any spelling of it
   assert.equal(await game.readText("Units\\UnitData.slk"), "\u0001\u0002\u0003");
   assert.equal(asked.length, 1);
   assert.equal(game.backendReads, 1);
+  assert.equal(game.requests, 3, "every read is counted as asked, kept or not");
 });
 
 test("reads of the same file at once share one backend call", async () => {

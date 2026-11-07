@@ -137,7 +137,8 @@ export class EditorService {
   canUndo() { return !!this.active?.instance?.undo; }
 
   async open(path: string, providerId?: string) {
-    const existing = this.tabs.find((t) => t.path === path && (!providerId || t.providerId === providerId));
+    const opened = () => this.tabs.find((t) => t.path === path && (!providerId || t.providerId === providerId));
+    const existing = opened();
     if (existing) return this.show(existing);
     const sameFile = this.tabs.find((t) => t.path === path);
     if (sameFile && providerId) await this.close(sameFile);
@@ -145,6 +146,10 @@ export class EditorService {
     let id = providerId ?? this.associated(path) ?? this.candidates(path).find((c) => c.priority !== "option")?.id;
     id ??= await this.fallback(path);
     const provider = await this.provider(id, path);
+    // Opened meanwhile, while the editor's extension started: by the project's tabs coming back
+    // (restore) or another open of the same file. That tab, not a second editor loading it all again.
+    const meanwhile = opened();
+    if (meanwhile) return this.show(meanwhile);
     const tab = this.addTab(path, id);
     this.show(tab);
     await this.resolveTab(tab, provider);

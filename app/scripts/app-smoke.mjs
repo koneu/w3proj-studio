@@ -2016,16 +2016,47 @@ async function gameReadsOnce(page, found) {
       const b = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
       return a[0] === 0 && b[0] === 0 && a[1] === b[1];
     }, 30000);
-    const at = await reads();
+    const at = await reads(), askedAt = await asked();
     await tool("terrain_screenshot", { maxSize: 64 });
-    return (await reads()) - at;
+    return [(await reads()) - at, (await asked()) - askedAt];
   };
+  const asked = () => page.evaluate(`w3Workbench.game.requests`);
   // Something besides the terrain can read a table of its own for the first time meanwhile
   // (the ability data, once): the third opening has nothing left to read.
-  const second = await reopen(), third = await reopen();
+  const [second, askedSecond] = await reopen(), [third, askedThird] = await reopen();
   // The control: the first opening did read the game's files.
   if (first < 10) fail(`the first opening read ${first} game files: the map's models didn't come from the game`);
   if (second > 2 || third !== 0) fail(`opening the terrain again read ${second}, then ${third} game files (the first opening read ${first})`);
+  // Each opening loads the map's models and textures once: from the cache, but asked for alike.
+  if (askedSecond < 10 || Math.abs(askedThird - askedSecond) > askedSecond / 10) fail(`two openings of the terrain asked for ${askedSecond}, then ${askedThird} game files`);
+
+  // The project's tabs coming back while the terrain is being opened (a cold start: the editor's
+  // extension still starting) made a second terrain editor, which loaded everything again: some
+  // cold GoldRush opens asked for 2,060 files instead of 1,078. The extension's start is held back
+  // here so that the tabs come back in the middle of it.
+  const terrain = await page.evaluate(`w3.editors.activePath()`);
+  const askedRaced = await asked();
+  const raced = await page.evaluate(`(async () => {
+    const ed = w3Workbench.editors, path = ${JSON.stringify(terrain)};
+    await w3.editors.closeAll();
+    const memory = ed.memory, activate = ed.activate;
+    ed.memory = { load: () => ({ tabs: [{ path, editor: "w3.terrainViewer" }], active: path }), store: (s) => memory?.store(s) };
+    ed.activate = async (e) => { await new Promise((r) => setTimeout(r, 400)); return activate.call(ed, e); };
+    try {
+      const opening = ed.open(path, "w3.terrainViewer");
+      await new Promise((r) => setTimeout(r, 100));
+      await ed.restore();
+      await opening;
+    } finally { ed.memory = memory; ed.activate = activate; }
+    return ed.tabs.filter((t) => t.path === path).length;
+  })()`);
+  if (raced !== 1) fail(`opening the terrain while the project's tabs came back made ${raced} terrain tabs`);
+  // (With two, the tool can pick the hidden one: "isn't visible".)
+  const shot = await tool("terrain_screenshot", { maxSize: 64 }).then(() => null, (e) => e.message);
+  if (shot) fail(`after opening the terrain while the project's tabs came back: ${shot}`);
+  await sleep(1000);
+  const racedAsked = (await asked()) - askedRaced;
+  if (racedAsked > askedSecond * 1.5) fail(`opening the terrain while the project's tabs came back asked for ${racedAsked} game files, a plain opening ${askedSecond}`);
   await page.evaluate(`w3.editors.closeAll()`);
 }
 

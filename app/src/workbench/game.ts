@@ -28,6 +28,8 @@ export class GameService {
   private cachedBytes = 0;
   /** Reads that went to the backend: for tests and the app smoke's guard. */
   backendReads = 0;
+  /** Reads asked of this service, kept or not: an editor loading twice asks for everything twice (the app smoke's guard). */
+  requests = 0;
   /** Paths the backend said aren't there, in order (each once, as they're remembered): for the app smoke's guard. */
   readonly backendMisses: string[] = [];
   /** Reads waiting on the backend now, and the ones queued for a place (see MAX_READS_IN_FLIGHT). */
@@ -102,6 +104,7 @@ export class GameService {
 
   /** Each caller gets its own copy: one that changes its bytes can't change another's. */
   async read(path: string, tileset?: string): Promise<Uint8Array> {
+    this.requests++;
     const args = this.args();
     // As the backend looks paths up: either slash, any case.
     const key = [args.install ?? "", args.modeName ?? "", tileset ?? "", path.replace(/\\/g, "/").toLowerCase()].join("|");
