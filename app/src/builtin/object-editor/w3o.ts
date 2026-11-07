@@ -47,8 +47,13 @@ export function mergeSkin(main: EditFile, skin: EditFile | null, opts: { addSkin
         if (opts.addSkinOnly && sets.some((x) => x.mods.length)) target.push(structuredClone(s));
         continue;
       }
+      // Several flagged sets in the Skin object stay sets, also where the main object has none yet.
+      if (s.sets && s.sets.length > 1 && !t.sets?.length) { t.sets = [{ flag: 0, mods: t.mods ?? [] }]; delete t.mods; }
       for (const set of sets) {
-        const dest = t.sets?.length ? t.sets.find((x) => x.flag === set.flag) ?? t.sets[0] : null;
+        let dest = t.sets?.length ? t.sets.find((x) => x.flag === set.flag) ?? null : null;
+        if (t.sets?.length && !dest) {
+          if (s.sets) t.sets.push(dest = { flag: set.flag, mods: [] }); else dest = t.sets[0];
+        }
         const list = dest ? dest.mods : (t.mods ??= []);
         const taken = new Set(list.map(modKey));
         for (const m of set.mods) {
@@ -84,14 +89,40 @@ export interface ImportPlan {
   writes: { kind: string; file: EditFile; added: number; replaced: number }[];
   /** Imported objects that take the id of a different map object (another base): that one is replaced. */
   conflicts: { kind: string; id: string; had: string; has: string }[];
+  /** Each kind's Skin file with the fields the import sets taken out of the objects it replaces or adds
+   *  (else the old values stay and probably win), only for kinds where that changes something. */
+  skins: { kind: string; file: EditFile; dropped: number }[];
+}
+
+/** A Skin file without the fields `incoming` sets, for the objects it holds (custom by id, game objects
+ *  by base). `dropped` counts the fields taken out. */
+export function pruneSkin(skin: EditFile, incoming: Pick<EditFile, "original" | "custom">): { file: EditFile; dropped: number } {
+  const file = structuredClone(skin);
+  let dropped = 0;
+  const prune = (list: EditObject[], from: EditObject[], same: (a: EditObject, b: EditObject) => boolean) => {
+    for (const add of from) {
+      const keys = new Set((add.sets ?? [{ flag: 0, mods: add.mods ?? [] }]).flatMap((x) => x.mods.map(modKey)));
+      const old = list.find((x) => same(x, add));
+      if (!old) continue;
+      for (const set of old.sets ?? [{ flag: 0, mods: (old.mods ??= []) }]) {
+        const keep = set.mods.filter((m) => !keys.has(modKey(m)));
+        dropped += set.mods.length - keep.length;
+        set.mods.splice(0, set.mods.length, ...keep);
+      }
+    }
+  };
+  prune(file.custom, incoming.custom ?? [], (a, b) => a.id === b.id);
+  prune(file.original, incoming.original ?? [], (a, b) => a.base === b.base);
+  return { file, dropped };
 }
 
 /** Merges a .w3o's kinds into the map's files. Throws, writing nothing, when a kind can't be merged:
  *  object data of another version than the map's (version 3 objects carry level sets older ones
  *  can't hold) is not converted. */
-export function planImport(existing: Record<string, EditFile | null>, incoming: { kind: string; file: EditFile }[]): ImportPlan {
+export function planImport(existing: Record<string, EditFile | null>, incoming: { kind: string; file: EditFile }[], skins: Record<string, EditFile | null> = {}): ImportPlan {
   const writes: ImportPlan["writes"] = [];
   const conflicts: ImportPlan["conflicts"] = [];
+  const skinWrites: ImportPlan["skins"] = [];
   for (const { kind, file: add } of incoming) {
     const have = existing[kind];
     let base: EditFile;
@@ -105,8 +136,13 @@ export function planImport(existing: Record<string, EditFile | null>, incoming: 
     }
     const { added, replaced } = mergeObjects(base, add);
     writes.push({ kind, file: base, added, replaced });
+    const skin = skins[kind];
+    if (skin) {
+      const pruned = pruneSkin(skin, add);
+      if (pruned.dropped) skinWrites.push({ kind, ...pruned });
+    }
   }
-  return { writes, conflicts };
+  return { writes, conflicts, skins: skinWrites };
 }
 
 export function describeImport(plan: ImportPlan): string {
@@ -119,4 +155,10 @@ export function describeConflicts(plan: ImportPlan): string {
   if (!plan.conflicts.length) return "";
   const shown = plan.conflicts.slice(0, 6).map((c) => `${c.id} (${c.had} becomes ${c.has})`).join(", ");
   return ` These ids are already used by objects of another base and are replaced by unrelated ones: ${shown}${plan.conflicts.length > 6 ? ` and ${plan.conflicts.length - 6} more` : ""}.`;
+}
+
+/** What the question says about Skin fields that are taken out. */
+export function describeSkin(plan: ImportPlan): string {
+  if (!plan.skins.length) return "";
+  return ` ${plan.skins.map((k) => `${k.dropped} field${k.dropped === 1 ? "" : "s"} of war3mapSkin.${k.kind}`).join(", ")} that the import sets are dropped from the Skin file, so the old values don't override the new ones.`;
 }

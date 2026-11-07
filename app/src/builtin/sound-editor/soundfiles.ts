@@ -85,7 +85,7 @@ export function planReplace(opts: { soundFile: string; sourceName: string; proje
   const remove = existing && projectOf(existing).toLowerCase() !== write.toLowerCase() ? projectOf(existing) : null;
   // Another format means another file name; one already there belongs to something else.
   if (remove && files.has(write.toLowerCase())) {
-    throw new Error(`${toArchiveName(write.slice(4))} is already in the map, so a ${newExt} replacement of ${opts.soundFile} would overwrite it. Remove or rename that file first, or replace with a ${extOf(existing!)} file.`);
+    throw new Error(`${toArchiveName(write.slice(4))} is already in the map, so a replacement in ${newExt} format would overwrite it. Remove or rename that file first, or replace ${opts.soundFile} with a file in ${extOf(existing!)} format.`);
   }
 
   let changed = false;

@@ -252,3 +252,72 @@ test("mergeSkin puts a Skin set's fields into the set with the same flag", () =>
   const merged = mergeSkin(main, skin, { addSkinOnly: false }).custom[0].sets!;
   assert.deepEqual(merged.map((s) => s.mods.map((m) => m.value)), [["zero"], ["one"]]);
 });
+
+import { describeSkin, pruneSkin } from "./w3o";
+
+test("pruneSkin takes out the fields the import sets, for the objects it holds, and leaves the rest", () => {
+  const skin = file(3, [{ base: "hfoo", mods: [mod("unam", "STALE BASE"), mod("utip", "keep tip")] }],
+    [{ base: "hfoo", id: "h000", mods: [mod("unam", "STALE NAME"), mod("uico", "old.blp")] }, { base: "hfoo", id: "h001", mods: [mod("unam", "Other object")] }]);
+  const incoming = file(3, [{ base: "hfoo", mods: [mod("unam", "New base")] }], [{ base: "hfoo", id: "h000", mods: [mod("unam", "New name")] }]);
+  const { file: pruned, dropped } = pruneSkin(skin, incoming);
+  assert.equal(dropped, 2);
+  assert.deepEqual(pruned.custom[0].mods!.map((m) => m.field), ["uico"]);
+  assert.deepEqual(pruned.custom[1].mods!.map((m) => m.field), ["unam"], "an object the import doesn't hold is untouched");
+  assert.deepEqual(pruned.original[0].mods!.map((m) => m.field), ["utip"]);
+  assert.equal(skin.custom[0].mods!.length, 2, "the file handed in is not changed");
+  // A field of another level is another field.
+  const lvl = (level: number) => ({ field: "atp1", type: "string", level, data: 0, value: "t" });
+  const a = pruneSkin(file(3, [], [{ base: "AHbz", id: "A000", mods: [lvl(1), lvl(2)] }]), file(3, [], [{ base: "AHbz", id: "A000", mods: [lvl(2)] }]));
+  assert.deepEqual(a.file.custom[0].mods!.map((m) => m.level), [1]);
+  // Sets are pruned in every set.
+  const sets = pruneSkin(file(3, [], [{ base: "AHbz", id: "A000", sets: [{ flag: 0, mods: [lvl(1)] }, { flag: 1, mods: [lvl(1)] }] }]), file(3, [], [{ base: "AHbz", id: "A000", mods: [lvl(1)] }]));
+  assert.equal(sets.dropped, 2);
+});
+
+test("Import drops the stale Skin fields in the same write, and says so in the question", async () => {
+  const f = fake({
+    "map/war3map.w3u.json": J(file(3, [], [unit("h000", "Old")])),
+    "map/war3mapSkin.w3u.json": J(file(3, [], [{ base: "hfoo", id: "h000", mods: [mod("unam", "STALE NAME"), mod("uico", "keep.blp")] }])),
+  }, { w3o: [{ kind: "w3u", text: J(file(3, [], [unit("h000", "New")])) }] });
+  await importObjectData(f.w3);
+  const skin = JSON.parse(f.fs.get("map/war3mapSkin.w3u.json")!) as EditFile;
+  assert.deepEqual(skin.custom[0].mods!.map((m) => m.field), ["uico"]);
+  assert.equal((JSON.parse(f.fs.get("map/war3map.w3u.json")!) as EditFile).custom[0].mods![0].value, "New");
+  assert.match(f.asked[0], /1 field of war3mapSkin\.w3u that the import sets are dropped/);
+  const at = (s: string) => f.log.indexOf(s);
+  assert.ok(at("command w3.checkpoints.create") < at("write map/war3mapSkin.w3u.json"), "after the checkpoint");
+  // Nothing in the Skin file to drop: it is not written, and the question says nothing of it.
+  const calm = fake({ "map/war3map.w3u.json": J(file(3, [], [unit("h000", "Old")])), "map/war3mapSkin.w3u.json": J(file(3, [], [bare("hfoo", "h777")])) },
+    { w3o: [{ kind: "w3u", text: J(file(3, [], [unit("h000", "New")])) }] });
+  await importObjectData(calm.w3);
+  assert.deepEqual(calm.log.filter((l) => l.startsWith("write")), ["write map/war3map.w3u.json"]);
+  assert.doesNotMatch(calm.asked[0], /Skin/);
+  assert.equal(describeSkin({ writes: [], conflicts: [], skins: [] }), "");
+});
+
+test("a corrupt Skin file refuses the import and nothing is written", async () => {
+  const f = fake({ "map/war3map.w3u.json": J(file(3, [], [unit("h000", "Old")])), "map/war3mapSkin.w3u.json": "{ broken" },
+    { w3o: [{ kind: "w3u", text: J(file(3, [], [unit("h000", "New")])) }] });
+  await assert.rejects(importObjectData(f.w3), /war3mapSkin\.w3u\.json is there but can't be read/);
+  assert.deepEqual(f.log.filter((l) => l.startsWith("write") || l.startsWith("command") || l === "confirm"), []);
+});
+
+test("mergeSkin keeps the main object's end token, and flagged Skin sets stay sets", () => {
+  const main = file(3, [], [{ base: "hfoo", id: "h000", end: "h000", mods: [mod("unam", "N")] }]);
+  const noEnd = mergeSkin(main, file(3, [], [{ base: "hfoo", id: "h000", mods: [mod("uico", "i.blp")] }]), { addSkinOnly: false });
+  assert.equal(noEnd.custom[0].end, "h000");
+  assert.equal(noEnd.custom[0].mods![1].end, undefined, "it inherits the object's");
+  const sameEnd = mergeSkin(main, file(3, [], [{ base: "hfoo", id: "h000", end: "h000", mods: [mod("uico", "i.blp")] }]), { addSkinOnly: false });
+  assert.equal(sameEnd.custom[0].mods![1].end, undefined, "the same end token is not written again");
+  const otherEnd = mergeSkin(main, file(3, [], [{ base: "hfoo", id: "h000", end: "h111", mods: [mod("uico", "i.blp")] }]), { addSkinOnly: false });
+  assert.equal(otherEnd.custom[0].mods![1].end, "h111", "a different one stays with its field");
+  // The main object has plain mods, the Skin object two flagged sets.
+  const lvl = (value: string) => ({ field: "atp1", type: "string", level: 1, data: 0, value });
+  const skin = file(3, [], [{ base: "AHbz", id: "A000", sets: [{ flag: 0, mods: [lvl("zero")] }, { flag: 1, mods: [lvl("one")] }] }]);
+  const merged = mergeSkin(file(3, [], [{ base: "AHbz", id: "A000", mods: [{ field: "anam", type: "string", value: "Name" }] }]), skin, { addSkinOnly: false }).custom[0];
+  assert.equal(merged.mods, undefined);
+  assert.deepEqual(merged.sets!.map((s) => [s.flag, s.mods.map((m) => m.value)]), [[0, ["Name", "zero"]], [1, ["one"]]]);
+  // A flag the main object's sets lack becomes a set of its own instead of landing in the first.
+  const two = mergeSkin(file(3, [], [{ base: "AHbz", id: "A000", sets: [{ flag: 0, mods: [] }, { flag: 2, mods: [] }] }]), skin, { addSkinOnly: false }).custom[0].sets!;
+  assert.deepEqual(two.map((s) => [s.flag, s.mods.length]), [[0, 1], [2, 0], [1, 1]]);
+});

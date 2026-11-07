@@ -28,7 +28,7 @@ function setup(files: Record<string, string>, opts: { answer?: boolean; unsaved?
     backend: {
       invoke: async (cmd: string, a: { path: string; text?: string }) => {
         if (cmd === "codec_decode") { const t = fs.get(`${a.path}.json`); if (t === undefined) throw new Error("no codec"); return t; }
-        if (cmd === "fs_exists") return fs.has(a.path) || fs.has(`${a.path}.json`);
+        if (cmd === "fs_exists") return fs.has(a.path) || (raw.has(`${a.path}.json`) && fs.has(`${a.path}.json`));
         if (cmd === "codec_canonicalize") return a.text!;
         if (cmd === "codec_write") { log.push(`codec_write ${a.path}`); fs.set(`${a.path}.json`, a.text!); return null; }
         throw new Error(cmd);
@@ -135,8 +135,11 @@ const customUnits = (...ids: string[]) => JSON.stringify({ custom: ids.map((id) 
 
 test("a chapter map knows its campaign's custom objects, also the skin ones, so none are invalid", async () => {
   const { w3, fs, log } = setup({
-    [UNITS]: units("hfoo", "c001", "c002", "xxxx"), [DOODADS]: doodads("LTlt", "d001"),
+    [UNITS]: units("hfoo", "c001", "c002", "xxxx"), [DOODADS]: doodads("LTlt", "d001", "d002", "d003"),
+    "C:/camp/map/war3campaign.w3f.json": "{}",
     "C:/camp/map/war3campaign.w3u.json": customUnits("c001"),
+    "C:/camp/map/war3campaign.w3b.json": JSON.stringify({ custom: [{ id: "d002", base: "ATtr" }] }),
+    "C:/camp/map/war3campaignSkin.w3d.json": JSON.stringify({ custom: [{ id: "d003", base: "LTlt" }] }),
     "C:/camp/map/war3campaignSkin.w3u.json": customUnits("c002"),
     "C:/camp/map/war3campaign.w3d.json": JSON.stringify({ custom: [{ id: "d001", base: "LTlt" }] }),
   }, { root: CHAPTER });
@@ -144,8 +147,22 @@ test("a chapter map knows its campaign's custom objects, also the skin ones, so 
   assert.deepEqual([...plan.types], [["xxxx", 1]], "only the type nobody has");
   await deleteInvalid(w3, game);
   assert.deepEqual(idsOf(fs, UNITS, "units"), ["hfoo", "c001", "c002"]);
-  assert.deepEqual(idsOf(fs, DOODADS, "doodads"), ["LTlt", "d001"]);
+  assert.deepEqual(idsOf(fs, DOODADS, "doodads"), ["LTlt", "d001", "d002", "d003"], "doodads and destructables defined only in the campaign");
   assert.ok(log.length > 0);
+});
+
+test("only a folder that holds war3campaign.w3f counts as the campaign, and the folder is not case sensitive", async () => {
+  const objects = { [UNITS]: units("hfoo", "c001"), [DOODADS]: doodads(), "C:/camp/map/war3campaign.w3u.json": customUnits("c001") };
+  // No war3campaign.w3f there: the folder is some folder, its objects are not taken.
+  const none = setup(objects, { root: CHAPTER });
+  assert.deepEqual([...(await planInvalid(none.w3, game)).types], [["c001", 1]]);
+  const raw = setup({ ...objects, "C:/camp/map/war3campaign.w3f": "x" }, { root: CHAPTER });
+  assert.equal((await planInvalid(raw.w3, game)).total, 0, "the raw form counts too");
+  const upper = setup({ ...objects, "C:/camp/map/war3campaign.w3f.json": "{}" }, { root: "C:\\camp\\Maps\\Chapter 4.w3x" });
+  assert.equal((await planInvalid(upper.w3, game)).total, 0, "Maps");
+  // A map in a folder called maps, on a drive root: no campaign at C:/map.
+  const drive = setup(objects, { root: "C:\\maps\\x" });
+  assert.equal((await planInvalid(drive.w3, game)).total, 1);
 });
 
 test("a project that holds the campaign's object files itself knows them too", async () => {
@@ -168,7 +185,7 @@ test("a map outside a campaign folder gets no campaign path", async () => {
 
 test("an object file that is there but can't be read stops everything instead of making its objects unknown", async () => {
   for (const bad of ["map/war3map.w3u.json", "map/war3mapSkin.w3u.json", "C:/camp/map/war3campaign.w3u.json"]) {
-    const { w3, fs, log } = setup({ [UNITS]: units("hfoo", "h000", "h001"), [DOODADS]: doodads("LTlt"), [bad]: "{ not json" }, { root: CHAPTER });
+    const { w3, fs, log } = setup({ [UNITS]: units("hfoo", "h000", "h001"), [DOODADS]: doodads("LTlt"), "C:/camp/map/war3campaign.w3f.json": "{}", [bad]: "{ not json" }, { root: CHAPTER });
     const before = fs.get(UNITS);
     await assert.rejects(deleteInvalid(w3, game), (e: Error) => e.message.includes(bad) && /can't be read/.test(e.message), bad);
     assert.equal(fs.get(UNITS), before);

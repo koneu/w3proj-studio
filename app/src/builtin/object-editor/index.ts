@@ -12,7 +12,7 @@ import { StringTable } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderGone, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
-import { capped, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { mergeSkin } from "./w3o";
@@ -1065,8 +1065,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!path) return;
           // Its own texts: references to this map's string table mean nothing in another.
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          // The fields the map keeps in its Skin file (names, models, art) belong in the exported file.
-          const merged = mergeSkin(file as unknown as EditFile, await readMapDoc<EditFile>(w3, `map/war3mapSkin.${kind}.json`), { addSkinOnly: true }) as unknown as ObjectFile;
+          // The fields the map keeps in its Skin file (names, models, art) belong in the exported file. All objects
+          // are exported here, so the Skin file's own entries come along; Export Object takes the chosen ones only.
+          const merged = mergeSkin(file as unknown as EditFile, await readMapDocStrict<EditFile>(w3, `map/war3mapSkin.${kind}.json`), { addSkinOnly: true }) as unknown as ObjectFile;
           const own = { ...merged, custom: merged.custom.map((o) => copyOf(o as EditObject, text)), original: merged.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);

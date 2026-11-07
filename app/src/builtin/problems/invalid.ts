@@ -23,11 +23,22 @@ export const isRandomId = (id: string) => /^[uib]DNR$/.test(id) || /^Y.I\d$/.tes
  *  false when the game's object data could not be read: then "unknown" only means "not loaded". */
 export interface KnownTypes { known: Set<string>; inUnits: Set<string>; inDoodads: Set<string>; gameOk: boolean }
 
-/** The campaign project a chapter map's project sits in (<campaign>/maps/<chapter>), else undefined.
- *  Forward slashes, which Windows takes too. */
+/** Where a campaign project would be, going by the folder layout (<campaign>/maps/<chapter>), else
+ *  undefined. Forward slashes, which Windows takes too. `findCampaign` also checks that there is one. */
 export function campaignOf(root: string | undefined): string | undefined {
-  const m = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
+  const m = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/i.exec(root)?.[1] : undefined;
   return m?.replace(/\\/g, "/");
+}
+
+/** The campaign project a chapter map's project sits in: the folder two up, if it holds war3campaign.w3f
+ *  (in its project or raw form), as the Campaign Editor decides. Else undefined. */
+export async function findCampaign(w3: W3Api): Promise<string | undefined> {
+  const campaign = campaignOf(w3.workspace.project()?.root);
+  if (!campaign) return undefined;
+  for (const name of ["war3campaign.w3f.json", "war3campaign.w3f"]) {
+    if (await w3.backend.invoke<boolean>("fs_exists", { path: `${campaign}/map/${name}` }).catch(() => false)) return campaign;
+  }
+  return undefined;
 }
 
 export async function knownPlacedTypes(w3: W3Api, load: KindLoader = loadKind): Promise<KnownTypes> {
@@ -38,7 +49,7 @@ export async function knownPlacedTypes(w3: W3Api, load: KindLoader = loadKind): 
   const note = (kind: string, id: string) => { known.add(id); (kind === "w3u" || kind === "w3t" ? inUnits : inDoodads).add(id); };
   const readJson = <T>(path: string) => readMapDocStrict<T>(w3, path);
   // A chapter map also has its campaign's custom objects (the campaign project is two folders up).
-  const campaign = campaignOf(w3.workspace.project()?.root);
+  const campaign = await findCampaign(w3);
   for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {
     const k = await load(w3, kind).catch(() => null);
     if (!k || !k.baseIds.length) gameOk = false;

@@ -3,7 +3,7 @@
 import type { W3Api } from "../../extensions/api";
 import { jsonPathOf, mapStrings, readMapDocStrict } from "../../lib/formats/mapdoc";
 import type { EditFile, EditObject } from "./objectedit";
-import { describeConflicts, describeImport, exportParts, mergeSkin, KIND_NAMES, onlyObjects, planImport, W3O_KINDS, withOwnTexts } from "./w3o";
+import { describeConflicts, describeImport, describeSkin, exportParts, mergeSkin, KIND_NAMES, onlyObjects, planImport, W3O_KINDS, withOwnTexts } from "./w3o";
 
 const WE_FILTER = [{ name: "Object data (.w3o)", extensions: ["w3o"] }];
 const withExt = (p: string) => (/\.w3o$/i.test(p) ? p : `${p}.w3o`);
@@ -43,7 +43,7 @@ export async function exportAllObjectData(w3: W3Api): Promise<string | null> {
 /** The chosen objects of one kind, as a .w3o of their own. `file` is the editor's file, `text` its string lookup. */
 export async function exportObjects(w3: W3Api, kind: string, file: EditFile, objects: EditObject[], text: (value: string) => string | null): Promise<string | null> {
   if (!objects.length) throw new Error("Select an object first.");
-  // Their fields in the Skin file (names, models, art) go along.
+  // Their fields in the Skin file (names, models, art) go along; objects only the Skin file has are not chosen.
   const skin = await readMapDocStrict<EditFile>(w3, `map/war3mapSkin.${kind}.json`);
   const chosen = withOwnTexts(mergeSkin(onlyObjects(file, objects), skin, { addSkinOnly: false }), text);
   const single = objects.length === 1 ? (objects[0].id ?? objects[0].base) : `${objects.length} ${KIND_NAMES[kind] ?? kind}`;
@@ -64,13 +64,15 @@ export async function importObjectData(w3: W3Api): Promise<number> {
   const source = await w3.window.pickFile({ title: "Import Object Data", filters: WE_FILTER });
   if (!source) return 0;
   const parts = await w3.backend.invoke<{ kind: string; text: string }[]>("w3o_import", { path: source });
-  const existing: Record<string, EditFile | null> = {};
+  const existing: Record<string, EditFile | null> = {}, skins: Record<string, EditFile | null> = {};
   const paths: Record<string, string> = {};
   for (const { kind } of parts) {
     paths[kind] = jsonPathOf(w3, `war3map.${kind}`);
     existing[kind] = await readMapDocStrict<EditFile>(w3, paths[kind]);
+    // The Skin file too: a corrupt one refuses the import before anything is written.
+    skins[kind] = await readMapDocStrict<EditFile>(w3, `map/war3mapSkin.${kind}.json`);
   }
-  const plan = planImport(existing, parts.map((p) => ({ kind: p.kind, file: JSON.parse(p.text) as EditFile })));
+  const plan = planImport(existing, parts.map((p) => ({ kind: p.kind, file: JSON.parse(p.text) as EditFile })), skins);
   if (!plan.writes.length) { void w3.window.showInfo(describeImport(plan)); return 0; }
   // Encoded before anything is written: what can't be packed isn't kept.
   const texts: { path: string; text: string }[] = [];
@@ -78,7 +80,11 @@ export async function importObjectData(w3: W3Api): Promise<number> {
     const path = paths[wr.kind];
     texts.push({ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(wr.file) }) });
   }
-  if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${describeConflicts(plan)} A checkpoint is made first, to come back to.`, "Import", 60_000))) return 0;
+  for (const sk of plan.skins) {
+    const path = jsonPathOf(w3, `war3mapSkin.${sk.kind}`);
+    texts.push({ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(sk.file) }) });
+  }
+  if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${describeConflicts(plan)}${describeSkin(plan)} A checkpoint is made first, to come back to.`, "Import", 60_000))) return 0;
   await w3.commands.execute("w3.checkpoints.create", { quiet: true });
   for (const t of texts) await w3.workspace.writeText(t.path, t.text);
   await w3.workspace.refresh();
