@@ -29,6 +29,9 @@ export function toProjectPath(archiveName: string): string {
 
 /** Project path below the map folder → archive name. */
 export function toArchiveName(projectPath: string): string {
+  // Nothing escaped and no lone surrogate (which the UTF-8 round trip below would replace): the
+  // name is the path with "\" (most paths, and the Problems checks turn thousands per run).
+  if (!projectPath.includes("%") && !/[\uD800-\uDFFF]/.test(projectPath)) return projectPath.split("/").join("\\");
   return projectPath.split("/").map((part) => {
     const bytes: number[] = [];
     for (let i = 0; i < part.length;) {

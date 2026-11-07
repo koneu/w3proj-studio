@@ -41,13 +41,14 @@ export async function findCampaign(w3: W3Api): Promise<string | undefined> {
   return undefined;
 }
 
-export async function knownPlacedTypes(w3: W3Api, load: KindLoader = loadKind): Promise<KnownTypes> {
+/** `read`: how an object file is read (readMapDocStrict, or the Problems run's shared copy of it). */
+export async function knownPlacedTypes(w3: W3Api, load: KindLoader = loadKind, read: (path: string) => Promise<unknown> = (path) => readMapDocStrict(w3, path)): Promise<KnownTypes> {
   // "sloc" is a start location: never unknown, never removed.
   const known = new Set<string>(["sloc"]);
   const inUnits = new Set<string>(["sloc"]), inDoodads = new Set<string>();
   let gameOk = true;
   const note = (kind: string, id: string) => { known.add(id); (kind === "w3u" || kind === "w3t" ? inUnits : inDoodads).add(id); };
-  const readJson = <T>(path: string) => readMapDocStrict<T>(w3, path);
+  const readJson = <T>(path: string) => read(path) as Promise<T | null>;
   // A chapter map also has its campaign's custom objects (the campaign project is two folders up).
   const campaign = await findCampaign(w3);
   for (const kind of ["w3u", "w3t", "w3b", "w3d"]) {

@@ -12,6 +12,7 @@ import { builtinChecks } from "./checks";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
 import { resultsStale } from "./projectkey";
+import { RunScope } from "./runscope";
 
 interface Group { check: ProblemCheck; problems: Problem[]; error?: string }
 
@@ -21,6 +22,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The project root the results are for. */
   let ranFor: string | null = null;
   let ran = false, running: Promise<Problem[]> | null = null;
+  /** What the checks of the running run share; outside a run, nothing is shared. */
+  let scope = new RunScope(w3, false);
   const folded = new Set<string>();
   const status = w3.statusBar.add({ id: "w3.problems.status", text: "", command: "w3.problems.show", align: "right", priority: 60 });
   ctx.subscriptions.push(status);
@@ -43,11 +46,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const root = w3.workspace.project()?.root ?? null;
         if (!root) { groups = []; return []; }
         const result: Group[] = [];
+        // What the built-in checks of this run share (each document read once); dropped when it ends.
+        scope = new RunScope(w3);
         // One failing check doesn't stop the others.
         for (const check of [...checks]) {
+          // Each check's time, as a User Timing measure ("problems:<id>"): DevTools and the bench read it.
+          const started = performance.now();
           try { result.push({ check, problems: await check.run() }); } catch (e) {
             result.push({ check, problems: [], error: String(e instanceof Error ? e.message : e) });
           }
+          performance.measure(`problems:${check.id}`, { start: started, end: performance.now() });
         }
         // The project was closed or changed while the checks ran: these results are not its own.
         if (resultsStale(root, w3.workspace.project()?.root ?? null)) return [];
@@ -57,6 +65,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         updateStatus();
         return all();
       })().finally(() => {
+        // The run's documents aren't kept: the next run reads the files as they are then.
+        scope = new RunScope(w3, false);
         // Redrawn once the run is over (its button shows "Checking…" while running).
         running = null;
         w3.views.refresh("w3.problems.list");
@@ -71,7 +81,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!w3.workspace.project()) throw new Error("No project is open in W3Proj Studio.");
     return (await service.run()).map(({ severity, message, location }) => ({ severity, message, location }));
   }));
-  for (const c of [...builtinChecks(w3), ...mapChecks(w3)]) ctx.subscriptions.push(service.registerCheck(c));
+  for (const c of [...builtinChecks(w3, () => scope), ...mapChecks(w3, () => scope)]) ctx.subscriptions.push(service.registerCheck(c));
 
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
   ctx.subscriptions.push(

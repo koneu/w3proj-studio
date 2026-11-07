@@ -15,9 +15,10 @@ export const readMapDoc = async <T>(w3: W3Api, path: string): Promise<T | null> 
 };
 
 /** Like readMapDoc, but tells a file that isn't there (null) from one that is there and can't be read
- *  (throws, naming it): for code that acts on what it finds, where "unreadable" must never pass for "empty". */
-export const readMapDocStrict = async <T>(w3: W3Api, path: string): Promise<T | null> => {
-  const doc = await readMapDoc<T>(w3, path);
+ *  (throws, naming it): for code that acts on what it finds, where "unreadable" must never pass for "empty".
+ *  `read`: how the document is read (readMapDoc, or a cache of its results). */
+export const readMapDocStrict = async <T>(w3: W3Api, path: string, read: (w3: W3Api, path: string) => Promise<unknown> = readMapDoc): Promise<T | null> => {
+  const doc = (await read(w3, path)) as T | null;
   if (doc !== null) return doc;
   const there = async (p: string) => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(p) }).catch(() => true);
   if ((await there(path)) || (await there(path.replace(/\.json$/, "")))) throw new Error(`${path} is there but can't be read.`);

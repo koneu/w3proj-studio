@@ -6,8 +6,7 @@
 import { readMapDoc } from "../../lib/formats/mapdoc";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck, ProblemFix } from "../../extensions/services";
-import type { FileInfo } from "../../extensions/api";
-import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { toProjectPath } from "../../lib/formats/archivepath";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
@@ -17,10 +16,14 @@ import { gameJassEnv } from "../../lib/jass/env";
 import { parseMdx, renameTextures } from "../../lib/model/mdx";
 import { loadKind } from "../../lib/objects/metadata";
 import { type ModeChoices, pickClassicModel } from "./modelpick";
-import { chooseFolder, mergedValues, modelExists, modelFieldValue, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
+import { chooseFolder, mergedValues, modelExists, modelFieldValue, modelNames, planImports, planModelEdit, serialQueue, textureLacking } from "./fixplan";
 import { conversionSources, missingTextures, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
+import { FileLookup, type FileKind } from "./lookup";
+import { mapLimit, RunScope } from "./runscope";
+
+export { FileLookup };
 
 const KINDS = ["w3u", "w3t", "w3a", "w3h", "w3b", "w3d", "w3q"];
 /** Object data field types that hold file paths (shadow textures are names, not paths). */
@@ -34,73 +37,21 @@ interface Mod { field: string; value: number | string; level?: number }
 /** A path that only exists on someone's machine, or climbs out of the map. */
 export const isAbsolute = (p: string) => /^[a-z]:[\\/]/i.test(p) || /^[\\/]{2}/.test(p) || /(^|[\\/])\.\.([\\/]|$)/.test(p);
 
-/** A path as the game looks it up: lower case, "\\", without art set or language folders
- *  (`_HD.w3mod\\`, `_Locales\\zhCN.w3mod\\`), which only choose the variant. */
-const plainPath = (p: string) => {
-  let s = p.replace(/\//g, "\\").toLowerCase();
-  for (let before = ""; before !== s;) { before = s; s = s.replace(/^(_hd|_de|_teen)\.w3mod\\|^_locales\\[a-z]{4}\.w3mod\\/, ""); }
-  return s;
-};
-
-/** Where files are looked up: the project's map folder (and a chapter map's campaign), then the
- *  game's data (cached). */
-export class FileLookup {
-  private files = new Set<string>();
-  private game = new Map<string, Promise<boolean>>();
-  private ready: Promise<void>;
-  constructor(private w3: W3Api) {
-    const add = (list: FileInfo[]) => {
-      for (const f of list) {
-        const rel = f.path.replace(/\\/g, "/");
-        if (rel.toLowerCase().startsWith("map/")) this.files.add(plainPath(toArchiveName(rel.slice(4))));
-      }
-    };
-    add(w3.workspace.files());
-    // A campaign's chapter map also uses the campaign's imports.
-    const root = w3.workspace.project()?.root;
-    const campaign = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-    this.ready = campaign
-      ? w3.backend.invoke<FileInfo[]>("project_files", { root: campaign }).then(add, () => {})
-      : Promise.resolve();
-  }
-  inMap(path: string) {
-    return this.files.has(plainPath(path));
-  }
-  inGame(path: string): Promise<boolean> {
-    const key = path.replace(/\//g, "\\").toLowerCase();
-    let p = this.game.get(key);
-    if (!p) {
-      p = this.w3.game.resolve(path.replace(/\//g, "\\")).then((r) => !!r, () => false);
-      this.game.set(key, p);
-    }
-    return p;
-  }
-  /** Whether any variant exists: as written, with the extensions the game also accepts
-   *  (models without extension or as .mdl → .mdx; textures as .dds). */
-  async exists(path: string, kind: "model" | "texture" | "file"): Promise<boolean> {
-    const variants = [path];
-    if (kind === "model") {
-      if (!/\.\w{3}$/.test(path)) variants.push(`${path}.mdx`);
-      else if (/\.mdl$/i.test(path)) variants.push(path.replace(/\.mdl$/i, ".mdx"));
-    }
-    if (kind === "texture") {
-      if (!/\.\w{3}$/.test(path)) variants.push(`${path}.blp`, `${path}.dds`);
-      else if (/\.(blp|tif|tga|png)$/i.test(path)) variants.push(path.replace(/\.\w+$/, ".dds"));
-    }
-    await this.ready;
-    if (variants.some((v) => this.inMap(v))) return true;
-    for (const v of variants) if (await this.inGame(v)) return true;
-    return false;
-  }
-}
-
 /** A map file's JSON document ("map/x.json"), also from the raw file of older projects. */
 export { readMapDoc };
-const readJson = readMapDoc;
 const capped = (list: Problem[], what: string): Problem[] =>
   list.length > LIMIT ? [...list.slice(0, LIMIT), { severity: "warning", message: `… and ${list.length - LIMIT} more ${what}` }] : list;
 
-export function builtinChecks(w3: W3Api): ProblemCheck[] {
+/** A kind's object files: the map's and the campaign's, each with its skin file. */
+const objectFiles = (kind: string) => [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`];
+/** At most this many numbered variations of a model are looked up in the batch; more are asked one by one. */
+const BATCH_VARIATIONS = 64;
+/** Imported models read at the same time by "Textures of imported models". */
+const MODEL_READS = 6;
+
+/** `scope`: what the checks of the current run share (the Problems service makes one per run);
+ *  without it, every check reads everything itself. */
+export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(w3, false)): ProblemCheck[] {
   return [
     {
       id: "jass",
@@ -131,30 +82,41 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       id: "objectPaths",
       title: "Files used by object data",
       async run() {
-        const files = new FileLookup(w3);
+        const s = scope();
+        const files = s.lookup();
         const out: Problem[] = [];
-        /** Whether the file an object field names exists. A doodad or destructable with several
-         *  variations names its model without the number; the files are X0.mdx, X1.mdx… */
-        const pathExists = async (p: string, type: string, id: string, base: string, vars: Map<string, string>, meta: NonNullable<Awaited<ReturnType<typeof loadKind>>>, variationsField?: string) => {
-          const what = type.startsWith("model") ? "model" : type === "icon" || type.endsWith("exture") ? "texture" : "file";
+        type Meta = NonNullable<Awaited<ReturnType<typeof loadKind>>>;
+        /** What an object field's file is looked up as, and how many numbered models it stands for: a
+         *  doodad or destructable with several variations names its model without the number; the files
+         *  are X0.mdx, X1.mdx… */
+        const lookupOf = (type: string, id: string, base: string, vars: Map<string, string>, meta: Meta, variationsField?: string) => {
+          const what: FileKind = type.startsWith("model") ? "model" : type === "icon" || type.endsWith("exture") ? "texture" : "file";
           let variations = 1;
           if (what === "model" && variationsField) {
             // The count as the game merges the main and the skin file; else the base type's.
             const f = meta.fieldById.get(variationsField);
             variations = Number(vars.get(id) ?? (f ? meta.defaultValue(base, f, 0) : 1)) || 1;
           }
-          return modelExists(p, variations, (x) => files.exists(x, what));
+          return { what, variations };
         };
+        // Every object file at once, and the game's data of each kind that has one.
+        await s.prefetch(KINDS.flatMap(objectFiles));
+        const metas = new Map(await Promise.all(KINDS.map(async (kind) => {
+          const has = (await Promise.all(objectFiles(kind).map((f) => s.doc(f)))).some((d) => d);
+          return [kind, has ? loadKind(w3, kind).catch(() => null) : null] as const;
+        })));
+        // First what to look up, in the order of the problems; then the game paths of all of it at once.
+        const found: { p: string; at: string; reveal: { command: string; args: unknown[] }; what?: FileKind; variations?: number }[] = [];
         for (const kind of KINDS) {
           let meta: Awaited<ReturnType<typeof loadKind>> | null = null;
           const variationsField = ART[kind]?.variations;
           const vars = variationsField
-            ? mergedValues(await Promise.all([`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`].map((f) => readJson<{ original?: Obj[]; custom?: Obj[] }>(w3, f))), variationsField)
+            ? mergedValues(await Promise.all(objectFiles(kind).map((f) => s.doc<{ original?: Obj[]; custom?: Obj[] }>(f))), variationsField)
             : new Map<string, string>();
-          for (const file of [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`, `map/war3campaign.${kind}.json`, `map/war3campaignSkin.${kind}.json`]) {
-            const data = await readJson<{ original?: Obj[]; custom?: Obj[] }>(w3, file);
+          for (const file of objectFiles(kind)) {
+            const data = await s.doc<{ original?: Obj[]; custom?: Obj[] }>(file);
             if (!data) continue;
-            meta ??= await loadKind(w3, kind).catch(() => null);
+            meta ??= await metas.get(kind)!;
             if (!meta) continue;
             for (const o of [...(data.custom ?? []), ...(data.original ?? [])]) {
               const id = o.id ?? o.base;
@@ -169,13 +131,17 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
                 for (const p of paths) {
                   const at = `${name} (${id}) › ${f.label}${m.level ? ` (level ${m.level})` : ""}`;
                   const reveal = { command: "w3.objectEditor.open", args: [kind, id] };
-                  if (isAbsolute(p)) out.push({ severity: "error", message: `${p}: a path on someone's disk, not in the map`, location: at, reveal });
-                  else if (!(await pathExists(p, f.type, id, o.base, vars, meta, variationsField))) {
-                    out.push({ severity: "warning", message: `${p} not found (neither in the map nor in the game)`, location: at, reveal });
-                  }
+                  found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField) });
                 }
               }
             }
+          }
+        }
+        await files.prefetch(found.flatMap(({ p, what, variations }) => (what ? modelNames(p, Math.min(variations!, BATCH_VARIATIONS)).map((x): [string, FileKind] => [x, what]) : [])));
+        for (const { p, at, reveal, what, variations } of found) {
+          if (!what) out.push({ severity: "error", message: `${p}: a path on someone's disk, not in the map`, location: at, reveal });
+          else if (!(await modelExists(p, variations!, (x) => files.exists(x, what)))) {
+            out.push({ severity: "warning", message: `${p} not found (neither in the map nor in the game)`, location: at, reveal });
           }
         }
         return capped(out, "missing files");
@@ -185,12 +151,18 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       id: "modelTextures",
       title: "Textures of imported models",
       async run() {
-        const files = new FileLookup(w3);
+        const files = scope().lookup();
         const out: Problem[] = [];
         const models = w3.workspace.files().filter((f) => /^map\/.+\.mdx$/i.test(f.path.replace(/\\/g, "/")));
-        for (const f of models) {
-          let textures: { replaceableId: number; path: string }[];
-          try { textures = parseMdx(await w3.workspace.readBytes(f.path)).textures; } catch (e) {
+        // Several models read at once; only their texture lists are kept.
+        const read = await mapLimit(models, MODEL_READS, async (f) => {
+          try { return { textures: parseMdx(await w3.workspace.readBytes(f.path)).textures.map(({ replaceableId, path }) => ({ replaceableId, path })) }; } catch (e) { return { error: e }; }
+        });
+        const lookedUp = (t: { replaceableId: number; path: string }) => t.replaceableId === 0 && !!t.path && !isAbsolute(t.path);
+        await files.prefetch(read.flatMap((r) => (r.textures ?? []).filter(lookedUp).map((t): [string, FileKind] => [t.path, "texture"])));
+        for (const [i, f] of models.entries()) {
+          const { textures, error: e } = read[i];
+          if (!textures) {
             out.push({ severity: "warning", message: `can't be read: ${(e as Error).message ?? e}`, location: f.path, reveal: { command: "w3.problems.open", args: [f.path] } });
             continue;
           }
@@ -208,7 +180,10 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
       id: "placements",
       title: "Placed objects",
       async run() {
-        const { known, inUnits, inDoodads } = await knownPlacedTypes(w3);
+        const s = scope();
+        const readJson = <T>(_: W3Api, path: string) => s.doc<T>(path);
+        await s.prefetch(["map/war3mapUnits.doo.json", "map/war3map.doo.json", "map/war3map.w3i.json"]);
+        const { known, inUnits, inDoodads } = await knownPlacedTypes(w3, loadKind, (path) => s.docStrict(path));
         const random = isRandomId;
         const unknown = new Map<string, { n: number; x: number; y: number; file: string }>();
         const misplaced = new Map<string, { n: number; x: number; y: number; file: string }>();
@@ -248,21 +223,37 @@ export function builtinChecks(w3: W3Api): ProblemCheck[] {
     {
       id: "classicModels",
       title: "Graphics modes",
-      run: () => classicModels(w3),
+      run: () => classicModels(w3, scope()),
     },
     {
       id: "imports",
       title: "Imported files",
       async run() {
-        const files = new FileLookup(w3);
+        const s = scope();
+        const files = s.lookup();
         const out: Problem[] = [];
-        for (const [list, folder] of [["map/war3map.imp.json", "war3mapImported"], ["map/war3campaign.imp.json", "war3campImported"]] as const) {
-          const data = await readJson<{ files?: { flags: number; path: string }[] }>(w3, list);
+        const lists = [["map/war3map.imp.json", "war3mapImported"], ["map/war3campaign.imp.json", "war3campImported"]] as const;
+        await s.prefetch(lists.map(([list]) => list));
+        /** The names an entry's file may have: "standard path" entries (flags 5, 8) name a file inside
+         *  the import folder; a sound may be stored under its other extensions. */
+        const variantsOf = (e: { flags: number; path: string }, folder: string) => {
+          const paths = [5, 8].includes(e.flags) ? [`${folder}\\${e.path}`, e.path] : [e.path];
+          const sound = /\.(flac|ogg|mp3|wav)$/i.test(e.path);
+          return paths.flatMap((p) => (sound ? [".flac", ".ogg", ".mp3", ".wav"].map((x) => p.replace(/\.\w+$/, x)) : [p]));
+        };
+        // The game paths of every entry the map doesn't have, at once.
+        const gamePaths: string[] = [];
+        for (const [list, folder] of lists) {
+          for (const e of (await s.doc<{ files?: { flags: number; path: string }[] }>(list))?.files ?? []) {
+            const variants = variantsOf(e, folder);
+            if (!variants.some((v) => files.inMap(v))) gamePaths.push(...variants);
+          }
+        }
+        await files.prefetchGame(gamePaths);
+        for (const [list, folder] of lists) {
+          const data = await s.doc<{ files?: { flags: number; path: string }[] }>(list);
           for (const e of data?.files ?? []) {
-            // "Standard path" entries (flags 5, 8) name a file inside the import folder.
-            const paths = [5, 8].includes(e.flags) ? [`${folder}\\${e.path}`, e.path] : [e.path];
-            const sound = /\.(flac|ogg|mp3|wav)$/i.test(e.path);
-            const variants = paths.flatMap((p) => (sound ? [".flac", ".ogg", ".mp3", ".wav"].map((x) => p.replace(/\.\w+$/, x)) : [p]));
+            const variants = variantsOf(e, folder);
             if (variants.some((v) => files.inMap(v))) continue;
             let inGame = false;
             for (const v of variants) if (await files.inGame(v)) { inGame = true; break; }
@@ -294,17 +285,20 @@ const MODES = [
 /** Placed objects whose model is missing in a graphics mode the map supports (Classic falls
  *  back to nothing, HD and DE each only to Classic, never to one another): players in that mode
  *  don't see them. Maps without the supported-modes field (before 1.32) count as Classic only. */
-async function classicModels(w3: W3Api): Promise<Problem[]> {
-  const info = await readJson<{ supportedModes?: number }>(w3, "map/war3map.w3i.json");
-  const supported = MODES.filter((m) => (info?.supportedModes ?? 1) & m.bit);
-  if (!supported.length) return [];
-  // Game paths (lowercase, without the folder prefix) per art folder: Classic, _hd, _de.
+/** What classicModels takes from the game's file list: game paths (lowercase, without the folder
+ *  prefix) per art folder (Classic, _hd, _de), the Classic models and the Reforged ones by set (as
+ *  stored, for the pickers of the fixes, which only read them). */
+interface GameModels { stored: Map<string | null, Set<string>>; classicModels: Set<string>; reforgedModels: Record<Source, Set<string>> }
+/** Per file list: the game service keeps one list until the game folder changes, so a new list is a new key. */
+const gameModelsCache = new WeakMap<string[], GameModels>();
+
+function gameModels(list: string[]): GameModels {
+  const known = gameModelsCache.get(list);
+  if (known) return known;
   const stored = new Map<string | null, Set<string>>(MODES.map((m) => [m.layer, new Set()]));
-  // The Classic models (as stored, for the picker of the fix).
   const classicModels = new Set<string>();
-  // The Reforged models by set, for the picker of the fix (they are converted when chosen).
   const reforgedModels: Record<Source, Set<string>> = { de: new Set(), hd: new Set() };
-  for (const full of await w3.game.list()) {
+  for (const full of list) {
     const path = full.slice(full.lastIndexOf(":") + 1);
     const layer = /:_(hd|de)\.w3mod:/i.exec(full)?.[1].toLowerCase();
     stored.get(layer ? `_${layer}` : null)!.add(path.replace(/\\/g, "/").toLowerCase());
@@ -313,11 +307,24 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
       else if (/:_(hd|de)\.w3mod:[^:]*$/i.test(full)) reforgedModels[layer as Source].add(path.replace(/\//g, "\\"));
     }
   }
-  const files = new FileLookup(w3);
+  const out = { stored, classicModels, reforgedModels };
+  gameModelsCache.set(list, out);
+  return out;
+}
+
+async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
+  const readJson = <T>(_: W3Api, path: string) => s.doc<T>(path);
+  const info = await readJson<{ supportedModes?: number }>(w3, "map/war3map.w3i.json");
+  const supported = MODES.filter((m) => (info?.supportedModes ?? 1) & m.bit);
+  if (!supported.length) return [];
+  const { stored, classicModels, reforgedModels } = gameModels(await w3.game.list());
+  const files = s.lookup();
   // The project the problems were found in: the fixes write into no other.
   const root = w3.workspace.project()?.root;
   const kinds = new Map<string, Awaited<ReturnType<typeof loadKind>>>();
-  for (const kind of Object.keys(ART)) { const k = await loadKind(w3, kind).catch(() => null); if (k) kinds.set(kind, k); }
+  const loaded = await Promise.all(Object.keys(ART).map((kind) => loadKind(w3, kind).catch(() => null)));
+  Object.keys(ART).forEach((kind, i) => { if (loaded[i]) kinds.set(kind, loaded[i]); });
+  await s.prefetch(Object.keys(ART).flatMap((kind) => [`map/war3map.${kind}.json`, `map/war3mapSkin.${kind}.json`]));
   // The map's own objects and skin changes: id → [kind, base, field → value].
   const custom = new Map<string, { kind: string; base: string; mods: Map<string, string> }>();
   for (const kind of Object.keys(ART)) {
@@ -346,8 +353,10 @@ async function classicModels(w3: W3Api): Promise<Problem[]> {
     const known = found.get(path);
     if (known) return known;
     const key = path.replace(/\\/g, "/").toLowerCase();
-    // exists() waits until the map's file list is read; only the map's own copy counts here.
-    const imported = (await files.exists(path, "file")) && files.inMap(path);
+    // Only the map's own copy counts here (once a chapter map's campaign files are listed too): the
+    // game's is decided by the art folders below.
+    await files.whenReady();
+    const imported = files.inMap(path);
     const out = imported || stored.get(null)!.has(key) ? [] : supported.filter((m) => !m.layer || !stored.get(m.layer)!.has(key));
     found.set(path, out);
     return out;

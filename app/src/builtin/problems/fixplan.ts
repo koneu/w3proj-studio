@@ -133,7 +133,15 @@ export function mergedValues(docs: ({ original?: Loose[]; custom?: Loose[] } | n
 
 /** Whether the model an object names exists. A type with several variations names its model without
  *  the number: the files are X0.mdx, X1.mdx… and every one of them has to be there. A model file
- *  named as written (X.mdx) counts too, as the game's own Classic models are. */
+ *  named as written (X.mdx) counts too, as the game's own Classic models are. These are the files
+ *  modelExists may look at, in its order (so they can be looked up together beforehand). */
+export const modelNames = (path: string, variations: number): string[] => {
+  if (variations <= 1) return [path];
+  const stem = path.replace(/\.(mdl|mdx)$/i, "");
+  return [path, ...Array.from({ length: variations }, (_, i) => `${stem}${i}.mdx`)];
+};
+
+/** Whether the model exists (see modelNames). */
 export async function modelExists(path: string, variations: number, exists: (p: string) => Promise<boolean>): Promise<boolean> {
   if (await exists(path)) return true;
   if (variations <= 1) return false;
