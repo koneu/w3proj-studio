@@ -13,6 +13,7 @@ import { readdirSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { parseWai } from "./ai/wai";
 import { soundDurationMs } from "./audio/duration";
 import { parseIni, parseSlk } from "./formats/text";
@@ -27,8 +28,16 @@ import { parseW3e } from "./terrain/w3e";
 import { parseTriggerData } from "./triggers/triggerdata";
 import { parseWct, parseWctText, parseWtg, writeWtg } from "./triggers/wtg";
 
-/** A single file may take this long; past it the worker is killed and the file reported. */
+/**
+ * A single file may use this much processor time; past it the worker is killed and the file
+ * reported. Processor time, not the clock: with other gates running the worker is held back, and a
+ * parser that needs a second of work then takes many on the clock. A hang still burns it all.
+ */
 const LIMIT_MS = 4000;
+/** Time on the clock with no new file and no processor time used: a worker stuck without working. */
+const STALL_MS = 60000;
+/** How often the worker's second thread reports the process's processor time. */
+const BEAT_MS = 50;
 /** Fails like a hang: a parser that fills the heap takes the app with it. */
 const HEAP_MB = 512;
 /** Enough to see what's wrong; a parser that fails on everything shouldn't take hours. */
@@ -258,9 +267,30 @@ function allSeeds(): Seed[] {
 
 const ROUNDS = Number(process.env.W3_HOSTILE_ROUNDS ?? 60);
 
+/**
+ * The child's second thread. A parser stuck in a loop can't report anything itself, so this thread
+ * says every BEAT_MS how much processor time the process has used: "cpu <ms>". When the parser is
+ * done it is told (cell 0 is -1), says "done", and ends, and with it the process.
+ * (No backslashes in here: it's a string of code for the thread.)
+ */
+const BEAT_THREAD = `
+const { workerData } = require("node:worker_threads");
+const { writeSync } = require("node:fs");
+const cell = new Int32Array(workerData);
+for (;;) {
+  Atomics.wait(cell, 1, 0, ${BEAT_MS});
+  if (Atomics.load(cell, 0) < 0) break;
+  const u = process.cpuUsage();
+  writeSync(1, "cpu " + Math.round((u.user + u.system) / 1000) + String.fromCharCode(10));
+}
+writeSync(1, "done" + String.fromCharCode(10));
+`;
+
 /** The child's part: from `start` on, tells the parent each case's number before running it. */
 function work(start: number) {
   const seeds = allSeeds(), total = seeds.length * ROUNDS;
+  const cell = new Int32Array(new SharedArrayBuffer(8));
+  new Worker(BEAT_THREAD, { eval: true, workerData: cell.buffer });
   for (let c = start; c < total; c++) {
     writeSync(1, `${c}\n`);
     const seed = seeds[Math.floor(c / ROUNDS)], round = c % ROUNDS;
@@ -268,7 +298,7 @@ function work(start: number) {
       TARGETS[seed.target](bytesOf(seed, round));
     } catch { /* refusing a damaged file is right */ }
   }
-  writeSync(1, "done\n");
+  Atomics.store(cell, 0, -1);
 }
 
 interface Failure { seed: string; round: number; what: string }
@@ -280,22 +310,33 @@ function runFrom(start: number): Promise<{ at: number; what: string } | null> {
       env: { ...process.env, W3_HOSTILE_START: String(start), NODE_TEST_CONTEXT: undefined },
       stdio: ["ignore", "pipe", "ignore"],
     });
-    let at = start, finished = false, since = Date.now(), tail = "", killed = false;
+    // `cpu`: the process's processor time at the last report; `since`: its value when this case began.
+    let at = start, finished = false, stalledSince = Date.now(), tail = "", killed = "", cpu = 0, since = 0;
+    const kill = (why: string) => { if (!killed) { killed = why; child.kill("SIGKILL"); } };
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
       const lines = (tail + chunk).split("\n");
       tail = lines.pop()!;
       for (const line of lines) {
-        if (line === "done") finished = true; else at = Number(line);
+        if (line === "done") finished = true;
+        else if (line.startsWith("cpu ")) {
+          const now = Number(line.slice(4));
+          if (now > cpu) stalledSince = Date.now();
+          cpu = now;
+          if (cpu - since > LIMIT_MS) kill(`over ${LIMIT_MS} ms of processor time`);
+        } else {
+          at = Number(line);
+          since = cpu;
+          stalledSince = Date.now();
+        }
       }
-      since = Date.now();
     });
     const watch = setInterval(() => {
-      if (Date.now() - since > LIMIT_MS) { killed = true; child.kill("SIGKILL"); }
-    }, 100);
+      if (Date.now() - stalledSince > STALL_MS) kill(`no progress and no processor time for ${STALL_MS} ms`);
+    }, 500);
     child.on("close", (code) => {
       clearInterval(watch);
       if (finished) resolve(null);
-      else resolve({ at, what: killed ? `over ${LIMIT_MS} ms` : `stopped with code ${code}: out of memory, or a crash` });
+      else resolve({ at, what: killed || `stopped with code ${code}: out of memory, or a crash` });
     });
   });
 }
