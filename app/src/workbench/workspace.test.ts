@@ -8,6 +8,7 @@ const backend = new Map<string, F[]>();
 const calls = { projectFiles: 0 };
 let gate: Promise<void> | null = null;
 let filesGate: Promise<void> | null = null;
+let normalizeGate: Promise<void> | null = null;
 const reset = () => {
   backend.set(A, [{ path: "war3map.j", size: 1, modified: 1 }]);
   backend.set(B, [{ path: "other.txt", size: 1, modified: 1 }]);
@@ -28,7 +29,7 @@ g.__TAURI_INTERNALS__ = {
         return seen;
       }
       case "project_folders": return [];
-      case "path_normalize": return String(args.path).replace(/konsta~1/i, "Konstantin");
+      case "path_normalize": if (normalizeGate) await normalizeGate; return String(args.path).replace(/konsta~1/i, "Konstantin");
       case "fs_write_text": {
         if (gate) await gate;
         const path = String(args.path);
@@ -118,6 +119,7 @@ test("recent projects: another spelling of the opened root isn't listed twice", 
   reset();
   const { ws, saved } = make(["C:\\Users\\KONSTA~1\\a", B, "c:\\users\\konsta~1\\b"]);
   await ws.open(A);
+  await ws.recentsTidied();
   assert.deepEqual(saved.recentProjects, [A, B]);
 });
 
@@ -168,4 +170,21 @@ test("a write during the read doesn't hide someone else's change from the same r
   await ws.writeText("map/Scripts/x.ai", "// ai");
   release();
   assert.deepEqual([...(await checking)], ["by-git.txt"]);
+});
+
+const OFFLINE = "//offline/share/p";
+
+test("opening a project doesn't wait for the recent list's paths to be resolved", async () => {
+  reset();
+  const { ws, saved } = make([B, OFFLINE]);
+  let release!: () => void;
+  normalizeGate = new Promise<void>((r) => { release = r; });
+  const started = Date.now();
+  await ws.open(A);
+  assert.ok(Date.now() - started < 1000, "the open didn't wait for the disk");
+  assert.deepEqual(saved.recentProjects, [A, B, OFFLINE], "listed as saved at once");
+  normalizeGate = null;
+  release();
+  await ws.recentsTidied();
+  assert.deepEqual(saved.recentProjects, [A, B, OFFLINE]);
 });

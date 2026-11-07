@@ -1,6 +1,7 @@
 import type { ConfigurationProperty, FileInfo, ProjectInfo, SettingInfo, Settings, SettingsTarget, Disposable } from "../extensions/api";
 import { invoke, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
 import { Emitter } from "./dom";
+import { timeLimit } from "./timelimit";
 
 export class WorkspaceService {
   private info: ProjectInfo | null = null;
@@ -33,12 +34,30 @@ export class WorkspaceService {
     this.info = await invoke<ProjectInfo>("project_open", { path });
     await this.refresh(false);
     await this.settings.loadProject(this.info.root);
-    // Entries saved under another spelling of a folder (8.3 short name) are the same project.
-    const spelled = await Promise.all(this.settings.get<string[]>("recentProjects", []).map((p) => invoke<string>("path_normalize", { path: p }).catch(() => p)));
-    const seen = new Set([this.info.root.toLowerCase()]);
-    const recent = spelled.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
-    await this.settings.set("recentProjects", [this.info.root, ...recent].slice(0, 10));
+    // The list first, as the entries were saved; then, off the open's way, the entries under another
+    // spelling of a folder (8.3 short name) are merged (see tidyRecents).
+    const root = this.info.root;
+    const seen = new Set([root.toLowerCase()]);
+    const others = this.settings.get<string[]>("recentProjects", []).filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
+    await this.settings.set("recentProjects", [root, ...others].slice(0, 10));
+    this.tidying = this.tidyRecents(root);
     this.onDidChange.fire();
+  }
+
+  private tidying: Promise<void> = Promise.resolve();
+  /** Resolves when the recent list has been tidied after the last open(). */
+  recentsTidied() {
+    return this.tidying;
+  }
+
+  /** Recent entries that are another spelling of one already listed go; each question to the disk
+   *  has a time limit, since an offline share may never answer. */
+  private async tidyRecents(root: string) {
+    const spelled = await Promise.all(this.settings.get<string[]>("recentProjects", []).map((p) => timeLimit(invoke<string>("path_normalize", { path: p }), 2000).catch(() => p)));
+    if (this.info?.root !== root) return;
+    const seen = new Set<string>();
+    const list = spelled.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
+    if (list.length !== spelled.length || list.some((p, i) => p !== spelled[i])) await this.settings.set("recentProjects", list);
   }
 
   close() {

@@ -1,5 +1,6 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { adoptOldTabKeys, tabsKey } from "./tabmemory";
+import { timeLimit } from "./timelimit";
 import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
@@ -196,7 +197,7 @@ export class Workbench {
       this.editors.projectOpened();
       // Tabs saved under another spelling of this folder (8.3 short name) move to the key it has now,
       // before anything (the extension scan) can open or close a tab. Storing is off until restore().
-      await adoptOldTabKeys(localStorage, root, (p) => invoke<string>("path_normalize", { path: p })).catch(() => 0);
+      await adoptOldTabKeys(localStorage, root, (p) => timeLimit(invoke<string>("path_normalize", { path: p }), 2000)).catch(() => 0);
       try {
         this.host.addExternal(await invoke("extensions_scan", { projectRoot: root }));
         await this.host.fire("onStartup");

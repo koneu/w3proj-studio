@@ -5,6 +5,13 @@ export const TABS_PREFIX = "w3.openEditors:";
 /** The storage key for a project root (as the backend spells it: one spelling per folder). */
 export const tabsKey = (root: string) => `${TABS_PREFIX}${root.replace(/[\\/]+$/, "").toLowerCase()}`;
 
+const leaf = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop()!.toLowerCase();
+
+/** Whether an old key's path could be another spelling of `root`: the same last folder name, or a
+ *  short (8.3) name, which has a `~`. Others aren't asked about: resolving the path of an unrelated
+ *  project on an offline share would hold the project open up. */
+export const mayBeSameFolder = (oldPath: string, root: string) => leaf(oldPath) === leaf(root) || leaf(oldPath).includes("~");
+
 export interface KeyValueStore { readonly length: number; key(i: number): string | null; getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
 
 /** Tab state saved before the root was normalised sits under another spelling of the same folder
@@ -15,7 +22,7 @@ export async function adoptOldTabKeys(store: KeyValueStore, root: string, normal
   const old: string[] = [];
   for (let i = 0; i < store.length; i++) {
     const k = store.key(i);
-    if (k && k.startsWith(TABS_PREFIX) && k !== current) old.push(k);
+    if (k && k.startsWith(TABS_PREFIX) && k !== current && mayBeSameFolder(k.slice(TABS_PREFIX.length), root)) old.push(k);
   }
   let moved = 0;
   for (const k of old) {
