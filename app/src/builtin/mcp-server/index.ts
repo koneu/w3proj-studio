@@ -275,7 +275,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
     w3.mcp.registerTool("project_info", appState),
     w3.mcp.registerTool("studio_status", appState),
-    w3.mcp.registerTool("save_project", async () => ({ saved: await w3.editors.saveAll(), stillUnsaved: w3.editors.unsavedPaths() })),
+    w3.mcp.registerTool("save_project", async () => {
+      const saved = await w3.editors.saveAll();
+      // The map's pathing, shadows and minimap follow a tool's terrain edit a few seconds later: saved means they are in.
+      await w3.commands.execute("w3.terrain.settle").catch(() => {});
+      return { saved, stillUnsaved: w3.editors.unsavedPaths() };
+    }),
     w3.mcp.registerTool("begin_edit", async ({ title }) => {
       if (typeof title !== "string" || !title.trim()) throw new Error("begin_edit needs a title.");
       open();

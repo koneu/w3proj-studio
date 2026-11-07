@@ -180,14 +180,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     clearTimeout(rebuildTimer);
     rebuildTimer = setTimeout(() => void runRebuild(), REBUILD_DELAY);
   };
+  /** The rebuild that is running, if any. */
+  let rebuilding: Promise<void> = Promise.resolve();
   const runRebuild = async () => {
     const editor = opened, job = rebuild;
     // No editor: it waits for the next edit; a tool opens one then.
     if (!job || !editor || job.key !== w3.workspace.project()?.root) return;
     rebuild = null;
-    await editor.derive(job.from).catch((e) => w3.window.showError(`Rebuilding the map's derived files failed: ${e}`));
+    rebuilding = editor.derive(job.from).catch((e) => { w3.window.showError(`Rebuilding the map's derived files failed: ${e}`); });
+    await rebuilding;
   };
-  ctx.subscriptions.push({ dispose: () => clearTimeout(rebuildTimer) });
+  ctx.subscriptions.push(
+    { dispose: () => clearTimeout(rebuildTimer) },
+    // What saves or packs the project first waits here: pathing, shadows and the minimap still due from the last edit
+    // belong in it (an AI tool's edit is not an unsaved editor, so saving doesn't write them).
+    w3.commands.register("w3.terrain.settle", async () => {
+      clearTimeout(rebuildTimer);
+      await runRebuild();
+      await rebuilding;
+    }),
+  );
 
   let opened: {
     handle: TerrainEditorHandle; ready: () => Promise<void>;

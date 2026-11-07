@@ -30,7 +30,8 @@ const work = process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke");
 const exeName = process.platform === "win32" ? ".exe" : "";
 const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
 const cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
-const IDENTIFIER = "dev.w3proj.studio.smoke";
+// W3_SMOKE_ID: another identifier, when several runs share the machine (they share the settings folder otherwise).
+const IDENTIFIER = process.env.W3_SMOKE_ID ?? "dev.w3proj.studio.smoke";
 const FIXTURE = join(repo, "tests", "fixtures", "mini-map");
 
 function build() {
@@ -324,6 +325,38 @@ async function terrainWiring(page, found) {
   } finally {
     await gated.release();
   }
+}
+
+/** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
+ *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
+ *  right when the project is saved and packed straight after. */
+async function waterPathing(page, found) {
+  const fail = (what) => found.push(`water pathing: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "water");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Water", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const wpmFile = join(root, "map", "war3map.wpm");
+  // Cell (x, y) of the pathing map holds the world point (x * 32 + offset); the map's middle is the cell 128.
+  const cell = (b, x, y) => b[16 + (128 + y) * b.readUInt32LE(8) + 128 + x];
+  const before = readFileSync(wpmFile);
+  if (cell(before, 0, 0) & 0x02) fail("the new map's middle can't be walked (control)");
+  await tool("set_water", { mode: "lake", left: -768, bottom: -768, right: 768, top: 768 });
+  // Packing straight after the tool call: saving the project has to bring the pathing map up to date.
+  await tool("save_project");
+  const out = join(work, "water.w3x");
+  await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(root)}, output: ${JSON.stringify(out)} })`);
+  const inMap = spawnSync(cli, ["cat", out, "war3map.wpm"], { maxBuffer: 1 << 26 });
+  if (inMap.status !== 0) { fail("the CLI can't read war3map.wpm from the packed map"); return; }
+  const wpm = inMap.stdout;
+  if (!(cell(wpm, 0, 0) & 0x02)) fail("the deep middle of a lake can be walked in the packed map's pathing (cell flags " + cell(wpm, 0, 0).toString(16) + ")");
+  // Along the row through the middle: unwalkable water in a stretch, and walkable wet cells at its ends.
+  const row = []; for (let x = -30; x <= 30; x++) row.push(cell(wpm, x, 0));
+  if (!row.some((v) => !(v & 0x40) && !(v & 0x02))) fail("the lake has no shallow rim that can be walked");
+  if (!row.some((v) => v & 0x02)) fail("the lake has no deep part");
 }
 
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
@@ -1080,6 +1113,7 @@ async function run() {
 
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
+    await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));

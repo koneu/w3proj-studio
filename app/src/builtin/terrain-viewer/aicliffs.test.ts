@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isBackdrop } from "../../lib/terrain/area";
+import { generatePathing, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
 import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
 
@@ -169,6 +170,30 @@ test("a lake is deep in the middle and walkable at its edge", () => {
   assert.ok(depth(16, 16) > 100);
   assert.ok(depth(9, 16) > 0 && depth(9, 16) <= 52, `${depth(9, 16)}`);
   assert.equal(corner(t, 16, 16).layer, 2);
+});
+
+test("in the pathing map a lake can't be walked across its middle, and a ford can be walked everywhere", () => {
+  const cells = (t: Terrain) => {
+    const w = (t.width - 1) * 4, p = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules: new Map() });
+    return { w, at: (cx: number, cy: number) => p[16 + cy * w + cx] };
+  };
+  const area = { left: 8 * 128, bottom: 8 * 128, right: 24 * 128, top: 24 * 128 };
+  const lake = flat();
+  setWater(lake, area, "ellipse", "lake", kinds);
+  const l = cells(lake);
+  assert.ok(l.at(64, 64) & NO_WALK, "the deep middle is blocked");
+  assert.ok(!(l.at(64, 64) & NO_WATER), "and it is water");
+  // Walking in from the west edge: the first wet cells can be walked, then the way ends.
+  const row = Array.from({ length: 128 }, (_, i) => l.at(i, 64));
+  const wet = row.findIndex((v) => !(v & NO_WATER));
+  assert.ok(wet > 0 && !(row[wet] & NO_WALK), "the rim is wet and walkable");
+  assert.ok(row.some((v) => v & NO_WALK), "and then the water gets deep");
+  const ford = flat();
+  setWater(ford, area, "ellipse", "ford", kinds);
+  const f = cells(ford);
+  const fordRow = Array.from({ length: 128 }, (_, i) => f.at(i, 64));
+  assert.ok(fordRow.some((v) => !(v & NO_WATER)), "the ford is water");
+  assert.ok(fordRow.every((v) => !(v & NO_WALK)), "and every cell of it can be walked");
 });
 
 test("a river runs at any angle", () => {
