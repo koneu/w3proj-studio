@@ -17,7 +17,9 @@
 // as `after` (the release CLI before everything that runs it) and as locks, held for the whole
 // step: "cargo" (one cargo command in the target folder at a time), "dist" (app/dist is read by
 // every build of the Tauri crate, and rebuilt by the smoke tests: they take turns; the app smoke
-// test only needs it for its first minute, the build, and says so in its log). A
+// test only needs it for its first minute, the build, and says so in its log). Steps queue for a
+// lock in the order they became ready, so a step waiting for "dist" alone isn't passed by later
+// readers (tests/gate-scheduler.mjs, tested in app/scripts/gate-scheduler.test.mjs). A
 // step whose `after` step failed fails without running. Each step writes its output to its own
 // log under target/gate-logs/<tier>-<pid>/ and the gate prints it, or its tail, when the step ends.
 //
@@ -30,6 +32,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, 
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Locks, schedule } from "./gate-scheduler.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(repo, "app");
@@ -49,45 +52,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // ---- locks -----------------------------------------------------------------------------------
 
-/** Named locks, shared ("r": many at once) or exclusive ("w"). */
-class Locks {
-  state = new Map();
-  waiting = [];
-  can(name, mode) {
-    const s = this.state.get(name) ?? { r: 0, w: false };
-    return mode === "w" ? !s.w && s.r === 0 : !s.w;
-  }
-  take(name, mode) {
-    const s = this.state.get(name) ?? { r: 0, w: false };
-    if (mode === "w") s.w = true;
-    else s.r++;
-    this.state.set(name, s);
-  }
-  release(name, mode) {
-    const s = this.state.get(name);
-    if (mode === "w") s.w = false;
-    else s.r--;
-    this.waiting = this.waiting.filter((go) => !go());
-    this.onRelease?.();
-  }
-  /** Waits for the lock, runs `body` holding it. First come, first served among those waiting. */
-  async hold(name, mode, body) {
-    await new Promise((granted) => {
-      const go = () => {
-        if (!this.can(name, mode)) return false;
-        this.take(name, mode);
-        granted();
-        return true;
-      };
-      if (!go()) this.waiting.push(go);
-    });
-    try {
-      return await body();
-    } finally {
-      this.release(name, mode);
-    }
-  }
-}
+/** The locks between this gate's steps (tests/gate-scheduler.mjs). */
 const locks = new Locks();
 
 /** The owner written into a lock folder, or null while there is none (being made, or left half made). */
@@ -357,93 +322,43 @@ function show(step, log, ok) {
   console.log([`\n=== ${step.name}: ${ok ? "pass" : "FAIL"}  (${clock()})  ${where}`, ...shown].join("\n"));
 }
 
-function runAll() {
-  const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
-  const waiting = [...order];
-  let busy = 0;
-  let running = 0;
-  return new Promise((finish) => {
-    locks.onRelease = () => pump();
-    function pump() {
-      const before = waiting.length;
-      for (const step of [...waiting]) {
-        const deps = (step.after ?? []).filter((id) => chosen.some((s) => s.id === id.split("#")[0]));
-        if (deps.some((id) => !done.has(id))) continue;
-        const log = join(logDir, `${step.id}.log`);
-        // "step#event" only orders: a step waiting for the app's build still runs if there was none.
-        const failed = deps.filter((id) => !id.includes("#") && !done.get(id).ok);
-        if (failed.length) {
-          skip(step, log, `not run: ${failed.join(", ")} failed`);
-          continue;
-        }
-        const held = [...(step.locks ?? [])];
-        const fits = running === 0 || (!serial && busy + step.weight <= jobs);
-        if (!fits || !held.every(([name, mode]) => locks.can(name, mode))) continue;
-        waiting.splice(waiting.indexOf(step), 1);
-        for (const [name, mode] of held) locks.take(name, mode);
-        busy += step.weight;
-        running++;
-        console.log(`${clock()}  start  ${step.name}`);
-        const t0 = Date.now();
-        const ctx = context(log);
-        // A step that is done with app/dist before it ends says so in its log: from then on others
-        // may build against it (the Tauri build is the first minute of the app smoke test).
-        const built = step.built
-          ? setInterval(() => {
-              if (!readFileSync(log, "utf8").includes(step.built)) return;
-              clearInterval(built);
-              mark(step, true);
-              for (const [name, mode] of held.splice(0)) locks.release(name, mode);
-              pump();
-            }, 1000)
-          : null;
-        Promise.resolve()
-          .then(() => step.run(ctx))
-          .catch((e) => {
-            ctx.say(String(e?.stack ?? e));
-            return false;
-          })
-          .then((ok) => {
-            clearInterval(built);
-            ctx.close();
-            mark(step, ok === true);
-            busy -= step.weight;
-            running--;
-            show(step, log, ok === true);
-            done.set(step.id, { ok: ok === true, seconds: Math.round((Date.now() - t0) / 1000) });
-            for (const [name, mode] of held) locks.release(name, mode);
-            pump();
-          });
-      }
-      // Nothing runs and nothing can start: a step waits for something that won't come. That would
-      // be a mistake in the steps above; they fail instead of the gate waiting forever.
-      if (waiting.length && running === 0) {
-        // A step skipped in this round may have freed one earlier in the list: look again first.
-        if (waiting.length < before) return pump();
-        for (const step of [...waiting]) {
-          const missing = (step.after ?? []).filter((id) => !done.has(id)).join(", ") || "a lock";
-          skip(step, join(logDir, `${step.id}.log`), `not run: still waiting for ${missing}`);
-        }
-      }
-      if (!waiting.length && running === 0) finish();
-    }
-    /** A step that doesn't run fails, and what waits for its events goes on. */
-    function skip(step, log, why) {
-      waiting.splice(waiting.indexOf(step), 1);
-      writeFileSync(log, `${why}\n`);
-      show(step, log, false);
-      done.set(step.id, { ok: false, seconds: 0 });
-      mark(step, false);
-    }
-    /** The step's "built" event, once: ok says whether the build happened. */
-    function mark(step, ok) {
-      if (step.built && !done.has(`${step.id}#built`)) done.set(`${step.id}#built`, { ok, seconds: 0 });
-    }
-    pump();
-  });
+/** Runs one step, writing its log; resolves with whether it passed. */
+async function launch(step, { built }) {
+  console.log(`${clock()}  start  ${step.name}`);
+  const log = join(logDir, `${step.id}.log`);
+  const ctx = context(log);
+  // A step that is done with app/dist before it ends says so in its log: from then on others
+  // may build against it (the Tauri build is the first minute of the app smoke test).
+  const watch = step.built
+    ? setInterval(() => {
+        if (!readFileSync(log, "utf8").includes(step.built)) return;
+        clearInterval(watch);
+        built();
+      }, 1000)
+    : null;
+  let ok;
+  try {
+    ok = (await step.run(ctx)) === true;
+  } catch (e) {
+    ctx.say(String(e?.stack ?? e));
+    ok = false;
+  } finally {
+    clearInterval(watch);
+    ctx.close();
+  }
+  show(step, log, ok);
+  return ok;
 }
 
-await runAll();
+/** A step that doesn't run fails, and says why in its log. */
+function skip(step, why) {
+  const log = join(logDir, `${step.id}.log`);
+  writeFileSync(log, `${why}\n`);
+  show(step, log, false);
+}
+
+const order = serial ? [...chosen].sort((a, b) => table.indexOf(a.id) - table.indexOf(b.id)) : chosen;
+await schedule({ steps: order, locks, serial, jobs, launch, skip, done });
 
 console.log(`\n--- gate: ${tier}`);
 const results = table.filter((id) => done.has(id)).map((id) => ({ name: steps.find((s) => s.id === id).name, ...done.get(id) }));

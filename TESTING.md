@@ -64,7 +64,10 @@ coverage tools reported numbers for tests they hadn't measured. The last line is
 from another is written down in `tests/gate.mjs`: the release CLI comes before everything that runs
 it, one cargo command works in `target/` at a time, and the smoke tests, which rebuild `app/dist`
 (every build of the Tauri crate reads it), take turns with the cargo steps that build it. The real-app
-smoke test builds first, and the rest of the gate waits for that build, not for the whole test. A step whose prerequisite
+smoke test builds first, and the rest of the gate waits for that build, not for the whole test. Steps
+queue for a lock in the order they became ready: once the UI smoke test waits to rebuild `app/dist`,
+no step that comes later starts building against it first (`tests/gate-scheduler.mjs`, with its
+tests in `app/scripts/gate-scheduler.test.mjs`). A step whose prerequisite
 failed fails without running. Each step's output goes to `target/gate-logs/<tier>-<pid>/<step>.log`; the
 gate prints it, or its end and the path, when the step finishes. Times in the table are wall time,
 so they grow when steps compete for the cores.
