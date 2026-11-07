@@ -90,6 +90,53 @@ class Locks {
 }
 const locks = new Locks();
 
+/**
+ * A lock between gates running at once, also from different worktrees: a folder that exists while
+ * it is held, with the owner's process in it. A folder left by a process that is gone is taken over.
+ */
+async function withFileLock(dir, say, body) {
+  const owner = join(dir, "owner.json");
+  let told = 0;
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      writeFileSync(owner, JSON.stringify({ pid: process.pid, repo, since: new Date().toISOString() }));
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      let held = null;
+      try {
+        held = JSON.parse(readFileSync(owner, "utf8"));
+      } catch {
+        // Being made or removed right now; look again.
+      }
+      let alive = true;
+      if (held) {
+        try {
+          process.kill(held.pid, 0);
+        } catch (k) {
+          alive = k.code === "EPERM";
+        }
+      }
+      if (held && !alive) {
+        say(`taking over the lock of ${held.repo} (process ${held.pid} is gone)`);
+        rmSync(dir, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() - told > 30000) {
+        say(`waiting for ${held ? `the gate of ${held.repo} (process ${held.pid}, since ${held.since})` : "another gate"}: ${dir}`);
+        told = Date.now();
+      }
+      await sleep(1000);
+    }
+  }
+  try {
+    return await body();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---- running commands ------------------------------------------------------------------------
 
 /**
@@ -134,10 +181,18 @@ const needs = (path, what, step) => async (ctx) => {
   return step(ctx);
 };
 
+/** Where cargo-llvm-cov builds. Shared by all worktrees of this repository: the dependencies are
+ * compiled once, not once per worktree (3 minutes cold). Its file lock makes one gate at a time
+ * use it, because cargo-llvm-cov sweeps every .profraw in its folder before it runs. */
+const covTarget = process.env.W3PROJ_COV_TARGET_DIR ?? join(mainCheckout(), "target", "llvm-cov-shared");
+
 /** Rust line coverage per crate, against the floors. */
 async function rustCoverage(ctx) {
   const out = join(repo, "target", "cov-rust.json");
-  const measured = await ctx.sh(`cargo llvm-cov --workspace --locked --json --summary-only --output-path "${out}"`);
+  mkdirSync(dirname(covTarget), { recursive: true });
+  const measured = await withFileLock(`${covTarget}.lock`, (m) => { ctx.say(m); console.log(`   Rust coverage: ${m}`); }, () =>
+    ctx.sh(`cargo llvm-cov --workspace --locked --json --summary-only --output-path "${out}"`, { env: { CARGO_TARGET_DIR: covTarget } }),
+  );
   if (!measured) return false;
   const areas = {};
   for (const f of JSON.parse(readFileSync(out, "utf8")).data[0].files) {
