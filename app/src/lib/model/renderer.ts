@@ -58,18 +58,6 @@ const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
-function slerp(a: number[], b: number[], t: number): number[] {
-  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
-  const bb = d < 0 ? b.map((v) => -v) : b;
-  d = Math.abs(d);
-  if (d > 0.9995) {
-    const r = a.map((v, i) => v + (bb[i] - v) * t), l = Math.hypot(...r);
-    return r.map((v) => v / l);
-  }
-  const th = Math.acos(d), s = Math.sin(th), wa = Math.sin((1 - t) * th) / s, wb = Math.sin(t * th) / s;
-  return a.map((v, i) => v * wa + bb[i] * wb);
-}
-
 // ------------------------------------------------------------------ animation
 
 export interface Clock {
@@ -81,45 +69,107 @@ export interface Clock {
   time: number;
 }
 
+/** Whether a track's key times never go down (as the format has them), checked once per list. */
+const timesInOrder = new WeakMap<Uint32Array, boolean>();
+function inOrder(times: Uint32Array): boolean {
+  let ok = timesInOrder.get(times);
+  if (ok === undefined) {
+    ok = true;
+    for (let k = 1; k < times.length && ok; k++) if (times[k] < times[k - 1]) ok = false;
+    timesInOrder.set(times, ok);
+  }
+  return ok;
+}
+
+/** The first index in [lo, hi) whose time passes `test`, or hi; times in order, and `test` false then true along them. */
+function firstWhere(times: Uint32Array, lo: number, hi: number, test: (v: number) => boolean): number {
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (test(times[mid])) hi = mid; else lo = mid + 1;
+  }
+  return lo;
+}
+
 /** Samples a track; `fallback` when it has no key inside the interval. */
 export function sample(track: Track | undefined, clock: Clock, globalSeqs: number[], fallback: number[]): number[] {
+  return sampleInto(track, clock, globalSeqs, fallback, []);
+}
+
+/** sample(), with the value written into `out` (made `size` long) instead of a new array: `out`, or
+ *  `fallback` itself when the track has no key inside the interval. For poses, which sample thousands
+ *  of tracks a frame. */
+export function sampleInto(track: Track | undefined, clock: Clock, globalSeqs: number[], fallback: number[], out: number[]): number[] {
   if (!track || track.times.length === 0) return fallback;
   let t = clock.frame, start = clock.seqStart, end = clock.seqEnd;
+  const { times, values, size } = track;
+  /** Key k's value into out. */
+  const key = (k: number) => {
+    out.length = size;
+    for (let j = 0; j < size; j++) out[j] = values[k * size + j];
+    return out;
+  };
   if (track.globalSeq >= 0) {
     const dur = globalSeqs[track.globalSeq] ?? 0;
     // A global sequence of length 0 holds a constant: the first key, wherever it sits
     // (e.g. shoreline emitters keep their sideways turn there).
-    if (dur <= 0) return Array.from(track.values.subarray(0, track.size));
+    if (dur <= 0) return key(0);
     start = 0; end = dur; t = clock.time % dur;
   }
-  const { times, values, size } = track;
-  let first = -1, last = -1;
-  for (let i = 0; i < times.length; i++) {
-    if (times[i] < start || times[i] > end) continue;
-    if (first < 0) first = i;
-    last = i;
+  let first = -1, last = -1, i: number;
+  const sorted = inOrder(times);
+  if (sorted) {
+    // The keys of every sequence are in one list, in time order: the sequence's are found by halving.
+    first = firstWhere(times, 0, times.length, (v) => v >= start);
+    last = firstWhere(times, first, times.length, (v) => v > end) - 1;
+    if (first > last) first = last = -1;
+  } else {
+    for (let k = 0; k < times.length; k++) {
+      if (times[k] < start || times[k] > end) continue;
+      if (first < 0) first = k;
+      last = k;
+    }
   }
-  const key = (i: number) => Array.from(values.subarray(i * size, i * size + size));
   if (first < 0) return fallback;
   if (t <= times[first] || first === last) return key(first);
   if (t >= times[last]) return key(last);
-  let i = first;
+  // The last key at or before t (t is between the first and the last key here).
+  i = sorted ? Math.min(last - 1, Math.max(first, firstWhere(times, first, last + 1, (v) => v > t) - 1)) : first;
   while (i < last && times[i + 1] <= t) i++;
   const a = i, b = i + 1, u = (t - times[a]) / (times[b] - times[a]);
-  const va = key(a), vb = key(b);
-  if (track.interp === 0) return va;
-  if (size === 4) return slerp(va, vb, u); // quaternions: slerp for all interpolation types
-  if (track.interp === 1 || !track.inTan || !track.outTan) return va.map((v, k) => v + (vb[k] - v) * u);
-  const ot = Array.from(track.outTan.subarray(a * size, a * size + size)), it = Array.from(track.inTan.subarray(b * size, b * size + size));
+  if (track.interp === 0) return key(a);
+  out.length = size;
+  const A = a * size, B = b * size;
+  if (size === 4) {
+    // Quaternions: slerp for all interpolation types (the shorter way round).
+    let d = values[A] * values[B] + values[A + 1] * values[B + 1] + values[A + 2] * values[B + 2] + values[A + 3] * values[B + 3];
+    const sign = d < 0 ? -1 : 1;
+    d = Math.abs(d);
+    if (d > 0.9995) {
+      for (let k = 0; k < 4; k++) out[k] = values[A + k] + (sign * values[B + k] - values[A + k]) * u;
+      const l = Math.hypot(out[0], out[1], out[2], out[3]);
+      for (let k = 0; k < 4; k++) out[k] = out[k] / l;
+      return out;
+    }
+    const th = Math.acos(d), s = Math.sin(th), wa = Math.sin((1 - u) * th) / s, wb = Math.sin(u * th) / s;
+    for (let k = 0; k < 4; k++) out[k] = values[A + k] * wa + sign * values[B + k] * wb;
+    return out;
+  }
+  if (track.interp === 1 || !track.inTan || !track.outTan) {
+    for (let k = 0; k < size; k++) out[k] = values[A + k] + (values[B + k] - values[A + k]) * u;
+    return out;
+  }
+  const ot = track.outTan, it = track.inTan;
   if (track.interp === 2) {
     // Hermite
     const u2 = u * u, u3 = u2 * u;
     const h1 = 2 * u3 - 3 * u2 + 1, h2 = -2 * u3 + 3 * u2, h3 = u3 - 2 * u2 + u, h4 = u3 - u2;
-    return va.map((v, k) => h1 * v + h2 * vb[k] + h3 * ot[k] + h4 * it[k]);
+    for (let k = 0; k < size; k++) out[k] = h1 * values[A + k] + h2 * values[B + k] + h3 * ot[A + k] + h4 * it[B + k];
+    return out;
   }
   // Bezier
   const iu = 1 - u;
-  return va.map((v, k) => iu * iu * iu * v + 3 * iu * iu * u * ot[k] + 3 * iu * u * u * it[k] + u * u * u * vb[k]);
+  for (let k = 0; k < size; k++) out[k] = iu * iu * iu * values[A + k] + 3 * iu * iu * u * ot[A + k] + 3 * iu * u * u * it[B + k] + u * u * u * values[B + k];
+  return out;
 }
 
 const IDENTITY3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
@@ -154,19 +204,60 @@ function nodeOrder(model: Model): number[] {
   return order;
 }
 
+/** A node's translation, rotation and scaling without a key (read only). */
+const NO_MOVE = [0, 0, 0], NO_TURN = [0, 0, 0, 1], NO_SCALE = [1, 1, 1];
+
 /** Model-space matrix of every node (by object id) at a moment of an animation. */
 export function poseNodes(model: Model, clock: Clock): Mat4[] {
   const world: Mat4[] = [];
+  // The samples go into the same three arrays node after node: mat4.node only reads them.
+  const T: number[] = [], R: number[] = [], S: number[] = [];
   for (const id of nodeOrder(model)) {
     const n = model.nodes[id];
     const pivot: Vec3 = [model.pivots[id * 3] ?? 0, model.pivots[id * 3 + 1] ?? 0, model.pivots[id * 3 + 2] ?? 0];
-    const t = sample(n.translation, clock, model.globalSequences, [0, 0, 0]) as Vec3;
-    const r = sample(n.rotation, clock, model.globalSequences, [0, 0, 0, 1]);
-    const s = sample(n.scaling, clock, model.globalSequences, [1, 1, 1]) as Vec3;
+    const t = sampleInto(n.translation, clock, model.globalSequences, NO_MOVE, T) as Vec3;
+    const r = sampleInto(n.rotation, clock, model.globalSequences, NO_TURN, R);
+    const s = sampleInto(n.scaling, clock, model.globalSequences, NO_SCALE, S) as Vec3;
     const local = mat4.node(pivot, t, r, s);
     world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
   }
   return world;
+}
+
+/** Whether a track gives the same value at every moment of a sequence (or of its global sequence),
+ *  going by what sample() does: no key or one key in it, or keys that are all the same and are
+ *  interpolated without tangents. Hermite and Bezier curves bend between equal keys, so they count as moving. */
+export function trackStill(track: Track | undefined, seqStart: number, seqEnd: number, globalSeqs: number[]): boolean {
+  if (!track || track.times.length === 0) return true;
+  let start = seqStart, end = seqEnd;
+  if (track.globalSeq >= 0) {
+    const dur = globalSeqs[track.globalSeq] ?? 0;
+    if (dur <= 0) return true;
+    start = 0; end = dur;
+  }
+  const { times, values, size } = track;
+  let first = -1, keys = 0;
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] < start || times[i] > end) continue;
+    keys++;
+    if (first < 0) { first = i; continue; }
+    for (let k = 0; k < size; k++) if (values[i * size + k] !== values[first * size + k]) return false;
+  }
+  if (keys < 2 || track.interp === 0) return true;
+  // Equal quaternions are slerped into themselves only when they're of unit length (slerp normalises).
+  if (size === 4) return Math.abs(Math.hypot(values[first * 4], values[first * 4 + 1], values[first * 4 + 2], values[first * 4 + 3]) - 1) < 1e-4;
+  return track.interp === 1 || !track.inTan || !track.outTan;
+}
+
+/** Whether nothing a pose gives (node matrices, geoset opacity and colour, layer opacity, texture and
+ *  texture transform) changes during the sequence from `seqStart` to `seqEnd`: then posing it again is the same pose. */
+export function poseStill(model: Model, seqStart: number, seqEnd: number): boolean {
+  const gs = model.globalSequences, still = (t: Track | undefined) => trackStill(t, seqStart, seqEnd, gs);
+  for (const n of model.nodes) if (n && !(still(n.translation) && still(n.rotation) && still(n.scaling))) return false;
+  for (const ga of model.geosetAnims) if (!still(ga.alphaTrack) || !still(ga.colorTrack)) return false;
+  for (const mat of model.materials) for (const l of mat.layers) if (!still(l.alphaTrack) || !still(l.textureTrack)) return false;
+  for (const ta of model.textureAnims) if (ta && !(still(ta.translation) && still(ta.rotation) && still(ta.scaling))) return false;
+  return true;
 }
 
 /** The start of the Stand animation of a look (see ./stand): how placed objects stand. */
@@ -203,7 +294,9 @@ const REPLACEABLE: Record<number, string> = {
 const VS = `#version 300 es
 precision highp float;
 in vec3 aPos; in vec3 aNormal; in vec2 aUV; in vec4 aBones; in vec4 aWeights;
-uniform mat4 uViewProj; uniform mat4 uWorld;
+// The instance's world transform: one per instance, so every copy of a model in a batch is one draw.
+in mat4 aWorld;
+uniform mat4 uViewProj;
 // Texture animation (TXAN) of the layer: identity without one.
 uniform mat3 uTexMatrix;
 uniform highp sampler2D uBones;
@@ -228,9 +321,9 @@ mat4 bone(float id) {
 void main() {
   mat4 m = aWeights.x * bone(aBones.x) + aWeights.y * bone(aBones.y) + aWeights.z * bone(aBones.z) + aWeights.w * bone(aBones.w);
   if (aWeights.x + aWeights.y + aWeights.z + aWeights.w < 0.001) m = mat4(1.0);
-  vNormal = mat3(uWorld) * mat3(m) * aNormal;
+  vNormal = mat3(aWorld) * mat3(m) * aNormal;
   vUV = (uTexMatrix * vec3(aUV, 1.0)).xy;
-  vec4 world = uWorld * m * vec4(aPos, 1.0);
+  vec4 world = aWorld * m * vec4(aPos, 1.0);
   if (uUseHeight > 0.5) world.z += groundAt(world.xy);
   gl_Position = uViewProj * world;
   vFogDepth = gl_Position.w;
@@ -280,10 +373,17 @@ export function compile(gl: WebGL2RenderingContext, vs: string, fs: string): Web
 
 // ------------------------------------------------------------------ GPU model
 
-interface GpuGeoset {
+/** A vertex array and where its instance attributes point now, so they're only set again when that changes. */
+interface InstancedVao {
   vao: WebGLVertexArrayObject;
+  buffer: WebGLBuffer | null;
+  first: number;
+}
+
+interface GpuGeoset {
+  vao: InstancedVao;
   indexCount: number;
-  wireVao: WebGLVertexArrayObject;
+  wireVao: InstancedVao;
   wireCount: number;
   materialId: number;
   geosetId: number;
@@ -314,12 +414,28 @@ export function bounds(model: Model): Pick<Extent, "min" | "max"> {
   return min[0] <= max[0] ? { min, max } : { min: [-50, -50, 0], max: [50, 50, 100] };
 }
 
-const UNIFORMS = ["uViewProj", "uWorld", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+/** Bytes per instance in an instance buffer: its world matrix, 16 floats, column-major. */
+export const INSTANCE_BYTES = 64;
+
+/** Instances of one model to draw together, one draw per layer: their world matrices one after the
+ *  other in `buffer` (INSTANCE_BYTES each), in runs of one player colour. Only layers that show the
+ *  player colour are drawn run by run. */
+export interface InstanceRuns {
+  buffer: WebGLBuffer | null;
+  /** Consecutive instances of one player colour: the first one's index in the buffer, and how many. */
+  runs: { team: number; first: number; count: number }[];
+}
+
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
   prog: WebGLProgram;
   u: Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
+  /** First of the four attribute locations of the instance's world matrix (-1: none). */
+  world: number;
+  /** Room for one instance, for models drawn one at a time (draw). */
+  one: WebGLBuffer | null;
   white: WebGLTexture;
   /** 1×1 team colour and generated team glow, per player colour. */
   team: WebGLTexture[];
@@ -348,9 +464,14 @@ function shared(gl: WebGL2RenderingContext): Shared {
       return t;
     };
     const prog = compile(gl, VS, FS);
+    const one = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, one);
+    gl.bufferData(gl.ARRAY_BUFFER, INSTANCE_BYTES, gl.DYNAMIC_DRAW);
     s = {
       prog,
       u: Object.fromEntries(UNIFORMS.map((n) => [n, gl.getUniformLocation(prog, n)])) as Shared["u"],
+      world: gl.getAttribLocation(prog, "aWorld"),
+      one,
       white: solid([255, 255, 255, 255]),
       team: TEAM_COLORS.map(([, c]) => solid([...c, 255])),
       glow: TEAM_COLORS.map(([, c]) => glow(c)),
@@ -418,7 +539,9 @@ export class ModelGpu {
   private boneTex: WebGLTexture;
   private boneData: Float32Array;
   private nodeOrder: number[];
-  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean; mode: number; alpha: number; texIndex: number }[] = [];
+  /** The layers to draw at the last pose, with what the pose gives them: opacity (layer times geoset),
+   *  colour (r, g, b), texture coordinate transform and texture. Every instance shares them. */
+  private draws: { g: GpuGeoset; layer: Layer; prio: number; blended: boolean; mode: number; alpha: number; texIndex: number; color: number[]; texMatrix: Float32Array }[] = [];
   /** The posed layers in the order their file modes give, and those of them that are blend layers. */
   private base: ModelGpu["draws"] = [];
   private blend2: ModelGpu["draws"] = [];
@@ -427,6 +550,12 @@ export class ModelGpu {
   private geoAlpha = new Map<number, number>();
   private geoColor = new Map<number, number[]>();
   private clock: Clock = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
+  /** Per sequence (start|end), whether nothing moves in it (see poseStill). */
+  private stillBySpan = new Map<string, boolean>();
+  /** The sequence and shown geosets of the last full pose. */
+  private posedAs: string | null = null;
+  /** Full poses made (not counting those a still sequence skipped): for tests. */
+  fullPoses = 0;
   /** Model-space matrix of every node (by object id) at the last pose; emitters follow them. */
   nodeWorld: Mat4[] = [];
   /** The moment of the last pose. */
@@ -511,6 +640,9 @@ export class ModelGpu {
       attr("aUV", uvs, 2);
       attr("aBones", bones, 4);
       attr("aWeights", weights, 4);
+      // The world matrix, a column per location, steps once per instance; its buffer is set at the draw.
+      const w = this.sh.world;
+      if (w >= 0) for (let k = 0; k < 4; k++) { gl.enableVertexAttribArray(w + k); gl.vertexAttribDivisor(w + k, 1); }
     };
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
@@ -532,13 +664,21 @@ export class ModelGpu {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lb);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lines, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
-    return { vao, indexCount: g.faces.length, wireVao, wireCount: lines.length, materialId: g.materialId, geosetId };
+    return { vao: { vao, buffer: null, first: -1 }, indexCount: g.faces.length, wireVao: { vao: wireVao, buffer: null, first: -1 }, wireCount: lines.length, materialId: g.materialId, geosetId };
   }
 
   /** Bone matrices and geoset animation state for a moment of an animation. */
   pose(clock: Clock) {
     const m = this.model;
     this.clock = clock;
+    // A sequence in which nothing moves gives the same pose at every moment: posed once, it stays
+    // (unless the geosets shown changed). The clock still moves on, for the particles that follow it.
+    const span = `${clock.seqStart}|${clock.seqEnd}`, posedAs = `${span}|${[...this.hidden].join(",")}`;
+    let still = this.stillBySpan.get(span);
+    if (still === undefined) this.stillBySpan.set(span, (still = poseStill(m, clock.seqStart, clock.seqEnd)));
+    if (still && this.posedAs === posedAs) return;
+    this.posedAs = posedAs;
+    this.fullPoses++;
     const world = poseNodes(m, clock);
     this.nodeWorld = world;
     for (const id of this.nodeOrder) this.boneData.set(world[id], id * 16);
@@ -559,11 +699,14 @@ export class ModelGpu {
       if (this.hidden.has(g.geosetId) || (this.geoAlpha.get(g.geosetId) ?? 1) <= 0.01) continue;
       const mat = m.materials[g.materialId];
       if (!mat) continue;
+      // Geoset animation colours are stored as BGR.
+      const bgr = this.geoColor.get(g.geosetId) ?? [1, 1, 1];
+      const color = [bgr[2], bgr[1], bgr[0]];
       for (const layer of mat.layers) {
-        const two = layer.filterMode === 2;
-        const alpha = two ? sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1) : 1;
-        const texIndex = !two ? 0 : layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
-        this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2, mode: layer.filterMode, alpha, texIndex });
+        const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1);
+        const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
+        const texMatrix = textureMatrix(m.textureAnims[layer.textureAnimId], clock, m.globalSequences);
+        this.draws.push({ g, layer, prio: mat.priorityPlane, blended: layer.filterMode >= 2, mode: layer.filterMode, alpha, texIndex, color, texMatrix });
       }
     }
     this.blend2 = this.draws.filter((d) => d.layer.filterMode === 2);
@@ -595,12 +738,23 @@ export class ModelGpu {
 
   /** Draws the posed model with a world transform. */
   draw(viewProj: Mat4, world: Mat4, opts: DrawOptions = {}) {
-    const gl = this.gl, m = this.model, sh = this.sh, u = sh.u, clock = this.clock;
-    const team = opts.team ?? 0, pass = opts.pass ?? "all";
-    const rgb = TEAM_COLORS[team]?.[1] ?? TEAM_COLORS[0][1];
+    const gl = this.gl, sh = this.sh;
+    gl.bindBuffer(gl.ARRAY_BUFFER, sh.one);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, world, 0, 16);
+    this.drawInstances(viewProj, { buffer: sh.one, runs: [{ team: opts.team ?? 0, first: 0, count: 1 }] }, opts);
+  }
+
+  /** Draws the posed model once for each instance in `instances`: one draw call per layer, or per layer
+   *  and run of one player colour for the layers that show it. `opts.team` is not used: each run has its own. */
+  drawInstances(viewProj: Mat4, instances: InstanceRuns, opts: DrawOptions = {}) {
+    const runs = instances.runs;
+    let total = 0;
+    for (const r of runs) total += r.count;
+    if (!total || !instances.buffer) return;
+    const gl = this.gl, m = this.model, sh = this.sh, u = sh.u;
+    const pass = opts.pass ?? "all";
     gl.useProgram(sh.prog);
     gl.uniformMatrix4fv(u.uViewProj, false, viewProj);
-    gl.uniformMatrix4fv(u.uWorld, false, world);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
     gl.uniform1i(u.uBones, 1);
@@ -613,31 +767,31 @@ export class ModelGpu {
       gl.uniform1i(u.uHeight, 3);
       gl.uniform4f(u.uHeightRect, hm.x, hm.y, hm.width, hm.height);
     }
-    gl.uniform3f(u.uTeam, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
     const mx = opts.mix ?? [0, 0, 0, 0];
     gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
     setFog(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.fog);
     const light = opts.light ?? DEFAULT_LIGHT;
-    gl.uniform3fv(u.uLightDir, light.dir);
-    gl.uniform3fv(u.uDiffuse, light.diffuse);
-    gl.uniform3fv(u.uAmbient, light.ambient);
+    gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
+    gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
+    gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);
+    // Runs that follow each other in the buffer are drawn in one call where the colour doesn't show.
+    let contiguous = true;
+    for (let i = 1; i < runs.length; i++) if (runs[i].first !== runs[i - 1].first + runs[i - 1].count) contiguous = false;
+    const tint = opts.tint ?? [1, 1, 1, 1];
+    const teamRgb = (team: number) => TEAM_COLORS[team]?.[1] ?? TEAM_COLORS[0][1];
 
-    for (const { g, layer, blended, mode } of this.classified()) {
+    for (const { g, layer, blended, mode, alpha, color, texMatrix, texIndex } of this.classified()) {
       if ((pass === "opaque" && blended) || (pass === "blended" && !blended)) continue;
-      const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1);
       if (alpha <= 0.01) continue;
-      const color = this.geoColor.get(g.geosetId) ?? [1, 1, 1];
-      // Geoset animation colours are stored as BGR.
-      const tint = opts.tint ?? [1, 1, 1, 1];
-      gl.uniform4f(u.uColor, color[2] * tint[0], color[1] * tint[1], color[0] * tint[2], alpha * tint[3]);
-
-      gl.uniformMatrix3fv(u.uTexMatrix, false, textureMatrix(m.textureAnims[layer.textureAnimId], clock, m.globalSequences));
-      const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
+      gl.uniform4f(u.uColor, color[0] * tint[0], color[1] * tint[1], color[2] * tint[2], alpha * tint[3]);
+      gl.uniformMatrix3fv(u.uTexMatrix, false, texMatrix);
       const tex = m.textures[texIndex];
-      gl.bindTexture(gl.TEXTURE_2D, tex?.replaceableId === 1 ? sh.team[team] ?? sh.white : tex?.replaceableId === 2 ? sh.glow[team] ?? sh.white : this.textures[texIndex] ?? sh.white);
-      // HD layers list [diffuse, normal, ORM, emissive, team colour, environment].
+      // Team colour (1) and team glow (2) are textures of the player's colour.
+      const teamTexture = tex?.replaceableId === 1 ? sh.team : tex?.replaceableId === 2 ? sh.glow : null;
+      if (!teamTexture) gl.bindTexture(gl.TEXTURE_2D, this.textures[texIndex] ?? sh.white);
+      // HD layers list [diffuse, normal, ORM, emissive, team colour, environment]; the ORM's alpha masks the player colour.
       const orm = layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
       gl.uniform1f(u.uHd, orm ? 1 : 0);
       if (orm) {
@@ -661,17 +815,36 @@ export class ModelGpu {
       if (sf & 0x80) gl.depthMask(false);
       if (opts.onTop) gl.disable(gl.DEPTH_TEST);
       if (opts.tint && mode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
-      if (opts.wireframe) {
-        gl.bindVertexArray(g.wireVao);
-        gl.drawElements(gl.LINES, g.wireCount, gl.UNSIGNED_SHORT, 0);
-      } else {
-        gl.bindVertexArray(g.vao);
-        gl.drawElements(gl.TRIANGLES, g.indexCount, gl.UNSIGNED_SHORT, 0);
+      const v = opts.wireframe ? g.wireVao : g.vao;
+      const prim = opts.wireframe ? gl.LINES : gl.TRIANGLES, count = opts.wireframe ? g.wireCount : g.indexCount;
+      gl.bindVertexArray(v.vao);
+      if (!teamTexture && !orm && contiguous) {
+        this.pointInstances(v, instances.buffer, runs[0].first);
+        gl.drawElementsInstanced(prim, count, gl.UNSIGNED_SHORT, 0, total);
+        continue;
+      }
+      for (const r of runs) {
+        if (!r.count) continue;
+        if (teamTexture) gl.bindTexture(gl.TEXTURE_2D, teamTexture[r.team] ?? sh.white);
+        if (orm) { const rgb = teamRgb(r.team); gl.uniform3f(u.uTeam, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255); }
+        this.pointInstances(v, instances.buffer, r.first);
+        gl.drawElementsInstanced(prim, count, gl.UNSIGNED_SHORT, 0, r.count);
       }
     }
     gl.bindVertexArray(null);
     gl.depthMask(true);
     gl.enable(gl.DEPTH_TEST);
+  }
+
+  /** Points a vertex array's world matrix attribute at an instance buffer from instance `first` on (it stays set in the array). */
+  private pointInstances(v: InstancedVao, buffer: WebGLBuffer, first: number) {
+    const loc = this.sh.world;
+    if (loc < 0 || (v.buffer === buffer && v.first === first)) return;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    for (let k = 0; k < 4; k++) gl.vertexAttribPointer(loc + k, 4, gl.FLOAT, false, INSTANCE_BYTES, first * INSTANCE_BYTES + k * 16);
+    v.buffer = buffer;
+    v.first = first;
   }
 }
 

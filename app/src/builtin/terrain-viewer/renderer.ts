@@ -5,7 +5,8 @@
 import type { DecodedImage } from "../../lib/image/index";
 import { fogForCamera, FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
-import { compile, mat4, poseNodes, standClock, type Clock, type HeightMap, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
+import { compile, INSTANCE_BYTES, mat4, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 
@@ -311,6 +312,47 @@ export class TerrainRenderer {
     const next = withGroup(this.batches, group, batches);
     this.batches.length = 0;
     this.batches.push(...next);
+    // The instance buffers of batches that are gone go with them.
+    const kept = new Set(next);
+    for (const [b, buf] of this.instanceBuffers) if (!kept.has(b)) { this.gl.deleteBuffer(buf.buffer); this.instanceBuffers.delete(b); }
+  }
+
+  /** Per batch, a GPU buffer of the world matrices of its instances in view, filled at each frame. */
+  private instanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
+  /** Room to gather a batch's matrices before they're uploaded. */
+  private instanceData = new Float32Array(16 * 1024);
+
+  /** Fills a batch's instance buffer with its instances in view (all of them without `planes`), in runs
+   *  of one player colour, and says what's where. */
+  private gatherInstances(b: ObjectBatch, planes: Float32Array | null): InstanceRuns {
+    const gl = this.gl;
+    const byTeam = new Map<number, ObjectInstance[]>();
+    let n = 0;
+    for (const inst of b.instances) {
+      if (planes && inst.sphere && !sphereInView(planes, inst.sphere)) continue;
+      let list = byTeam.get(inst.team);
+      if (!list) byTeam.set(inst.team, (list = []));
+      list.push(inst);
+      n++;
+    }
+    const runs: InstanceRuns["runs"] = [];
+    let entry = this.instanceBuffers.get(b);
+    if (!entry) this.instanceBuffers.set(b, (entry = { buffer: gl.createBuffer(), bytes: 0 }));
+    if (!n) return { buffer: entry.buffer, runs };
+    if (this.instanceData.length < n * 16) this.instanceData = new Float32Array(Math.max(n * 16, this.instanceData.length * 2));
+    const data = this.instanceData;
+    let at = 0;
+    for (const [team, list] of byTeam) {
+      runs.push({ team, first: at, count: list.length });
+      for (const inst of list) data.set(inst.world, (at++) * 16);
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, entry.buffer);
+    if (entry.bytes < n * INSTANCE_BYTES) {
+      entry.bytes = Math.max(n, 16, (entry.bytes / INSTANCE_BYTES) * 2) * INSTANCE_BYTES;
+      gl.bufferData(gl.ARRAY_BUFFER, entry.bytes, gl.DYNAMIC_DRAW);
+    }
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * 16);
+    return { buffer: entry.buffer, runs };
   }
   /** Camera: looks at `target` from `distance` away. */
   yaw = -Math.PI / 2;
@@ -880,14 +922,19 @@ export class TerrainRenderer {
     if (!on) for (const gpu of new Set(this.batches.map((b) => b.gpu))) gpu.pose(standClock(gpu.model, gpu.props));
   }
 
-  /** Poses every placed model at the current moment of its Stand animation (one pose per
-   *  model, shared by its instances), and the classic models whose effects stand in. */
-  private poseAnimated() {
+  /** Poses the placed models at the current moment of their Stand animation (one pose per
+   *  model, shared by its instances), and the classic models whose effects stand in. Only models
+   *  with an instance in view (`inView`) are posed, and those whose particles follow their pose
+   *  (near objects have particles in view) or that a placement preview shows: the others are posed
+   *  when they come into view, before they're drawn. */
+  private poseAnimated(inView: ReadonlySet<ObjectBatch>) {
     const t = performance.now() - this.animStart;
     const at = (c: Clock): Clock => ({ ...c, frame: c.seqStart + (t % Math.max(1, c.seqEnd - c.seqStart)), time: t });
     const posed = new Set<ModelGpu>();
+    const previewed = new Set([this.ghost, ...this.ghosts].map((g) => g?.gpu));
     for (const b of this.batches) {
       if (this.hiddenGroups.has(b.group)) continue;
+      if (!inView.has(b) && !b.effects && !previewed.has(b.gpu)) continue;
       if (!posed.has(b.gpu) && b.gpu.model.sequences.length) {
         posed.add(b.gpu);
         b.gpu.pose(at(standClock(b.gpu.model, b.gpu.props)));
@@ -952,7 +999,6 @@ export class TerrainRenderer {
 
   render() {
     const gl = this.gl;
-    if (this.animate) { this.poseAnimated(); this.lastAnimFrame = performance.now(); }
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);
@@ -1052,12 +1098,20 @@ export class TerrainRenderer {
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
 
-    // Placed objects: every opaque layer, then every blended one.
+    // Placed objects: every opaque layer, then every blended one; each model once per layer for all
+    // its instances in view. Cliffs aren't culled: the ground they follow moves them up in the shader.
+    const planes = frustumPlanes(viewProj);
+    const gathered: [ObjectBatch, InstanceRuns][] = [];
+    for (const b of this.batches) {
+      if (this.hiddenGroups.has(b.group) || !b.instances.length) continue;
+      const list = this.gatherInstances(b, b.followGround ? null : planes);
+      if (list.runs.length) gathered.push([b, list]);
+    }
+    if (this.animate) { this.poseAnimated(new Set(gathered.map(([b]) => b))); this.lastAnimFrame = performance.now(); }
     for (const pass of ["opaque", "blended"] as const) {
-      for (const b of this.batches) {
-        if (this.hiddenGroups.has(b.group)) continue;
+      for (const [b, list] of gathered) {
         const light = (b.group === "units" ? this.unitLight : this.terrainLight) ?? undefined;
-        for (const inst of b.instances) b.gpu.draw(viewProj, inst.world, { team: inst.team, pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog });
+        b.gpu.drawInstances(viewProj, list, { pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog });
       }
     }
     if (this.showEffects || this.showWeather) this.drawParticles(viewProj, this.eye());
