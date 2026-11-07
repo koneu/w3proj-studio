@@ -8,7 +8,7 @@ import type { TriggerFile } from "../../lib/triggers/wtg";
 /** Where a double-click goes. */
 export type Target =
   | { kind: "object"; ext: string; id: string }
-  | { kind: "point"; x: number; y: number }
+  | { kind: "point"; x: number; y: number; /** A placed object: selected too. */ id?: string; editorId?: number }
   | { kind: "trigger"; name: string }
   | { kind: "variables" }
   | { kind: "sounds" }
@@ -100,7 +100,7 @@ export function buildTree(c: MapContents): Node[] {
       label: `${c.nameOf(id)} (${ps.length})`, detail: id, ref: id, target: { kind: "object", ext, id },
       children: ps.map((p): Node => {
         const g = placedName(p, prefix);
-        return { label: `${c.nameOf(id)} ${g.slice(-4)}`, detail: `${owner(p.player)} ${at(p)}`.trim(), ref: g, target: { kind: "point", x: p.position[0], y: p.position[1] } };
+        return { label: `${c.nameOf(id)} ${g.slice(-4)}`, detail: `${owner(p.player)} ${at(p)}`.trim(), ref: g, target: { kind: "point", x: p.position[0], y: p.position[1], id, editorId: typeof p.editorId === "number" ? p.editorId : undefined } };
       }),
     })).sort((a, b) => a.label.localeCompare(b.label));
     return { label: `${title} (${list.length})`, children };

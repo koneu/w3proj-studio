@@ -1,3 +1,4 @@
+import type { PlacedRef } from "./pickmatch";
 // The "w3.terrain" service: tool groups other extensions add to the terrain
 // editor (see extensions/services.ts). Open editors follow registrations.
 // Also picks a point on the map for other modules (trigger parameters).
@@ -19,11 +20,11 @@ export class TerrainToolRegistry implements TerrainService {
   placedObjects() { return this.livePlacements?.() ?? null; }
 
   /** Set by the open terrain editor: moves its camera to a point. */
-  look: ((x: number, y: number) => void) | null = null;
+  look: ((x: number, y: number, ref?: PlacedRef) => void) | null = null;
   /** Set by each open terrain editor, by its file: Reset Texture Variations, as one undo step; false when nothing changed. */
   readonly resetVariations = new Map<string, () => boolean>();
   /** A point to show once the terrain editor has opened. */
-  pendingLook: [number, number] | null = null;
+  pendingLook: [number, number, PlacedRef?] | null = null;
 
   /** `open` brings up the terrain editor (for pickPoint). */
   constructor(private open: () => Promise<void>) {}

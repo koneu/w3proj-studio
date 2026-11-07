@@ -50,7 +50,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const go = async (t: Target) => {
     switch (t.kind) {
       case "object": return w3.commands.execute("w3.objectEditor.open", t.ext, t.id);
-      case "point": return w3.commands.execute("w3.terrain.showPoint", t.x, t.y);
+      case "point": return w3.commands.execute("w3.terrain.showPoint", t.x, t.y, t.id !== undefined ? { id: t.id, editorId: t.editorId } : undefined);
       case "trigger": return w3.commands.execute("w3.triggers.reveal", t.name);
       case "variables": return w3.commands.execute("w3.triggers.variables");
       case "sounds": return w3.commands.execute("w3.sounds.open");

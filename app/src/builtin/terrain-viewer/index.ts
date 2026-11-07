@@ -1,6 +1,7 @@
 import { fogOf } from "../../lib/model/fog";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
+import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
@@ -902,11 +903,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.editors.open(path, "w3.terrainViewer");
     }),
     // Shows a world point in the terrain editor (opening it first); used by the Object Manager.
-    w3.commands.register("w3.terrain.showPoint", async (x?: number, y?: number) => {
+    w3.commands.register("w3.terrain.showPoint", async (x?: number, y?: number, ref?: { id?: string; editorId?: number }) => {
       if (typeof x !== "number" || typeof y !== "number") return w3.commands.execute("w3.terrain.open");
-      toolGroups.pendingLook = [x, y];
+      // `ref` (optional) also selects that placed object after centring.
+      const pick: PlacedRef | undefined = ref ? { id: typeof ref.id === "string" ? ref.id : undefined, editorId: typeof ref.editorId === "number" ? ref.editorId : undefined, x, y } : undefined;
+      toolGroups.pendingLook = [x, y, pick];
       await w3.commands.execute("w3.terrain.open");
-      if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y); toolGroups.pendingLook = null; }
+      if (toolGroups.look && toolGroups.pendingLook) { toolGroups.look(x, y, pick); toolGroups.pendingLook = null; }
     }),
     w3.commands.register("w3.terrain.resetVariations", async () => {
       const path = w3.editors.activePath();
@@ -2769,7 +2772,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // However the pick ends (click, Esc, Cancel, another pick), the ring goes.
         const stopPickRing = toolGroups.onChange(() => { if (!toolGroups.picking) showPickTarget(null); });
         toolGroups.livePlacements = live;
-        const look = (x: number, y: number) => { renderer.target = [x, y, heightAt(terrain, x, y)]; redraw(); };
+        const look = (x: number, y: number, ref?: PlacedRef) => {
+          renderer.target = [x, y, heightAt(terrain, x, y)];
+          if (ref) {
+            // Normal selection (side panel, keys); no undo step, nothing dirty.
+            const insts = renderer.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed);
+            const at = matchPlaced(insts.map((i) => i.pick!.placed as unknown as PlacedLike), ref);
+            if (at >= 0) { group = []; selectObject(insts[at]); }
+          }
+          redraw();
+        };
         toolGroups.look = look;
         const resetGround = () => {
           if (!editable) throw new Error("This terrain is read-only.");
@@ -2779,7 +2791,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return true;
         };
         toolGroups.resetVariations.set(doc.path, resetGround);
-        if (toolGroups.pendingLook) { const [px, py] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py)); }
+        if (toolGroups.pendingLook) { const [px, py, pref] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py, pref)); }
         if (editable) queueMicrotask(syncGroups);
 
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
