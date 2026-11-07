@@ -11,6 +11,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, writeWtgFile, wtgPath, type Param } from "../../lib/triggers/wtg";
 import { bindUndoKeys, History } from "../../lib/undo";
+import { exportSound, replaceSound } from "./soundfiles";
 import { h } from "../../workbench/dom";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
@@ -56,6 +57,13 @@ function loadGameSounds(w3: W3Api): Promise<GameSounds> {
   return gameSounds;
 }
 
+/** The Sound Editor shown last, for the commands of the palette. */
+let current: SoundEditor | null = null;
+const needEditor = () => {
+  if (!current) throw new Error("Open the Sound Editor and select a sound first.");
+  return current;
+};
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.commands.register("w3.sounds.open", async () => {
@@ -66,6 +74,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.soundEditor"); return; }
       await w3.editors.open(FILE, "w3.soundEditor");
     }),
+    w3.commands.register("w3.sounds.export", () => needEditor().exportCurrent()),
+    w3.commands.register("w3.sounds.replace", () => needEditor().replaceCurrent()),
     w3.editors.registerProvider("w3.soundEditor", {
       async resolve(el, doc) {
         // The raw file goes through the format engine both ways.
@@ -96,6 +106,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         const changed = () => { history.commit(); doc.setDirty(history.dirty); };
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly);
+        current = editor;
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
@@ -111,7 +122,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             history.markSaved();
             doc.setDirty(false);
           },
-          dispose: () => { editor.dispose(); unbindKeys(); },
+          dispose: () => { editor.dispose(); unbindKeys(); if (current === editor) current = null; },
         };
       },
     }),
@@ -171,6 +182,20 @@ class SoundEditor {
     this.renderDetail();
   }
 
+  /** Export Sound: the selected sound's file, else the file selected on the left. */
+  async exportCurrent() {
+    const path = this.selected?.file ?? this.selectedFile?.path;
+    if (!path) throw new Error("Select a sound, or a sound file on the left, first.");
+    await exportSound(this.w3, path, this.game?.files ?? null);
+  }
+  /** Replace Internal Sound: the selected sound's file is replaced by one from disk. */
+  async replaceCurrent() {
+    if (!this.editable) throw new Error("This Sound Editor is read-only.");
+    if (!this.selected) throw new Error("Select one of the map's sounds first.");
+    await replaceSound(this.w3, this.selected.file);
+  }
+  private failed = (e: unknown) => void this.w3.window.showError(String((e as Error).message ?? e));
+
   setGame(g: GameSounds) { this.game = g; this.renderBrowser(); this.renderDetail(); }
   setGameError(msg: string) { this.browser.replaceChildren(h("p.muted", {}, `Game sounds unavailable: ${msg}`)); }
   dispose() { this.stop(); }
@@ -216,6 +241,7 @@ class SoundEditor {
     const actions = h("div.snd-actions", {},
       h("button", { title: "Play the selected file", onclick: () => this.selectedFile && void this.play(this.selectedFile.path) }, "▶ Play"),
       h("button", { title: "Stop playback", onclick: () => this.stop() }, "■ Stop"),
+      h("button", { title: "Save the selected file to a file of your own", onclick: () => this.selectedFile ? void exportSound(this.w3, this.selectedFile.path, this.game?.files ?? null).catch(this.failed) : this.failed(new Error("Select a sound file first.")) }, "Export…"),
       ...(this.editable ? [
         h("button", { onclick: () => this.add(false) }, "Add as sound"),
         h("button", { onclick: () => this.add(true) }, "Add as music"),
@@ -289,6 +315,16 @@ class SoundEditor {
     const rows = this.doc.sounds.map((s) => h(`tr.snd-row${this.selected === s ? ".active" : ""}`, {
       onclick: () => { this.selected = s; this.renderList(); this.renderDetail(); },
       ondblclick: () => void this.play(s.file),
+      oncontextmenu: (e: MouseEvent) => {
+        e.preventDefault();
+        this.selected = s;
+        this.renderList();
+        this.renderDetail();
+        this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
+          { label: "Export Sound…", run: () => void this.exportCurrent().catch(this.failed) },
+          { label: "Replace Internal Sound…", disabled: !this.editable, run: () => void this.replaceCurrent().catch(this.failed) },
+        ]);
+      },
     },
     h("td", {}, s.name.replace(/^gg_snd_/, "")),
     h("td.muted", {}, s.flags & MUSIC ? "music" : [s.flags & THREE_D ? "3D" : "", s.flags & LOOPING ? "loop" : ""].filter(Boolean).join(" · ") || "sound"),
@@ -353,7 +389,8 @@ class SoundEditor {
       h("div.snd-head", {}, h("h3", {}, music ? "Music" : "Sound"),
         h("button", { onclick: () => void this.play(s.file) }, "▶ Play"),
         h("button", { onclick: () => this.stop() }, "■ Stop"),
-        ...(this.editable ? [h("button", { onclick: () => {
+        h("button", { title: "Save this sound's file to a file of your own", onclick: () => void this.exportCurrent().catch(this.failed) }, "Export…"),
+        ...(this.editable ? [h("button", { title: "Put a sound file from disk in this sound's place in the map", onclick: () => void this.replaceCurrent().catch(this.failed) }, "Replace Internal Sound…"), h("button", { onclick: () => {
           if (!this.doc.sounds.includes(s)) return;
           this.doc.sounds = this.doc.sounds.filter((x) => x !== s);
           this.selected = null;
