@@ -2,14 +2,46 @@
 // Edits replace only the text of changed blocks, so the rest of the file
 // (comments, order, line endings) stays byte-identical.
 
-const BLOCK = /(STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)([\s\S]*?)(\r?\n\})/g;
+const HEADER = /STRING\s+(\d+)\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n/g;
+const CLOSE = /\r?\n\}/g;
+// A `}` that ends a text line, with the next block's header right after it (blank lines allowed).
+const UNCLOSED = /\}(?=\r?\n(?:[ \t]*\r?\n)*STRING\s+\d+\s*(?:\/\/[^\n]*\n\s*)*\{\r?\n)/;
+
+/** One `STRING n { text }` block: `text.slice(from, to)` is the text, `text.slice(to, end)` what closes it. */
+interface Block { num: number; from: number; to: number; end: number; closed: boolean }
+
+/** The blocks of a file. A block ends at the first line that starts with `}`. Some real files have
+ *  a block whose `}` sits at the end of its last text line, with the next STRING block right after;
+ *  there the first such `}` ends the block (before the next header, never anywhere else), so the next
+ *  string isn't swallowed. */
+function scan(text: string): Block[] {
+  const blocks: Block[] = [];
+  let pos = 0;
+  for (;;) {
+    HEADER.lastIndex = pos;
+    const h = HEADER.exec(text);
+    if (!h) return blocks;
+    const from = h.index + h[0].length;
+    CLOSE.lastIndex = from;
+    const c = CLOSE.exec(text);
+    if (!c) return blocks;
+    const u = UNCLOSED.exec(text.slice(from, c.index));
+    if (u) {
+      blocks.push({ num: Number(h[1]), from, to: from + u.index, end: from + u.index + 1, closed: false });
+      pos = from + u.index + 1;
+    } else {
+      blocks.push({ num: Number(h[1]), from, to: c.index, end: c.index + c[0].length, closed: true });
+      pos = c.index + c[0].length;
+    }
+  }
+}
 
 export class StringTable {
   private values = new Map<number, string>();
   private changed = new Set<number>();
 
   constructor(private text: string) {
-    for (const m of text.matchAll(BLOCK)) this.values.set(Number(m[2]), m[3]);
+    for (const b of scan(text)) this.values.set(b.num, text.slice(b.from, b.to));
   }
 
   /** "TRIGSTR_003" / "TRIGSTR_3" → 3, anything else → null. */
@@ -49,11 +81,15 @@ export class StringTable {
   /** The file with changed blocks rewritten. */
   serialize(): string {
     const eol = this.text.includes("\r\n") ? "\r\n" : "\n";
-    return this.text.replace(BLOCK, (all, head: string, num: string, _body: string, tail: string) => {
-      const n = Number(num);
-      if (!this.changed.has(n)) return all;
-      return head + this.values.get(n)!.replace(/\r?\n/g, eol) + tail;
-    });
+    let out = "", at = 0;
+    for (const b of scan(this.text)) {
+      if (!this.changed.has(b.num)) continue;
+      // an unchanged block stays as it is; a changed one that had no `}` line gets the usual one
+      out += this.text.slice(at, b.from) + this.values.get(b.num)!.replace(/\r?\n/g, eol);
+      at = b.closed ? b.to : b.end;
+      if (!b.closed) out += eol + "}";
+    }
+    return out + this.text.slice(at);
   }
 
   markSaved() {
@@ -66,7 +102,7 @@ export class StringTable {
     this.text = text;
     this.values.clear();
     this.changed.clear();
-    for (const m of text.matchAll(BLOCK)) this.values.set(Number(m[2]), m[3]);
+    for (const b of scan(text)) this.values.set(b.num, text.slice(b.from, b.to));
   }
 
   /** The file to save when several editors edit it: `current` (the file on disk now, possibly
