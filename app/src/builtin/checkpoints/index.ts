@@ -3,7 +3,7 @@
 // projects without git. Unsaved edits aren't included: saving them behind the user's back would
 // run everything that follows a save (the map script, for one).
 
-import type { ExtensionContext, W3Api } from "../../extensions/api";
+import type { ExtensionContext, ProjectInfo, W3Api } from "../../extensions/api";
 import { checkpointName, checkpointState, newestFirst, toPrune } from "./checkpoints";
 
 const FOLDER = "build/checkpoints";
@@ -12,7 +12,10 @@ const POLL = 20_000;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const out = w3.output.channel("Project");
-  let busy = false;
+  /** The checkpoint being made, if one is. */
+  let running: Promise<string> | null = null;
+  /** The last checkpoint's file: names go by the second, and a second one in the same second waits for the next. */
+  let last = "";
   /** Projects told that their automatic checkpoints fail. */
   const warned = new Set<string>();
 
@@ -21,36 +24,52 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Pathing, shadows and the minimap still due from a terrain edit belong in a checkpoint. A failure never stops one. */
   const settle = () => w3.commands.execute("w3.terrain.settle").catch(() => {});
 
-  /** Packs the project as it is on disk; the file's name, or null when one is being made. `settleFirst`: the
+  const pack = async (project: ProjectInfo, settleFirst: boolean): Promise<string> => {
+    if (settleFirst) await settle();
+    let at = new Date();
+    if (`${project.root}|${checkpointName(project.default_output, at)}` === last) {
+      await new Promise((r) => setTimeout(r, 1000 - at.getMilliseconds() + 5));
+      at = new Date();
+    }
+    const name = checkpointName(project.default_output, at);
+    last = `${project.root}|${name}`;
+    const target = `${project.root}\\build\\checkpoints\\${name}`;
+    await w3.backend.invoke("project_pack", { root: project.root, output: target });
+    const keep = w3.settings.get<number>("checkpoints.keep") ?? 10;
+    const old = toPrune(await list(project.root), keep);
+    // The project may have been changed meanwhile: its own root, not the current one.
+    for (const f of old) await w3.backend.invoke("fs_delete", { root: project.root, path: `${project.root}\\build\\checkpoints\\${f}` });
+    out.append(`checkpoint ${name}${old.length ? ` (${old.length} old one${old.length === 1 ? "" : "s"} removed)` : ""}`);
+    return name;
+  };
+
+  /** Packs `project` as it is on disk; the file's name. One at a time: while one is being made, this
+   *  waits for it and then makes its own, since the running one may have started before the caller's
+   *  last read and so wouldn't hold the state the caller is about to change. `settleFirst`: the
    *  rebuild due from an edit is done before (the automatic ones don't wait for it). */
-  const create = async (settleFirst = true): Promise<string | null> => {
-    const project = w3.workspace.project();
-    if (!project || busy) return null;
-    busy = true;
+  const create = async (project: ProjectInfo, settleFirst = true): Promise<string> => {
+    while (running) await running.catch(() => {});
+    const job = pack(project, settleFirst);
+    running = job;
     try {
-      if (settleFirst) await settle();
-      const name = checkpointName(project.default_output, new Date());
-      const target = `${project.root}\\build\\checkpoints\\${name}`;
-      await w3.backend.invoke("project_pack", { root: project.root, output: target });
-      const keep = w3.settings.get<number>("checkpoints.keep") ?? 10;
-      const old = toPrune(await list(project.root), keep);
-      // The project may have been changed meanwhile: its own root, not the current one.
-      for (const f of old) await w3.backend.invoke("fs_delete", { root: project.root, path: `${project.root}\\build\\checkpoints\\${f}` });
-      out.append(`checkpoint ${name}${old.length ? ` (${old.length} old one${old.length === 1 ? "" : "s"} removed)` : ""}`);
-      return name;
+      return await job;
     } finally {
-      busy = false;
+      if (running === job) running = null;
     }
   };
 
   const tick = async () => {
+    // Captured once: everything below is about this project, also if another one is opened meanwhile.
     const project = w3.workspace.project();
-    if (!project || busy || w3.settings.get<boolean>("checkpoints.enabled") === false) return;
+    if (!project || running || w3.settings.get<boolean>("checkpoints.enabled") === false) return;
     const minutes = w3.settings.get<number>("checkpoints.intervalMinutes") ?? 5;
     const megabytes = w3.settings.get<number>("checkpoints.maxMegabytes") ?? 500;
     const newest = newestFirst(await list(project.root))[0]?.time ?? null;
+    // files() is the open project's: if that's another one now, this look is void. A checkpoint asked
+    // for meanwhile is as good as this one.
+    if (w3.workspace.project()?.root !== project.root || running) return;
     if (checkpointState(w3.workspace.files(), newest, Date.now(), minutes * 60_000, megabytes * 1024 * 1024) !== "due") return;
-    await create(false).catch((e) => {
+    await create(project, false).catch((e) => {
       out.append(`checkpoint failed: ${String(e)}`);
       if (warned.has(project.root)) return;
       warned.add(project.root);
@@ -59,10 +78,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** Replaces the project's map files with a checkpoint's; what's there now is kept as one first. */
-  const restore = async (root: string, name: string) => {
+  const restore = async (project: ProjectInfo, name: string) => {
     // Settled by the caller, before the editors closed: settling now would open the terrain editor again.
-    await create(false);
-    await w3.commands.execute("w3.project.syncFromMap", `${root}\\${FOLDER.replace("/", "\\")}\\${name}`);
+    await create(project, false);
+    await w3.commands.execute("w3.project.syncFromMap", `${project.root}\\${FOLDER.replace("/", "\\")}\\${name}`);
   };
 
   const timer = setInterval(() => void tick().catch(() => {}), POLL);
@@ -73,8 +92,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return newestFirst(await list(project.root)).map((c) => ({ name: c.name, at: new Date(c.time).toLocaleString() }));
     }),
     w3.mcp.registerTool("create_checkpoint", async () => {
-      if (!w3.workspace.project()) throw new Error("No project is open in W3Proj Studio.");
-      return { name: await create() };
+      const project = w3.workspace.project();
+      if (!project) throw new Error("No project is open in W3Proj Studio.");
+      return { name: await create(project) };
     }),
     w3.mcp.registerTool("restore_checkpoint", async ({ name }) => {
       const project = w3.workspace.project();
@@ -89,16 +109,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
       await settle();
       await w3.editors.closeAll();
-      await restore(project.root, found.name);
+      await restore(project, found.name);
       return `Restored the checkpoint of ${when}. undo_last_edit can't go back past this.`;
     }),
     { dispose: () => clearInterval(timer) },
-    // `quiet` (other extensions, before something drastic): no message afterwards.
+    // `quiet` (other extensions, before something drastic): no message afterwards. Returns once a
+    // checkpoint made for this call exists, also when an automatic one was running.
     w3.commands.register("w3.checkpoints.create", async (opts?: { quiet?: boolean }) => {
-      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      const project = w3.workspace.project();
+      if (!project) throw new Error("Open or import a project first.");
       if (!opts?.quiet) await w3.editors.saveAll();
-      const name = await create();
-      if (name && !opts?.quiet) void w3.window.showInfo(`Checkpoint saved: ${name}`);
+      const name = await create(project);
+      if (!opts?.quiet) void w3.window.showInfo(`Checkpoint saved: ${name}`);
     }),
     // For other extensions: the path of the newest checkpoint, null when there is none.
     w3.commands.register("w3.checkpoints.newest", async () => {
@@ -117,7 +139,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (c !== "Restore") return;
       await settle();
       if (!(await w3.editors.closeAllAsking())) return;
-      await restore(project.root, pick.value);
+      await restore(project, pick.value);
     }),
   );
 }
