@@ -75,6 +75,9 @@ const SETTLE_LIMIT = 5 * 60_000;
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
 /** TEAM_COLORS index used for neutral players. */
 const NEUTRAL = 20;
+/** While objects load: the shortest time between two frames, and how long after the last input
+ *  every frame is drawn again. */
+const LOADING_FRAME_MS = 250, LOADING_INPUT_MS = 500;
 
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
@@ -3531,15 +3534,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         };
         // Static scene: draw only when something changed (or the size did).
-        let raf = 0, lastSize = "";
-        const tick = () => {
+        let raf = 0, lastSize = "", lastFrame = 0;
+        // While models and textures stream in, each one asks for a frame, and drawing thousands of
+        // objects every frame took time the loading needed (GoldRush: about 2 s of 7). Then a few
+        // frames a second show the progress, unless the person is steering the view.
+        let lastInput = -Infinity;
+        const steered = () => { lastInput = performance.now(); };
+        for (const type of ["pointerdown", "pointermove", "wheel", "keydown"]) el.addEventListener(type, steered, { capture: true, passive: true });
+        const tick = (now: number) => {
           const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
+          const loading = loader.busy || artLoads.size > 0;
+          const throttled = loading && now - lastInput > LOADING_INPUT_MS && now - lastFrame < LOADING_FRAME_MS;
           // Particle effects move by themselves: then every frame is drawn.
-          if (canvas.clientWidth > 0 && (dirty || size !== lastSize || renderer.animating)) {
+          if (canvas.clientWidth > 0 && (dirty || size !== lastSize || renderer.animating) && (size !== lastSize || !throttled)) {
             renderer.render();
             placeLabels();
             dirty = false;
             lastSize = size;
+            lastFrame = now;
           }
           raf = requestAnimationFrame(tick);
         };

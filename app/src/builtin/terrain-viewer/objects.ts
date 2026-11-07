@@ -192,6 +192,18 @@ export class ObjectLoader {
   readonly missing = new Map<string, string>();
   /** Texture path (lower case) → model paths (lower case) that use it. */
   private textureUsers = new Map<string, Set<string>>();
+  /** Models, textures and effects still loading. */
+  private running = 0;
+
+  /** Whether anything asked for is still loading: the view then draws less often (see the terrain viewer's tick). */
+  get busy(): boolean { return this.running > 0; }
+
+  private track<T>(load: Promise<T>): Promise<T> {
+    this.running++;
+    const done = () => { this.running--; };
+    load.then(done, done);
+    return load;
+  }
 
   /** Forgets every loaded model and texture (and what was missing): files the map imports
    *  changed, so they're read again on the next load. */
@@ -234,7 +246,7 @@ export class ObjectLoader {
         ? path.split(/[\\/]+/).map((_, i, parts) => parts.slice(i).join("\\")).slice(1).filter((t) => t.includes("\\"))
         : [path];
       const variants = tails.flatMap((t) => (/\.(blp|tif|tga)$/i.test(t) ? [t, t.replace(/\.\w+$/, ".dds")] : [t]));
-      t = (async () => {
+      t = this.track((async () => {
         let error = "";
         for (const v of variants) {
           try {
@@ -246,7 +258,7 @@ export class ObjectLoader {
         this.missing.set(path, error);
         this.onTexture();
         return null;
-      })();
+      })());
       this.textures.set(key, t);
     }
     return t;
@@ -268,7 +280,7 @@ export class ObjectLoader {
     const key = `${req.path.toLowerCase()}|${req.props ?? ""}`;
     let e = this.effectSources.get(key);
     if (!e) {
-      e = (async () => {
+      e = this.track((async () => {
         let sd;
         try { sd = parseMdx(await this.readFile(`War3.w3mod:${req.path.replace(/\\/g, "/")}`)); } catch { return null; }
         if (!sd.particleEmitters2.length && !sd.ribbons.length) return null;
@@ -278,7 +290,7 @@ export class ObjectLoader {
           if (t.replaceableId === 0 && t.path) void this.texture(t.path, t.flags).then((tex) => { textures[i] = tex; });
         });
         return { model: sd, textures, nodeWorld: poseNodes(sd, clock), clock, classic: true };
-      })();
+      })());
       this.effectSources.set(key, e);
     }
     return e;
@@ -288,7 +300,7 @@ export class ObjectLoader {
     const key = `${req.path.toLowerCase()}|${JSON.stringify(req.replaceable)}|${req.props ?? ""}`;
     let m = this.models.get(key);
     if (!m) {
-      m = (async () => {
+      m = this.track((async () => {
         const model = parseMdx(await this.readFile(req.path));
         const gpu = new ModelGpu(this.gl, model);
         // Stand still at the start of its "Stand" animation.
@@ -304,7 +316,7 @@ export class ObjectLoader {
           this.texture(tex, model.textures[i].flags).then((t) => { gpu.textures[i] = t; });
         });
         return gpu;
-      })();
+      })());
       this.models.set(key, m);
     }
     return m;
