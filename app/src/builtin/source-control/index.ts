@@ -13,6 +13,7 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, LOG_FORMAT, parseBranches, parseCounts, parseLog, parseNameStatus, type Branch, type Change, type Commit, type CommitFile } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
 import { diffObjects, type ObjectChange } from "./objdiff";
@@ -126,7 +127,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const what = changes.length === 1 ? changes[0].path : `${changes.length} changes`;
     const c = await w3.window.showWarning(`Discard ${what}? New files are deleted, the others go back to the last commit. A checkpoint is made first, where they're enabled.`, "Discard", "Cancel");
     if (c !== "Discard") return;
-    await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch(() => {});
+    // Discarded changes exist nowhere else: a failed checkpoint asks before anything goes.
+    if (!(await checkpointBefore(w3, `Discard ${what}`))) return;
     const plan = discardPlan(changes);
     for (const part of chunks(plan.unstage)) await git("rm", "--cached", "-f", "--quiet", "--", ...part);
     for (const part of chunks(plan.restore)) await git("restore", "--source=HEAD", "--staged", "--worktree", "--", ...part);

@@ -1,4 +1,5 @@
 import type { CommandContribution, Disposable } from "../extensions/api";
+import { commandNotFound } from "../lib/commanderror";
 import { disposable } from "./dom";
 
 export interface CommandInfo extends CommandContribution {
@@ -26,7 +27,7 @@ export class CommandService {
   async execute<T>(id: string, ...args: any[]): Promise<T> {
     if (!this.handlers.has(id)) await this.activate(`onCommand:${id}`);
     const handler = this.handlers.get(id);
-    if (!handler) throw new Error(`command not found: ${id}`);
+    if (!handler) throw new Error(commandNotFound(id));
     return (await handler(...args)) as T;
   }
 
