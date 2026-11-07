@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, findPackedMap, recreatedMessage } from "./wtssession";
+import { WtsSession, fileIsMissing, findPackedMap, isNotFoundError, recreatedMessage } from "./wtssession";
 
 // The editor only changes strings that are already in the file (it needs the number to be in the
 // table), so it never adds a string and numbers can't collide: neither is covered here.
@@ -196,7 +196,7 @@ test("redo of a fresh, unsaved edit stays an edit even if another editor saved t
   d.b(1, "B1");
   a.restore(s0);
   a.restore(s1);
-  const changed = await a.save(d.read, d.write);
+  const changed = (await a.save(d.read, d.write)).shown;
   assert.equal(get(d.text, 1), "ONE");
   assert.equal(a.table.get(1), "ONE");
   assert.equal(changed, false, "what the editor shows is what was saved");
@@ -208,7 +208,7 @@ test("a save tells when it changed a text the editor shows", async () => {
   a.set(1, "ONE"); a.snapshot(); await a.save(d.read, d.write);
   d.b(1, "B1");
   a.restore(s0);
-  assert.equal(await a.save(d.read, d.write), true);
+  assert.equal((await a.save(d.read, d.write)).shown, true);
   assert.equal(a.table.get(1), "B1");
 });
 
@@ -226,42 +226,56 @@ test("a string typed while the save is writing is kept, and the editor stays dir
 
 // --- war3map.wts gone missing ---
 
-const gone = async (): Promise<string> => { throw "os error 2"; };
-const locked = async (): Promise<string> => { throw "os error 32: file in use"; };
+const gone = async (): Promise<string> => { throw "Das System kann die angegebene Datei nicht finden. (os error 2)"; };
+const locked = async (): Promise<string> => { throw "Der Prozess kann nicht auf die Datei zugreifen. (os error 32)"; };
+const yes = async () => true;
+const no = async () => false;
 
 test("a missing file is recreated from the editor's table, and the editor goes clean", async () => {
   const a = new WtsSession(wts("one", "two"));
   a.set(1, "ONE"); a.snapshot();
   let written = "";
-  await a.save(gone, async (t) => { written = t; }, async () => true);
+  const r = await a.save(gone, async (t) => { written = t; }, yes, 0);
   assert.equal(get(written, 1), "ONE");
   assert.equal(get(written, 2), "two");
-  assert.equal(a.recreated, true);
+  assert.equal(r.recreated, true);
   assert.equal(a.dirty, false);
+});
+
+test("a read that fails and then succeeds does not recreate: the normal merge is used", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); a.snapshot();
+  d.b(2, "B2"); // another editor's newer text
+  let reads = 0;
+  const flaky = async () => { if (reads++ === 0) throw "os error 2"; return d.text; };
+  const r = await a.save(flaky, d.write, yes, 0);
+  assert.equal(reads, 2);
+  assert.equal(r.recreated, false);
+  assert.equal(get(d.text, 1), "ONE");
+  assert.equal(get(d.text, 2), "B2");
 });
 
 test("after a recreate, undo past the save still works and the next save writes it", async () => {
   const d = disk(), a = new WtsSession(d.text);
   const s0 = a.snapshot();
   a.set(1, "ONE"); a.snapshot();
-  await a.save(gone, d.write, async () => true);
+  const r = await a.save(gone, d.write, yes, 0);
+  assert.equal(r.recreated, true);
   assert.equal(d.text.includes("ONE"), true);
   a.restore(s0);
   assert.equal(a.table.get(1), "one");
   assert.equal(a.dirty, true);
-  await a.save(d.read, d.write);
+  assert.equal((await a.save(d.read, d.write)).recreated, false);
   assert.equal(get(d.text, 1), "one");
-  assert.equal(a.recreated, false);
 });
 
 test("a read that fails for another reason stops the save: nothing written, session unchanged", async () => {
   const a = new WtsSession(wts("one", "two"));
   a.set(1, "ONE"); const snap = a.snapshot();
   let writes = 0;
-  await assert.rejects(a.save(locked, async () => { writes++; }, async () => false), /os error 32/);
+  await assert.rejects(a.save(locked, async () => { writes++; }, no, 0), /os error 32/);
   assert.equal(writes, 0);
   assert.equal(a.dirty, true);
-  assert.equal(a.recreated, false);
   assert.equal(a.table.get(1), "ONE");
   assert.deepEqual(a.snapshot(), snap);
 });
@@ -269,19 +283,18 @@ test("a read that fails for another reason stops the save: nothing written, sess
 test("a retry after a non-missing failure saves normally", async () => {
   const d = disk(), a = new WtsSession(d.text);
   a.set(1, "ONE"); a.snapshot();
-  await assert.rejects(a.save(locked, d.write, async () => false));
-  await a.save(d.read, d.write, async () => false);
+  await assert.rejects(a.save(locked, d.write, no, 0));
+  const r = await a.save(d.read, d.write, no, 0);
   assert.equal(get(d.text, 1), "ONE");
   assert.equal(a.dirty, false);
-  assert.equal(a.recreated, false);
+  assert.equal(r.recreated, false);
 });
 
 test("a failed write while recreating leaves the session as it was", async () => {
   const a = new WtsSession(wts("one", "two"));
   a.set(1, "ONE"); a.snapshot();
-  await assert.rejects(a.save(gone, async () => { throw "disk full"; }, async () => true), /disk full/);
+  await assert.rejects(a.save(gone, async () => { throw "disk full"; }, yes, 0), /disk full/);
   assert.equal(a.dirty, true);
-  assert.equal(a.recreated, false);
 });
 
 test("without a missing check, a failed read always stops the save", async () => {
@@ -290,21 +303,46 @@ test("without a missing check, a failed read always stops the save", async () =>
   await assert.rejects(a.save(gone, async () => {}), /os error 2/);
 });
 
+test("the outcome belongs to its own save: a second save does not reset it", async () => {
+  const a = new WtsSession(wts("one", "two"));
+  a.set(1, "ONE"); a.snapshot();
+  const first = await a.save(gone, async () => {}, yes, 0);
+  await a.save(gone, async () => {}, yes, 0); // clean: nothing to do
+  assert.equal(first.recreated, true);
+});
+
+test("only os errors 2 and 3 are 'not found', whatever the language", () => {
+  assert.equal(isNotFoundError("Das System kann die angegebene Datei nicht finden. (os error 2)"), true);
+  assert.equal(isNotFoundError("Das System kann den angegebenen Pfad nicht finden. (os error 3)"), true);
+  assert.equal(isNotFoundError("Zugriff verweigert. (os error 5)"), false);
+  assert.equal(isNotFoundError("in use (os error 32)"), false);
+  assert.equal(isNotFoundError("os error 22"), false);
+  assert.equal(isNotFoundError(new Error("NOT_UTF8")), false);
+});
+
+test("the file counts as missing only if the read said so, the refresh worked, it is not listed, and the rest of map/ is there", () => {
+  const base = { error: "(os error 2)", refreshed: true, listed: false, otherMapFiles: true };
+  assert.equal(fileIsMissing(base), true);
+  assert.equal(fileIsMissing({ ...base, error: "(os error 5)" }), false);
+  assert.equal(fileIsMissing({ ...base, refreshed: false }), false);
+  assert.equal(fileIsMissing({ ...base, listed: true }), false);
+  assert.equal(fileIsMissing({ ...base, otherMapFiles: false }), false);
+});
+
 test("the warning names the packed map when there is one, and leaves the sentence out otherwise", () => {
-  const withMap = recreatedMessage("C:\\p\\build\\m.w3x");
+  const withMap = recreatedMessage("C:/p/build/m.w3x");
   assert.match(withMap, /war3map\.wts was missing and has been recreated/);
-  assert.match(withMap, /strings changed elsewhere/);
-  assert.match(withMap, /C:\\p\\build\\m\.w3x/);
+  assert.match(withMap, /added or changed elsewhere/);
+  assert.match(withMap, /may hold the old strings/);
+  assert.match(withMap, /C:\/p\/build\/m\.w3x/);
   const none = recreatedMessage(null);
   assert.match(none, /recreated/);
-  assert.doesNotMatch(none, /\.w3x|found/);
+  assert.doesNotMatch(none, /\.w3x|old strings/);
 });
 
 test("the packed map is the build output if it exists, else the newest checkpoint", () => {
-  const out = "C:\\p\\build\\m.w3x", cp = "C:\\p\\build\\checkpoints\\m 2026-03-01 10-00-00.w3x";
-  assert.equal(findPackedMap(out, ["m.w3x"], cp), out);
-  assert.equal(findPackedMap(out, ["M.W3X"], cp), out);
-  assert.equal(findPackedMap(out, [], cp), cp);
-  assert.equal(findPackedMap(out, ["other.w3x"], null), null);
-  assert.equal(findPackedMap(out, [], null), null);
+  const out = "C:/p/build/m.w3x", cp = "C:/p/build/checkpoints/m 2026-03-01 10-00-00.w3x";
+  assert.equal(findPackedMap(out, true, cp), out);
+  assert.equal(findPackedMap(out, false, cp), cp);
+  assert.equal(findPackedMap(out, false, null), null);
 });

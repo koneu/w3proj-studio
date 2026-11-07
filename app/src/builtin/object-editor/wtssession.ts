@@ -32,9 +32,6 @@ export class WtsSession {
   private savedValues: Map<number, string>;
   private owned = new Map<number, Owned>();
   private saves = 0;
-  /** The last save found the file missing and wrote it anew from the editor's strings. */
-  recreated = false;
-
   constructor(text: string) {
     this.saved = text;
     this.table = new StringTable(text);
@@ -79,24 +76,36 @@ export class WtsSession {
    *  A failed read or write stops the save and leaves the session as it was. Returns whether a
    *  string the editor shows changed (another editor's text was kept).
    *
-   *  A failed read is only forgiven when `isMissing` says the file is really gone (not locked, not
-   *  unreadable): the file is then written anew from the editor's strings, and `recreated` is set. */
-  async save(read: () => Promise<string>, write: (text: string) => Promise<void>, isMissing?: () => Promise<boolean>): Promise<boolean> {
-    this.recreated = false;
-    if (!this.dirty) return false;
+   *  A failed read is only forgiven when `isMissing(error)` says the file is really gone (not
+   *  locked, not unreadable). It is then read once more after `retryMs` (a tool that saves by
+   *  delete-and-recreate leaves a moment where it is gone); only if it is still gone, the file is
+   *  written anew from the editor's strings (`recreated`). */
+  async save(
+    read: () => Promise<string>,
+    write: (text: string) => Promise<void>,
+    isMissing?: (error: unknown) => Promise<boolean>,
+    retryMs = 200,
+  ): Promise<{ shown: boolean; recreated: boolean }> {
+    if (!this.dirty) return { shown: false, recreated: false };
     let current: string | null;
     try {
       current = await read();
     } catch (e) {
-      if (!isMissing || !(await isMissing())) throw e;
-      current = null;
+      if (!isMissing || !(await isMissing(e))) throw e;
+      await new Promise((r) => setTimeout(r, retryMs));
+      try {
+        current = await read();
+      } catch (e2) {
+        if (!(await isMissing(e2))) throw e2;
+        current = null;
+      }
     }
     if (current === null) {
       // Nothing on disk to merge with: the editor's table is the file.
       const text = this.table.serialize();
       const mine = new Map(this.table.entries());
       await write(text);
-      return this.took(text, mine, true);
+      return { shown: this.took(text, mine), recreated: true };
     }
     const disk = new StringTable(current);
     const mine = new Map(this.table.entries());
@@ -107,11 +116,11 @@ export class WtsSession {
     }
     const merged = StringTable.merge(this.saved, edited, current);
     if (merged !== current) await write(merged);
-    return this.took(merged, mine, false);
+    return { shown: this.took(merged, mine), recreated: false };
   }
 
   /** Written: now the session takes it over. Strings typed during the write stay the editor's. */
-  private took(merged: string, mine: Map<number, string>, recreated: boolean): boolean {
+  private took(merged: string, mine: Map<number, string>): boolean {
     const next = new StringTable(merged);
     const typed = new Set<number>();
     for (const [n, v] of this.table.entries()) {
@@ -128,22 +137,31 @@ export class WtsSession {
     this.saved = merged;
     this.savedValues = new Map(new StringTable(merged).entries());
     this.saves++;
-    this.recreated = recreated;
     return shown;
   }
 }
 
+/** Whether a failed read says the file is not there: Windows error 2 (file) or 3 (path). The
+ *  Rust error text ends in "(os error N)" whatever the system language. */
+export function isNotFoundError(e: unknown): boolean {
+  return /\(os error (2|3)\)/.test(String(e)) || /^os error (2|3)$/.test(String(e));
+}
+
+/** Whether war3map.wts is really gone, and not just unreadable or in the middle of being replaced:
+ *  the read said not found, the file list was refreshed (so it can be trusted) and doesn't have
+ *  it, and the rest of map/ is still there (not a vanished folder). */
+export function fileIsMissing(x: { error: unknown; refreshed: boolean; listed: boolean; otherMapFiles: boolean }): boolean {
+  return isNotFoundError(x.error) && x.refreshed && !x.listed && x.otherMapFiles;
+}
+
 /** The packed map to point the user at: the project's build output if it exists, else the newest
- *  checkpoint (`newestCheckpoint`, a path), else null. `outputSiblings` are the names found next to
- *  the output (any case). */
-export function findPackedMap(output: string, outputSiblings: string[], newestCheckpoint: string | null): string | null {
-  const file = output.split(/[\\/]/).pop() ?? "";
-  if (file && outputSiblings.some((n) => n.toLowerCase() === file.toLowerCase())) return output;
-  return newestCheckpoint;
+ *  checkpoint (a path), else null. */
+export function findPackedMap(output: string, outputExists: boolean, newestCheckpoint: string | null): string | null {
+  return outputExists ? output : newestCheckpoint;
 }
 
 /** The warning shown when war3map.wts was recreated. */
 export function recreatedMessage(packedMap: string | null): string {
-  return "war3map.wts was missing and has been recreated from what this editor holds; strings changed elsewhere since may be lost."
-    + (packedMap ? ` The old strings can be found in ${packedMap}.` : "");
+  return "war3map.wts was missing and has been recreated from what this editor holds; strings added or changed elsewhere since may be lost."
+    + (packedMap ? ` ${packedMap} may hold the old strings.` : "");
 }
