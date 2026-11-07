@@ -140,3 +140,12 @@ export function applyPathingOverrides(wpm: Uint8Array, file: unknown, t: Terrain
   }
   return true;
 }
+
+/** What `resizeMap` does with the pathing overrides once the new wpm is built: applies them to it
+ *  (not for a same-size change, which uses the tool groups' own filters instead) and returns the
+ *  text to write to .w3proj/pathing.json, or null when the file must stay as it is. */
+export function applyResizePathing(wpm: Uint8Array, plan: ReturnType<typeof planPathingOverrides>, next: Terrain, change: Sides): string | null {
+  if (!plan) return null;
+  if (change.some((c) => c !== 0)) applyPathingOverrides(wpm, plan.file, next);
+  return plan.write ? pathingOverridesText(plan.file) : null;
+}

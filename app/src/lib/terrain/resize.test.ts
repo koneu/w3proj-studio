@@ -33,7 +33,7 @@ test("adding on the left and bottom moves the offset, not the world position", (
   assert.deepEqual(r.corners[r.width + 1], terrain(3, 3).corners[0]);
 });
 
-import { applyPathingOverrides, pathingOverridesText, planPathingOverrides, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
+import { applyPathingOverrides, applyResizePathing, pathingOverridesText, planPathingOverrides, resizePathingOverrides, type PathingOverrides, type Sides } from "./resize";
 
 // A 64×64-tile map is 256×256 pathing cells.
 const file = (t: Terrain, cells: PathingOverrides["cells"]): PathingOverrides => ({ format: "w3proj.pathing/1", width: (t.width - 1) * 4, height: (t.height - 1) * 4, cells });
@@ -136,7 +136,7 @@ test("pathing plan: a stale file whose size equals the NEW size is neither appli
   const t = big(), change: Sides = [32, 0, 0, 0], next = resizeTerrain(t, change);
   const stale = file(next, [[3, 4, 8, 0]]);
   assert.equal(planPathingOverrides(stale, t, change), null);
-  const wpm = new Uint8Array(16 + 260 * 256);
+  const wpm = new Uint8Array(16 + 384 * 256);
   const plan = planPathingOverrides(stale, t, change);
   if (plan) applyPathingOverrides(wpm, plan.file, next);
   assert.ok(wpm.every((b) => b === 0));
@@ -159,4 +159,48 @@ test("pathing plan: a malformed file is left alone", () => {
   const t = big();
   for (const bad of [null, "x", 5, {}, { width: 256, height: 256 }, { width: 256, height: 256, cells: [[1, 2, 3]] }, { width: 256, height: 256, cells: [[1, 2, 3, "4"]] }, { width: 1.5, height: 256, cells: [] }])
     assert.equal(planPathingOverrides(bad, t, [32, 0, 0, 0]), null, JSON.stringify(bad));
+});
+
+test("pathing plan: a shift with growth on one side and shrink on another moves cells and rewrites", () => {
+  const t = big();
+  const plan = planPathingOverrides(file(t, [[10, 20, 8, 0]]), t, [32, -32, 0, 0]);
+  assert.equal(plan?.write, true);
+  assert.equal(plan?.file.width, 256, "32 tiles added left, 32 removed right");
+  assert.deepEqual(plan?.file.cells, [[138, 20, 8, 0]]);
+});
+
+test("pathing plan: a real shift of a hand-ordered file rewrites it sorted; duplicates survive a no-op", () => {
+  const t = big();
+  const shifted = planPathingOverrides(file(t, [[9, 9, 1, 0], [3, 4, 8, 0]]), t, [32, 0, 0, 0]);
+  assert.equal(shifted?.write, true);
+  assert.deepEqual(shifted?.file.cells, [[131, 4, 8, 0], [137, 9, 1, 0]]);
+  const dup = planPathingOverrides(file(t, [[3, 4, 8, 0], [3, 4, 8, 0]]), t, [0, 0, 0, 0]);
+  assert.ok(dup && !dup.write);
+  assert.equal(dup.file.cells.length, 2);
+});
+
+test("pathing file: fields other than format, width, height and cells are dropped on rewrite", () => {
+  const t = big();
+  const f = { ...file(t, [[1, 1, 1, 0]]), note: "hand written" } as PathingOverrides;
+  const plan = planPathingOverrides(f, t, [32, 0, 0, 0]);
+  assert.ok(plan);
+  assert.equal("note" in JSON.parse(applyResizePathing(new Uint8Array(16 + 384 * 256), plan, resizeTerrain(t, [32, 0, 0, 0]), [32, 0, 0, 0])!), false);
+});
+
+test("applyResizePathing: what resizeMap applies and writes", () => {
+  const t = big(), change: Sides = [32, 0, 0, 0], next = resizeTerrain(t, change);
+  const wpm = () => new Uint8Array(16 + 384 * 256);
+  // stale / malformed: nothing applied, nothing written
+  let w = wpm();
+  assert.equal(applyResizePathing(w, planPathingOverrides(file(next, [[3, 4, 8, 0]]), t, change), next, change), null);
+  assert.ok(w.every((b) => b === 0));
+  // real move: applied and written
+  w = wpm();
+  const text = applyResizePathing(w, planPathingOverrides(file(t, [[3, 4, 8, 0]]), t, change), next, change);
+  assert.deepEqual(JSON.parse(text!).cells, [[131, 4, 8, 0]]);
+  assert.equal(w[16 + 4 * 384 + 131], 8);
+  // same-size: file untouched, not applied here (filterPathing path)
+  w = wpm();
+  assert.equal(applyResizePathing(w, planPathingOverrides(file(t, [[3, 4, 8, 0]]), t, [0, 0, 0, 0]), t, [0, 0, 0, 0]), null);
+  assert.ok(w.every((b) => b === 0));
 });
