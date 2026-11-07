@@ -84,6 +84,7 @@ test("a file that isn't there is remembered as such; another failure is asked ag
   busy = false;
   assert.equal((await game.read("a.dds")).length, 300);
   assert.equal(asked.filter((a) => a.path === "a.dds").length, 2);
+  assert.deepEqual(game.backendMisses, ["Nothing.tif"], "only what isn't there counts as missing, once");
 });
 
 test("another graphics mode or tileset reads again; another install forgets everything", async () => {
@@ -154,6 +155,26 @@ test("Reload forgets the files and what wasn't there: a patched install is asked
   assert.equal((await game.read("later.dds")).length, 5);
   await game.read("a.dds");
   assert.equal(asked.length, 4);
+});
+
+test("at most MAX_READS_IN_FLIGHT reads wait on the backend at once; the rest follow in order, and all arrive", async () => {
+  const { game } = make();
+  const { MAX_READS_IN_FLIGHT } = await import("./game");
+  assert.ok(MAX_READS_IN_FLIGHT >= 16 && MAX_READS_IN_FLIGHT <= 64);
+  const n = MAX_READS_IN_FLIGHT * 3;
+  for (let i = 0; i < n; i++) stored.set(`q${i}.dds`, new Uint8Array([i & 255]));
+  let open!: () => void;
+  hold = new Promise((r) => { open = r; });
+  // Not there, and the same file twice: a failure frees its place too, a shared read takes one.
+  const reads = [...Array.from({ length: n }, (_, i) => game.read(`q${i}.dds`)), game.read("q0.dds"), game.read("gone.dds").catch(() => null)];
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(asked.length, MAX_READS_IN_FLIGHT, "the rest wait their turn");
+  assert.deepEqual(asked.map((a) => a.path), Array.from({ length: MAX_READS_IN_FLIGHT }, (_, i) => `q${i}.dds`), "first come, first asked");
+  open();
+  const got = await Promise.all(reads);
+  assert.equal(asked.length, n + 1);
+  assert.deepEqual(got.slice(0, n).map((b) => b![0]), Array.from({ length: n }, (_, i) => i & 255));
+  assert.equal(got[n + 1], null);
 });
 
 test("the cache's size is a setting: a smaller one lets the oldest go at once", async () => {

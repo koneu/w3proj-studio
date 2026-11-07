@@ -1996,13 +1996,26 @@ async function gameReadsOnce(page, found) {
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
   const reads = () => page.evaluate(`w3Workbench.game.backendReads`);
+  const misses = () => page.evaluate(`w3Workbench.game.backendMisses.length`);
   // The picture waits until every model and texture is in.
-  const before = await reads();
+  const before = await reads(), missedBefore = await misses();
   await tool("terrain_screenshot", { maxSize: 64 });
   const first = (await reads()) - before;
+  // HD models name .tif textures; the game stores them as .dds only, and that is asked for first.
+  const tifMissed = await page.evaluate(`w3Workbench.game.backendMisses.slice(${missedBefore}).filter((p) => /\\.tif$/i.test(p))`);
+  if (tifMissed.length) fail(`${tifMissed.length} reads asked the game for a .tif it doesn't have (${tifMissed.slice(0, 3).join(", ")})`);
+  const storedTif = await page.evaluate(`w3.game.list().then((l) => l.filter((p) => /\\.tif$/i.test(p)).slice(0, 3))`);
+  if (storedTif.length) fail(`the game stores .tif files now (${storedTif.join(", ")}): texpath.ts's neverStoredLast no longer holds`);
   const reopen = async () => {
     await page.evaluate(`w3.editors.closeAll()`);
-    await sleep(300);
+    // Reads others started (a table read after another, queued behind the terrain's) land first:
+    // what is counted below is the reopened terrain's.
+    await until("the game reads to settle", async () => {
+      const a = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
+      await sleep(500);
+      const b = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
+      return a[0] === 0 && b[0] === 0 && a[1] === b[1];
+    }, 30000);
     const at = await reads();
     await tool("terrain_screenshot", { maxSize: 64 });
     return (await reads()) - at;

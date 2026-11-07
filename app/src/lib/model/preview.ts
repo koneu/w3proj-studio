@@ -7,7 +7,7 @@ import type { W3Api } from "../../extensions/api";
 import { toProjectPath } from "../formats/archivepath";
 import { decodeImage } from "../image/index.ts";
 import { parseMdx } from "./mdx";
-import { textureCandidates } from "./texpath";
+import { neverStoredLast, textureCandidates } from "./texpath";
 import { ModelRenderer, standClock, type Clock } from "./renderer";
 import { parseAnimProps } from "./stand";
 
@@ -91,7 +91,7 @@ export class ModelPreview {
     const layers = this.opts.prefer === "classic" ? ["War3.w3mod:"]
       : this.opts.prefer === "hd" ? ["War3.w3mod:_HD.w3mod:", "War3.w3mod:_DE.w3mod:"]
       : this.opts.prefer === "reforged" || this.opts.prefer === "de" ? ["War3.w3mod:_DE.w3mod:", "War3.w3mod:_HD.w3mod:"] : [];
-    const tries = variants.flatMap((v) => [...layers.map((l) => l + v.replace(/\\/g, "/")), v]);
+    const tries = neverStoredLast(variants.flatMap((v) => [...layers.map((l) => l + v.replace(/\\/g, "/")), v]));
     for (const v of tries) {
       try { return await this.w3.game.read(v); } catch (e) { last = e; }
     }

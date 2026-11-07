@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { gamePartOf, isMachinePath, textureCandidates } from "./texpath";
+import { gamePartOf, isMachinePath, neverStoredLast, textureCandidates } from "./texpath";
 
 test("the build machine's folder in front of the art folder is dropped", () => {
   assert.equal(gamePartOf("C:/Users/ksizemore/Box/Classic Games/Warcraft3/assets/Art/HD//Doodads/Terrain/CityBridgeExtraLarge0/StoneBridgeWide_Diffuse.tif"),
@@ -22,6 +22,22 @@ test("paths without a drive are game paths already", () => {
 
 test("an absolute path without a game part has none", () => {
   assert.equal(gamePartOf("C:/Users/dok/Downloads/arthas_BH/Blackhood01_Diffuse.tif"), null);
+});
+
+test("names the game never stores (.tif) are read last; the first one the game has stays the same", () => {
+  assert.deepEqual(neverStoredLast(["D/X.tif", "D/X.dds"]), ["D/X.dds", "D/X.tif"]);
+  assert.deepEqual(neverStoredLast(["a\\X.TIF", "a\\X.dds", "b\\X.tif", "b\\X.dds"]), ["a\\X.dds", "b\\X.dds", "a\\X.TIF", "b\\X.tif"]);
+  // The shadow map's list: as written, .blp, .dds. A .blp the game has still comes before the .dds.
+  assert.deepEqual(neverStoredLast(["X.tif", "X.blp", "X.dds"]), ["X.blp", "X.dds", "X.tif"]);
+  // Only .tif: the game has .tiff, .tga and .png files, so those keep their place.
+  for (const keep of [["X.blp", "X.dds"], ["X.tga", "X.dds"], ["X.png", "X.dds"], ["X.tiff", "X.dds"], ["X.mdx"]]) assert.deepEqual(neverStoredLast(keep), keep);
+  // Every list and every set of stored files: the first stored name found is the same.
+  const names = ["p.tif", "p.dds", "q.blp", "q.tif", "q.dds", "r.tga"];
+  for (let mask = 0; mask < 1 << names.length; mask++) {
+    const stored = new Set(names.filter((n, i) => mask & (1 << i) && !n.endsWith(".tif")));
+    const first = (list: string[]) => list.find((n) => stored.has(n));
+    assert.equal(first(neverStoredLast(names)), first(names), [...stored].join());
+  }
 });
 
 test("candidates: as written, then as .dds; with no game part the model's folder, then Textures", () => {

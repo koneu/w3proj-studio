@@ -28,6 +28,19 @@ export function gamePartOf(raw: string): string | null {
   return null;
 }
 
+/** A name the game never stores: HD models name their textures as the artists exported them
+ *  (.tif), and the game has none of those (0 of its files in November 2026; it keeps them as .dds).
+ *  Asking for one is a read that always fails: on GoldRush 297 of 994. */
+const NEVER_IN_GAME = /\.tif$/i;
+
+/** `names` in the order to read them: those the game never stores (.tif) last, the others in
+ *  their order. As a .tif is never found in the game, the first game file found doesn't change; it
+ *  is only found sooner. (A map's own .tif import now loses to a .dds of the same name, the
+ *  game's or the map's.) */
+export function neverStoredLast(names: string[]): string[] {
+  return [...names.filter((n) => !NEVER_IN_GAME.test(n)), ...names.filter((n) => NEVER_IN_GAME.test(n))];
+}
+
 /** Game paths to try for a model's texture, best first: the game part as written, then as .dds
  *  (what the game stores .blp, .tif, .tga and .png names as). `modelPath`: the model that names
  *  it, for paths with no game part (the file next to the model, then in Textures). */

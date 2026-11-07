@@ -6,6 +6,7 @@ import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
+import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { bounds, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni } from "../../lib/formats/text";
@@ -245,7 +246,7 @@ export class ObjectLoader {
       const tails = /^([a-z]:)?[\\/]/i.test(path)
         ? path.split(/[\\/]+/).map((_, i, parts) => parts.slice(i).join("\\")).slice(1).filter((t) => t.includes("\\"))
         : [path];
-      const variants = tails.flatMap((t) => (/\.(blp|tif|tga)$/i.test(t) ? [t, t.replace(/\.\w+$/, ".dds")] : [t]));
+      const variants = neverStoredLast(tails.flatMap((t) => (/\.(blp|tif|tga)$/i.test(t) ? [t, t.replace(/\.\w+$/, ".dds")] : [t])));
       t = this.track((async () => {
         let error = "";
         for (const v of variants) {

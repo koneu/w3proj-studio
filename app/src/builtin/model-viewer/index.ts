@@ -2,6 +2,7 @@ import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/a
 import { errorView, formatBytes, h } from "../../workbench/dom";
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
+import { neverStoredLast } from "../../lib/model/texpath";
 import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
 
 const FILTER_NAMES = ["none", "transparent", "blend", "additive", "add alpha", "modulate", "modulate 2x"];
@@ -12,8 +13,8 @@ function textureLoader(w3: W3Api, doc: EditorDocument) {
   const gamePath = doc.path.startsWith("game:") ? doc.path.slice(5) : null;
   // "War3.w3mod:_HD.w3mod:Units/…/X.mdx" → "War3.w3mod:_HD.w3mod:"
   const layer = gamePath ? gamePath.slice(0, gamePath.lastIndexOf(":") + 1) : null;
-  // HD models name .tif/.blp sources that the game ships as .dds.
-  const variants = (p: string) => (/\.(blp|tif|tga)$/i.test(p) ? [p, p.replace(/\.\w+$/, ".dds")] : [p]);
+  // HD models name .tif/.blp sources that the game ships as .dds; a .tif is never there, so last.
+  const variants = (p: string) => neverStoredLast(/\.(blp|tif|tga)$/i.test(p) ? [p, p.replace(/\.\w+$/, ".dds")] : [p]);
   return async (path: string): Promise<Uint8Array> => {
     const slash = path.replace(/\\/g, "/");
     if (layer) {

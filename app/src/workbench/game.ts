@@ -9,6 +9,11 @@ export const GAME_SCHEME = "game:";
 export const GAME_CACHE_SETTING = "game.cacheMegabytes";
 export const GAME_CACHE_DEFAULT_MB = 1024;
 
+/** Game reads waiting on the backend at most. Opening a big map asks for a thousand files at once;
+ *  the backend reads them a few at a time anyway, and the rest only held memory and IPC there
+ *  (about 315 in flight on GoldRush). Later ones wait here, first come first asked. */
+export const MAX_READS_IN_FLIGHT = 32;
+
 /** Read-only access to the installed game's data via the backend. The game's files don't change
  *  while the app runs, so what was read is kept (up to `game.cacheMegabytes`, the least recently
  *  read go first) and a file that isn't there is remembered as such: a map opened again, another
@@ -23,6 +28,14 @@ export class GameService {
   private cachedBytes = 0;
   /** Reads that went to the backend: for tests and the app smoke's guard. */
   backendReads = 0;
+  /** Paths the backend said aren't there, in order (each once, as they're remembered): for the app smoke's guard. */
+  readonly backendMisses: string[] = [];
+  /** Reads waiting on the backend now, and the ones queued for a place (see MAX_READS_IN_FLIGHT). */
+  private inFlight = 0;
+  private queued: (() => void)[] = [];
+
+  /** Backend reads not finished yet, running or queued: the app smoke waits for none before it counts. */
+  get readsPending(): number { return this.inFlight + this.queued.length; }
 
   /** `cacheBytes`: a fixed size instead of the setting's (tests). */
   constructor(private settings: Settings, private cacheBytes?: number) {
@@ -98,17 +111,32 @@ export class GameService {
       this.files.set(key, read);
     } else {
       this.backendReads++;
-      const started = this.invoke<ArrayBuffer>("game_read", { ...args, path, tileset: tileset ?? null }).then((b) => new Uint8Array(b));
+      const started = this.limited(() => this.invoke<ArrayBuffer>("game_read", { ...args, path, tileset: tileset ?? null })).then((b) => new Uint8Array(b));
       read = started;
       this.files.set(key, started);
       started.then((bytes) => this.keep(key, started, bytes.byteLength), (e) => {
         // Only "not there" is for good; another failure (game data that can't be opened, the
         // storage busy) is tried again next time.
         const message = typeof e === "string" ? e : String((e as Error)?.message ?? e);
-        if (!/^not found: /.test(message) && this.files.get(key) === started) this.files.delete(key);
+        if (/^not found: /.test(message)) this.backendMisses.push(path);
+        else if (this.files.get(key) === started) this.files.delete(key);
       });
     }
     return (await read).slice();
+  }
+
+  /** Runs a backend read when one of MAX_READS_IN_FLIGHT places is free; a finished read hands
+   *  its place to the longest waiting. */
+  private async limited<T>(job: () => Promise<T>): Promise<T> {
+    if (this.inFlight < MAX_READS_IN_FLIGHT) this.inFlight++;
+    else await new Promise<void>((give) => this.queued.push(give));
+    try {
+      return await job();
+    } finally {
+      const next = this.queued.shift();
+      if (next) next();
+      else this.inFlight--;
+    }
   }
 
   /** Counts a finished read in, and lets the least recently used go past the limit. */
