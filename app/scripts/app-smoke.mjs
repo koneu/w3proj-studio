@@ -18,6 +18,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { inflateSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
@@ -728,6 +729,212 @@ async function testMapWithoutGame(page, found) {
   }
 }
 
+/** Delete Invalid Objects, Export Minimap, .w3o export and import, and the Sound Editor's export and
+ *  replace, run through the app on scratch copies of the mini map; every project they change is
+ *  packed by the CLI and verified. The system's dialogs can't be reached, so their answers are put in
+ *  by hand. */
+async function moduleFunctions(page, found) {
+  const fail = (what) => found.push(`module functions: ${what}`);
+  const dir = join(work, "module-functions");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const verify = (root, label) => {
+    const map = join(dir, `${label}.w3x`);
+    const packed = spawnSync(cli, ["pack", root, "-o", map], { encoding: "utf8" });
+    const r = packed.status === 0 ? spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" }) : packed;
+    if (r.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(r.stdout ?? "")) fail(`${label}: verify: ${((r.stdout ?? "") + (r.stderr ?? "")).trim().slice(-300)}`);
+  };
+  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const put = (p, o) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(o, null, 2)); };
+  const openProject = async (root) => {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  };
+  // The system's dialogs: the next answers, and the questions asked.
+  await page.evaluate(`(() => {
+    window.__d = { save: null, file: null, asked: [] };
+    w3.window.pickSaveFile = async () => window.__d.save;
+    w3.window.pickFile = async () => window.__d.file;
+    w3.window.confirm = async (m) => { window.__d.asked.push(m); return true; };
+  })()`);
+  const answer = (o) => page.evaluate(`Object.assign(window.__d, ${JSON.stringify(o)}, { asked: [] })`);
+  const asked = () => page.evaluate(`window.__d.asked`);
+  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
+  const tool = async (name) => {
+    const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } });
+    const reply = JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(message)})`));
+    if (reply.error || reply.result?.isError) throw new Error(`${name}: ${reply.result?.content?.[0]?.text ?? reply.error?.message}`);
+  };
+  // The extensions are activated on demand; the commands need them.
+  await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
+
+  // ---- Delete Invalid Objects ---------------------------------------------------------------
+  const a = join(dir, "invalid");
+  cpSync(FIXTURE, a, { recursive: true });
+  {
+    const units = json(join(a, "map", "war3mapUnits.doo.json"));
+    const doodads = json(join(a, "map", "war3map.doo.json"));
+    const hfoo = units.units[0];
+    units.units.push({ ...hfoo, id: "zzzz", skinId: "zzzz" }, { ...hfoo, id: "sloc", skinId: "sloc" }, { ...hfoo, id: "zzzz", skinId: "zzzz" });
+    doodads.doodads.push({ ...doodads.doodads[0], id: "QQQQ", skinId: "QQQQ" });
+    put(join(a, "map", "war3mapUnits.doo.json"), units);
+    put(join(a, "map", "war3map.doo.json"), doodads);
+    const before = doodads.doodads.length - 1;
+    await openProject(a);
+    await answer({});
+    const err = await run("w3.problems.deleteInvalid");
+    if (err) fail(`Delete Invalid Objects: ${err}`);
+    const question = (await asked())[0] ?? "";
+    if (!/Delete 3 placed objects of 2 unknown types \((zzzz ×2, QQQQ ×1|QQQQ ×1, zzzz ×2)\)/.test(question)) fail(`Delete Invalid Objects asked "${question}"`);
+    const after = json(join(a, "map", "war3mapUnits.doo.json")).units.map((u) => u.id);
+    if (after.join() !== "hfoo,sloc") fail(`placed units after: ${after.join()}`);
+    const left = json(join(a, "map", "war3map.doo.json")).doodads;
+    if (left.length !== before || left.some((d) => d.id === "QQQQ")) fail(`placed doodads after: ${left.map((d) => d.id).join()}`);
+    const checkpoints = existsSync(join(a, "build", "checkpoints")) ? readdirSync(join(a, "build", "checkpoints")) : [];
+    if (!checkpoints.length) fail("Delete Invalid Objects made no checkpoint");
+    // The same again finds nothing and asks nothing.
+    await answer({});
+    await run("w3.problems.deleteInvalid");
+    if ((await asked()).length) fail("Delete Invalid Objects asked with nothing to delete");
+    verify(a, "invalid");
+  }
+
+  // ---- Export Minimap -----------------------------------------------------------------------
+  const b = join(dir, "minimap");
+  cpSync(FIXTURE, b, { recursive: true });
+  {
+    await openProject(b);
+    try { await tool("rebuild_map"); } catch (e) { fail(`rebuild_map: ${e.message}`); }
+    await until("the minimap", () => existsSync(join(b, "map", "war3mapMap.blp")), 20000).catch(() => fail("no war3mapMap.blp to export"));
+    const out = join(dir, "minimap-out.png");
+    await answer({ save: out });
+    const err = await run("w3.terrain.exportMinimap");
+    if (err) fail(`Export Minimap: ${err}`);
+    else if (!existsSync(out)) fail("Export Minimap wrote no file");
+    else {
+      const png = readFileSync(out);
+      if (png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") fail("the minimap file isn't a PNG");
+      else if (png.readUInt32BE(16) !== 256 || png.readUInt32BE(20) !== 256) fail(`the minimap is ${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
+      else {
+        // The pixels are the minimap's: not one flat colour.
+        const raw = inflateSync(png.subarray(41, png.length - 12));
+        const colours = new Set();
+        for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x += 4) colours.add(raw.readUIntBE(y * 1025 + 1 + x * 4, 3));
+        if (colours.size < 4) fail(`the exported minimap has ${colours.size} colours`);
+      }
+    }
+    verify(b, "minimap");
+  }
+
+  // ---- .w3o: export all, import, export one -------------------------------------------------
+  const c = join(dir, "objects");
+  cpSync(FIXTURE, c, { recursive: true });
+  put(join(c, "map", "war3map.w3u.json"), {
+    format: "w3proj.objects/1", version: 3,
+    original: [{ base: "hpea", mods: [{ field: "uhpm", type: "int", value: 99 }] }, { base: "hkni", mods: [] }],
+    custom: [{ base: "hfoo", id: "h000", mods: [{ field: "unam", type: "string", value: "Smoke Footman" }] }],
+  });
+  put(join(c, "map", "war3map.w3q.json"), { format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "Rhme", id: "R000", mods: [{ field: "gnam", type: "string", level: 1, data: 0, value: "Smoke Upgrade" }] }] });
+  {
+    await openProject(c);
+    const out = join(dir, "all-object-data");
+    await answer({ save: out });
+    const err = await run("w3.objects.exportAll");
+    if (err) fail(`Export All Object Data: ${err}`);
+    const file = `${out}.w3o`;
+    if (!existsSync(file)) fail("Export All Object Data wrote no .w3o");
+    else {
+      const bin = readFileSync(file);
+      // Version 1, units present first; both kinds' texts are in it.
+      if (bin.readUInt32LE(0) !== 1 || bin.readUInt32LE(4) !== 1 || !bin.includes(Buffer.from("Smoke Footman")) || !bin.includes(Buffer.from("Smoke Upgrade"))) fail(`the .w3o starts ${bin.subarray(0, 12).toString("hex")}`);
+      // Into a copy that has none of it: the file brings everything back.
+      const d = join(dir, "objects-in");
+      cpSync(FIXTURE, d, { recursive: true });
+      await openProject(d);
+      await answer({ file });
+      const e2 = await run("w3.objects.importAll");
+      if (e2) fail(`Import Object Data: ${e2}`);
+      else {
+        const u = json(join(d, "map", "war3map.w3u.json"));
+        // The copy keeps the mini map's own change to the Footman, and gains the file's.
+        const peasant = u.original.find((o) => o.base === "hpea");
+        if (u.custom.map((o) => o.id).join() !== "h000" || !peasant || !u.original.some((o) => o.base === "hfoo")) fail(`imported units: ${JSON.stringify(u).slice(0, 200)}`);
+        else if (u.custom[0].mods[0].value !== "Smoke Footman" || peasant.mods[0].value !== 99) fail("imported unit values differ");
+        const q = json(join(d, "map", "war3map.w3q.json"));
+        if (q.custom[0]?.id !== "R000" || q.custom[0].mods[0].level !== 1) fail(`imported upgrades: ${JSON.stringify(q).slice(0, 200)}`);
+        if (!(await asked())[0]?.includes("2 units")) fail(`Import asked "${(await asked())[0]}"`);
+        if (!existsSync(join(d, "build", "checkpoints"))) fail("Import made no checkpoint");
+      }
+      verify(d, "objects-in");
+    }
+
+    // One object, from the Object Editor list's menu, as the user would.
+    await openProject(c);
+    const one = join(dir, "one-object.w3o");
+    await answer({ save: one });
+    await page.evaluate(`w3.editors.open("map/war3map.w3u.json")`);
+    await until("the object list", () => page.evaluate(`[...document.querySelectorAll(".obj-item")].some((e) => e.textContent.includes("Smoke Footman"))`), 30000);
+    await page.evaluate(`[...document.querySelectorAll(".obj-item")].find((e) => e.textContent.includes("Smoke Footman")).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 60, clientY: 60 }))`);
+    await until("the menu", () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith("Export Object"))`), 5000);
+    await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith("Export Object")).click()`);
+    await until("the file", () => existsSync(one), 10000).catch(() => fail("Export Object wrote no file"));
+    if (existsSync(one)) {
+      const bin = readFileSync(one);
+      if (bin.readUInt32LE(0) !== 1 || bin.readUInt32LE(4) !== 1 || !bin.includes(Buffer.from("Smoke Footman")) || bin.includes(Buffer.from("hpea"))) fail("Export Object: the file isn't one object of units");
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(c, "objects");
+  }
+
+  // ---- Sound Editor: export and replace -----------------------------------------------------
+  const s = join(dir, "sounds");
+  cpSync(FIXTURE, s, { recursive: true });
+  {
+    const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.from([40, 0, 0, 0]), Buffer.from("WAVEfmt "), Buffer.from([16, 0, 0, 0, 1, 0, 1, 0, 0x40, 0x1f, 0, 0, 0x40, 0x1f, 0, 0, 1, 0, 8, 0]), Buffer.from("data"), Buffer.from([4, 0, 0, 0, 128, 130, 128, 126])]);
+    mkdirSync(join(s, "map", "war3mapImported"), { recursive: true });
+    writeFileSync(join(s, "map", "war3mapImported", "boom.wav"), wav);
+    put(join(s, "map", "war3map.imp.json"), { format: "w3proj.imports/1", version: 1, files: [{ flags: 21, path: "war3mapImported\\boom.wav" }, { flags: 5, path: "readme.txt" }] });
+    put(join(s, "map", "war3map.w3s.json"), {
+      format: "w3proj.sounds/1", version: 3,
+      sounds: [{
+        name: "gg_snd_boom", file: "war3mapImported\\boom.wav", eaxEffect: "DefaultEAXON", flags: 16, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+        channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+        variableName: "gg_snd_boom", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+        speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+      }],
+    });
+    await openProject(s);
+    verify(s, "sounds-before");
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`!!document.querySelector("tr.snd-row")`), 20000);
+    await page.evaluate(`document.querySelector("tr.snd-row").click()`);
+    const out = join(dir, "boom-out.wav");
+    await answer({ save: out });
+    const err = await run("w3.sounds.export");
+    if (err) fail(`Export Sound: ${err}`);
+    else if (!existsSync(out) || !readFileSync(out).equals(wav)) fail("the exported sound isn't the map's file");
+
+    const mp3 = join(dir, "replacement.mp3");
+    const mp3Bytes = Buffer.concat([Buffer.from("ID3"), Buffer.from([3, 0, 0, 0, 0, 0, 0]), Buffer.alloc(64, 0x55)]);
+    writeFileSync(mp3, mp3Bytes);
+    await answer({ file: mp3 });
+    const e2 = await run("w3.sounds.replace");
+    if (e2) fail(`Replace Internal Sound: ${e2}`);
+    else {
+      const now = join(s, "map", "war3mapImported", "boom.mp3");
+      if (!existsSync(now) || !readFileSync(now).equals(mp3Bytes)) fail("the replacement isn't in the map");
+      if (existsSync(join(s, "map", "war3mapImported", "boom.wav"))) fail("the replaced sound is still in the map");
+      const imp = json(join(s, "map", "war3map.imp.json")).files.map((f) => f.path);
+      if (imp.join() !== "war3mapImported\\boom.mp3,readme.txt") fail(`the import list: ${imp.join()}`);
+      if (!existsSync(join(s, "build", "checkpoints"))) fail("Replace Internal Sound made no checkpoint");
+      // The sound still names its file; the game takes it under the other extension.
+      if (json(join(s, "map", "war3map.w3s.json")).sounds[0].file !== "war3mapImported\\boom.wav") fail("the sound entry changed");
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(s, "sounds-after");
+  }
+}
+
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const hash = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 const snapshot = (dir) => new Map(walk(dir).map((p) => [relative(dir, p).replaceAll("\\", "/"), hash(p)]));
@@ -834,6 +1041,7 @@ async function run() {
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
+    await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     found.push(...problems(page.events));
     if (exited !== null) found.push(`the app exited with ${exited}`);
 
