@@ -205,6 +205,17 @@ export interface EffectSource {
   classic: boolean;
 }
 
+/** The order object groups are drawn in; others come after, in the order they came. */
+export const GROUP_ORDER = ["cliffs", "shoreline", "doodads", "units"];
+
+/** The batches with one group's replaced, at the group's place in GROUP_ORDER. */
+export function withGroup<B extends { group: string }>(batches: readonly B[], group: string, replacement: readonly B[]): B[] {
+  const rank = (g: string) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? GROUP_ORDER.length : i; };
+  const others = batches.filter((b) => b.group !== group);
+  const at = others.findIndex((b) => rank(b.group) > rank(group));
+  return at < 0 ? [...others, ...replacement] : [...others.slice(0, at), ...replacement, ...others.slice(at)];
+}
+
 export interface ObjectBatch {
   group: string;
   gpu: ModelGpu;
@@ -292,6 +303,15 @@ export class TerrainRenderer {
   /** Several at once, for what's being pasted. */
   ghosts: NonNullable<TerrainRenderer["ghost"]>[] = [];
   readonly batches: ObjectBatch[] = [];
+
+  /** Puts the batches of one group in place of its old ones. Groups keep a fixed order, so what is
+   *  drawn over what (see-through layers blend in drawing order) doesn't follow which group
+   *  finished loading first. */
+  setGroup(group: string, batches: ObjectBatch[]) {
+    const next = withGroup(this.batches, group, batches);
+    this.batches.length = 0;
+    this.batches.push(...next);
+  }
   /** Camera: looks at `target` from `distance` away. */
   yaw = -Math.PI / 2;
   pitch = 0.95;

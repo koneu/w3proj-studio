@@ -1515,9 +1515,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const waves = { cliffShores: (flags & CLIFF_SHORE_WAVES) !== 0, rollingShores: (flags & ROLLING_SHORE_WAVES) !== 0 };
           const { batches } = await loader.loadModels("shoreline", planShoreline(terrain, shoreModels, waves));
           if (gen !== shoreGen) return;
-          const others = renderer.batches.filter((b) => b.group !== "shoreline");
-          renderer.batches.length = 0;
-          renderer.batches.push(...others, ...batches);
+          renderer.setGroup("shoreline", batches);
           redraw();
         }
         /** Places cliff models for the current layers (initially and after edits). */
@@ -1529,9 +1527,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const { batches, failed } = await loader.loadModels("cliffs", requests);
           if (gen !== cliffGen) return;
           const broken = new Set(failed.map((f) => f.index));
-          const others = renderer.batches.filter((b) => b.group !== "cliffs");
-          renderer.batches.length = 0;
-          renderer.batches.push(...others, ...batches.map((b) => ({ ...b, followGround: true })));
+          renderer.setGroup("cliffs", batches.map((b) => ({ ...b, followGround: true })));
           renderer.setCliffTiles(new Set(requests.flatMap((r, i) => (broken.has(i) ? [] : r.tiles))), groundOverrides);
           const tiles = requests.reduce((n, r) => n + r.tiles.length, 0);
           cliffInfo.textContent = `${tiles.toLocaleString()} cliff tiles · ${requests.length} cliff models${failed.length ? ` · ${failed.length} failed` : ""}`;
@@ -1644,9 +1640,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf), loader.load("units", units, skins, team, baseOf)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
-          const others = renderer.batches.filter((b) => b.group !== "doodads" && b.group !== "units");
-          renderer.batches.length = 0;
-          renderer.batches.push(...others, ...d.batches, ...u.batches);
+          renderer.setGroup("doodads", d.batches);
+          renderer.setGroup("units", u.batches);
           void showSplats();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.

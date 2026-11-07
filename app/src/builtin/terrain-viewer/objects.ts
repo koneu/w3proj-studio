@@ -316,9 +316,10 @@ export class ObjectLoader {
     return this.model({ path: modelPath(skin, variation), replaceable, props: skin.animProps, instances: [] });
   }
 
-  /** Loads each requested model; failed ones are reported by index. */
+  /** Loads each requested model; failed ones are reported by index. The batches keep the order of
+   *  the requests, whichever model loads first: see-through layers blend in drawing order. */
   async loadModels(group: string, requests: ModelRequest[]): Promise<{ batches: ObjectBatch[]; failed: { index: number; error: string }[] }> {
-    const batches: ObjectBatch[] = [], failed: { index: number; error: string }[] = [];
+    const loaded: (ObjectBatch | undefined)[] = [], failed: { index: number; error: string }[] = [];
     await Promise.all(requests.map(async (req, index) => {
       try {
         const gpu = await this.model(req);
@@ -337,12 +338,13 @@ export class ObjectLoader {
             Math.max(16, r * s),
           ];
         }
-        batches.push({ group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined });
+        loaded[index] = { group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined };
       } catch (e) {
         failed.push({ index, error: `${req.path}: ${(e as Error).message ?? e}` });
       }
     }));
-    return { batches, failed };
+    failed.sort((a, b) => a.index - b.index);
+    return { batches: loaded.filter((b): b is ObjectBatch => b !== undefined), failed };
   }
 
   /** Placed doodads/units: models from the skin tables. Custom object ids
