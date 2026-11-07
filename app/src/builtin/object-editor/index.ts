@@ -16,7 +16,7 @@ import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terra
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { mergeSkin } from "./w3o";
-import { summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
@@ -33,7 +33,7 @@ interface ObjectFile { format: string; version: number; original: Obj[]; custom:
 const clipboard: Record<string, { count: number; ready: Promise<{ objects: Obj[]; along: Copied[] }> }> = {};
 /** What the terrain view was told about types, per project and set of types: the answer to the question
  *  and the ids it left in the map. A later paste of the same asks nothing while those are still there. */
-const answered = new Map<string, { renames: Map<string, string>; targets: string[] }>();
+const answered = new Map<string, { renames: Map<string, string>; targets: Map<string, string> }>();
 /** A field value copied by the field menu: goes into any field of the same type. */
 let fieldClip: { type: string; value: number | string } | null = null;
 
@@ -194,8 +194,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push({ dispose: () => { for (const t of ["keydown", "keyup", "mousedown"] as const) window.removeEventListener(t, trackShift, true); } });
   const images = imageLoader(w3);
   const objects = objectsService(w3, {
-    async typesFor(ids: readonly string[]) {
-      const view = await viewMap(w3);
+    async typesFor(ids: readonly string[], root?: string) {
+      const view = await viewMap(w3, undefined, root);
       const seeds = [...new Set(ids)].flatMap((id) => view.customs.get(id) ?? []);
       return [...seeds, ...referencedBy(seeds, view.customs, view.holdsIds)];
     },
@@ -204,27 +204,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const root = w3.workspace.project()?.root ?? "";
       const key = `${root}\n${JSON.stringify(types)}`;
       const before = answered.get(key);
-      if (before) {
-        // Asked about this already: the answer holds as long as what it left in the map is still there (an undo takes it away).
+      // Unsaved object data isn't what the check would read: no shortcut then, the paste settles it.
+      const unsavedData = w3.editors.unsavedPaths().some((p) => /^map\/war3map(Skin)?\.w3[utbdahq]\.json$/i.test(p));
+      if (before && !unsavedData) {
+        // Asked about this already: the answer holds while what it left in the map is there as it was (an undo takes it away, an edit changes it).
         const view = await viewMap(w3);
-        if (before.targets.every((id) => view.customs.has(id))) return new Map(before.renames);
+        if (answerHolds(before.targets, (id) => view.customs.get(id)?.object)) return new Map(before.renames);
         answered.delete(key);
-      }
+      } else if (before) answered.delete(key);
       if (!(await settleEditors(w3))) return null;
       const settled = await settle(w3, { chosen: [], along: [...types] }, label, undefined, false);
       if (!settled) return null;
       const plan = settled.plan;
-      const remember = () => {
+      const remember = async () => {
+        const view = await viewMap(w3);
         if (answered.size >= 20) answered.delete(answered.keys().next().value as string);
-        answered.set(key, { renames: new Map(plan.renames), targets: plan.items.flatMap((i) => (i.to && i.fate !== "chosen" ? [i.to] : [])) });
+        const targets = new Map<string, string>();
+        for (const i of plan.items) if (i.to && i.fate !== "chosen") targets.set(i.to, signature(view.customs.get(i.to)?.object));
+        answered.set(key, { renames: new Map(plan.renames), targets });
       };
       if (plan.writes.length) {
         const title = `Add ${plan.writes.length} object${plan.writes.length === 1 ? "" : "s"} for ${label}`;
         if (!(await applyPlan(w3, plan, title, async () => emptyFile(w3) as Promise<EditFile>))) return null;
-        remember();
+        await remember();
         void w3.window.showInfo(summaryTypes(plan), "Undo").then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
       }
-      if (!plan.writes.length) remember();
+      if (!plan.writes.length) await remember();
       return plan.renames;
     },
   });

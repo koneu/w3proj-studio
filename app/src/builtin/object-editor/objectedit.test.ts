@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, assertPlanFits, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
 import type { Plan, PlanItem } from "../../lib/objects/copydeps";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
@@ -204,4 +204,28 @@ test("overwritten objects lose their Skin entry; a Skin file without them is lef
   assert.equal(rest.original.length, 1);
   assert.equal(skin.custom.length, 2, "the Skin file given is untouched");
   assert.equal(withoutSkinEntries(skin, new Set(["A009"])), null);
+});
+
+test("an earlier answer holds only while its objects are there as they were", () => {
+  const a = { base: "AHhb", id: "A001", mods: [{ field: "anam", value: "x" }] };
+  const targets = new Map([["A001", signature(a)], ["B001", signature({ base: "Bslo", id: "B001" })]]);
+  const now = (changed?: unknown, gone = false) => (id: string) => (id === "A001" ? changed ?? a : gone ? undefined : { base: "Bslo", id: "B001" });
+  assert.equal(answerHolds(targets, now()), true);
+  assert.equal(answerHolds(targets, now({ ...a, mods: [{ field: "anam", value: "y" }] })), false, "an object edited since");
+  assert.equal(answerHolds(targets, now(undefined, true)), false, "an object gone, as after an undo");
+  assert.equal(answerHolds(new Map(), () => undefined), true);
+  assert.notEqual(signature(undefined), signature({}), "nothing is not an empty object");
+});
+
+test("a Skin file kept raw only is told from one with a JSON form", () => {
+  assert.equal(rawOnlySkin(["map/war3mapSkin.w3h"], "w3h"), true);
+  assert.equal(rawOnlySkin(["map/war3mapSkin.w3h", "map/war3mapSkin.w3h.json"], "w3h"), false);
+  assert.equal(rawOnlySkin(["map/war3map.w3h.json"], "w3h"), false, "no Skin file at all");
+  assert.equal(rawOnlySkin(["map/war3mapSkin.w3a"], "w3h"), false, "another kind's");
+});
+
+test("the overwrite prompt names the use of an id, and says when the placements couldn't be read", () => {
+  assert.equal(describeUse("B001", { objects: 1, placed: 0 }), "B001: 1 object, 0 placed");
+  assert.equal(describeUse("B001", { objects: 2, placed: 3 }), "B001: 2 objects, 3 placed");
+  assert.equal(describeUse("B001", { objects: 0, placed: null }), "B001: 0 objects, an unknown number of placed");
 });

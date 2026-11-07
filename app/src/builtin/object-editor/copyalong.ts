@@ -11,7 +11,7 @@ import { StringTable } from "../../lib/formats/wts";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { entryIds } from "../../lib/terrain/entryids";
 import { idsUsedBy } from "../../lib/objects/refs";
-import { assertPlanFits, copyOf, kindsOf, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
+import { assertPlanFits, copyOf, describeUse, rawOnlySkin, kindsOf, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
 import { OBJECT_CODE, OBJECT_LIST } from "./fields";
 import { objectName } from "./objectinfo";
 import { stripColors } from "./service";
@@ -71,7 +71,12 @@ const emptyFile = (version = 3): EditFile => ({ format: "w3proj.objects/1", vers
 /** Reads the map as the rules need it. A kind's data the game can't give, or an object file that is there
  *  but can't be read, stops it with a message: either would pass for "nothing there" and paste over things. */
 export async function viewMap(w3: W3Api, live?: Live, root = w3.workspace.project()?.root ?? ""): Promise<MapView> {
-  const wts = await w3.workspace.readText(`${root}\\map\\war3map.wts`).catch(() => null);
+  // Missing means no string table; there but unreadable stops it: TRIGSTR references would cross unresolved.
+  const wtsPath = `${root}\\map\\war3map.wts`;
+  let wts: string | null = null;
+  if (await w3.backend.invoke<boolean>("fs_exists", { path: wtsPath })) {
+    try { wts = await w3.workspace.readText(wtsPath); } catch { throw new Error("map/war3map.wts is there but can't be read."); }
+  }
   const table = wts === null ? null : new StringTable(wts);
   const text = live?.text ?? ((v: string) => {
     const n = table ? StringTable.ref(v) : null;
@@ -170,18 +175,19 @@ function listOf(view: MapView, items: { ext: string; object: CopyObject }[]): st
 }
 
 /** How many objects of the map and placed objects use each of `ids`. */
-export async function usageOf(w3: W3Api, view: MapView, ids: string[]): Promise<Map<string, { objects: number; placed: number }>> {
+export async function usageOf(w3: W3Api, view: MapView, ids: string[]): Promise<Map<string, { objects: number; placed: number | null }>> {
   const want = new Set(ids);
   const users = new Map<string, number>();
   for (const f of view.merged.values()) for (const o of [...f.custom, ...f.original]) for (const id of idsUsedBy(o, want)) users.set(id, (users.get(id) ?? 0) + 1);
   const placed = new Map<string, number>();
+  let unknown = false;
   for (const [path, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
-    const doc = await readDoc<Record<string, unknown>>(w3, view.root, path).catch(() => null);
+    const doc = await readDoc<Record<string, unknown>>(w3, view.root, path).catch(() => { unknown = true; return null; });
     for (const e of Array.isArray(doc?.[key]) ? (doc![key] as Record<string, unknown>[]) : []) {
       for (const id of entryIds(e)) if (want.has(id)) placed.set(id, (placed.get(id) ?? 0) + 1);
     }
   }
-  return new Map(ids.map((id) => [id, { objects: users.get(id) ?? 0, placed: placed.get(id) ?? 0 }]));
+  return new Map(ids.map((id) => [id, { objects: users.get(id) ?? 0, placed: unknown ? null : placed.get(id) ?? 0 }]));
 }
 
 export interface Settled { plan: Plan; policy: Policy | "alone" }
@@ -205,10 +211,11 @@ export async function settle(w3: W3Api, set: CopySet, label: string, live?: Live
     const added = brought.filter((i) => i.fate === "add");
     const rest = added.length ? ` · Added as they are: ${listing(added)}` : "";
     const use = await usageOf(w3, view, plan.conflicts);
-    const used = plan.conflicts.map((id) => `${id}: ${use.get(id)!.objects} object${use.get(id)!.objects === 1 ? "" : "s"}, ${use.get(id)!.placed} placed`).join("; ");
+    const used = plan.conflicts.map((id) => describeUse(id, use.get(id)!)).join("; ");
+    const rawSkin = [...new Set(plan.conflicts.map((id) => view.customs.get(id)!.ext))].filter((ext) => rawOnlySkin(w3.workspace.files().map((f) => f.path), ext));
     items.push(
       { label: "Keep this map's versions", description: `${plan.conflicts.length} differ`, detail: `${differ}${rest}${note}`, value: "keep" },
-      { label: "Overwrite them with the copied versions", detail: `${differ}. Used by (this map's objects, placed objects) ${used}.${rest}${note}`, value: "overwrite" },
+      ...(rawSkin.length ? [] : [{ label: "Overwrite them with the copied versions", detail: `${differ}. Used by (this map's objects, placed objects) ${used}. Fields they have only in this map's Skin files are dropped.${rest}${note}`, value: "overwrite" as const }]),
       { label: "Paste them under new ids", detail: `${differ}. Everything pasted that refers to them follows.${rest}${note}`, value: "new" },
     );
   } else {
@@ -257,6 +264,8 @@ export async function applyPlan(w3: W3Api, plan: Plan, title: string, emptyObjec
       // Encodes it too: what can't be packed doesn't get written.
       out.push({ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(tidy) }) });
       const gone = new Set(plan.writes.filter((x) => x.ext === ext && x.overwrites).map((x) => x.overwrites));
+      // A Skin file kept raw can't be changed here, and leaving its entry would put old values back: refused.
+      if (gone.size) jsonPathOf(w3, `war3mapSkin.${ext}`);
       const skin = skins.get(ext);
       const rest = skin && gone.size ? withoutSkinEntries(skin, gone) : null;
       if (rest) {

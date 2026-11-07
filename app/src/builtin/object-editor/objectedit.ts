@@ -144,6 +144,25 @@ export function withoutSkinEntries(skin: EditFile, ids: ReadonlySet<string | und
   return { ...skin, custom: skin.custom.filter((o) => !ids.has(o.id)) };
 }
 
+/** What an object holds, to tell later whether it is still the same. */
+export const signature = (o: unknown) => JSON.stringify(o ?? null);
+
+/** Whether an earlier answer still holds: every object it left in the map (id to signature) is there as it was. */
+export function answerHolds(targets: ReadonlyMap<string, string>, now: (id: string) => unknown): boolean {
+  return [...targets].every(([id, sig]) => signature(now(id)) === sig);
+}
+
+/** Whether a project (its file paths) keeps a kind's Skin file raw only: it can't be changed as text. */
+export function rawOnlySkin(paths: readonly string[], ext: string): boolean {
+  const files = new Set(paths.map((p) => p.toLowerCase()));
+  return !files.has(`map/war3mapskin.${ext}.json`) && files.has(`map/war3mapskin.${ext}`);
+}
+
+/** "B000: 2 objects, 1 placed"; `placed` null when the placements couldn't be read. */
+export function describeUse(id: string, use: { objects: number; placed: number | null }): string {
+  return `${id}: ${use.objects} object${use.objects === 1 ? "" : "s"}, ${use.placed ?? "an unknown number of"} placed`;
+}
+
 /** The kinds a plan writes to. */
 export const kindsOf = (plan: Plan) => [...new Set(plan.writes.map((w) => w.ext))];
 

@@ -2018,8 +2018,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const takeTypes = (f: Fragment) => {
           // The type of each, and what it carries, can do, drops or picks from.
           const ids = [...new Set(f.objects.flatMap((o) => entryIds(o.entry)))];
-          void w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.typesFor(ids)).then((types) => { if (types.length) f.types = types; },
-            (e) => void w3.window.showWarning(`The custom objects these refer to couldn't be gathered (${(e as Error).message ?? e}). Pasting them elsewhere won't bring their abilities and the like.`));
+          // Read from the project the objects are copied in, even if another one is open when this finishes. The fragment
+          // holds the promise from the start, so a paste or a turn before it is done waits for it.
+          const root = w3.workspace.project()?.root;
+          f.typesReady = w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.typesFor(ids, root)).then((types) => { if (types.length) f.types = types; return types; },
+            (e) => { void w3.window.showWarning(`The custom objects these refer to couldn't be gathered (${(e as Error).message ?? e}). Pasting them elsewhere won't bring their abilities and the like.`); return []; });
         };
         const copySelection = () => {
           const entries = copyable();
@@ -2162,13 +2165,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The types of what's being pasted, in this map: asked at every click. The service answers at once while
          *  what it did before is still there (an undo may have taken it away, then it asks again); only a question
          *  still open is shared, so a double click doesn't ask twice. */
-        let bringing: { types: Fragment["types"]; renames: Promise<Map<string, string> | null> } | null = null;
-        const bringTypes = (f: Fragment) => {
-          if (!f.types?.length) return Promise.resolve(new Map<string, string>());
-          if (bringing?.types !== f.types) {
+        let bringing: { types: Fragment["typesReady"]; renames: Promise<Map<string, string> | null> } | null = null;
+        const bringTypes = (f: Fragment): Promise<Map<string, string> | null> => {
+          if (!f.typesReady) return Promise.resolve(new Map<string, string>());
+          if (bringing?.types !== f.typesReady) {
             const label = `${f.objects.length} copied object${f.objects.length === 1 ? "" : "s"}`;
-            const renames = w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.bringTypes(f.types!, label));
-            const mine = { types: f.types, renames };
+            const renames = f.typesReady.then((types) => (types.length ? w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.bringTypes(types, label)) : new Map<string, string>()));
+            const mine = { types: f.typesReady, renames };
             bringing = mine;
             const done = () => { if (bringing === mine) bringing = null; };
             void renames.then(done, done);

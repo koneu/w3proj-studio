@@ -33,7 +33,7 @@ export interface ObjectsService {
   /** The map's own objects that placed objects of these types need: the custom ones among `ids` and whatever
    *  they refer to, abilities and the like, however far. Taken from the open map at copy time, to be handed to
    *  `bringTypes` in whichever map is open when the objects are pasted. */
-  typesFor(ids: readonly string[]): Promise<CopiedObject[]>;
+  typesFor(ids: readonly string[], root?: string): Promise<CopiedObject[]>;
   /** Makes sure the open map has copied types: those it has the same are used, the rest are added, and when it
    *  has other content under an id the user decides (keep, overwrite, new ids). One edit, one undo. Resolves
    *  with the ids that changed (old to new), or null if the user cancelled. */

@@ -51,6 +51,8 @@ export interface Fragment {
   format: typeof FRAGMENT_FORMAT;
   /** The custom object types the objects use, with what those refer to, from the map they were copied in. */
   types?: Copied[];
+  /** The same while it is being gathered, and kept through turns: a paste waits for it. Not part of a saved fragment. */
+  typesReady?: Promise<Copied[]>;
   objects: FragmentObject[];
   ground?: FragmentGround;
 }

@@ -264,3 +264,9 @@ test("tiles added for a paste that is refused go again, to the last cliff type a
   t.groundTiles.push("Lrok");
   assert.deepEqual(before.ground, ["Ldrt", "Lgrs"]);
 });
+
+test("a turned fragment keeps waiting for the same types", () => {
+  const typesReady = Promise.resolve([]);
+  const f = { ...fragmentOf([{ list: "units", entry: { position: [0, 0, 0], angle: 0 } }], () => 0), typesReady };
+  for (const turn of ["mirrorX", "cw"] as const) assert.equal(turnFragment(f, turn).typesReady, typesReady);
+});
