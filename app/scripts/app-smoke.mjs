@@ -822,8 +822,15 @@ async function resizeUndo(page, found) {
   // An edit by a tool and a resize straight after it: the rebuild of pathing, shadows and minimap still due is done first
   // (not on the new files), the undo that follows is not met by a question about files changed since, and nothing is written
   // to the old terrain afterwards (the three grids all have the size of the terrain).
+  // (Through the Map Size tab, which makes no checkpoint for a larger map: a checkpoint settles the rebuild too.)
+  await hands.click(".terrain-tab", "Map Size");
+  await sleep(500);
+  await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[1]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  await sleep(200);
   await tool("place_objects", { objects: [{ id: "LPwb", x: 1500, y: 1500 }], ignoreRoom: true });
-  await tool("resize_map", { right: 32 });
+  // The rebuild is due three seconds after the edit: Apply is pressed when it is about to start.
+  await sleep(2700);
+  await hands.click(".mapsize-buttons button.primary");
   await editorUp();
   const raced = await settledState();
   await page.evaluate(`window.__warned.length = 0`);
