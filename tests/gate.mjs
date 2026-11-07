@@ -26,9 +26,9 @@
 // and the game (W3PROJ_GAME, default the Warcraft III folder above it).
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -90,6 +90,32 @@ class Locks {
 }
 const locks = new Locks();
 
+/** The owner written into a lock folder, or null while there is none (being made, or left half made). */
+function lockOwner(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+
+function ageMs(path) {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * A lock between gates running at once, also from different worktrees: a folder that exists while
  * it is held, with the owner's process in it. A folder left by a process that is gone is taken over.
@@ -104,23 +130,24 @@ async function withFileLock(dir, say, body) {
       break;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
-      let held = null;
-      try {
-        held = JSON.parse(readFileSync(owner, "utf8"));
-      } catch {
-        // Being made or removed right now; look again.
-      }
-      let alive = true;
-      if (held) {
+      const held = lockOwner(owner);
+      // Stale: its process is gone, or it never got an owner (a gate killed between the two
+      // steps above) and is older than a moment.
+      const stale = held ? !alive(held.pid) : ageMs(dir) > 10000;
+      if (stale) {
+        // Taken over by renaming it away first: of two gates that both see it stale only one can
+        // rename it, and a gate that took the lock in between isn't swept away (its owner is checked
+        // once more right before the rename).
+        const again = lockOwner(owner);
+        if (again ? alive(again.pid) || again.pid !== held?.pid : held || ageMs(dir) <= 10000) continue;
+        const gone = `${dir}.stale-${process.pid}-${Date.now()}`;
         try {
-          process.kill(held.pid, 0);
-        } catch (k) {
-          alive = k.code === "EPERM";
+          renameSync(dir, gone);
+        } catch {
+          continue;
         }
-      }
-      if (held && !alive) {
-        say(`taking over the lock of ${held.repo} (process ${held.pid} is gone)`);
-        rmSync(dir, { recursive: true, force: true });
+        say(held ? `took over the lock of ${held.repo} (process ${held.pid} is gone)` : `took over a lock without an owner: ${dir}`);
+        rmSync(gone, { recursive: true, force: true });
         continue;
       }
       if (Date.now() - told > 30000) {
@@ -229,7 +256,19 @@ async function hostileRounds(ctx) {
   mkdirSync(dirname(list), { recursive: true });
   const built = await locks.hold("cargo", "w", () => ctx.sh("cargo test --release -p w3proj --test robustness --locked --no-run --message-format=json", { stdout: list }));
   if (!built) {
-    ctx.say(readFileSync(list, "utf8").split("\n").filter((l) => !l.startsWith("{")).join("\n"));
+    // The compiler's own messages, as cargo would have printed them, and anything else it said.
+    for (const line of readFileSync(list, "utf8").split("\n")) {
+      if (!line.startsWith("{")) {
+        if (line.trim()) ctx.say(line);
+        continue;
+      }
+      try {
+        const m = JSON.parse(line);
+        if (m.reason === "compiler-message" && m.message?.rendered) ctx.say(m.message.rendered);
+      } catch {
+        ctx.say(line);
+      }
+    }
     return false;
   }
   let program;
@@ -246,6 +285,10 @@ async function hostileRounds(ctx) {
 }
 
 const bin = join(repo, "target", "release", `w3proj${exe}`);
+// The app smoke test's settings folder goes by this identifier: one per worktree, so that gates of
+// different worktrees don't share it (two gates in one worktree share target/ anyway). The same
+// name each run, so no new folder is left in the user's settings per run.
+const smokeId = process.env.W3_SMOKE_ID ?? `dev.w3proj.studio.smoke.${basename(repo).replace(/[^A-Za-z0-9-]+/g, "-")}`;
 const hasGame = join(game, ".build.info");
 const update = args.includes("--update-floor") ? " --update-floor" : "";
 
@@ -253,7 +296,7 @@ const update = args.includes("--update-floor") ? " --update-floor" : "";
 // busy. `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
 const steps = [
   { id: "cli", name: "release CLI", tier: "corpus", weight: 6, locks: [["cargo", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
-  { id: "appsmoke", name: "the real app on a scratch project", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs", { cwd: app, env: { W3PROJ_BIN: bin } }) },
+  { id: "appsmoke", name: "the real app on a scratch project", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs", { cwd: app, env: { W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId } }) },
   { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
   { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, run: hostileRounds },
   { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
@@ -322,15 +365,15 @@ function runAll() {
   return new Promise((finish) => {
     locks.onRelease = () => pump();
     function pump() {
+      const before = waiting.length;
       for (const step of [...waiting]) {
         const deps = (step.after ?? []).filter((id) => chosen.some((s) => s.id === id.split("#")[0]));
         if (deps.some((id) => !done.has(id))) continue;
         const log = join(logDir, `${step.id}.log`);
-        if (deps.some((id) => !done.get(id).ok)) {
-          waiting.splice(waiting.indexOf(step), 1);
-          writeFileSync(log, `not run: ${deps.filter((id) => !done.get(id).ok).join(", ")} failed\n`);
-          show(step, log, false);
-          done.set(step.id, { ok: false, seconds: 0 });
+        // "step#event" only orders: a step waiting for the app's build still runs if there was none.
+        const failed = deps.filter((id) => !id.includes("#") && !done.get(id).ok);
+        if (failed.length) {
+          skip(step, log, `not run: ${failed.join(", ")} failed`);
           continue;
         }
         const held = [...(step.locks ?? [])];
@@ -349,7 +392,7 @@ function runAll() {
           ? setInterval(() => {
               if (!readFileSync(log, "utf8").includes(step.built)) return;
               clearInterval(built);
-              done.set(`${step.id}#built`, { ok: true, seconds: 0 });
+              mark(step, true);
               for (const [name, mode] of held.splice(0)) locks.release(name, mode);
               pump();
             }, 1000)
@@ -363,7 +406,7 @@ function runAll() {
           .then((ok) => {
             clearInterval(built);
             ctx.close();
-            if (step.built && !done.has(`${step.id}#built`)) done.set(`${step.id}#built`, { ok: true, seconds: 0 });
+            mark(step, ok === true);
             busy -= step.weight;
             running--;
             show(step, log, ok === true);
@@ -372,7 +415,29 @@ function runAll() {
             pump();
           });
       }
+      // Nothing runs and nothing can start: a step waits for something that won't come. That would
+      // be a mistake in the steps above; they fail instead of the gate waiting forever.
+      if (waiting.length && running === 0) {
+        // A step skipped in this round may have freed one earlier in the list: look again first.
+        if (waiting.length < before) return pump();
+        for (const step of [...waiting]) {
+          const missing = (step.after ?? []).filter((id) => !done.has(id)).join(", ") || "a lock";
+          skip(step, join(logDir, `${step.id}.log`), `not run: still waiting for ${missing}`);
+        }
+      }
       if (!waiting.length && running === 0) finish();
+    }
+    /** A step that doesn't run fails, and what waits for its events goes on. */
+    function skip(step, log, why) {
+      waiting.splice(waiting.indexOf(step), 1);
+      writeFileSync(log, `${why}\n`);
+      show(step, log, false);
+      done.set(step.id, { ok: false, seconds: 0 });
+      mark(step, false);
+    }
+    /** The step's "built" event, once: ok says whether the build happened. */
+    function mark(step, ok) {
+      if (step.built && !done.has(`${step.id}#built`)) done.set(`${step.id}#built`, { ok, seconds: 0 });
     }
     pump();
   });
