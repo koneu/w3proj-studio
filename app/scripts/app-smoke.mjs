@@ -357,6 +357,25 @@ async function waterPathing(page, found) {
   const row = []; for (let x = -30; x <= 30; x++) row.push(cell(wpm, x, 0));
   if (!row.some((v) => !(v & 0x40) && !(v & 0x02))) fail("the lake has no shallow rim that can be walked");
   if (!row.some((v) => v & 0x02)) fail("the lake has no deep part");
+
+  // The same with the terrain tab closed straight after the edits (before the rebuild's few seconds are up): a
+  // doodad that blocks, and a second lake; the pathing map has both in the pack.
+  const packed = async (name) => {
+    await tool("save_project");
+    const file = join(work, name);
+    await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(root)}, output: ${JSON.stringify(file)} })`);
+    const r = spawnSync(cli, ["cat", file, "war3map.wpm"], { maxBuffer: 1 << 26 });
+    return r.status === 0 ? r.stdout : null;
+  };
+  await tool("place_objects", { objects: [{ id: "LPwb", x: 1536, y: 1536 }], ignoreRoom: true });
+  await tool("set_water", { mode: "lake", left: -2560, bottom: -2560, right: -1536, top: -1536 });
+  await page.evaluate(`w3.editors.closeAll()`);
+  const closed = await packed("water-closed.w3x");
+  if (!closed) { fail("the CLI can't read war3map.wpm after the tab was closed"); return; }
+  if (!(cell(closed, -64, -64) & 0x02)) fail("a lake made just before the terrain tab was closed isn't in the packed pathing map");
+  let tree = false;
+  for (let y = 46; y <= 50; y++) for (let x = 46; x <= 50; x++) if (cell(closed, x, y) & 0x02) tree = true;
+  if (!tree) fail("a doodad placed just before the terrain tab was closed doesn't block in the packed pathing map");
 }
 
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is

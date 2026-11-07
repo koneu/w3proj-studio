@@ -89,7 +89,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!r || !status || !selected.length) return;
     const msg = message.trim() || await w3.window.inputBox({ prompt: "Commit message", placeholder: "What changed" });
     if (!msg?.trim()) return;
-    if (await w3.editors.saveAll()) await refresh();
+    // What a terrain edit by a tool still has to write (pathing, shadows, minimap) belongs in the commit.
+    await w3.commands.execute("w3.terrain.settle").catch(() => {});
+    await w3.editors.saveAll();
+    await refresh();
     busy = true;
     w3.views.refresh("w3.scm.changes");
     try {

@@ -171,24 +171,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The open terrain editor, for tools. */
   /** Nearly always a burst of edits: the derived files wait for the last of them. */
   const REBUILD_DELAY = 3000;
-  let rebuild: { key: string; from: { terrain: Terrain; doodads: Placed[] } } | null = null, rebuildTimer: ReturnType<typeof setTimeout> | undefined;
+  /** `terrain` is left out when the edit didn't touch the ground. */
+  type RebuildFrom = { terrain?: Terrain; doodads: Placed[] };
+  let rebuild: { key: string; from: RebuildFrom } | null = null, rebuildTimer: ReturnType<typeof setTimeout> | undefined;
   /** After the edits stop: pathing, shadows and the minimap, in the background. `from` is the
    *  state before the first edit: shadows are updated from there. */
-  const rebuildSoon = (from: () => { terrain: Terrain; doodads: Placed[] }) => {
+  const rebuildSoon = (from: () => RebuildFrom) => {
     const key = w3.workspace.project()?.root ?? "";
     if (rebuild?.key !== key) rebuild = { key, from: from() };
     clearTimeout(rebuildTimer);
     rebuildTimer = setTimeout(() => void runRebuild(), REBUILD_DELAY);
   };
-  /** The rebuild that is running, if any. */
+  /** The rebuilds in a row: one at a time, as they all write the same files (the shadow map is read and written back). */
   let rebuilding: Promise<void> = Promise.resolve();
-  const runRebuild = async () => {
-    const editor = opened, job = rebuild;
-    // No editor: it waits for the next edit; a tool opens one then.
-    if (!job || !editor || job.key !== w3.workspace.project()?.root) return;
-    rebuild = null;
-    rebuilding = editor.derive(job.from).catch((e) => { w3.window.showError(`Rebuilding the map's derived files failed: ${e}`); });
-    await rebuilding;
+  const runRebuild = () => {
+    const run = rebuilding.then(async () => {
+      const job = rebuild;
+      if (!job || job.key !== w3.workspace.project()?.root) return;
+      // The editor of the project's own terrain; closed since the edit, it is opened again: the work is
+      // done there (the derived files need what the editor has loaded).
+      const editor = ownEditor() ?? await liveEditor().catch(() => null);
+      if (!editor) return;
+      rebuild = null;
+      await editor.derive(job.from).catch((e) => { w3.window.showError(`Rebuilding the map's derived files failed: ${e}`); });
+    });
+    rebuilding = run.catch(() => {});
+    return run;
   };
   ctx.subscriptions.push(
     { dispose: () => clearTimeout(rebuildTimer) },
@@ -197,16 +205,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrain.settle", async () => {
       clearTimeout(rebuildTimer);
       await runRebuild();
-      await rebuilding;
     }),
   );
 
-  let opened: {
+  interface OpenedEditor {
     handle: TerrainEditorHandle; ready: () => Promise<void>;
     screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => Promise<string>;
     /** Rebuilds the derived files; without `before` shadows stay, as nothing is known to have changed. */
-    derive: (before?: { terrain: Terrain; doodads: Placed[] }) => Promise<void>;
-  } | null = null;
+    derive: (before?: RebuildFrom) => Promise<void>;
+  }
+  /** The open terrain editors by document path: a game map's read-only one is another entry. */
+  const openedBy = new Map<string, OpenedEditor>();
+  /** The editor of the project's own terrain, which is the only one that writes into the project. */
+  const ownEditor = () => { const p = projectTerrain(w3); return (p && openedBy.get(p)) || null; };
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
   let lastView: { key: string; view: TerrainView } | null = null;
 
@@ -214,11 +225,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const liveEditor = async () => {
     await w3.commands.execute("w3.terrain.open");
     for (let n = 0; n < 200; n++) {
-      const editor = opened;
+      const editor = ownEditor();
       if (editor) {
         await editor.ready();
         // Taking a change in place can end in reopening: then it's the next one's turn.
-        if (opened === editor) return editor;
+        if (ownEditor() === editor) return editor;
       } else await new Promise((done) => setTimeout(done, 100));
     }
     throw new Error("The terrain editor couldn't start (see its tab).");
@@ -250,8 +261,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await change({ name, key, doc, list, json: true, dirty: false });
       return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
     }, async () => {
-      const t = opened?.handle.terrain;
-      if (t && key === "doodads") rebuildSoon(() => ({ terrain: { ...t, corners: t.corners.map((c) => ({ ...c })) }, doodads: before }));
+      // Doodads block pathing and cast shadows. With no editor open the ground is the project's, as the rebuild finds it.
+      if (key === "doodads") rebuildSoon(() => ({ doodads: before }));
     });
   };
 
@@ -3379,7 +3390,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             redraw();
           }
         };
-        opened = {
+        const record: OpenedEditor = {
           handle, ready, screenshot: takeScreenshot,
           // Tools change the files: what's open is the result already.
           derive: async (from) => {
@@ -3388,10 +3399,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
           },
         };
+        // A read-only editor (a game map) never derives: it isn't the project's.
+        if (editable) openedBy.set(doc.path, record);
         /** A change from outside, in place: nothing is torn down, so what's loaded stays. Only a
          *  new ground tile or another map size needs a real reopen. */
         const takeChange = async (path: string): Promise<boolean> => {
-          const reopenInstead = () => { opened = null; return false; };
+          const reopenInstead = () => { if (openedBy.get(doc.path) === record) openedBy.delete(doc.path); return false; };
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           minimapStale.set();
           // The editor's undo steps were for the map as it was.
@@ -3508,7 +3521,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             layerSeq++;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
-            if (opened?.screenshot === takeScreenshot) opened = null;
+            if (openedBy.get(doc.path) === record) openedBy.delete(doc.path);
             lastView = { key: viewKey, view: handle.view() };
             stopLightWatch.dispose();
             stopObjectWatch.dispose();

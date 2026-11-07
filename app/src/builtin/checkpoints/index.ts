@@ -18,12 +18,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const list = async (root: string) => w3.workspace.listFolder(`${root}\\build\\checkpoints`).catch(() => [] as string[]);
 
-  /** Packs the project as it is on disk; the file's name, or null when one is being made. */
-  const create = async (): Promise<string | null> => {
+  /** Pathing, shadows and the minimap still due from a terrain edit belong in a checkpoint. A failure never stops one. */
+  const settle = () => w3.commands.execute("w3.terrain.settle").catch(() => {});
+
+  /** Packs the project as it is on disk; the file's name, or null when one is being made. `settleFirst`: the
+   *  rebuild due from an edit is done before (the automatic ones don't wait for it). */
+  const create = async (settleFirst = true): Promise<string | null> => {
     const project = w3.workspace.project();
     if (!project || busy) return null;
     busy = true;
     try {
+      if (settleFirst) await settle();
       const name = checkpointName(project.default_output, new Date());
       const target = `${project.root}\\build\\checkpoints\\${name}`;
       await w3.backend.invoke("project_pack", { root: project.root, output: target });
@@ -45,7 +50,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const megabytes = w3.settings.get<number>("checkpoints.maxMegabytes") ?? 500;
     const newest = newestFirst(await list(project.root))[0]?.time ?? null;
     if (checkpointState(w3.workspace.files(), newest, Date.now(), minutes * 60_000, megabytes * 1024 * 1024) !== "due") return;
-    await create().catch((e) => {
+    await create(false).catch((e) => {
       out.append(`checkpoint failed: ${String(e)}`);
       if (warned.has(project.root)) return;
       warned.add(project.root);
@@ -55,7 +60,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** Replaces the project's map files with a checkpoint's; what's there now is kept as one first. */
   const restore = async (root: string, name: string) => {
-    await create();
+    // Settled by the caller, before the editors closed: settling now would open the terrain editor again.
+    await create(false);
     await w3.commands.execute("w3.project.syncFromMap", `${root}\\${FOLDER.replace("/", "\\")}\\${name}`);
   };
 
@@ -81,6 +87,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!(await w3.window.confirm(`AI request: restore the map to the checkpoint of ${when}? Its files are replaced; a checkpoint of what's there now is made first.`, "Restore", 90_000))) {
         throw new Error("The user didn't confirm it in Studio, so nothing changed. Ask them before trying again.");
       }
+      await settle();
       await w3.editors.closeAll();
       await restore(project.root, found.name);
       return `Restored the checkpoint of ${when}. undo_last_edit can't go back past this.`;
@@ -108,6 +115,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!pick?.value) return;
       const c = await w3.window.showWarning(`Restore the project to ${pick.label}? Its map files are replaced by that version; a checkpoint of what's there now is made first. Unsaved edits are asked about.`, "Restore", "Cancel");
       if (c !== "Restore") return;
+      await settle();
       if (!(await w3.editors.closeAllAsking())) return;
       await restore(project.root, pick.value);
     }),
