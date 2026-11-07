@@ -14,7 +14,7 @@ import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
-import { loadSkins, ObjectLoader, placement, withObjectArt, type ObjectArt, type Placed } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
 import { buildMinimap, buildMinimapIcons, minimapSettings } from "./minimapgen";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
@@ -1454,9 +1454,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
         const NEUTRALS: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Extra", 26: "Neutral Victim", 27: "Neutral Passive" };
         const ownerName = (n: number) => (n < 24 ? `Player ${n + 1} (${TEAM_COLORS[n]?.[0] ?? "?"})` : NEUTRALS[n] ?? `Player ${n + 1}`);
+        /** Stand-ins for the objects that only show as markers (unknown ids, models that didn't load), so
+         *  they can be selected like the others. */
+        let strays: Stray[] = [];
+        let unresolvedDoodads: Placed[] = [], unresolvedUnits: Placed[] = [];
+        const drawMarkers = () => {
+          renderer.setMarkers("doodads", unresolvedDoodads.map((p) => marker(p, [90, 200, 90])));
+          renderer.setMarkers("units", unresolvedUnits.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
+        };
+        /** Every selectable placed object: those with a model and the strays. */
+        const allInstances = (): Stray[] => [...renderer.batches.flatMap((b) => b.instances.map((inst) => ({ group: b.group, inst }))), ...strays];
         const findInstance = (entry: Placed): ObjectInstance | null => {
           for (const b of renderer.batches) for (const inst of b.instances) if (inst.pick?.placed === entry) return inst;
-          return null;
+          return strays.find((s) => s.inst.pick?.placed === entry)?.inst ?? null;
         };
         /** Models for the current entries (initially and after object edits). */
         /** Splats\UberSplatData.slk, once read; splat textures asked for. */
@@ -1518,8 +1528,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           void showSplats();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.
-          renderer.setMarkers("doodads", d.unresolved.map((p) => marker(p, [90, 200, 90])));
-          renderer.setMarkers("units", u.unresolved.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
+          unresolvedDoodads = d.unresolved;
+          unresolvedUnits = u.unresolved;
+          strays = [...d.strays, ...u.strays];
+          drawMarkers();
           // Each problem shows its objects when clicked; those without a model can be removed at once.
           const found = [...d.problems, ...u.problems];
           const broken = found.flatMap((p) => p.items);
@@ -1646,6 +1658,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             inst.world = placement(entry, inst.pick.extraScale);
             if (inst.sphere) inst.sphere = [inst.sphere[0] + dx, inst.sphere[1] + dy, inst.sphere[2] + dz, inst.sphere[3]];
             if (inst === selected) selectObject(inst);
+            if (strays.some((s) => s.inst === inst)) drawMarkers();
           }
           if (group.includes(entry)) groupRingsStale = true;
           redraw();
@@ -1761,9 +1774,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Every placed object with a model (the groups not hidden). */
         const allPlaced = (): { p: Placed; kind: string; id: string }[] => {
           const out: { p: Placed; kind: string; id: string }[] = [];
-          for (const b of renderer.batches) {
-            if ((b.group !== "doodads" && b.group !== "units") || renderer.hiddenGroups.has(b.group)) continue;
-            for (const inst of b.instances) if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
+          for (const { group, inst } of allInstances()) {
+            if ((group !== "doodads" && group !== "units") || renderer.hiddenGroups.has(group)) continue;
+            if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
           }
           return out;
         };
@@ -2405,19 +2418,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const selectedEntries = (): Placed[] => (group.length ? group : selected?.pick ? [selected.pick.placed] : []);
 
         /** Objects whose position projects into the canvas rectangle (CSS pixels). */
-        const objectsInBox = (x0: number, y0: number, x1: number, y1: number): Placed[] => {
-          const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)], [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)];
-          const out: Placed[] = [];
-          for (const b of renderer.batches) {
-            if ((b.group !== "doodads" && b.group !== "units") || renderer.hiddenGroups.has(b.group)) continue;
-            for (const inst of b.instances) {
-              if (!inst.pick || !boxKinds.has(inst.pick.kind)) continue;
-              const s = renderer.project(inst.pick.placed.position);
-              if (s && s[0] >= ax && s[0] <= bx && s[1] >= ay && s[1] <= by) out.push(inst.pick.placed);
-            }
-          }
-          return out;
-        };
+        const objectsInBox = (x0: number, y0: number, x1: number, y1: number): Placed[] =>
+          objectsInRect(allInstances(), (pos) => renderer.project(pos), renderer.hiddenGroups, boxKinds, x0, y0, x1, y1);
 
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
@@ -2858,7 +2860,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         function trySelect(ref: PlacedRef): boolean {
-          const insts = renderer.batches.flatMap((b) => b.instances).filter((i) => i.pick?.placed);
+          const insts = allInstances().map((s) => s.inst).filter((i) => i.pick?.placed);
           const at = matchPlaced(insts.map((i) => i.pick!.placed as unknown as PlacedLike), ref);
           if (at < 0) return false;
           endFacing(false);

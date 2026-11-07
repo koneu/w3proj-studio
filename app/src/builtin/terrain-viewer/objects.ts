@@ -176,6 +176,8 @@ export interface LoadResult {
   batches: ObjectBatch[];
   /** Objects without a drawable model (start locations, unknown ids, load errors). */
   unresolved: Placed[];
+  /** Selection stand-ins for the unresolved objects (not start locations). */
+  strays: Stray[];
   /** Models that didn't load and ids without a model, with the placements concerned. */
   problems: LoadProblem[];
 }
@@ -379,6 +381,43 @@ export class ObjectLoader {
       ...failed.map((f) => ({ message: f.error, items: entries[f.index].items })),
       ...[...unknown].map(([id, items]) => ({ message: `${id}: unknown object (no model; not in the game's or the map's object data)`, items })),
     ];
-    return { batches, unresolved, problems };
+    return { batches, unresolved, strays: strayInstances(group, placed, unresolved, skins, teamOf, baseOf), problems };
   }
+}
+
+/** A placed object without a model (an unknown id, a model that didn't load). Only a marker
+ *  shows it, so selection works on this stand-in instance: its position and a small sphere. */
+export interface Stray { group: string; inst: ObjectInstance }
+
+/** Stand-ins for the unresolved objects of one group. Start locations are left out: they stay
+ *  markers that can't be moved or deleted (a player needs one). */
+export function strayInstances(group: string, placed: readonly Placed[], unresolved: readonly Placed[], skins: Map<string, Skin>,
+  teamOf: (p: Placed) => number, baseOf: (id: string) => string | undefined = () => undefined): Stray[] {
+  const index = new Map(placed.map((p, i) => [p, i]));
+  return unresolved.filter((p) => p.id !== "sloc").map((p) => {
+    const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
+    const [x, y, z] = p.position;
+    return {
+      group,
+      inst: {
+        world: placement(p, 1), team: teamOf(p), sphere: [x, y, z, 32] as [number, number, number, number],
+        pick: { kind: skin?.kind ?? (group === "doodads" ? "w3d" : "w3u"), id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index: index.get(p) ?? -1, placed: p, model: "", extraScale: 1 },
+      },
+    };
+  });
+}
+
+/** The placed objects whose position projects into a rectangle of the canvas (CSS pixels), among
+ *  the doodads and units not hidden, of the kinds wanted. */
+export function objectsInRect(sources: Iterable<Stray>, project: (position: [number, number, number]) => [number, number] | null | undefined,
+  hidden: ReadonlySet<string>, kinds: ReadonlySet<string>, x0: number, y0: number, x1: number, y1: number): Placed[] {
+  const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)], [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)];
+  const out: Placed[] = [];
+  for (const { group, inst } of sources) {
+    if ((group !== "doodads" && group !== "units") || hidden.has(group)) continue;
+    if (!inst.pick || !kinds.has(inst.pick.kind)) continue;
+    const s = project(inst.pick.placed.position);
+    if (s && s[0] >= ax && s[0] <= bx && s[1] >= ay && s[1] <= by) out.push(inst.pick.placed);
+  }
+  return out;
 }
