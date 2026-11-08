@@ -381,6 +381,15 @@ export class TerrainRenderer {
   wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
   hiddenGroups = new Set<string>();
+  /** Lit as the game is (the map's lighting on): the pair of the World Editor's game view. */
+  gameView = false;
+
+  /** Whether a group's objects are drawn: not hidden by its toggle, and not the shoreline waves in HD with the
+   *  lighting on. The World Editor's HD game view draws no shoreline waves (map 03, we-drive 2026-11-08); its
+   *  classic game view, and either mode without game view, does. */
+  groupShown(group: string): boolean {
+    return !this.hiddenGroups.has(group) && !(group === "shoreline" && this.gameView && this.tone === 2);
+  }
   /** A model previewing a placement (drawn see-through; red when `ok` is false). */
   ghost: { gpu: ModelGpu; world: Mat4; team: number; ok: boolean } | null = null;
   /** Several at once, for what's being pasted. */
@@ -910,6 +919,7 @@ export class TerrainRenderer {
     const sources = [...this.batches.map((b) => ({ group: b.group, instances: b.instances })),
       ...extra.map((s) => ({ group: s.group, instances: [s.inst] }))];
     for (const b of sources) {
+      // By the toggles alone: what's left out otherwise (the shoreline) has nothing to pick.
       if (this.hiddenGroups.has(b.group)) continue;
       for (const inst of b.instances) {
         if (!inst.pick || !inst.sphere) continue;
@@ -1029,7 +1039,7 @@ export class TerrainRenderer {
     const posed = new Set<ModelGpu>();
     const previewed = new Set([this.ghost, ...this.ghosts].map((g) => g?.gpu));
     for (const b of this.batches) {
-      if (this.hiddenGroups.has(b.group)) continue;
+      if (!this.groupShown(b.group)) continue;
       if (!inView.has(b) && !b.effects && !previewed.has(b.gpu)) continue;
       if (!posed.has(b.gpu) && b.gpu.model.sequences.length) {
         posed.add(b.gpu);
@@ -1047,9 +1057,9 @@ export class TerrainRenderer {
   get animating(): boolean {
     if (this.showWater && this.water.count && this.waterLook.frames.length > 1 && this.waterFrame() !== this.waterFrameShown) return true;
     if (this.animate && performance.now() - this.lastAnimFrame > 33
-      && this.batches.some((b) => b.instances.length && b.gpu.model.sequences.length && !this.hiddenGroups.has(b.group))) return true;
+      && this.batches.some((b) => b.instances.length && b.gpu.model.sequences.length && this.groupShown(b.group))) return true;
     if (this.showWeather && this.weather.length) return true;
-    return this.showEffects && this.batches.some((b) => b.instances.length && b.effects && !this.hiddenGroups.has(b.group));
+    return this.showEffects && this.batches.some((b) => b.instances.length && b.effects && this.groupShown(b.group));
   }
 
   /** Weather to draw from now on. */
@@ -1072,7 +1082,7 @@ export class TerrainRenderer {
     const items: Parameters<ParticleRenderer["draw"]>[2] = [];
     for (const b of this.showEffects ? this.batches : []) {
       const fx = b.effects;
-      if (!fx || this.hiddenGroups.has(b.group)) continue;
+      if (!fx || !this.groupShown(b.group)) continue;
       for (const inst of b.instances) {
         if (Math.hypot(inst.world[12] - this.target[0], inst.world[13] - this.target[1]) > reach) continue;
         let p = this.particleStates.get(inst);
@@ -1216,7 +1226,7 @@ export class TerrainRenderer {
     const planes = frustumPlanes(viewProj);
     const gathered: [ObjectBatch, InstanceRuns][] = [];
     for (const b of this.batches) {
-      if (this.hiddenGroups.has(b.group) || !b.instances.length) continue;
+      if (!this.groupShown(b.group) || !b.instances.length) continue;
       const list = this.gatherInstances(b, b.followGround ? null : planes);
       if (list.runs.length) gathered.push([b, list]);
     }

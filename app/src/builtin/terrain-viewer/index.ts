@@ -1255,6 +1255,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           lightBox.checked = on;
           lightSelect.value = String(hour);
           lightSelect.disabled = !on;
+          renderer.gameView = on;
           renderer.terrainLight = on && lighting?.terrain ? lightAt(lighting.terrain, hour) : null;
           renderer.waterTint = lighting && lighting.flags & WATER_TINTING ? lighting.waterTint : null;
           renderer.unitLight = on && lighting?.unit ? lightAt(lighting.unit, hour) : null;
