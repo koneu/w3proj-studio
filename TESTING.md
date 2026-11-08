@@ -201,8 +201,10 @@ node scripts/pic-compare.mjs we.png st.png --sample --diff d.png
 Studio's defaults are lighting on at hour 12 (`terrain.lighting.*` in the terrain viewer's extension.json). On map
 03 at the opening view (HD, both pairs), the mean absolute difference was 17.5 (lit) and 16.5 (unlit) before the
 editor's picture tone went into Studio (`lib/model/tone.ts`, branch render-fixes-2), and is 7.7 and 6.9 after; on
-cliff.w3m 42.8 and 14.1 before, 26.8 and 7.1 after. What is left on map 03 is the lake's shore (Studio's foam
-models; the editor shows none in game view) and the start location, which the editor hides in game view. On
+cliff.w3m 42.8 and 14.1 before, 26.8 and 7.1 after. What is left on map 03 is the lake's shore and the start
+location, which the editor hides in game view. The editor's HD game view draws no shoreline waves (its classic game
+view and its unlit view do: white crests at the water's edge, where Studio's foam sits about a tile farther up the
+shore); Studio leaves them out in HD with the lighting on (renderer.ts `groupShown`). On
 cliff.w3m lit, its own lighting (sun 1.95, shadow intensity 5.85) still comes out brighter in the editor.
 
 The camera lines up on raised ground too: on map 03 (ground 256 high at the centre) the start location's ring is
@@ -214,6 +216,20 @@ for the test (war3map.w3l naming two `<guid>.mdl` files, unpacked and packed wit
 editor does with one value at a time. That is how tone.ts was fitted: flat ground of cliff.w3m, the sun straight
 down at intensity 0.5, 1 and 2, at 52° from the south, north, east and south-west, ambient alone, shadow intensity
 0, 2 and 5.85; with no light at all the view is black and `--compare-ready` never sees it drawn.
+
+Measured again on 2026-11-08 (branch render-fixes-3), with both of cliff.w3m's lighting files changed per variant:
+- **The ground in game view follows the map's unit lighting model**, not the terrain one: changing only the terrain
+  file (its shadow intensity, its sun's intensity) left the flat grass the same to the last digit; changing only the
+  unit file changed it. (cliff.w3m's two files are the same and both name their model `DNCLordaeronTerrain`, so a
+  cache by that name would look the same; a map with two different models would tell.)
+- **The shadow intensity's lift is much stronger than shadeWrap's** at the cliff's sun (52° from straight up), and
+  grows with the sun's intensity. k (the light on flat grass over the editor's own light, from the mean green by
+  simulating the tone curve per pixel of the unlit picture, so values near white aren't underestimated): sun 1.95,
+  ambient 0.2, shadow 0 / 1 / 2 / 3 / 5.85: 0.93 / 1.45 / 2.12 / 3.14 / 16.4 (Studio's hdLight and shadeWrap: 1.31
+  / 1.81 / 2.32 / 2.83 / 4.28); shadow 5.85 with sun 0.5 / 1: 2.43 / 4.01; sun 1.95, shadow 5.85, ambient 0 / 1:
+  13.4 / 32.7; shadow 0, ambient 0: sun 1.95 0.79. The cliff walls, which face away from that sun, aren't lifted as
+  much, so a lift growing with (1 − cos) alone doesn't fit; the editor's shadow map may be what decides. tone.ts is
+  unchanged until a model fits walls and ground together.
 
 ## Process
 
