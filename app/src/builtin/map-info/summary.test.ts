@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { mapSummary, setMapText } from "./summary";
+import { mapSummary, setMapText, setW3iColorHex, w3iColorHex } from "./summary";
 
 const resolve = (v: string) => v.replace("TRIGSTR_", "text ");
 const info = {
@@ -49,4 +49,14 @@ test("a Reign of Chaos map leaves out what its format doesn't store", () => {
   assert.equal("model" in got.loadingScreen, false);
   assert.equal(got.scriptLanguage, "jass");
   assert.equal(got.customized.itemTables, 0);
+});
+
+test("w3i colours are blue, green, red, alpha: 03b's red water tint shows red and is stored back in that order", () => {
+  // 03b_Water_Tint: the w3i holds 100,100,255,255 and its war3map.j says SetWaterBaseColor(255, 100, 100, 255).
+  const tint = [100, 100, 255, 255];
+  assert.equal(w3iColorHex(tint), "#ff6464");
+  setW3iColorHex(tint, "#102030");
+  assert.deepEqual(tint, [0x30, 0x20, 0x10, 255], "alpha kept, red last");
+  setW3iColorHex(tint, "not a colour");
+  assert.deepEqual(tint, [0x30, 0x20, 0x10, 255]);
 });

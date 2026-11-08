@@ -8,7 +8,7 @@ import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
-import { mapSummary } from "./summary";
+import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
 import { renderTechtree, type TechInfo } from "./techtree";
 import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { parseW3e } from "../../lib/terrain/w3e";
@@ -308,19 +308,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           box.addEventListener("change", () => { set(box.checked ? get() | mask : get() & ~mask); update(); });
           return h("label.form-check", {}, box, " ", label);
         };
-        /** RGBA colour: colour picker + alpha. */
-        const color = (rgba: number[]) => {
-          const hex = "#" + rgba.slice(0, 3).map((c) => c.toString(16).padStart(2, "0")).join("");
-          const pick = h("input", { type: "color", value: hex });
+        /** A w3i colour (stored blue, green, red, alpha): colour picker + alpha. */
+        const color = (bgra: number[]) => {
+          const pick = h("input", { type: "color", value: w3iColorHex(bgra) });
           // Dragging in the colour dialog is one undo step.
           let visit = {};
           pick.addEventListener("input", () => {
-            const m = /^#(..)(..)(..)$/.exec(pick.value)!;
-            for (let i = 0; i < 3; i++) rgba[i] = parseInt(m[i + 1], 16);
+            setW3iColorHex(bgra, pick.value);
             update(visit);
           });
           pick.addEventListener("change", () => { visit = {}; });
-          return h("div.form-inline", {}, pick, h("span.muted", {}, "alpha"), num(() => rgba[3], (n) => { rgba[3] = Math.max(0, Math.min(255, n)); }, { int: true }));
+          return h("div.form-inline", {}, pick, h("span.muted", {}, "alpha"), num(() => bgra[3], (n) => { bgra[3] = Math.max(0, Math.min(255, n)); }, { int: true }));
         };
         const section_ = (title: string, ...children: (Node | null)[]) => h("section.form-section", {}, h("h3", {}, title), ...children.filter((c): c is Node => c !== null));
 
