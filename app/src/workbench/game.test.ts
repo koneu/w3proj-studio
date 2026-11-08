@@ -178,6 +178,100 @@ test("at most MAX_READS_IN_FLIGHT reads wait on the backend at once; the rest fo
   assert.equal(got[n + 1], null);
 });
 
+/** Fills every place with reads held at the backend, then queues `queue` (path and whether it's a
+ *  background read) and opens: what the backend is asked after the first places is the queue's order. */
+async function queueOrder(queue: [string, boolean][], meanwhile?: (game: InstanceType<typeof GameService>) => void) {
+  const { game } = make();
+  const { MAX_READS_IN_FLIGHT } = await import("./game");
+  for (let i = 0; i < MAX_READS_IN_FLIGHT; i++) stored.set(`f${i}.dds`, new Uint8Array(1));
+  for (const [p] of queue) stored.set(p, new Uint8Array(1));
+  let open!: () => void;
+  hold = new Promise((r) => { open = r; });
+  const reads = Array.from({ length: MAX_READS_IN_FLIGHT }, (_, i) => game.read(`f${i}.dds`));
+  reads.push(...queue.map(([p, background]) => game.read(p, undefined, background)));
+  meanwhile?.(game);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(asked.length, MAX_READS_IN_FLIGHT, "the queue waits for a place");
+  open();
+  await Promise.all(reads);
+  return asked.slice(MAX_READS_IN_FLIGHT).map((a) => a.path);
+}
+
+test("a read someone waits on goes before background reads queued earlier", async () => {
+  const order = await queueOrder([["b1.dds", true], ["b2.dds", true], ["n1.dds", false], ["n2.dds", false]]);
+  assert.deepEqual(order, ["n1.dds", "n2.dds", "b1.dds", "b2.dds"]);
+});
+
+test("background reads aren't held back for good: every BACKGROUND_TURN-th place is theirs", async () => {
+  const { BACKGROUND_TURN } = await import("./game");
+  const now = Array.from({ length: BACKGROUND_TURN * 3 }, (_, i): [string, boolean] => [`n${i}.dds`, false]);
+  const order = await queueOrder([["b1.dds", true], ["b2.dds", true], ...now]);
+  assert.equal(order.indexOf("b1.dds"), BACKGROUND_TURN - 1, `b1 is asked ${BACKGROUND_TURN - 1} reads after the others started: ${order.join(" ")}`);
+  assert.equal(order.indexOf("b2.dds"), 2 * BACKGROUND_TURN - 1);
+  assert.deepEqual(order.filter((p) => p.startsWith("n")), now.map(([p]) => p), "the others keep their order");
+});
+
+test("a background read someone then waits on moves up to the reads waited on", async () => {
+  const order = await queueOrder([["b1.dds", true], ["b2.dds", true], ["b3.dds", true], ["n1.dds", false]], (game) => { void game.read("B3.dds"); });
+  assert.deepEqual(order, ["n1.dds", "b3.dds", "b1.dds", "b2.dds"]);
+  // A background read of one waited on doesn't move it back.
+  const kept = await queueOrder([["n1.dds", false], ["n2.dds", false]], (game) => { void game.read("n1.dds", undefined, true); });
+  assert.deepEqual(kept, ["n1.dds", "n2.dds"]);
+});
+
+test("a pass over many files read once doesn't push out the files read again", async () => {
+  const { game } = make(10_000);
+  const count = (path: string) => asked.filter((x) => x.path === path).length;
+  const hot = ["h1.dds", "h2.dds", "h3.dds"];
+  for (const p of hot) stored.set(p, new Uint8Array(1000));
+  // In use: read twice (another editor, the map opened again).
+  for (const p of [...hot, ...hot]) await game.read(p);
+  // One file read once before the pass: it may go.
+  stored.set("once.dds", new Uint8Array(1000));
+  await game.read("once.dds");
+  // The pass: four times the cache, each file once, some of them as background reads.
+  for (let i = 0; i < 40; i++) {
+    stored.set(`scan${i}.dds`, new Uint8Array(1000));
+    await game.read(`scan${i}.dds`, undefined, i % 2 === 0);
+  }
+  assert.ok(game.cachedSize <= 10_000, `the cache keeps to its size (${game.cachedSize})`);
+  const before = asked.length;
+  for (const p of hot) await game.read(p);
+  assert.equal(asked.length, before, `the files in use are still kept: ${hot.map((p) => `${p} asked ${count(p)}×`).join(", ")}`);
+  // The control: what was read once went (the pass did push files out).
+  await game.read("once.dds");
+  await game.read("scan0.dds");
+  assert.equal(count("once.dds"), 2);
+  assert.equal(count("scan0.dds"), 2);
+});
+
+test("a background read of a kept file doesn't make it one in use", async () => {
+  const { game } = make(5_000);
+  stored.set("x.dds", new Uint8Array(1000));
+  await game.read("x.dds");
+  await game.read("x.dds", undefined, true);
+  for (let i = 0; i < 10; i++) { stored.set(`p${i}.dds`, new Uint8Array(1000)); await game.read(`p${i}.dds`, undefined, true); }
+  await game.read("x.dds");
+  assert.equal(asked.filter((a) => a.path === "x.dds").length, 2, "read once by someone, it went with the pass");
+});
+
+test("the files in use keep to their share of the cache: the oldest of them go back to read once", async () => {
+  const { game } = make(4_000);
+  const { PROTECTED_SHARE } = await import("./game");
+  for (let i = 0; i < 4; i++) stored.set(`u${i}.dds`, new Uint8Array(1000));
+  for (let i = 0; i < 4; i++) { await game.read(`u${i}.dds`); await game.read(`u${i}.dds`); }
+  assert.equal(asked.length, 4);
+  assert.equal(game.cachedSize, 4000);
+  // u0 is the oldest in use; over the share, it counts as read once again, and goes first.
+  assert.ok(PROTECTED_SHARE * 4000 < 4000);
+  stored.set("new.dds", new Uint8Array(1000));
+  await game.read("new.dds");
+  for (const p of ["u1.dds", "u2.dds", "u3.dds", "new.dds"]) await game.read(p);
+  assert.equal(asked.length, 5, "u1–u3 and the new one stayed");
+  await game.read("u0.dds");
+  assert.equal(asked.length, 6, "u0 went");
+});
+
 test("the cache's size is a setting: a smaller one lets the oldest go at once", async () => {
   const { game, set } = make();
   for (const n of [1, 2, 3]) stored.set(`m${n}.dds`, new Uint8Array(400 * 1024));
