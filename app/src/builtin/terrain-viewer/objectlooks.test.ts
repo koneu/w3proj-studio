@@ -51,6 +51,22 @@ test("a unit given the swim look stands in its model's Stand Swim, apart from th
   assert.equal(look(land), "Stand");
 });
 
+test("a type of several variations whose numbered file isn't stored is drawn from its plain file, not as a cube", async () => {
+  // YSw5 (City wall endcap): numVar 2, but the classic storage has only CityWallEndcap.mdx.
+  const endcap: Skin = { ...nagaSkin, kind: "w3d", file: "Doodads\\Cityscape\\Structures\\CityWallEndcap\\CityWallEndcap", numVar: 2, moveType: undefined };
+  const read: string[] = [];
+  const loader = new ObjectLoader(fakeGl(), (path) => {
+    read.push(path);
+    return path === "Doodads\\Cityscape\\Structures\\CityWallEndcap\\CityWallEndcap.mdx" ? Promise.resolve(mdxOfSequences([["Stand", 0, 1000]])) : Promise.reject(new Error("not stored"));
+  }, () => {});
+  const wall = { ...placed(0), id: "YSw5", variation: 1 };
+  const out = await loader.load("doodads", [wall], new Map([["YSw5", endcap]]), () => 0);
+  assert.deepEqual(read, ["Doodads\\Cityscape\\Structures\\CityWallEndcap\\CityWallEndcap1.mdx", "Doodads\\Cityscape\\Structures\\CityWallEndcap\\CityWallEndcap.mdx"]);
+  assert.equal(out.batches.length, 1);
+  assert.notEqual(out.batches[0].gpu.model.name, "Placeholder", "the wall's model, not the checkered cube");
+  assert.deepEqual(out.problems, []);
+});
+
 test("an uprooted Ancient stands in its Alternate look, a swimming unit in its Swim one", () => {
   assert.deepEqual(unitLooks(false, false), []);
   assert.deepEqual(unitLooks(true, false), ["alternate"]);

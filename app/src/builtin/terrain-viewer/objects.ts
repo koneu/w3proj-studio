@@ -198,6 +198,13 @@ export function modelPath(skin: Skin, variation: number): string {
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
 
+/** The model to read when a variation's file isn't stored: the type's file without a number. The classic game
+ *  keeps some types of several variations in one file (the City wall endcap YSw5: numVar 2, but only
+ *  CityWallEndcap.mdx in War3.w3mod; the numbered files are Reforged's), which the World Editor's SD view shows. */
+export function plainModelPath(skin: Skin): string | undefined {
+  return skin.numVar > 1 ? `${skin.file.replace(/\.(mdl|mdx)$/i, "")}.mdx` : undefined;
+}
+
 /** World matrix: translate · rotate about z · scale (column-major). `z`: drawn at another height than
  *  the stored one (a ship on the water, see unitDrawHeight). */
 export function placement(p: Placed, extraScale: number, z = p.position[2]): Mat4 {
@@ -210,6 +217,8 @@ export function placement(p: Placed, extraScale: number, z = p.position[2]): Mat
 /** One model to draw at the given places. */
 export interface ModelRequest {
   path: string;
+  /** Read instead when `path` isn't stored (plainModelPath). */
+  plain?: string;
   /** Replaceable texture id → path (e.g. a tree type's own texture). */
   replaceable: Record<number, string>;
   instances: ObjectInstance[];
@@ -348,7 +357,10 @@ export class ObjectLoader {
     let m = this.models.get(key);
     if (!m) {
       m = this.track((async () => {
-        const model = parseMdx(await this.readFile(req.path));
+        const model = parseMdx(await this.readFile(req.path).catch((e: unknown) => {
+          if (req.plain) return this.readFile(req.plain);
+          throw e;
+        }));
         const gpu = new ModelGpu(this.gl, model);
         // Stand still at the start of its "Stand" animation.
         gpu.props = req.props ?? [];
@@ -372,7 +384,7 @@ export class ObjectLoader {
   /** The GPU model for a placed type (shared with the batches; for previews). */
   modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
     const replaceable = skinTextures(skin);
-    return this.model({ path: modelPath(skin, variation), replaceable, props: skin.animProps, instances: [] });
+    return this.model({ path: modelPath(skin, variation), plain: plainModelPath(skin), replaceable, props: skin.animProps, instances: [] });
   }
 
   /** Loads each requested model; failed ones are reported by index. The batches keep the order of
@@ -440,7 +452,7 @@ export class ObjectLoader {
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = skinTextures(skin);
-        entry = { req: { path, replaceable, props, instances: [] }, items: [] };
+        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [] }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);
