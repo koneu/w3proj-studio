@@ -98,8 +98,8 @@ void main() {
   if (uTone > 1.5) {
     // Fades in from the shore faster than the classic ramp, then slowly to all of it at a depth of 100: the
     // World Editor's HD lake on map 03 (we-drive, 2026-11-08) is about 0.37 opaque at depth 11, 0.59 at 22,
-    // 0.75 at 38, 0.85 at 71, which (depth / 100)^0.4 follows within 0.05.
-    float a = pow(clamp(vDepth * 1.28, 0.0, 1.0), 0.4) * t.a;
+    // 0.75 at 38, 0.85 at 71 (as Studio's old ramp placed those depths), ((depth - 4) / 96)^0.4 within 0.06.
+    float a = pow(clamp((vDepth * 128.0 - 4.0) / 96.0, 0.0, 1.0), 0.4) * t.a;
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
     outColor = vec4(fogged(uHdWater * mix(1.0, ripple, 0.5)), a);
     return;
