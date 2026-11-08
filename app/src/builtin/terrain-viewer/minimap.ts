@@ -20,7 +20,25 @@ export interface MinimapInput {
   objects: { x: number; y: number; rgb: Rgb }[];
   /** Look of the render (settings "terrain.minimap.*"). */
   params?: Partial<MinimapParams>;
+  // Export Minimap's options; left out, the picture is war3mapMap.blp's.
+  /** Side of the square picture in pixels (MINIMAP_SIZE). */
+  size?: number;
+  /** The ground's colours and the water (both on by default); without the ground it is black. */
+  show?: { terrain?: boolean; water?: boolean };
+  /** The whole map, unplayable border included, instead of the playable area. */
+  wholeMap?: boolean;
+  /** Per pathing cell over the whole map (4 per tile, rows from the south), RGBA blended over the ground. */
+  overlay?: { rgba: Uint8Array; width: number; height: number };
+  /** Units and items, as squares in their owner's colour. */
+  units?: { x: number; y: number; rgb: Rgb }[];
+  /** Regions (world rectangles), filled see-through and outlined, over the smoothed picture. */
+  regions?: { left: number; bottom: number; right: number; top: number; rgb: Rgb }[];
+  /** Preview icons (gold mines, neutral buildings, start locations) at world points, `tint` multiplied in. */
+  icons?: { x: number; y: number; image: { width: number; height: number; rgba: ArrayLike<number> }; tint?: Rgb }[];
 }
+
+/** How big a preview icon is on a 256 pixel minimap. */
+export const ICON_SIZE = 16;
 
 export interface MinimapParams {
   /** Ground colours relative to the texture average. */
@@ -57,9 +75,12 @@ const HUE_OFFSET = 64;
 
 /** RGBA pixels, rows top to bottom (north up). */
 export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
-  const { terrain: t, margins: [ml, mr, mb, mt], tileColor, waterColor } = input;
+  const { terrain: t, tileColor, waterColor } = input;
+  const [ml, mr, mb, mt] = input.wholeMap ? [0, 0, 0, 0] : input.margins;
   const P = { ...DEFAULT_MINIMAP, ...input.params };
-  const N = MINIMAP_SIZE;
+  const N = Math.max(1, Math.round(input.size ?? MINIMAP_SIZE));
+  const showGround = input.show?.terrain !== false, showWater = input.show?.water !== false;
+  const overlay = input.overlay;
   const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt;
   const scale = N / Math.max(pw, ph); // pixels per tile
   const ox = (N - pw * scale) / 2, oy = (N - ph * scale) / 2;
@@ -79,11 +100,13 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       const col = [0, 0, 0];
       let depth = 0;
       q.forEach((c, i) => {
-        const tc = tileColor(t.groundTiles[c.texture]);
-        for (let k = 0; k < 3; k++) col[k] += tc[k] * w[i] * P.groundBrightness;
+        if (showGround) {
+          const tc = tileColor(t.groundTiles[c.texture]);
+          for (let k = 0; k < 3; k++) col[k] += tc[k] * w[i] * P.groundBrightness;
+        }
         depth += (c.hasWater ? c.water - c.height : -64) * w[i];
       });
-      if (depth > 0) {
+      if (showWater && depth > 0) {
         const f = Math.min(1, depth / P.waterFullDepth);
         const a = P.waterOpacityShallow + (P.waterOpacityDeep - P.waterOpacityShallow) * f;
         for (let k = 0; k < 3; k++) {
@@ -91,18 +114,35 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
           col[k] = col[k] * (1 - a) + wc * a;
         }
       }
+      if (overlay) {
+        const cx = Math.floor(gx * 4), cy = Math.floor(gy * 4);
+        if (cx >= 0 && cy >= 0 && cx < overlay.width && cy < overlay.height) {
+          const o = (cy * overlay.width + cx) * 4, a = overlay.rgba[o + 3] / 255;
+          for (let k = 0; k < 3; k++) col[k] = col[k] * (1 - a) + overlay.rgba[o + k] * a;
+        }
+      }
       img.set(col, (py * N + px) * 3);
     }
   }
 
+  /** Pixel of a world point. */
+  const at = (wx: number, wy: number) => [((wx - t.offsetX) / 128 - ml) * scale + ox, N - (((wy - t.offsetY) / 128 - mb) * scale + oy)] as const;
   const rad = P.objectRadius * scale;
   for (const o of input.objects) {
-    const cx = ((o.x - t.offsetX) / 128 - ml) * scale + ox, cy = N - (((o.y - t.offsetY) / 128 - mb) * scale + oy);
+    const [cx, cy] = at(o.x, o.y);
     for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
       for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
         if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rad) continue;
         img.set(o.rgb, (y * N + x) * 3);
       }
+    }
+  }
+  // Units: squares a little wider than the doodads' dots, at least a pixel.
+  const half = Math.max(0.5, rad * 1.2);
+  for (const u of input.units ?? []) {
+    const [cx, cy] = at(u.x, u.y);
+    for (let y = Math.floor(cy - half); y < Math.ceil(cy + half); y++) {
+      for (let x = Math.floor(cx - half); x < Math.ceil(cx + half); x++) if (x >= 0 && y >= 0 && x < N && y < N) img.set(u.rgb, (y * N + x) * 3);
     }
   }
 
@@ -124,6 +164,33 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
           }
           img[(y * N + x) * 3 + k] = sum / weight;
         }
+      }
+    }
+  }
+
+  // Regions and icons stay sharp: drawn over the smoothed picture.
+  const blend = (x: number, y: number, rgb: ArrayLike<number>, a: number) => {
+    if (x < 0 || y < 0 || x >= N || y >= N || a <= 0) return;
+    const i = (y * N + x) * 3;
+    for (let k = 0; k < 3; k++) img[i + k] = img[i + k] * (1 - a) + rgb[k] * a;
+  };
+  for (const r of input.regions ?? []) {
+    const [x0f, y1f] = at(r.left, r.bottom), [x1f, y0f] = at(r.right, r.top);
+    const x0 = Math.round(x0f), x1 = Math.max(x0 + 1, Math.round(x1f)), y0 = Math.round(y0f), y1 = Math.max(y0 + 1, Math.round(y1f));
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) blend(x, y, r.rgb, x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1 ? 1 : 0.35);
+    }
+  }
+  const iconSide = Math.max(4, Math.round((ICON_SIZE * N) / MINIMAP_SIZE));
+  for (const icon of input.icons ?? []) {
+    const [cx, cy] = at(icon.x, icon.y), { width: iw, height: ih, rgba } = icon.image;
+    const left = Math.round(cx - iconSide / 2), top = Math.round(cy - iconSide / 2);
+    for (let y = 0; y < iconSide; y++) {
+      for (let x = 0; x < iconSide; x++) {
+        // Nearest texel of the icon's picture.
+        const s = (Math.min(ih - 1, Math.floor(((y + 0.5) * ih) / iconSide)) * iw + Math.min(iw - 1, Math.floor(((x + 0.5) * iw) / iconSide))) * 4;
+        const tint = icon.tint ?? [255, 255, 255];
+        blend(left + x, top + y, [rgba[s] * tint[0] / 255, rgba[s + 1] * tint[1] / 255, rgba[s + 2] * tint[2] / 255], rgba[s + 3] / 255);
       }
     }
   }

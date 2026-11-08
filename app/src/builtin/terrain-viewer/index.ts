@@ -27,8 +27,8 @@ import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
-import { exportMinimap } from "./minimapexport";
-import { buildMinimap, minimapSettings } from "./minimapgen";
+import { exportMinimap, type ExportOptions, type ExportSource } from "./minimapexport";
+import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
@@ -284,6 +284,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     screenshot: (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => Promise<string>;
     /** Rebuilds the derived files; without `before` shadows stay, as nothing is known to have changed. */
     derive: (before?: RebuildFrom) => Promise<void>;
+    /** What Export Minimap draws, as the editor has it now (unsaved edits included). */
+    minimapSource: () => Promise<ExportSource>;
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
@@ -1050,7 +1052,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { removed };
     }),
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
-    w3.commands.register("w3.terrain.exportMinimap", () => exportMinimap(w3)),
+    // The dialog, or `given` options as they are (scripts and tests); the picture is of the terrain editor as it is.
+    w3.commands.register("w3.terrain.exportMinimap", (given?: Partial<ExportOptions>) =>
+      exportMinimap(w3, async () => (await liveEditor("read")).minimapSource(), given)),
     w3.commands.register("w3.terrain.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       const path = projectTerrain(w3);
@@ -4047,6 +4051,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await ready();
             minimapStale.set();
             await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
+          },
+          minimapSource: async () => {
+            await ready();
+            const rf = (p: string) => readFile(w3, doc, p);
+            // Copies: the picture is of the moment it was asked for, whatever is edited while it is drawn.
+            const doodads = [...(dooFile?.list ?? [])], units = [...(unitsFile?.list ?? [])];
+            return {
+              base: await minimapBase(w3, terrain, doodads, rf),
+              terrain, units,
+              pathing: () => handle.pathing({ filtered: true }),
+              regions: async () => (await readMapDoc<{ regions?: { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }[] }>(w3, "map/war3map.w3r.json"))?.regions ?? [],
+              iconKind: () => iconKinds(w3),
+              iconImage: (type) => minimapIconImage(w3, type, rf),
+              params: minimapSettings(w3),
+            };
           },
         };
         // A read-only editor (a game map) never derives: it isn't the project's.
