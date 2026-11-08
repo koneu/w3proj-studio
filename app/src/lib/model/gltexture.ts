@@ -134,8 +134,14 @@ export function createTexture(gl: WebGL2RenderingContext, image: DecodedImage, o
 export function drawnTextures(model: Pick<Model, "textures" | "materials" | "particleEmitters2">): Set<number> {
   const unused = new Set<number>(), used = new Set<number>();
   for (const material of model.materials) for (const layer of material.layers) {
-    // Which texture an animated layer shows is only known while it plays.
-    if (layer.textureTrack) return new Set(model.textures.keys());
+    // An animated layer shows the textures its track names (a Reforged flipbook: 50 frames of the diffuse,
+    // and 50 normal maps that aren't drawn); a track without values could show any.
+    for (const track of [layer.textureTrack, layer.slotTracks?.[2]]) {
+      if (!track) continue;
+      if (!track.values?.length) return new Set(model.textures.keys());
+      for (const id of track.values) used.add(id);
+    }
+    layer.slotTracks?.forEach((track, slot) => { if (track && slot !== 0 && slot !== 2) for (const id of track.values) unused.add(id); });
     layer.textureIds.forEach((id, slot) => (slot === 0 || slot === 2 ? used : unused).add(id));
   }
   for (const emitter of model.particleEmitters2) used.add(emitter.textureId);

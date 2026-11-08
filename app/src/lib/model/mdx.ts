@@ -51,7 +51,10 @@ export interface Layer {
   coordId: number;
   alpha: number;
   alphaTrack?: Track;
+  /** Which texture the diffuse slot shows over time (a flipbook): the layer's KMTF, or a Reforged layer's slot 0 one. */
   textureTrack?: Track;
+  /** A Reforged layer's per-slot texture tracks (same order as `textureIds`), when any slot has one. */
+  slotTracks?: (Track | undefined)[];
 }
 
 export interface Material {
@@ -420,6 +423,7 @@ function readLayer(r: Reader, version: number): Layer {
   const coordId = r.u32();
   const alpha = r.f32();
   let textureIds = [textureId];
+  let slotTracks: (Track | undefined)[] | undefined;
   // The Reforged additions are present only if the layer has room for them
   // before its tracks (v1300 files use the classic 28-byte layer again).
   const hasMore = (n: number) => end - r.p >= n && !r.peekTag().startsWith("K");
@@ -433,16 +437,20 @@ function readLayer(r: Reader, version: number): Layer {
     r.u32(); // HD flag
     const n = r.u32();
     textureIds = [];
+    slotTracks = [];
     for (let i = 0; i < n; i++) {
       textureIds.push(r.u32());
       r.u32(); // slot
-      // Per-slot texture id tracks follow the slot when present.
-      if (r.peekTag() === "KMTF") readTrack(r, (r.tag(), "KMTF"));
+      // Per-slot texture id tracks follow the slot when present: a flipbook (the HD City Fountain's water
+      // names the stone's diffuse as its texture and plays War3_FountainWater_Diff_0000…0049 through one).
+      slotTracks.push(r.peekTag() === "KMTF" ? readTrack(r, (r.tag(), "KMTF")) : undefined);
     }
     if (!textureIds.length) textureIds = [textureId];
+    if (!slotTracks.some((t) => t)) slotTracks = undefined;
   }
   const tracks = readTracks(r, end);
-  return { filterMode, shadingFlags, textureIds, textureAnimId, coordId, alpha, alphaTrack: tracks.KMTA, textureTrack: tracks.KMTF };
+  // The diffuse slot's flipbook is the layer's texture track (what a classic layer's KMTF is).
+  return { filterMode, shadingFlags, textureIds, textureAnimId, coordId, alpha, alphaTrack: tracks.KMTA, textureTrack: tracks.KMTF ?? slotTracks?.[0], slotTracks };
 }
 
 export function parseMdx(buf: Uint8Array): Model {
