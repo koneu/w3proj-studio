@@ -2189,6 +2189,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 // The boxes show the values again, not what was typed.
                 if (stillShown()) show();
               },
+              openItemTables: () => void w3.commands.execute("w3.mapInfo.itemTables").catch((e) => w3.window.showError(String((e as Error).message ?? e))),
+              createItemTable: async () => {
+                const root = w3.workspace.project()?.root;
+                let made: { number: number; name: string };
+                try {
+                  // Made in Map Properties, one undo step there, and opened on it for its items.
+                  made = await w3.commands.execute<{ number: number; name: string }>("w3.mapInfo.createItemTable");
+                } catch (e) {
+                  void w3.window.showError(`No item table was made: ${(e as Error).message ?? e}`);
+                  return;
+                }
+                // Another project, or this editor closed meanwhile: the table isn't this one's to use.
+                if (disposed || w3.workspace.project()?.root !== root) return;
+                // Not saved yet, so not in the file the lists come from: known here until war3map.w3i is saved
+                // and the lists are read again (a table discarded unsaved then shows as not in the map).
+                if (lists.tables && !lists.tables.some((t) => t.number === made.number)) lists.tables.push(made);
+                ctx.tables = lists.tables?.map((t) => t.number);
+                if (!stillShown()) {
+                  void w3.window.showInfo(`Made ${made.name} (#${made.number}). The selection changed meanwhile: choose it under Drops › Map item table.`);
+                  return;
+                }
+                const why = changeProps(items, { field: "drops", value: { mode: "table", table: made.number } }, ctx);
+                if (why) host.warn(`Not changed: ${why}`);
+              },
             };
             show();
           }).catch((e) => {

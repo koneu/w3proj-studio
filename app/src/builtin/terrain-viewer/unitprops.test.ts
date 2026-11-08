@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   applyChange, attributesAt, changeAll, checkChange, commonFields, dropsOf, fieldsFor, fitSkills, heroPools, maxSkillLevel, propSnapshot,
-  randomItemLabel, redistribute, setTotal, type TypeFacts,
+  ownSetsOnly, randomItemLabel, redistribute, setTotal, tableChoice, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
 
@@ -196,6 +196,21 @@ test("drops: a map table, own sets or nothing, and the file's fields follow", ()
   assert.equal(checkChange(u, f, { field: "drops", value: { mode: "custom", sets: [[{ id: "0x00000000", chance: 50 }]] } }), null, "an empty slot");
   applyChange(u, f, { field: "drops", value: { mode: "none" } });
   assert.deepEqual([get(u).itemTable, get(u).itemSets], [-1, []]);
+});
+
+test("choosing a map item table: the first table, an offer to make one when there are none, never one unread", () => {
+  assert.deepEqual(tableChoice([{ number: 4 }, { number: 1 }]), { table: 4 });
+  assert.deepEqual(tableChoice([]), { offer: true }, "no tables: an offer to make one, not only a warning");
+  assert.match((tableChoice(null) as { error: string }).error, /couldn't be read/, "an unreadable war3map.w3i isn't taken for one without tables");
+});
+
+test("objects in the older layout are offered only own sets, and are told why", () => {
+  assert.equal(ownSetsOnly([unit("hfoo"), destructable()]), null);
+  assert.match(ownSetsOnly([oldUnit("hfoo")]) ?? "", /^This object is .*Reign of Chaos.*only own item sets/);
+  assert.match(ownSetsOnly([oldUnit("hfoo"), oldUnit("hkni")]) ?? "", /^These objects are/);
+  assert.match(ownSetsOnly([oldUnit("hfoo"), unit("hkni"), destructable()]) ?? "", /^1 of these objects is in/);
+  // The control: the same unit with the field is offered tables, so the field is what decides.
+  assert.equal(ownSetsOnly([unit("hfoo")]), null);
 });
 
 test("inventory slots stay in order and empty slots leave the list", () => {

@@ -516,6 +516,8 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-prop-item { display: flex; align-items: center; gap: 4px; }
 .terrain-prop-chance { width: 52px; flex: 0 0 auto; }
 .terrain-prop-over { color: var(--error); }
+.terrain-prop-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 90px; }
+.terrain-prop-hint, .terrain-prop-link { padding-left: 90px; font-size: 11px; }
 .terrain-filter { width: 260px; font-family: var(--mono); font-size: 12px; }
 .terrain-tilemgr { flex-basis: 100%; display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; max-width: 640px; }
 .terrain-tilemgr-row { display: flex; gap: 8px; align-items: center; }

@@ -136,6 +136,19 @@ function techs(info: TechInfo, ctx: TechContext): HTMLElement {
 }
 
 const nextNumber = (list: { number: number }[]) => 1 + Math.max(-1, ...list.map((x) => x.number));
+
+/** Where Map Properties scrolls to: the item tables, or one of them. */
+export const ITEM_TABLES_ANCHOR = "item-tables";
+export const itemTableAnchor = (number: number) => `item-table-${number}`;
+
+/** Adds a new item table (one empty set, named as the World Editor names it) after the others and gives it;
+ *  throws for a map whose format has no item tables (Reign of Chaos). */
+export function addItemTable(info: TechInfo): ItemTable {
+  if (!Array.isArray(info.itemTables)) throw new Error("This map's format has no item tables (Reign of Chaos).");
+  const table: ItemTable = { number: nextNumber(info.itemTables), name: "Item Table", sets: [[]] };
+  info.itemTables.push(table);
+  return table;
+}
 const chanceTotal = (chances: number[]) => {
   const sum = chances.reduce((a, b) => a + b, 0);
   return h(`span${sum === 100 ? ".muted" : ".techtree-warn"}`, { title: "Chances should add up to 100%" }, `total ${sum}%`);
@@ -167,9 +180,10 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
 }
 
 function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
-  return section(`Item tables (${info.itemTables.length})`,
-    "Items dropped by units that use the table: one item is chosen from each set by its chance.",
-    ...info.itemTables.map((t) => h("div.techtree-table", {},
+  const el = section(`Item tables (${info.itemTables.length})`,
+    "Items dropped by units that use the table: one item is chosen from each set by its chance. A placed unit, building or item "
+      + "uses one in the terrain editor: Selection › Properties › Drops › Map item table.",
+    ...info.itemTables.map((t) => h("div.techtree-table", { "data-anchor": itemTableAnchor(t.number) },
       h("div.techtree-table-head", {},
         h("input.form-input", { value: t.name, onchange: (e: Event) => { t.name = (e.target as HTMLInputElement).value; ctx.changed(); } }),
         h("span.muted", {}, `#${t.number}`),
@@ -188,7 +202,9 @@ function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
           ctx.changed(true);
         } }, "Add item…"))),
       h("button", { onclick: () => { t.sets.push([]); ctx.changed(true); } }, "Add set"))),
-    h("button", { onclick: () => { info.itemTables.push({ number: nextNumber(info.itemTables), name: "Item Table", sets: [[]] }); ctx.changed(true); } }, "Add item table"));
+    h("button", { onclick: () => { addItemTable(info); ctx.changed(true); } }, "Add item table"));
+  el.dataset.anchor = ITEM_TABLES_ANCHOR;
+  return el;
 }
 
 export function renderTechtree(info: TechInfo, ctx: TechContext): Node[] {

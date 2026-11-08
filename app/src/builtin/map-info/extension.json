@@ -12,6 +12,6 @@
     "viewContainers": [{ "id": "scenario", "title": "Scenario", "icon": "⚑", "order": 4 }],
     "views": [{ "id": "w3.scenario.sections", "title": "Map Properties", "container": "scenario" }],
     "editors": [{ "id": "w3.mapInfo", "title": "Map Properties", "patterns": ["war3map.w3i.json"] }],
-    "commands": [{ "id": "w3.strings.export", "when": "project", "menu": "File:4:6", "title": "Export Strings…", "category": "Map" }, { "id": "w3.strings.import", "when": "project", "menu": "File:4:7", "title": "Import Strings…", "category": "Map" }, { "id": "w3.mapInfo.open", "when": "project", "menu": "Scenario:1:1", "title": "Map Properties…", "category": "Scenario", "keybinding": "f7" }]
+    "commands": [{ "id": "w3.strings.export", "when": "project", "menu": "File:4:6", "title": "Export Strings…", "category": "Map" }, { "id": "w3.strings.import", "when": "project", "menu": "File:4:7", "title": "Import Strings…", "category": "Map" }, { "id": "w3.mapInfo.open", "when": "project", "menu": "Scenario:1:1", "title": "Map Properties…", "category": "Scenario", "keybinding": "f7" }, { "id": "w3.mapInfo.itemTables", "when": "project", "menu": "Scenario:1:1.5", "title": "Item Tables…", "category": "Scenario" }, { "id": "w3.mapInfo.createItemTable", "when": "project", "title": "Create an Item Table", "category": "Scenario", "hidden": true }]
   }
 }

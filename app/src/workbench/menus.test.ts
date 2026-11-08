@@ -47,6 +47,11 @@ test("what a user looks for first is in the menus of the built-in extensions", (
     assert.ok(placed.get(id)?.startsWith(menu), id);
   }
   assert.ok(placed.size >= 30);
+  // Item tables (unit drops) aren't only a section deep in Map Properties: their own entry, right after it.
+  const scenario = menuTree(readdirSync(builtin, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) =>
+    (JSON.parse(readFileSync(join(builtin, d.name, "extension.json"), "utf8")) as { contributes?: { commands?: CommandContribution[] } }).contributes?.commands ?? []))
+    .find((m) => m.name === "Scenario")!.groups.flat().map((e) => e.id);
+  assert.equal(scenario.indexOf("w3.mapInfo.itemTables"), scenario.indexOf("w3.mapInfo.open") + 1, scenario.join(", "));
 });
 
 test("a menu entry says why it can't run, and only then", () => {
