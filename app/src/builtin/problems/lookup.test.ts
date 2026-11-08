@@ -1,7 +1,8 @@
 // A campaign's chapter map finds files in the campaign's own files too, which are listed in the
 // background: the checks that ask "is this file in the map?" have to wait for that list, a list
 // that can't be read must not pass for an empty one, and results found while another project was
-// opened must not be shown for it.
+// opened must not be shown for it. Whether there is a campaign, and its files, are known or the
+// checks fail saying why; a file is read from where it is (the chapter's folder or the campaign's).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -9,14 +10,24 @@ import type { FileInfo, W3Api } from "../../extensions/api";
 import type { Problem, ProblemsService } from "../../extensions/services";
 import { builtinChecks } from "./checks";
 import { activate } from "./index";
+import { findCampaign, knownPlacedTypes } from "./invalid";
 import { FileLookup } from "./lookup";
+import { joinPath } from "../../lib/paths";
 
 const CHAPTER = "/camp/maps/Chapter 1";
 const IMPORTED = "war3mapImported\\camp.blp";
 
 interface Options {
-  /** The campaign's file list, as project_files gives it: a list, or an Error it fails with. */
+  /** The campaign's file list, as project_files_partial gives it: a list, or an Error it fails with. */
   campaign?: FileInfo[] | Error;
+  /** The campaign's folders project_files_partial couldn't read (and skipped). */
+  unreadable?: { path: string; error: string }[];
+  /** What asking whether war3campaign.w3f is there fails with (else it answers). */
+  existsError?: Error;
+  /** The chapter map's own files besides war3map.imp.json, with their bytes. */
+  own?: Record<string, Uint8Array>;
+  /** Files on disk outside the project (full paths), with their bytes. */
+  disk?: Record<string, Uint8Array>;
   /** Whether the campaign folder holds war3campaign.w3f (else it's no campaign). */
   isCampaign?: boolean;
   /** The chapter map's import list (war3map.imp). */
@@ -39,23 +50,27 @@ function chapter(opts: Options = {}) {
   const w3 = {
     workspace: {
       project: () => (open ? { root: open.root, name: "ch", manifest: {}, default_output: "" } : null),
-      files: () => [{ path: "map/war3map.imp.json", size: 1, modified: 1 }],
+      files: () => [{ path: "map/war3map.imp.json", size: 1, modified: 1 }, ...Object.keys(opts.own ?? {}).map((path) => ({ path, size: 1, modified: 1 }))],
       resolve: (p: string) => `${open?.root}/${p}`,
       readText: async (p: string) => { if (p in docs) return docs[p]; throw new Error(`no ${p}`); },
-      readBytes: async (p: string) => { throw new Error(`no ${p}`); },
+      readBytes: async (p: string) => { const b = opts.own?.[p]; if (b) return b; throw new Error(`no ${p}`); },
       onDidChange: () => none,
     },
     backend: {
       invoke: async (command: string, args: Record<string, unknown> = {}) => {
-        if (command === "fs_exists") return (opts.isCampaign ?? true) && String(args.path) === "/camp/map/war3campaign.w3f.json";
-        if (command === "project_files") {
+        if (command === "fs_exists") {
+          if (opts.existsError) throw opts.existsError;
+          return (opts.isCampaign ?? true) && String(args.path) === "/camp/map/war3campaign.w3f.json";
+        }
+        if (command === "project_files_partial") {
           asked.push(String(args.root));
           await released;
           if (campaign instanceof Error) throw campaign;
-          return campaign;
+          return { files: campaign, unreadable: opts.unreadable ?? [] };
         }
         throw new Error(`${command}: not in this test`);
       },
+      readBytes: async (p: string) => { const b = opts.disk?.[p]; if (b) return b; throw new Error(`no ${p}`); },
     },
     game: {
       list: async () => [],
@@ -147,4 +162,96 @@ test("results found while the campaign list was awaited aren't shown once anothe
   app.release();
   assert.deepEqual(await run, []);
   assert.deepEqual(app.service().problems(), [], "the old project's problems are shown for the new one");
+});
+
+test("list_problems asked after another project was opened checks that one, not answering with the old run's nothing", async () => {
+  const app = chapter();
+  activate(app.w3, { extensionId: "w3.problems", extensionPath: null, subscriptions: [] });
+  // A run starts for the chapter map and waits for its campaign's file list.
+  const first = app.service().run();
+  await settle();
+  // Another project is opened (no campaign above it), and a client asks.
+  app.switchTo("/other");
+  const listing = app.tools.get("list_problems")!({}) as Promise<Problem[]>;
+  await settle();
+  app.release();
+  assert.deepEqual(await first, [], "the chapter map's run gave results for the project opened since");
+  const listed = await listing;
+  assert.deepEqual(listed.map((p) => p.message), [`${IMPORTED} is listed but its file is missing`], "list_problems answered for a project it never checked");
+});
+
+test("a run asked for (as Build does) after another project was opened checks that one too", async () => {
+  const app = chapter();
+  activate(app.w3, { extensionId: "w3.problems", extensionPath: null, subscriptions: [] });
+  const first = app.service().run();
+  await settle();
+  app.switchTo("/other");
+  const second = app.service().run();
+  await settle();
+  app.release();
+  assert.deepEqual(await first, []);
+  assert.deepEqual((await second).map((p) => p.message), [`${IMPORTED} is listed but its file is missing`], "Build would pack a project that was never checked");
+});
+
+test("list_problems says so when the project changes during its own run, instead of answering with nothing", async () => {
+  const app = chapter({ campaign: [] });
+  activate(app.w3, { extensionId: "w3.problems", extensionPath: null, subscriptions: [] });
+  const listing = app.tools.get("list_problems")!({}) as Promise<Problem[]>;
+  await settle();
+  app.switchTo("/other");
+  app.release();
+  await assert.rejects(listing, /project changed while it was being checked/);
+});
+
+test("control: list_problems for the project the run is for joins it and answers with its problems", async () => {
+  const app = chapter({ campaign: [] });
+  activate(app.w3, { extensionId: "w3.problems", extensionPath: null, subscriptions: [] });
+  const listing = app.tools.get("list_problems")!({}) as Promise<Problem[]>;
+  await settle();
+  app.release();
+  assert.deepEqual((await listing).map((p) => p.message), [`${IMPORTED} is listed but its file is missing`]);
+  assert.deepEqual(app.asked, ["/camp"], "the campaign was listed more than once: the run wasn't joined");
+});
+
+test("whether the campaign file is there, when that can't be found out, fails the checks naming why instead of meaning no campaign", async () => {
+  const app = chapter({ existsError: new Error("Permission denied (os error 13)") });
+  await assert.rejects(findCampaign(app.w3), /\/camp.*couldn't be checked.*Permission denied/);
+  const lookup = new FileLookup(app.w3);
+  await assert.rejects(lookup.whenReady(), /couldn't be checked.*Permission denied/);
+  // (Asked at once: the campaign's file list is never waited for, there's no campaign known to list.)
+  await assert.rejects(app.imports.run(), /couldn't be checked.*Permission denied/);
+  // The campaign's custom objects aren't taken as absent either (placed ones would all look unknown).
+  await assert.rejects(knownPlacedTypes(app.w3, async () => ({ baseIds: ["hfoo"] }), async () => null), /couldn't be checked/);
+  // Control: a folder that answers "not there" is no campaign, and nothing fails.
+  assert.equal(await findCampaign(chapter({ isCampaign: false }).w3), undefined);
+});
+
+test("the map's file is read from where it is: the chapter's own folder, or its campaign's", async () => {
+  const own = new Uint8Array([1]), theirs = new Uint8Array([2]);
+  const app = chapter({
+    campaign: [{ path: "map/war3mapImported/camp.blp", size: 1, modified: 1 }],
+    own: { "map/war3mapImported/Own.blp": own },
+    disk: { [joinPath("/camp", "map", "war3mapImported", "camp.blp")]: theirs },
+  });
+  const lookup = new FileLookup(app.w3);
+  app.release();
+  await lookup.whenReady();
+  assert.equal(await lookup.read(IMPORTED), theirs, "a file only the campaign has was read from the chapter's folder");
+  // The map's own file, under the spelling it has on disk.
+  assert.equal(await lookup.read("war3mapImported\\own.blp"), own);
+  assert.equal(await lookup.read("war3mapImported\\none.blp"), null);
+  // What writing would create in the chapter's folder: the campaign's file isn't the chapter's own.
+  assert.equal(lookup.inMap(IMPORTED), true);
+  assert.equal(lookup.inOwnMap(IMPORTED), false);
+  assert.equal(lookup.inOwnMap("war3mapImported\\Own.blp"), true);
+});
+
+test("an unreadable chapter folder of the campaign is skipped: the campaign's own files are still found", async () => {
+  const app = chapter({ unreadable: [{ path: "maps/Chapter 2", error: "Permission denied (os error 13)" }] });
+  assert.deepEqual((await runImports(app)).map((p) => p.message), []);
+});
+
+test("control: an unreadable folder of the campaign's own map fails the check, naming it", async () => {
+  const app = chapter({ unreadable: [{ path: "map/war3mapImported", error: "Permission denied (os error 13)" }] });
+  await assert.rejects(runImports(app), /couldn't be listed \(map\/war3mapImported: Permission denied/);
 });

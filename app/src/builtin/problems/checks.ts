@@ -673,7 +673,8 @@ async function convertToClassic(
     return files;
   };
   // Absent is null; a file the map has that can't be read throws (it would look free and be overwritten).
-  const existing = async (archive: string) => (lookup.inMap(archive) ? w3.workspace.readBytes(`map/${toProjectPath(archive)}`) : null);
+  // A chapter map's file may be its campaign's: read from there, not from the chapter's own folder.
+  const existing = (archive: string) => lookup.read(archive);
   const { dir, files } = await chooseFolder(name, build, existing);
   // The converted models must find every texture they name, in the map.
   const have = new Set([...files.keys()].map((f) => f.toLowerCase()));
@@ -685,7 +686,8 @@ async function convertToClassic(
   // Everything that can fail comes before the first write.
   const applyImports = await prepareImports(w3, [...files.keys()]);
   const applyModel = await prepareModel(w3, kind, base, id, modelFieldValue(kind, `${dir}\\${name}`), count);
-  await writeFix(w3, root, files, (a) => !lookup.inMap(a), [applyImports, applyModel]);
+  // A file only the campaign had is new in the chapter's folder: removed again if the fix fails.
+  await writeFix(w3, root, files, (a) => !lookup.inOwnMap(a), [applyImports, applyModel]);
   await w3.workspace.refresh();
   return [...files.values()].reduce((n, b) => n + b.length, 0);
 }

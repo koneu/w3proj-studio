@@ -21,7 +21,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let groups: Group[] = [];
   /** The project root the results are for. */
   let ranFor: string | null = null;
-  let ran = false, running: Promise<Problem[]> | null = null;
+  let ran = false;
+  /** The run going on: `root` is the project it checks, `adopted` whether its results became the
+   *  shown ones (not when the project was closed or changed meanwhile). */
+  let running: Promise<{ root: string | null; adopted: boolean; problems: Problem[] }> | null = null;
   /** What the checks of the running run share; outside a run, nothing is shared. */
   let scope = new RunScope(w3, false);
   const folded = new Set<string>();
@@ -42,46 +45,67 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { dispose: () => { const i = checks.indexOf(check); if (i >= 0) checks.splice(i, 1); } };
     },
     run() {
-      running ??= (async () => {
-        const root = w3.workspace.project()?.root ?? null;
-        if (!root) { groups = []; return []; }
-        const result: Group[] = [];
-        // What the built-in checks of this run share (each document read once); dropped when it ends.
-        scope = new RunScope(w3);
-        // One failing check doesn't stop the others.
-        for (const check of [...checks]) {
-          // Each check's time, as a User Timing measure ("problems:<id>"): DevTools and the bench read it.
-          const started = performance.now();
-          try { result.push({ check, problems: await check.run() }); } catch (e) {
-            result.push({ check, problems: [], error: String(e instanceof Error ? e.message : e) });
-          }
-          performance.measure(`problems:${check.id}`, { start: started, end: performance.now() });
-        }
-        // The project was closed or changed while the checks ran: these results are not its own.
-        if (resultsStale(root, w3.workspace.project()?.root ?? null)) return [];
-        groups = result;
-        ranFor = root;
-        ran = true;
-        updateStatus();
-        return all();
-      })().finally(() => {
-        // The run's documents aren't kept: the next run reads the files as they are then.
-        scope = new RunScope(w3, false);
-        // Redrawn once the run is over (its button shows "Checking…" while running).
-        running = null;
-        w3.views.refresh("w3.problems.list");
-      });
-      w3.views.refresh("w3.problems.list");
-      return running;
+      return runCurrent().then((r) => r.problems);
     },
     problems: all,
   };
+  /** Starts a run, or joins the one going on (which may be for the project open when it started). */
+  const start = () => {
+    running ??= (async () => {
+      const root = w3.workspace.project()?.root ?? null;
+      if (!root) { groups = []; return { root, adopted: false, problems: [] }; }
+      const result: Group[] = [];
+      // What the built-in checks of this run share (each document read once); dropped when it ends.
+      scope = new RunScope(w3);
+      // One failing check doesn't stop the others.
+      for (const check of [...checks]) {
+        // Each check's time, as a User Timing measure ("problems:<id>"): DevTools and the bench read it.
+        const started = performance.now();
+        try { result.push({ check, problems: await check.run() }); } catch (e) {
+          result.push({ check, problems: [], error: String(e instanceof Error ? e.message : e) });
+        }
+        performance.measure(`problems:${check.id}`, { start: started, end: performance.now() });
+      }
+      // The project was closed or changed while the checks ran: these results are not its own.
+      if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [] };
+      groups = result;
+      ranFor = root;
+      ran = true;
+      updateStatus();
+      return { root, adopted: true, problems: all() };
+    })().finally(() => {
+      // The run's documents aren't kept: the next run reads the files as they are then.
+      scope = new RunScope(w3, false);
+      // Redrawn once the run is over (its button shows "Checking…" while running).
+      running = null;
+      w3.views.refresh("w3.problems.list");
+    });
+    w3.views.refresh("w3.problems.list");
+    return running;
+  };
+  /** A run for the project open now: the one going on may have been started for the project open
+   *  before (its "nothing found" says nothing about this one, and Build would pack unchecked), so
+   *  then a run of its own follows once that one is over. Its results are adopted only if the project
+   *  stays open meanwhile. */
+  const runCurrent = async () => {
+    for (let tries = 0; ; tries++) {
+      const root = w3.workspace.project()?.root ?? null;
+      const r = await start();
+      if (r.root === root || tries >= 2) return r;
+    }
+  };
   ctx.subscriptions.push(w3.services.provide(PROBLEMS_SERVICE, service));
   ctx.subscriptions.push(w3.mcp.registerTool("list_problems", async () => {
-    if (!w3.workspace.project()) throw new Error("No project is open in W3Proj Studio.");
-    const found = (await service.run()).map(({ severity, message, location }) => ({ severity, message, location }));
-    // A check that failed found nothing, which isn't "no problems": say so (only for this project's run).
-    const failed = ranFor === (w3.workspace.project()?.root ?? null) ? groups.filter((g) => g.error) : [];
+    const root = w3.workspace.project()?.root ?? null;
+    if (!root) throw new Error("No project is open in W3Proj Studio.");
+    const r = await runCurrent();
+    // Not this project's results (it was closed or changed during the run): no answer, rather than "none".
+    if (!r.adopted || r.root !== root || resultsStale(root, w3.workspace.project()?.root ?? null)) {
+      throw new Error("The project changed while it was being checked; ask again once it stays open.");
+    }
+    const found = r.problems.map(({ severity, message, location }) => ({ severity, message, location }));
+    // A check that failed found nothing, which isn't "no problems": say so (groups are this run's).
+    const failed = groups.filter((g) => g.error);
     return [...failed.map((g) => ({ severity: "error" as const, message: `The check failed: ${g.error}`, location: g.check.title })), ...found];
   }));
   for (const c of [...builtinChecks(w3, () => scope), ...mapChecks(w3, () => scope)]) ctx.subscriptions.push(service.registerCheck(c));

@@ -3,6 +3,7 @@
 
 import type { FileInfo, W3Api } from "../../extensions/api";
 import { toArchiveName } from "../../lib/formats/archivepath";
+import { joinPath } from "../../lib/paths";
 import { findCampaign } from "./invalid";
 
 /** A path as the game looks it up: lower case, "\\", without art set or language folders
@@ -21,28 +22,42 @@ export type FileKind = "model" | "texture" | "file";
 /** Where files are looked up: the project's map folder (and a chapter map's campaign), then the
  *  game's data (cached). */
 export class FileLookup {
-  private files = new Set<string>();
+  /** The map's own files: plain path → path in the project ("map/…", as listed). */
+  private own = new Map<string, string>();
+  /** A chapter map's campaign's files: plain path → path below the campaign's map folder. */
+  private campaignFiles = new Map<string, string>();
+  /** The campaign project's folder, once known (a chapter map's only). */
+  private campaign: string | undefined;
   private game = new Map<string, Promise<boolean>>();
   private ready: Promise<void>;
   constructor(private w3: W3Api) {
-    const add = (list: FileInfo[]) => {
+    const add = (into: Map<string, string>, list: FileInfo[]) => {
       for (const f of list) {
         const rel = f.path.replace(/\\/g, "/");
-        if (rel.toLowerCase().startsWith("map/")) this.files.add(plainPath(toArchiveName(rel.slice(4))));
+        if (!rel.toLowerCase().startsWith("map/")) continue;
+        const archive = toArchiveName(rel.slice(4)), key = plainPath(archive);
+        // Several variants (`_HD.w3mod\…`) give one key: the plain file stands for it if there is one.
+        if (!into.has(key) || archive.replace(/\//g, "\\").toLowerCase() === key) into.set(key, rel);
       }
     };
-    add(w3.workspace.files());
+    add(this.own, w3.workspace.files());
     // A campaign's chapter map also uses the campaign's imports. Only a folder that holds
     // war3campaign.w3f is a campaign (as for its custom objects); one that is but whose files can't
     // be listed makes the lookup fail, never pass for a campaign without files.
     this.ready = (async () => {
       const campaign = await findCampaign(w3);
       if (campaign === undefined) return;
-      let list: FileInfo[];
-      try { list = await w3.backend.invoke<FileInfo[]>("project_files", { root: campaign }); } catch (e) {
-        throw new Error(`The campaign's files (${campaign}) couldn't be listed (${e instanceof Error ? e.message : String(e)}), so files of the chapter map that may be among them can't be checked.`);
+      const failed = (why: string) => new Error(`The campaign's files (${campaign}) couldn't be listed (${why}), so files of the chapter map that may be among them can't be checked.`);
+      let list: { files: FileInfo[]; unreadable: { path: string; error: string }[] };
+      try { list = await w3.backend.invoke("project_files_partial", { root: campaign }); } catch (e) {
+        throw failed(e instanceof Error ? e.message : String(e));
       }
-      add(list);
+      // The campaign folder holds its chapters' projects too (maps\<chapter>): one that can't be read
+      // doesn't matter here, a folder of the campaign's own map does.
+      const inMapFolder = list.unreadable.find((u) => /^map(\/|$)/i.test(u.path.replace(/\\/g, "/")));
+      if (inMapFolder) throw failed(`${inMapFolder.path}: ${inMapFolder.error}`);
+      this.campaign = campaign;
+      add(this.campaignFiles, list.files);
     })();
     // The checks that ask report the failure; when none asks, it isn't an unhandled rejection.
     this.ready.catch(() => {});
@@ -55,7 +70,25 @@ export class FileLookup {
   /** Whether the map (or a chapter map's campaign) has the file: only once whenReady() resolved,
    *  before that a campaign's files are missing from it. */
   inMap(path: string) {
-    return this.files.has(plainPath(path));
+    const key = plainPath(path);
+    return this.own.has(key) || this.campaignFiles.has(key);
+  }
+  /** Whether the map's own folder has the file (not only a chapter map's campaign): what writing it
+   *  into the map would replace rather than create. */
+  inOwnMap(path: string) {
+    return this.own.has(plainPath(path));
+  }
+  /** The bytes of the map's file as the game would find it: the map's own, else (a chapter map) its
+   *  campaign's; null if neither has it. A file that is there but can't be read throws. Waits for
+   *  whenReady(), and rejects as it does. */
+  async read(path: string): Promise<Uint8Array | null> {
+    await this.ready;
+    const key = plainPath(path);
+    const own = this.own.get(key);
+    if (own !== undefined) return this.w3.workspace.readBytes(own);
+    const theirs = this.campaignFiles.get(key);
+    if (theirs !== undefined && this.campaign !== undefined) return this.w3.backend.readBytes(joinPath(this.campaign, theirs));
+    return null;
   }
   inGame(path: string): Promise<boolean> {
     const key = gameKey(path);

@@ -31,12 +31,19 @@ export function campaignOf(root: string | undefined): string | undefined {
 }
 
 /** The campaign project a chapter map's project sits in: the folder two up, if it holds war3campaign.w3f
- *  (in its project or raw form), as the Campaign Editor decides. Else undefined. */
+ *  (in its project or raw form), as the Campaign Editor decides. Else undefined. Throws, saying why,
+ *  when that can't be found out: an unknown answer must not count as "no campaign", or the
+ *  campaign's objects and files would all look missing. */
 export async function findCampaign(w3: W3Api): Promise<string | undefined> {
   const campaign = campaignOf(w3.workspace.project()?.root);
   if (!campaign) return undefined;
   for (const name of ["war3campaign.w3f.json", "war3campaign.w3f"]) {
-    if (await w3.backend.invoke<boolean>("fs_exists", { path: `${campaign}/map/${name}` }).catch(() => false)) return campaign;
+    const path = `${campaign}/map/${name}`;
+    let there: boolean;
+    try { there = await w3.backend.invoke<boolean>("fs_exists", { path }); } catch (e) {
+      throw new Error(`Whether ${campaign} is this chapter map's campaign couldn't be checked: ${path} (${e instanceof Error ? e.message : String(e)}).`);
+    }
+    if (there) return campaign;
   }
   return undefined;
 }
