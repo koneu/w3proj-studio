@@ -1060,6 +1060,9 @@ async function unitProperties(page, found) {
   if (unit("sloc") && JSON.stringify(unit("sloc").itemSets) !== "[]") fail("the start location took drops");
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
+  // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
+  // nothing to read from the game (its control). The game's files are forgotten, as after a patch.
+  await page.evaluate(`w3Workbench.game.reload()`);
 }
 
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
