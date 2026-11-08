@@ -72,13 +72,42 @@ const SKIN_FILES: [string, string][] = [
   ["Doodads\\DoodadSkins.txt", "w3d"], ["Units\\DestructableSkin.txt", "w3b"], ["Units\\UnitSkin.txt", "w3u"], ["Units\\ItemSkin.txt", "w3t"],
 ];
 
+/** Every game table the skins are made from, in the order they're read. */
+const SKIN_TABLES = [...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, "Units\\UnitData.slk"];
+
+/** The skins last made, with what they were made from: reading the tables again is cheap (the game's
+ *  files are kept, see workbench/game.ts), parsing them isn't (tens of ms, on each reload of the
+ *  placed objects). Made again when the install, the graphics mode or any table's text differs, so a
+ *  reloaded or patched game (w3.game.reload) is seen too, and a table that couldn't be read (taken as
+ *  empty, as without the cache) is parsed again once it can be. */
+let skinCache: { install: string; mode: string; texts: string[]; skins: Map<string, Skin> } | null = null;
+/** Times the skins were parsed: for the tests. */
+export const skinParses = { count: 0 };
+
 /** Model info per object id. Keys with a graphics-mode suffix ("file:hd")
- *  win over plain ones. */
+ *  win over plain ones. The game's own: a map's object data goes on top with withObjectArt. The
+ *  entries are shared between callers and frozen; the map is the caller's own. */
 export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
+  const install = w3.settings.get<string>("game.installDir") ?? "";
   const mode = w3.settings.get<string>("game.graphicsMode") ?? "hd";
+  const texts = await Promise.all(SKIN_TABLES.map((f) => w3.game.readText(f).catch(() => "")));
+  const kept = skinCache;
+  if (kept && kept.install === install && kept.mode === mode && kept.texts.every((t, i) => t === texts[i])) return new Map(kept.skins);
+  const skins = parseSkins(mode, texts);
+  for (const s of skins.values()) { if (s.animProps) Object.freeze(s.animProps); Object.freeze(s); }
+  // The install or mode changed during the reads: they may be of either, so they aren't kept.
+  const settled = install === (w3.settings.get<string>("game.installDir") ?? "") && mode === (w3.settings.get<string>("game.graphicsMode") ?? "hd");
+  skinCache = settled ? { install, mode, texts, skins } : null;
+  return new Map(skins);
+}
+
+/** The skins from the tables' texts, in SKIN_TABLES' order. */
+function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
+  skinParses.count++;
   const out = new Map<string, Skin>();
+  const tables = new Map(SKIN_TABLES.map((f, i) => [f, texts[i]]));
   for (const [f, kind] of SKIN_FILES) {
-    const text = await w3.game.readText(f).catch(() => "");
+    const text = tables.get(f) ?? "";
     for (const [id, sec] of parseIni(text)) {
       const get = (k: string) => sec.get(`${k}:${mode}`) ?? sec.get(k);
       const file = get("file");
@@ -98,8 +127,8 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
       });
     }
   }
-  for (const f of UNIT_FUNC) addAnimProps(out, await w3.game.readText(f).catch(() => ""));
-  addMoveTypes(out, parseSlk(await w3.game.readText("Units\\UnitData.slk").catch(() => "")));
+  for (const f of UNIT_FUNC) addAnimProps(out, tables.get(f) ?? "");
+  addMoveTypes(out, parseSlk(tables.get("Units\\UnitData.slk") ?? ""));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
