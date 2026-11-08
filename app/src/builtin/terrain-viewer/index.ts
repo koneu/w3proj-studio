@@ -7,7 +7,7 @@ import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
-import { TILESETS } from "../../lib/terrain/tilesets";
+import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
 import { errorText } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
@@ -596,9 +596,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset", "mcp.confirmTileset");
       refuseLostView(projectTerrain(w3));
       handle.setTileset(set.id);
+      // The custom tiles flag follows the new list and tileset in both (see customTilesFlag), in the same undo step.
       if (swap) handle.replaceGroundTiles(tiles);
-      // Exactly the tileset's own list again: nothing is custom about it any more.
-      if (t.groundTiles.join() === set.tiles.join()) { t.customTilesets = false; t.customTilesetsRaw = 0; }
       await handle.setMapTileset(set.id);
       await w3.editors.saveAll();
       return { ...plan, groundTiles: t.groundTiles };
@@ -1450,6 +1449,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           terrain.groundTiles.forEach((_, i) => loadTile(i, paths));
         };
 
+        /** Each tileset's own ground tiles, once read: a tile list equal to its tileset's isn't custom. */
+        let ownTiles: Map<string, string[]> | null = null;
+        const tilesetList = () => loadTilesets(w3).then((d) => {
+          const sets = d.sets.map((s) => ({ id: s.id, name: s.name, tiles: s.tiles.map((t) => t.id) }));
+          ownTiles = new Map(sets.map((s) => [s.id, s.tiles]));
+          return sets;
+        });
+        void tilesetList().catch(() => { /* the flag stays set; the palettes say what's missing */ });
         /** Changes the map's ground tile list: `tiles` is the new list, `map`
          *  gives each old index's new index. Corners and cliff types are
          *  remapped; one undo step. */
@@ -1484,8 +1491,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Stored cliff list: the derived order first, then entries no tile uses.
           const derived = newCliffs.map((t) => t.cliffID);
           terrain.cliffTiles = [...derived, ...before.cliffs.filter((id) => !derived.includes(id) && !oldCliffs.some((t) => t.cliffID === id))];
-          terrain.customTilesets = true;
-          terrain.customTilesetsRaw = 1;
+          // Exactly the tileset's own list (a template): nothing is custom about it, as the World Editor writes it.
+          terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
+          terrain.customTilesets = terrain.customTilesetsRaw !== 0;
           const after = snap();
           pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: true, objects: false });
           void syncTileList();
@@ -2975,13 +2983,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           terrain, editable, redraw, host: el, resizeMap,
           terrainChanged: (cliffs) => { renderer.terrainChanged(); if (cliffs) void liveCliffs(); doc.setDirty(true); redraw(); },
           commitTerrain,
-          tilesets: () => loadTilesets(w3).then((d) => d.sets.map((s) => ({ id: s.id, name: s.name, tiles: s.tiles.map((t) => t.id) }))),
+          tilesets: tilesetList,
           setTileset: (id) => {
             if (id === terrain.tileset) return;
-            const set = (v: string) => { terrain.tileset = v; loadTilesetArt(); reloadLighting(); };
-            const before = terrain.tileset;
-            pushEdit({ undo: () => set(before), redo: () => set(id), terrain: true, objects: false });
-            set(id);
+            const set = (v: string, custom: number) => {
+              terrain.tileset = v;
+              terrain.customTilesetsRaw = custom;
+              terrain.customTilesets = custom !== 0;
+              loadTilesetArt();
+              reloadLighting();
+            };
+            const before = terrain.tileset, customBefore = terrain.customTilesetsRaw;
+            // The tile list is custom or not by the tileset's own list.
+            const custom = customTilesFlag(terrain.groundTiles, ownTiles?.get(id));
+            pushEdit({ undo: () => set(before, customBefore), redo: () => set(id, custom), terrain: true, objects: false });
+            set(id, custom);
             redraw();
           },
           replaceGroundTiles: (tiles) => {

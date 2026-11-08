@@ -415,6 +415,45 @@ async function waterPathing(page, found) {
   if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
 }
 
+/** The terrain painter's tile templates (Tiles…, Template, Use its tiles): another tileset's tiles make the w3e's
+ *  list custom, and the tileset's own tiles again clear the flag, as the World Editor writes it. */
+async function tileTemplate(page, found) {
+  const fail = (what) => found.push(`tile template: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "template");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Template", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const header = (key) => new RegExp(`^${key} (\\S+)`, "m").exec(readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"))?.[1];
+  const own = header("tileset");
+  if (header("custom-tilesets") !== "0") fail(`a new map's tile list is custom (control): ${header("custom-tilesets")}`);
+  await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
+  await sleep(300);
+  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
+  const template = `document.querySelectorAll(".terrain-tilemgr-row")[1]?.querySelector("select")`;
+  await until("the tile templates", () => page.evaluate(`(${template})?.options.length > 1`), 20000);
+  const use = async (id) => {
+    const ok = await page.evaluate(`(() => {
+      const s = ${template};
+      if (![...s.options].some((o) => o.value === ${JSON.stringify(id)})) return false;
+      s.value = ${JSON.stringify(id)};
+      [...document.querySelectorAll(".terrain-tilemgr button")].find((b) => b.textContent === "Use its tiles").click();
+      return true;
+    })()`);
+    if (!ok) throw new Error(`no template ${id}`);
+    await sleep(300);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(500);
+  };
+  await use(own === "A" ? "B" : "A");
+  if (header("custom-tilesets") !== "1") fail(`another tileset's tiles didn't make the list custom (control): ${header("custom-tilesets")}`);
+  await use(own);
+  if (header("custom-tilesets") !== "0") fail(`the tileset's own tiles again left the custom tiles flag at ${header("custom-tilesets")}`);
+  if (header("tileset") !== own) fail(`a template changed the tileset to ${header("tileset")}`);
+}
+
 /** What the checks of the terrain viewer's height tools share: a new map opened in the editor, and the ways a person
  *  works on it (commands, keys and mouse sent into the hidden window) with the saved files to judge by. */
 async function heightKit(page, name) {
@@ -2509,7 +2548,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2585,6 +2624,7 @@ async function run() {
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
+    await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
