@@ -60,3 +60,11 @@ test("w3i colours are blue, green, red, alpha: 03b's red water tint shows red an
   setW3iColorHex(tint, "not a colour");
   assert.deepEqual(tint, [0x30, 0x20, 0x10, 255]);
 });
+
+test("set_map_text: a text in the string table with a line that is just } is refused with the reason, not cut", () => {
+  const wts = "STRING 1\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nKept\r\n}\r\n";
+  const doc = { name: "TRIGSTR_001", author: "", description: "", suggestedPlayers: "", loadingScreen: { title: "", subtitle: "", text: "" } };
+  const table = new StringTable(wts);
+  setMapText(doc, "name", "First\n}\nSecond", table);
+  assert.throws(() => table.serialize(), /string 1 .*" }"/);
+});

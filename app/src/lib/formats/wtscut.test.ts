@@ -6,7 +6,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "./wts";
-import { setMapText } from "../../builtin/map-info/summary";
 
 const map = "STRING 1\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nA hero\r\n}\r\n\r\nSTRING 3\r\n{\r\nKept\r\n}\r\n";
 
@@ -33,13 +32,6 @@ test("merging an editor's strings onto the file refuses a cut text", () => {
   const edited = new StringTable(map);
   edited.set(1, "Name\n}\nrest");
   assert.throws(() => StringTable.merge(map, edited, map), /starts with "}"/);
-});
-
-test("set_map_text's way (a text kept in the string table) refuses it with the reason", () => {
-  const doc = { name: "TRIGSTR_001", author: "", description: "", suggestedPlayers: "", loadingScreen: { title: "", subtitle: "", text: "" } };
-  const table = new StringTable(map);
-  setMapText(doc, "name", "First\n}\nSecond", table);
-  assert.throws(() => table.serialize(), /string 1 .*" }"/);
 });
 
 test("a safe text with braces elsewhere is written and read back whole", () => {
