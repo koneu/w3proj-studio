@@ -180,6 +180,16 @@ export interface TerrainEditorHandle {
   moveGroundTile(from: number, to: number): void;
   /** Removes a tile; its corners get `replacement` (an index in the current list); one undo step. */
   removeGroundTile(index: number, replacement: number): void;
+  /** Per ground tile (by index): corners painted with it, and cliff tiles drawn with its cliff type. Null until the
+   *  game's cliff types are read. */
+  groundTileUse(): { ground: number[]; cliffs: number[] } | null;
+  /** Removes the tiles `remove` (indices) in one undo step; a tile in use needs a replacement in `replace` (its
+   *  index → a tile that stays), which its corners and cliffs get. The removed ids; throws with the reason when refused
+   *  (nothing changes then). */
+  removeGroundTiles(remove: readonly number[], replace: ReadonlyMap<number, number>): string[];
+  /** Removes the tiles nothing uses (corners or cliffs), one undo step: their ids (none: no step), or null while
+   *  the cliff types aren't read. */
+  removeUnusedGroundTiles(): string[] | null;
   /** Small thumbnail (data URL) of a ground tile type's texture. */
   groundTileThumb(id: string): Promise<string | null>;
   readonly objects: TerrainObjects;

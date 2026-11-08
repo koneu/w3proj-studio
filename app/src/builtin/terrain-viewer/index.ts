@@ -24,6 +24,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
+import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
 import { exportMinimap } from "./minimapexport";
 import { buildMinimap, minimapSettings } from "./minimapgen";
@@ -292,8 +293,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const found = path ? openedBy.get(path) : undefined;
     return found && found.root === w3.workspace.project()?.root ? found : null;
   };
-  /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
-  let lastView: { key: string; view: TerrainView } | null = null;
+  /** The view when a terrain editor last closed: an edit from elsewhere (a new map size, an undone resize) reopens it.
+   *  Its camera and the selected objects (found again by id and creation number, else spot) come back. */
+  let lastView: { key: string; view: TerrainView; selection: PlacedRef[] } | null = null;
 
   /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
   /** The editor of the project's terrain, opened if need be. For an edit (the default) it is refused while its 3D view is lost. */
@@ -1102,6 +1104,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       refuseLostView(path);
       if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
+    w3.commands.register("w3.terrain.removeUnusedTiles", () => {
+      const path = w3.editors.activePath();
+      const editor = editorOf(path) ?? ownEditor();
+      if (!editor) throw new Error("Open the terrain editor first.");
+      refuseLostView(path && editorOf(path) ? path : projectTerrain(w3));
+      const removed = editor.handle.removeUnusedGroundTiles();
+      if (removed === null) throw new Error("The game's cliff types aren't read yet, so it isn't known which tiles cliffs use. Try again in a moment.");
+      void w3.window.showInfo(removed.length ? `Removed ${removed.length} unused ground tile${removed.length === 1 ? "" : "s"}: ${removed.join(", ")}. Undo takes it back.` : "Every ground tile of the map is in use.");
+      return removed;
+    }),
     // `opts` (other extensions): dialog preset, and a step before the map is created (and opened).
     w3.commands.register("w3.map.new", async (opts?: NewMapPreset & { beforeCreate?(o: { dir: string; name: string }): Promise<void> }) => {
       const o = await askNewMap(w3, opts ?? {});
@@ -1491,26 +1503,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             void syncTileList();
           };
           const before = snap();
-          // Cliff types follow the ground tile order (see cliffs.ts).
-          const types = cliffData?.types ?? new Map<string, CliffType>();
-          const oldCliffs = cliffList(terrain, types);
-          terrain.groundTiles = [...tiles];
-          const newCliffs = cliffList(terrain, types);
-          for (const c of terrain.corners) {
-            c.texture = map(c.texture);
-            if (c.cliffTexture < 15 && oldCliffs.length) {
-              const type = oldCliffs[c.cliffTexture];
-              const ni = type ? newCliffs.indexOf(type) : -1;
-              // A removed tile's cliffs take the replacement's cliff type (or the first).
-              c.cliffTexture = ni >= 0 ? ni : Math.max(0, newCliffs.findIndex((t) => t.groundTile === tiles[c.texture]));
-            }
-          }
-          // Stored cliff list: the derived order first, then entries no tile uses.
-          const derived = newCliffs.map((t) => t.cliffID);
-          terrain.cliffTiles = [...derived, ...before.cliffs.filter((id) => !derived.includes(id) && !oldCliffs.some((t) => t.cliffID === id))];
-          // Exactly the tileset's own list (a template): nothing is custom about it, as the World Editor writes it.
-          terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
-          terrain.customTilesets = terrain.customTilesetsRaw !== 0;
+          // Cliff types follow the ground tile order (see cliffs.ts); the custom tiles flag follows the list: exactly
+          // the tileset's own (a template) isn't custom, as the World Editor writes it.
+          applyTileList(terrain, tiles, map, cliffData?.types ?? new Map<string, CliffType>(), ownTiles?.get(terrain.tileset));
           const after = snap();
           pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: true, objects: false });
           void syncTileList();
@@ -1518,6 +1513,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.terrainChanged();
           minimapStale.set();
           redraw();
+        };
+        /** Takes ground tiles out of the list in one undo step (see planRemoval): the removed ids. Refused until the
+         *  game's cliff types are read, since what a cliff is made of isn't known before. */
+        const removeTiles = (remove: readonly number[], replace: ReadonlyMap<number, number>): string[] => {
+          if (!editable) throw new Error("This terrain is read-only.");
+          if (!cliffData) throw new Error("The game's cliff types aren't read yet, so it isn't known which tiles cliffs use. Try again in a moment.");
+          const plan = planRemoval(terrain.groundTiles, remove, replace, tileUse(terrain, cliffData.types));
+          changeTileList(plan.tiles, plan.map);
+          return plan.removed;
+        };
+        /** Removes the tiles nothing uses (one undo step; none, no step): their ids, or null while the cliff types
+         *  aren't read. */
+        const removeUnusedTiles = (): string[] | null => {
+          if (!cliffData) return null;
+          const unused = unusedTiles(tileUse(terrain, cliffData.types));
+          // A list nothing uses at all (no corners): the first tile stays.
+          const remove = unused.length === terrain.groundTiles.length ? unused.slice(1) : unused;
+          return remove.length ? removeTiles(remove, new Map()) : [];
         };
         /** What the tileset decides besides the tiles: blight, water, shoreline, default lighting. */
         const loadTilesetArt = () => {
@@ -2807,6 +2820,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Entries currently selected (one or many). */
         const selectedEntries = (): Placed[] => (group.length ? group : selected?.pick ? [selected.pick.placed] : []);
+        /** What is selected, said so that it can be found again among entries loaded anew (see matchPlaced). */
+        const selectionRefs = (): PlacedRef[] => selectedEntries().map((p) => ({ id: p.id, editorId: (p as Placed & { editorId?: number }).editorId, x: p.position[0], y: p.position[1] }));
+        /** Selects what `refs` name among the placed objects as they are now; true when any was found. */
+        const reselect = (refs: readonly PlacedRef[]): boolean => {
+          if (!refs.length) return false;
+          const placed = allPlaced().map((o) => o.p);
+          const like = placed as unknown as PlacedLike[];
+          const found = [...new Set(refs.map((ref) => matchPlaced(like, ref)).filter((i) => i >= 0))].map((i) => placed[i]);
+          if (found.length) selectEntries(found);
+          return found.length > 0;
+        };
 
         /** Objects whose position projects into the canvas rectangle (CSS pixels). */
         const objectsInBox = (x0: number, y0: number, x1: number, y1: number): Placed[] =>
@@ -3058,6 +3082,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const shift = (i: number) => (i > index ? i - 1 : i);
             changeTileList(tiles, (old) => shift(old === index ? replacement : old));
           },
+          groundTileUse: () => (cliffData ? tileUse(terrain, cliffData.types) : null),
+          removeGroundTiles: (remove, replace) => removeTiles(remove, replace),
+          removeUnusedGroundTiles: removeUnusedTiles,
           groundTileThumb: async (id) => {
             try {
               const path = (await tilePaths(w3)).get(id);
@@ -3189,7 +3216,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
         };
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
-        if (lastView?.key === viewKey) handle.setView(lastView.view);
+        const carried = lastView?.key === viewKey ? lastView : null;
+        /** Set once the editor is closed: a load that ends afterwards selects nothing. */
+        let disposed = false;
+        if (carried) handle.setView(carried.view);
+        // The objects selected when it last closed, once they are loaded, unless something was selected meanwhile.
+        if (carried?.selection.length) {
+          void firstLoad.then(() => {
+            if (disposed || selected || group.length) return;
+            if (reselect(carried.selection)) redraw();
+          }, () => {});
+        }
         const tabsEl = h("div.terrain-tabs");
         const dragHint = h("span", {}, "Drag: select box · Hold A and drag: select an area");
         const builtinBar = selectBar();
@@ -3814,10 +3851,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           mark.reset();
           if (path === doc.path.toLowerCase()) {
             const bytes = await readTerrainBytes(doc.path, doc), fresh = parseW3e(bytes);
-            const same = fresh.width === terrain.width && fresh.height === terrain.height && fresh.tileset === terrain.tileset
-              && fresh.groundTiles.join() === terrain.groundTiles.join() && fresh.cliffTiles.join() === terrain.cliffTiles.join();
-            if (!same) return reopenInstead();
+            // Another size or place needs everything built anew: the editor opens again (camera and selection stay).
+            const sameGrid = fresh.width === terrain.width && fresh.height === terrain.height && fresh.offsetX === terrain.offsetX && fresh.offsetY === terrain.offsetY;
+            if (!sameGrid) return reopenInstead();
             fresh.corners.forEach((c, i) => Object.assign(terrain.corners[i], c));
+            // A new ground tile (an AI tool painting one the map didn't have), another list or tileset: taken in place too.
+            const tilesChanged = fresh.groundTiles.join() !== terrain.groundTiles.join() || fresh.cliffTiles.join() !== terrain.cliffTiles.join()
+              || fresh.customTilesetsRaw !== terrain.customTilesetsRaw;
+            const tilesetChanged = fresh.tileset !== terrain.tileset;
+            Object.assign(terrain, {
+              version: fresh.version, trailer: fresh.trailer, groundTiles: fresh.groundTiles, cliffTiles: fresh.cliffTiles,
+              customTilesets: fresh.customTilesets, customTilesetsRaw: fresh.customTilesetsRaw, tileset: fresh.tileset,
+            });
+            if (tilesetChanged) { loadTilesetArt(); reloadLighting(); }
+            if (tilesChanged || tilesetChanged) void syncTileList();
             savedW3e = bytes;
             notifyGroups({ terrain: true, objects: false } as Edit);
             void replanCliffs();
@@ -3829,10 +3876,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (path !== `map/${name}.json`.toLowerCase()) continue;
             const f = await loadPlacedFile(w3, name, key);
             if (!f) return reopenInstead();
+            // The selection is of the entries as they were: it goes to the same objects in the file's (a resize writes them too).
+            const kept = selectionRefs();
             if (key === "doodads") { dooFile = f; savedDoodads = structuredClone(f.list); } else { unitsFile = f; savedStarts = startLocations(f.list); }
             objectsTouched = false;
-            if (selected) clearSelection();
+            if (selected || group.length) clearSelection();
             await rebuildObjects();
+            reselect(kept);
             notifyGroups({ terrain: false, objects: true } as Edit);
             redraw();
             return true;
@@ -3871,6 +3921,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               void w3.window.showInfo("This map had no start location, which the game can't start. Added Player 1's in the middle of the map.");
             }
             if (objectsTouched) await settleMoved();
+            // Remove Unused Tiles on save (off unless chosen): an undo step of its own, so the save writes it and Undo
+            // still takes it back. Not on a lost view, where nothing is edited.
+            if (w3.settings.get<boolean>("terrain.removeUnusedTilesOnSave", false) === true && !lostViews.has(doc.path)) {
+              const removed = removeUnusedTiles();
+              if (removed?.length) void w3.window.showInfo(`Saving removed the ground tiles nothing uses: ${removed.join(", ")} (setting Remove Unused Tiles on Save). Undo takes it back.`);
+            }
             // Below, everything the save writes is taken in one go with no await, so the files agree with
             // each other and with the undo position. An edit made while they are written is not in them,
             // and stays unsaved.
@@ -3926,7 +3982,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
             if (openedBy.get(doc.path) === record) openedBy.delete(doc.path);
-            lastView = { key: viewKey, view: handle.view() };
+            disposed = true;
+            lastView = { key: viewKey, view: handle.view(), selection: selectionRefs() };
             stopLightWatch.dispose();
             stopObjectWatch.dispose();
             objectReload.cancel();

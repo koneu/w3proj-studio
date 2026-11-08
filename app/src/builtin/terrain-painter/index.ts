@@ -157,12 +157,68 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const tilePanel = h("div.terrain-tilemgr", { hidden: true });
   /** Index whose removal is being confirmed. */
   let removing: number | null = null;
+  /** Clean up: the tiles ticked for removal and, for those in use, the tile each one's corners and cliffs get (by
+   *  index), for the tile list it was started on. Null when not cleaning up. */
+  let cleanup: { list: string; remove: Set<number>; replace: Map<number, number> } | null = null;
   const renderTiles = async () => {
     if (tilePanel.hidden) return;
     const names = await tileNames(w3);
     const usage = ed.groundTileUsage();
     const total = usage.reduce((a, b) => a + b, 0) || 1;
     const t = terrain.groundTiles;
+    // Another list (an undo, a tile added) makes the ticks point at other tiles: they go.
+    if (cleanup && cleanup.list !== t.join()) cleanup = null;
+    const use = ed.groundTileUse();
+    const inUse = (i: number) => !use || use.ground[i] + use.cliffs[i] > 0;
+    const unused = use ? t.map((_, i) => i).filter((i) => !inUse(i)) : [];
+    const tryIt = (f: () => void) => { try { f(); } catch (e) { void w3.window.showWarning((e as Error).message ?? String(e)); } };
+    const useText = (i: number) => use ? `${use.ground[i].toLocaleString()} corners${use.cliffs[i] ? `, ${use.cliffs[i].toLocaleString()} cliff tiles` : ""}` : `${usage[i].toLocaleString()} corners`;
+    const cleanupBar = h("div.terrain-tilemgr-row.terrain-tilemgr-cleanup", {},
+      h("button", {
+        title: use ? "Remove the tiles no corner is painted with and no cliff is made of; one undo step" : "Waiting for the game's cliff types",
+        disabled: !use || !unused.length || unused.length === t.length,
+        onclick: () => { tryIt(() => ed.removeUnusedGroundTiles()); ed.focus(); },
+      }, `Remove unused (${unused.length})`),
+      h("button", {
+        title: "Choose tiles to remove, used ones too: their corners and cliffs get a tile that stays; one undo step",
+        disabled: !use || t.length < 2,
+        onclick: () => { cleanup = cleanup ? null : { list: t.join(), remove: new Set(unused), replace: new Map() }; removing = null; void renderTiles(); },
+      }, cleanup ? "Stop cleaning up" : "Clean up…"));
+    /** The cleanup's footer: how many go, and the button. */
+    const cleanupFooter = () => {
+      if (!cleanup) return null;
+      const c = cleanup, kept = t.map((_, i) => i).filter((i) => !c.remove.has(i));
+      return h("div.terrain-tilemgr-row.terrain-tilemgr-cleanup", {},
+        h("button", {
+          disabled: !c.remove.size || !kept.length,
+          title: kept.length ? "" : "A map needs at least one ground tile: keep one",
+          onclick: () => {
+            const replace = new Map([...c.remove].filter(inUse).map((i) => [i, c.replace.get(i) ?? kept[0]] as [number, number]));
+            tryIt(() => { ed.removeGroundTiles([...c.remove], replace); cleanup = null; });
+            ed.focus();
+            void renderTiles();
+          },
+        }, `Remove ${c.remove.size} tile${c.remove.size === 1 ? "" : "s"}`),
+        h("button", { onclick: () => { cleanup = null; void renderTiles(); } }, "Cancel"));
+    };
+    /** In a cleanup, a row's tick and, for a ticked tile in use, what replaces it. */
+    const cleanupCells = (i: number, label: string) => {
+      if (!cleanup) return [];
+      const c = cleanup;
+      const box = h("input", { type: "checkbox", title: `Remove ${label}`, checked: c.remove.has(i), onchange: () => {
+        if (box.checked) c.remove.add(i); else c.remove.delete(i);
+        // A tile ticked now can't be what replaces another.
+        for (const [k, r] of c.replace) if (c.remove.has(r)) c.replace.delete(k);
+        void renderTiles();
+      } });
+      if (!c.remove.has(i) || !inUse(i)) return [box];
+      const others = t.map((o, j) => [o, j] as const).filter(([, j]) => !c.remove.has(j));
+      if (!others.length) return [box];
+      const chosen = c.replace.get(i) ?? others[0][1];
+      const sel = h("select.terrain-tilemgr-replace", { title: `What ${label}'s ${useText(i)} get`, onchange: () => c.replace.set(i, Number(sel.value)) },
+        ...others.map(([o, j]) => h("option", { value: String(j), selected: j === chosen }, `${names.get(o) ?? o} (${o})`)));
+      return [box, h("span.muted", {}, " → "), sel];
+    };
     const [sets, mapSet] = await Promise.all([ed.tilesets().catch(() => []), ed.mapTileset().catch(() => null)]);
     const nameOf = (id: string) => sets.find((s) => s.id === id)?.name ?? id;
     // Tileset (water, lighting, blight) and tile templates: a tileset's own tile list.
@@ -186,10 +242,20 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       h("div.terrain-tilemgr-row", {}, h("span.terrain-tilemgr-name", {}, "Template"), templateSelect, applyTemplate),
       ...(sync ? [sync] : []),
       h("div.muted", {}, "Draw order: tiles further down are drawn over the ones above them where they meet. Changes are one undo step each."),
+      cleanupBar,
+      ...(cleanup ? [h("div.muted", {}, "Tick the tiles to remove (the unused ones are ticked). A used one's corners and cliffs get the tile chosen beside it.")] : []),
       ...t.map((id, i) => {
         const img = h("img", { alt: id });
         void ed.groundTileThumb(id).then((src) => { if (src) img.src = src; });
         const label = `${names.get(id) ?? id} (${id})`;
+        if (cleanup) {
+          const [box, ...replacement] = cleanupCells(i, label);
+          return h(`div.terrain-tilemgr-row${cleanup.remove.has(i) ? ".removing" : ""}`, { title: useText(i) },
+            box, img,
+            h("span.terrain-tilemgr-name", {}, label),
+            h("span.muted", { title: useText(i) }, inUse(i) ? `${((100 * usage[i]) / total).toFixed(1)}%` : "unused"),
+            ...replacement);
+        }
         if (removing === i) {
           const others = t.map((o, j) => [o, j] as const).filter(([, j]) => j !== i);
           const sel = h("select", {}, ...others.map(([o, j]) => h("option", { value: String(j) }, `${names.get(o) ?? o} (${o})`)));
@@ -204,6 +270,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           h("button", { title: "Move down (drawn later, over the others)", disabled: i === t.length - 1, onclick: () => { ed.moveGroundTile(i, i + 1); ed.focus(); } }, "↓"),
           h("button", { title: "Remove from the map (its corners get another tile)", disabled: t.length < 2, onclick: () => { removing = i; void renderTiles(); } }, "✕"));
       }),
+      ...(cleanup ? [cleanupFooter()!] : []),
     );
   };
   const tilesButton = h("button", { title: "The map's ground tiles: drawing order and removal", onclick: () => {

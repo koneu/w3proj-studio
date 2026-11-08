@@ -521,6 +521,166 @@ async function tileTemplate(page, found) {
   if (header("tileset") !== own) fail(`a template changed the tileset to ${header("tileset")}`);
 }
 
+/** A new map for a terrain check, with its terrain editor open on the Terrain tab, and a tool group of the check's own that
+ *  counts the terrain editors made: an edit taken in place keeps the one there. */
+async function terrainMap(page, name) {
+  const tool = mcpTool(page);
+  const folder = join(work, name);
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__countEditors?.dispose();
+    window.__editorsMade = 0;
+    window.__countEditors = s.registerToolGroup({ id: "smoke-count", title: "Smoke", order: 999, create: (ed) => { window.__editorsMade++; window.__smokeEd = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  await tool("new_map", { name, width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!window.__smokeEd && !!document.querySelector(".model-stage canvas")`), 30000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const w3e = join(root, "map", "war3map.w3e.txt");
+  const kit = {
+    tool, root, w3e,
+    ground: () => /^ground (.*)$/m.exec(readFileSync(w3e, "utf8"))?.[1].trim().split(" ") ?? [],
+    made: () => page.evaluate(`window.__editorsMade`),
+    /** The side list's heading, which follows the editor's tile list. */
+    heading: () => page.evaluate(`[...document.querySelectorAll(".model-side h4")].find((e) => e.textContent.startsWith("Ground textures"))?.textContent ?? ""`),
+    save: async () => { await page.evaluate(`w3.editors.saveAll()`); await sleep(600); },
+    undo: async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await sleep(300); },
+    tab: async (label) => { await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent.trim() === ${JSON.stringify(label)})?.click()`); await sleep(300); },
+    done: () => page.evaluate(`window.__countEditors?.dispose(); window.__countEditors = null;`),
+  };
+  // The cliff types are read: what uses a tile is known (Tiles… waits for it).
+  await until("the game's cliff types", () => page.evaluate(`typeof window.__smokeEd.groundTileUse !== "function" || !!window.__smokeEd.groundTileUse()`), 30000);
+  return kit;
+}
+
+/** An AI tool's edit that adds a ground tile is taken by the open terrain editor in place, as its other edits are; a map
+ *  size change opens the editor again, with the camera and the selected object as they were. */
+async function tilesInPlace(page, found) {
+  const fail = (what) => found.push(`terrain in place: ${what}`);
+  const k = await terrainMap(page, "InPlace");
+  try {
+    const before = k.ground(), made = await k.made();
+    const tile = ["Lgrs", "Agrs", "Bdrt", "Ndrt", "Ydrt"].find((t) => !before.includes(t));
+    await k.tool("paint_terrain", { tile, left: -512, bottom: -512, right: 512, top: 512 });
+    await until("the painted tile on disk", () => k.ground().includes(tile), 10000).catch(() => fail(`${tile} didn't join the map's list (control): ${k.ground().join(" ")}`));
+    const want = `Ground textures (${k.ground().length})`;
+    await until("the editor's tile list", async () => (await k.heading()) === want, 10000).catch(async () => fail(`the editor shows "${await k.heading()}", the map has ${want}`));
+    if ((await k.made()) !== made) fail("a new ground tile from an AI tool opened the terrain editor again instead of taking it in place");
+    const live = await page.evaluate(`window.__smokeEd.terrain.groundTiles.join(" ")`);
+    if (live !== k.ground().join(" ")) fail(`the editor's tile list is ${live}, the map's ${k.ground().join(" ")}`);
+    if (!(await page.evaluate(`!window.__smokeEd.host.isConnected ? false : true`))) fail("the editor taken in place isn't on screen");
+
+    // Another size: the editor opens again. The selected unit and the camera stay.
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 256, player: 1 }], ignoreRoom: true });
+    await k.tool("save_project");
+    await page.evaluate(`w3.commands.execute("w3.terrain.showPoint", 256, 256, { id: "hfoo" })`);
+    const selName = () => page.evaluate(`document.querySelector(".terrain-sel-name")?.textContent ?? null`);
+    // The side panel names the selected object (the Footman).
+    await until("the unit selected", async () => (await selName()) === "Footman", 10000).catch(async () => fail(`the unit wasn't selected (control): ${await selName()}`));
+    await page.evaluate(`window.__smokeEd.setView({ target: [300, 200, 0], yaw: 1.1, pitch: 0.9, distance: 2345 })`);
+    const view = await page.evaluate(`window.__smokeEd.view()`);
+    const madeBefore = await k.made();
+    await k.tool("resize_map", { right: 32 });
+    await until("the editor on the new size", () => page.evaluate(`window.__editorsMade > ${madeBefore} && !!document.querySelector(".model-stage canvas")`), 30000)
+      .catch(() => fail("the resize didn't open the editor again (control)"));
+    await until("the unit selected again", async () => (await selName()) === "Footman", 15000).catch(async () => fail(`after the resize the selection is ${await selName()}, not the unit`));
+    const after = await page.evaluate(`window.__smokeEd.view()`);
+    const near = (a, b) => Math.abs(a - b) < 1e-3;
+    if (!near(after.target[0], view.target[0]) || !near(after.target[1], view.target[1]) || !near(after.yaw, view.yaw) || !near(after.pitch, view.pitch) || !near(after.distance, view.distance)) {
+      fail(`the camera moved with the resize: ${JSON.stringify(view)} became ${JSON.stringify(after)}`);
+    }
+  } finally {
+    await k.done();
+  }
+}
+
+/** Tiles…: Remove unused takes out the tiles no corner or cliff uses, Clean up removes a used one too with the tile chosen
+ *  in its place, and Remove Unused Tiles on Save does it on save (off unless chosen). One undo step each. */
+async function tileCleanup(page, found) {
+  const fail = (what) => found.push(`tile cleanup: ${what}`);
+  const k = await terrainMap(page, "Cleanup");
+  try {
+    const tile = ["Lgrs", "Agrs", "Bdrt", "Ndrt"].find((t) => !k.ground().includes(t));
+    await k.tool("paint_terrain", { tile, left: -512, bottom: -512, right: 512, top: 512 });
+    await until("the painted tile", async () => k.ground().includes(tile) && (await k.heading()) === `Ground textures (${k.ground().length})`, 10000);
+    const full = k.ground();
+    const use = await page.evaluate(`window.__smokeEd.groundTileUse()`);
+    const used = full.filter((_, i) => use.ground[i] + use.cliffs[i] > 0);
+    if (used.length < 2 || used.length === full.length) { fail(`a new map should use some of its tiles, not all (control): ${full.join(" ")}, used ${used.join(" ")}`); return; }
+    // Saving with the setting off (the default) keeps them.
+    await page.evaluate(`window.__smokeEd.terrainChanged()`);
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the terrain wasn't left unsaved for the save (control)");
+    await k.save();
+    if (k.ground().join(" ") !== full.join(" ")) fail(`saving with Remove Unused Tiles on Save off changed the list: ${k.ground().join(" ")}`);
+
+    await k.tab("Terrain");
+    await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
+    const button = (text) => `[...document.querySelectorAll(".terrain-tilemgr button")].find((b) => b.textContent.startsWith(${JSON.stringify(text)}))`;
+    await until("Remove unused", () => page.evaluate(`!!${button("Remove unused")} && !${button("Remove unused")}.disabled`), 10000);
+    const label = await page.evaluate(`${button("Remove unused")}.textContent`);
+    if (label !== `Remove unused (${full.length - used.length})`) fail(`the button says "${label}" for ${full.length - used.length} unused tiles`);
+    await page.evaluate(`${button("Remove unused")}.click()`);
+    await sleep(300);
+    await k.save();
+    if (k.ground().join(" ") !== used.join(" ")) fail(`Remove unused left ${k.ground().join(" ")}, the map uses ${used.join(" ")}`);
+    await k.undo();
+    await k.save();
+    if (k.ground().join(" ") !== full.join(" ")) fail(`one undo didn't bring the unused tiles back: ${k.ground().join(" ")}`);
+
+    // Clean up: the unused ones come ticked; the painted tile is ticked too, and goes to another used tile.
+    await until("Clean up", () => page.evaluate(`!!${button("Clean up")}`), 5000);
+    await page.evaluate(`${button("Clean up")}.click()`);
+    await until("the ticks", () => page.evaluate(`document.querySelectorAll(".terrain-tilemgr-row input[type=checkbox]").length === ${full.length}`), 5000);
+    const into = used.find((t) => t !== tile);
+    await page.evaluate(`(() => {
+      const row = [...document.querySelectorAll(".terrain-tilemgr-row")].find((r) => r.querySelector(".terrain-tilemgr-name")?.textContent.endsWith("(${tile})"));
+      const box = row.querySelector("input[type=checkbox]");
+      box.checked = true;
+      box.dispatchEvent(new Event("change"));
+    })()`);
+    await until("its replacement", () => page.evaluate(`!!document.querySelector(".terrain-tilemgr-replace")`), 5000);
+    await page.evaluate(`(() => {
+      const sel = document.querySelector(".terrain-tilemgr-replace");
+      sel.value = String(${full.indexOf(into)});
+      sel.dispatchEvent(new Event("change"));
+    })()`);
+    const removeLabel = await page.evaluate(`[...document.querySelectorAll(".terrain-tilemgr button")].find((b) => /^Remove \\d+ tiles?$/.test(b.textContent))?.textContent`);
+    if (removeLabel !== `Remove ${full.length - used.length + 1} tiles`) fail(`the cleanup's button says "${removeLabel}"`);
+    const painted = await page.evaluate(`window.__smokeEd.groundTileUsage()[${full.indexOf(tile)}]`);
+    const intoBefore = await page.evaluate(`window.__smokeEd.groundTileUsage()[${full.indexOf(into)}]`);
+    await page.evaluate(`[...document.querySelectorAll(".terrain-tilemgr button")].find((b) => /^Remove \\d+ tiles?$/.test(b.textContent)).click()`);
+    await sleep(300);
+    await k.save();
+    const kept = used.filter((t) => t !== tile);
+    if (k.ground().join(" ") !== kept.join(" ")) fail(`Clean up left ${k.ground().join(" ")}, wanted ${kept.join(" ")}`);
+    const intoAfter = await page.evaluate(`window.__smokeEd.groundTileUsage()[window.__smokeEd.terrain.groundTiles.indexOf(${JSON.stringify(into)})]`);
+    if (intoAfter !== intoBefore + painted) fail(`${into} has ${intoAfter} corners after taking ${tile}'s ${painted} (it had ${intoBefore})`);
+
+    // Undo, then Remove Unused Tiles on Save: the save takes them out, and one undo puts them back.
+    await k.undo();
+    await page.evaluate(`w3.settings.set("terrain.removeUnusedTilesOnSave", true)`);
+    try {
+      await k.save();
+      if (k.ground().join(" ") !== used.join(" ")) fail(`with Remove Unused Tiles on Save the save left ${k.ground().join(" ")}, the map uses ${used.join(" ")}`);
+    } finally {
+      await page.evaluate(`w3.settings.set("terrain.removeUnusedTilesOnSave", false)`);
+    }
+    await k.undo();
+    await k.save();
+    if (k.ground().join(" ") !== full.join(" ")) fail(`one undo after the save didn't bring the unused tiles back: ${k.ground().join(" ")}`);
+
+    // The command does the same.
+    const err = await page.evaluate(`w3.commands.execute("w3.terrain.removeUnusedTiles").then(() => null, (e) => String(e))`);
+    if (err) fail(`Remove Unused Ground Tiles: ${err}`);
+    await k.save();
+    if (k.ground().join(" ") !== used.join(" ")) fail(`the command left ${k.ground().join(" ")}`);
+    await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…")?.click()`);
+  } finally {
+    await k.done();
+  }
+}
+
 /** What the checks of the terrain viewer's height tools share: a new map opened in the editor, and the ways a person
  *  works on it (commands, keys and mouse sent into the hidden window) with the saved files to judge by. */
 async function heightKit(page, name) {
@@ -1494,6 +1654,39 @@ async function limits(page, hands, file, fail) {
   await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
   await retype(hands, ".obj-table .obj-value-cell input", "777");
   if (await flagged()) fail("the mark stayed after going back inside the limits");
+  await speedLimits(page, hands, fail);
+}
+
+/** Movement Speed may be typed up to 522, but the game moves a unit at MaxUnitSpeed at most (400, the game's
+ *  Gameplay Constants): 450 warns. The map's own Gameplay Constants (war3mapMisc.txt) count first: at 500 there,
+ *  450 is fine. */
+async function speedLimits(page, hands, fail) {
+  const flagged = () => page.evaluate(`document.querySelectorAll("tr.obj-over").length`);
+  const tooltip = () => page.evaluate(`document.querySelector(".obj-table .obj-value-cell input").title`);
+  const search = async (text) => {
+    await page.evaluate(`(() => { const e = document.querySelector("input.obj-field-search"); e.value = ""; e.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+    await hands.click("input.obj-field-search");
+    await hands.type(text);
+    await until(`the field ${text}`, () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+  };
+  await search("umvs");
+  await retype(hands, ".obj-table .obj-value-cell input", "350");
+  if (await flagged()) fail(`a Movement Speed of 350 was marked: "${await tooltip()}"`);
+  await retype(hands, ".obj-table .obj-value-cell input", "450");
+  if ((await flagged()) !== 1) fail("a Movement Speed of 450 wasn't marked, though the game moves units at 400 at most");
+  if (!/400 at most.*Unit Speed - Maximum, the game's default/.test(await tooltip())) fail(`the speed warning's tooltip is "${await tooltip()}"`);
+  // The map raises the limit: the mark goes once the file is saved, with the editor left open. The map's own file
+  // (if it has one) is put back afterwards.
+  const had = await page.evaluate(`w3.workspace.readText("map/war3mapMisc.txt").catch(() => null)`);
+  await page.evaluate(`w3.workspace.writeText("map/war3mapMisc.txt", "[Misc]\\r\\nMaxUnitSpeed=500\\r\\n")`);
+  await until("the map's Gameplay Constants", async () => (await flagged()) === 0, 5000)
+    .catch(async () => fail(`with MaxUnitSpeed 500 in the map, 450 is still marked: "${await tooltip()}"`));
+  await page.evaluate(`w3.workspace.writeText("map/war3mapMisc.txt", "[Misc]\\r\\nMaxUnitSpeed=420\\r\\n")`);
+  await until("the lower constant", async () => (await flagged()) === 1, 5000).catch(() => fail("with MaxUnitSpeed 420 in the map, 450 isn't marked"));
+  if (!/420 at most.*set by this map/.test(await tooltip())) fail(`the map constant's tooltip is "${await tooltip()}"`);
+  await page.evaluate(had === null ? `w3.workspace.delete("map/war3mapMisc.txt")` : `w3.workspace.writeText("map/war3mapMisc.txt", ${JSON.stringify(had)})`);
+  await retype(hands, ".obj-table .obj-value-cell input", "270");
+  await search("uhpm");
 }
 
 /** The Trigger Editor: renames the map's trigger, switches it off, and Build carries both. */
@@ -2684,7 +2877,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, objectsWhileOpening, heightsLimits, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2762,6 +2955,8 @@ async function run() {
     await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
+    await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
+    await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
     await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
