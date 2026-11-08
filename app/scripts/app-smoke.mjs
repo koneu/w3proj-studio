@@ -923,6 +923,145 @@ async function terrainSelectCameras(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Unit Properties in the Selection panel (propspanel.ts), typed and chosen in the hidden window: a hero's hit points,
+ *  level, a skill, its attributes and an item picked into its inventory; a gold mine's gold; a waygate's destination and
+ *  colour; a destructable's life; drops for everything at once after Ctrl+A. Showing the panel changes nothing, values
+ *  not edited keep their defaults (-1), a refused value leaves no change and no undo step, each edit is one undo step,
+ *  and the packed map verifies. The unit file gets the layout with hero attributes and item tables (subversion 11, as
+ *  the World Editor saves an 8/11 map), the map an item table and a region. */
+async function unitProperties(page, found) {
+  const fail = (what) => found.push(`unit properties: ${what}`);
+  const k = await heightKit(page, "UnitProps");
+  const TXT = "map/war3map.w3e.txt";
+  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: -768, y: 0 }], ignoreRoom: true });
+  await k.save();
+  const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json"), regions = k.read("war3map.w3r.json");
+  if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
+  units.subversion = 11;
+  units.units = units.units.map((u) => {
+    const out = {};
+    for (const [key, v] of Object.entries(u)) {
+      out[key] = v;
+      if (key === "mana") out.itemTable = -1;
+      if (key === "level") Object.assign(out, { strength: 0, agility: 0, intelligence: 0 });
+    }
+    return out;
+  });
+  info.itemTables = [{ number: 3, name: "Smoke Loot", sets: [[{ chance: 100, id: "ratf" }]] }];
+  regions.regions.push({ left: 512, bottom: 512, right: 640, top: 640, name: "Smoke Gate", index: 0, weather: "0x00000000", sound: "",
+    color: { blue: 255, green: 128, red: 128, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) });
+  await page.evaluate(`w3.editors.closeAll()`);
+  for (const [file, doc] of [["war3mapUnits.doo.json", units], ["war3map.w3i.json", info], ["war3map.w3r.json", regions]]) {
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(`map/${file}`)}, ${JSON.stringify(JSON.stringify(doc, null, 2))})`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor", async () => (await page.evaluate(`w3.editors.activePath()`)) === TXT, 20000);
+  await k.tab("Select");
+
+  const at = (prop) => `.terrain-props [data-prop="${prop}"]`;
+  const value = (prop) => page.evaluate(`document.querySelector(${JSON.stringify(at(prop))})?.value ?? null`);
+  const shown = (prop) => page.evaluate(`!!document.querySelector(${JSON.stringify(at(prop))})`);
+  const panel = () => until("the properties panel", () => page.evaluate(`!!document.querySelector(".terrain-props")`), 20000);
+  /** After a change the objects are drawn again and the panel made anew. */
+  const settled = async () => { await sleep(700); await panel(); };
+  const select = async (ref) => { await k.look(ref.x, ref.y, ref); await panel(); };
+  const typeInto = async (prop, text) => { await retype(k.hands, at(prop), text); await settled(); };
+  const choose = async (prop, v) => {
+    await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(at(prop))}); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event("change")); })()`);
+    await settled();
+  };
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`);
+  const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(); };
+  const unit = (id) => k.units().find((u) => u.id === id);
+
+  // The hero: what applies shows, what doesn't (gold, colour) doesn't; showing it changes nothing.
+  const before = hash(join(k.root, "map", "war3mapUnits.doo.json"));
+  await select({ id: "Hpal", x: 0, y: 0 });
+  for (const p of ["hp", "mana", "level", "attr-default", "skill-AHhb", "slot-5", "acquire", "drops-mode"]) if (!(await shown(p))) fail(`the Paladin's ${p} isn't shown`);
+  for (const p of ["gold", "color", "waygate", "life"]) if (await shown(p)) fail(`the Paladin shows ${p}`);
+  if (await dirty()) fail("selecting the Paladin and showing its properties made the map changed");
+  await k.save();
+  if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== before) fail("saving after only looking changed war3mapUnits.doo");
+
+  await typeInto("hp", "40");
+  if (!(await dirty())) fail("a property edit didn't mark the map changed");
+  await typeInto("level", "3");
+  await typeInto("skill-AHhb", "2");
+  await k.hands.click(at("attr-default"));
+  await settled();
+  await typeInto("attr-0", "30");
+  await k.save();
+  let h = unit("Hpal");
+  if (h.hp !== 40 || h.level !== 3 || h.strength !== 30 || !(h.agility > 0 && h.intelligence > 0)) fail(`the Paladin after the edits: ${JSON.stringify([h.hp, h.level, h.strength, h.agility, h.intelligence])}`);
+  if (JSON.stringify(h.abilities) !== JSON.stringify([{ id: "AHhb", autocast: 0, level: 2 }])) fail(`the Paladin's skills: ${JSON.stringify(h.abilities)}`);
+  if (h.mana !== -1 || h.itemTable !== -1 || h.color !== -1 || h.targetAcquisition !== -1 || h.itemSets.length) fail(`values not edited lost their defaults: ${JSON.stringify([h.mana, h.itemTable, h.color, h.targetAcquisition, h.itemSets])}`);
+
+  // An item picked with the object browser goes into the slot.
+  await k.hands.click(at("slot-0"));
+  await until("the item browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
+  await k.hands.click("input.picker-search");
+  await k.hands.type("ankh");
+  await sleep(300);
+  await k.hands.key("Enter", "Enter", 13);
+  await settled();
+  await k.save();
+  if (JSON.stringify(unit("Hpal").inventory) !== JSON.stringify([{ slot: 0, id: "ankh" }])) fail(`the Paladin's inventory: ${JSON.stringify(unit("Hpal").inventory)}`);
+  // One undo takes the item back, and only that.
+  await undo();
+  await k.save();
+  h = unit("Hpal");
+  if (h.inventory.length || h.strength !== 30) fail(`one undo after the item: ${JSON.stringify([h.inventory, h.strength])}`);
+  // A value out of range is refused whole: nothing changes, and the next undo is the strength's again, back to what
+  // unchecking Default gave it (the Paladin's at level 3: 22 + 2 × 2.7).
+  await typeInto("hp", "150");
+  await k.save();
+  if (unit("Hpal").hp !== 40) fail(`hit points 150 % were taken: ${unit("Hpal").hp}`);
+  if (Number(await value("hp")) !== 40) fail(`after the refusal the box shows ${await value("hp")}, not the hit points`);
+  await k.clearToasts();
+  await undo();
+  await k.save();
+  if (unit("Hpal").strength !== 27 || unit("Hpal").hp !== 40) fail(`the undo after a refused value: ${JSON.stringify([unit("Hpal").strength, unit("Hpal").hp])}`);
+  await undo();
+  await k.save();
+  if (unit("Hpal").strength !== 0) fail(`two undos: the attributes aren't the default again (${unit("Hpal").strength})`);
+
+  // A gold mine has gold and no hit points; a waygate a destination and a colour.
+  await select({ id: "ngol", x: 768, y: 0 });
+  if (await shown("hp")) fail("the gold mine shows hit points (the World Editor doesn't: it's invulnerable)");
+  await typeInto("gold", "9000");
+  await select({ id: "nwgt", x: 0, y: 768 });
+  await choose("waygate", "0");
+  await choose("color", "3");
+  await k.save();
+  if (unit("ngol").gold !== 9000) fail(`the gold mine's gold: ${unit("ngol").gold}`);
+  if (unit("nwgt").waygate !== 0 || unit("nwgt").color !== 3) fail(`the waygate: ${JSON.stringify([unit("nwgt").waygate, unit("nwgt").color])}`);
+
+  // A destructable's life, in war3map.doo.
+  await select({ id: "LTlt", x: -768, y: 0 });
+  await typeInto("life", "30");
+  await k.save();
+  const tree = k.doodads().find((d) => d.id === "LTlt");
+  if (tree?.life !== 30) fail(`the tree's life: ${tree?.life}`);
+
+  // Everything at once (Ctrl+A): only what they all have, the drops; own sets, then the map's table, each one step.
+  await k.focusMap();
+  await k.hands.key("a", "KeyA", 65, 2);
+  await until("the properties of the selection", () => page.evaluate(`/objects/.test(document.querySelector(".terrain-props legend")?.textContent ?? "")`), 20000);
+  if (await shown("hp") || await shown("gold")) fail("several objects of different kinds show fields not all of them have");
+  await choose("drops-mode", "custom");
+  await choose("drops-mode", "table");
+  await k.save();
+  const dropping = () => [...k.units().filter((u) => u.id !== "sloc"), ...k.doodads()];
+  if (!dropping().every((o) => o.itemTable === 3 && o.itemSets.length === 0)) fail(`drops from the map's table: ${JSON.stringify(dropping().map((o) => [o.id, o.itemTable, o.itemSets]))}`);
+  await undo();
+  await k.save();
+  if (!dropping().every((o) => o.itemTable === -1 && JSON.stringify(o.itemSets) === "[[]]")) fail(`one undo back to own (empty) sets: ${JSON.stringify(dropping().map((o) => [o.id, o.itemTable, o.itemSets]))}`);
+  if (unit("sloc") && JSON.stringify(unit("sloc").itemSets) !== "[]") fail("the start location took drops");
+  await k.verify(fail);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
@@ -2908,7 +3047,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2992,6 +3131,7 @@ async function run() {
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
+    await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
