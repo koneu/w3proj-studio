@@ -19,9 +19,10 @@ export const MAX_READS_IN_FLIGHT = 32;
  *  waiting background read: a map that keeps asking for files can't hold a check back for good. */
 export const BACKGROUND_TURN = 8;
 
-/** Background reads running at most, even with places free: the reads someone then waits on (a map
- *  opened while the Object Manager reads its tables) wait behind these few, not behind a full queue.
- *  Taking every free place, they put GoldRush's first model reads 150 ms and its picture 0.4 s later. */
+/** Background reads running at most, even with places free, and only one while reads someone waits
+ *  on run or wait: those (a map opened while the Object Manager reads its tables) wait behind few,
+ *  not behind a full queue. Taking every free place, they put GoldRush's first model reads 150 ms
+ *  and its picture 0.4 s later. */
 export const BACKGROUND_IN_FLIGHT = 8;
 
 /** The share of the cache that files read more than once can hold (the rest is for files read
@@ -175,7 +176,7 @@ export class GameService {
   private async limited<T>(key: string, background: boolean, job: () => Promise<T>): Promise<T> {
     // Whether it runs as a background read (it may be moved up while queued).
     let asBackground = background;
-    if (this.inFlight < MAX_READS_IN_FLIGHT && (!background || this.backgroundInFlight < BACKGROUND_IN_FLIGHT)) {
+    if (this.inFlight < MAX_READS_IN_FLIGHT && (!background || this.backgroundRoom())) {
       this.inFlight++;
       if (background) this.backgroundInFlight++;
     } else {
@@ -195,14 +196,29 @@ export class GameService {
         if (next.background) this.backgroundInFlight++;
         next.give(next.background);
       } else this.inFlight--;
+      // The last read waited on finished: background reads may take more places now.
+      while (this.queuedLater.length && !this.queuedNow.length && this.inFlight < MAX_READS_IN_FLIGHT && this.backgroundRoom()) {
+        const more = this.queuedLater.shift()!;
+        if (this.queuedByKey.get(more.key) === more) this.queuedByKey.delete(more.key);
+        this.inFlight++;
+        this.backgroundInFlight++;
+        more.give(true);
+      }
     }
   }
 
+  /** Whether another background read may run: BACKGROUND_IN_FLIGHT at most, and only one while reads
+   *  someone waits on run or wait (their reading and parsing would hold those up). */
+  private backgroundRoom(): boolean {
+    const waitedOn = this.inFlight - this.backgroundInFlight > 0 || this.queuedNow.length > 0;
+    return this.backgroundInFlight < (waitedOn ? 1 : BACKGROUND_IN_FLIGHT);
+  }
+
   /** The queued read that gets a free place: the longest waiting of those someone waits on, except
-   *  every BACKGROUND_TURN-th place, which goes to the longest waiting background read. A background
-   *  read gets one only while fewer than BACKGROUND_IN_FLIGHT run. */
+   *  every BACKGROUND_TURN-th place, which goes to the longest waiting background read (see
+   *  backgroundRoom). */
   private next(): Waiting | undefined {
-    const later = this.queuedLater.length > 0 && this.backgroundInFlight < BACKGROUND_IN_FLIGHT;
+    const later = this.queuedLater.length > 0 && this.backgroundRoom();
     if (later && (!this.queuedNow.length || this.sinceLater >= BACKGROUND_TURN - 1)) {
       this.sinceLater = 0;
       return this.queuedLater.shift();
