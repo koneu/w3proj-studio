@@ -1,5 +1,7 @@
 import { fogOf } from "../../lib/model/fog";
 import { worldSphere } from "../../lib/model/frustum";
+import { watchContextLoss } from "../../lib/model/contextloss";
+import { runLayerJobs } from "./layerjobs";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
@@ -227,7 +229,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       };
       let editor = ownEditor();
       if (!editor) {
-        try { editor = await liveEditor(); } catch (e) { throw failed(e); }
+        try { editor = await liveEditor("read"); } catch (e) { throw failed(e); }
       }
       // The wait was long enough for another project to be opened: its job and editor are not this one's.
       if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
@@ -262,6 +264,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
+  /** Terrain editors (by document path) whose 3D view was lost (a GPU reset): nothing is edited there
+   *  until it is opened again, so no edit lands on a view that isn't drawn. Saving still works. */
+  const lostViews = new Set<string>();
+  const VIEW_LOST = "The terrain editor's 3D view stopped (the graphics device was reset): save, then reopen the editor. Nothing is edited there until then.";
+  const refuseLostView = (path: string | null | undefined) => { if (path && lostViews.has(path)) throw new Error(VIEW_LOST); };
   /** The editor of the project's own terrain, which is the only one that writes into the project. */
   const ownEditor = () => {
     const p = projectTerrain(w3), found = p ? openedBy.get(p) : undefined;
@@ -271,14 +278,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let lastView: { key: string; view: TerrainView } | null = null;
 
   /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
-  const liveEditor = async () => {
+  /** The editor of the project's terrain, opened if need be. For an edit (the default) it is refused while its 3D view is lost. */
+  const liveEditor = async (use: "edit" | "read" = "edit") => {
     await w3.commands.execute("w3.terrain.open");
     for (let n = 0; n < 200; n++) {
       const editor = ownEditor();
       if (editor) {
         await editor.ready();
         // Taking a change in place can end in reopening: then it's the next one's turn.
-        if (ownEditor() === editor) return editor;
+        if (ownEditor() === editor) {
+          if (use === "edit") refuseLostView(projectTerrain(w3));
+          return editor;
+        }
       } else await new Promise((done) => setTimeout(done, 100));
     }
     throw new Error("The terrain editor couldn't start (see its tab).");
@@ -297,6 +308,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** One edit of a placement file. */
   const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
+    // Every object tool comes through here (remove_objects without liveEditor too).
+    refuseLostView(projectTerrain(w3));
     let before: Placed[] = [];
     const name = key === "units" ? "war3mapUnits.doo" : "war3map.doo", path = jsonPathOf(w3, name);
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
@@ -435,7 +448,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** What the melee tools go by: units, trees, routes, and how wide things are. */
   const meleeFacts = async (size: number) => {
-    const { handle } = await liveEditor();
+    const { handle } = await liveEditor("read");
     const [balance, weapons, destructables, game, data, grid] = await Promise.all([
       w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
       w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle),
@@ -544,7 +557,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("set_tileset", async ({ tileset, replaceTiles, dryRun }) => {
       if (typeof tileset !== "string") throw new Error("tileset must be a letter; terrain_info lists them.");
       requireProject(w3);
-      const { handle } = await liveEditor();
+      // A dry run only reads; the change itself is refused on a lost view (before and after the question).
+      const { handle } = await liveEditor("read");
       const sets = await handle.tilesets();
       const set = sets.find((s) => s.id === tileset);
       if (!set) throw new Error(`"${tileset}" isn't a tileset. They are: ${sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
@@ -553,8 +567,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { tiles, kept } = swap ? swapTiles(before, old?.tiles ?? [], set.tiles) : { tiles: before, kept: [] };
       const plan = { tileset: set.id, name: set.name, tiles: before.map((from, i) => ({ from, to: tiles[i] })), keptFromOtherTilesets: kept };
       if (dryRun === true) return plan;
+      refuseLostView(projectTerrain(w3));
       const stays = kept.length ? `, keeping ${kept.join(", ")}` : "";
       await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset", "mcp.confirmTileset");
+      refuseLostView(projectTerrain(w3));
       handle.setTileset(set.id);
       if (swap) handle.replaceGroundTiles(tiles);
       // Exactly the tileset's own list again: nothing is custom about it any more.
@@ -569,7 +585,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!change.every((n) => Number.isInteger(n))) throw new Error("left, right, bottom and top must be whole numbers of tiles.");
       if (border !== undefined && !(Array.isArray(border) && border.length === 4 && border.every((n) => Number.isInteger(n) && n >= 0))) throw new Error("border must be [left, right, bottom, top].");
       requireProject(w3);
-      const { handle } = await liveEditor();
+      // A dry run only reads; the resize itself is refused on a lost view (before and after the question).
+      const { handle } = await liveEditor("read");
       const t = handle.terrain;
       const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
       const complements = (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides;
@@ -585,24 +602,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(grows ? { note: "New ground continues the map's edge: the same tile and height as far as it reaches, and the tiles repeat. Paint it afterwards to hide that." } : {}),
       };
       if (dryRun === true) return result;
+      refuseLostView(projectTerrain(w3));
       await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}? Undo Resize in Studio takes it back until Studio closes.`, "Resize map", "mcp.confirmResize");
+      refuseLostView(projectTerrain(w3));
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
       return { ...result, objectsRemoved: done.removed, undo: "undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; the checkpoint just made stays." };
     }),
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       return withNeighbour(handle, checkPath(await walkGrid(handle), start, goal, size));
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32, wide = typeof corridorWidth === "number" && corridorWidth > 0 ? corridorWidth : 400;
       return withNeighbour(handle, checkRoute(await walkGrid(handle), points as [number, number][], size, wide));
     }),
     w3.mcp.registerTool("find_pockets", async (args) => {
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       const grid = await walkGrid(handle), bounds = await playable().catch(() => null);
       // What's past the playable part isn't ground anyone walks on.
       if (bounds) for (let y = 0; y < grid.height; y++) for (let x = 0; x < grid.width; x++) {
@@ -647,7 +666,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror })) as object };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       const wanted = typeof filter === "string" ? filter.toLowerCase() : "";
       const seen = new Map<string, string[]>();
       for (const s of await handle.tilesets()) for (const id of s.tiles) seen.set(id, [...(seen.get(id) ?? []), s.name]);
@@ -730,7 +749,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds));
     }),
     w3.mcp.registerTool("rebuild_map", async () => {
-      const editor = await liveEditor();
+      // Only the derived files are written, without the GPU: it works on a lost view too.
+      const editor = await liveEditor("read");
       await editor.derive();
       return "Pathing and the minimap are rebuilt from the map as it is. Shadows only follow the edits that make them.";
     }),
@@ -776,7 +796,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }, typeof count === "number" ? Math.max(1, Math.min(30, count)) : 12, mirror === true);
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
-      const editor = await liveEditor();
+      const editor = await liveEditor("read");
       const t = editor.handle.terrain;
       const whole = { left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 };
       // The game's pathing file leaves out trees and other destructables: what stands there counts.
@@ -1008,6 +1028,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const path = w3.editors.activePath();
       const view = path ? toolGroups.viewCommands.get(path) : undefined;
       if (!view) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
       const why = await run(view);
       if (why) void w3.window.showInfo(why);
     })),
@@ -1041,6 +1062,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const path = w3.editors.activePath();
       const reset = path ? toolGroups.resetVariations.get(path) : undefined;
       if (!reset) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
       if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
     // `opts` (other extensions): dialog preset, and a step before the map is created (and opened).
@@ -1113,6 +1135,40 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
         }
+        // A lost context (a GPU reset, a driver hiccup) takes every texture, mesh and model on the GPU
+        // with it, and they come from a long load (ground, cliffs, doodads, units, splats, shadows,
+        // weather) that this view can't run again in place. Opening the editor again would, but it reads
+        // the terrain from disk: unsaved edits would be gone. So drawing stops for good and a message says
+        // so, over the view. No edit lands on a view that isn't drawn: the message takes the mouse, the
+        // toolbar and panels go inert, keys, undo and redo do nothing, and the commands and MCP tools that
+        // edit refuse (lostViews). The edits stay in memory and saving works as before; Reopen is refused
+        // while some are unsaved.
+        /** Set at a loss, and never cleared: the renderer's GPU objects are gone even once the context is back. */
+        let glDead = false;
+        const glMessage = h("div.gl-lost-text");
+        const glLost = h("div.gl-lost", { hidden: true }, glMessage);
+        const reopenAfterLoss = async () => {
+          if (w3.editors.isDirty(doc.path)) {
+            void w3.window.showWarning("Save first (Ctrl+S): opening the editor again reads the terrain from disk, and the unsaved edits would be lost.");
+            return;
+          }
+          await w3.editors.close(doc.path);
+          await w3.editors.open(doc.path, "w3.terrainViewer");
+        };
+        const glWatch = watchContextLoss(canvas, {
+          lost: () => {
+            glDead = true;
+            lostViews.add(doc.path);
+            // The toolbar, the tool tabs and the side panels can't be used either: only the message and saving.
+            for (const x of el.querySelectorAll<HTMLElement>(".model-main > :not(.model-stage), .model-side")) x.inert = true;
+            glMessage.replaceChildren(
+              h("div", {}, "The graphics device was reset (WebGL context lost), and the 3D view stopped."),
+              h("div", {}, "Your edits are kept, and saving works. Save (Ctrl+S), then open the editor again to see the map."),
+              h("button", { onclick: () => void reopenAfterLoss() }, "Reopen editor"));
+            glLost.hidden = false;
+          },
+          restored: () => {},
+        });
         let dirty = true, loadDirty = false;
         const redraw = () => { dirty = true; };
         /** A texture or other art came in: drawn with the next frame the load lets through (see tick). */
@@ -1259,8 +1315,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         // Past its own steps, undo and redo go on to a map resize (Map Size), which reopens the editor.
         const resizeStep = (which: "undo" | "redo") => void w3.commands.execute(`w3.terrainMapSize.${which}`, { quiet: true }).catch(() => {});
-        const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } else resizeStep("undo"); };
-        const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } else resizeStep("redo"); };
+        /** True, with a warning, when the view is lost: then nothing is edited (see lostViews). */
+        const refuseLost = () => { if (glDead) void w3.window.showWarning(VIEW_LOST); return glDead; };
+        const undo = () => { if (refuseLost()) return; if (at > 0) { const e = history[--at]; e.undo(); changed(e); } else resizeStep("undo"); };
+        const redo = () => { if (refuseLost()) return; if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } else resizeStep("redo"); };
         /** While a key edits: whether it's the first press or a repeat of a held key. */
         let keyPress: "first" | "repeat" | null = null;
         /** The undo step a held key is building; a repeat joins it. */
@@ -1689,7 +1747,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               title: "Deletes every placed object whose model doesn't load or whose id is unknown (one undo step)",
               onclick: async () => {
                 const c = await w3.window.showWarning(`Delete ${broken.length} placed object${broken.length === 1 ? "" : "s"} without a model? (Ctrl+Z undoes it)`, "Delete", "Cancel");
-                if (c === "Delete") deleteEntries(broken);
+                if (c === "Delete" && !refuseLost()) deleteEntries(broken);
               },
             }, `Remove ${broken.length} without a model`)] : []));
           // Keep the selection on the same entries.
@@ -1988,10 +2046,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
           const chosen = await objects.pick(el, { title: `Replace ${entries.length === 1 ? "this" : `these ${entries.length}`} with…`, kinds: replaceableKinds(kinds.values()) });
           keysToMap();
-          if (!chosen) return;
+          if (!chosen || refuseLost()) return;
           const swapped = entries.filter((p) => replaceableBy(kinds.get(p) as string, chosen.kind) && p.id !== chosen.id);
           if (!swapped.length) return;
           await loadCells(chosen.id).catch(() => { /* stays free */ });
+          if (refuseLost()) return;
           type Look = Props & { id: string; skinId?: string };
           const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
           const before = swapped.map(look);
@@ -2022,6 +2081,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           firstDoodadHeight: () => selectedDoodads()[0]?.position[2] ?? null,
           setUniformHeights: async (height) => {
             if (!editable) return "This terrain is read-only.";
+            if (glDead) return VIEW_LOST;
             const doodads = selectedDoodads();
             if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
             const z = height ?? doodads[0].position[2];
@@ -2032,6 +2092,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           resetFixedHeights: () => {
             if (!editable) return "This terrain is read-only.";
+            if (glDead) return VIEW_LOST;
             const doodads = selectedDoodads();
             if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
             const steps = history.length, atBefore = at;
@@ -2262,6 +2323,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!ground) return null;
           const tiles = await tileNumbers(ground.tiles, new Set(ground.corners.map((c) => c.texture)));
           const full = tiles.filter((n) => n < 0).length;
+          if (glDead) return undefined;
           if (full) void w3.window.showWarning(`This map can't take ${full} more ground tile${full === 1 ? "" : "s"}; its first tile stands in.`);
           const cliffs = ground.cliffs.map((id) => Math.max(0, terrain.cliffTiles.indexOf(id)));
           return stampGround(terrain, ground, groundOrigin(terrain, ground, g[0], g[1]), tiles.map((n) => Math.max(0, n)), cliffs);
@@ -2273,10 +2335,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const root = w3.workspace.project()?.root;
           const renames = await bringTypes(f).catch((e) => { void w3.window.showError(String(e)); return null; });
           // Another project, or the paste ended, while the question was open: nothing is placed.
-          if (!renames || pasting !== f || w3.workspace.project()?.root !== root) return;
+          if (!renames || pasting !== f || w3.workspace.project()?.root !== root || refuseLost()) return;
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           const tiles = tileSnapshot(terrain);
           const stamped = await placeGround(f, g);
+          // Lost while the ground's tiles were added: nothing was stamped, and the tiles go again.
+          if (stamped === undefined) { restoreTiles(terrain, tiles); refuseLost(); return; }
           // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
           // own step: without clearing keyStep this click would join the one before.
           keyStep = null;
@@ -3142,6 +3206,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         toolGroups.look.set(doc.path, look);
         const resetGround = () => {
           if (!editable) throw new Error("This terrain is read-only.");
+          if (glDead) throw new Error(VIEW_LOST);
           const log = new CornerUndo();
           if (!resetVariations(terrain, log)) return false;
           commitTerrain(log.step(terrain));
@@ -3211,25 +3276,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const layerBusy = h("span.muted", { hidden: true }, "Working…");
         const refreshLayers = async () => {
           const seq = ++layerSeq;
-          if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); layerBusy.hidden = true; redraw(); return; }
-          const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
-          // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
-          const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
-          const show = () => {
-            if (seq !== layerSeq) return;
-            const rgba = composeLayers(parts);
-            if (rgba) renderer.setViewLayer(rgba, W, H); else renderer.setViewLayer(null);
-            redraw();
-          };
-          show();
-          const late: Promise<void>[] = [];
-          if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
-          if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
-          layerBusy.hidden = !late.length;
-          const settled = await Promise.allSettled(late);
-          if (seq === layerSeq) layerBusy.hidden = true;
-          const failed = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
-          if (failed && seq === layerSeq) w3.window.showError(`The view layers couldn't be drawn: ${(failed.reason as Error)?.message ?? failed.reason}`);
+          const latest = () => seq === layerSeq;
+          // A layer that throws at once (not by rejecting) still ends with the label hidden and its error shown.
+          const failed = await runLayerJobs(() => {
+            if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); redraw(); return []; }
+            const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
+            // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
+            const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
+            const show = () => {
+              if (!latest()) return;
+              const rgba = composeLayers(parts);
+              if (rgba) renderer.setViewLayer(rgba, W, H); else renderer.setViewLayer(null);
+              redraw();
+            };
+            show();
+            const late: Promise<void>[] = [];
+            if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
+            if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            return late;
+          }, latest, (busy) => { layerBusy.hidden = !busy; });
+          if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
         };
         const refreshLayersSoon = () => {
           if (!viewState.naval && !viewState.heights && !viewState.cameras) return;
@@ -3305,7 +3371,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
-            h("div.model-stage", {}, canvas, labelLayer)),
+            h("div.model-stage", {}, canvas, labelLayer, glLost)),
           side));
 
         // ---- camera ------------------------------------------------------------------
@@ -3447,6 +3513,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         // Undo/redo anywhere in the editor (toolbars, panels), except while typing.
         el.addEventListener("keydown", (e) => {
+          if (glDead) return;
           const t = e.target as HTMLElement;
           if (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "range", "button"].includes((t as HTMLInputElement).type))) return;
           if (!(e.ctrlKey || e.metaKey)) return;
@@ -3455,6 +3522,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
+          // No edits by key on a view that isn't drawn (the message over it takes the mouse). Ctrl+S still saves: it's a command.
+          if (glDead) return;
           if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
           if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
           if (clipboardKey(e)) { e.preventDefault(); return; }
@@ -3561,7 +3630,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const byItself = loadDirty || renderer.animating;
           const due = dirty || size !== lastSize || (byItself && !(loading && now - lastFrame < LOADING_FRAME_MS));
           // Particle effects move by themselves: then every frame is drawn.
-          if (canvas.clientWidth > 0 && due) {
+          if (canvas.clientWidth > 0 && due && !glDead) {
             renderer.render();
             placeLabels();
             dirty = loadDirty = false;
@@ -3623,6 +3692,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           clearTimeout(timer);
           if (!inTime) void w3.window.showWarning(`Some models or textures were still loading after ${PICTURE_WAIT_MS / 1000} seconds: the terrain picture leaves them out.`);
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
+          if (glDead) throw new Error("The terrain editor's 3D view stopped (the graphics device was reset): save, then open the editor again.");
           const before = handle.view();
           if (area) {
             const middle = heightAt(terrain, (area.left + area.right) / 2, (area.bottom + area.top) / 2);
@@ -3806,6 +3876,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             window.removeEventListener("mouseup", onUp);
             window.removeEventListener("keyup", areaKeyUp);
             window.removeEventListener("blur", areaKeyLost);
+            glWatch.dispose();
+            if (glDead) lostViews.delete(doc.path);
             renderer.dispose();
           },
         };
