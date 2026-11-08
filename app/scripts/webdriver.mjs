@@ -108,7 +108,13 @@ export class WebDriverPage {
     const steps = params.type === "mousePressed" ? [move, { type: "pointerDown", button: 0 }]
       : params.type === "mouseReleased" ? [move, { type: "pointerUp", button: 0 }]
       : [move];
-    return this.actions([{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: steps }]);
+    const pointer = { type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: steps };
+    // DevTools' modifier bit 8 is Shift: held (WebDriver's Shift key) around the pointer's steps, tick by tick.
+    if (!(params.modifiers & 8)) return this.actions([pointer]);
+    const SHIFT = String.fromCharCode(0xe008);
+    pointer.actions = [{ type: "pause", duration: 0 }, ...steps, { type: "pause", duration: 0 }];
+    const keys = { type: "key", id: "keyboard", actions: [{ type: "keyDown", value: SHIFT }, ...steps.map(() => ({ type: "pause", duration: 0 })), { type: "keyUp", value: SHIFT }] };
+    return this.actions([keys, pointer]);
   }
 
   async screenshot(params) {

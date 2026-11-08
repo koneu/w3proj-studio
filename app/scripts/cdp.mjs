@@ -68,14 +68,15 @@ export class Hands {
     if (!at) throw new Error(`nothing to click: ${selector}${text ? ` "${text}"` : ""}`);
     return at;
   }
-  mouse(type, x, y, buttons = 0) {
-    return this.page.send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" && !buttons ? "none" : "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1 });
+  /** `modifiers`: DevTools' bits (8 Shift, 2 Ctrl, 1 Alt). */
+  mouse(type, x, y, buttons = 0, modifiers = 0) {
+    return this.page.send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" && !buttons ? "none" : "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1, modifiers });
   }
-  async click(selector, text = null) {
+  async click(selector, text = null, modifiers = 0) {
     const { x, y } = await this.where(selector, text);
-    await this.mouse("mouseMoved", x, y);
-    await this.mouse("mousePressed", x, y, 1);
-    await this.mouse("mouseReleased", x, y);
+    await this.mouse("mouseMoved", x, y, 0, modifiers);
+    await this.mouse("mousePressed", x, y, 1, modifiers);
+    await this.mouse("mouseReleased", x, y, 0, modifiers);
     await sleep(50);
   }
   async drag(from, to, steps = 12) {

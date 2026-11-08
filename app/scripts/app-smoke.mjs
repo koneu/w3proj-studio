@@ -1922,6 +1922,17 @@ async function testMapWithoutGame(page, found) {
     if (!/not found/.test(toast)) found.push(`test map (${way}): the toast says "${toast.slice(0, 200)}"`);
     await sleep(500);
   }
+  // The Test Map options: a wrong one stops before packing, naming the setting; the backend takes only the game's
+  // Test Map flags, and with good ones gets as far as starting the program (which isn't there).
+  await page.evaluate(`w3.settings.set("testMap.assetMode", "4k")`);
+  const wrong = await page.evaluate(`w3.commands.execute("w3.project.testMap").then(() => null, (e) => String(e))`);
+  if (!/testMap\.assetMode/.test(wrong ?? "")) found.push(`test map: a wrong asset mode gave ${JSON.stringify(wrong)}`);
+  await page.evaluate(`w3.settings.set("testMap.assetMode", undefined)`);
+  const invoke = (args) => page.evaluate(`w3.backend.invoke("game_test_map", { exe: "C:/no/such/Warcraft III.exe", map: "C:/no/map.w3x", args: ${JSON.stringify(args)} }).then(() => null, (e) => String(e))`);
+  const flag = await invoke(["-loadfile", "C:/other.w3x"]);
+  if (!/isn't a Test Map option/.test(flag ?? "")) found.push(`test map: the backend let ${JSON.stringify(flag)} through for -loadfile`);
+  const good = await invoke(["-windowmode", "windowed", "-hd", "0", "-mapdiff", "2", "-testmapprofile", "WorldEdit", "-fixedseed", "1"]);
+  if (/isn't a Test Map option/.test(good ?? "")) found.push(`test map: the backend refused the World Editor's own flags: ${good}`);
 }
 
 /** Delete Invalid Objects, Export Minimap, .w3o export and import, and the Sound Editor's export and
@@ -3036,6 +3047,157 @@ async function contextLoss(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** The Replace dialogs (doodads with Swap Both, units with Selected Only, tiles), each one undo step; regions: bounds as
+ *  numbers, several selected with Shift+click edited at once; Map Properties: a text with a line that is just } is
+ *  changed to " }" when the save asks, and not saved when the answer is no. */
+async function shouldHaves(page, found) {
+  const fail = (what) => found.push(`should-haves: ${what}`);
+  const k = await heightKit(page, "ShouldHaves");
+  const TXT = "map/war3map.w3e.txt";
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: -512, y: 512 }, { id: "LTlt", x: -256, y: 512 }, { id: "ATtr", x: 0, y: 512 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 0, y: -512, player: 1 }, { id: "hfoo", x: 384, y: -512, player: 1 }, { id: "hkni", x: 768, y: -512, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const count = (list) => list.reduce((m, o) => ({ ...m, [o.id]: (m[o.id] ?? 0) + 1 }), {});
+  /** Opens a Replace dialog by its command, picks old and new (and the boxes), presses Replace. */
+  const replace = async (command, from, to, boxes = []) => {
+    await page.evaluate(`void w3.commands.execute(${JSON.stringify(command)})`);
+    await until(`the ${command} dialog`, () => page.evaluate(`!!document.querySelector(".replace-dialog")`), 20000);
+    const missing = await page.evaluate(`(() => {
+      const d = document.querySelector(".replace-dialog"), set = (sel, v) => { const s = d.querySelector(sel); if (![...s.options].some((o) => o.value === v)) return sel + " has no " + v; s.value = v; return null; };
+      const why = set(".replace-from", ${JSON.stringify(from)}) ?? set(".replace-to", ${JSON.stringify(to)});
+      if (why) return why;
+      for (const b of ${JSON.stringify(boxes)}) d.querySelector(b).checked = true;
+      d.querySelector(".newmap-buttons button.primary").click();
+      return null;
+    })()`);
+    if (missing) { fail(`${command}: ${missing}`); await page.evaluate(`document.querySelector(".replace-overlay")?.remove()`); return; }
+    await sleep(800);
+    await k.save();
+  };
+  const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await sleep(500); await k.save(); };
+
+  // Doodads, Swap Both: the trees trade types; one undo puts all of it back.
+  const trees = JSON.stringify(count(k.doodads()));
+  await replace("w3.terrain.replaceDoodads", "LTlt", "ATtr", [".replace-swap"]);
+  const swapped = count(k.doodads());
+  if (swapped.LTlt !== 1 || swapped.ATtr !== 2) fail(`Replace Doodads with Swap Both gave ${JSON.stringify(swapped)}, not 1 LTlt and 2 ATtr`);
+  await undo();
+  if (JSON.stringify(count(k.doodads())) !== trees) fail(`one undo of Replace Doodads left ${JSON.stringify(count(k.doodads()))}, not ${trees}`);
+
+  // Units, Selected Units Only: only the selected footman becomes a knight.
+  await k.tab("Select");
+  await k.look(0, -512, { id: "hfoo", x: 0, y: -512 });
+  await replace("w3.terrain.replaceUnits", "hfoo", "hkni", [".replace-selected"]);
+  const units = count(k.units().filter((u) => u.id !== "sloc"));
+  if (units.hfoo !== 1 || units.hkni !== 2) fail(`Replace Units, Selected Units Only, gave ${JSON.stringify(units)}, not 1 hfoo and 2 hkni`);
+
+  // Tiles: the ground changes, one undo takes it back.
+  const ground = hash(join(k.root, "map", "war3map.w3e.txt"));
+  const tiles = await page.evaluate(`(async () => { void w3.commands.execute("w3.terrain.replaceTiles"); await new Promise((r) => setTimeout(r, 800));
+    const d = document.querySelector(".replace-dialog"); const v = d ? [...d.querySelectorAll(".replace-from option")].map((o) => [o.value, o.textContent.includes(" · ")]) : []; document.querySelector(".replace-overlay")?.remove(); return v; })()`);
+  // From a tile the ground has (its count shows), to another.
+  const used = tiles.find(([, n]) => n)?.[0], other = tiles.find(([id]) => id !== used)?.[0];
+  if (!used || !other) fail(`Replace Tiles offers ${JSON.stringify(tiles)}`);
+  else {
+    await replace("w3.terrain.replaceTiles", used, other);
+    if (hash(join(k.root, "map", "war3map.w3e.txt")) === ground) fail(`Replace Tiles ${used} → ${other} changed nothing on disk`);
+    await undo();
+    if (hash(join(k.root, "map", "war3map.w3e.txt")) !== ground) fail("one undo of Replace Tiles didn't put the ground back");
+  }
+  if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`)) fail("the terrain is unsaved after saving");
+
+  // Regions: Left typed as a number; then two selected with Shift+click take one sound in one undo step.
+  await k.tool("add_region", { name: "First", left: -1024, bottom: -1024, right: -512, top: -512 });
+  await k.tool("add_region", { name: "Second", left: 512, bottom: 512, right: 1024, top: 1024 });
+  await sleep(500);
+  await k.tab("Regions");
+  const regions = () => k.read("war3map.w3r.json").regions;
+  const first = regions().find((r) => r.name === "First");
+  await page.evaluate(`(() => { const s = document.querySelector('select[title="Go to a region"]'); s.value = ${JSON.stringify(String(first.index))}; s.dispatchEvent(new Event("change")); })()`);
+  await sleep(300);
+  const typed = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-left"); if (!i) return false; i.value = "-1088"; i.dispatchEvent(new Event("change")); return true; })()`);
+  if (!typed) fail("a selected region shows no Left box");
+  const refused = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-right"); if (!i) return null; i.value = "-2000"; i.dispatchEvent(new Event("change")); return i.classList.contains("invalid"); })()`);
+  if (refused !== true) fail(`a Right left of Left wasn't refused (${refused})`);
+  await k.save();
+  const moved = regions().find((r) => r.name === "First");
+  if (moved?.left !== -1088 || moved?.right !== -512) fail(`after typing Left the region is ${JSON.stringify(moved && [moved.left, moved.right])}, not [-1088, -512]`);
+  await k.look(768, 768);
+  await sleep(500);
+  const c = await k.hands.where(".model-stage canvas");
+  await k.hands.mouse("mouseMoved", c.x, c.y, 0, 8);
+  await k.hands.click(".model-stage canvas", null, 8);
+  await sleep(300);
+  const both = await page.evaluate(`document.querySelector(".terrain-region-count")?.textContent ?? null`);
+  if (both !== "2 regions") fail(`Shift+click on a second region shows "${both}", not "2 regions"`);
+  else {
+    await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-sound"); i.value = "gg_snd_Smoke"; i.dispatchEvent(new Event("change")); })()`);
+    await k.save();
+    const sounds = regions().map((r) => r.sound);
+    if (sounds.join() !== "gg_snd_Smoke,gg_snd_Smoke") fail(`the sound for both regions gave ${JSON.stringify(sounds)}`);
+    await undo();
+    if (regions().some((r) => r.sound)) fail(`one undo left the sounds ${JSON.stringify(regions().map((r) => r.sound))}`);
+  }
+
+  // Map Properties: a description kept in war3map.wts, typed with a line that is just "}".
+  await page.evaluate(`w3.editors.closeAll()`);
+  const wtsPath = join(k.root, "map", "war3map.wts");
+  const info = k.read("war3map.w3i.json");
+  info.description = "TRIGSTR_900";
+  await page.evaluate(`(async () => {
+    await w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))});
+    await w3.workspace.writeText("map/war3map.wts", (await w3.workspace.readText("map/war3map.wts")) + "STRING 900\\r\\n{\\r\\nOld words\\r\\n}\\r\\n");
+  })()`);
+  const typeDescription = (text) => page.evaluate(`(async () => {
+    await w3.commands.execute("w3.mapInfo.open", "description");
+    await new Promise((r) => setTimeout(r, 500));
+    const t = [...document.querySelectorAll(".map-info textarea")].find((x) => x.value.startsWith("Old words") || x.value.startsWith("Line one"));
+    if (!t) return false;
+    t.value = ${JSON.stringify(text)};
+    t.dispatchEvent(new Event("input"));
+    return true;
+  })()`);
+  const W3I = "map/war3map.w3i.json";
+  // Asked, the answer no: nothing is saved, the editor stays unsaved.
+  await page.evaluate(`(() => { w3.window.confirm = async () => false; })()`);
+  if (!(await typeDescription("Line one\n}\nLine three"))) fail("the description isn't a text of war3map.wts in Map Properties");
+  const before = readFileSync(wtsPath, "utf8");
+  const refusedSave = await page.evaluate(`w3.editors.saveAll().then(() => null, (e) => String(e))`);
+  if (!/starts with "}"/.test(refusedSave ?? "")) fail(`saving with the answer no gave ${JSON.stringify(refusedSave)}`);
+  if (readFileSync(wtsPath, "utf8") !== before) fail("war3map.wts changed though the answer was no");
+  if (!(await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`))) fail("Map Properties isn't unsaved after a refused save");
+  // The answer yes: the line becomes " }" and the whole text comes back.
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const saved = readFileSync(wtsPath, "utf8");
+  if (!saved.includes("Line one\r\n }\r\nLine three\r\n}")) fail(`war3map.wts holds ${JSON.stringify(saved.slice(saved.indexOf("STRING 900"), saved.indexOf("STRING 900") + 60))}`);
+  if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`)) fail("Map Properties is unsaved after its save");
+  await page.evaluate(`w3.editors.closeAll()`);
+
+  // Map Properties ▸ Players: ally priorities (player 1 gives player 2 high) and the HUD skin.
+  const two = k.read("war3map.w3i.json");
+  two.players.push({ ...two.players[0], id: 1, name: "Second", start: [512, 512] });
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(two, null, 2))})`);
+  const picked = await page.evaluate(`(async () => {
+    await w3.commands.execute("w3.mapInfo.open", "players");
+    await new Promise((r) => setTimeout(r, 500));
+    const choose = (s, v) => { if (!s) return false; s.value = v; s.dispatchEvent(new Event("change")); return true; };
+    const ally = document.querySelector(".map-priorities-ally tbody tr:first-child td:nth-child(3) select");
+    const skin = [...document.querySelectorAll(".map-info select")].find((s) => [...s.options].some((o) => o.textContent === "Selected Race"));
+    return { ally: choose(ally, "high"), skin: choose(skin, "2"), hasSkin: ${JSON.stringify(two.players[0].hudSkin !== undefined)} };
+  })()`);
+  if (!picked.ally) fail("Map Properties shows no ally priority for player 2 in player 1's row");
+  if (picked.hasSkin && !picked.skin) fail("Map Properties shows no HUD Skin for a map that has them");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const after = k.read("war3map.w3i.json").players;
+  if (after[0].allyHigh !== 2 || after[0].allyLow !== 0) fail(`player 1's ally priorities are low ${after[0].allyLow}, high ${after[0].allyHigh}, not high for player 2`);
+  if (picked.hasSkin && after[0].hudSkin !== 2) fail(`player 1's HUD skin is ${after[0].hudSkin}, not 2 (Orc)`);
+  await page.evaluate(`w3.editors.closeAll()`);
+  await k.reset();
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -3099,7 +3261,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -3185,6 +3347,7 @@ async function run() {
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
+    await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
