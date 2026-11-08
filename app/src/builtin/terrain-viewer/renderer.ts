@@ -79,8 +79,9 @@ const WATER_FS = `#version 300 es
 precision mediump float;
 in vec2 vUv; in float vDepth;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
-// The map's water tint (white without) and the scene light on a flat surface.
-uniform vec4 uTint; uniform vec3 uLight;
+// The scene light on a flat surface (the map's water tint is in the ramp: waterRamp); uGrey 1: the
+// texture gives only its brightness (tinted water).
+uniform vec3 uLight; uniform float uGrey;
 out vec4 outColor;
 ${FOG_FS}
 void main() {
@@ -88,7 +89,9 @@ void main() {
   vec4 c = vDepth <= deepLevel
     ? mix(uShallowMin, uShallowMax, clamp((vDepth - minDepth) / (deepLevel - minDepth), 0.0, 1.0))
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
-  vec4 w = texture(uTex, vUv) * c * uTint;
+  vec4 t = texture(uTex, vUv);
+  t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);
+  vec4 w = t * c;
   outColor = vec4(fogged(w.rgb * uLight), w.a);
 }`;
 
@@ -98,6 +101,21 @@ export interface WaterLook {
   frames: (WebGLTexture | null)[];
   rate: number;
   shallowMin: number[]; shallowMax: number[]; deepMin: number[]; deepMax: number[];
+}
+
+type WaterRamp = Pick<WaterLook, "shallowMin" | "shallowMax" | "deepMin" | "deepMax">;
+
+/** The colour ramp the water is drawn with (the shader multiplies the texture by it), and whether the
+ *  texture gives only its brightness (`grey`). The map's water tint (war3map.w3i, stored blue, green,
+ *  red, alpha; null when its tinting is off) takes the place of the colour, as the game's
+ *  SetWaterBaseColor does: 03b_Water_Tint's red tint is plainly red in the game, not the ramp's blue
+ *  darkened, nor the (blue) texture's colour under red. Its alpha scales the ramp's, so the shallows
+ *  still fade out at the shore. */
+export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & { grey: boolean } {
+  if (!tint) return { shallowMin: look.shallowMin, shallowMax: look.shallowMax, deepMin: look.deepMin, deepMax: look.deepMax, grey: false };
+  const [b, g, r, a = 255] = tint;
+  const apply = (c: number[]) => [r / 255, g / 255, b / 255, c[3] * (a / 255)];
+  return { shallowMin: apply(look.shallowMin), shallowMax: apply(look.shallowMax), deepMin: apply(look.deepMin), deepMax: apply(look.deepMax), grey: true };
 }
 
 /** Until the game's water is known: an untextured blue-grey ramp. */
@@ -257,7 +275,7 @@ export class TerrainRenderer {
   private waterFrameShown = -1;
   /** White texture for untextured water. */
   private waterWhite: WebGLTexture;
-  /** The map's water tint (r, g, b, a in 0–255) when tinting is on; null: none. */
+  /** The map's water tint as stored (b, g, r, a in 0–255; see waterRamp) when tinting is on; null: none. */
   waterTint: number[] | null = null;
   private splatProg: WebGLProgram;
   /** Splat meshes by texture path and blend mode. */
@@ -1153,11 +1171,11 @@ export class TerrainRenderer {
       setFog(gl, (name) => gl.getUniformLocation(this.waterProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.waterProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.waterProg, "uTex"), 0);
-      for (const [name, v] of [["uShallowMin", look.shallowMin], ["uShallowMax", look.shallowMax], ["uDeepMin", look.deepMin], ["uDeepMax", look.deepMax]] as const) {
+      const ramp = waterRamp(look, this.waterTint);
+      for (const [name, v] of [["uShallowMin", ramp.shallowMin], ["uShallowMax", ramp.shallowMax], ["uDeepMin", ramp.deepMin], ["uDeepMax", ramp.deepMax]] as const) {
         gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
       }
-      const tint = this.waterTint ?? [255, 255, 255, 255];
-      gl.uniform4f(gl.getUniformLocation(this.waterProg, "uTint"), tint[0] / 255, tint[1] / 255, tint[2] / 255, (tint[3] ?? 255) / 255);
+      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uGrey"), ramp.grey ? 1 : 0);
       // Lit like flat ground (normal straight up); the even light without the map's.
       const sun = this.terrainLight;
       const up = sun ? Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1)) : 0;
