@@ -57,13 +57,15 @@ const ICON_FIELDS: Record<string, string> = { w3u: "uico", w3t: "iico", w3a: "aa
 /** Images (icons, textures) as data URLs: the map's imports first, then the game's files (cached). */
 export function imageLoader(w3: W3Api): (path: string) => Promise<string | null> {
   const cache = new Map<string, Promise<string | null>>();
+  // Icons of a list fill in as they come: the reads someone waits on (a map opening) go first.
+  const background = { background: true };
   return (path: string) => {
     const key = path.toLowerCase();
     let p = cache.get(key);
     if (!p) {
       p = (async () => {
         const project = w3.workspace.project();
-        const bytes = await (project ? w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => w3.game.read(path)) : w3.game.read(path));
+        const bytes = await (project ? w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => w3.game.read(path, background)) : w3.game.read(path, background));
         const mip = decodeImage(bytes, path).mip(0);
         const canvas = document.createElement("canvas");
         canvas.width = mip.width;
