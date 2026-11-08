@@ -66,23 +66,27 @@ fn known_clients() -> Vec<Client> {
     if let Some(base) = std::env::var_os("W3PROJ_TEST_CLIENT_HOME").map(PathBuf::from) {
         return clients(&base.join("roaming"), &base.join("local"), &base.join("home"));
     }
-    let (appdata, local, home) = system_folders();
-    clients(&appdata, &local, &home)
+    // Without its folders known, no client is offered: a missing variable must not become a relative path, which
+    // would put a configuration file into whatever folder the app runs in.
+    match system_folders() {
+        Some((appdata, local, home)) => clients(&appdata, &local, &home),
+        None => Vec::new(),
+    }
 }
 
 /// The folders clients keep their settings in: on Windows %APPDATA%, %LOCALAPPDATA% and the profile; elsewhere
 /// the XDG config folder (~/.config, where VS Code and Claude Desktop keep theirs), ~/.local/share and the home
 /// folder (Claude Code, Cursor, Windsurf). An unset variable gives no folder rather than a relative path.
-fn system_folders() -> (PathBuf, PathBuf, PathBuf) {
-    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+fn system_folders() -> Option<(PathBuf, PathBuf, PathBuf)> {
+    // Only full paths count: an unset, empty or relative variable gives no folder.
+    let var = |name: &str| std::env::var_os(name).map(PathBuf::from).filter(|p| p.is_absolute());
     if cfg!(windows) {
-        let f = |name: &str| var(name).unwrap_or_default();
-        return (f("APPDATA"), f("LOCALAPPDATA"), f("USERPROFILE"));
+        return Some((var("APPDATA")?, var("LOCALAPPDATA")?, var("USERPROFILE")?));
     }
-    let home = var("HOME").unwrap_or_default();
+    let home = var("HOME")?;
     let config = var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
     let data = var("XDG_DATA_HOME").unwrap_or_else(|| home.join(".local").join("share"));
-    (config, data, home)
+    Some((config, data, home))
 }
 
 fn entry(client: &Client, bridge: &str) -> Value {

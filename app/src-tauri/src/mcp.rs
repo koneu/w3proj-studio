@@ -101,18 +101,30 @@ mod pipe {
 #[cfg(unix)]
 mod pipe {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     use std::path::Path;
 
-    /// The socket, for this user alone. A socket file left by an app that ended without closing it is
-    /// replaced; one that answers belongs to another running copy, and this one doesn't take over.
+    /// The socket, for this user alone, in a folder that is theirs alone (made with mode 0700 when it's the
+    /// temp-folder fallback; refused when it belongs to someone else or others can open it). A socket left by an
+    /// app that ended without closing it is replaced; one that answers belongs to another running copy, and this
+    /// one doesn't take over. Nothing but a socket is ever removed.
     pub fn bind(path: &Path) -> std::io::Result<std::os::unix::net::UnixListener> {
+        use std::os::unix::fs::FileTypeExt;
+        let denied = |msg: String| std::io::Error::new(std::io::ErrorKind::PermissionDenied, msg);
         // A socket's path has room for 107 bytes (sun_path); the system's own message for more says little.
         if path.as_os_str().len() > 107 {
             let msg = format!("the socket's path is longer than the system allows (107 bytes): {}. Set XDG_RUNTIME_DIR to a shorter folder.", path.display());
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg));
         }
-        if path.exists() {
+        let dir = path.parent().ok_or_else(|| denied(format!("no folder for {}", path.display())))?;
+        if !dir.exists() {
+            std::fs::DirBuilder::new().mode(0o700).create(dir)?;
+        }
+        w3proj::private_dir(dir).map_err(|e| denied(format!("the MCP socket's folder isn't safe to use: {e}")))?;
+        if let Ok(meta) = std::fs::symlink_metadata(path) {
+            if !meta.file_type().is_socket() {
+                return Err(denied(format!("{} is there and isn't a socket; it was left as it is", path.display())));
+            }
             if std::os::unix::net::UnixStream::connect(path).is_ok() {
                 return Err(std::io::Error::new(std::io::ErrorKind::AddrInUse, "another copy of W3Proj Studio is already serving MCP"));
             }
@@ -127,9 +139,14 @@ mod pipe {
     /// Serves until aborted; the socket file goes when the server stops (see `mcp_serve`).
     pub fn start(app: AppHandle, mcp: Mcp) -> std::io::Result<tauri::async_runtime::JoinHandle<()>> {
         let listener = bind(Path::new(&w3proj::mcp_pipe_name()))?;
+        let me = w3proj::own_uid();
         Ok(tauri::async_runtime::spawn(async move {
             let Ok(listener) = tokio::net::UnixListener::from_std(listener) else { return };
             while let Ok((stream, _)) = listener.accept().await {
+                // Only this user's processes are answered, whatever the folder lets through.
+                if me.is_none() || stream.peer_cred().ok().map(|c| c.uid()) != me {
+                    continue;
+                }
                 let (app, mcp) = (app.clone(), mcp.clone());
                 tauri::async_runtime::spawn(async move {
                     let _ = connection(app, mcp, stream).await;
@@ -147,10 +164,41 @@ mod pipe {
     mod tests {
         use super::*;
 
+        fn folder(name: &str, mode: u32) -> std::path::PathBuf {
+            let dir = std::env::temp_dir().join(format!("w3proj-mcp-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            dir
+        }
+
+        #[test]
+        fn the_folder_must_be_this_users_alone() {
+            let open = folder("open", 0o755);
+            let e = bind(&open.join("s.sock")).unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+            assert!(!open.join("s.sock").exists(), "nothing is made in a folder others can open");
+            std::fs::remove_dir_all(&open).unwrap();
+            // A missing folder (the temp-folder fallback) is made, for this user alone.
+            let parent = folder("parent", 0o700);
+            let made = parent.join("w3proj-studio-x");
+            let _listener = bind(&made.join("s.sock")).unwrap();
+            assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
+            std::fs::remove_dir_all(&parent).unwrap();
+        }
+
+        #[test]
+        fn a_file_that_isnt_a_socket_is_never_removed() {
+            let dir = folder("file", 0o700);
+            std::fs::write(dir.join("s.sock"), "someone's data").unwrap();
+            assert_eq!(bind(&dir.join("s.sock")).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+            assert_eq!(std::fs::read_to_string(dir.join("s.sock")).unwrap(), "someone's data");
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+
         #[test]
         fn a_live_socket_is_kept_and_a_dead_one_replaced() {
-            let dir = std::env::temp_dir().join(format!("w3proj-mcp-sock-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
+            let dir = folder("sock", 0o700);
             let path = dir.join("s.sock");
             let first = bind(&path).unwrap();
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600, "for this user alone");
