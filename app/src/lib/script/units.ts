@@ -94,6 +94,11 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
   else if (u.targetAcquisition > 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
   if (u.level > 1) lines.push(`    call SetHeroLevel( ${v}, ${u.level}, false )`);
+  // A hero's own attributes (0: its default ones), as the World Editor writes them (seen in the game's campaign map
+  // WC2Orc12 and in a map it saved with a Paladin of 30/20/25).
+  if ((u.strength ?? 0) > 0) {
+    lines.push(`    call SetHeroStr( ${v}, ${u.strength}, true )`, `    call SetHeroAgi( ${v}, ${u.agility ?? 0}, true )`, `    call SetHeroInt( ${v}, ${u.intelligence ?? 0}, true )`);
+  }
   if (u.hp !== -1) lines.push(`    set life = GetUnitState( ${v}, UNIT_STATE_LIFE )`, `    call SetUnitState( ${v}, UNIT_STATE_LIFE, ${(u.hp / 100).toFixed(2)} * life )`);
   if (u.mana !== -1) lines.push(`    call SetUnitState( ${v}, UNIT_STATE_MANA, ${u.mana} )`);
   for (const a of u.abilities) {

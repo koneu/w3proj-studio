@@ -198,6 +198,16 @@ test("placed changes are written, defaults aren't", () => {
   has(units([unit({ targetAcquisition: -2 })]), "    call SetUnitAcquireRange( u, 200.0 )");
 });
 
+test("a hero's own attributes follow its level, before its life; 0 is its default ones", () => {
+  // As World Editor 2.0 wrote it for a level 5 Paladin of 30/20/25 at 60 % life.
+  const u = units([unit({ id: "Hpal", level: 5, strength: 30, agility: 20, intelligence: 25, hp: 60 })]);
+  const want = ["    call SetHeroLevel( u, 5, false )", "    call SetHeroStr( u, 30, true )", "    call SetHeroAgi( u, 20, true )", "    call SetHeroInt( u, 25, true )",
+    "    set life = GetUnitState( u, UNIT_STATE_LIFE )"].join(EOL);
+  assert.ok(u.includes(want), `not in this order:\n${u}`);
+  hasNot(units([unit({ id: "Hpal", level: 5, strength: 0, agility: 0, intelligence: 0 })]), "SetHeroStr");
+  hasNot(units([unit({ id: "Hpal", level: 5 })]), "SetHeroStr");
+});
+
 test("autocast is set as placed; a toggle like Defend is only ever switched on", () => {
   const orders = (a: string) => (a === "AHhb" ? { on: "healon", off: "healoff" } : a === "Adef" ? { on: "defend" } : undefined);
   const placed = (id: string, autocast: number) => units([unit({ abilities: [{ id, autocast, level: 0 }] })], { autocastOrders: orders });
