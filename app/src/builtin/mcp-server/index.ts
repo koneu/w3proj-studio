@@ -9,6 +9,7 @@ import { h } from "../../workbench/dom";
 import { editablePath, EditLog } from "./edits";
 import { GUIDES, guideTemplate, hasRules, isTopic, layoutIdea, ownTopics, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
+import { joinPath } from "../../lib/paths";
 
 /** One read_file answer; `offset` gets the rest. */
 const READ_LIMIT = 200_000;
@@ -55,7 +56,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   });
   // Only this part changes with an edit: redrawing the view would flash everything else in it.
   /** Where a user's rules for a guide are, whether or not they exist yet. */
-  const rulesPath = async (topic: string) => `${(await w3.backend.invoke<{ user_guides: string }>("app_paths")).user_guides}\\${topic}.md`;
+  const rulesPath = async (topic: string) => joinPath((await w3.backend.invoke<{ user_guides: string }>("app_paths")).user_guides, `${topic}.md`);
   const readRules = async (topic: string) => {
     const path = await rulesPath(topic);
     if (!(await w3.backend.invoke<boolean>("fs_exists", { path }))) return "";

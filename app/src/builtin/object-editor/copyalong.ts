@@ -9,6 +9,7 @@ import { loadKind, nextFreeId, type KindData } from "../../lib/objects/metadata"
 import { planPaste, referencedBy, type Copied, type CopyObject, type CopySet, type HoldsIds, type PasteWorld, type Plan, type Policy } from "../../lib/objects/copydeps";
 import { StringTable } from "../../lib/formats/wts";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
+import { joinPath } from "../../lib/paths";
 import { entryIds } from "../../lib/terrain/entryids";
 import { idsUsedBy } from "../../lib/objects/refs";
 import { assertPlanFits, copyOf, describeUse, rawOnlySkin, kindsOf, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
@@ -55,7 +56,7 @@ const campaignRoot = (root: string) => /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(
  *  throws, naming it: it must never pass for "empty". Read by its full path, so a project opened meanwhile
  *  (a copy is gathered while the user moves on to another map) isn't mistaken for this one. */
 async function readDoc<T>(w3: W3Api, root: string, rel: string): Promise<T | null> {
-  const abs = `${root}\\${rel.replace(/\//g, "\\")}`;
+  const abs = joinPath(root, rel);
   if (await w3.backend.invoke<boolean>("fs_exists", { path: abs })) {
     try { return JSON.parse(await w3.workspace.readText(abs)) as T; } catch { throw new Error(`${rel} is there but can't be read.`); }
   }
@@ -72,7 +73,7 @@ const emptyFile = (version = 3): EditFile => ({ format: "w3proj.objects/1", vers
  *  but can't be read, stops it with a message: either would pass for "nothing there" and paste over things. */
 export async function viewMap(w3: W3Api, live?: Live, root = w3.workspace.project()?.root ?? ""): Promise<MapView> {
   // Missing means no string table; there but unreadable stops it: TRIGSTR references would cross unresolved.
-  const wtsPath = `${root}\\map\\war3map.wts`;
+  const wtsPath = joinPath(root, "map/war3map.wts");
   let wts: string | null = null;
   if (await w3.backend.invoke<boolean>("fs_exists", { path: wtsPath })) {
     try { wts = await w3.workspace.readText(wtsPath); } catch { throw new Error("map/war3map.wts is there but can't be read."); }
@@ -105,7 +106,7 @@ export async function viewMap(w3: W3Api, live?: Live, root = w3.workspace.projec
       if (!customs.has(o.id)) customs.set(o.id, { ext, object: copyOf(o, text) });
     }
     if (campaign) {
-      const path = `${campaign}\\map\\war3campaign.${ext}.json`;
+      const path = joinPath(campaign, "map", `war3campaign.${ext}.json`);
       if (await w3.backend.invoke<boolean>("fs_exists", { path }).catch(() => false)) {
         let c: EditFile;
         try { c = JSON.parse(await w3.workspace.readText(path)) as EditFile; } catch { throw new Error(`${path} is there but can't be read.`); }

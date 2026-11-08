@@ -1,4 +1,5 @@
 import type { ExtensionContext, FileInfo, W3Api } from "../../extensions/api";
+import { joinPath } from "../../lib/paths";
 import { clickSelection } from "../../lib/selection";
 import { formatBytes, h } from "../../workbench/dom";
 import { planMoves } from "./moves";
@@ -249,7 +250,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         "Open map project", "Open here anyway", "Cancel");
       if (c === "Open here anyway") return w3.editors.open(path);
       if (c !== "Open map project") return;
-      await w3.commands.execute("w3.project.open", `${w3.workspace.project()!.root}\\${dir.replace(/\//g, "\\")}`);
+      await w3.commands.execute("w3.project.open", joinPath(w3.workspace.project()!.root, dir));
       await w3.editors.open(parts.slice(inner).join("/"));
     };
     const tree = buildTree(w3.workspace.files(), w3.workspace.folders());

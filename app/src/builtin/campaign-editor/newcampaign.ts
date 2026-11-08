@@ -5,6 +5,7 @@
 // ("New map…" / "Add map…").
 
 import type { W3Api } from "../../extensions/api";
+import { joinPath } from "../../lib/paths";
 import { h } from "../../workbench/dom";
 
 export interface NewCampaignOptions { dir: string; name: string; author: string; difficulty: string; description: string; race: number }
@@ -23,7 +24,7 @@ export function askNewCampaign(w3: W3Api): Promise<NewCampaignOptions | null> {
     const folder = h("span.newmap-folder.muted", {}, "Choose a parent folder…");
     const error = h("div.newmap-error");
     const folderName = () => name.value.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled Campaign";
-    const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName()}` : "");
+    const target = () => (parent ? joinPath(parent, folderName()) : "");
     const update = () => {
       // Shown right-aligned to clip the start of long paths; the mark keeps them left-to-right.
       folder.textContent = parent ? `‎${target()}` : "Choose a parent folder…";

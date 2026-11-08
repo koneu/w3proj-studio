@@ -13,6 +13,7 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, LOG_FORMAT, parseBranches, parseCounts, parseLog, parseNameStatus, type Branch, type Change, type Commit, type CommitFile } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { isFullPath } from "../../lib/paths";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
@@ -240,7 +241,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.scm.diff", (path: string) => w3.editors.open(`${DIFF}${path}`, "w3.diff")),
     w3.commands.register("w3.scm.diffActive", async () => {
       const p = w3.editors.activePath();
-      if (!p || p.startsWith("w3:") || p.startsWith("game:") || /^[a-z]:[\\/]/i.test(p)) throw new Error("Open a project file first.");
+      if (!p || p.startsWith("w3:") || p.startsWith("game:") || isFullPath(p)) throw new Error("Open a project file first.");
       await w3.editors.open(`${DIFF}${p}`, "w3.diff");
     }),
     w3.commands.register("w3.scm.commit", () => commit()),

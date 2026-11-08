@@ -9,6 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { joinPath } from "../../lib/paths";
 import { addChapter } from "./chapters";
 import { StringTable } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
@@ -59,7 +60,7 @@ async function parentCampaign(w3: W3Api): Promise<string | null> {
   const root = w3.workspace.project()?.root;
   const m = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root) : null;
   if (!m) return null;
-  return (await w3.backend.invoke<boolean>("fs_exists", { path: `${m[1]}\\${FILE.replace(/\//g, "\\")}` })) ? m[1] : null;
+  return (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(m[1], FILE) })) ? m[1] : null;
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -76,8 +77,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const openChapter = async (map: string) => {
     const view = [...openViews][0];
     if (view) return view.openMap(map);
-    const dir = `${w3.workspace.project()!.root}\\maps\\${toProjectPath(map)}`;
-    if (!(await w3.backend.invoke<boolean>("fs_exists", { path: `${dir}\\w3proj.toml` }))) throw new Error(`${map} isn't unpacked as a project.`);
+    const dir = joinPath(w3.workspace.project()!.root, "maps", toProjectPath(map));
+    if (!(await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "w3proj.toml") }))) throw new Error(`${map} isn't unpacked as a project.`);
     await w3.commands.execute("w3.project.open", dir);
   };
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
@@ -310,7 +311,7 @@ class CampaignView {
   private projectDir(map: string): string | null {
     const dir = toProjectPath(map);
     const has = this.w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === `maps/${dir}/w3proj.toml`.toLowerCase());
-    return has ? `${this.w3.workspace.project()!.root}\\maps\\${dir}` : null;
+    return has ? joinPath(this.w3.workspace.project()!.root, "maps", dir) : null;
   }
 
   async addMap() {
@@ -318,7 +319,7 @@ class CampaignView {
     if (!src) return;
     const name = src.split(/[\\/]/).pop()!;
     if (this.campaignMaps().some((m) => m.name.toLowerCase() === name.toLowerCase())) throw new Error(`${name} is already in the campaign.`);
-    const dir = `${this.w3.workspace.project()!.root}\\maps\\${toProjectPath(name)}`;
+    const dir = joinPath(this.w3.workspace.project()!.root, "maps", toProjectPath(name));
     await this.w3.window.withProgress(`Adding ${name}`, () => this.w3.backend.invoke("project_unpack", {
       map: src, dir, allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir"),
     }));
@@ -339,7 +340,7 @@ class CampaignView {
     }
     const root = this.w3.workspace.project()!.root;
     await this.w3.commands.execute("w3.map.new", {
-      parent: `${root}\\maps`, suffix: ".w3x", title: "New Chapter Map",
+      parent: joinPath(root, "maps"), suffix: ".w3x", title: "New Chapter Map",
       beforeCreate: async (o: { dir: string; name: string }) => {
         const map = toArchiveName(o.dir.split(/[\\/]/).pop()!);
         if (this.campaignMaps().some((m) => m.name.toLowerCase() === map.toLowerCase())) throw new Error(`${map} is already in the campaign.`);

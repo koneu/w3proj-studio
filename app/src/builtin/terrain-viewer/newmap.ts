@@ -10,6 +10,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
+import { isFullPath, joinPath } from "../../lib/paths";
 import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
@@ -110,7 +111,7 @@ export function mapChoices(a: Record<string, unknown>, data: Pick<TileData, "set
   if (typeof a.name !== "string" || !a.name.trim()) throw new Error("The map needs a name.");
   const parent = typeof a.folder === "string" && a.folder.trim() ? a.folder.trim() : fallbackParent;
   if (!parent) throw new Error("No project is open to put it next to: give folder, the parent folder of the new map's project.");
-  if (!/^(?:[A-Za-z]:[\\/]|\\\\)/.test(parent)) throw new Error(`folder must be a full path, not "${parent}".`);
+  if (!isFullPath(parent)) throw new Error(`folder must be a full path, not "${parent}".`);
   const size = (v: unknown, what: string) => {
     if (v === undefined) return 96;
     if (!SIZES.includes(v as number)) throw new Error(`${what} must be one of ${SIZES.join(", ")} tiles.`);
@@ -133,7 +134,7 @@ export function mapChoices(a: Record<string, unknown>, data: Pick<TileData, "set
   if (script !== "jass" && script !== "lua") throw new Error("script must be jass or lua.");
   const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   return {
-    dir: `${parent.replace(/[\\/]+$/, "")}\\${folderName(a.name)}`, name: a.name.trim(), author: text(a.author), description: text(a.description),
+    dir: joinPath(parent, folderName(a.name)), name: a.name.trim(), author: text(a.author), description: text(a.description),
     width, height, tileset: set.id, groundTiles: tiles, cliffTiles: data.cliffsOn(tiles), customTiles: false, baseTile,
     layer: layer as number, water, noise: a.hills === true, lua: script === "lua",
   };
@@ -205,7 +206,7 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       tileList.hidden = false;
       sync();
     };
-    const target = () => (parent ? `${parent.replace(/[\\/]+$/, "")}\\${folderName(name.value)}${preset.suffix ?? ""}` : "");
+    const target = () => (parent ? joinPath(parent, `${folderName(name.value)}${preset.suffix ?? ""}`) : "");
     const update = () => {
       const [w, h] = playableOf(Number(width.value), Number(height.value));
       playable.textContent = `playable ${w} × ${h}`;

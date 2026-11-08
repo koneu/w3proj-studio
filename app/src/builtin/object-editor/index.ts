@@ -6,6 +6,7 @@ import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } f
 import { pickBaseObject } from "./picker";
 import { iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
 import { toProjectPath } from "../../lib/formats/archivepath";
+import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable } from "../../lib/formats/wts";
@@ -1211,7 +1212,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Nothing is written into a vanished map folder: it would leave a lone file there.
             const root = w3.workspace.project()?.root;
             if (root) {
-              const folderExists = await w3.backend.invoke<boolean>("fs_exists", { path: `${root}\\map` }).catch(() => true);
+              const folderExists = await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, "map") }).catch(() => true);
               if (mapFolderGone({ folderExists, isNew, hasWts })) {
                 w3.window.showError("The map folder is missing, so nothing was saved. Restore it (a checkpoint or the packed map has the files) and save again.");
                 return;

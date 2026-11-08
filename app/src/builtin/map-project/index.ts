@@ -1,5 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
+import { joinPath } from "../../lib/paths";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -109,7 +110,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   const editBuild = () => {
     const p = w3.workspace.project()!;
-    return `${p.root}\\build\\${baseName(p.root)}.edit.w3x`;
+    return joinPath(p.root, "build", `${baseName(p.root)}.edit.w3x`);
   };
 
   ctx.subscriptions.push(
@@ -129,8 +130,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!parent) return;
       const name = await w3.window.inputBox({ prompt: "Project folder name", value: baseName(map).replace(/[^\w\- .()]/g, "_") });
       if (!name) return;
-      const dir = `${parent.replace(/[\\/]$/, "")}\\${name}`;
-      if (await w3.backend.invoke<boolean>("fs_exists", { path: `${dir}\\w3proj.toml` })) {
+      const dir = joinPath(parent, name);
+      if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "w3proj.toml") })) {
         const c = await w3.window.showWarning(`${dir} already is a project. Overwrite its map files with ${baseName(map)}?`, "Overwrite", "Cancel");
         if (c !== "Overwrite") return;
       }

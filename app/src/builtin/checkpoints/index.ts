@@ -4,9 +4,12 @@
 // run everything that follows a save (the map script, for one).
 
 import type { ExtensionContext, ProjectInfo, W3Api } from "../../extensions/api";
+import { joinPath } from "../../lib/paths";
 import { checkpointName, checkpointState, newestFirst, toPrune } from "./checkpoints";
 
 const FOLDER = "build/checkpoints";
+/** The checkpoint folder of a project, or a checkpoint in it. */
+const inFolder = (root: string, name = "") => joinPath(root, FOLDER, name);
 /** How often the state is looked at; the setting decides when a checkpoint is made. */
 const POLL = 20_000;
 
@@ -21,7 +24,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Projects told that their automatic checkpoints fail. */
   const warned = new Set<string>();
 
-  const list = async (root: string) => w3.workspace.listFolder(`${root}\\build\\checkpoints`).catch(() => [] as string[]);
+  const list = async (root: string) => w3.workspace.listFolder(inFolder(root)).catch(() => [] as string[]);
 
   /** Pathing, shadows and the minimap still due from a terrain edit belong in a checkpoint. A failure never stops one. */
   const settle = () => w3.commands.execute("w3.terrain.settle").catch(() => {});
@@ -35,7 +38,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       name = checkpointName(project.default_output, new Date());
     }
     last = `${project.root}|${name}`;
-    const target = `${project.root}\\build\\checkpoints\\${name}`;
+    const target = inFolder(project.root, name);
     await w3.backend.invoke("project_pack", { root: project.root, output: target });
     const keep = w3.settings.get<number>("checkpoints.keep") ?? 10;
     // A checkpoint being restored stays, however old: it's read after this one is made.
@@ -45,7 +48,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // checkpoint exists already, so an old one that can't go is only said.
     for (const f of old) {
       try {
-        await w3.backend.invoke("fs_delete", { root: project.root, path: `${project.root}\\build\\checkpoints\\${f}` });
+        await w3.backend.invoke("fs_delete", { root: project.root, path: inFolder(project.root, f) });
         removed++;
       } catch (e) {
         out.append(`checkpoint ${f} couldn't be removed: ${e instanceof Error ? e.message : String(e)}`);
@@ -103,7 +106,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await create(project, false);
       still();
       if (!(await list(project.root)).includes(name)) throw new Error(`Not restored: the checkpoint ${name} is gone.`);
-      await w3.commands.execute("w3.project.syncFromMap", `${project.root}\\${FOLDER.replace("/", "\\")}\\${name}`);
+      await w3.commands.execute("w3.project.syncFromMap", inFolder(project.root, name));
     } finally {
       const n = (restoring.get(key) ?? 1) - 1;
       if (n > 0) restoring.set(key, n); else restoring.delete(key);
@@ -152,7 +155,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.checkpoints.newest", async () => {
       const project = w3.workspace.project();
       const newest = project ? newestFirst(await list(project.root))[0] : undefined;
-      return newest ? `${project!.root}\\build\\checkpoints\\${newest.name}` : null;
+      return newest ? inFolder(project!.root, newest.name) : null;
     }),
     w3.commands.register("w3.checkpoints.restore", async () => {
       const project = w3.workspace.project();

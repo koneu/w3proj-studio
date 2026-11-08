@@ -1,5 +1,5 @@
 import type { ConfigurationProperty, FileInfo, ProjectInfo, SettingInfo, Settings, SettingsTarget, Disposable } from "../extensions/api";
-import { invoke, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
+import { invoke, isAbsolutePath, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
 import { Emitter } from "./dom";
 
 /** A file's size and last write (ms) as the backend reports them. */
@@ -154,6 +154,7 @@ export class WorkspaceService {
   resolve(projectPath: string): string {
     if (/^[a-z]:[\\/]/i.test(projectPath) || projectPath.startsWith("\\\\")) return projectPath;
     if (!this.info) throw new Error("no project is open");
+    if (isAbsolutePath(projectPath, this.info.root)) return projectPath;
     return joinPath(this.info.root, projectPath);
   }
 

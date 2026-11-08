@@ -5,6 +5,7 @@ import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
+import { joinPath } from "../../lib/paths";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
@@ -97,7 +98,7 @@ async function mapObjectData(w3: W3Api): Promise<{ bases: Map<string, string>; a
   const art: ObjectArt[] = [];
   // A campaign's chapter map also uses the campaign's custom objects.
   const campaign = campaignRoot(w3);
-  if (campaign) for (const k of kinds) { const f = await read(`${campaign}\\map\\war3campaign.${k}.json`, k); if (f) art.push(f); }
+  if (campaign) for (const k of kinds) { const f = await read(joinPath(campaign, "map", `war3campaign.${k}.json`), k); if (f) art.push(f); }
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   for (const prefix of ["war3map", "war3mapSkin"]) {
     for (const k of kinds) {
@@ -142,7 +143,7 @@ async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
   // The project's own files are known; only those are read (most paths are the game's).
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   const own = names.map((n) => `map/${n.replace(/\\/g, "/")}`).filter((p) => files.has(p.toLowerCase()));
-  const candidates = [...own, ...(campaign ? names.map((n) => `${campaign}\\map\\${n}`) : [])];
+  const candidates = [...own, ...(campaign ? names.map((n) => joinPath(campaign, "map", n)) : [])];
   let last: unknown = new Error(`${path} isn't imported`);
   for (const c of candidates) {
     try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }

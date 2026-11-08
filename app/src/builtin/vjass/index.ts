@@ -8,6 +8,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ScriptLanguagesService, type TriggersService } from "../../extensions/services";
 import { mapJass } from "../../lib/jass/env";
+import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
 import { vjassSymbols } from "./symbols";
@@ -34,7 +35,7 @@ const OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const exe = () => w3.settings.get<string>("vjass.jassHelper")
-    || `${(w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III").replace(/[\\/]+$/, "")}\\_retail_\\x86_64\\JassHelper\\jasshelper.exe`;
+    || joinPath(w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III", "_retail_/x86_64/JassHelper/jasshelper.exe");
 
   const compile = async (script: string, commonJ: string, blizzardJ: string): Promise<string> => {
     const path = exe();
@@ -42,21 +43,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       throw new Error(`JassHelper not found (${path}). Set "vjass.jassHelper" to jasshelper.exe.`);
     }
     const dir = await w3.backend.invoke<string>("tool_temp_dir");
-    await w3.workspace.writeText(`${dir}\\common.j`, commonJ);
-    await w3.workspace.writeText(`${dir}\\Blizzard.j`, blizzardJ);
-    await w3.workspace.writeText(`${dir}\\input.j`, script);
+    await w3.workspace.writeText(joinPath(dir, "common.j"), commonJ);
+    await w3.workspace.writeText(joinPath(dir, "Blizzard.j"), blizzardJ);
+    await w3.workspace.writeText(joinPath(dir, "input.j"), script);
     const flags = [...(w3.settings.get<boolean>("vjass.debug") ? ["--debug"] : []), ...(w3.settings.get<boolean>("vjass.optimize") === false ? ["--nooptimize"] : [])];
     const r = await w3.backend.invoke<{ code: number; stdout: string; stderr: string }>("tool_run", {
       exe: path, args: ["--scriptonly", ...flags, "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir,
     });
     if (r.code !== 0) {
       // JassHelper writes its errors (its own, or pjass's) to logs\compileerrors.txt.
-      const log = await w3.workspace.readText(`${dir}\\logs\\compileerrors.txt`).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
+      const log = await w3.workspace.readText(joinPath(dir, "logs/compileerrors.txt")).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
       // The log starts with the script's file name and ends with a count; the errors are between.
       const lines = log.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^logs[\\/]/i.test(l) && !/^\d+$/.test(l));
       throw new Error(`JassHelper: ${lines.slice(0, 8).join(" · ")} (files in ${dir})`);
     }
-    return w3.workspace.readText(`${dir}\\output.j`);
+    return w3.workspace.readText(joinPath(dir, "output.j"));
   };
 
   void w3.services.get<ScriptLanguagesService>(SCRIPT_LANGUAGES_SERVICE).then((s) => {

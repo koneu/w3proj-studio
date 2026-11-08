@@ -40,6 +40,4 @@ export function writeBytes(path: string, bytes: Uint8Array): Promise<{ size: num
   return tauriInvoke("fs_write_bytes", bytes, { headers: { path: encodeURIComponent(path) } });
 }
 
-export function joinPath(root: string, rel: string): string {
-  return `${root.replace(/[\\/]+$/, "")}\\${rel.replace(/\//g, "\\")}`;
-}
+export { isAbsolutePath, joinPath } from "../lib/paths";

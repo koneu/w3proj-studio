@@ -1,5 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { blockedBy, neededBy, requires } from "../../extensions/graph";
+import { joinPath } from "../../lib/paths";
 import { h } from "../../workbench/dom";
 
 const SAMPLE_MANIFEST = {
@@ -157,9 +158,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.backend.invoke("reveal_in_explorer", { path: (await paths()).user_extensions });
     }),
     w3.commands.register("w3.extensions.createSample", async () => {
-      const dir = `${(await paths()).user_extensions}\\sample-hello`;
-      await w3.backend.invoke("fs_write_text", { path: `${dir}\\extension.json`, text: JSON.stringify(SAMPLE_MANIFEST, null, 2) + "\n" });
-      await w3.backend.invoke("fs_write_text", { path: `${dir}\\main.js`, text: SAMPLE_MAIN });
+      const dir = joinPath((await paths()).user_extensions, "sample-hello");
+      await w3.backend.invoke("fs_write_text", { path: joinPath(dir, "extension.json"), text: JSON.stringify(SAMPLE_MANIFEST, null, 2) + "\n" });
+      await w3.backend.invoke("fs_write_text", { path: joinPath(dir, "main.js"), text: SAMPLE_MAIN });
       const c = await w3.window.showInfo(`Sample extension written to ${dir}. Reload to load it.`, "Reload", "Open Folder");
       if (c === "Reload") location.reload();
       if (c === "Open Folder") await w3.backend.invoke("reveal_in_explorer", { path: dir });

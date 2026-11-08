@@ -19,6 +19,7 @@ import { QuickInput } from "./quickinput";
 import { StatusBar } from "./statusbar";
 import { ViewService } from "./views";
 import { PROJECT_SETTINGS, SettingsService, WorkspaceService } from "./workspace";
+import { isFullPath } from "../lib/paths";
 
 /** Shows the mouse pointer before a native dialog (see ui_show_cursor in the backend). */
 const showCursor = () => invoke("ui_show_cursor").catch(() => {});
@@ -137,7 +138,7 @@ export class Workbench {
         try { state = key ? JSON.parse(localStorage.getItem(key) ?? "null") : null; } catch { return null; }
         if (!state || !Array.isArray(state.tabs)) return null;
         const files = new Set(this.workspace.files().map((f) => f.path.toLowerCase()));
-        const exists = (p: string) => p.startsWith("w3:") || isGame(p) || /^[a-z]:[\\/]/i.test(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
+        const exists = (p: string) => p.startsWith("w3:") || isGame(p) || isFullPath(p) || files.has(p.replace(/\\/g, "/").toLowerCase());
         return { tabs: state.tabs.filter((t) => typeof t.path === "string" && typeof t.editor === "string" && exists(t.path)), active: state.active };
       },
       store: (state) => {
