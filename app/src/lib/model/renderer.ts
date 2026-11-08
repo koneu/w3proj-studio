@@ -363,6 +363,8 @@ const FS = `#version 300 es
 precision mediump float;
 in vec3 vNormal; in vec2 vUV;
 uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform float uUnshaded;
+// uOpaque 1: an opaque layer (filter mode None), whose texture's alpha doesn't count (layerAlpha).
+uniform float uOpaque;
 // HD materials: the ORM texture's alpha masks where team colour goes.
 uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix;
 // Scene light: direction toward it, diffuse and ambient colour (intensity included).
@@ -373,6 +375,7 @@ void main() {
   vec4 c = texture(uTex, vUV);
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c *= uColor;
+  if (uOpaque > 0.5) c.a = uColor.a;
   if (c.a < uAlphaTest) discard;
   vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
   outColor = vec4(fogged(mix(c.rgb * light, uMix.rgb, uMix.a)), c.a);
@@ -456,7 +459,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -560,6 +563,14 @@ export interface HeightMap {
  *  (ShimmeringPortal's disc). Any fade (alpha under 1) is the layer blending again. */
 export function effectiveFilterMode(filterMode: number, alpha: number, opaqueTexture: boolean): number {
   return filterMode === 2 && alpha >= 0.999 && opaqueTexture ? 0 : filterMode;
+}
+
+/** How a layer of this (effective) filter mode uses alpha: the alpha test's threshold, and whether the texture's
+ *  alpha counts. An opaque layer (0, None) draws its texture whole, whatever its alpha channel holds: HD models'
+ *  diffuse textures often have alpha 0 throughout (Wood_Debris_Barrels_01, YCde), which a test on the texture's
+ *  alpha threw away entirely. Transparent (1) cuts at 0.75; the blended modes drop only what is all but clear. */
+export function layerAlpha(mode: number): { test: number; textureAlpha: boolean } {
+  return { test: mode === 1 ? 0.75 : 0.01, textureAlpha: mode !== 0 };
 }
 
 type Layer = Model["materials"][number]["layers"][number];
@@ -851,7 +862,9 @@ export class ModelGpu {
       gl.uniform1f(u.uUnshaded, sf & 0x1 ? 1 : 0);
       if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
       if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
-      gl.uniform1f(u.uAlphaTest, (mode === 1 ? 0.75 : 0.01) * (opts.tint?.[3] ?? 1));
+      const rule = layerAlpha(mode);
+      gl.uniform1f(u.uOpaque, rule.textureAlpha ? 0 : 1);
+      gl.uniform1f(u.uAlphaTest, rule.test * (opts.tint?.[3] ?? 1));
       switch (mode) {
         case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
         case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;
