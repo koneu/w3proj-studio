@@ -344,9 +344,10 @@ class Session {
     const rest = [];
     this.clicked ??= new Map();
     for (const d of dialogs) {
-      // The welcome asks to accept Blizzard's terms: only the user may decide that for them, so it's answered only when
-      // they said so (W3PROJ_WE_ACCEPT_TERMS=1); otherwise it's reported like any dialog we-drive doesn't know.
-      if (d.title === WELCOME.title && process.env.W3PROJ_WE_ACCEPT_TERMS === "1") {
+      // The welcome asks to accept Blizzard's terms. The user accepted them in their own install, which the farm is made
+      // from, and said on 2026-11-08 that we-drive may accept them in its own prefix. W3PROJ_WE_ACCEPT_TERMS=0 makes it
+      // report the dialog instead, like any dialog we-drive doesn't know.
+      if (d.title === WELCOME.title && process.env.W3PROJ_WE_ACCEPT_TERMS !== "0") {
         // Once, then again only if it's still there 15 s later (it stays until the editor has loaded the map).
         if (Date.now() - (this.clicked.get(d.id) ?? 0) > 15000) {
           x11(this.display, "click", `${d.rect[0] + WELCOME.button.x},${d.rect[1] + WELCOME.button.y}`);
