@@ -102,6 +102,8 @@ export interface TerrainToolGroupInstance {
   filterPathing?(cells: Uint8Array, width: number, height: number): void;
   /** A file the group keeps was saved elsewhere: takes it in place. Without this, the editor reopens. */
   reloadFile?(path: string): Promise<boolean>;
+  /** The camera objects as the group holds them, unsaved edits included: the Camera Objects layer draws these, not the saved war3map.w3c. */
+  cameraObjects?(): Promise<readonly import("../lib/terrain/cameras").CameraObject[]>;
   /** Writes the group's own files; called on save after the map files. */
   save?(): Promise<void>;
   dispose?(): void;

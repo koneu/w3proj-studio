@@ -14,7 +14,8 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./t
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, scaledNudge, waterLimitHits, type Bounds } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Box, type GridSize } from "./viewcmds";
+import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
@@ -3328,11 +3329,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             show();
             const late: Promise<void>[] = [];
             if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
-            if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (viewState.cameras) late.push(camerasNow().then((cams) => { parts[2] = cameraColors(cams, W, H, terrain.offsetX, terrain.offsetY); show(); }));
             return late;
           }, latest, (busy) => { layerBusy.hidden = !busy; });
           if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
         };
+        /** The cameras of the Camera Objects layer: the Camera Editor's, unsaved edits included, else the saved file. */
+        const camerasNow = () => layerCameras(groupInsts.values(),
+          async () => (await readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json"))?.cameras ?? []);
         const refreshLayersSoon = () => {
           if (!viewState.naval && !viewState.heights && !viewState.cameras) return;
           clearTimeout(layerTimer);
@@ -3816,6 +3820,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           // A group that isn't open yet reads the file when it is.
           for (const g of groupInsts.values()) await g.reloadFile?.(path);
+          // The Camera Objects layer draws what the Camera Editor now holds.
+          refreshLayersSoon();
           return true;
         };
         let changes: Promise<boolean> = Promise.resolve(true);
