@@ -308,6 +308,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** One edit of a placement file. */
   const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
+    // Every object tool comes through here (remove_objects without liveEditor too).
+    refuseLostView(projectTerrain(w3));
     let before: Placed[] = [];
     const name = key === "units" ? "war3mapUnits.doo" : "war3map.doo", path = jsonPathOf(w3, name);
     const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
@@ -555,7 +557,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("set_tileset", async ({ tileset, replaceTiles, dryRun }) => {
       if (typeof tileset !== "string") throw new Error("tileset must be a letter; terrain_info lists them.");
       requireProject(w3);
-      const { handle } = await liveEditor();
+      // A dry run only reads; the change itself is refused on a lost view (before and after the question).
+      const { handle } = await liveEditor("read");
       const sets = await handle.tilesets();
       const set = sets.find((s) => s.id === tileset);
       if (!set) throw new Error(`"${tileset}" isn't a tileset. They are: ${sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
@@ -564,8 +567,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { tiles, kept } = swap ? swapTiles(before, old?.tiles ?? [], set.tiles) : { tiles: before, kept: [] };
       const plan = { tileset: set.id, name: set.name, tiles: before.map((from, i) => ({ from, to: tiles[i] })), keptFromOtherTilesets: kept };
       if (dryRun === true) return plan;
+      refuseLostView(projectTerrain(w3));
       const stays = kept.length ? `, keeping ${kept.join(", ")}` : "";
       await withConsent(`change the tileset from ${old?.name ?? t.tileset} to ${set.name}${swap ? `, replacing its ground tiles${stays}` : ""}?`, "Change tileset", "mcp.confirmTileset");
+      refuseLostView(projectTerrain(w3));
       handle.setTileset(set.id);
       if (swap) handle.replaceGroundTiles(tiles);
       // Exactly the tileset's own list again: nothing is custom about it any more.
@@ -580,7 +585,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!change.every((n) => Number.isInteger(n))) throw new Error("left, right, bottom and top must be whole numbers of tiles.");
       if (border !== undefined && !(Array.isArray(border) && border.length === 4 && border.every((n) => Number.isInteger(n) && n >= 0))) throw new Error("border must be [left, right, bottom, top].");
       requireProject(w3);
-      const { handle } = await liveEditor();
+      // A dry run only reads; the resize itself is refused on a lost view (before and after the question).
+      const { handle } = await liveEditor("read");
       const t = handle.terrain;
       const info = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json");
       const complements = (border ?? info?.cameraComplements ?? [0, 0, 0, 0]) as Sides;
@@ -596,7 +602,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         ...(grows ? { note: "New ground continues the map's edge: the same tile and height as far as it reaches, and the tiles repeat. Paint it afterwards to hide that." } : {}),
       };
       if (dryRun === true) return result;
+      refuseLostView(projectTerrain(w3));
       await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}? Undo Resize in Studio takes it back until Studio closes.`, "Resize map", "mcp.confirmResize");
+      refuseLostView(projectTerrain(w3));
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
       return { ...result, objectsRemoved: done.removed, undo: "undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; the checkpoint just made stays." };
     }),
@@ -741,7 +749,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return editGround(`${mode === "dry" ? "Dry out" : `${mode[0].toUpperCase()}${mode.slice(1)} water in`} ${where}`, (t) => setWater(t, place, args.shape === "box" ? "box" : "ellipse", mode, kinds));
     }),
     w3.mcp.registerTool("rebuild_map", async () => {
-      const editor = await liveEditor();
+      // Only the derived files are written, without the GPU: it works on a lost view too.
+      const editor = await liveEditor("read");
       await editor.derive();
       return "Pathing and the minimap are rebuilt from the map as it is. Shadows only follow the edits that make them.";
     }),
@@ -1738,7 +1747,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               title: "Deletes every placed object whose model doesn't load or whose id is unknown (one undo step)",
               onclick: async () => {
                 const c = await w3.window.showWarning(`Delete ${broken.length} placed object${broken.length === 1 ? "" : "s"} without a model? (Ctrl+Z undoes it)`, "Delete", "Cancel");
-                if (c === "Delete") deleteEntries(broken);
+                if (c === "Delete" && !refuseLost()) deleteEntries(broken);
               },
             }, `Remove ${broken.length} without a model`)] : []));
           // Keep the selection on the same entries.
@@ -2037,10 +2046,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
           const chosen = await objects.pick(el, { title: `Replace ${entries.length === 1 ? "this" : `these ${entries.length}`} with…`, kinds: replaceableKinds(kinds.values()) });
           keysToMap();
-          if (!chosen) return;
+          if (!chosen || refuseLost()) return;
           const swapped = entries.filter((p) => replaceableBy(kinds.get(p) as string, chosen.kind) && p.id !== chosen.id);
           if (!swapped.length) return;
           await loadCells(chosen.id).catch(() => { /* stays free */ });
+          if (refuseLost()) return;
           type Look = Props & { id: string; skinId?: string };
           const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
           const before = swapped.map(look);
@@ -2313,6 +2323,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!ground) return null;
           const tiles = await tileNumbers(ground.tiles, new Set(ground.corners.map((c) => c.texture)));
           const full = tiles.filter((n) => n < 0).length;
+          if (glDead) return undefined;
           if (full) void w3.window.showWarning(`This map can't take ${full} more ground tile${full === 1 ? "" : "s"}; its first tile stands in.`);
           const cliffs = ground.cliffs.map((id) => Math.max(0, terrain.cliffTiles.indexOf(id)));
           return stampGround(terrain, ground, groundOrigin(terrain, ground, g[0], g[1]), tiles.map((n) => Math.max(0, n)), cliffs);
@@ -2324,10 +2335,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const root = w3.workspace.project()?.root;
           const renames = await bringTypes(f).catch((e) => { void w3.window.showError(String(e)); return null; });
           // Another project, or the paste ended, while the question was open: nothing is placed.
-          if (!renames || pasting !== f || w3.workspace.project()?.root !== root) return;
+          if (!renames || pasting !== f || w3.workspace.project()?.root !== root || refuseLost()) return;
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
           const tiles = tileSnapshot(terrain);
           const stamped = await placeGround(f, g);
+          // Lost while the ground's tiles were added: nothing was stamped, and the tiles go again.
+          if (stamped === undefined) { restoreTiles(terrain, tiles); refuseLost(); return; }
           // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
           // own step: without clearing keyStep this click would join the one before.
           keyStep = null;

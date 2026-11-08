@@ -2263,6 +2263,10 @@ async function contextLoss(page, found) {
   await page.evaluate(`w3.editors.open(${JSON.stringify(ground)})`);
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(ground)} && !!(${canvasNow})`), 20000);
   await until("a frame of the terrain (control: the view draws)", async () => (await frames()) > 0, 20000);
+  // The terrain as the editor holds it (unsaved edits included): every corner's height, and the tiles' shares.
+  const tool = mcpTool(page);
+  const held = () => tool("terrain_info", { heights: true });
+  const unpainted = await held();
   // An unsaved edit, painted by mouse (the MCP tools save what they change).
   const hands = new Hands(page);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
@@ -2272,10 +2276,9 @@ async function contextLoss(page, found) {
   await hands.drag({ x: at.x - 80, y: at.y }, { x: at.x + 80, y: at.y }).catch((e) => { throw new Error(`painting at ${JSON.stringify(at)}: ${e.message}`); });
   await sleep(300);
   if (!(await dirty())) return fail("painting left the terrain without unsaved changes (control)");
-  // The terrain as the editor holds it (unsaved edits included): every corner's height and tile.
-  const tool = mcpTool(page);
-  const held = () => tool("terrain_info", { heights: true });
   const beforeLoss = await held();
+  // The control: the snapshot sees a paint, so "unchanged while lost" below can fail.
+  if (beforeLoss === unpainted) return fail("the terrain snapshot didn't change with the paint (control)");
   await glCall("loseContext");
   await until("the message about the lost view", lostShown, 5000).catch(() => fail("no message over the terrain view after its WebGL context was lost"));
   await sleep(300);
