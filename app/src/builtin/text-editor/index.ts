@@ -255,7 +255,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
             await doc.writeText(t);
             saved = t;
-            doc.setDirty(false);
+            // Typed while the question was open or the file was being written: still unsaved.
+            doc.setDirty(view.state.sliceDoc() !== saved);
           },
           focus: () => view.focus(),
           dispose: () => {

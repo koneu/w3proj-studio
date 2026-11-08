@@ -3175,6 +3175,22 @@ async function shouldHaves(page, found) {
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`)) fail("Map Properties is unsaved after its save");
   await page.evaluate(`w3.editors.closeAll()`);
 
+  // war3map.wts by hand: text typed after a string's end (where a "}" line puts the rest of a text) is asked about.
+  await page.evaluate(`w3.editors.open("map/war3map.wts", "w3.textEditor")`);
+  await until("the text editor", () => page.evaluate(`!!document.querySelector(".cm-content")`), 20000);
+  await k.hands.click(".cm-content");
+  await k.hands.key("End", "End", 35, 2);
+  await k.hands.type("stray words");
+  const WTS = "map/war3map.wts", plain = readFileSync(wtsPath, "utf8");
+  await page.evaluate(`(() => { w3.window.confirm = async () => false; })()`);
+  const strayNo = await page.evaluate(`w3.editors.saveAll().then(() => null, (e) => String(e))`);
+  if (!/Text outside every string/.test(strayNo ?? "") || readFileSync(wtsPath, "utf8") !== plain) fail(`a hand-typed line outside every string, answered no, gave ${JSON.stringify(strayNo)}${readFileSync(wtsPath, "utf8") !== plain ? " and changed the file" : ""}`);
+  if (!(await page.evaluate(`w3.editors.isDirty(${JSON.stringify(WTS)})`))) fail("the string table isn't unsaved after a refused save");
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await page.evaluate(`w3.editors.saveAll()`);
+  if (!readFileSync(wtsPath, "utf8").includes("stray words")) fail("Save Anyway didn't save the string table");
+  await page.evaluate(`w3.editors.closeAll()`);
+
   // Map Properties ▸ Players: ally priorities (player 1 gives player 2 high) and the HUD skin.
   const two = k.read("war3map.w3i.json");
   two.players.push({ ...two.players[0], id: 1, name: "Second", start: [512, 512] });
