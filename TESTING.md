@@ -102,11 +102,12 @@ falls short, rather than copying their insides into a scratch file.
 |---|---|
 | run one TypeScript test file | `npm test -- src/lib/undo.test.ts` (in `app/`; other arguments go to node, e.g. `--test-name-pattern=…`) |
 | show a test fails without the fix | `node scripts/fails-without.mjs <test> <changed source files…>` (in `app/`): passes as is, fails with those files as on `dev` (`--base`), files put back. Exit 3 means the old code merely didn't build: weak evidence. Rust: `--run "cargo test -p <crate> <name>"` |
-| look at the app, ask it something | `node scripts/app-drive.mjs <steps>` (in `app/`): the hidden smoke app (Xvfb on Linux), `--map`/`--project` (a copy), `--terrain`, `--camera game`, `--look x,y`, `--shot file.png`, `--mcp tool={…}`, `--command id`, `--eval "…"`, `--frame-cost ms` (CPU time per terrain frame: all, poses, particles). Steps run in order; the list is at the top of the file |
+| look at the app, ask it something | `node scripts/app-drive.mjs <steps>` (in `app/`): the hidden smoke app (Xvfb on Linux), `--map`/`--project` (a copy), `--terrain`, `--camera game`, `--camera we[:x,y,…]` (the World Editor's view), `--view-size 1184x844`, `--compare-ready lit\|unlit`, `--look x,y`, `--shot file.png`, `--mcp tool={…}`, `--command id`, `--eval "…"` (an expression, statements, or statements that `return`), `--frame-cost ms` (CPU time per terrain frame: all, poses, particles). Steps run in order; the list is at the top of the file |
+| compare two pictures | `node scripts/pic-compare.mjs a.png b.png` (in `app/`): mean colour per region in both, their difference, the mean absolute difference of the pixels; `--region [name=]x,y,w,h`, `--sample` (whole and a 3x3 grid), `--diff d.png`, `--tolerance T` (exit 1 when a region's difference is above it, 2 when the pictures can't be compared). Plain JavaScript, no Pillow |
 | run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--wheel N`, `--windows`, `--game-view on\|off\|status`, `--fps ms`, `--close`; options `--mode sd\|hd`, `--day-night cycle\|fixed`. The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--wheel N`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
 line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
@@ -163,7 +164,45 @@ It never starts the game itself.
   The editor puts the target above the middle of the view (an off-centre projection, at 0.385 of the height), which
   a centred camera matches only at this aspect.
 - **Applying a camera object**: `--key m` (camera layer), `--click 1396,177` (the first camera in the palette's list,
-  13 px per row), `--click 1476,119` (View Selected Camera). Three runs gave the same picture.
+  13 px per row), `--click 1476,119` (View Selected Camera). Three runs gave the same picture. `--look` does this:
+  its cameras go into we-drive's copy of the map before the start (unpacked with the release CLI, war3map.w3c.json,
+  packed again), one row each, then two parking cameras at the terrain's corners; after View Selected Camera the
+  parking camera farther away is selected, which takes the selected camera's green circle out of the picture
+  without moving the view. `--look center` on cliff.w3m (SD) gives the opening picture exactly (difference 0).
+- **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
+  seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
+- **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and
+  Info Display are checked by default; Sky, Fog Effects, Light Ranges, Bloom, Ambient Occlusion, Grid, Camera Bounds,
+  pathing, Regions and Camera Objects aren't. With game view on, these items are greyed and read as unchecked.
+- **Time and lighting**: with the day fixed (we-drive's default) the status bar says "Time: 06:00". Measured
+  2026-11-08 at the opening view (pic-compare, whole picture), the editor's three states hardly differ: on cliff.w3m
+  game view off with View > Lighting on, with it off, and game view on are within a mean absolute difference of
+  0.7 and 1.3; on map 03 (Water Ford Lake Boats) 2.5 and 3.0. So in this build most of the darkness and colour
+  difference to Studio isn't the editor's lighting.
+
+### Comparing pictures with Studio
+
+Both sides at the same size, camera and lighting, then `pic-compare.mjs`:
+
+```sh
+node scripts/we-drive.mjs --map M --compare-ready --look center --shot we.png --close        # lit
+node scripts/app-drive.mjs --map M --terrain --view-size 1184x844 --camera we --compare-ready lit --shot st.png
+node scripts/pic-compare.mjs we.png st.png --sample --diff d.png
+```
+
+| World Editor (we-drive) | Studio (app-drive) |
+|---|---|
+| `--compare-ready`: game view on, the day fixed (06:00) | `--compare-ready lit`: `terrain.lighting.enabled` on, `terrain.lighting.hour` 6 |
+| `--compare-ready-unlit`: game view off, View > Lighting off | `--compare-ready unlit`: `terrain.lighting.enabled` off (Studio's even light) |
+| `--look x,y[,distance[,aoa[,fov[,rotation]]]]` | `--camera "we:x,y[,distance…]"` (only angle 304 and field of view 70 are fitted) |
+
+Studio's defaults are lighting on at hour 12 (`terrain.lighting.*` in the terrain viewer's extension.json). On map
+03 at the opening view (2026-11-08, SD), the pairs differ by a mean absolute difference of 19.8 (lit) and 21.3
+(unlit); Studio is greener and less red and blue in both (mean delta lit -14.9, +6.5, -10.4; unlit -14.6, +19.0,
+-11.1), Studio's lighting at 06:00 darkens its green by 14 against its even light. The worst cell is the lake (top
+right): the editor draws its water blue, Studio green. Off-centre looks and rotation 0 line up on cliff.w3m
+(grass edge masks agree at no shift); on map 03, whose ground at the centre is 256 high, the lake edge is about
+25 px off, which is open.
 
 ## Process
 
