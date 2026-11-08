@@ -39,7 +39,7 @@ fn claude_desktop(appdata: &Path, local: &Path) -> PathBuf {
     if let Some(data) = folder_starting(&local.join("Claude-Data"), "claude_") {
         return data;
     }
-    let packaged = folder_starting(&local.join("Packages"), "Claude_").map(|p| p.join(r"LocalCache\Roaming\Claude")).filter(|p| {
+    let packaged = folder_starting(&local.join("Packages"), "Claude_").map(|p| p.join("LocalCache").join("Roaming").join("Claude")).filter(|p| {
         let left = std::fs::read_dir(p).map(|d| d.flatten().any(|f| f.file_name().to_string_lossy().starts_with(".user-data-left")));
         p.is_dir() && !left.unwrap_or(false)
     });
@@ -48,14 +48,15 @@ fn claude_desktop(appdata: &Path, local: &Path) -> PathBuf {
 
 fn clients(appdata: &Path, local: &Path, home: &Path) -> Vec<Client> {
     let claude = claude_desktop(appdata, local);
-    let code = appdata.join(r"Code\User");
+    // Paths join part by part: on Linux a backslash would be part of a file name.
+    let code = appdata.join("Code").join("User");
     let mcp_servers = |id, name, config: PathBuf, installed: PathBuf| Client { id, name, config, installed, key: "mcpServers", typed: false };
     vec![
         mcp_servers("claudeDesktop", "Claude Desktop", claude.join("claude_desktop_config.json"), claude),
         mcp_servers("claudeCode", "Claude Code", home.join(".claude.json"), home.join(".claude")),
         Client { id: "vscode", name: "VS Code", config: code.join("mcp.json"), installed: code, key: "servers", typed: true },
-        mcp_servers("cursor", "Cursor", home.join(r".cursor\mcp.json"), home.join(".cursor")),
-        mcp_servers("windsurf", "Windsurf", home.join(r".codeium\windsurf\mcp_config.json"), home.join(r".codeium\windsurf")),
+        mcp_servers("cursor", "Cursor", home.join(".cursor").join("mcp.json"), home.join(".cursor")),
+        mcp_servers("windsurf", "Windsurf", home.join(".codeium").join("windsurf").join("mcp_config.json"), home.join(".codeium").join("windsurf")),
     ]
 }
 
@@ -65,8 +66,23 @@ fn known_clients() -> Vec<Client> {
     if let Some(base) = std::env::var_os("W3PROJ_TEST_CLIENT_HOME").map(PathBuf::from) {
         return clients(&base.join("roaming"), &base.join("local"), &base.join("home"));
     }
-    let folder = |name: &str| PathBuf::from(std::env::var_os(name).unwrap_or_default());
-    clients(&folder("APPDATA"), &folder("LOCALAPPDATA"), &folder("USERPROFILE"))
+    let (appdata, local, home) = system_folders();
+    clients(&appdata, &local, &home)
+}
+
+/// The folders clients keep their settings in: on Windows %APPDATA%, %LOCALAPPDATA% and the profile; elsewhere
+/// the XDG config folder (~/.config, where VS Code and Claude Desktop keep theirs), ~/.local/share and the home
+/// folder (Claude Code, Cursor, Windsurf). An unset variable gives no folder rather than a relative path.
+fn system_folders() -> (PathBuf, PathBuf, PathBuf) {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if cfg!(windows) {
+        let f = |name: &str| var(name).unwrap_or_default();
+        return (f("APPDATA"), f("LOCALAPPDATA"), f("USERPROFILE"));
+    }
+    let home = var("HOME").unwrap_or_default();
+    let config = var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
+    let data = var("XDG_DATA_HOME").unwrap_or_else(|| home.join(".local").join("share"));
+    (config, data, home)
 }
 
 fn entry(client: &Client, bridge: &str) -> Value {
@@ -314,10 +330,31 @@ mod tests {
         assert_eq!(json_of(&c.config)["a"], 1);
     }
 
+    /// A path below `base`, given with `/`: joined part by part, as the code does, so it means the same on every system.
+    fn at(base: &Path, rel: &str) -> PathBuf {
+        rel.split('/').fold(base.to_path_buf(), |p, part| p.join(part))
+    }
+
+    #[test]
+    fn client_paths_have_no_backslash_in_a_file_name_off_windows() {
+        let home = Home::new();
+        for id in ["claudeDesktop", "claudeCode", "vscode", "cursor", "windsurf"] {
+            let c = home.client(id);
+            for p in [&c.config, &c.installed] {
+                assert!(p.starts_with(&home.0), "{id}: {}", p.display());
+                if !cfg!(windows) {
+                    assert!(p.components().all(|part| !part.as_os_str().to_string_lossy().contains('\\')), "{id}: {}", p.display());
+                }
+            }
+        }
+        assert_eq!(home.client("cursor").config, at(&home.0, "home/.cursor/mcp.json"));
+        assert_eq!(home.client("vscode").config, at(&home.0, "roaming/Code/User/mcp.json"));
+    }
+
     #[test]
     fn the_store_version_of_claude_desktop_is_found() {
         let home = Home::new();
-        let packaged = home.0.join(r"local\Packages\Claude_abc123\LocalCache\Roaming\Claude");
+        let packaged = at(&home.0, "local/Packages/Claude_abc123/LocalCache/Roaming/Claude");
         std::fs::create_dir_all(&packaged).unwrap();
         assert_eq!(home.client("claudeDesktop").config, packaged.join("claude_desktop_config.json"));
     }
@@ -325,11 +362,11 @@ mod tests {
     #[test]
     fn claude_desktop_moved_out_of_its_package() {
         let home = Home::new();
-        let packaged = home.0.join(r"local\Packages\Claude_abc123\LocalCache\Roaming\Claude");
+        let packaged = at(&home.0, "local/Packages/Claude_abc123/LocalCache/Roaming/Claude");
         std::fs::create_dir_all(&packaged).unwrap();
         std::fs::write(packaged.join(".user-data-left.claude_abc123"), "{}").unwrap();
-        assert_eq!(home.client("claudeDesktop").config, home.0.join(r"roaming\Claude\claude_desktop_config.json"), "what it left isn't read");
-        let data = home.0.join(r"local\Claude-Data\claude_abc123");
+        assert_eq!(home.client("claudeDesktop").config, at(&home.0, "roaming/Claude/claude_desktop_config.json"), "what it left isn't read");
+        let data = at(&home.0, "local/Claude-Data/claude_abc123");
         std::fs::create_dir_all(&data).unwrap();
         assert_eq!(home.client("claudeDesktop").config, data.join("claude_desktop_config.json"));
     }

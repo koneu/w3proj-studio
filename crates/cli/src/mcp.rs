@@ -100,7 +100,19 @@ fn studio(line: &str) -> io::Result<String> {
     Ok(reply.trim_end().to_owned())
 }
 
-#[cfg(not(windows))]
+/// The app's Unix socket (w3proj::mcp_pipe_name): one connection per request, as with the pipe.
+#[cfg(unix)]
+fn studio(line: &str) -> io::Result<String> {
+    let stream = std::os::unix::net::UnixStream::connect(w3proj::mcp_pipe_name())?;
+    (&stream).write_all(format!("{line}\n").as_bytes())?;
+    let mut reply = String::new();
+    if io::BufReader::new(&stream).read_line(&mut reply)? == 0 {
+        return Err(io::ErrorKind::UnexpectedEof.into());
+    }
+    Ok(reply.trim_end().to_owned())
+}
+
+#[cfg(not(any(windows, unix)))]
 fn studio(_: &str) -> io::Result<String> {
     Err(io::ErrorKind::Unsupported.into())
 }
