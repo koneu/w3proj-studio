@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn builds_compare_as_numbers_newest_first() {
         let g = |v: &str| FoundGame { path: v.into(), version: v.into() };
-        let mut list = vec![g("2.0.2.22796"), g(""), g("3.0.1.24371"), g("2.0.10.1")];
+        let mut list = [g("2.0.2.22796"), g(""), g("3.0.1.24371"), g("2.0.10.1")];
         list.sort_by(newer_first);
         assert_eq!(list.iter().map(|x| x.version.as_str()).collect::<Vec<_>>(), ["3.0.1.24371", "2.0.10.1", "2.0.2.22796", ""]);
     }

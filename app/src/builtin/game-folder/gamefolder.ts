@@ -21,7 +21,7 @@ export function gameFolderItems(found: FoundGame[]): QuickPickItem<GameChoice>[]
   return [
     ...installs,
     { label: "Choose folder…", detail: "The folder that holds Warcraft III's _retail_ folder and .build.info", value: { kind: "browse" } },
-    { label: "Later", detail: "Until then units, models and textures can't be shown, and new maps can't be made", value: { kind: "later" } },
+    { label: "Later", detail: "Until then units, models and textures can't be shown, and new maps can't be made. Asked again at the next start (setting game.askForFolder turns it off)", value: { kind: "later" } },
   ];
 }
 
@@ -39,6 +39,7 @@ async function opens(w3: W3Api, install: string): Promise<string | null> {
  *  Returns the folder chosen, or null. */
 export async function checkGameFolder(w3: W3Api, force = false): Promise<string | null> {
   const current = w3.settings.get<string>("game.installDir") ?? "";
+  if (!force && w3.settings.get<boolean>("game.askForFolder") === false) return null;
   if (!force && current && (await opens(w3, current)) === null) return null;
   const found = await w3.backend.invoke<FoundGame[]>("game_find").catch(() => [] as FoundGame[]);
   for (;;) {

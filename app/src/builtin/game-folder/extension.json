@@ -7,6 +7,12 @@
   "contributes": {
     "commands": [
       { "id": "w3.game.chooseFolder", "title": "Choose Warcraft III Folder…", "category": "Game Data" }
-    ]
+    ],
+    "configuration": {
+      "title": "Game Folder",
+      "properties": {
+        "game.askForFolder": { "type": "boolean", "default": true, "description": "At start, offer the Warcraft III installs found when game.installDir doesn't open. Off: never asked; \"Game Data: Choose Warcraft III Folder…\" still works." }
+      }
+    }
   }
 }

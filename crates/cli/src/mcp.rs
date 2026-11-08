@@ -100,10 +100,16 @@ fn studio(line: &str) -> io::Result<String> {
     Ok(reply.trim_end().to_owned())
 }
 
-/// The app's Unix socket (w3proj::mcp_pipe_name): one connection per request, as with the pipe.
+/// The app's Unix socket (w3proj::mcp_pipe_name): one connection per request, as with the pipe. Only in a
+/// folder that is this user's alone: a socket in a folder others can write to may be someone else's, who would
+/// then see the requests and answer them.
 #[cfg(unix)]
 fn studio(line: &str) -> io::Result<String> {
-    let stream = std::os::unix::net::UnixStream::connect(w3proj::mcp_pipe_name())?;
+    let path = w3proj::mcp_pipe_name();
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        w3proj::private_dir(dir).map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e))?;
+    }
+    let stream = std::os::unix::net::UnixStream::connect(path)?;
     (&stream).write_all(format!("{line}\n").as_bytes())?;
     let mut reply = String::new();
     if io::BufReader::new(&stream).read_line(&mut reply)? == 0 {

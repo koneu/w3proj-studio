@@ -108,11 +108,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
   };
 
-  /** A program of the game: as set (user or project settings), else the one in game.installDir. */
-  const program = (key: string, file: string) => {
-    const set = w3.settings.inspect(key);
-    return gameProgram(set.project ?? set.user, w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III", file);
-  };
+  /** A program of the game: as set, else the one in game.installDir. Read through `get`, which takes these from the
+   *  user's settings only: a project (shared through git or a zip) must never choose a program to run. */
+  const program = (key: string, file: string) =>
+    gameProgram(w3.settings.get<string>(key), w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III", file);
 
   const editBuild = () => {
     const p = w3.workspace.project()!;

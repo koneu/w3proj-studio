@@ -23,7 +23,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
-import { chosenGamePath } from "../../tests/gamepath.mjs";
+import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 
 const LINUX = process.platform === "linux";
 
@@ -2344,12 +2344,13 @@ async function run() {
   // machine is. The checks count the checkpoints that commands make.
   // The game's folder goes to the app as well as to the CLI: without it the app looks in its default
   // (C:\Program Files (x86)\Warcraft III), which on Linux, or on another drive, isn't there.
+  // Without W3PROJ_GAME or .game-path, the folder the gate uses too (above the checkout, the Windows layout).
   // The game's programs follow game.installDir unless set: here they're set to files that aren't there, so no step
-  // can start the game or the World Editor.
+  // can start the game or the World Editor. No game-folder question at start: it would sit on top of the checks.
   writeFileSync(join(configDir, "settings.json"), JSON.stringify({
     "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true, "checkpoints.enabled": false,
     "game.path": join(work, "no-game", "Warcraft III.exe"), "worldEditor.path": join(work, "no-game", "World Editor.exe"),
-    ...(game ? { "game.installDir": game } : {}),
+    "game.installDir": game ?? gamePath(repo), "game.askForFolder": false,
   }));
   const triggerData = join(repo, "tests", "fixtures", "TriggerData.txt");
   // Windows: the app's WebView2 over the DevTools Protocol. Linux: WebKitGTK over WebDriver (webdriver.mjs),
