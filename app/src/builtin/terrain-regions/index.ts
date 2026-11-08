@@ -104,6 +104,10 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Kept as map/war3map.w3r.json (else the raw file, through the backend). */
   let asJson = true, unsaved = false, active = false;
   let selected: Region | null = null;
+  /** Further regions selected with Shift or Ctrl (by index): colour, weather, sound, moving and Delete work on all. */
+  let extra = new Set<number>();
+  /** Every selected region, the one clicked last first. */
+  const selection = (): Region[] => selected ? [selected, ...doc.regions.filter((r) => r !== selected && extra.has(r.index))] : [];
 
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
@@ -156,18 +160,30 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   };
 
   // ---- undo --------------------------------------------------------------------------
-  const commit = (before: Region[], after: Region[], select: Region | null) => {
-    const set = (v: Region[], sel: Region | null) => { doc.regions = v; selected = sel; unsaved = true; renderPanel(); render(); };
+  const commit = (before: Region[], after: Region[], select: Region | null, others: Iterable<number> = []) => {
+    const keep = new Set(others);
+    const set = (v: Region[], sel: Region | null) => {
+      doc.regions = v;
+      selected = sel;
+      extra = new Set(sel ? v.filter((r) => r !== sel && keep.has(r.index)).map((r) => r.index) : []);
+      unsaved = true;
+      renderPanel();
+      render();
+    };
     set(after, select);
     const selName = select?.index;
     const pick = (v: Region[]) => v.find((r) => r.index === selName) ?? null;
     ed.pushEdit({ undo: () => set(before, pick(before)), redo: () => set(after, pick(after)), terrain: false, objects: false });
   };
   /** Changes one region (by copy) as an undo step. */
-  const update = (r: Region, change: Partial<Region>) => {
+  const update = (r: Region, change: Partial<Region>) => updateAll([r], () => change);
+  /** Changes several regions (by copy) as one undo step; the selection stays on them. */
+  const updateAll = (list: Region[], change: (r: Region) => Partial<Region>) => {
     const before = doc.regions;
-    const copy = { ...structuredClone(r), ...change };
-    commit(before, before.map((x) => (x === r ? copy : x)), copy);
+    const copies = new Map(list.map((r) => [r, { ...structuredClone(r), ...change(r) }]));
+    const after = before.map((x) => copies.get(x) ?? x);
+    const primary = selected && copies.get(selected) ? copies.get(selected)! : copies.get(list[0]) ?? null;
+    commit(before, after, primary, list.map((r) => r.index));
   };
 
   // ---- pointer -----------------------------------------------------------------------
@@ -180,7 +196,8 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     const m = Math.max(GRID, Math.min(96, (r.right - r.left) / 4, (r.top - r.bottom) / 4));
     return { l: x - r.left < m, r: r.right - x < m, b: y - r.bottom < m, t: r.top - y < m };
   };
-  let drag: { kind: "new" | "move" | "resize"; start: [number, number]; orig: Region; grab: ReturnType<typeof edges>; moved: boolean } | null = null;
+  /** `origs`: every region a move takes along, as it was. */
+  let drag: { kind: "new" | "move" | "resize"; start: [number, number]; orig: Region; grab: ReturnType<typeof edges>; moved: boolean; origs: Map<Region, Region> } | null = null;
   const nextIndex = () => 1 + Math.max(-1, ...doc.regions.map((r) => r.index));
 
   // ---- toolbar -----------------------------------------------------------------------
@@ -196,27 +213,53 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     jump.replaceChildren(h("option", { value: "" }, "Go to region…"),
       ...[...doc.regions].sort((a, b) => a.name.localeCompare(b.name)).map((r) => h("option", { value: String(r.index) }, r.name)));
     const r = selected;
-    if (!r) { panel.replaceChildren(h("span.muted", {}, "Drag on the map to draw a region · click one to select it · drag inside to move, at an edge to resize · Del deletes")); return; }
+    if (!r) { panel.replaceChildren(h("span.muted", {}, "Drag on the map to draw a region · click one to select it · Shift+click adds one · drag inside to move, at an edge to resize · Del deletes")); return; }
+    const all = selection(), many = all.length > 1;
+    // Colour, weather and sound: what the first shows, set on every selected region (one undo step).
+    const same = <T>(get: (x: Region) => T) => all.every((x) => get(x) === get(r));
     const hex = `#${[r.color.red, r.color.green, r.color.blue].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+    const color = h("input", { type: "color", value: hex, title: many ? `Colour in the editor, for all ${all.length}` : "Colour in the editor", onchange: () => {
+      const v = color.value;
+      updateAll(all, (x) => ({ color: { ...x.color, red: parseInt(v.slice(1, 3), 16), green: parseInt(v.slice(3, 5), 16), blue: parseInt(v.slice(5, 7), 16) } }));
+    } });
+    const mixed = h("option", { value: "", disabled: true, selected: true }, "(different weather)");
+    const weather = h("select", { title: many ? `Weather effect, for all ${all.length}` : "Weather effect", onchange: () => { if (weather.value) updateAll(all, () => ({ weather: weather.value })); } },
+      ...(same((x) => x.weather) ? [] : [mixed]), h("option", { value: NO_WEATHER, selected: same((x) => x.weather) && r.weather === NO_WEATHER }, "No weather"));
+    void weatherList(w3).then((list) => weather.append(...list.map(([id, label]) => h("option", { value: id, selected: same((x) => x.weather) && id === r.weather }, `${label} (${id})`))));
+    const sound = h("input.terrain-region-sound", { type: "text", value: same((x) => x.sound) ? r.sound : "", placeholder: same((x) => x.sound) ? "ambient sound (variable)" : "(different sounds)", list: soundList.id,
+      title: "Ambient sound: a sound variable name (from the map's sounds), empty for none", onchange: () => updateAll(all, () => ({ sound: sound.value.trim() })) });
+    const remove = h("button", { title: many ? `Delete these ${all.length} regions (Del)` : "Delete this region (Del)", onclick: () => deleteSelected() }, "Delete");
+    if (many) {
+      panel.replaceChildren(h("span.terrain-region-count", {}, `${all.length} regions`), color, weather, sound, remove);
+      return;
+    }
     const name = h("input.terrain-region-name", { type: "text", value: r.name, title: "Name (triggers use gg_rct_<name>)", onchange: () => {
       const v = name.value.trim();
       if (v && v !== r.name) update(r, { name: v });
     } });
-    const color = h("input", { type: "color", value: hex, title: "Colour in the editor", onchange: () => {
-      const v = color.value;
-      update(r, { color: { ...r.color, red: parseInt(v.slice(1, 3), 16), green: parseInt(v.slice(3, 5), 16), blue: parseInt(v.slice(5, 7), 16) } });
-    } });
-    const weather = h("select", { title: "Weather effect", onchange: () => update(r, { weather: weather.value }) }, h("option", { value: NO_WEATHER }, "No weather"));
-    void weatherList(w3).then((list) => weather.append(...list.map(([id, label]) => h("option", { value: id, selected: id === r.weather }, `${label} (${id})`))));
-    const sound = h("input.terrain-region-sound", { type: "text", value: r.sound, placeholder: "ambient sound (variable)", list: soundList.id, title: "Ambient sound: a sound variable name (from the map's sounds), empty for none", onchange: () => update(r, { sound: sound.value.trim() }) });
-    const size = `${Math.round(r.right - r.left)} × ${Math.round(r.top - r.bottom)} at (${Math.round(r.left)}, ${Math.round(r.bottom)})`;
-    panel.replaceChildren(name, color, weather, sound, h("span.muted", {}, size),
-      h("button", { title: "Delete this region (Del)", onclick: () => deleteSelected() }, "Delete"));
+    // The bounds as numbers (world units): a value that leaves the region with no size is refused and put back.
+    const bound = (key: "left" | "right" | "bottom" | "top", label: string) => {
+      const input = h(`input.terrain-region-bound.terrain-region-${key}`, { type: "number", step: String(GRID), value: String(r[key]), title: `${label} edge (world units)` });
+      input.addEventListener("change", () => {
+        const v = Number(input.value);
+        const box = { left: r.left, right: r.right, bottom: r.bottom, top: r.top, [key]: v };
+        if (input.value.trim() === "" || !Number.isFinite(v) || box.left >= box.right || box.bottom >= box.top) {
+          input.classList.add("invalid");
+          input.title = `${label}: left must be below right and bottom below top`;
+          return;
+        }
+        if (v !== r[key]) update(r, { [key]: v });
+      });
+      return h("label.terrain-region-boundrow", {}, h("span.muted", {}, `${label} `), input);
+    };
+    panel.replaceChildren(name, color, weather, sound,
+      bound("left", "Left"), bound("right", "Right"), bound("bottom", "Bottom"), bound("top", "Top"),
+      h("span.muted", {}, `${Math.round(r.right - r.left)} × ${Math.round(r.top - r.bottom)}`), remove);
   };
   const deleteSelected = () => {
-    const r = selected;
-    if (!r) return;
-    commit(doc.regions, doc.regions.filter((x) => x !== r), null);
+    const gone = new Set(selection());
+    if (!gone.size) return;
+    commit(doc.regions, doc.regions.filter((x) => !gone.has(x)), null);
   };
   const toolbar = h("div.terrain-group-tools", {}, jump, count, hover, panel, soundList);
 
@@ -228,18 +271,41 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!ed.editable || !p.ground) return false;
       const [x, y] = p.ground;
       const r = hit(x, y);
+      const adding = p.event.shiftKey || p.event.ctrlKey || p.event.metaKey;
+      if (r && adding) {
+        // Shift/Ctrl+click: adds the region to the selection, or takes it out.
+        const all = selection();
+        if (all.includes(r)) {
+          const rest = all.filter((x) => x !== r);
+          selected = rest[0] ?? null;
+          extra = new Set(rest.slice(1).map((x) => x.index));
+        } else {
+          if (selected) extra.add(selected.index);
+          selected = r;
+        }
+        renderPanel();
+        render();
+        return true;
+      }
       if (r) {
+        const together = selection().includes(r) && selection().length > 1;
+        if (!together) extra = new Set();
         selected = r;
         const grab = edges(r, x, y);
-        drag = { kind: grab.l || grab.r || grab.b || grab.t ? "resize" : "move", start: [x, y], orig: structuredClone(r), grab, moved: false };
+        // Inside one of several selected regions, a drag moves them all.
+        const kind = !together && (grab.l || grab.r || grab.b || grab.t) ? "resize" : "move";
+        drag = { kind, start: [x, y], orig: structuredClone(r), grab, moved: false, origs: new Map(selection().map((s) => [s, structuredClone(s)])) };
+      } else if (adding) {
+        return false;
       } else {
         selected = null;
+        extra = new Set();
         const [c0, c1, c2] = PALETTE[doc.regions.length % PALETTE.length];
         draft = {
           left: snap(x), right: snap(x), bottom: snap(y), top: snap(y), name: "", index: nextIndex(), weather: NO_WEATHER, sound: "",
           color: { red: c0, green: c1, blue: c2, alpha: 255 }, ...(doc.version >= 7 ? { trailer: [0, 0] } : {}),
         };
-        drag = { kind: "new", start: [x, y], orig: draft, grab: { l: false, r: false, b: false, t: false }, moved: false };
+        drag = { kind: "new", start: [x, y], orig: draft, grab: { l: false, r: false, b: false, t: false }, moved: false, origs: new Map() };
       }
       renderPanel();
       render();
@@ -262,7 +328,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         Object.assign(draft!, { left: snap(Math.min(sx, x)), right: snap(Math.max(sx, x)), bottom: snap(Math.min(sy, y)), top: snap(Math.max(sy, y)) });
       } else if (drag.kind === "move") {
         const dx = snap(x - drag.start[0]), dy = snap(y - drag.start[1]);
-        Object.assign(selected!, { left: o.left + dx, right: o.right + dx, bottom: o.bottom + dy, top: o.top + dy });
+        for (const [r, b] of drag.origs) Object.assign(r, { left: b.left + dx, right: b.right + dx, bottom: b.bottom + dy, top: b.top + dy });
       } else {
         const g = drag.grab, r = selected!;
         if (g.l) r.left = Math.min(snap(x), o.right - GRID);
@@ -286,15 +352,17 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         return;
       }
       if (!d.moved || !selected) { renderPanel(); render(); return; }
-      // The live edit becomes one undo step: restore, then apply as an update.
-      const now = { left: selected.left, right: selected.right, bottom: selected.bottom, top: selected.top };
-      Object.assign(selected, { left: d.orig.left, right: d.orig.right, bottom: d.orig.bottom, top: d.orig.top });
-      update(selected, now);
+      // The live edit becomes one undo step: restore, then apply as an update (of every region moved along).
+      const box = (r: Region) => ({ left: r.left, right: r.right, bottom: r.bottom, top: r.top });
+      const moved = d.kind === "move" ? [...d.origs.keys()] : [selected];
+      const now = new Map(moved.map((r) => [r, box(r)]));
+      for (const r of moved) Object.assign(r, box(d.kind === "move" ? d.origs.get(r)! : d.orig));
+      updateAll(moved, (r) => now.get(r)!);
     },
     pointerLeave() { hover.textContent = ""; ed.host.style.cursor = ""; },
     keyDown(e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selected) { deleteSelected(); return true; }
-      if (e.key === "Escape" && selected) { selected = null; renderPanel(); render(); return true; }
+      if (e.key === "Escape" && selected) { selected = null; extra = new Set(); renderPanel(); render(); return true; }
       return false;
     },
     async save() {
@@ -314,6 +382,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       await read();
       unsaved = false;
       selected = null;
+      extra = new Set();
       if (active) { renderPanel(); render(); }
       return true;
     },
