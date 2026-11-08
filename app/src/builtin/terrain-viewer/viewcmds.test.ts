@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, cameraColors, cameraEye, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Angle, type Box } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Angle, type Box } from "./viewcmds";
 
 /** The oracle: a real perspective projection of a point, written out here from the camera's position. */
 function project(p: number[], target: number[], distance: number, a: Angle, aspect: number): { x: number; y: number } | null {
@@ -78,18 +78,6 @@ test("navalColors: water shows, deep stronger than shallow, land and blocked cel
   assert.notDeepEqual(px(1).slice(0, 3), px(2).slice(0, 3));
 });
 
-test("cameraColors: the target and the eye are drawn where the camera is, nothing elsewhere", () => {
-  const cam = { targetX: 640, targetY: 640, rotation: 0, distance: 640, angleOfAttack: 0, fieldOfView: 60 };
-  assert.deepEqual(cameraEye(cam), [0, 640]);
-  const W = 40, H = 40, rgba = cameraColors([cam], W, H, 0, 0);
-  const at = (x: number, y: number) => rgba[((Math.floor(y / 32)) * W + Math.floor(x / 32)) * 4 + 3];
-  assert.equal(at(640, 640), 255);
-  assert.equal(at(16, 656), 255);
-  assert.ok(at(320, 656) > 0, "the line between them");
-  assert.equal(at(1200, 100), 0);
-  assert.equal(cameraColors([{ ...cam, fieldOfView: NaN }], W, H, 0, 0).every((v) => v === 0), true, "a camera with a broken value is left out whole");
-});
-
 test("composeLayers: the later layer lies over the earlier; none gives null; one stays as it is", () => {
   const a = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 128]), b = new Uint8Array([0, 255, 0, 255, 0, 255, 0, 0]);
   assert.equal(composeLayers([null, null]), null);
@@ -98,4 +86,14 @@ test("composeLayers: the later layer lies over the earlier; none gives null; one
   const half = new Uint8Array([0, 255, 0, 128, 0, 0, 0, 0]);
   const mix = composeLayers([a, half])!;
   assert.ok(mix[3] === 255 && mix[0] > 100 && mix[0] < 140 && mix[1] > 100 && mix[1] < 140);
+});
+
+test("layerCameras: the Camera Editor's cameras, unsaved edits and all, before the saved file's", async () => {
+  const saved = [{ name: "saved", targetX: 0, targetY: 0, rotation: 90, distance: 1650, angleOfAttack: 304, fieldOfView: 70 }];
+  const edited = [{ ...saved[0], name: "edited", targetX: 512 }];
+  let reads = 0;
+  const readSaved = async () => { reads++; return saved; };
+  assert.deepEqual(await layerCameras([{}, { cameraObjects: async () => edited }], readSaved), edited);
+  assert.equal(reads, 0, "the file isn't read while a group holds the cameras");
+  assert.deepEqual(await layerCameras([{}], readSaved), saved, "without the Camera Editor, the saved file");
 });

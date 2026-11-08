@@ -14,7 +14,8 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./t
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, scaledNudge, waterLimitHits, type Bounds } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Box, type GridSize } from "./viewcmds";
+import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
 import { TEAM_COLORS, type Vec3 } from "../../lib/model/renderer";
@@ -58,7 +59,8 @@ import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
-import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
+import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
+import { pictureTarget } from "./picturetarget";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
@@ -270,8 +272,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const VIEW_LOST = "The terrain editor's 3D view stopped (the graphics device was reset): save, then reopen the editor. Nothing is edited there until then.";
   const refuseLostView = (path: string | null | undefined) => { if (path && lostViews.has(path)) throw new Error(VIEW_LOST); };
   /** The editor of the project's own terrain, which is the only one that writes into the project. */
-  const ownEditor = () => {
-    const p = projectTerrain(w3), found = p ? openedBy.get(p) : undefined;
+  const ownEditor = () => editorOf(projectTerrain(w3));
+  /** The open editor of one of the project's terrain files. */
+  const editorOf = (path: string | null) => {
+    const found = path ? openedBy.get(path) : undefined;
     return found && found.root === w3.workspace.project()?.root ? found : null;
   };
   /** The view when a terrain editor last closed: an edit from elsewhere reopens it. */
@@ -279,15 +283,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
   /** The editor of the project's terrain, opened if need be. For an edit (the default) it is refused while its 3D view is lost. */
-  const liveEditor = async (use: "edit" | "read" = "edit") => {
-    await w3.commands.execute("w3.terrain.open");
+  /** With `path`, that terrain file's editor (one of the project's, see pictureTarget) instead. */
+  const liveEditor = async (use: "edit" | "read" = "edit", path?: string) => {
+    if (path) await w3.editors.open(path, "w3.terrainViewer");
+    else await w3.commands.execute("w3.terrain.open");
+    const find = () => (path ? editorOf(path) : ownEditor());
     for (let n = 0; n < 200; n++) {
-      const editor = ownEditor();
+      const editor = find();
       if (editor) {
         await editor.ready();
         // Taking a change in place can end in reopening: then it's the next one's turn.
-        if (ownEditor() === editor) {
-          if (use === "edit") refuseLostView(projectTerrain(w3));
+        if (find() === editor) {
+          if (use === "edit") refuseLostView(path ?? projectTerrain(w3));
           return editor;
         }
       } else await new Promise((done) => setTimeout(done, 100));
@@ -510,7 +517,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
     w3.mcp.registerTool("terrain_screenshot", async (args) => {
       const hide = hiddenInPicture(args.hide);
-      const editor = await liveEditor();
+      // A project can have two terrain files: the picture is of the one asked for, else the one in front, never a hidden tab.
+      const project = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
+      const path = pictureTarget(args.file, w3.editors.activePath(), TERRAIN_PATHS.filter((p) => project.has(p)), (p) => !!editorOf(p));
+      const editor = await liveEditor("edit", path ?? undefined);
       const area = await readArea(w3, args);
       const size = typeof args.maxSize === "number" && args.maxSize > 0 ? args.maxSize : 1280;
       const angle = args.view === "angled" || args.view === "low" ? args.view : "top";
@@ -2756,7 +2766,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
           const ray = renderer.ray(e.clientX - rect.left, e.clientY - rect.top);
-          const inst = renderer.pickObject(ray, pickRadius);
+          // Objects shown only as markers are clicked through their stand-ins, as a box selects them.
+          const inst = renderer.pickObject(ray, pickRadius, strays);
           // Shift+click adds or removes an object, as in the World Editor; so does Ctrl+click with nothing
           // selected yet, when it has no point to face.
           if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -3327,11 +3338,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             show();
             const late: Promise<void>[] = [];
             if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
-            if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (viewState.cameras) late.push(camerasNow().then((cams) => { parts[2] = cameraColors(cams, W, H, terrain.offsetX, terrain.offsetY); show(); }));
             return late;
           }, latest, (busy) => { layerBusy.hidden = !busy; });
           if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
         };
+        /** The cameras of the Camera Objects layer: the Camera Editor's, unsaved edits included, else the saved file. */
+        const camerasNow = () => layerCameras(groupInsts.values(),
+          async () => (await readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json"))?.cameras ?? []);
         const refreshLayersSoon = () => {
           if (!viewState.naval && !viewState.heights && !viewState.cameras) return;
           clearTimeout(layerTimer);
@@ -3501,7 +3515,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
-            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius) : null;
+            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius, strays) : null;
             // Dragging a selected object moves the whole selection.
             const entries = selectedEntries();
             const anchor = inst?.pick && entries.includes(inst.pick.placed) ? groundAt(e) : null;
@@ -3815,6 +3829,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           // A group that isn't open yet reads the file when it is.
           for (const g of groupInsts.values()) await g.reloadFile?.(path);
+          // The Camera Objects layer draws what the Camera Editor now holds.
+          refreshLayersSoon();
           return true;
         };
         let changes: Promise<boolean> = Promise.resolve(true);

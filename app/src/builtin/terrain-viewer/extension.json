@@ -40,6 +40,7 @@
         "readOnly": true,
         "inputSchema": { "type": "object", "properties": {
           "maxSize": { "type": "integer", "description": "Longest side in pixels (default 1280)." },
+          "file": { "type": "string", "description": "Which terrain file, when the project has two (map/war3map.w3e and map/war3map.w3e.txt). Default: the terrain editor in front." },
           "view": { "type": "string", "enum": ["top", "angled", "low"], "description": "For an area: from above (default), at the editor's angle, or low, which shows hills against the sky." },
           "hide": { "type": "array", "items": { "type": "string", "enum": ["doodads", "units", "cliffs", "water"] }, "description": "Left out of this picture only, to see the ground under a forest. doodads includes trees." },
           "overlay": { "type": "string", "enum": ["pathing", "heights"], "description": "pathing: red where units can't walk, orange where something stands for good, purple for destructables such as trees, which can be destroyed, blue for water. heights: blue (low) to red (high), with a line every 32 units." },

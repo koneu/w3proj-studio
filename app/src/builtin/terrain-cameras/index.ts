@@ -8,13 +8,17 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
+import { CAMERA_CELL, cameraColors, cameraEye, type CameraLook } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3c";
 /** Overlay cell size (world units). */
-const CELL = 32;
+const CELL = CAMERA_CELL;
 const RAD = Math.PI / 180;
+/** The cameras in the editor's overlay: blue, the selected one yellow and bigger. */
+const EDITOR_LOOK: CameraLook = { fov: [110, 200, 255, 110], line: [110, 200, 255, 220], target: [110, 200, 255, 220], eye: [110, 200, 255, 220], targetRadius: 2, eyeRadius: 1 };
+const SELECTED_LOOK: CameraLook = { fov: [255, 230, 90, 150], line: [255, 230, 90, 255], target: [255, 230, 90, 255], eye: [255, 255, 255, 255], targetRadius: 3, eyeRadius: 2 };
 
 interface Camera {
   targetX: number;
@@ -83,10 +87,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   // ---- geometry ----------------------------------------------------------------------
   const ground = (x: number, y: number) => heightAt(t, x, y);
   /** Where the camera stands, over the ground plane (x, y). */
-  const eyeOf = (c: Camera): [number, number] => {
-    const d = c.distance * Math.abs(Math.cos(c.angleOfAttack * RAD));
-    return [c.targetX - d * Math.cos(c.rotation * RAD), c.targetY - d * Math.sin(c.rotation * RAD)];
-  };
+  const eyeOf = cameraEye;
   /** The editor view that shows what the camera sees (roll left out). */
   const toView = (c: Camera): TerrainView => {
     // The game camera looks along rotation/angle of attack; the view's yaw and
@@ -114,34 +115,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (!active) return;
     count.textContent = `${doc.cameras.length} cameras`;
     if (previewing) { ed.setGroundOverlay(null); ed.setLabels(null); return; }
-    const rgba = new Uint8Array(W * H * 4);
-    const cell = (x: number, y: number) => [Math.floor((x - t.offsetX) / CELL), Math.floor((y - t.offsetY) / CELL)];
-    const dot = (x: number, y: number, r: number, c: number[]) => {
-      const [cx, cy] = cell(x, y);
-      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) {
-        const px = cx + i, py = cy + j;
-        if (i * i + j * j <= r * r + r && px >= 0 && py >= 0 && px < W && py < H) rgba.set(c, (py * W + px) * 4);
-      }
-    };
-    const line = (x0: number, y0: number, x1: number, y1: number, c: number[]) => {
-      const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (CELL / 2));
-      for (let k = 0; k <= n; k++) dot(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n, 0, c);
-    };
-    for (const c of [...doc.cameras].sort((a, b) => Number(a === selected) - Number(b === selected))) {
-      const sel = c === selected;
-      const col = sel ? [255, 230, 90, 255] : [110, 200, 255, 220];
-      const [ex, ey] = eyeOf(c);
-      // Field of view: two edges from the eye, as long as the eye-to-target line.
-      const len = Math.hypot(c.targetX - ex, c.targetY - ey);
-      const half = Math.min(80, Math.max(1, c.fieldOfView / 2)) * RAD;
-      for (const s of [-1, 1]) {
-        const a = c.rotation * RAD + s * half;
-        line(ex, ey, ex + (len / Math.cos(half)) * Math.cos(a), ey + (len / Math.cos(half)) * Math.sin(a), sel ? [255, 230, 90, 150] : [110, 200, 255, 110]);
-      }
-      line(ex, ey, c.targetX, c.targetY, col);
-      dot(c.targetX, c.targetY, sel ? 3 : 2, col);
-      dot(ex, ey, sel ? 2 : 1, sel ? [255, 255, 255, 255] : col);
-    }
+    // The selected camera last, so it lies over the others.
+    const order = [...doc.cameras].sort((a, b) => Number(a === selected) - Number(b === selected));
+    const rgba = cameraColors(order, W, H, t.offsetX, t.offsetY, (c) => (c === selected ? SELECTED_LOOK : EDITOR_LOOK));
     ed.setGroundOverlay(rgba, W, H);
     ed.setLabels(doc.cameras.map((c) => ({ x: c.targetX, y: c.targetY, text: c.name })));
   };
@@ -279,6 +255,8 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       update(selected, now);
     },
     pointerLeave() { hover.textContent = ""; ed.host.style.cursor = ""; },
+    // What the Camera Objects layer draws: the cameras as edited here, saved or not.
+    async cameraObjects() { await load; return doc.cameras; },
     keyDown(e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selected) { deleteSelected(); return true; }
       if (e.key === "Escape" && selected) { selected = null; renderPanel(); render(); return true; }

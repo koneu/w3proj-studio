@@ -1,8 +1,19 @@
 // What the terrain viewer's View commands work out, with no editor state: where the camera goes to
-// show a selection or the whole map, which grid is drawn, and the picture of the toggled layers.
+// show a selection or the whole map, which grid is drawn, and the picture of the toggled layers
+// (the camera objects' is lib/terrain/cameras).
 // The viewer passes what it read; the tests pass made-up maps.
 
 import { NO_WATER } from "../../lib/terrain/pathing";
+import type { CameraObject } from "../../lib/terrain/cameras";
+import type { TerrainToolGroupInstance } from "../../extensions/services";
+
+/** The camera objects the Camera Objects layer draws: those of a tool group that holds them (the
+ *  Camera Editor, with its unsaved edits), else the saved file's. */
+export async function layerCameras(groups: Iterable<Pick<TerrainToolGroupInstance, "cameraObjects">>,
+  saved: () => Promise<readonly CameraObject[]>): Promise<readonly CameraObject[]> {
+  for (const g of groups) if (g.cameraObjects) return g.cameraObjects();
+  return saved();
+}
 
 export interface Box { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number }
 /** The camera's direction: `yaw` and `pitch` point from the target to the eye, `fov` is vertical. */
@@ -61,45 +72,6 @@ export function navalColors(cells: ArrayLike<number>): Uint8Array {
     const c = cells[i];
     if (c & NO_WATER) continue;
     rgba.set(c & 0x02 ? [20, 70, 255, 200] : [90, 220, 255, 150], i * 4);
-  }
-  return rgba;
-}
-
-export interface CameraObject { name?: string; targetX: number; targetY: number; rotation: number; distance: number; angleOfAttack: number; fieldOfView: number }
-
-const RAD = Math.PI / 180;
-/** Where a camera object's eye is over the ground (x, y): `distance` back from the target along its rotation. */
-export const cameraEye = (c: CameraObject): [number, number] => {
-  const d = c.distance * Math.abs(Math.cos(c.angleOfAttack * RAD));
-  return [c.targetX - d * Math.cos(c.rotation * RAD), c.targetY - d * Math.sin(c.rotation * RAD)];
-};
-
-/** The camera objects drawn on the ground, one texel per pathing cell: target, eye, the line between and the field of view. */
-export function cameraColors(cameras: readonly CameraObject[], width: number, height: number, offsetX: number, offsetY: number): Uint8Array {
-  const rgba = new Uint8Array(width * height * 4);
-  const dot = (x: number, y: number, r: number, c: number[]) => {
-    const cx = Math.floor((x - offsetX) / 32), cy = Math.floor((y - offsetY) / 32);
-    for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) {
-      const px = cx + i, py = cy + j;
-      if (i * i + j * j <= r * r + r && px >= 0 && py >= 0 && px < width && py < height) rgba.set(c, (py * width + px) * 4);
-    }
-  };
-  const line = (x0: number, y0: number, x1: number, y1: number, c: number[]) => {
-    const n = Math.min(4096, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 16));
-    for (let k = 0; k <= n; k++) dot(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n, 0, c);
-  };
-  for (const c of cameras) {
-    if (![c.targetX, c.targetY, c.rotation, c.distance, c.angleOfAttack, c.fieldOfView].every(Number.isFinite)) continue;
-    const [ex, ey] = cameraEye(c);
-    const len = Math.hypot(c.targetX - ex, c.targetY - ey);
-    const half = Math.min(80, Math.max(1, c.fieldOfView / 2)) * RAD;
-    for (const s of [-1, 1]) {
-      const a = c.rotation * RAD + s * half;
-      line(ex, ey, ex + (len / Math.cos(half)) * Math.cos(a), ey + (len / Math.cos(half)) * Math.sin(a), [255, 150, 60, 130]);
-    }
-    line(ex, ey, c.targetX, c.targetY, [255, 190, 60, 230]);
-    dot(c.targetX, c.targetY, 2, [255, 190, 60, 255]);
-    dot(ex, ey, 1, [255, 255, 255, 255]);
   }
   return rgba;
 }
