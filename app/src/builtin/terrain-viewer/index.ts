@@ -1821,7 +1821,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const baseOf = (id: string) => bases.get(id);
           const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType)),
-            loader.load("units", startPreviews(units, startRaces), skins, team)]);
+            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
           renderer.setGroup("doodads", d.batches);
