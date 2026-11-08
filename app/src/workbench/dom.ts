@@ -29,6 +29,15 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
+/** Moves the keys to `el` from a click or change handler of a button, checkbox or select: now, and once more
+ *  after the event. WebKitGTK (Linux) focuses the clicked control after its handlers ran, which would take the
+ *  keys back; WebView2 (Windows) doesn't, and there the second call changes nothing. */
+export function focusAfterClick(el: { focus(options?: FocusOptions): void; readonly isConnected: boolean }): void {
+  const focus = () => { if (el.isConnected) el.focus({ preventScroll: true }); };
+  focus();
+  setTimeout(focus);
+}
+
 export function disposable(fn: () => void): Disposable {
   let done = false;
   return { dispose: () => { if (!done) { done = true; fn(); } } };

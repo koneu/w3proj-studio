@@ -2,7 +2,7 @@
 // field filters on any field ("gold>100", "hp>=500", "ubdg=1"), shown as an
 // overlay inside the object editor.
 
-import { h } from "../../workbench/dom";
+import { focusAfterClick, h } from "../../workbench/dom";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { compare, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, resolveField, type FieldFilter } from "./filters";
 
@@ -141,8 +141,8 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
     const builder = h("div.picker-builder", { hidden: true },
       fieldInput, fieldList, opSelect, valueInput,
       h("button.primary-inline", { onclick: addFilter }, "Add"),
-      h("button", { onclick: () => { builder.hidden = true; search.focus(); } }, "Cancel"));
-    const addButton = h("button.chip", { title: "Filter by any field's value", onclick: () => { builder.hidden = !builder.hidden; if (!builder.hidden) fieldInput.focus(); } }, "+ Field filter");
+      h("button", { onclick: () => { builder.hidden = true; focusAfterClick(search); } }, "Cancel"));
+    const addButton = h("button.chip", { title: "Filter by any field's value", onclick: () => { builder.hidden = !builder.hidden; if (!builder.hidden) focusAfterClick(fieldInput); } }, "+ Field filter");
 
     const renderFilterChips = () => {
       filterChips.replaceChildren(
