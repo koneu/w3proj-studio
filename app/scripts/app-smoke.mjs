@@ -2055,21 +2055,49 @@ async function moduleFunctions(page, found) {
     await until("the minimap", () => existsSync(join(b, "map", "war3mapMap.blp")), 20000).catch(() => fail("no war3mapMap.blp to export"));
     const out = join(dir, "minimap-out.png");
     await answer({ save: out });
-    const err = await run("w3.terrain.exportMinimap");
+    /** The PNG's size and its pixels' colours (one IDAT chunk, as lib/image/png writes it). */
+    const picture = (file) => {
+      const png = readFileSync(file);
+      if (png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") return null;
+      const size = png.readUInt32BE(16), raw = inflateSync(png.subarray(41, png.length - 12));
+      return { size, height: png.readUInt32BE(20), at: (x, y) => raw.readUIntBE(y * (1 + size * 4) + 1 + x * 4, 3), raw };
+    };
+    // The dialog, by its controls: 512 pixels, the pathing map too.
+    await page.evaluate(`(() => { window.__export = w3.commands.execute("w3.terrain.exportMinimap").then(() => null, (e) => String(e)); return null; })()`);
+    await until("the Export Minimap dialog", () => page.evaluate(`!!document.querySelector(".minimap-export-dialog")`), 20000).catch(() => fail("Export Minimap shows no dialog"));
+    await page.evaluate(`(() => { const d = document.querySelector(".minimap-export-dialog"); if (!d) return;
+      const s = d.querySelector(".minimap-size"); s.value = "512"; s.dispatchEvent(new Event("change"));
+      d.querySelector("[data-option=pathing]").checked = true; d.querySelector(".newmap-buttons button.primary").click(); })()`);
+    const err = await page.evaluate(`window.__export`);
     if (err) fail(`Export Minimap: ${err}`);
     else if (!existsSync(out)) fail("Export Minimap wrote no file");
     else {
-      const png = readFileSync(out);
-      if (png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") fail("the minimap file isn't a PNG");
-      else if (png.readUInt32BE(16) !== 256 || png.readUInt32BE(20) !== 256) fail(`the minimap is ${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`);
+      const p = picture(out);
+      if (!p) fail("the minimap file isn't a PNG");
+      else if (p.size !== 512 || p.height !== 512) fail(`the minimap is ${p.size}x${p.height}, not the chosen 512`);
       else {
-        // The pixels are the minimap's: not one flat colour.
-        const raw = inflateSync(png.subarray(41, png.length - 12));
+        // The pixels are the map's: not one flat colour.
         const colours = new Set();
-        for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x += 4) colours.add(raw.readUIntBE(y * 1025 + 1 + x * 4, 3));
+        for (let y = 0; y < 512; y += 2) for (let x = 0; x < 512; x += 8) colours.add(p.at(x, y));
         if (colours.size < 4) fail(`the exported minimap has ${colours.size} colours`);
       }
     }
+    // From the terrain editor as it is: a tile replaced and not saved shows; the saved ground stays. The whole map: the
+    // mini map's playable area is a line.
+    const given = { size: 64, doodads: false, units: false, icons: false, smooth: false, playableOnly: false };
+    const exportWith = async (o, file) => { await answer({ save: file }); return page.evaluate(`w3.commands.execute("w3.terrain.exportMinimap", ${JSON.stringify(o)}).then(() => null, (e) => String(e))`); };
+    const first = join(dir, "minimap-a.png"), second = join(dir, "minimap-b.png");
+    const ground = readFileSync(join(b, "map", "war3map.w3e.txt"));
+    const why = (await exportWith(given, first)) ?? (await page.evaluate(`w3.commands.execute("w3.terrain.replaceTiles", { from: "Lgrs", to: "Lrok" }).then(() => null, (e) => String(e))`)) ?? (await exportWith(given, second));
+    if (why) fail(`Export Minimap of an unsaved edit: ${why}`);
+    else {
+      if (picture(first).raw.equals(picture(second).raw)) fail("the exported minimap doesn't show the unsaved tile change");
+      if (!readFileSync(join(b, "map", "war3map.w3e.txt")).equals(ground)) fail("exporting the minimap saved the terrain");
+      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the replaced tiles aren't unsaved");
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await sleep(300);
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
     verify(b, "minimap");
   }
 
@@ -3220,6 +3248,166 @@ async function shouldHaves(page, found) {
   await k.reset();
 }
 
+/** The placer's per-placement look (a chosen variation, random rotation, asymmetric random scale) and random objects
+ *  (an item by level and class, a unit from a random group) by the toolbar and the Random… dialog; they round-trip
+ *  through the codec and come out in the packed script. Cycle Random Groups; the campaign's Gameplay Constants and
+ *  Game Interface, with its own string table, from the commands and from the Campaign Editor. */
+async function placerAndCampaign(page, found) {
+  const fail = (what) => found.push(`placer and campaign: ${what}`);
+  const k = await heightKit(page, "Placer");
+  const settings = ["terrain.placement.randomVariation", "terrain.placement.randomRotation", "terrain.placement.randomScale"];
+  const doodads = () => k.doodads().filter((d) => d.id === "ARrk");
+  const set = (sel, value) => page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(sel)}); if (!s || s.closest("[hidden]")) return false;
+    if (s.type === "checkbox") s.checked = ${JSON.stringify(value)}; else s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event("change")); return true; })()`);
+  const click = async (x, y) => { await k.look(x, y); await sleep(400); await k.clickMiddle(); await sleep(600); };
+  try {
+    // A rock (ten variations, scale 0.8–1.2, any facing), chosen in the Objects tab from one placed by a tool.
+    await k.tool("place_objects", { objects: [{ id: "ARrk", x: -768, y: -768 }], ignoreRoom: true });
+    await k.save();
+    await k.look(-768, -768, { id: "ARrk", x: -768, y: -768 });
+    await sleep(400);
+    await k.run("w3.terrain.selectInPalette");
+    await sleep(300);
+    const hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
+    if (!/Placing .*ARrk/.test(hint ?? "")) return fail(`the Objects tab says "${hint}" after Select In Tool Palette`);
+    // Without anything random: the first variation, facing 270, unscaled (as before).
+    await click(0, 0);
+    await k.save();
+    const plain = doodads().find((d) => Math.abs(d.position[0]) < 64 && Math.abs(d.position[1]) < 64);
+    if (!plain) return fail(`a click placed no rock (${doodads().length} rocks; ${await k.toasts()})`);
+    if (plain.variation !== 0 || Math.abs(plain.angle - 4.712389) > 1e-4 || plain.scale.some((s) => s !== 1)) fail(`a plain placement is ${JSON.stringify([plain.variation, plain.angle, plain.scale])}`);
+    // Variation 4 (shown as 4, stored as 3), random rotation, asymmetric scale.
+    const boxes = [await set(".terrain-place-variation", "3"), await set(".terrain-place-rotation input", true), await set(".terrain-place-scale", "asymmetric")];
+    if (boxes.some((b) => !b)) return fail(`the placer's Variation, Random rotation and Random scale controls: ${JSON.stringify(boxes)}`);
+    await sleep(300);
+    await click(512, 0);
+    await k.save();
+    const rolled = doodads().find((d) => Math.abs(d.position[0] - 512) < 64 && Math.abs(d.position[1]) < 64);
+    if (!rolled) fail("the second click placed no rock");
+    else {
+      if (rolled.variation !== 3) fail(`the chosen variation 4 placed variation ${rolled.variation + 1}`);
+      if (Math.abs(rolled.angle - 4.712389) < 1e-4) fail("Random rotation placed a rock facing 270");
+      const [x, y, z] = rolled.scale;
+      if (![x, y, z].every((s) => s >= 0.8 - 1e-6 && s <= 1.2 + 1e-6) || (x === y && y === z)) fail(`asymmetric random scale placed ${JSON.stringify(rolled.scale)}`);
+    }
+    if (await k.setting("terrain.placement.randomRotation") !== true || await k.setting("terrain.placement.randomScale") !== "asymmetric") fail("the placer's choices aren't kept as settings");
+    // One undo takes the last placement back, and only that.
+    const before = doodads().length;
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await sleep(400);
+    await k.save();
+    if (doodads().length !== before - 1) fail(`one undo left ${doodads().length} of ${before} rocks`);
+
+    // Random objects: a group with a unit and an item position in Map Properties' random groups.
+    const info = k.read("war3map.w3i.json");
+    info.unitTables = [{ number: 7, name: "Smoke Group", positions: [0, 2], lines: [{ chance: 60, ids: ["hfoo", "ratc"] }, { chance: 40, ids: ["hkni", "ckng"] }] }];
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))})`);
+    const random = async (choose) => {
+      await page.evaluate(`document.querySelector(".terrain-place-random").click()`);
+      await until("the Random dialog", () => page.evaluate(`!!document.querySelector(".random-dialog")`), 10000);
+      const why = await page.evaluate(`(() => { const d = document.querySelector(".random-dialog"), set = (sel, v) => { const s = d.querySelector(sel); if (s.type === "radio") s.checked = true; else s.value = v; s.dispatchEvent(new Event("change")); };
+        ${choose}; d.querySelector(".newmap-buttons button.primary").click(); return document.querySelector(".random-dialog") ? "the dialog stayed open" : null; })()`);
+      if (why) { await page.evaluate(`document.querySelector(".random-overlay")?.remove()`); throw new Error(why); }
+      await sleep(300);
+    };
+    await random(`set(".random-what", "item"); set(".random-by-level"); set(".random-level", "3"); set(".random-class", "1")`);
+    await click(-512, 512);
+    await random(`set(".random-what", "unit"); set(".random-by-group"); set(".random-group", "7"); set(".random-position", "0")`);
+    await click(512, 512);
+    await k.save();
+    const units = k.units();
+    const item = units.find((u) => u.id === "iDNR"), unit = units.find((u) => u.id === "uDNR");
+    if (!item || item.randomType !== 0 || item.randomLevel !== "030000" || item.randomClass !== 1 || item.player !== 27) fail(`the random item: ${JSON.stringify(item && [item.randomType, item.randomLevel, item.randomClass, item.player])}`);
+    if (!unit || unit.randomType !== 1 || unit.randomGroup !== 7 || unit.randomPosition !== 0 || "randomLevel" in unit) fail(`the random unit: ${JSON.stringify(unit && [unit.randomType, unit.randomGroup, unit.randomPosition, unit.randomLevel])}`);
+    // They have a model (the question mark), not an unknown id.
+    const warns = await page.evaluate(`[...document.querySelectorAll(".model-warn")].map((e) => e.textContent).join(" | ")`);
+    if (/[ui]DNR/.test(warns)) fail(`the random objects are reported: ${warns}`);
+    // Cycle Random Groups: the group's lines, then the question mark again.
+    await k.clearToasts();
+    for (const want of ["line 1", "line 2", "question mark"]) {
+      const err = await k.run("w3.terrain.cycleRandomGroupsNext");
+      await sleep(300);
+      if (err) { fail(`Cycle Random Groups: ${err}`); break; }
+      if (!(await k.toasts()).includes(want)) { fail(`Cycle Random Groups says "${await k.toasts()}", not ${want}`); break; }
+      await k.clearToasts();
+    }
+    if ((await page.evaluate(`w3.editors.unsavedPaths()`)).length) fail(`Cycle Random Groups left unsaved editors: ${await page.evaluate(`w3.editors.unsavedPaths()`)}`);
+    // Through the codec and into the packed script.
+    await k.verify(fail);
+    const output = await page.evaluate(`w3.workspace.project().default_output`);
+    const map = resolve(k.root, output);
+    rmSync(map, { force: true });
+    await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+    await until("the build", () => existsSync(map), 30000).catch(() => fail("no build"));
+    if (existsSync(map)) {
+      await sleep(300);
+      const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
+      for (const line of ["set itemID = ChooseRandomItemEx( ITEM_TYPE_PERMANENT, 3 )", "set unitID = gg_rg_007[0]", "BlzCreateItemWithSkin( itemID,"]) {
+        if (!script.includes(line)) fail(`the packed script has no "${line}"`);
+      }
+      if (/'[ui]DNR'/.test(script)) fail("the packed script creates a random object by its placeholder id");
+    }
+  } finally {
+    for (const key of settings) await page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined)`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+
+  // ---- the campaign's Gameplay Constants and Game Interface ---------------------------------
+  const camp = join(work, "campaign-settings");
+  rmSync(camp, { recursive: true, force: true });
+  await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Smoke Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+  await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+  const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "TRIGSTR_001", difficulty: "TRIGSTR_002", author: "TRIGSTR_003", description: "TRIGSTR_004",
+    flags: 1, background: 0, backgroundPath: "", minimapPath: "", ambientSound: 0, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+    unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+  const strings = "STRING 1\r\n{\r\nSmoke Campaign\r\n}\r\n\r\nSTRING 2\r\n{\r\nNormal\r\n}\r\n\r\nSTRING 3\r\n{\r\nMe\r\n}\r\n\r\nSTRING 4\r\n{\r\nWords\r\n}\r\n\r\nSTRING 9\r\n{\r\nCampaign Gold Text\r\n}\r\n";
+  await page.evaluate(`(async () => {
+    const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+    await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+    await w3.workspace.writeText("map/war3campaign.wts", ${JSON.stringify(strings)});
+    await w3.workspace.writeText("map/war3campaignSkin.txt", "[FrameDef]\\r\\nGOLD=TRIGSTR_009\\r\\n");
+    await w3.workspace.refresh();
+  })()`);
+  const skinBefore = readFileSync(join(camp, "map", "war3campaignSkin.txt"));
+  // Gameplay Constants from the Campaign Editor's button: the campaign's file, its title says so.
+  await page.evaluate(`w3.commands.execute("w3.campaign.open", "general")`);
+  await until("the Campaign Editor", () => page.evaluate(`!!document.querySelector(".camp-gameplay")`), 20000).catch(() => fail("the Campaign Editor has no Gameplay Constants button"));
+  await page.evaluate(`document.querySelector(".camp-gameplay")?.click()`);
+  await until("the campaign's Gameplay Constants", () => page.evaluate(`w3.editors.activePath() === "map/war3campaignMisc.txt" && !!document.querySelector(".gs-row")`), 30000)
+    .catch(async () => fail(`the button opened ${await page.evaluate(`w3.editors.activePath()`)}`));
+  const title = await page.evaluate(`document.querySelector(".gs-toolbar strong")?.textContent`);
+  if (title !== "Campaign Gameplay Constants") fail(`the editor is titled "${title}"`);
+  // A value changed and saved goes into the campaign's file, nothing into a map's.
+  const typed = await page.evaluate(`(() => { const row = [...document.querySelectorAll(".gs-row")].find((r) => /MaxHeroLevel/.test(r.title)); const i = row?.querySelector("input"); if (!i) return false; i.value = "12"; i.dispatchEvent(new Event("change")); return true; })()`);
+  if (!typed) fail("the campaign's Gameplay Constants have no Hero Maximum Level");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const misc = existsSync(join(camp, "map", "war3campaignMisc.txt")) ? readFileSync(join(camp, "map", "war3campaignMisc.txt"), "utf8") : "";
+  if (!/MaxHeroLevel=12/.test(misc)) fail(`war3campaignMisc.txt holds ${JSON.stringify(misc)}`);
+  if (existsSync(join(camp, "map", "war3mapMisc.txt"))) fail("the campaign got a war3mapMisc.txt");
+  // Game Interface by its command: the text comes from war3campaign.wts; opened and closed unchanged, the file stays as it was.
+  await page.evaluate(`w3.commands.execute("w3.gameInterface.open")`);
+  await until("the campaign's Game Interface", () => page.evaluate(`w3.editors.activePath() === "map/war3campaignSkin.txt" && !!document.querySelector(".gs-row")`), 30000)
+    .catch(async () => fail(`Game Interface opened ${await page.evaluate(`w3.editors.activePath()`)}`));
+  const shown = await page.evaluate(`[...document.querySelectorAll(".gs-row.set input")].map((i) => i.value)`);
+  if (!shown.includes("Campaign Gold Text")) fail(`the campaign's Game Interface shows ${JSON.stringify(shown)}, not the text in war3campaign.wts`);
+  await page.evaluate(`w3.editors.closeAll()`);
+  await sleep(300);
+  if (!readFileSync(join(camp, "map", "war3campaignSkin.txt")).equals(skinBefore)) fail("opening the campaign's Game Interface changed war3campaignSkin.txt");
+  // Packed, the campaign keeps both files byte for byte.
+  const w3n = join(work, "campaign-settings.w3n");
+  const packed = spawnSync(cli, ["pack", camp, "-o", w3n], { encoding: "utf8" });
+  if (packed.status !== 0) fail(`the campaign doesn't pack: ${packed.stderr}`);
+  else {
+    for (const [file, want] of [["war3campaignMisc.txt", misc], ["war3campaignSkin.txt", skinBefore.toString("utf8")]]) {
+      const got = spawnSync(cli, ["cat", w3n, file], { encoding: "utf8" }).stdout;
+      if (got !== want) fail(`the packed campaign's ${file} is ${JSON.stringify(got)}`);
+    }
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -3283,7 +3471,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -3370,6 +3558,7 @@ async function run() {
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
+    await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
