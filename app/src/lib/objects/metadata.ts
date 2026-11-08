@@ -124,30 +124,64 @@ interface Shared {
   names: Map<string, string>;
 }
 
-let shared: Promise<Shared> | null = null;
-const cache = new Map<string, Promise<KindData>>();
+/** The game reads of one load, as background reads while nobody waits on it (see loadKind). */
+class Reads {
+  /** Asked and not landed yet. */
+  private running = new Set<string>();
+  constructor(private w3: W3Api, private background: boolean) {}
+  text(path: string): Promise<string> {
+    this.running.add(path);
+    const read = this.w3.game.readText(path, this.background ? { background: true } : undefined);
+    const done = () => { this.running.delete(path); };
+    read.then(done, done);
+    return read;
+  }
+  /** Someone waits on the load now: its reads still queued go ahead of the background ones (asked
+   *  again, the game's read queue moves them up), and the rest are asked as reads waited on. */
+  waitedOn() {
+    if (!this.background) return;
+    this.background = false;
+    for (const path of this.running) this.w3.game.readText(path).catch(() => {});
+  }
+}
 
-function loadShared(w3: W3Api): Promise<Shared> {
-  shared ??= (async () => {
-    const we = new Map<string, string>();
-    for (const file of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
-      const ini = parseIni(await w3.game.readText(file).catch(() => ""));
-      for (const section of ini.values()) for (const [k, v] of section) we.set(k.toUpperCase(), v);
-    }
+let shared: { data: Promise<Shared>; reads: Reads } | null = null;
+const cache = new Map<string, { data: Promise<KindData>; reads: Reads }>();
+
+function loadShared(w3: W3Api, background: boolean): Promise<Shared> {
+  if (shared) {
+    if (!background) shared.reads.waitedOn();
+    return shared.data;
+  }
+  const reads = new Reads(w3, background);
+  const data = (async () => {
+    // All asked at once (about 70 files): one after another, each waited its turn behind the reads
+    // queued meanwhile (a map's models), and the last landed seconds after the terrain's picture.
+    // They're merged in the order below, whichever lands first.
+    const strings = ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"].map((file) => reads.text(file).catch(() => ""));
+    const editDataText = reads.text("UI/WorldEditData.txt").catch(() => "");
     // Base-layer and locale INI files under Units/ and Doodads/ hold the
     // "Profile" fields (names, tooltips, art, hotkeys, …).
     const files = (await w3.game.list()).filter((p) =>
       /^war3\.w3mod:(_locales\/[a-z]{4}\.w3mod:)?(units|doodads)\/[^/]*\.txt$/i.test(p));
     files.sort((a, b) => Number(a.includes("_Locales")) - Number(b.includes("_Locales")));
+    const texts = files.map((f) => reads.text(f));
+    // One that fails fails the whole (as before); the others aren't left as unhandled rejections.
+    for (const t of texts) t.catch(() => {});
+    const we = new Map<string, string>();
+    for (const text of strings) {
+      const ini = parseIni(await text);
+      for (const section of ini.values()) for (const [k, v] of section) we.set(k.toUpperCase(), v);
+    }
     const profile = new Map<string, Map<string, string>>();
-    for (const f of files) {
-      for (const [id, kv] of parseIniRaw(await w3.game.readText(f))) {
+    for (const text of texts) {
+      for (const [id, kv] of parseIniRaw(await text)) {
         const merged = profile.get(id) ?? new Map();
         for (const [k, v] of kv) merged.set(k, v);
         profile.set(id, merged);
       }
     }
-    const editData = parseIni(await w3.game.readText("UI/WorldEditData.txt").catch(() => ""));
+    const editData = parseIni(await editDataText);
     const names = new Map<string, string>();
     for (const [id, kv] of profile) {
       const n = kv.get("name") ?? kv.get("bufftip") ?? kv.get("editorname");
@@ -158,35 +192,52 @@ function loadShared(w3: W3Api): Promise<Shared> {
     }
     return { we, editData, profile, names };
   })();
-  shared.catch(() => { shared = null; });
-  return shared;
+  const entry = { data, reads };
+  shared = entry;
+  data.catch(() => { if (shared === entry) shared = null; });
+  return data;
 }
 
-export function loadKind(w3: W3Api, kind: string): Promise<KindData> {
-  let p = cache.get(kind);
-  if (!p) {
-    p = buildKind(w3, kind);
-    p.catch(() => cache.delete(kind));
-    cache.set(kind, p);
+/** A kind's object data from the game's tables, read once. `background`: for a view nobody waits
+ *  on (the Object Manager): its game reads go after the ones someone waits on (a map opening) until
+ *  a caller without it asks for the same kind. */
+export function loadKind(w3: W3Api, kind: string, opts?: { background?: boolean }): Promise<KindData> {
+  const background = opts?.background === true;
+  let entry = cache.get(kind);
+  if (!entry) {
+    const reads = new Reads(w3, background);
+    const data = buildKind(w3, kind, reads, background);
+    const made = { data, reads };
+    entry = made;
+    data.catch(() => { if (cache.get(kind) === made) cache.delete(kind); });
+    cache.set(kind, made);
+  } else if (!background) {
+    entry.reads.waitedOn();
+    // Its shared files too, which a background load may have started.
+    shared?.reads.waitedOn();
   }
-  return p;
+  return entry.data;
 }
 
-async function buildKind(w3: W3Api, kind: string): Promise<KindData> {
+async function buildKind(w3: W3Api, kind: string, reads: Reads, background: boolean): Promise<KindData> {
   const spec = KINDS[kind];
   if (!spec) throw new Error(`unknown object kind ${kind}`);
-  const { we, editData, profile, names: sharedNames } = await loadShared(w3);
+  // The kind's own tables are asked for with the shared files, not after them.
+  const tableTexts = Object.values(spec.tables).map(([path]) => reads.text(path));
+  const metaText = reads.text(spec.meta);
+  for (const t of [...tableTexts, metaText]) t.catch(() => {});
+  const { we, editData, profile, names: sharedNames } = await loadShared(w3, background);
 
   const tables = new Map<string, Map<string, Record<string, string>>>();
-  for (const [name, [path, key]] of Object.entries(spec.tables)) {
+  for (const [i, [name, [, key]]] of Object.entries(spec.tables).entries()) {
     const rows = new Map<string, Record<string, string>>();
-    for (const r of parseSlk(await w3.game.readText(path))) if (r[key]) rows.set(r[key], r);
+    for (const r of parseSlk(await tableTexts[i])) if (r[key]) rows.set(r[key], r);
     tables.set(name, rows);
   }
   const main = tables.get(spec.main)!;
 
   const fields: FieldMeta[] = [];
-  for (const r of parseSlk(await w3.game.readText(spec.meta))) {
+  for (const r of parseSlk(await metaText)) {
     if (!r.ID) continue;
     if (kind === "w3t" && r.useItem !== "1") continue;
     if (kind === "w3u" && r.useUnit !== "1" && r.useHero !== "1" && r.useBuilding !== "1") continue;

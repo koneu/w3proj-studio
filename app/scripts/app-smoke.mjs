@@ -2420,6 +2420,10 @@ async function graphicsModes(page, found) {
 
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
  *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
+/** What the first opening of gameReadsOnce's scene (the mini map with a tree, a goldmine and a footman) took
+ *  when last recorded: backend reads, reads asked of the game service, textures made by the terrain view. */
+const GAME_READS_RECORDED = { reads: 101, asked: 124, textures: 135 };
+
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
@@ -2437,14 +2441,49 @@ async function gameReadsOnce(page, found) {
     writeFileSync(join(root, "map", "war3mapUnits.doo.json"), JSON.stringify(units, null, 2));
   }
   const tool = mcpTool(page);
-  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  // The webview keeps the project's tabs from an earlier run (the same folder): a terrain that comes
+  // back on its own would load before the first opening is counted.
+  await page.evaluate(`(async () => {
+    await w3.editors.closeAll();
+    for (const k of Object.keys(localStorage)) if (k.startsWith("w3.openEditors:")) localStorage.removeItem(k);
+    await w3.workspace.open(${JSON.stringify(root)});
+  })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
   const reads = () => page.evaluate(`w3Workbench.game.backendReads`);
   const misses = () => page.evaluate(`w3Workbench.game.backendMisses.length`);
+  // Textures made for the terrain view (each one decoded from a game file or made by the view).
+  await page.evaluate(`(() => {
+    if (window.__texturesMade !== undefined) return;
+    window.__texturesMade = 0;
+    const P = WebGL2RenderingContext.prototype, make = P.createTexture;
+    P.createTexture = function () { if (this.canvas.closest?.(".model-stage")) window.__texturesMade++; return make.call(this); };
+  })()`);
+  const asked = () => page.evaluate(`w3Workbench.game.requests`);
+  // Reads others started (a table read after another, queued behind the terrain's; the Object
+  // Manager's tables on a project opened) land first: what is counted is the terrain's.
+  const settled = () => until("the game reads to settle", async () => {
+    const a = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
+    await sleep(500);
+    const b = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
+    return a[0] === 0 && b[0] === 0 && a[1] === b[1];
+  }, 30000);
+  await settled();
   // The picture waits until every model and texture is in.
-  const before = await reads(), missedBefore = await misses();
+  const before = await reads(), missedBefore = await misses(), askedBefore = await asked();
+  const texturesBefore = await page.evaluate(`window.__texturesMade`);
   await tool("terrain_screenshot", { maxSize: 64 });
   const first = (await reads()) - before;
+  const askedFirst = (await asked()) - askedBefore;
+  const texturesFirst = (await page.evaluate(`window.__texturesMade`)) - texturesBefore;
+  // A fixed scene: a count past what it took when recorded is a regression (a file read that wasn't, a
+  // texture decoded twice, a table asked once per model) that no timing in the gate would show reliably.
+  // When a change reads less, lower the number; a game patch that changes the files can move them too.
+  // (The backend reads are fewer when checks before this one read some of the same files.)
+  const RECORDED = GAME_READS_RECORDED;
+  console.log(`  game reads: the first opening of the scene read ${first} game files, asked for ${askedFirst}, made ${texturesFirst} textures (recorded: ${RECORDED.reads}, ${RECORDED.asked}, ${RECORDED.textures})`);
+  if (first > RECORDED.reads) fail(`the first opening read ${first} game files, ${RECORDED.reads} when recorded`);
+  if (askedFirst > RECORDED.asked) fail(`the first opening asked for ${askedFirst} game files, ${RECORDED.asked} when recorded`);
+  if (texturesFirst > RECORDED.textures) fail(`the first opening made ${texturesFirst} textures, ${RECORDED.textures} when recorded`);
   // HD models name .tif textures; the game stores them as .dds only, and that is asked for first.
   const tifMissed = await page.evaluate(`w3Workbench.game.backendMisses.slice(${missedBefore}).filter((p) => /\\.tif$/i.test(p))`);
   if (tifMissed.length) fail(`${tifMissed.length} reads asked the game for a .tif it doesn't have (${tifMissed.slice(0, 3).join(", ")})`);
@@ -2452,19 +2491,11 @@ async function gameReadsOnce(page, found) {
   if (storedTif.length) fail(`the game stores .tif files now (${storedTif.join(", ")}): texpath.ts's neverStoredLast no longer holds`);
   const reopen = async () => {
     await page.evaluate(`w3.editors.closeAll()`);
-    // Reads others started (a table read after another, queued behind the terrain's) land first:
-    // what is counted below is the reopened terrain's.
-    await until("the game reads to settle", async () => {
-      const a = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
-      await sleep(500);
-      const b = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
-      return a[0] === 0 && b[0] === 0 && a[1] === b[1];
-    }, 30000);
+    await settled();
     const at = await reads(), askedAt = await asked();
     await tool("terrain_screenshot", { maxSize: 64 });
     return [(await reads()) - at, (await asked()) - askedAt];
   };
-  const asked = () => page.evaluate(`w3Workbench.game.requests`);
   // Something besides the terrain can read a table of its own for the first time meanwhile
   // (the ability data, once): the third opening has nothing left to read.
   const [second, askedSecond] = await reopen(), [third, askedThird] = await reopen();

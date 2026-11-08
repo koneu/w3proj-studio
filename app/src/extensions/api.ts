@@ -223,7 +223,13 @@ export interface Settings {
   onDidChange(listener: (key: string) => void): Disposable;
 }
 
-export interface GameReadOptions { tileset?: string }
+export interface GameReadOptions {
+  tileset?: string;
+  /** A read nobody is waiting on (a check, a prefetch, an icon): it goes after the reads someone waits
+   *  on (a map opening, a model shown), but still gets a turn now and then. Once read, it doesn't count
+   *  as a file in use, so a pass over many files doesn't push the ones in use out of the cache. */
+  background?: boolean;
+}
 
 export interface W3Api {
   readonly version: string;

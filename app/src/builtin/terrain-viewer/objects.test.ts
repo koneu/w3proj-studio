@@ -8,6 +8,36 @@ const skin = (file: string): Skin => ({
   kind: "w3u", file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "",
 });
 
+test("the skin tables are asked for at once, and the later table still wins whichever lands first", async () => {
+  // The map's models wait for these: one after another, each waited its turn in the game's read queue.
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LTlt]\nfile=Doodads\\Tree",
+    "Units\\UnitSkin.txt": "[hfoo]\nfile=Units\\Footman\nfile:hd=Units\\FootmanHD",
+    "Units\\ItemSkin.txt": "[hfoo]\nfile=Items\\NotAFootman",
+    "Units\\HumanUnitFunc.txt": "[hfoo]\nAnimprops=upgrade,first",
+    "Units\\UnitData.slk": "ID;P\nC;Y1;X1;K\"unitID\"\nC;X2;K\"movetp\"\nC;Y2;X1;K\"hfoo\"\nC;X2;K\"foot\"\nE",
+  };
+  const pending: { go: () => void }[] = [], asked: string[] = [];
+  const w3 = {
+    settings: { get: () => "hd" },
+    game: { readText: (path: string) => new Promise<string>((resolve, reject) => {
+      asked.push(path);
+      pending.push({ go: () => (path in files ? resolve(files[path]) : reject(new Error(`not found: ${path}`))) });
+    }) },
+  } as unknown as W3Api;
+  const loading = loadSkins(w3);
+  await new Promise((r) => setTimeout(r, 10));
+  for (const path of Object.keys(files)) assert.ok(asked.includes(path), `${path} is asked for before any read landed (asked: ${asked.join(", ")})`);
+  for (const p of [...pending].reverse()) p.go();
+  const skins = await loading;
+  assert.equal(skins.get("LTlt")?.file, "Doodads\\Tree");
+  assert.equal(skins.get("hfoo")?.file, "Items\\NotAFootman", "the item table comes after the unit table");
+  assert.equal(skins.get("hfoo")?.kind, "w3t");
+  assert.deepEqual(skins.get("hfoo")?.animProps, ["upgrade", "first"]);
+  assert.equal(skins.get("hfoo")?.moveType, "foot");
+  assert.ok(skins.has("sloc"));
+});
+
 test("a unit table's Animprops land on the skins, whatever the table's spelling", () => {
   const skins = new Map([["hctw", skin("tower")], ["hkee", skin("hall")], ["hwtw", skin("tower")]]);
   addAnimProps(skins, "[hctw]\r\nAnimprops=upgrade,second\r\n[hkee]\t\r\nAnimprops=Upgrade,First\r\n[hwtw]\r\nName=Scout\r\n[nope]\r\nAnimprops=alternate\r\n");

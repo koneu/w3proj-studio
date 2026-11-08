@@ -38,7 +38,7 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
       async run() {
         const path = wtgPath(w3.workspace.files());
         if (!path) return [];
-        const file = await readWtgFile(w3.workspace, path, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"))).catch(() => null);
+        const file = await readWtgFile(w3.workspace, path, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null);
         if (!file) return [];
         const items = file.items.filter((i) => "ecas" in i && i.type !== 16);
         const triggers = items.map((i) => i.name);
@@ -82,7 +82,7 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         const path = terrainPath(w3.workspace.files().map((f) => f.path));
         if (!path) return [];
         const terrain = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
-        const ids = async (file: string, key: string) => new Set(parseSlk(await w3.game.readText(file)).map((r) => r[key]));
+        const ids = async (file: string, key: string) => new Set(parseSlk(await w3.game.readText(file, { background: true })).map((r) => r[key]));
         const ground = await ids("TerrainArt\\Terrain.slk", "tileID"), cliffs = await ids("TerrainArt\\CliffTypes.slk", "cliffID");
         const unknown = (list: string[], known: Set<string>, what: string) => list.filter((id) => !known.has(id)).map((id): Problem => ({
           severity: "error", message: `${what} ${id} isn't one of the game's`, location: path.slice(4), reveal: { command: "w3.terrain.open" },
