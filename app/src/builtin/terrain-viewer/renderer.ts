@@ -1030,7 +1030,21 @@ export class TerrainRenderer {
     this.particleRenderer.draw(viewProj, eye, items);
   }
 
+  /** CPU time of the frames drawn (ms, by performance.now): all of render, posing the placed models
+   *  in it, and the particles. For measuring (see TerrainEditorHandle.frameCost). */
+  readonly frameCost = { frames: 0, frameMs: 0, poseMs: 0, particleMs: 0 };
+
   render() {
+    const started = performance.now();
+    try {
+      this.drawFrame();
+    } finally {
+      this.frameCost.frames++;
+      this.frameCost.frameMs += performance.now() - started;
+    }
+  }
+
+  private drawFrame() {
     const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
@@ -1142,14 +1156,23 @@ export class TerrainRenderer {
       const list = this.gatherInstances(b, b.followGround ? null : planes);
       if (list.runs.length) gathered.push([b, list]);
     }
-    if (this.animate) { this.poseAnimated(new Set(gathered.map(([b]) => b))); this.lastAnimFrame = performance.now(); }
+    if (this.animate) {
+      const started = performance.now();
+      this.poseAnimated(new Set(gathered.map(([b]) => b)));
+      this.lastAnimFrame = performance.now();
+      this.frameCost.poseMs += this.lastAnimFrame - started;
+    }
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
         const light = (b.group === "units" ? this.unitLight : this.terrainLight) ?? undefined;
         b.gpu.drawInstances(viewProj, list, { pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog });
       }
     }
-    if (this.showEffects || this.showWeather) this.drawParticles(viewProj, this.eye());
+    if (this.showEffects || this.showWeather) {
+      const started = performance.now();
+      this.drawParticles(viewProj, this.eye());
+      this.frameCost.particleMs += performance.now() - started;
+    }
     else this.lastParticleTime = -1;
     // Placement preview: see-through, red where the object doesn't fit.
     for (const g of this.ghost ? [this.ghost, ...this.ghosts] : this.ghosts) {

@@ -23,6 +23,9 @@
 //   --look X,Y          point the terrain camera at a map position (keeps its angle and distance)
 //   --settle            wait until the game's files are read and the terrain view's layers are done
 //   --sleep MS          wait
+//   --frame-cost MS     CPU time of the terrain view's frames drawn during MS (by performance.now): the frames, and
+//                       per frame the whole frame, posing the placed models, the particles. Animated objects
+//                       redraw about 30 times a second by themselves
 //   --shot FILE.png     picture of the active editor's canvas (the terrain or model view), else of the window
 //   --shot-window FILE  picture of the whole window
 //   --mcp NAME[=JSON]   call an MCP tool with JSON arguments; prints its text answer
@@ -44,7 +47,7 @@ import { problems, sleep, until } from "./cdp.mjs";
 import { buildApp, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 
-const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--look", "--sleep", "--shot", "--shot-window", "--mcp", "--command", "--eval"]);
+const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
 function parseArgs(argv) {
@@ -193,6 +196,15 @@ async function main() {
         } else if (step === "--sleep") {
           await sleep(Number(arg));
           out({ step });
+        } else if (step === "--frame-cost") {
+          await editor();
+          const ms = Number(arg);
+          if (!(ms > 0)) throw new Error("--frame-cost wants a time in ms");
+          await page.evaluate(`window.__driveEd.frameCost()`);
+          await sleep(ms);
+          const c = await page.evaluate(`window.__driveEd.frameCost()`);
+          const per = (v) => (c.frames ? Math.round((v / c.frames) * 100) / 100 : null);
+          out({ step, ms, frames: c.frames, perFrame: { frameMs: per(c.frameMs), poseMs: per(c.poseMs), particleMs: per(c.particleMs) } });
         } else if (step === "--shot") {
           out({ step, file: await shot(arg, await canvasClip()) });
         } else if (step === "--shot-window") {

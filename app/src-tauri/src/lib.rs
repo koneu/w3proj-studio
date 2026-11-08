@@ -89,9 +89,15 @@ async fn path_normalize(path: String) -> String {
     tauri::async_runtime::spawn_blocking(move || normal_path(&path)).await.unwrap_or(fallback)
 }
 
+/// Off the UI thread: resolving the path (see `path_normalize`) and reading the manifest wait on
+/// the disk, which on a network or mapped drive can take long.
 #[tauri::command]
-fn project_open(path: String) -> CmdResult<ProjectInfo> {
-    let root = PathBuf::from(normal_path(&project_root(&path).to_string_lossy()));
+async fn project_open(path: String) -> CmdResult<ProjectInfo> {
+    tauri::async_runtime::spawn_blocking(move || open_project(&path)).await.map_err(err)?
+}
+
+fn open_project(path: &str) -> CmdResult<ProjectInfo> {
+    let root = PathBuf::from(normal_path(&project_root(path).to_string_lossy()));
     let manifest = project::Manifest::load(&root).map_err(err)?;
     Ok(ProjectInfo {
         name: manifest.display_name(&root),
@@ -377,14 +383,19 @@ fn codec_canonicalize(app: AppHandle, root: String, path: String, text: String) 
 }
 
 /// Decodes a raw project file (e.g. `map/war3map.doo`) to JSON with the
-/// format definitions in effect, for viewers that read either form.
+/// format definitions in effect, for viewers that read either form. Off the UI thread: a big file
+/// takes a while to read and decode.
 #[tauri::command]
-fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<String> {
-    let rel = path.strip_prefix("map/").unwrap_or(&path);
+async fn codec_decode(app: AppHandle, root: String, path: String) -> CmdResult<String> {
+    tauri::async_runtime::spawn_blocking(move || decode_file(&app, &root, &path)).await.map_err(err)?
+}
+
+fn decode_file(app: &AppHandle, root: &str, path: &str) -> CmdResult<String> {
+    let rel = path.strip_prefix("map/").unwrap_or(path);
     // The file first: callers try this for files that may not be there (the raw form of a document
     // whose JSON form is missing), and loading the format definitions for nothing is slow.
-    let bytes = std::fs::read(Path::new(&root).join(&path)).map_err(err)?;
-    let registry = Registry::for_project(Path::new(&root), &user_format_dirs(&app)?).map_err(err)?;
+    let bytes = std::fs::read(Path::new(root).join(path)).map_err(err)?;
+    let registry = Registry::for_project(Path::new(root), &user_format_dirs(app)?).map_err(err)?;
     let name = w3proj::paths::to_archive_name(rel);
     let mut last = format!("no format definition reads {name}");
     for codec in registry.for_archive_name(&name) {
@@ -1343,6 +1354,25 @@ mod fs_tests {
         let (dir, root) = project();
         assert_eq!(tauri::async_runtime::block_on(path_normalize(root.clone())), normal_path(&root));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn project_open_off_the_main_thread_gives_the_project_by_folder_or_manifest() {
+        let (base, _) = project();
+        let dir = base.join("new");
+        let root = dir.to_string_lossy().into_owned();
+        w3proj::create(&dir, None).unwrap();
+        let open = |path: String| tauri::async_runtime::block_on(project_open(path));
+        let by_folder = open(root.clone()).unwrap_or_else(|e| panic!("{e}"));
+        let by_manifest = open(dir.join(project::MANIFEST).to_string_lossy().into_owned()).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(by_folder.root, normal_path(&root));
+        assert_eq!(by_manifest.root, by_folder.root);
+        assert_eq!(by_manifest.name, by_folder.name);
+        assert_eq!(by_manifest.manifest, by_folder.manifest);
+        // No manifest: the manifest's own error, as before.
+        let Err(err) = open(dir.join("map").to_string_lossy().into_owned()) else { panic!("a folder without a manifest opened") };
+        assert!(err.contains("cannot read w3proj.toml"), "{err}");
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

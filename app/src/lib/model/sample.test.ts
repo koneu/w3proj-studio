@@ -44,3 +44,28 @@ test("sample finds a sequence's keys among all of a track's as going through the
     }
   }
 });
+
+test("sampling one track frame after frame, back again and in another sequence gives what going through the keys does", () => {
+  // A pose samples the same track each frame a little later, and what it found last is kept: moments
+  // forward, then back, then in another sequence and back, must all still find the right keys.
+  const r = random(11);
+  for (let round = 0; round < 300; round++) {
+    const n = 2 + Math.floor(r() * 30);
+    let at = 0;
+    const times: number[] = [], values: number[] = [];
+    for (let i = 0; i < n; i++) { at += Math.floor(r() * 4) === 0 ? 0 : 1 + Math.floor(r() * 100); times.push(at); values.push(Math.round(r() * 1000)); }
+    const track = { interp: 1, globalSeq: -1, times: new Uint32Array(times), values: new Float32Array(values), size: 1 } as unknown as Track;
+    const mid = times[Math.floor(n / 2)];
+    const sequences: [number, number][] = [[0, mid], [mid, at], [0, at]];
+    let seq = sequences[0], t = 0;
+    for (let step = 0; step < 60; step++) {
+      const what = r();
+      if (what < 0.1) seq = sequences[Math.floor(r() * sequences.length)];
+      if (what < 0.2) t = seq[0] + r() * (seq[1] - seq[0]); // a jump, back or ahead
+      else t = Math.min(seq[1] + 5, t + r() * 40); // the next frame
+      const got = sample(track, { frame: t, seqStart: seq[0], seqEnd: seq[1], time: 0 }, [], [-1])[0];
+      const want = byScan(times, Array.from(new Float32Array(values)), seq[0], seq[1], t, -1);
+      assert.ok(Math.abs(got - want) < 1e-3, `round ${round} step ${step}: times ${times.join(",")}, ${seq.join("–")} at ${t}: ${got}, by going through all ${want}`);
+    }
+  }
+});

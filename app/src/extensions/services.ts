@@ -153,6 +153,9 @@ export interface TerrainEditorHandle {
   view(): TerrainView;
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
+  /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
+   *  the placed models in it, and the particles. For measuring (app-drive's --frame-cost). */
+  frameCost(): { frames: number; frameMs: number; poseMs: number; particleMs: number };
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore

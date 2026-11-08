@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addAnimProps, addMoveTypes, objectsInRect, placement, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import type { W3Api } from "../../extensions/api";
+import { addAnimProps, addMoveTypes, loadSkins, objectsInRect, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer } from "./renderer";
 
 const skin = (file: string): Skin => ({
@@ -91,4 +92,70 @@ test("a selection box goes by where an object is drawn: a ship on the water abov
   assert.equal(standIn.inst.world[14], 300);
   assert.deepEqual(standIn.inst.sphere, [100, 100, 300, 32]);
   assert.deepEqual(ship.position, [100, 100, 0], "the stored height stays");
+});
+
+/** A game with the skin tables in `files`; `settings` as the app's. Reads that throw are listed in `broken`. */
+const fakeGame = (files: Record<string, string>, settings: Record<string, string>, broken = new Set<string>()) => ({
+  settings: { get: (k: string) => settings[k] },
+  game: { readText: async (p: string) => {
+    if (broken.has(p)) throw new Error("the storage is busy");
+    return files[p] ?? "";
+  } },
+}) as unknown as W3Api;
+
+const gameTables = () => ({
+  "Units\\UnitSkin.txt": "[hfoo]\r\nfile=Units\\Human\\Footman\\Footman\r\nfile:sd=Units\\Human\\Footman\\FootmanSD\r\nmodelScale=1.2\r\n",
+  "Doodads\\DoodadSkins.txt": "[LTlt]\r\nfile=Doodads\\Tree\r\nnumVar=10\r\n",
+  "Units\\HumanUnitFunc.txt": "[hfoo]\r\nAnimprops=upgrade,first\r\n",
+  "Units\\UnitData.slk": "ID;PWXL;N;E\r\nC;Y1;X1;K\"unitID\"\r\nC;X2;K\"movetp\"\r\nC;Y2;X1;K\"hfoo\"\r\nC;X2;K\"foot\"\r\nE\r\n",
+});
+
+test("the skins are parsed once per install and graphics mode, and come out alike each time", async () => {
+  const files = gameTables(), settings = { "game.installDir": "/cache-a", "game.graphicsMode": "hd" };
+  const w3 = fakeGame(files, settings);
+  const before = skinParses.count;
+  const first = await loadSkins(w3);
+  assert.equal(first.get("hfoo")?.file, "Units\\Human\\Footman\\Footman");
+  assert.deepEqual(first.get("hfoo")?.animProps, ["upgrade", "first"]);
+  assert.equal(first.get("hfoo")?.moveType, "foot");
+  assert.equal(first.get("LTlt")?.numVar, 10);
+  assert.ok(first.has("sloc"));
+  first.delete("LTlt");
+  const second = await loadSkins(w3);
+  assert.equal(skinParses.count - before, 1, "the tables didn't change: parsed once");
+  assert.ok(second.has("LTlt"), "each caller gets its own map");
+  assert.deepEqual(second, await loadSkins(w3));
+  assert.throws(() => { (second.get("hfoo") as Skin).file = "x"; }, "the shared entries can't be changed");
+
+  settings["game.graphicsMode"] = "sd";
+  assert.equal((await loadSkins(w3)).get("hfoo")?.file, "Units\\Human\\Footman\\FootmanSD", "another mode, the mode's own keys");
+  settings["game.installDir"] = "/cache-b";
+  await loadSkins(w3);
+  assert.equal(skinParses.count - before, 3, "another mode, another install: parsed again");
+});
+
+test("a reloaded game's changed table is seen, and a table that couldn't be read isn't kept as empty", async () => {
+  const files = gameTables(), settings = { "game.installDir": "/cache-c", "game.graphicsMode": "hd" }, broken = new Set<string>();
+  const w3 = fakeGame(files, settings, broken);
+  await loadSkins(w3);
+  // A patch, then w3.game.reload: the table reads differently.
+  files["Units\\UnitSkin.txt"] = files["Units\\UnitSkin.txt"].replace("modelScale=1.2", "modelScale=2");
+  assert.equal((await loadSkins(w3)).get("hfoo")?.modelScale, 2);
+  // The storage busy for one read: that load goes without the doodads, as before, the next has them again.
+  broken.add("Doodads\\DoodadSkins.txt");
+  assert.equal((await loadSkins(w3)).has("LTlt"), false);
+  broken.clear();
+  const before = skinParses.count;
+  assert.equal((await loadSkins(w3)).get("LTlt")?.numVar, 10);
+  assert.equal(skinParses.count - before, 1);
+});
+
+test("a map's object data goes on the game's skins fresh each time, and doesn't stick to them", async () => {
+  const w3 = fakeGame(gameTables(), { "game.installDir": "/cache-d", "game.graphicsMode": "hd" });
+  const mapped = withObjectArt(await loadSkins(w3), [{ kind: "w3u", original: [{ base: "hfoo", mods: [{ field: "umdl", value: "Units\\Other" }, { field: "uani", value: "alternate" }] }] }]);
+  assert.equal(mapped.get("hfoo")?.file, "Units\\Other");
+  const again = await loadSkins(w3);
+  assert.equal(again.get("hfoo")?.file, "Units\\Human\\Footman\\Footman");
+  assert.deepEqual(again.get("hfoo")?.animProps, ["upgrade", "first"]);
+  assert.equal(withObjectArt(again, []).get("hfoo")?.file, "Units\\Human\\Footman\\Footman");
 });
