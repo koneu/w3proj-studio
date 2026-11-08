@@ -46,6 +46,13 @@ export function unitSwims(moveType: string | undefined, ground: number, surface:
   return moveType?.toLowerCase() === "amph" && surface !== null && surface - ground > DEEP_WATER;
 }
 
+/** The looks a placed unit stands in besides its type's Animprops: an Ancient placed uprooted in its model's
+ *  Alternate animations (Stand Alternate: on its legs, roots out of the ground, as the World Editor shows it), a
+ *  swimming unit in its Swim ones. */
+export function unitLooks(uprooted: boolean, swimming: boolean): string[] {
+  return [...(uprooted ? ["alternate"] : []), ...(swimming ? ["swim"] : [])];
+}
+
 /** A number typed for a height, or null: it has to be finite. A comma may be the decimal mark. */
 export function parseHeight(text: string): number | null {
   const t = text.trim().replace(",", ".");

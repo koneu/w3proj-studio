@@ -13,7 +13,7 @@ import { joinPath } from "../../lib/paths";
 import { errorText } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight, unitSwims } from "./objheights";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Box, type GridSize } from "./viewcmds";
@@ -35,7 +35,7 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { meleeFlagsAfter, placedText, splitOwners } from "../../lib/terrain/owner";
+import { isUprooted, meleeFlagsAfter, placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -1856,7 +1856,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const baseOf = (id: string) => bases.get(id);
           const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType), true,
-              (p, skin) => (swims(p, skin.moveType) ? ["swim"] : [])),
+              (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
             loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;

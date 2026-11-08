@@ -23,6 +23,8 @@ export interface Placed {
   scale: [number, number, number];
   /** Units only. */
   player?: number;
+  /** Units only: the player field's bits above the owner (lib/terrain/owner.ts), e.g. an Ancient placed uprooted. */
+  playerFlags?: number;
 }
 
 export interface Skin {

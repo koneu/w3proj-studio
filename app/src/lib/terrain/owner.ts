@@ -27,6 +27,12 @@ export function meleeFlagsAfter(flags: number, list: readonly (Owned & { id: str
   return flags & MELEE_MAP && hasPlayerUnits(list, isItem) ? flags & ~MELEE_MAP : flags;
 }
 
+/** The player field's bit for an Ancient placed uprooted. */
+export const UPROOTED = 0x10000;
+
+/** Whether an entry is placed uprooted, before or after splitOwners. */
+export const isUprooted = (e: Owned): boolean => (((e.player ?? 0) | (e.playerFlags ?? 0)) & UPROOTED) !== 0;
+
 /** Replaces each entry's field by its owner, keeping the rest in `playerFlags` until saving. */
 export function splitOwners(list: Owned[]): void {
   for (const e of list) {

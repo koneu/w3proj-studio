@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ObjectLoader, type Placed, type Skin } from "./objects";
-import { unitSwims } from "./objheights";
+import { unitLooks, unitSwims } from "./objheights";
 import { standClock } from "../../lib/model/renderer";
 
 /** A WebGL context that accepts every call (nothing is drawn): enough to make models and textures. */
@@ -49,6 +49,12 @@ test("a unit given the swim look stands in its model's Stand Swim, apart from th
   };
   assert.equal(look(water), "Stand Swim");
   assert.equal(look(land), "Stand");
+});
+
+test("an uprooted Ancient stands in its Alternate look, a swimming unit in its Swim one", () => {
+  assert.deepEqual(unitLooks(false, false), []);
+  assert.deepEqual(unitLooks(true, false), ["alternate"]);
+  assert.deepEqual(unitLooks(false, true), ["swim"]);
 });
 
 test("amphibious units swim where the water is deeper than units walk; ships and walkers never", () => {
