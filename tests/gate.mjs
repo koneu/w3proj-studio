@@ -36,6 +36,14 @@ import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
 import { gamePath } from "./gamepath.mjs";
 
+// An older Node (a system one on Linux, when nvm's isn't loaded in this shell) fails steps in ways that look like
+// bugs (no WebSocket global, unknown test flags): say so instead, before anything runs.
+if (Number(process.versions.node.split(".")[0]) < 22) {
+  console.error(`the gate needs Node 22 or newer; this is ${process.version} (${process.execPath}). On Linux: source ~/.nvm/nvm.sh`);
+  console.log("GATE_EXIT=1");
+  process.exit(1);
+}
+
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(repo, "app");
 const exe = process.platform === "win32" ? ".exe" : "";
