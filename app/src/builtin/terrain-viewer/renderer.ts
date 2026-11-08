@@ -674,7 +674,7 @@ export class TerrainRenderer {
       this.overlay = null;
       return;
     }
-    this.overlayProg ??= compile(gl, OVERLAY_VS, OVERLAY_FS);
+    if (!this.overlayProgram()) return;
     if (!this.overlay) {
       const tex = gl.createTexture()!;
       this.overlay = { ...this.overlayMesh(), tex };
@@ -692,16 +692,23 @@ export class TerrainRenderer {
       slot.viewLayer = null;
       return;
     }
-    this.overlayProg ??= compile(gl, OVERLAY_VS, OVERLAY_FS);
+    if (!this.overlayProgram()) return;
     slot.viewLayer ??= { ...this.overlayMesh(), tex: gl.createTexture()! };
     this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
   }
 
   /** The border's shade, one texel per tile. */
   setBorder(rgba: Uint8Array, width: number, height: number) {
-    this.overlayProg ??= compile(this.gl, OVERLAY_VS, OVERLAY_FS);
+    if (!this.overlayProgram()) return;
     this.border ??= { ...this.overlayMesh(), tex: this.gl.createTexture()! };
     this.uploadOverlay(this.border.tex, rgba, width, height);
+  }
+
+  /** The overlay program, compiled the first time; null once the context is gone (the editor closed
+   *  while a file was still being read for a layer): a shader can't compile then, and nothing is drawn anyway. */
+  private overlayProgram(): WebGLProgram | null {
+    if (this.gl.isContextLost()) return null;
+    return (this.overlayProg ??= compile(this.gl, OVERLAY_VS, OVERLAY_FS));
   }
 
   private uploadOverlay(tex: WebGLTexture, rgba: Uint8Array, width: number, height: number) {
