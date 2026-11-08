@@ -81,13 +81,20 @@ function inOrder(times: Uint32Array): boolean {
   return ok;
 }
 
-/** The first index in [lo, hi) whose time passes `test`, or hi; times in order, and `test` false then true along them. */
-function firstWhere(times: Uint32Array, lo: number, hi: number, test: (v: number) => boolean): number {
+/** The first index in [lo, hi) whose time is at least `v` (`orAbove` false) or above it (true), or hi; times in order. */
+function firstFrom(times: Uint32Array, lo: number, hi: number, v: number, orAbove: boolean): number {
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (test(times[mid])) hi = mid; else lo = mid + 1;
+    if (orAbove ? times[mid] > v : times[mid] >= v) hi = mid; else lo = mid + 1;
   }
   return lo;
+}
+
+/** Key k of a track into out (made `size` long). */
+function keyInto(values: Float32Array, size: number, k: number, out: number[]): number[] {
+  out.length = size;
+  for (let j = 0; j < size; j++) out[j] = values[k * size + j];
+  return out;
 }
 
 /** Samples a track; `fallback` when it has no key inside the interval. */
@@ -102,25 +109,19 @@ export function sampleInto(track: Track | undefined, clock: Clock, globalSeqs: n
   if (!track || track.times.length === 0) return fallback;
   let t = clock.frame, start = clock.seqStart, end = clock.seqEnd;
   const { times, values, size } = track;
-  /** Key k's value into out. */
-  const key = (k: number) => {
-    out.length = size;
-    for (let j = 0; j < size; j++) out[j] = values[k * size + j];
-    return out;
-  };
   if (track.globalSeq >= 0) {
     const dur = globalSeqs[track.globalSeq] ?? 0;
     // A global sequence of length 0 holds a constant: the first key, wherever it sits
     // (e.g. shoreline emitters keep their sideways turn there).
-    if (dur <= 0) return key(0);
+    if (dur <= 0) return keyInto(values, size, 0, out);
     start = 0; end = dur; t = clock.time % dur;
   }
   let first = -1, last = -1, i: number;
   const sorted = inOrder(times);
   if (sorted) {
     // The keys of every sequence are in one list, in time order: the sequence's are found by halving.
-    first = firstWhere(times, 0, times.length, (v) => v >= start);
-    last = firstWhere(times, first, times.length, (v) => v > end) - 1;
+    first = firstFrom(times, 0, times.length, start, false);
+    last = firstFrom(times, first, times.length, end, true) - 1;
     if (first > last) first = last = -1;
   } else {
     for (let k = 0; k < times.length; k++) {
@@ -130,13 +131,13 @@ export function sampleInto(track: Track | undefined, clock: Clock, globalSeqs: n
     }
   }
   if (first < 0) return fallback;
-  if (t <= times[first] || first === last) return key(first);
-  if (t >= times[last]) return key(last);
+  if (t <= times[first] || first === last) return keyInto(values, size, first, out);
+  if (t >= times[last]) return keyInto(values, size, last, out);
   // The last key at or before t (t is between the first and the last key here).
-  i = sorted ? Math.min(last - 1, Math.max(first, firstWhere(times, first, last + 1, (v) => v > t) - 1)) : first;
+  i = sorted ? Math.min(last - 1, Math.max(first, firstFrom(times, first, last + 1, t, true) - 1)) : first;
   while (i < last && times[i + 1] <= t) i++;
   const a = i, b = i + 1, u = (t - times[a]) / (times[b] - times[a]);
-  if (track.interp === 0) return key(a);
+  if (track.interp === 0) return keyInto(values, size, a, out);
   out.length = size;
   const A = a * size, B = b * size;
   if (size === 4) {
@@ -211,10 +212,10 @@ const NO_MOVE = [0, 0, 0], NO_TURN = [0, 0, 0, 1], NO_SCALE = [1, 1, 1];
 export function poseNodes(model: Model, clock: Clock): Mat4[] {
   const world: Mat4[] = [];
   // The samples go into the same three arrays node after node: mat4.node only reads them.
-  const T: number[] = [], R: number[] = [], S: number[] = [];
+  const T: number[] = [], R: number[] = [], S: number[] = [], pivot: Vec3 = [0, 0, 0];
   for (const id of nodeOrder(model)) {
     const n = model.nodes[id];
-    const pivot: Vec3 = [model.pivots[id * 3] ?? 0, model.pivots[id * 3 + 1] ?? 0, model.pivots[id * 3 + 2] ?? 0];
+    pivot[0] = model.pivots[id * 3] ?? 0; pivot[1] = model.pivots[id * 3 + 1] ?? 0; pivot[2] = model.pivots[id * 3 + 2] ?? 0;
     const t = sampleInto(n.translation, clock, model.globalSequences, NO_MOVE, T) as Vec3;
     const r = sampleInto(n.rotation, clock, model.globalSequences, NO_TURN, R);
     const s = sampleInto(n.scaling, clock, model.globalSequences, NO_SCALE, S) as Vec3;
@@ -524,13 +525,21 @@ export function effectiveFilterMode(filterMode: number, alpha: number, opaqueTex
 
 type Layer = Model["materials"][number]["layers"][number];
 
+/** A Set that counts its changes, so a user can tell it changed without comparing its contents. */
+export class VersionedSet<T> extends Set<T> {
+  version = 0;
+  add(v: T) { if (!this.has(v)) this.version++; return super.add(v); }
+  delete(v: T) { const had = super.delete(v); if (had) this.version++; return had; }
+  clear() { if (this.size) this.version++; super.clear(); }
+}
+
 /** One model's GPU resources in a WebGL2 context: pose it for a moment of an
  *  animation, then draw it any number of times. */
 export class ModelGpu {
   /** GPU texture per model texture; null until loaded. */
   readonly textures: (WebGLTexture | null)[];
   /** Hidden geosets (by index); HD lower-detail copies start hidden. */
-  readonly hidden = new Set<number>();
+  readonly hidden = new VersionedSet<number>();
   readonly stats: Stats;
   /** The look it stands in (the unit's Animprops): models with one are loaded once per look. */
   props: readonly string[] = [];
@@ -550,10 +559,9 @@ export class ModelGpu {
   private geoAlpha = new Map<number, number>();
   private geoColor = new Map<number, number[]>();
   private clock: Clock = { frame: 0, seqStart: 0, seqEnd: 0, time: 0 };
-  /** Per sequence (start|end), whether nothing moves in it (see poseStill). */
-  private stillBySpan = new Map<string, boolean>();
-  /** The sequence and shown geosets of the last full pose. */
-  private posedAs: string | null = null;
+  /** The sequence (start, end) of the last full pose, whether nothing moves in it (see poseStill), and
+   *  the version of `hidden` it was made with. */
+  private posed = { start: NaN, end: NaN, still: false, hidden: -1 };
   /** Full poses made (not counting those a still sequence skipped): for tests. */
   fullPoses = 0;
   /** Model-space matrix of every node (by object id) at the last pose; emitters follow them. */
@@ -673,11 +681,10 @@ export class ModelGpu {
     this.clock = clock;
     // A sequence in which nothing moves gives the same pose at every moment: posed once, it stays
     // (unless the geosets shown changed). The clock still moves on, for the particles that follow it.
-    const span = `${clock.seqStart}|${clock.seqEnd}`, posedAs = `${span}|${[...this.hidden].join(",")}`;
-    let still = this.stillBySpan.get(span);
-    if (still === undefined) this.stillBySpan.set(span, (still = poseStill(m, clock.seqStart, clock.seqEnd)));
-    if (still && this.posedAs === posedAs) return;
-    this.posedAs = posedAs;
+    const p = this.posed, sameSpan = p.start === clock.seqStart && p.end === clock.seqEnd;
+    if (!sameSpan) p.still = poseStill(m, clock.seqStart, clock.seqEnd);
+    if (p.still && sameSpan && p.hidden === this.hidden.version) return;
+    p.start = clock.seqStart; p.end = clock.seqEnd; p.hidden = this.hidden.version;
     this.fullPoses++;
     const world = poseNodes(m, clock);
     this.nodeWorld = world;
@@ -723,11 +730,12 @@ export class ModelGpu {
     const c = this.classCache, refs = this.blend2.map((d) => this.textures[d.texIndex]);
     if (c && c.pose === this.poseSeq && refs.every((t, i) => t === c.refs[i])) return c.list;
     const m = this.model;
+    // `base` has every blend layer as blended (its file mode): any drawn as opaque now needs its own order.
     let changed = false;
     for (const [i, d] of this.blend2.entries()) {
       const tex = m.textures[d.texIndex];
       const mode = effectiveFilterMode(2, d.alpha, !tex?.replaceableId && isOpaqueTexture(refs[i]));
-      if (mode !== d.mode) changed = true;
+      if (mode !== 2) changed = true;
       d.mode = mode;
       d.blended = mode >= 2;
     }

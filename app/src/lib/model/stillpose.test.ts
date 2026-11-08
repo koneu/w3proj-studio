@@ -64,6 +64,12 @@ test("a model in which nothing moves is posed once; its clock still moves on", (
   gpu.hidden.add(0);
   gpu.pose(at(900));
   assert.equal(gpu.fullPoses, 2, "a geoset hidden or shown poses again");
+  gpu.hidden.add(0);
+  gpu.pose(at(950));
+  assert.equal(gpu.fullPoses, 2, "hiding one already hidden changes nothing");
+  gpu.hidden.delete(0);
+  gpu.pose(at(960));
+  assert.equal(gpu.fullPoses, 3, "showing it again poses again");
 });
 
 test("a model that moves is posed at every moment (the control)", () => {

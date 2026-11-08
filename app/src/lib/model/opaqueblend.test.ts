@@ -71,3 +71,27 @@ test("the class follows textures that land after the pose", async () => {
   gpu.textures[0] = null;
   assert.deepEqual(modes(), [2], "the texture going away is seen too");
 });
+
+test("a later texture keeps the order an earlier one gave: opaque layers stay first", async () => {
+  const { ModelGpu } = await import("./renderer");
+  const { createTexture } = await import("./gltexture");
+  const gl = new Proxy({ getExtension: (n: string) => (n === "WEBGL_compressed_texture_s3tc" ? { COMPRESSED_RGBA_S3TC_DXT5_EXT: 1, COMPRESSED_RGBA_S3TC_DXT1_EXT: 2, COMPRESSED_RGBA_S3TC_DXT3_EXT: 3 } : null), getError: () => 0, getAttribLocation: () => 0, NO_ERROR: 0 } as Record<string, unknown>, {
+    get: (t, k) => (k in t ? t[k as string] : typeof k === "string" && /^[A-Z_0-9]+$/.test(k) ? 1 : () => ({})),
+  }) as unknown as WebGL2RenderingContext;
+  // Two blend layers, the first drawn before the second in the file; the second's texture turns out opaque.
+  const layer = (id: number) => ({ filterMode: 2, shadingFlags: 0, textureIds: [id], textureAnimId: -1, coordId: 0, alpha: 1 });
+  const model = {
+    nodes: [], textures: [{ replaceableId: 0, path: "a.blp", flags: 0 }, { replaceableId: 0, path: "b.blp", flags: 0 }],
+    materials: [{ priorityPlane: 0, flags: 0, layers: [layer(0), layer(1)] }],
+    geosets: [{ positions: new Float32Array(9), normals: new Float32Array(9), uvs: new Float32Array(6), faces: new Uint16Array([0, 1, 2]), vertexGroups: new Uint8Array(3), groups: [[0]], materialId: 0, lod: 0 }],
+    geosetAnims: [], globalSequences: [], textureAnims: [], sequences: [],
+  } as unknown as ConstructorParameters<typeof ModelGpu>[1];
+  const gpu = new ModelGpu(gl, model);
+  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+  const order = () => (gpu as unknown as { classified(): { texIndex: number; mode: number }[] }).classified().map((d) => `${d.texIndex}:${d.mode}`);
+  const tex = (a0: number) => createTexture(gl, { format: "t", width: 4, height: 4, hasAlpha: true, mipCount: 1, blocks: { format: "bc3" as const, levels: [{ width: 4, height: 4, data: new Uint8Array(bc3(a0, 255, 0)) }] }, mip() { throw new Error("no decode"); } }, { repeat: [false, false] });
+  gpu.textures[1] = tex(255);
+  assert.deepEqual(order(), ["1:0", "0:2"], "the opaque one first");
+  gpu.textures[0] = tex(128);
+  assert.deepEqual(order(), ["1:0", "0:2"], "the other texture landing (see-through) changes nothing");
+});
