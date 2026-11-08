@@ -2,7 +2,7 @@
 // float texture), keyframe animation, Warcraft blend modes, team colour.
 // Particles, ribbons and texture animations are not drawn.
 
-import { FOG_FS, FOG_VS, setFog, type Fog } from "./fog";
+import { fogColorForBlend, FOG_FS, FOG_VS, setFog, type Fog } from "./fog";
 import type { DecodedImage } from "../image/index";
 import { createTexture, isOpaqueTexture } from "./gltexture";
 import { standSequence } from "./stand";
@@ -830,6 +830,8 @@ export class ModelGpu {
         case 5: gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.depthMask(false); break;
         default: gl.enable(gl.BLEND); gl.blendFunc(gl.DST_COLOR, gl.SRC_COLOR); gl.depthMask(false);
       }
+      // Shading flag 0x20: the layer isn't fogged.
+      if (opts.fog) { const fc = fogColorForBlend(mode, opts.fog.color); gl.uniform4f(u.uFogColor, fc[0], fc[1], fc[2], sf & 0x20 ? 0 : 1); }
       if (sf & 0x80) gl.depthMask(false);
       if (opts.onTop) gl.disable(gl.DEPTH_TEST);
       if (opts.tint && mode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }

@@ -3,7 +3,7 @@
 // Cliff tiles get cliff models (see cliffs.ts); ramps stay sloped ground.
 
 import type { DecodedImage } from "../../lib/image/index";
-import { fogForCamera, FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
+import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
 import { compile, INSTANCE_BYTES, mat4, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
@@ -391,7 +391,9 @@ export class TerrainRenderer {
   private brush: Mesh | null = null;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly terrain: Terrain) {
-    const gl = canvas.getContext("webgl2", { antialias: true });
+    // Opaque: blended layers (leaves, the boundary's shade) would otherwise leave the picture part see-through,
+    // and the page behind lightened them, as pale ghosts in a fog that hides everything else.
+    const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL2 is not available");
     this.gl = gl;
     this.groundProg = compile(gl, GROUND_VS, GROUND_FS);
@@ -1029,8 +1031,10 @@ export class TerrainRenderer {
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);
-    // Past the end of the fog there's nothing to see, so the background is the fog too.
-    const fog = this.showFog && this.fog ? fogForCamera(this.fog, this.distance) : null;
+    // Past the end of the fog there's nothing to see, so the background is the fog too. The fog counts from
+    // the eye as in the game, also from further out than the game's camera: zoomed out, a near fog covers
+    // everything, as it does there (the view's Fog box turns it off).
+    const fog = this.showFog && this.fog ? this.fog : null;
     const back = fog?.color ?? [0.11, 0.12, 0.14];
     gl.clearColor(back[0], back[1], back[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
