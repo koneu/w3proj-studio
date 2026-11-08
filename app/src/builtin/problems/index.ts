@@ -79,7 +79,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(w3.services.provide(PROBLEMS_SERVICE, service));
   ctx.subscriptions.push(w3.mcp.registerTool("list_problems", async () => {
     if (!w3.workspace.project()) throw new Error("No project is open in W3Proj Studio.");
-    return (await service.run()).map(({ severity, message, location }) => ({ severity, message, location }));
+    const found = (await service.run()).map(({ severity, message, location }) => ({ severity, message, location }));
+    // A check that failed found nothing, which isn't "no problems": say so (only for this project's run).
+    const failed = ranFor === (w3.workspace.project()?.root ?? null) ? groups.filter((g) => g.error) : [];
+    return [...failed.map((g) => ({ severity: "error" as const, message: `The check failed: ${g.error}`, location: g.check.title })), ...found];
   }));
   for (const c of [...builtinChecks(w3, () => scope), ...mapChecks(w3, () => scope)]) ctx.subscriptions.push(service.registerCheck(c));
 
