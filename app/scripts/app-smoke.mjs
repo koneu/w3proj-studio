@@ -22,6 +22,9 @@ import { inflateSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
+import { launch } from "./webdriver.mjs";
+
+const LINUX = process.platform === "linux";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
@@ -36,7 +39,8 @@ const FIXTURE = join(repo, "tests", "fixtures", "mini-map");
 
 function build() {
   const conf = JSON.parse(readFileSync(join(app, "src-tauri", "tauri.conf.json"), "utf8"));
-  const windows = conf.app.windows.map((w) => ({ ...w, visible: false }));
+  // Linux runs it inside xvfb-run, a display nobody sees, where the window has to be shown to be drawn.
+  const windows = conf.app.windows.map((w) => ({ ...w, visible: LINUX }));
   const patch = join(work, "tauri.smoke.json");
   writeFileSync(patch, JSON.stringify({ identifier: IDENTIFIER, app: { windows }, build: { beforeBuildCommand: "npm run build" } }));
   const r = spawnSync(`npx tauri build --debug --no-bundle --config "${patch}"`, { cwd: app, shell: true, stdio: "inherit" });
@@ -2237,17 +2241,31 @@ async function run() {
   // (the first one at the first 20-second poll that finds a project without one): which project got one, and
   // whether a command's own checkpoint was skipped because one was being made, would depend on how fast the
   // machine is. The checks count the checkpoints that commands make.
-  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true, "checkpoints.enabled": false }));
-  const port = await freePort();
-  const child = spawn(exe, [], {
-    stdio: "ignore",
-    env: { ...process.env, W3PROJ_TRIGGERDATA: join(repo, "tests", "fixtures", "TriggerData.txt"), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
-  });
-  let exited = null;
-  child.on("exit", (code) => { exited = code; });
+  // The game's folder goes to the app as well as to the CLI: without it the app looks in its default
+  // (C:\Program Files (x86)\Warcraft III), which on Linux, or on another drive, isn't there.
+  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true, "checkpoints.enabled": false, ...(game ? { "game.installDir": game } : {}) }));
+  const triggerData = join(repo, "tests", "fixtures", "TriggerData.txt");
+  // Windows: the app's WebView2 over the DevTools Protocol. Linux: WebKitGTK over WebDriver (webdriver.mjs),
+  // which gives a page that takes the same calls.
+  let stop = async () => {}, exited = () => null;
 
   try {
-    const page = await connect(port);
+    let page;
+    if (LINUX) {
+      const launched = await launch(exe, { W3PROJ_TRIGGERDATA: triggerData });
+      ({ page, stop, exited } = launched);
+    } else {
+      const port = await freePort();
+      const child = spawn(exe, [], {
+        stdio: "ignore",
+        env: { ...process.env, W3PROJ_TRIGGERDATA: triggerData, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
+      });
+      let code = null;
+      child.on("exit", (c) => { code = c; });
+      exited = () => code;
+      stop = async () => { child.kill(); };
+      page = await connect(port);
+    }
     await until("the app to start", () => page.evaluate(`!!window.w3 && document.querySelectorAll("button.activity").length > 0`));
     await sleep(500);
     const found = [];
@@ -2342,7 +2360,7 @@ async function run() {
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
     found.push(...problems(page.events));
-    if (exited !== null) found.push(`the app exited with ${exited}`);
+    if (exited() !== null) found.push(`the app exited with ${exited()}`);
 
     const shot = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     if (shot) writeFileSync(join(work, "screen.png"), Buffer.from(shot.data, "base64"));
@@ -2351,7 +2369,7 @@ async function run() {
     if (process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${JSON.stringify(r)}`);
     return found;
   } finally {
-    child.kill();
+    await stop();
     await sleep(300);
     rmSync(configDir, { recursive: true, force: true });
   }

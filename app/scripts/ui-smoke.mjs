@@ -73,6 +73,12 @@ function findEdge() {
     join(process.env["ProgramFiles(x86)"] ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
     join(process.env.ProgramFiles ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
     join(process.env.ProgramFiles ?? "", "Google", "Chrome", "Application", "chrome.exe"),
+    // Linux. Google Chrome first: Ubuntu's chromium is a snap, which can't write a profile outside the home folder.
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/microsoft-edge",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
   ];
   const found = candidates.find((p) => p && existsSync(p));
   if (!found) throw new Error("no Edge or Chrome found; set W3_SMOKE_BROWSER");

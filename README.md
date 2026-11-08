@@ -99,19 +99,45 @@ Functionality one extension offers others goes through a service, not an import.
 
 ## Build & run
 
-Requires Rust (the toolchain version is pinned in `rust-toolchain.toml`), Node 20+, and WebView2.
+Requires Rust (the toolchain version is pinned in `rust-toolchain.toml`), Node 22 (Vite 7 needs
+20.19 or newer), and the system webview: WebView2 on Windows, WebKitGTK on Linux.
 
 ```sh
 cargo test --workspace
-cargo build --release -p w3proj-cli        # → target/release/w3proj.exe
+cargo build --release -p w3proj-cli        # → target/release/w3proj(.exe)
 
 cd app
-npm install
+npm ci                                     # also in every new git worktree
 npm run check                              # types (app and tests) and module boundaries
 npm test                                   # TypeScript unit tests (src/**/*.test.ts, node:test)
 npx tauri dev                              # run the editor
 npx tauri build                            # installer in target/release/bundle
 ```
+
+### Linux
+
+On Debian/Ubuntu one script installs everything above, plus what the app smoke test needs on Linux:
+
+```sh
+scripts/setup-linux.sh --check   # what's there and what's missing; changes nothing
+scripts/setup-linux.sh           # install what's missing (asks for sudo for apt packages)
+```
+
+It sets up:
+
+- **apt packages:** Tauri's build dependencies (`libwebkit2gtk-4.1-dev`, `libssl-dev`, `libxdo-dev`,
+  `libayatana-appindicator3-dev`, `librsvg2-dev`, `build-essential`, …), plus `webkit2gtk-driver` and `xvfb`.
+- **Rust** through rustup, at the pinned version.
+- **Node 22** through [nvm](https://github.com/nvm-sh/nvm), not apt: Ubuntu's `nodejs` package is too old.
+- **`tauri-driver`** (`cargo install tauri-driver --locked`, into `~/.cargo/bin`, which must be on `PATH`).
+- **`npm ci`** in `app/`.
+
+Why the extra test tools: on Windows the smoke tests drive the app's WebView2 over the Chrome DevTools
+Protocol. WebKitGTK doesn't speak that protocol, so on Linux they drive it over WebDriver
+(`tauri-driver` → `WebKitWebDriver`), inside `xvfb-run`, so the app gets a display without a window
+on your screen.
+
+Known Linux gaps: the MCP server is Windows only so far.
 
 ### CLI
 
