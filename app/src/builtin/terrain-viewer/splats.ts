@@ -5,6 +5,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { parseSlk } from "../../lib/formats/text";
+import { isUprooted } from "../../lib/terrain/owner";
 import type { Placed, Skin } from "./objects";
 
 export interface SplatDef {
@@ -37,10 +38,12 @@ export async function loadSplatTable(w3: W3Api): Promise<Map<string, SplatDef>> 
   return out;
 }
 
-/** The ground marks of placed units (buildings) whose type names one. */
+/** The ground marks of placed units (buildings) whose type names one. An Ancient placed uprooted has none: it
+ *  walks, its roots are out of the ground (the World Editor draws its root mark only rooted; we-drive, 2026-11-08). */
 export function planSplats(units: Placed[], skins: Map<string, Skin>, table: Map<string, SplatDef>, baseOf: (id: string) => string | undefined): Splat[] {
   const out: Splat[] = [];
   for (const p of units) {
+    if (isUprooted(p)) continue;
     const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
     const def = skin?.uberSplat ? table.get(skin.uberSplat) : undefined;
     if (def) out.push({ x: p.position[0], y: p.position[1], def });

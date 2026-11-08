@@ -9,14 +9,14 @@ import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
 import { compile, INSTANCE_BYTES, mat4, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { hdLight, setTone, shadeWrap, TONE_FS, type Tone } from "../../lib/model/tone";
+import { facing, hdLight, setTone, shadeWrap, TONE_FS, type Tone } from "../../lib/model/tone";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
-import { cornerNormal, heightAt, rampLift, type Terrain } from "../../lib/terrain/w3e";
+import { cornerNormal, heightAt, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -96,8 +96,10 @@ void main() {
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
   if (uTone > 1.5) {
-    // Fades in from the shore as the ramp's opacity does, to all of it where the ramp is deepest.
-    float a = clamp(c.a / max(uDeepMax.a, 0.01), 0.0, 1.0) * t.a;
+    // Fades in from the shore faster than the classic ramp, then slowly to all of it at a depth of 100: the
+    // World Editor's HD lake on map 03 (we-drive, 2026-11-08) is about 0.37 opaque at depth 11, 0.59 at 22,
+    // 0.75 at 38, 0.85 at 71 (as Studio's old ramp placed those depths), ((depth - 4) / 96)^0.4 within 0.06.
+    float a = pow(clamp((vDepth * 128.0 - 4.0) / 96.0, 0.0, 1.0), 0.4) * t.a;
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
     outColor = vec4(fogged(uHdWater * mix(1.0, ripple, 0.5)), a);
     return;
@@ -106,6 +108,32 @@ void main() {
   vec4 w = t * c;
   outColor = vec4(fogged(toned(w.rgb, uLight)), w.a);
 }`;
+
+/** What of a corner the water reads. */
+type WaterCorner = Pick<Corner, "height" | "water" | "hasWater" | "layer">;
+
+/**
+ * A tile's water, its four corners given in any fixed order: the surface height and the depth (world units; how clear
+ * the water is) at each, or null where no water is drawn (no corner has water, or the ground is above the surface at
+ * all four).
+ *
+ * Corners without water (the shore) keep the surface level: their stored level is often the default far below, which
+ * would tilt the water into the ground. Their depth is their own level's, though, as the World Editor fades it: shore
+ * corners at the lake's level give a smooth edge, those far below one that follows the wet corners tile by tile
+ * (we-drive, map 03 with both, 2026-11-08). On a cliff tile the dry corners are on the cliff top, but the wall goes
+ * down into the water: they keep the wet corners' depth (no fade to clear at the wall).
+ */
+export function waterTile(cs: readonly WaterCorner[]): { z: number[]; depth: number[] } | null {
+  if (!cs.some((c) => c.hasWater) || cs.every((c) => c.water <= c.height)) return null;
+  const wet = cs.filter((c) => c.hasWater);
+  const level = Math.max(...wet.map((c) => c.water));
+  const cliff = !cs.every((c) => c.layer === cs[0].layer);
+  const wetDepth = Math.max(...wet.map((c) => c.water - c.height));
+  return {
+    z: cs.map((c) => (c.hasWater ? c.water : level)),
+    depth: cs.map((c) => (!c.hasWater && cliff ? wetDepth : c.water - c.height)),
+  };
+}
 
 /** A tileset's water: animation frames (by index; null until loaded), frames per second and
  *  the colour ramp (r, g, b, a in 0–1). */
@@ -136,10 +164,13 @@ export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & {
  * out a dark teal on every tileset measured (we-drive, game view on and off, 2026-11-08: Lordaeron 22, 54–61, 73;
  * Northrend 22, 48–52, 39–41; Barrens 25–26, 41–46, 42–44), Lordaeron Summer bluer, the one tileset with its own
  * water environment map (Environment\EnvironmentMap\LordaeronSummer\Water_IBL). A map's water tint takes that blue
- * away (03b_Water_Tint, red: 23, 50, 40) rather than showing its colour.
+ * away (03b_Water_Tint, red: 23, 50, 40) rather than showing its colour. Cityscape's water is blue (OrcX02_03's city
+ * pool in game view, 2026-11-09: 50, 61, 121).
  */
 export function hdWaterColor(tileset: string, tinted: boolean): [number, number, number] {
-  return tileset.toUpperCase() === "L" && !tinted ? [22 / 255, 57 / 255, 73 / 255] : [23 / 255, 47 / 255, 41 / 255];
+  if (tinted) return [23 / 255, 47 / 255, 41 / 255];
+  const own: Record<string, [number, number, number]> = { L: [22 / 255, 57 / 255, 73 / 255], Y: [50 / 255, 61 / 255, 121 / 255] };
+  return own[tileset.toUpperCase()] ?? [23 / 255, 47 / 255, 41 / 255];
 }
 
 /** The brightness HD water's ripple is measured against until the texture is known (Lordaeron's Water00). */
@@ -365,8 +396,7 @@ export class TerrainRenderer {
    *  (shadeWrap); without the map's lighting the even light, 1. `sun` is already drawnLight's. */
   private flatLight(sun: SceneLight | null): number[] {
     if (!sun) return [1, 1, 1];
-    const d = Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1));
-    const up = d + (1 - d) * shadeWrap(this.tone, sun);
+    const up = facing([0, 0, 1], sun.dir, shadeWrap(this.tone, sun));
     return [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up);
   }
   /** Particle effects (fires, glows, …) of placed objects. */
@@ -626,21 +656,11 @@ export class TerrainRenderer {
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
-        if (!cs.some((c) => c.hasWater) || cs.every((c) => c.water <= c.height)) continue;
-        // Corners without water (the shore) keep the surface level: their stored level is
-        // meaningless (often the default far below), which would tilt the water into the ground.
-        const wet = cs.filter((c) => c.hasWater);
-        const level = Math.max(...wet.map((c) => c.water));
-        // On a cliff tile the dry corners are on the cliff top, but the wall goes down into the
-        // water: they keep the wet corners' depth (no fade to clear at the wall). On a slope the
-        // shallow edge fades out.
-        const cliff = !cs.every((c) => c.layer === cs[0].layer);
-        const wetDepth = Math.max(...wet.map((c) => c.water - c.height));
-        const v = cs.map((c, i) => {
+        const tile = waterTile(cs);
+        if (!tile) continue;
+        const v = cs.map((_, i) => {
           const dx = i === 1 || i === 2 ? 1 : 0, dy = i >= 2 ? 1 : 0;
-          const z = c.hasWater ? c.water : level;
-          const depth = !c.hasWater && cliff ? wetDepth : z - c.height;
-          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, z, dx, 1 - dy, depth / 128];
+          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, tile.z[i], dx, 1 - dy, tile.depth[i] / 128];
         });
         out.push(...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]);
       }

@@ -2651,8 +2651,9 @@ async function graphicsModes(page, found) {
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
  *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
 /** What the first opening of gameReadsOnce's scene (the mini map with a tree, a goldmine and a footman) took
- *  when last recorded: backend reads, reads asked of the game service, textures made by the terrain view. */
-const GAME_READS_RECORDED = { reads: 101, asked: 124, textures: 135 };
+ *  when last recorded: backend reads, reads asked of the game service, textures made by the terrain view. One more
+ *  each since HD emissive textures are drawn: the gold mine's Neutral_GoldMine_Emissive (branch render-fixes-4). */
+const GAME_READS_RECORDED = { reads: 102, asked: 125, textures: 136 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);

@@ -4,7 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
-import { parseMdx } from "../../lib/model/mdx";
+import { parseMdx, type Model } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
@@ -23,6 +23,8 @@ export interface Placed {
   scale: [number, number, number];
   /** Units only. */
   player?: number;
+  /** Units only: the player field's bits above the owner (lib/terrain/owner.ts), e.g. an Ancient placed uprooted. */
+  playerFlags?: number;
 }
 
 export interface Skin {
@@ -205,6 +207,20 @@ export function modelPath(skin: Skin, variation: number): string {
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
 
+/** Whether a model's own particle effects show anything. Some Reforged models keep their classic emitters as empty
+ *  placeholders (the Lordaeron brazier LObr: colours and alphas all 0) next to their PopcornFX fire: those count as
+ *  none, so the classic model's emitters stand in as for the others. */
+export function drawsParticles(m: Pick<Model, "particleEmitters2" | "ribbons">): boolean {
+  return m.ribbons.length > 0 || m.particleEmitters2.some((e) => e.segmentAlpha.some((a) => a > 0));
+}
+
+/** The model to read when a variation's file isn't stored: the type's file without a number. The classic game
+ *  keeps some types of several variations in one file (the City wall endcap YSw5: numVar 2, but only
+ *  CityWallEndcap.mdx in War3.w3mod; the numbered files are Reforged's), which the World Editor's SD view shows. */
+export function plainModelPath(skin: Skin): string | undefined {
+  return skin.numVar > 1 ? `${skin.file.replace(/\.(mdl|mdx)$/i, "")}.mdx` : undefined;
+}
+
 /** World matrix: translate · rotate about z · scale (column-major). `z`: drawn at another height than
  *  the stored one (a ship on the water, see unitDrawHeight). */
 export function placement(p: Placed, extraScale: number, z = p.position[2]): Mat4 {
@@ -217,6 +233,8 @@ export function placement(p: Placed, extraScale: number, z = p.position[2]): Mat
 /** One model to draw at the given places. */
 export interface ModelRequest {
   path: string;
+  /** Read instead when `path` isn't stored (plainModelPath). */
+  plain?: string;
   /** Replaceable texture id → path (e.g. a tree type's own texture). */
   replaceable: Record<number, string>;
   instances: ObjectInstance[];
@@ -329,7 +347,7 @@ export class ObjectLoader {
    *  path, which keeps the classic models' scale and layout. */
   private effects(req: ModelRequest, gpu: ModelGpu): Promise<EffectSource | null> {
     const m = gpu.model;
-    if (m.particleEmitters2.length || m.ribbons.length) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
+    if (drawsParticles(m)) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
     if (!m.skipped.includes("CORN")) return Promise.resolve(null);
     const key = `${req.path.toLowerCase()}|${req.props ?? ""}`;
     let e = this.effectSources.get(key);
@@ -355,7 +373,10 @@ export class ObjectLoader {
     let m = this.models.get(key);
     if (!m) {
       m = this.track((async () => {
-        const model = parseMdx(await this.readFile(req.path));
+        const model = parseMdx(await this.readFile(req.path).catch((e: unknown) => {
+          if (req.plain) return this.readFile(req.plain);
+          throw e;
+        }));
         const gpu = new ModelGpu(this.gl, model);
         // Stand still at the start of its "Stand" animation.
         gpu.props = req.props ?? [];
@@ -379,7 +400,7 @@ export class ObjectLoader {
   /** The GPU model for a placed type (shared with the batches; for previews). */
   modelFor(skin: Skin, variation: number): Promise<ModelGpu> {
     const replaceable = skinTextures(skin);
-    return this.model({ path: modelPath(skin, variation), replaceable, props: skin.animProps, instances: [] });
+    return this.model({ path: modelPath(skin, variation), plain: plainModelPath(skin), replaceable, props: skin.animProps, instances: [] });
   }
 
   /** Loads each requested model; failed ones are reported by index. The batches keep the order of
@@ -424,10 +445,12 @@ export class ObjectLoader {
   /** Placed doodads/units: models from the skin tables. Custom object ids
    *  use their base object's model (`baseOf`, from the map's object data). An object whose model doesn't load
    *  (or whose id is unknown) is drawn as the World Editor's checkered cube, a batch of its own in the group, and
-   *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray. */
+   *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray.
+   *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim"). */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
     baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
-    placeholders = true, shownAs?: (p: Placed) => string | undefined): Promise<LoadResult> {
+    placeholders = true, shownAs?: (p: Placed) => string | undefined,
+    looksOf?: (p: Placed, skin: Skin) => readonly string[]): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
@@ -443,11 +466,13 @@ export class ObjectLoader {
         continue;
       }
       const path = modelPath(skin, p.variation);
-      const key = `${path}|${skin.texFile}|${skin.animProps ?? ""}`;
+      const more = looksOf?.(p, skin).filter((l) => !skin.animProps?.includes(l)) ?? [];
+      const props = more.length ? [...(skin.animProps ?? []), ...more] : skin.animProps;
+      const key = `${path}|${skin.texFile}|${props ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = skinTextures(skin);
-        entry = { req: { path, replaceable, props: skin.animProps, instances: [] }, items: [] };
+        entry = { req: { path, plain: plainModelPath(skin), replaceable, props, instances: [] }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);

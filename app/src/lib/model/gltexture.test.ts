@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decodeImage, type BlockImage, type DecodedImage } from "../image/index";
-import { createTexture, drawnTextures, levelFor, uploadableLevels } from "./gltexture";
+import { createTexture, drawnTextures, emissiveSlot, levelFor, uploadableLevels } from "./gltexture";
 import type { Layer, Model } from "./mdx";
 
 /** Records what's done to it. `refuse`: the next error the context reports. */
@@ -190,6 +190,18 @@ const model = (textures: number, layers: Layer[], emitters: number[] = []) => ({
 
 test("a Reforged layer needs its diffuse and ORM, not its normal map or the rest", () => {
   assert.deepEqual([...drawnTextures(model(6, [layer([0, 1, 2, 3, 4, 5])]))], [0, 2]);
+});
+
+test("a Reforged layer's emissive texture is drawn too (the Ashenvale obelisk's red runes), a team colour in its slot isn't", () => {
+  // AOob's HD body: [diffuse, normal, ORM, emissive, team colour (replaceable 1), environment map].
+  const paths = ["Obelisk_Diffuse.tif", "Obelisk_Normal.tif", "Obelisk_ORM.tif", "Obelisk_Emissive.tif", "", "ReplaceableTextures/EnvironmentMap.blp"];
+  const m = { ...model(6, [layer([0, 1, 2, 3, 4, 5])]), textures: paths.map((path, i) => ({ path, replaceableId: i === 4 ? 1 : 0, flags: 0 })) } as Pick<Model, "textures" | "materials" | "particleEmitters2">;
+  assert.equal(emissiveSlot(m, layer([0, 1, 2, 3, 4, 5])), 3);
+  assert.deepEqual([...drawnTextures(m)], [0, 2, 3]);
+  assert.equal(emissiveSlot(m, layer([0, 1, 2, 4])), null, "a replaceable texture in the slot");
+  assert.equal(emissiveSlot(m, layer([0])), null, "a classic layer");
+  const black = { ...m, textures: [...m.textures.slice(0, 3), { path: "Textures/Black32.blp", replaceableId: 0, flags: 0 }] } as typeof m;
+  assert.equal(emissiveSlot(black, layer([0, 1, 2, 3])), null, "the black placeholder (the HD footman's)");
 });
 
 test("a classic model needs every texture, used by a layer or not", () => {

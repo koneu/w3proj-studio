@@ -15,3 +15,12 @@ test("buildings get their ground mark; custom types their base's; others none", 
   const splats = planSplats([placed("hbar", 100, 200), placed("hfoo", 0, 0), placed("h000", -50, 50)], skins, table, (id) => (id === "h000" ? "hbar" : undefined));
   assert.deepEqual(splats, [{ x: 100, y: 200, def: hmed }, { x: -50, y: 50, def: hmed }]);
 });
+
+test("an Ancient placed uprooted has no root mark, as the file has it and as the editor splits it", () => {
+  const emda: SplatDef = { texture: "Textures\\RootBase.blp", scale: 160, blend: 0, color: [1, 1, 1, 1] };
+  const skins = new Map([["eaom", skin("EMDA")]]);
+  const table = new Map([["EMDA", emda]]);
+  const rooted = placed("eaom", 0, 0), uprootedRaw = { ...placed("eaom", 300, 0), player: 0x10002 } as Placed;
+  const uprootedSplit = { ...placed("eaom", 600, 0), player: 2, playerFlags: 0x10000 } as Placed;
+  assert.deepEqual(planSplats([rooted, uprootedRaw, uprootedSplit], skins, table, () => undefined), [{ x: 0, y: 0, def: emda }]);
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, withGroup } from "./renderer";
+import { hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, withGroup } from "./renderer";
 
 const b = (group: string, name: string) => ({ group, name });
 const names = (list: { name: string }[]) => list.map((x) => x.name).join(" ");
@@ -81,6 +81,8 @@ test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-dri
   within(rgb(hdWaterColor("L", false)), [22, 54, 73], [23, 61, 73], "Lordaeron");
   within(rgb(hdWaterColor("N", false)), [22, 48, 39], [23, 52, 41], "Northrend");
   within(rgb(hdWaterColor("B", false)), [25, 41, 42], [26, 46, 44], "Barrens");
+  // OrcX02_03's city pool (Cityscape, game view, 2026-11-09): blue, not teal.
+  within(rgb(hdWaterColor("Y", false)), [50, 61, 121], [50, 61, 121], "Cityscape");
   // 03b_Water_Tint (red): the editor's HD water loses Lordaeron's blue instead of turning red.
   within(rgb(hdWaterColor("L", true)), [22, 50, 40], [23, 50, 40], "Lordaeron tinted");
 });
@@ -96,4 +98,22 @@ test("a texture's mean brightness comes from a small mip level", () => {
   assert.equal(meanBrightness(img), 0.5);
   assert.deepEqual(asked, [2]);
   assert.equal(meanBrightness({ ...img, mip() { throw new Error("truncated"); } }), null, "an image that can't be decoded");
+});
+
+test("a shore corner's water depth is its own stored level's; its surface stays the lake's", () => {
+  // Map 03's lake edge: two wet corners (12 and 21 deep at 247.9) and two dry ones on the bank at 256.
+  const wet = (height: number) => ({ height, water: 247.9, hasWater: true, layer: 2 });
+  const dry = (water: number) => ({ height: 256, water, hasWater: false, layer: 2 });
+  // Dry corners stored far below (the default, -346 under the bank): the water is clear well before them, so the
+  // edge follows the wet corners tile by tile, as in the World Editor.
+  const low = waterTile([wet(235.9), wet(226.9), dry(-90), dry(-90)])!;
+  assert.deepEqual(low.z, [247.9, 247.9, 247.9, 247.9], "the surface doesn't tilt down to the stored level");
+  near(low.depth, [12, 21, -346, -346]);
+  // Dry corners stored at the lake's level: the water fades out just past them, a smooth edge.
+  near(waterTile([wet(235.9), wet(226.9), dry(247.9), dry(247.9)])!.depth, [12, 21, -8.1, -8.1]);
+  // A cliff tile: the dry corners on top keep the wet ones' depth (the wall goes down into the water).
+  const cliffTop = { height: 384, water: -90, hasWater: false, layer: 3 };
+  near(waterTile([wet(235.9), wet(226.9), cliffTop, cliffTop])!.depth, [12, 21, 21, 21]);
+  assert.equal(waterTile([dry(-90), dry(-90), dry(-90), dry(-90)]), null, "no wet corner");
+  assert.equal(waterTile([{ ...wet(250), water: 247.9 }, dry(247.9), dry(247.9), dry(247.9)]), null, "the ground above the surface everywhere");
 });

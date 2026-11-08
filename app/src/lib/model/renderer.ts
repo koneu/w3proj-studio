@@ -4,7 +4,7 @@
 
 import { fogColorForBlend, FOG_FS, FOG_VS, setFog, type Fog } from "./fog";
 import type { DecodedImage } from "../image/index";
-import { createTexture, isOpaqueTexture } from "./gltexture";
+import { createTexture, emissiveSlot, isOpaqueTexture } from "./gltexture";
 import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
@@ -380,6 +380,8 @@ uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform f
 uniform float uOpaque;
 // HD materials: the ORM texture's alpha masks where team colour goes.
 uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix;
+// HD materials' emissive texture (slot 3): light of its own, added unlit; uGlow 0 without one.
+uniform sampler2D uEmissive; uniform float uGlow;
 // Scene light: direction toward it, diffuse and ambient colour (intensity included).
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
@@ -392,7 +394,8 @@ void main() {
   if (uOpaque > 0.5) c.a = uColor.a;
   if (c.a < uAlphaTest) discard;
   vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * facing(vNormal, uLightDir);
-  outColor = vec4(fogged(mix(toned(c.rgb, light), uMix.rgb, uMix.a)), c.a);
+  vec3 glow = uGlow > 0.5 ? texture(uEmissive, vUV).rgb * uColor.rgb : vec3(0.0);
+  outColor = vec4(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -473,7 +476,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -833,6 +836,7 @@ export class ModelGpu {
     gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
     gl.uniform1i(u.uBones, 1);
     gl.uniform1i(u.uOrm, 2);
+    gl.uniform1i(u.uEmissive, 4);
     const hm = opts.heightMap;
     gl.uniform1f(u.uUseHeight, hm ? 1 : 0);
     if (hm) {
@@ -872,6 +876,13 @@ export class ModelGpu {
       if (orm) {
         gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D, orm);
+        gl.activeTexture(gl.TEXTURE0);
+      }
+      const emissive = emissiveSlot(m, layer) !== null ? this.textures[layer.textureIds[3]] : null;
+      gl.uniform1f(u.uGlow, emissive ? 1 : 0);
+      if (emissive) {
+        gl.activeTexture(gl.TEXTURE4);
+        gl.bindTexture(gl.TEXTURE_2D, emissive);
         gl.activeTexture(gl.TEXTURE0);
       }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hdLight, shadeWrap, toneOf } from "./tone";
+import { facing, hdLight, hdTone, shadeWrap, toneOf } from "./tone";
 import type { SceneLight } from "./dnclight";
 
 const near = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} not within ${tol} of ${b}`);
@@ -15,10 +15,12 @@ test("the graphics mode picks the picture's tone: classic for SD, HD for the res
 /** The factor a light gives flat ground (normal straight up) after hdLight and shadeWrap, relative to the
  *  editor's light without a lighting model (exposure only): the k of the tone curve's fit over the exposure. */
 function flatFactor(l: SceneLight): number {
+  return surfaceFactor(l, [0, 0, 1]);
+}
+/** The same for a surface of normal `n`. */
+function surfaceFactor(l: SceneLight, n: number[]): number {
   const h = hdLight(l);
-  const d = Math.max(0, h.dir[2] / Math.hypot(...h.dir));
-  const up = d + (1 - d) * shadeWrap(2, h);
-  return h.ambient[1] + h.diffuse[1] * up;
+  return h.ambient[1] + h.diffuse[1] * facing(n, h.dir, shadeWrap(2, h));
 }
 const sun = (intensity: number, dir: [number, number, number], ambient = 0, shadow = 0): SceneLight =>
   ({ dir, diffuse: [intensity, intensity, intensity], ambient: [ambient, ambient, ambient], shadow });
@@ -45,6 +47,34 @@ test("HD: a shadow intensity above 0 lifts the shading toward the full sun (clif
   near(withShadow, 2.47 / 0.7, 0.6, "with");
   // Straight down it changes nothing (measured: 0.715 with 5.85 against 0.701 with 0).
   near(flatFactor(sun(1, UP, 0, 5.85)), flatFactor(sun(1, UP)), 1e-9, "straight down");
+});
+
+test("HD: the shadow intensity lifts cliff walls as much as flat ground, and ambient beside a sun adds as it reads", () => {
+  // cliff.w3m's unit lighting at 06:00 (sun 1.94 from the south-west, ambient 0.168, 0.168, 0.196) with one value
+  // changed at a time; its south walls (normal straight south) and grass, light factor from the pictures (we-drive).
+  const cliff = (shadow: number, ambient = 0.2): SceneLight =>
+    ({ dir: SOUTH_WEST, diffuse: [1.942, 1.942, 1.942], ambient: [0.84 * ambient, 0.84 * ambient, 0.98 * ambient], shadow });
+  const SOUTH = [0, -1, 0];
+  for (const [shadow, wall, grass] of [[0, 0.708, 0.917], [1, 1.22, 1.446], [2, 1.672, 2.128], [3, 2.14, NaN], [5.85, 3.81, NaN]]) {
+    near(surfaceFactor(cliff(shadow), SOUTH), wall, 0.15, `wall, shadow intensity ${shadow}`);
+    if (!Number.isNaN(grass)) near(surfaceFactor(cliff(shadow), [0, 0, 1]), grass, 0.15, `grass, shadow intensity ${shadow}`);
+  }
+  // The lift per unit of shadow intensity is the same on both (a lift by the wall's own cosine was half again more).
+  const perUnit = (n: number[]) => surfaceFactor(cliff(1), n) - surfaceFactor(cliff(0), n);
+  near(perUnit(SOUTH), perUnit([0, 0, 1]), 1e-9, "walls and ground");
+  near(surfaceFactor(cliff(5.85, 0), SOUTH), 3.63, 0.2, "wall, ambient 0");
+  near(surfaceFactor(cliff(0, 0), [0, 0, 1]), 0.779, 0.06, "grass, ambient 0, shadow 0");
+});
+
+test("HD: the picture's curve is ACES up to the middle, and white sooner near the top (the editor's shoulder)", () => {
+  const aces = (x: number) => (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+  for (const x of [0, 0.02, 0.1, 0.2, 0.3]) near(hdTone(x), aces(x), 0.01, `x ${x}`);
+  near(hdTone(0.45), 0.649, 0.005, "lifted from ACES's 0.581");
+  near(hdTone(0.6), 0.917, 0.005, "lifted from 0.673");
+  assert.equal(hdTone(0.7), 1, "white where ACES is still at 0.71");
+  assert.equal(hdTone(50), 1);
+  assert.equal(hdTone(-1), 0);
+  for (let x = 0; x < 2; x += 0.01) assert.ok(hdTone(x + 0.01) >= hdTone(x), `rising at ${x}`);
 });
 
 test("the classic picture (and the model viewer) shade by the cosine alone", () => {
