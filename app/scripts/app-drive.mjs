@@ -27,7 +27,8 @@
 //   --shot-window FILE  picture of the whole window
 //   --mcp NAME[=JSON]   call an MCP tool with JSON arguments; prints its text answer
 //   --command ID        run a command (as the palette does); prints its error if it fails
-//   --eval EXPR         evaluate in the page (statements or an expression; a promise is awaited); prints the value
+//   --eval EXPR         evaluate in the page (statements or an expression; a promise is awaited); prints the value.
+//                       With a top-level `await`: an expression, or statements that `return` the value
 //
 // Examples:
 //   node scripts/app-drive.mjs --map ../openpoints/example-maps/02c_Fog_Linear_Near.w3x --terrain --camera game --shot /tmp/02c.png
@@ -206,7 +207,16 @@ async function main() {
           const r = await page.evaluate(`Promise.race([w3.commands.execute(${JSON.stringify(arg)}).then(() => null, (e) => String(e)), new Promise((r) => setTimeout(() => r("still running after 10 s (waiting for an answer?)"), 10000))])`);
           out({ step, command: arg, error: r });
         } else if (step === "--eval") {
-          out({ step, value: await page.evaluate(arg) });
+          // `await` at the top: as an async expression, else as async statements (which `return` their value).
+          let value;
+          if (/\bawait\b/.test(arg)) {
+            // Which form it is, found by parsing it here (nothing runs twice in the page).
+            const AsyncFunction = (async () => {}).constructor;
+            let expression = true;
+            try { new AsyncFunction(`return (${arg});`); } catch { expression = false; }
+            value = await page.evaluate(expression ? `(async () => (${arg}))()` : `(async () => { ${arg} })()`);
+          } else value = await page.evaluate(arg);
+          out({ step, value });
         }
       } catch (e) {
         failed = true;

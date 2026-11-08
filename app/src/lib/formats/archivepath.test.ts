@@ -23,6 +23,13 @@ test("a component that starts with a byte-order mark loses it, with and without 
   assert.equal(toArchiveName(`a/b${BOM}.mdx`), slow(`a/b${BOM}.mdx`));
 });
 
+test("a character outside the Basic Multilingual Plane survives the full decoding, next to an escape", () => {
+  const emoji = String.fromCodePoint(0x1f600), old = String.fromCodePoint(0x10348);
+  assert.equal(toArchiveName(`war3mapImported/${emoji}%25${old}.mdx`), `war3mapImported\\${emoji}%${old}.mdx`);
+  assert.equal(slow(`a/${emoji}.mdx`), `a\\${emoji}.mdx`);
+  assert.ok(!slow(`${old}/b`).includes(REPLACEMENT));
+});
+
 test("for random paths without escapes or surrogates, the shortcut and the full decoding agree", () => {
   // Fixed seed (printed on failure), as every random test here.
   const seed = 20261107;

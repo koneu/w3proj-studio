@@ -334,6 +334,39 @@ async function terrainWiring(page, found) {
   }
 }
 
+/** place_objects on a new map: a dry run refuses the overlaps among its own objects that the real run refuses,
+ *  and the placing itself takes the Melee flag off (not the map script's regeneration a moment after a save,
+ *  which is off here, as it is with script.generateOnSave unset or a project closed right after). */
+async function placeObjects(page, found) {
+  const fail = (what) => found.push(`place objects: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "placing");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Placing", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const flags = () => JSON.parse(readFileSync(join(root, "map", "war3map.w3i.json"), "utf8")).flags;
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    const two = { objects: [{ id: "hbar", x: 1024, y: 1024, player: 1 }, { id: "hbar", x: 1024, y: 1024, player: 1 }] };
+    const dry = JSON.parse(await tool("place_objects", { ...two, dryRun: true }));
+    if (dry.wouldPlace !== 1 || dry.skipped.length !== 1) fail(`a dry run of two barracks on one spot: ${JSON.stringify(dry)}`);
+    // The dry run's own marks stay out of the editor's map of what's taken.
+    const again = JSON.parse(await tool("place_objects", { objects: [two.objects[0]], dryRun: true }));
+    if (again.wouldPlace !== 1) fail(`a dry run left its objects in the way: ${JSON.stringify(again)}`);
+    if (!(flags() & 4)) fail("a new map isn't a melee map (control)");
+    const real = JSON.parse(await tool("place_objects", two));
+    if (real.placed !== 1 || JSON.stringify(real.skipped) !== JSON.stringify(dry.skipped)) fail(`the real run refused other things than its dry run: ${JSON.stringify(real)} vs ${JSON.stringify(dry)}`);
+    if (flags() & 4) fail("a map with a player's unit placed is still a melee map");
+    // One undo step takes the unit and the flag back.
+    await tool("undo_last_edit");
+    if (!(flags() & 4)) fail("undoing the placing didn't make it a melee map again");
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
+  }
+}
+
 /** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
  *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
  *  right when the project is saved and packed straight after. */
@@ -2278,6 +2311,43 @@ async function gameReadsOnce(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Map Properties ▸ Players: Start X and Y can be typed for a player without a start location, and only
+ *  shown for one with it, which the terrain editor's save writes there (players follow start locations). */
+async function playerStarts(page, found, root) {
+  const fail = (what) => found.push(`player starts: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  const units = "map/war3mapUnits.doo.json";
+  const before = await page.evaluate(`w3.workspace.readText(${JSON.stringify(units)})`);
+  /** Player 1's Start X and Y cells: their text, and whether they hold an input. */
+  const cells = () => page.evaluate(`(() => {
+    const row = [...document.querySelectorAll(".map-info .form-table tbody tr")].find((r) => r.cells[0]?.textContent === "1");
+    return row ? [5, 6].map((i) => ({ input: !!row.cells[i].querySelector("input"), text: row.cells[i].querySelector("input")?.value ?? row.cells[i].textContent })) : null;
+  })()`);
+  const players = `[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Players")?.click()`;
+  try {
+    await page.evaluate(`w3.editors.open("map/war3map.w3i.json")`);
+    await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
+    await page.evaluate(players);
+    await until("the players", async () => (await cells()) !== null, 5000);
+    const free = await cells();
+    if (!free.every((c) => c.input)) fail(`without a start location, Start X/Y can't be typed (control): ${JSON.stringify(free)}`);
+    // Player 1's start location, as the terrain editor places it.
+    const doc = JSON.parse(before);
+    doc.units.push({ ...doc.units[0], id: "sloc", player: 0, position: [128, -256, 0], angle: 4.712389 });
+    await page.evaluate(`(async () => w3.workspace.writeText(${JSON.stringify(units)}, ${JSON.stringify(JSON.stringify(doc))}))()`);
+    await until("the start location to be read", async () => {
+      await page.evaluate(players);
+      const now = await cells();
+      return now !== null && now[0].text === "128";
+    }, 10000).catch(() => {});
+    const followed = await cells();
+    if (followed?.some((c) => c.input) || followed?.[0].text !== "128" || followed?.[1].text !== "-256") fail(`with a start location, Start X/Y are still typed, or don't show it: ${JSON.stringify(followed)}`);
+  } finally {
+    await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(units)}, ${JSON.stringify(before)}); await w3.editors.closeAll(); })()`);
+  }
+}
+
 /** Tabs that change while an editor is opened or closed (the user, a restore, a tool): the editor
  *  service keeps one tab per file, closes the right one, and an editor whose tab went while it
  *  loaded is disposed. Through the real EditorService, its waits held open from outside. */
@@ -2614,7 +2684,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, objectsWhileOpening, heightsLimits, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, objectsWhileOpening, heightsLimits, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2689,6 +2759,7 @@ async function run() {
     }
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
+    await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
     await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
@@ -2702,6 +2773,7 @@ async function run() {
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
+    await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
     await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
     found.push(...problems(page.events));

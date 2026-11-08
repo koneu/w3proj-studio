@@ -258,6 +258,8 @@ export interface TerrainOccupancy {
   fits(kind: string, id: string, x: number, y: number, angle: number): Promise<boolean>;
   /** Marks the footprint as taken (for several placements in one go). */
   mark(kind: string, id: string, x: number, y: number, angle: number): Promise<void>;
+  /** A copy as it is now: marks on it stay in it (a dry run that must see its own objects). */
+  scratch(): TerrainOccupancy;
 }
 
 /** "w3.triggers", provided by the Trigger Editor: kinds of triggers that

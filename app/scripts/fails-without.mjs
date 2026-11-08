@@ -10,6 +10,8 @@
 //   --base REF     what "without the fix" is (default: dev)
 //   --run CMD      the command to run instead of `npm test -- <test file>`, e.g. a Rust test:
 //                  --run "cargo test -p w3proj-studio --lib an_unreadable_subfolder"
+//   --keep-rust-tests  for Rust files whose tests are in the file itself (`#[cfg(test)] mod tests` at its end):
+//                  the code before that comes from the base, the tests stay the new ones
 //
 // Exit 0 only for pass-then-fail; 3 when the test without the fix merely doesn't build (weak evidence). The files are put back on every way out (also Ctrl+C); a file that differed
 // from the base before the run is exactly as it was afterwards. Paths are relative to where it's run.
@@ -22,11 +24,12 @@ import { fileURLToPath } from "node:url";
 const app = fileURLToPath(new URL("..", import.meta.url));
 
 const argv = process.argv.slice(2);
-let base = "dev", run = null;
+let base = "dev", run = null, keepRustTests = false;
 const files = [];
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--base") base = argv[++i];
   else if (argv[i] === "--run") run = argv[++i];
+  else if (argv[i] === "--keep-rust-tests") keepRustTests = true;
   else files.push(argv[i]);
 }
 const [test, ...sources] = files;
@@ -59,6 +62,16 @@ for (const p of paths) {
   const rel = relative(top, p).replaceAll("\\", "/");
   const r = spawnSync("git", ["show", `${base}:${rel}`], { cwd: top, maxBuffer: 1 << 28 });
   atBase.set(p, r.status === 0 ? r.stdout : null);
+}
+// The base's code with the file's own tests as they are now.
+if (keepRustTests) {
+  const TESTS = /^#\[cfg\(test\)\]\s*\nmod tests\b/m;
+  for (const p of paths.filter((p) => p.endsWith(".rs"))) {
+    const old = atBase.get(p)?.toString("utf8"), cur = now.get(p)?.toString("utf8");
+    const [o, c] = [old?.search(TESTS) ?? -1, cur?.search(TESTS) ?? -1];
+    if (o < 0 || c < 0) { console.error(`${relative(process.cwd(), p)}: no "#[cfg(test)] mod tests" ${c < 0 ? "now" : `on ${base}`} to keep the tests of`); process.exit(2); }
+    atBase.set(p, Buffer.from(old.slice(0, o) + cur.slice(c), "utf8"));
+  }
 }
 const same = paths.filter((p) => (now.get(p) === null && atBase.get(p) === null) || (now.get(p) !== null && atBase.get(p) !== null && now.get(p).equals(atBase.get(p))));
 if (same.length === paths.length) {

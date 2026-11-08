@@ -126,8 +126,10 @@ export async function deriveFromProject(w3: W3Api, opts: {
   const path = opts.terrainPath;
   const now = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
   const [dooFile, unitsFile, objects] = await Promise.all([
-    loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null),
-    loadPlacedFile(w3, "war3mapUnits.doo", "units").catch(() => null),
+    // Absent is null; a file that's there but can't be read fails the rebuild, rather than writing a pathing map
+    // without its doodads (or icons without its units) over a good one.
+    loadPlacedFile(w3, "war3map.doo", "doodads"),
+    loadPlacedFile(w3, "war3mapUnits.doo", "units"),
     opts.objects(),
   ]);
   const doodads = dooFile?.list ?? [];

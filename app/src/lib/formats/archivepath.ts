@@ -32,7 +32,7 @@ const BOM = String.fromCharCode(0xfeff);
 
 /** Project path below the map folder → archive name. */
 export function toArchiveName(projectPath: string): string {
-  // Nothing escaped, no surrogate (which the UTF-8 round trip below would replace) and no U+FEFF (which
+  // Nothing escaped, no surrogate (a lone one the UTF-8 round trip below replaces by U+FFFD) and no U+FEFF (which
   // its decoder drops at the start of a component): the name is the path with "\" (most paths, and
   // the Problems checks turn thousands per run).
   if (!projectPath.includes("%") && !/[\uD800-\uDFFF]/.test(projectPath) && !projectPath.includes(BOM)) return projectPath.split("/").join("\\");
@@ -41,8 +41,11 @@ export function toArchiveName(projectPath: string): string {
     for (let i = 0; i < part.length;) {
       const hex = part[i] === "%" ? part.slice(i + 1, i + 3) : "";
       if (/^[0-9a-fA-F]{2}$/.test(hex)) { bytes.push(parseInt(hex, 16)); i += 3; continue; }
-      bytes.push(...new TextEncoder().encode(part[i]));
-      i++;
+      // A whole character: one outside the Basic Multilingual Plane is two UTF-16 units, its four UTF-8
+      // bytes (as the packer writes it) only when encoded together.
+      const c = String.fromCodePoint(part.codePointAt(i)!);
+      bytes.push(...new TextEncoder().encode(c));
+      i += c.length;
     }
     return new TextDecoder().decode(new Uint8Array(bytes));
   }).join("\\");

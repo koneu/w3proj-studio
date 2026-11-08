@@ -1,7 +1,8 @@
 //! "Try to set up for …": adds this app's MCP server to an AI client's own configuration.
 //! The places are where a standard installation keeps it, so this can fail, and it must fail
-//! without damage: nothing is written for a client that isn't found or to a file that isn't plain
-//! JSON, and the previous file stays next to it as a backup.
+//! without damage: nothing is written for a client that isn't found or to a file that isn't JSON
+//! (comments and trailing commas, as the clients allow, are read, and kept when writing), and the
+//! previous file stays next to it as a backup.
 
 use std::path::{Path, PathBuf};
 
@@ -97,20 +98,78 @@ fn entry(client: &Client, bridge: &str) -> Value {
     }
 }
 
+/// JSON with comments (`//`, `/* */`) and trailing commas, as VS Code, Claude Desktop and Cursor read their
+/// settings, turned into plain JSON of the same length: comments and trailing commas become spaces (line
+/// breaks stay), so a place in one is the same place in the other. Also says, per byte, which are in a comment.
+fn blank_jsonc(text: &str) -> (String, Vec<bool>) {
+    let b = text.as_bytes();
+    let mut out = b.to_vec();
+    let mut comment = vec![false; b.len()];
+    let (mut i, mut in_string, mut comma) = (0, false, None::<usize>);
+    while i < b.len() {
+        let c = b[i];
+        if in_string {
+            if c == b'\\' {
+                i += 1;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        let block = c == b'/' && b.get(i + 1) == Some(&b'*');
+        if c == b'/' && (block || b.get(i + 1) == Some(&b'/')) {
+            let end = if block {
+                text[i + 2..].find("*/").map_or(b.len(), |e| i + 2 + e + 2)
+            } else {
+                text[i..].find('\n').map_or(b.len(), |e| i + e)
+            };
+            for k in i..end {
+                comment[k] = true;
+                if b[k] != b'\n' && b[k] != b'\r' {
+                    out[k] = b' ';
+                }
+            }
+            i = end;
+            continue;
+        }
+        match c {
+            b'"' => in_string = true,
+            b',' => {
+                comma = Some(i);
+                i += 1;
+                continue;
+            }
+            b'}' | b']' => {
+                if let Some(at) = comma {
+                    out[at] = b' ';
+                }
+            }
+            _ => {}
+        }
+        if !c.is_ascii_whitespace() {
+            comma = None;
+        }
+        i += 1;
+    }
+    // Only ASCII bytes were replaced, and only whole characters' bytes (comments end at ASCII), so it's still UTF-8.
+    (String::from_utf8(out).unwrap_or_default(), comment)
+}
+
 fn parse(text: &str, file: &Path) -> Result<Map<String, Value>, String> {
-    let text = text.trim_start_matches('\u{feff}');
-    if text.trim().is_empty() {
+    let (plain, _) = blank_jsonc(text.trim_start_matches('\u{feff}'));
+    if plain.trim().is_empty() {
         return Ok(Map::new());
     }
-    match serde_json::from_str(text) {
+    match serde_json::from_str(&plain) {
         Ok(Value::Object(root)) => Ok(root),
         Ok(_) => Err(format!("{} doesn't hold a JSON object. It was left as it is.", file.display())),
-        // Comments, trailing commas: writing it back would lose them.
-        Err(e) => Err(format!("{} isn't plain JSON ({e}). It was left as it is.", file.display())),
+        Err(e) => Err(format!("{} isn't valid JSON ({e}). It was left as it is.", file.display())),
     }
 }
 
-/// The file with our server in it; None when it already is.
+/// The file with our server in it; None when it already is. A file with comments or trailing commas is
+/// changed only where the server goes, so they stay; a plain one is written out again.
 fn merged(text: &str, file: &Path, key: &str, server: Value) -> Result<Option<String>, String> {
     let mut root = parse(text, file)?;
     let servers = root.entry(key).or_insert_with(|| json!({}));
@@ -120,8 +179,172 @@ fn merged(text: &str, file: &Path, key: &str, server: Value) -> Result<Option<St
     if servers.get(SERVER) == Some(&server) {
         return Ok(None);
     }
-    servers.insert(SERVER.into(), server);
-    serde_json::to_string_pretty(&root).map(|s| Some(s + "\n")).map_err(|e| e.to_string())
+    servers.insert(SERVER.into(), server.clone());
+    let body = text.trim_start_matches('\u{feff}');
+    if blank_jsonc(body).0 == body {
+        return serde_json::to_string_pretty(&root).map(|s| Some(s + "\n")).map_err(|e| e.to_string());
+    }
+    // Checked by reading it back: whatever went wrong, the file is left as it was and the user told what to add.
+    let edited = edit_jsonc(text, key, &server).filter(|t| parse(t, file).ok().as_ref() == Some(&root));
+    match edited {
+        Some(t) => Ok(Some(t)),
+        None => {
+            let by_hand = serde_json::to_string_pretty(&json!({ SERVER: server })).unwrap_or_default();
+            Err(format!(
+                "{} has comments, and the server couldn't be added without losing them. It was left as it is. Add this to \"{key}\" in it by hand:\n{by_hand}",
+                file.display()
+            ))
+        }
+    }
+}
+
+/// A member of an object in plain JSON: where its key starts, and its value's span.
+struct Member {
+    key: String,
+    key_start: usize,
+    value: (usize, usize),
+}
+
+fn skip_ws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+/// The end of the value starting at `i`, in JSON already known to be valid.
+fn value_end(b: &[u8], mut i: usize) -> usize {
+    match b.get(i) {
+        Some(b'"') => {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                i += if b[i] == b'\\' { 2 } else { 1 };
+            }
+            i + 1
+        }
+        Some(b'{' | b'[') => {
+            let mut depth = 0;
+            while i < b.len() {
+                match b[i] {
+                    b'"' => {
+                        i = value_end(b, i);
+                        continue;
+                    }
+                    b'{' | b'[' => depth += 1,
+                    b'}' | b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return i + 1;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            i
+        }
+        _ => {
+            while i < b.len() && !matches!(b[i], b',' | b'}' | b']') && !b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            i
+        }
+    }
+}
+
+/// The members of the object whose `{` is at `open`, and where its `}` is.
+fn members(plain: &str, open: usize) -> Option<(Vec<Member>, usize)> {
+    let b = plain.as_bytes();
+    let mut list = Vec::new();
+    let mut i = skip_ws(b, open + 1);
+    while b.get(i) == Some(&b'"') {
+        let key_end = value_end(b, i);
+        let key = serde_json::from_str::<String>(plain.get(i..key_end)?).ok()?;
+        let colon = skip_ws(b, key_end);
+        if b.get(colon) != Some(&b':') {
+            return None;
+        }
+        let start = skip_ws(b, colon + 1);
+        let end = value_end(b, start);
+        list.push(Member { key, key_start: i, value: (start, end) });
+        i = skip_ws(b, end);
+        if b.get(i) == Some(&b',') {
+            i = skip_ws(b, i + 1);
+        }
+    }
+    (b.get(i) == Some(&b'}')).then_some((list, i))
+}
+
+/// The spaces and tabs a line starts with, for the line `at` is on.
+fn indent_at(text: &str, at: usize) -> &str {
+    let start = text[..at].rfind('\n').map_or(0, |n| n + 1);
+    let len = text[start..].bytes().take_while(|c| *c == b' ' || *c == b'\t').count();
+    &text[start..start + len]
+}
+
+/// The text with our server put in by inserting or replacing only its own part: everything else, comments
+/// and trailing commas included, stays as it was. None where the file's shape isn't one this knows.
+fn edit_jsonc(text: &str, key: &str, server: &Value) -> Option<String> {
+    let (plain, comment) = blank_jsonc(text);
+    let b = plain.as_bytes();
+    let bom = if text.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+    let open = skip_ws(b, bom);
+    // Line breaks as the file has them.
+    let br = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    // A value as pretty JSON whose lines after the first start with `indent`.
+    let rendered = |value: &Value, indent: &str| serde_json::to_string_pretty(value).unwrap_or_default().replace('\n', &format!("{br}{indent}"));
+    // Nothing but comments: the object goes after them.
+    if open == b.len() {
+        return Some(format!("{}{br}{}{br}", text.trim_end(), rendered(&json!({ key: { SERVER: server } }), "")));
+    }
+    if b[open] != b'{' {
+        return None;
+    }
+    let (list, close) = members(&plain, open)?;
+    let (target_open, name, value) = match list.iter().find(|m| m.key == key) {
+        Some(m) if b.get(m.value.0) == Some(&b'{') => {
+            let (inner, _) = members(&plain, m.value.0)?;
+            if let Some(own) = inner.iter().find(|s| s.key == SERVER) {
+                let indent = indent_at(text, own.key_start);
+                return Some(format!("{}{}{}", &text[..own.value.0], rendered(server, indent), &text[own.value.1..]));
+            }
+            (m.value.0, SERVER, server.clone())
+        }
+        Some(_) => return None,
+        None => (open, key, json!({ SERVER: server })),
+    };
+    let (list, close) = if target_open == open { (list, close) } else { members(&plain, target_open)? };
+    let name = serde_json::to_string(name).ok()?;
+    // The end of the line `from` is on, when only comments (and a trailing comma) follow there: what's
+    // inserted goes on a line of its own after it, so those stay on their line.
+    let line_end = |from: usize| text[from..].find('\n').map(|n| from + n).filter(|&nl| nl < close && !comment[nl] && plain[from..nl].trim().is_empty());
+    let Some(last) = list.last() else {
+        let outer = indent_at(text, target_open);
+        let indent = format!("{outer}  ");
+        let member = format!("{name}: {}", rendered(&value, &indent));
+        let after = target_open + 1;
+        if let Some(nl) = line_end(after) {
+            let at = if text.as_bytes()[nl - 1] == b'\r' { nl - 1 } else { nl };
+            return Some(format!("{}{}{indent}{member}{}", &text[..at], &text[at..=nl], &text[at..]));
+        }
+        return Some(format!("{}{br}{indent}{member}{br}{outer}{}", &text[..after], &text[after..]));
+    };
+    let end = last.value.1;
+    // An object written on one line stays on one.
+    if !text[target_open..end].contains('\n') {
+        return Some(format!("{}, {name}: {}{}", &text[..end], serde_json::to_string(&value).ok()?, &text[end..]));
+    }
+    let indent = indent_at(text, last.key_start).to_string();
+    let member = format!("{name}: {}", rendered(&value, &indent));
+    if let Some(nl) = line_end(end) {
+        let trailing = text.as_bytes()[end..nl].iter().enumerate().any(|(k, c)| *c == b',' && !comment[end + k]);
+        let at = if text.as_bytes()[nl - 1] == b'\r' { nl - 1 } else { nl };
+        let eol = &text[at..=nl];
+        // The file's own style: with a trailing comma after its last member, ours gets one too.
+        let (comma, after) = if trailing { ("", ",") } else { (",", "") };
+        return Some(format!("{}{comma}{}{eol}{indent}{member}{after}{}", &text[..end], &text[end..at], &text[at..]));
+    }
+    Some(format!("{},{br}{indent}{member}{}", &text[..end], &text[end..]))
 }
 
 /// Replaces the file in one step, with a backup first: clients may read or write it at any time.
@@ -317,12 +540,105 @@ mod tests {
     fn files_it_cant_understand_are_left_alone() {
         let home = Home::new();
         let c = home.client("vscode");
-        for (text, why) in [("// comment\n{}", "plain JSON"), ("[1]", "JSON object"), (r#"{"servers":[]}"#, "isn't an object"), ("{ broken", "plain JSON")] {
+        for (text, why) in [("// comment\n[1]", "JSON object"), ("[1]", "JSON object"), (r#"{"servers":[]}"#, "isn't an object"), ("{ broken", "valid JSON"), ("{ /* open", "valid JSON")] {
             home.write(&c, text);
             assert!(set_up(&c, "x").unwrap_err().contains(why), "{text}");
             assert_eq!(std::fs::read_to_string(&c.config).unwrap(), text);
         }
         assert_eq!(std::fs::read_dir(c.config.parent().unwrap()).unwrap().count(), 1, "no backup, no temp file");
+    }
+
+    /// What a file says once comments and trailing commas are taken out, through the code's own reading.
+    fn jsonc_of(path: &Path) -> Value {
+        Value::Object(parse(&std::fs::read_to_string(path).unwrap(), path).unwrap())
+    }
+
+    /// Sets up `client` in a file holding `before`; gives the text written, after checking that every comment of
+    /// `before` is still in it, in order, and that it reads as `before` plus the server.
+    fn set_up_keeping(home: &Home, id: &str, before: &str, comments: &[&str]) -> String {
+        let c = home.client(id);
+        home.write(&c, before);
+        let done = set_up(&c, "bridge.exe").unwrap_or_else(|e| panic!("refused: {e}"));
+        assert!(done.changed);
+        assert_eq!(std::fs::read_to_string(done.backup.unwrap()).unwrap(), before);
+        let after = std::fs::read_to_string(&c.config).unwrap();
+        let mut rest = after.as_str();
+        for piece in comments {
+            assert!(before.contains(piece), "{piece:?} isn't in the file to begin with");
+            let at = rest.find(piece).unwrap_or_else(|| panic!("lost {piece:?}:\n{after}"));
+            rest = &rest[at + piece.len()..];
+        }
+        let mut want = Value::Object(parse(before, &c.config).unwrap());
+        want.as_object_mut().unwrap().entry(c.key).or_insert_with(|| json!({}))[SERVER] = entry(&c, "bridge.exe");
+        assert_eq!(jsonc_of(&c.config), want, "{after}");
+        after
+    }
+
+    #[test]
+    fn comments_and_trailing_commas_stay() {
+        let home = Home::new();
+        // VS Code: comments around and in its list, a trailing comma after the last server.
+        let vscode = "// My servers\n{\n  /* the list */\n  \"servers\": {\n    \"other\": { \"command\": \"x\" }, // keep me\n  },\n  \"inputs\": [],\n}\n";
+        let after = set_up_keeping(&home, "vscode", vscode, &["// My servers\n{\n  /* the list */\n", "}, // keep me\n"]);
+        assert!(after.contains("// keep me\n    \"w3proj\": {"), "after the last server's line, its comment with it:\n{after}");
+        // Claude Desktop: no list yet; line ends as Windows writes them.
+        let after = set_up_keeping(&home, "claudeDesktop", "{\r\n  // theme\r\n  \"theme\": \"dark\"\r\n}\r\n", &["{\r\n  // theme\r\n"]);
+        assert_eq!(after.matches('\n').count(), after.matches("\r\n").count(), "{after:?}");
+        // An empty list with a comment in it, a list on one line, a file of comments only, a URL in a string.
+        set_up_keeping(&home, "cursor", "{\n  \"mcpServers\": { // none yet\n  }\n}\n", &["{ // none yet\n"]);
+        set_up_keeping(&home, "windsurf", "{ \"a\": \"http://x/*y*/\", \"mcpServers\": { \"o\": {} } } // end\n", &["} } // end\n"]);
+        set_up_keeping(&home, "claudeCode", "// nothing here yet\n", &["// nothing here yet\n"]);
+    }
+
+    #[test]
+    fn our_entry_in_a_file_with_comments_is_replaced_in_place() {
+        let home = Home::new();
+        let c = home.client("cursor");
+        let before = "{\n  // mine\n  \"mcpServers\": {\n    \"w3proj\": { \"command\": \"old.exe\", \"args\": [\"mcp\"] }, // ours\n    \"b\": {}\n  }\n}\n";
+        home.write(&c, before);
+        assert!(set_up(&c, "new.exe").unwrap().changed);
+        let after = std::fs::read_to_string(&c.config).unwrap();
+        assert!(after.contains("// mine") && after.contains("}, // ours\n    \"b\": {}"), "{after}");
+        assert_eq!(jsonc_of(&c.config)["mcpServers"]["w3proj"]["command"], "new.exe");
+        assert!(!set_up(&c, "new.exe").unwrap().changed, "a second try changes nothing");
+        assert!(info(&c).configured, "the status reads a file with comments");
+    }
+
+    #[test]
+    fn a_file_with_comments_that_cant_be_edited_safely_is_left_with_what_to_add() {
+        let home = Home::new();
+        let c = home.client("vscode");
+        // The same key twice: the last one counts, so an edit of the first can't be shown to work.
+        let before = "// two lists\n{ \"servers\": {}, \"servers\": { \"x\": {} } }\n";
+        home.write(&c, before);
+        let why = set_up(&c, "bridge.exe").unwrap_err();
+        assert!(why.contains("has comments") && why.contains("by hand") && why.contains("\"w3proj\"") && why.contains("bridge.exe"), "{why}");
+        assert_eq!(std::fs::read_to_string(&c.config).unwrap(), before);
+        assert_eq!(std::fs::read_dir(c.config.parent().unwrap()).unwrap().count(), 1, "no backup, no temp file");
+    }
+
+    #[test]
+    fn random_text_never_panics_and_what_is_written_has_the_server() {
+        // Fixed seed; pieces of JSON with comments, put together at random, most of them broken.
+        let pieces = ["{", "}", "[", "]", ",", ":", "\"mcpServers\"", "\"w3proj\"", "\"a\"", "1", "\"/*\"", "// c\n", "/* c */", "/*", "\n", "\r\n", " ", "\\", "\"", "\u{feff}", "é"];
+        let mut s: u64 = 20261108;
+        let file = Path::new("x.json");
+        let server = json!({ "command": "b" });
+        let mut edited = 0;
+        for _ in 0..20000 {
+            let mut text = String::new();
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            for _ in 0..(s >> 60) + 2 {
+                s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                text.push_str(pieces[(s >> 33) as usize % pieces.len()]);
+            }
+            if let Ok(Some(out)) = merged(&text, file, "mcpServers", server.clone()) {
+                assert_eq!(parse(&out, file).unwrap()["mcpServers"][SERVER], server, "{text:?} gave {out:?}");
+                edited += usize::from(text.contains("//") || text.contains("/* c */"));
+            }
+        }
+        // Control: files with comments were edited, so the comparison reached the editing.
+        assert!(edited > 100, "only {edited} files with comments were edited");
     }
 
     #[test]

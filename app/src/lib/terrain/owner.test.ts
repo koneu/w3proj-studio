@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hasPlayerUnits, joinOwners, ownerOf, placedText, splitOwners } from "./owner";
+import { hasPlayerUnits, joinOwners, meleeFlagsAfter, ownerOf, placedText, splitOwners } from "./owner";
 
 const UPROOTED = 0x10001;
 
@@ -49,4 +49,11 @@ test("a unit of a player counts; start locations, items and neutrals don't", () 
   assert.equal(hasPlayerUnits([{ id: "sloc", player: 0 }, { id: "ratf", player: 0 }], item), false);
   assert.equal(hasPlayerUnits([{ id: "nogr", player: 24 }, { id: "ngol", player: 27 }], item), false);
   assert.equal(hasPlayerUnits([], item), false);
+});
+
+test("a player's unit takes Melee off the map's flags, and only that flag; nothing puts it back", () => {
+  const item = (id: string) => id === "ratf";
+  assert.equal(meleeFlagsAfter(0x9c14, [{ id: "hfoo", player: 0 }], item), 0x9c10);
+  assert.equal(meleeFlagsAfter(0x9c14, [{ id: "sloc", player: 0 }, { id: "ratf", player: 27 }], item), 0x9c14);
+  assert.equal(meleeFlagsAfter(0x9c10, [], item), 0x9c10);
 });
