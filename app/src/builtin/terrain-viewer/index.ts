@@ -48,6 +48,7 @@ import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
+import { askReplace, replaceCorners, replaceTitle, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
@@ -1109,6 +1110,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       refuseLostView(path);
       if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
+    // Replace Cliff Type, Tiles, Doodads, Units: the dialog, or `req` as given (scripts and tests). How many changed.
+    ...([["w3.terrain.replaceCliffType", "cliffs"], ["w3.terrain.replaceTiles", "tiles"], ["w3.terrain.replaceDoodads", "doodads"], ["w3.terrain.replaceUnits", "units"]] as const)
+      .map(([id, kind]) => w3.commands.register(id, async (given?: ReplaceRequest) => {
+        const path = w3.editors.activePath();
+        const at = path && toolGroups.replaceTypes.has(path) ? path : projectTerrain(w3);
+        const replacer = at ? toolGroups.replaceTypes.get(at) : undefined;
+        if (!replacer || !at) throw new Error("Open the terrain editor first.");
+        refuseLostView(at);
+        let req: ReplaceRequest | null = given ?? null;
+        if (!req) {
+          const choices = await replacer.choices(kind);
+          if (!choices.from.length) {
+            void w3.window.showInfo(kind === "doodads" ? "This map has no doodads to replace." : kind === "units" ? "This map has no units to replace." : "There is nothing to replace.");
+            return 0;
+          }
+          req = await askReplace(kind, choices, kind === "doodads" || kind === "units" ? (from) => replacer.pickType!(kind, from) : undefined);
+          if (!req) return 0;
+        }
+        // The editor may have closed while the dialog was open.
+        if (toolGroups.replaceTypes.get(at) !== replacer) throw new Error("The terrain editor closed meanwhile; nothing was replaced.");
+        const n = await replacer.run(kind, req);
+        if (!given) void w3.window.showInfo(n ? `${replaceTitle(kind)}: ${n.toLocaleString()} ${kind === "tiles" || kind === "cliffs" ? "corners" : kind} changed. Undo takes it back.` : "Nothing to replace.");
+        return n;
+      })),
     w3.commands.register("w3.terrain.removeUnusedTiles", () => {
       const path = w3.editors.activePath();
       const editor = editorOf(path) ?? ownEditor();
@@ -2239,6 +2264,31 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           moveEdits(entries, before);
           refreshGroupRings();
         };
+        /** Placed objects become other types where they stand (`swaps`: old id → new id), as one undo step; with
+         *  `newVariations` each takes a random variation of its new type. How many changed (0 when the view was lost). */
+        const replaceEntries = async (entries: Placed[], swaps: Record<string, string>, newVariations = false): Promise<number> => {
+          const swapped = entries.filter((p) => swaps[p.id] !== undefined && swaps[p.id] !== p.id);
+          if (!swapped.length) return 0;
+          for (const id of new Set(swapped.map((p) => swaps[p.id]))) await loadCells(id).catch(() => { /* stays free */ });
+          if (refuseLost()) return 0;
+          type Look = Props & { id: string; skinId?: string };
+          const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
+          const before = swapped.map(look);
+          const numVar = (id: string) => handle.objects.type(id)?.numVar ?? 1;
+          replacePlaced(swapped as Parameters<typeof replacePlaced>[0], swaps, null, numVar);
+          for (const p of swapped) {
+            if (newVariations && p.variation !== undefined) p.variation = Math.floor(Math.random() * numVar(p.id));
+            // A building of another size has another spot on the grid.
+            const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
+            if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, heightAt(terrain, x, y)]; repositioned.add(p); }
+          }
+          const after = swapped.map(look);
+          const put = (v: Look[]) => { swapped.forEach((p, i) => Object.assign(p, structuredClone(v[i]))); };
+          pushEdit({ undo: () => put(before), redo: () => put(after), terrain: false, objects: true });
+          objectsTouched = true;
+          await rebuildObjects();
+          return swapped.length;
+        };
         /** The selection becomes another type where it stands, as one undo step. */
         const replaceSelected = async () => {
           const entries = selectedEntries().filter((p) => p.id !== "sloc");
@@ -2250,22 +2300,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!chosen || refuseLost()) return;
           const swapped = entries.filter((p) => replaceableBy(kinds.get(p) as string, chosen.kind) && p.id !== chosen.id);
           if (!swapped.length) return;
-          await loadCells(chosen.id).catch(() => { /* stays free */ });
-          if (refuseLost()) return;
-          type Look = Props & { id: string; skinId?: string };
-          const look = (p: Placed): Look => ({ ...snapshot(p), id: p.id, ...("skinId" in p ? { skinId: (p as { skinId?: string }).skinId } : {}) });
-          const before = swapped.map(look);
-          replacePlaced(swapped as Parameters<typeof replacePlaced>[0], Object.fromEntries(swapped.map((p) => [p.id, chosen.id])), null, (id) => handle.objects.type(id)?.numVar ?? 1);
-          for (const p of swapped) {
-            // A building of another size has another spot on the grid.
-            const [x, y] = onGrid(p.id, p.position[0], p.position[1]);
-            if (x !== p.position[0] || y !== p.position[1]) { p.position = [x, y, heightAt(terrain, x, y)]; repositioned.add(p); }
-          }
-          const after = swapped.map(look);
-          const put = (v: Look[]) => { swapped.forEach((p, i) => Object.assign(p, structuredClone(v[i]))); };
-          pushEdit({ undo: () => put(before), redo: () => put(after), terrain: false, objects: true });
-          objectsTouched = true;
-          await rebuildObjects();
+          if (!(await replaceEntries(swapped, Object.fromEntries(swapped.map((p) => [p.id, chosen.id]))))) return;
           selectEntries(entries);
           const left = entries.length - swapped.length;
           if (left) void w3.window.showInfo(`Replaced ${swapped.length}. The other ${left} can't become ${chosen.name}, or already are.`);
@@ -2362,6 +2397,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let areaPanel = false;
         /** Tile names by id, once read. */
         let tileNames: Promise<Map<string, string>> | null = null;
+        const readTileNames = () => (tileNames ??= w3.game.readText("TerrainArt\\Terrain.slk").then((text) => new Map(parseSlk(text).filter((r) => r.tileID).map((r) => [r.tileID, r.comment || r.tileID]))).catch(() => new Map<string, string>()));
         const replaceRow = (label: string, from: [string, string][], to: [string, string][], run: (from: string, to: string) => void | Promise<void>) => {
           const pick = (options: [string, string][]) => h("select", {}, ...options.map(([value, text]) => h("option", { value }, text)));
           const fromEl = pick(from), toEl = pick(to);
@@ -2375,8 +2411,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const a = terrainArea;
           if (!a) return;
           areaPanel = true;
-          tileNames ??= w3.game.readText("TerrainArt\\Terrain.slk").then((text) => new Map(parseSlk(text).filter((r) => r.tileID).map((r) => [r.tileID, r.comment || r.tileID]))).catch(() => new Map<string, string>());
-          const names = await tileNames, sets = await handle.tilesets().catch(() => []);
+          const names = await readTileNames(), sets = await handle.tilesets().catch(() => []);
           if (terrainArea !== a) return;
           const cliffGrounds = handle.cliffGroundTiles();
           const inArea: Corner[] = [];
@@ -3438,6 +3473,75 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return true;
         };
         toolGroups.resetVariations.set(doc.path, resetGround);
+        // ---- Replace Cliff Type, Tiles, Doodads, Units (commands; the dialog is in replace.ts) -------------------
+        const replaceTypes: ReplaceTypes = {
+          choices: async (kind) => {
+            const names = await readTileNames();
+            const tileLabel = (id: string) => `${names.get(id) ?? id} (${id})`;
+            if (kind === "tiles") {
+              const use = handle.groundTileUsage();
+              const own = (await handle.tilesets().catch(() => [])).find((s) => s.id === terrain.tileset)?.tiles ?? [];
+              const from = terrain.groundTiles.map((id, i) => ({ id, label: tileLabel(id), count: use[i] ?? 0 }));
+              return { from, to: [...from, ...own.filter((id) => !terrain.groundTiles.includes(id)).map((id) => ({ id, label: tileLabel(id), count: 0 }))], selected: 0 };
+            }
+            if (kind === "cliffs") {
+              const use = handle.groundTileUse();
+              const from = handle.cliffGroundTiles().map((g) => ({ id: g, label: `${tileLabel(g)} cliff`, count: use?.cliffs[terrain.groundTiles.indexOf(g)] ?? 0 }));
+              return { from, to: from, selected: 0 };
+            }
+            const { list, fits } = replacePool(kind);
+            const counts = new Map<string, number>();
+            for (const p of list) if (fits(p)) counts.set(p.id, (counts.get(p.id) ?? 0) + 1);
+            const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
+            const from = await Promise.all([...counts].map(async ([id, count]) => ({ id, label: `${(await objects?.name(id).catch(() => undefined)) ?? id} (${id})`, count })));
+            from.sort((a, b) => a.label.localeCompare(b.label));
+            return { from, to: from, selected: selectedEntries().filter((p) => list.includes(p) && fits(p)).length };
+          },
+          pickType: async (kind, from) => {
+            const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+            const fromKind = handle.objects.type(from)?.kind ?? (kind === "doodads" ? "w3d" : "w3u");
+            const chosen = await objects.pick(el, { title: `Replace ${from} with…`, kinds: kind === "units" ? ["w3u"] : replaceableKinds([fromKind]) });
+            keysToMap();
+            return chosen ? { id: chosen.id, label: `${chosen.name} (${chosen.id})` } : null;
+          },
+          run: async (kind, req) => {
+            if (!editable) throw new Error("This terrain is read-only.");
+            if (glDead) throw new Error(VIEW_LOST);
+            if (kind === "tiles" || kind === "cliffs") {
+              let from: number, to: number;
+              if (kind === "tiles") {
+                from = terrain.groundTiles.indexOf(req.from);
+                if (from < 0) throw new Error(`${req.from} isn't one of this map's ground tiles: ${terrain.groundTiles.join(", ")}.`);
+                const slot = await handle.ensureGroundTile(req.to);
+                if (slot === null) throw new Error("This map has 16 ground tiles, the most it can have: remove one first.");
+                to = slot;
+              } else {
+                const grounds = handle.cliffGroundTiles();
+                if (!grounds.length) throw new Error("The game's cliff types aren't read yet. Try again in a moment.");
+                from = grounds.indexOf(req.from);
+                to = grounds.indexOf(req.to);
+                if (from < 0 || to < 0) throw new Error(`The map's cliff types are those of ${grounds.join(", ")}.`);
+              }
+              if (glDead) throw new Error(VIEW_LOST);
+              const log = new CornerUndo();
+              const changed = replaceCorners(terrain, kind === "tiles" ? "texture" : "cliffTexture", from, to, !!req.swap, log);
+              if (!changed.length) return 0;
+              commitTerrain({ ...log.step(terrain), cliffs: true });
+              return changed.length;
+            }
+            const { list, fits } = replacePool(kind);
+            const type = handle.objects.type(req.to), was = handle.objects.type(req.from);
+            if (!type) throw new Error(`"${req.to}" isn't an object type here.`);
+            if (!fits({ id: req.to } as Placed) || (was && !replaceableBy(was.kind, type.kind))) throw new Error(`${req.from} can't become ${req.to}: ${kind === "units" ? "units stay units" : "doodads and destructables stay among them"}.`);
+            const pool = req.selectedOnly ? selectedEntries().filter((p) => list.includes(p)) : list;
+            return replaceEntries(pool.filter(fits), swapsOf(req), kind === "doodads" && !!req.resetVariations);
+          },
+        };
+        /** The placed objects a Replace command works on, and which of them it may change (units: not start locations or items). */
+        const replacePool = (kind: "doodads" | "units") => kind === "doodads"
+          ? { list: dooFile?.list ?? [], fits: (_p: Placed) => true }
+          : { list: unitsFile?.list ?? [], fits: (p: Placed) => p.id !== "sloc" && (handle.objects.type(p.id)?.kind ?? "w3u") === "w3u" };
+        toolGroups.replaceTypes.set(doc.path, replaceTypes);
         if (toolGroups.pendingLook) { const [px, py, pref] = toolGroups.pendingLook; toolGroups.pendingLook = null; requestAnimationFrame(() => look(px, py, pref)); }
         if (editable) queueMicrotask(syncGroups);
 
@@ -4084,6 +4188,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);
             if (toolGroups.heightCommands.get(doc.path) === heightCommands) toolGroups.heightCommands.delete(doc.path);
+            if (toolGroups.replaceTypes.get(doc.path) === replaceTypes) toolGroups.replaceTypes.delete(doc.path);
             clearTimeout(layerTimer);
             layerSeq++;
             for (const g of groupInsts.values()) g.dispose?.();

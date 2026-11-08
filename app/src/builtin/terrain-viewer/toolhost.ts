@@ -1,4 +1,5 @@
 import type { PlacedRef } from "./pickmatch";
+import type { ReplaceTypes } from "./replace";
 // The "w3.terrain" service: tool groups other extensions add to the terrain
 // editor (see extensions/services.ts). Open editors follow registrations.
 // Also picks a point on the map for other modules (trigger parameters).
@@ -50,6 +51,8 @@ export class TerrainToolRegistry implements TerrainService {
   readonly viewCommands = new Map<string, ViewCommands>();
   /** Set by each open terrain editor, by its file: Set Uniform Doodad Heights and Reset Fixed Object Heights. */
   readonly heightCommands = new Map<string, HeightCommands>();
+  /** Set by each open terrain editor, by its file: Replace Cliff Type, Tiles, Doodads and Units. */
+  readonly replaceTypes = new Map<string, ReplaceTypes>();
   /** A point to show once the terrain editor has opened. */
   pendingLook: [number, number, PlacedRef?] | null = null;
 
