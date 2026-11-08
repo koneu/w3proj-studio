@@ -1,5 +1,6 @@
 import { fogOf } from "../../lib/model/fog";
 import { worldSphere } from "../../lib/model/frustum";
+import { runLayerJobs } from "./layerjobs";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
@@ -3211,25 +3212,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const layerBusy = h("span.muted", { hidden: true }, "Working…");
         const refreshLayers = async () => {
           const seq = ++layerSeq;
-          if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); layerBusy.hidden = true; redraw(); return; }
-          const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
-          // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
-          const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
-          const show = () => {
-            if (seq !== layerSeq) return;
-            const rgba = composeLayers(parts);
-            if (rgba) renderer.setViewLayer(rgba, W, H); else renderer.setViewLayer(null);
-            redraw();
-          };
-          show();
-          const late: Promise<void>[] = [];
-          if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
-          if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
-          layerBusy.hidden = !late.length;
-          const settled = await Promise.allSettled(late);
-          if (seq === layerSeq) layerBusy.hidden = true;
-          const failed = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
-          if (failed && seq === layerSeq) w3.window.showError(`The view layers couldn't be drawn: ${(failed.reason as Error)?.message ?? failed.reason}`);
+          const latest = () => seq === layerSeq;
+          // A layer that throws at once (not by rejecting) still ends with the label hidden and its error shown.
+          const failed = await runLayerJobs(() => {
+            if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); redraw(); return []; }
+            const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
+            // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
+            const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
+            const show = () => {
+              if (!latest()) return;
+              const rgba = composeLayers(parts);
+              if (rgba) renderer.setViewLayer(rgba, W, H); else renderer.setViewLayer(null);
+              redraw();
+            };
+            show();
+            const late: Promise<void>[] = [];
+            if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
+            if (viewState.cameras) late.push(readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json").then((d) => { parts[2] = cameraColors(d?.cameras ?? [], W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            return late;
+          }, latest, (busy) => { layerBusy.hidden = !busy; });
+          if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
         };
         const refreshLayersSoon = () => {
           if (!viewState.naval && !viewState.heights && !viewState.cameras) return;
