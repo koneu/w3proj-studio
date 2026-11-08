@@ -49,7 +49,8 @@ export function facing(n: readonly number[], l: readonly number[], wrap: number)
 
 const glsl = (v: number) => v.toFixed(3);
 
-/** For fragment shaders: `toned(base, light)`, base an sRGB colour (a texture's), light the scene light on it, and
+/** For fragment shaders: `toned(base, light)`, base an sRGB colour (a texture's), light the scene light on it,
+ *  `tonedGlow(base, light, glow)` the same with a colour of its own added unlit (an HD emissive texture), and
  *  `facing(n, l)`, how much a surface of normal n gets of a light from l (as facing above). */
 export const TONE_FS = `uniform float uTone; uniform float uShadeWrap;
 float facing(vec3 n, vec3 l) {
@@ -61,15 +62,16 @@ vec3 linearToSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
 }
-vec3 toned(vec3 base, vec3 light) {
+vec3 tonedGlow(vec3 base, vec3 light, vec3 glow) {
   if (uTone > 1.5) {
-    vec3 x = srgbToLinear(clamp(base, 0.0, 1.0)) * max(light, vec3(0.0)) * ${HD_EXPOSURE.toFixed(3)};
+    vec3 x = (srgbToLinear(clamp(base, 0.0, 1.0)) * max(light, vec3(0.0)) + srgbToLinear(clamp(glow, 0.0, 1.0))) * ${HD_EXPOSURE.toFixed(3)};
     vec3 o = min((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3(1.0));
     return linearToSrgb(o + ${glsl(HD_SHOULDER.gain)} * pow(o, vec3(${glsl(HD_SHOULDER.power)})) * (1.0 - o));
   }
-  if (uTone > 0.5) return base * clamp(light, 0.0, 1.0);
-  return base * light;
-}`;
+  if (uTone > 0.5) return base * clamp(light, 0.0, 1.0) + glow;
+  return base * light + glow;
+}
+vec3 toned(vec3 base, vec3 light) { return tonedGlow(base, light, vec3(0.0)); }`;
 
 /** Sets a shader's tone, and how it shades for this light (shadeWrap). */
 export function setTone(gl: WebGL2RenderingContext, where: (name: string) => WebGLUniformLocation | null, tone: Tone | undefined, light?: SceneLight | null) {

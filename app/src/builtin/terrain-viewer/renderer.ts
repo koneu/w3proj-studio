@@ -164,10 +164,13 @@ export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & {
  * out a dark teal on every tileset measured (we-drive, game view on and off, 2026-11-08: Lordaeron 22, 54–61, 73;
  * Northrend 22, 48–52, 39–41; Barrens 25–26, 41–46, 42–44), Lordaeron Summer bluer, the one tileset with its own
  * water environment map (Environment\EnvironmentMap\LordaeronSummer\Water_IBL). A map's water tint takes that blue
- * away (03b_Water_Tint, red: 23, 50, 40) rather than showing its colour.
+ * away (03b_Water_Tint, red: 23, 50, 40) rather than showing its colour. Cityscape's water is blue (OrcX02_03's city
+ * pool in game view, 2026-11-09: 50, 61, 121).
  */
 export function hdWaterColor(tileset: string, tinted: boolean): [number, number, number] {
-  return tileset.toUpperCase() === "L" && !tinted ? [22 / 255, 57 / 255, 73 / 255] : [23 / 255, 47 / 255, 41 / 255];
+  if (tinted) return [23 / 255, 47 / 255, 41 / 255];
+  const own: Record<string, [number, number, number]> = { L: [22 / 255, 57 / 255, 73 / 255], Y: [50 / 255, 61 / 255, 121 / 255] };
+  return own[tileset.toUpperCase()] ?? [23 / 255, 47 / 255, 41 / 255];
 }
 
 /** The brightness HD water's ripple is measured against until the texture is known (Lordaeron's Water00). */

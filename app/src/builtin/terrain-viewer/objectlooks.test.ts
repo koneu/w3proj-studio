@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ObjectLoader, type Placed, type Skin } from "./objects";
+import { drawsParticles, ObjectLoader, type Placed, type Skin } from "./objects";
+import type { ParticleEmitter2, RibbonEmitter } from "../../lib/model/mdx";
 import { unitLooks, unitSwims } from "./objheights";
 import { standClock } from "../../lib/model/renderer";
 
@@ -65,6 +66,15 @@ test("a type of several variations whose numbered file isn't stored is drawn fro
   assert.equal(out.batches.length, 1);
   assert.notEqual(out.batches[0].gpu.model.name, "Placeholder", "the wall's model, not the checkered cube");
   assert.deepEqual(out.problems, []);
+});
+
+test("a Reforged model's empty placeholder emitters count as no effects, so the classic ones stand in", () => {
+  const emitter = (segmentAlpha: number[]) => ({ segmentAlpha }) as unknown as ParticleEmitter2;
+  // The HD Lordaeron brazier (LObr): two emitters, colours and alphas all 0, beside its PopcornFX fire.
+  assert.equal(drawsParticles({ particleEmitters2: [emitter([0, 0, 0]), emitter([0, 0, 0])], ribbons: [] }), false);
+  assert.equal(drawsParticles({ particleEmitters2: [emitter([0, 0, 0]), emitter([21, 78, 0])], ribbons: [] }), true);
+  assert.equal(drawsParticles({ particleEmitters2: [], ribbons: [{} as RibbonEmitter] }), true);
+  assert.equal(drawsParticles({ particleEmitters2: [], ribbons: [] }), false);
 });
 
 test("an uprooted Ancient stands in its Alternate look, a swimming unit in its Swim one", () => {

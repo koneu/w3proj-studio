@@ -131,6 +131,14 @@ export function createTexture(gl: WebGL2RenderingContext, image: DecodedImage, o
 /** The textures a model's drawing can touch. A Reforged layer also lists a normal map, and possibly
  *  emissive and other maps, which the shader here doesn't sample: of its slots, only the diffuse (0)
  *  and ORM (2) count. A texture anything else names, like a particle emitter, counts too. */
+/** An HD layer's emissive texture (its slot 3 of [diffuse, normal, ORM, emissive, team colour, environment]), drawn
+ *  as light of its own: the Ashenvale obelisk's red runes, the totem's lamp. Null for a classic layer. */
+export function emissiveSlot(model: Pick<Model, "textures">, layer: { textureIds: number[] }): number | null {
+  const id = layer.textureIds.length >= 4 ? layer.textureIds[3] : -1;
+  const tex = model.textures[id];
+  return tex && tex.replaceableId === 0 && tex.path ? id : null;
+}
+
 export function drawnTextures(model: Pick<Model, "textures" | "materials" | "particleEmitters2">): Set<number> {
   const unused = new Set<number>(), used = new Set<number>();
   for (const material of model.materials) for (const layer of material.layers) {
@@ -142,7 +150,7 @@ export function drawnTextures(model: Pick<Model, "textures" | "materials" | "par
       for (const id of track.values) used.add(id);
     }
     layer.slotTracks?.forEach((track, slot) => { if (track && slot !== 0 && slot !== 2) for (const id of track.values) unused.add(id); });
-    layer.textureIds.forEach((id, slot) => (slot === 0 || slot === 2 ? used : unused).add(id));
+    layer.textureIds.forEach((id, slot) => (slot === 0 || slot === 2 || (slot === 3 && emissiveSlot(model, layer) === id) ? used : unused).add(id));
   }
   for (const emitter of model.particleEmitters2) used.add(emitter.textureId);
   for (const id of used) unused.delete(id);

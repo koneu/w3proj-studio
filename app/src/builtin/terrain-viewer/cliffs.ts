@@ -11,6 +11,14 @@ import type { Mat4 } from "../../lib/model/renderer";
 import type { ModelRequest } from "./objects";
 import type { Terrain } from "../../lib/terrain/w3e";
 
+/** A Reforged cliff model's texture as drawn: its placeholders for the cliff type's HD set become that set
+ *  (TerrainArt\CityScape\City_Cliff1_Diffuse.blp). The Cliffs models name Doodads\Terrain\#ignore_Cliffs\Cliff1_…,
+ *  the City cliffs (CityCliffs) ReplaceableTextures\Cliff\Cliff1_…, a file the game doesn't have (drawn white
+ *  before: OrcX02_03's city walls). Other paths stay. */
+export function cliffRetexture(path: string, type: Pick<CliffType, "texDir" | "texFile">): string {
+  return path.replace(/^.*(?:#ignore_Cliffs|ReplaceableTextures[\\/]Cliff)[\\/]Cliff\d+_(\w+)\.\w+$/i, `${type.texDir}\\${type.texFile}_$1.blp`);
+}
+
 export interface CliffType {
   cliffID: string;
   cliffModelDir: string;
@@ -51,7 +59,7 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
     const key = `${path}|${texture}`;
     const req = byPath.get(key) ?? {
       path, replaceable: { 11: texture }, instances: [], tiles: [],
-      retexture: (p: string) => p.replace(/^.*#ignore_Cliffs[\\/]Cliff\d+_(\w+)\.\w+$/i, `${type.texDir}\\${type.texFile}_$1.blp`),
+      retexture: (p: string) => cliffRetexture(p, type),
     };
     req.instances.push({ world, team: 0 });
     req.tiles.push(...tiles);

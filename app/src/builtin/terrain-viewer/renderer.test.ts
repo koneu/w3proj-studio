@@ -81,6 +81,8 @@ test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-dri
   within(rgb(hdWaterColor("L", false)), [22, 54, 73], [23, 61, 73], "Lordaeron");
   within(rgb(hdWaterColor("N", false)), [22, 48, 39], [23, 52, 41], "Northrend");
   within(rgb(hdWaterColor("B", false)), [25, 41, 42], [26, 46, 44], "Barrens");
+  // OrcX02_03's city pool (Cityscape, game view, 2026-11-09): blue, not teal.
+  within(rgb(hdWaterColor("Y", false)), [50, 61, 121], [50, 61, 121], "Cityscape");
   // 03b_Water_Tint (red): the editor's HD water loses Lordaeron's blue instead of turning red.
   within(rgb(hdWaterColor("L", true)), [22, 50, 40], [23, 50, 40], "Lordaeron tinted");
 });

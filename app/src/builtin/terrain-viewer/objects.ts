@@ -4,7 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
-import { parseMdx } from "../../lib/model/mdx";
+import { parseMdx, type Model } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
@@ -198,6 +198,13 @@ export function modelPath(skin: Skin, variation: number): string {
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
 
+/** Whether a model's own particle effects show anything. Some Reforged models keep their classic emitters as empty
+ *  placeholders (the Lordaeron brazier LObr: colours and alphas all 0) next to their PopcornFX fire: those count as
+ *  none, so the classic model's emitters stand in as for the others. */
+export function drawsParticles(m: Pick<Model, "particleEmitters2" | "ribbons">): boolean {
+  return m.ribbons.length > 0 || m.particleEmitters2.some((e) => e.segmentAlpha.some((a) => a > 0));
+}
+
 /** The model to read when a variation's file isn't stored: the type's file without a number. The classic game
  *  keeps some types of several variations in one file (the City wall endcap YSw5: numVar 2, but only
  *  CityWallEndcap.mdx in War3.w3mod; the numbered files are Reforged's), which the World Editor's SD view shows. */
@@ -331,7 +338,7 @@ export class ObjectLoader {
    *  path, which keeps the classic models' scale and layout. */
   private effects(req: ModelRequest, gpu: ModelGpu): Promise<EffectSource | null> {
     const m = gpu.model;
-    if (m.particleEmitters2.length || m.ribbons.length) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
+    if (drawsParticles(m)) return Promise.resolve({ model: m, textures: gpu.textures, nodeWorld: gpu.nodeWorld, clock: gpu.poseClock, classic: false });
     if (!m.skipped.includes("CORN")) return Promise.resolve(null);
     const key = `${req.path.toLowerCase()}|${req.props ?? ""}`;
     let e = this.effectSources.get(key);
