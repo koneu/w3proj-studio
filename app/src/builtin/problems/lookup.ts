@@ -3,6 +3,7 @@
 
 import type { FileInfo, W3Api } from "../../extensions/api";
 import { toArchiveName } from "../../lib/formats/archivepath";
+import { findCampaign } from "./invalid";
 
 /** A path as the game looks it up: lower case, "\\", without art set or language folders
  *  (`_HD.w3mod\\`, `_Locales\\zhCN.w3mod\\`), which only choose the variant. */
@@ -31,17 +32,28 @@ export class FileLookup {
       }
     };
     add(w3.workspace.files());
-    // A campaign's chapter map also uses the campaign's imports.
-    const root = w3.workspace.project()?.root;
-    const campaign = root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
-    this.ready = campaign
-      ? w3.backend.invoke<FileInfo[]>("project_files", { root: campaign }).then(add, () => {})
-      : Promise.resolve();
+    // A campaign's chapter map also uses the campaign's imports. Only a folder that holds
+    // war3campaign.w3f is a campaign (as for its custom objects); one that is but whose files can't
+    // be listed makes the lookup fail, never pass for a campaign without files.
+    this.ready = (async () => {
+      const campaign = await findCampaign(w3);
+      if (campaign === undefined) return;
+      let list: FileInfo[];
+      try { list = await w3.backend.invoke<FileInfo[]>("project_files", { root: campaign }); } catch (e) {
+        throw new Error(`The campaign's files (${campaign}) couldn't be listed (${e instanceof Error ? e.message : String(e)}), so files of the chapter map that may be among them can't be checked.`);
+      }
+      add(list);
+    })();
+    // The checks that ask report the failure; when none asks, it isn't an unhandled rejection.
+    this.ready.catch(() => {});
   }
-  /** Once the map's files are all known (a chapter map's campaign is listed in the background). */
+  /** Once the map's files are all known (a chapter map's campaign is listed in the background).
+   *  Rejects, saying why, if the campaign's files can't be listed. */
   whenReady(): Promise<void> {
     return this.ready;
   }
+  /** Whether the map (or a chapter map's campaign) has the file: only once whenReady() resolved,
+   *  before that a campaign's files are missing from it. */
   inMap(path: string) {
     return this.files.has(plainPath(path));
   }

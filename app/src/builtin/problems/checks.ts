@@ -234,6 +234,8 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         const out: Problem[] = [];
         const lists = [["map/war3map.imp.json", "war3mapImported"], ["map/war3campaign.imp.json", "war3campImported"]] as const;
         await s.prefetch(lists.map(([list]) => list));
+        // inMap knows a chapter map's campaign files only once they are listed (fails if they can't be).
+        await files.whenReady();
         /** The names an entry's file may have: "standard path" entries (flags 5, 8) name a file inside
          *  the import folder; a sound may be stored under its other extensions. */
         const variantsOf = (e: { flags: number; path: string }, folder: string) => {

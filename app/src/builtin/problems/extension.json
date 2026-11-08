@@ -14,7 +14,7 @@
       { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
     ],
     "mcpTools": [
-      { "name": "list_problems", "description": "Checks the open project and lists what's wrong: script errors, missing files, broken references.", "readOnly": true }
+      { "name": "list_problems", "description": "Checks the open project and lists what's wrong: script errors, missing files, broken references. A check that couldn't run is listed as an error with the check's name as its location.", "readOnly": true }
     ]
   }
 }
