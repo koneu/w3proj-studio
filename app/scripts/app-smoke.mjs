@@ -1065,6 +1065,166 @@ async function unitProperties(page, found) {
   await page.evaluate(`w3Workbench.game.reload()`);
 }
 
+/** Item tables for unit drops, reached from where they're used: the unit file's older layout (no item table field) offers
+ *  only own sets and says why; with the newer layout and no tables, choosing "Map item table" offers to make one, which
+ *  Map Properties makes (one undo step there) and opens for editing, and the footman then drops from it (one undo step in
+ *  the terrain editor). "Edit item tables…", "or use a map item table…" and the command Item Tables… open Map Properties
+ *  at the item tables. */
+async function itemTablesAccess(page, found) {
+  const fail = (what) => found.push(`item tables: ${what}`);
+  const k = await heightKit(page, "ItemTables");
+  const TXT = "map/war3map.w3e.txt", W3I = "map/war3map.w3i.json";
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 0, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const at = (prop) => `.terrain-props [data-prop="${prop}"]`;
+  const shown = (prop) => page.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(at(prop))}); return !!e && !e.closest("[hidden]"); })()`);
+  const value = (prop) => page.evaluate(`document.querySelector(${JSON.stringify(at(prop))})?.value ?? null`);
+  const options = (prop) => page.evaluate(`[...document.querySelectorAll(${JSON.stringify(`${at(prop)} option`)})].map((o) => o.value)`);
+  const panel = () => until("the properties panel", () => page.evaluate(`!!document.querySelector(${JSON.stringify(at("drops-mode"))})`), 20000);
+  const settled = async () => { await sleep(700); await panel(); };
+  const choose = async (prop, v) => {
+    await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(at(prop))}); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event("change")); })()`);
+    await sleep(300);
+  };
+  const active = () => page.evaluate(`w3.editors.activePath()`);
+  const dirty = (path) => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
+  const toTerrain = async () => { await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`); await until("the terrain editor in front", async () => (await active()) === TXT, 20000); };
+  const footman = () => k.units().find((u) => u.id === "hfoo");
+  /** Map Properties in front, at Techtree & Tables, with the item tables (or one of them) scrolled into its view. */
+  const atItemTables = async (how, anchor = "item-tables") => {
+    await until(`Map Properties in front (${how})`, async () => (await active()) === W3I, 20000).catch((e) => fail(e.message));
+    const where = await page.evaluate(`(() => {
+      const pane = [...document.querySelectorAll(".editor-pane")].find((p) => !p.hidden && p.querySelector(".map-info"));
+      const section = pane?.querySelector(".form-nav-item.active")?.textContent ?? null;
+      const target = pane ? [...pane.querySelectorAll("[data-anchor]")].find((x) => x.dataset.anchor === ${JSON.stringify(anchor)}) : null;
+      if (!target) return { section, target: false };
+      let box = target.parentElement;
+      while (box && box.scrollHeight <= box.clientHeight) box = box.parentElement;
+      const r = target.getBoundingClientRect(), v = (box ?? document.documentElement).getBoundingClientRect();
+      return { section, target: true, inView: r.top >= v.top - 2 && r.top < v.bottom, focused: target.contains(document.activeElement) };
+    })()`);
+    if (where.section !== "Techtree & Tables" || !where.target || !where.inView) fail(`${how}: Map Properties isn't at ${anchor} (${JSON.stringify(where)})`);
+    return where;
+  };
+
+  // The unit file of a new map: if it has the older layout, "Map item table" isn't offered, and the panel says why.
+  await k.tab("Select");
+  await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
+  await panel();
+  const oldLayout = !("itemTable" in footman());
+  if (oldLayout) {
+    if ((await options("drops-mode")).includes("table")) fail("a unit file without item tables offers \"Map item table\"");
+    if (!(await shown("drops-hint")) || !/Reign of Chaos/.test(await page.evaluate(`document.querySelector(${JSON.stringify(at("drops-hint"))})?.textContent ?? ""`))) fail("the older layout doesn't say why only own sets are offered");
+  }
+
+  // The newer layout (subversion 11, as unitProperties makes it), and a map without item tables.
+  const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json");
+  if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
+  units.subversion = 11;
+  units.units = units.units.map((u) => {
+    const out = {};
+    for (const [key, v] of Object.entries(u)) {
+      out[key] = v;
+      if (key === "mana" && !("itemTable" in u)) out.itemTable = -1;
+      if (key === "level" && !("strength" in u)) Object.assign(out, { strength: 0, agility: 0, intelligence: 0 });
+    }
+    return out;
+  });
+  info.itemTables = [];
+  await page.evaluate(`w3.editors.closeAll()`);
+  for (const [file, doc] of [["war3mapUnits.doo.json", units], ["war3map.w3i.json", info]]) {
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(`map/${file}`)}, ${JSON.stringify(JSON.stringify(doc, null, 2))})`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor", async () => (await active()) === TXT, 20000);
+  await k.tab("Select");
+  await k.look(0, 0, { id: "hfoo", x: 0, y: 0 });
+  await panel();
+  if (await shown("drops-hint")) fail("the newer layout still says only own sets can be given");
+  if (!(await options("drops-mode")).includes("table")) return fail("the newer layout doesn't offer \"Map item table\"");
+
+  // No tables yet: choosing one offers to make one, and changes nothing by itself.
+  if (await shown("table-offer")) fail("the offer to make an item table shows before \"Map item table\" was chosen");
+  await choose("drops-mode", "table");
+  if (!(await shown("table-offer"))) return fail("choosing \"Map item table\" with no tables doesn't offer to make one");
+  if ((await value("drops-mode")) !== "none") fail(`with no table made the drops show ${await value("drops-mode")}`);
+  if (await dirty(TXT)) fail("choosing \"Map item table\" with no tables changed the map");
+  await k.hands.click(at("create-table"));
+  const made = await atItemTables("Create an item table", "item-table-0");
+  if (!made.focused) fail("the new item table isn't open for editing (its name box hasn't the keys)");
+  if (!(await dirty(W3I))) fail("making an item table didn't leave Map Properties changed");
+  await until("the footman to drop from the new table", () => dirty(TXT), 10000).catch(() => fail("the footman wasn't given the new table (the terrain editor is unchanged)"));
+  // Making it is one undo step in Map Properties: undone, the table goes and nothing is left to save; redone, it's back.
+  // (Before saving: a save of the terrain opens Map Properties again, as it does for the start locations it shows.)
+  const tableShown = () => page.evaluate(`[...document.querySelectorAll(".map-info [data-anchor]")].some((x) => x.dataset.anchor === "item-table-0")`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  if (await tableShown() || await dirty(W3I)) fail(`one undo in Map Properties after Create: the table ${await tableShown() ? "is still there" : "went"}, the editor ${await dirty(W3I) ? "is" : "isn't"} changed`);
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await sleep(300);
+  if (!(await tableShown()) || !(await dirty(W3I))) fail("a redo in Map Properties didn't bring the new table back");
+  await k.save();
+  const table = k.read("war3map.w3i.json").itemTables;
+  if (JSON.stringify(table) !== JSON.stringify([{ number: 0, name: "Item Table", sets: [[]] }])) fail(`the map's item tables after Create: ${JSON.stringify(table)}`);
+  if (footman().itemTable !== 0 || footman().itemSets.length) fail(`the footman after Create: ${JSON.stringify([footman().itemTable, footman().itemSets])}`);
+
+  // Back in the terrain editor the footman shows the table by name, with the button that edits the tables.
+  await toTerrain();
+  await settled();
+  if ((await value("drops-mode")) !== "table" || (await value("drops-table")) !== "0") fail(`the panel after Create: ${await value("drops-mode")} ${await value("drops-table")}`);
+  if (!/Item Table \(#0\)/.test(await page.evaluate(`document.querySelector(${JSON.stringify(`${at("drops-table")} option:checked`)})?.textContent ?? ""`))) fail("the footman's table isn't shown by its name");
+  if (!(await shown("edit-tables"))) fail("no \"Edit item tables…\" next to the map item table");
+  else {
+    // Map Properties shown at another section first: the button goes to the item tables all the same.
+    await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "description")`);
+    await toTerrain();
+    await settled();
+    await k.hands.click(at("edit-tables"));
+    await atItemTables("Edit item tables…");
+  }
+
+  // The command (palette and Scenario menu), from anywhere.
+  if (!(await page.evaluate(`w3Workbench.commands.all().some((c) => c.id === "w3.mapInfo.itemTables" && c.title === "Item Tables…")`))) fail("the command palette has no Item Tables…");
+  if (await page.evaluate(`w3Workbench.commands.all().some((c) => c.id === "w3.mapInfo.createItemTable")`)) fail("the palette lists the panel's Create an Item Table");
+  await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "players")`);
+  await toTerrain();
+  const ran = await k.run("w3.mapInfo.itemTables");
+  if (ran) fail(`Item Tables…: ${ran}`);
+  await atItemTables("Item Tables…");
+  // Map Properties' own command takes the section and the place in it; a section it hasn't is refused.
+  await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "forces")`);
+  await toTerrain();
+  if (await k.run("w3.mapInfo.open", "techtree", "item-tables")) fail("w3.mapInfo.open with a section and anchor failed");
+  await atItemTables("w3.mapInfo.open techtree item-tables");
+  if (!/no section/.test(await k.run("w3.mapInfo.open", "nonsense") ?? "")) fail("w3.mapInfo.open took a section it hasn't");
+
+  // Own sets: the link to the map's tables.
+  await toTerrain();
+  await settled();
+  await choose("drops-mode", "custom");
+  await settled();
+  if (!(await shown("use-map-table"))) fail("own sets show no \"or use a map item table…\"");
+  else {
+    await toTerrain();
+    await k.hands.click(at("use-map-table"));
+    await atItemTables("or use a map item table…");
+  }
+
+  // Undo in the terrain editor: the table again, then the drops as before Create.
+  await toTerrain();
+  await settled();
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled();
+  await k.save();
+  if (footman().itemTable !== 0) fail(`one undo after own sets: the footman's table is ${footman().itemTable}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled();
+  await k.save();
+  if (footman().itemTable !== -1 || footman().itemSets.length) fail(`the undo of the table's choice: ${JSON.stringify([footman().itemTable, footman().itemSets])}`);
+  await k.verify(fail);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
@@ -3471,7 +3631,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, itemTablesAccess, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -3556,6 +3716,7 @@ async function run() {
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
+    await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
