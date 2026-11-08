@@ -2,6 +2,8 @@
 // the import list, the folder a converted model goes to, and the queue that keeps two fixes from
 // reading and writing the same file at once. Pure, so tests can stand in for the app.
 
+import { errorText } from "../../lib/oserror";
+
 type Mod = { field: string; type: string; level?: number; data?: number; value: number | string };
 type O = { base: string; id?: string; end?: string; mods?: Mod[] };
 export interface ObjDoc { format?: string; version: number; original: O[]; custom: O[] }
@@ -22,7 +24,7 @@ const parseDoc = (text: string, what: string): ObjDoc => {
     if (!doc || typeof doc !== "object" || !Array.isArray(doc.original) || !Array.isArray(doc.custom)) throw new Error("not object data");
     return doc;
   } catch (e) {
-    throw new Error(`${what} can't be read (${(e as Error).message}), so the model was not changed.`);
+    throw new Error(`${what} can't be read (${errorText(e)}), so the model was not changed.`);
   }
 };
 
@@ -77,7 +79,7 @@ export function planImports(json: string | null, raw: string | null, names: stri
   type Imports = { format?: string; version: number; files: { flags: number; path: string }[] };
   let doc: Imports;
   try { doc = JSON.parse(json ?? raw ?? '{"format":"w3proj.imports/1","version":1,"files":[]}'); } catch (e) {
-    throw new Error(`war3map.imp can't be read (${(e as Error).message}), so nothing was changed.`);
+    throw new Error(`war3map.imp can't be read (${errorText(e)}), so nothing was changed.`);
   }
   if (!Array.isArray(doc?.files)) throw new Error("war3map.imp can't be read (no file list), so nothing was changed.");
   const have = new Set(doc.files.map((f) => f.path.toLowerCase()));

@@ -13,6 +13,7 @@ import { readLightMdl, readLightMdx, writeLightMdl, type Light, type LightModel,
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { h } from "../../workbench/dom";
+import { errorText } from "../../lib/oserror";
 
 const VIEW = "w3.lighting.overview";
 type Kind = "terrain" | "unit";
@@ -171,7 +172,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           model = readLightMdl(await doc.readText());
           if (!model.lights.length) throw new Error("it has no lights");
         } catch (e) {
-          el.append(h("div.view-empty", {}, `${doc.path} isn't a lighting model: ${(e as Error).message} `,
+          el.append(h("div.view-empty", {}, `${doc.path} isn't a lighting model: ${errorText(e)} `,
             h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.textEditor") }, "Open as text")));
           return {};
         }

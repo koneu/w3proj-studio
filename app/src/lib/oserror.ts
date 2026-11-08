@@ -5,6 +5,15 @@
  *  as an Error or as the plain string a backend call rejects with. Nothing else is "not there": a
  *  file locked by another program (32, 33) or a bad name (123, 267) is there and must not be taken
  *  for gone. */
+/** The words of an error, for showing it: an Error's message, or the plain string a backend call rejects with
+ *  (`(e as Error).message` on that string is undefined). */
+export function errorText(e: unknown): string {
+  if (e instanceof Error) return e.message || e.name;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string") return (e as { message: string }).message;
+  return String(e);
+}
+
 export function isNotFoundError(e: unknown): boolean {
   const text = e instanceof Error ? e.message : String(e);
   return /os error (2|3)(?!\d)/.test(text);

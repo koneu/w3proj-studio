@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isNotFoundError } from "./oserror";
+import { errorText, isNotFoundError } from "./oserror";
+
+test("errorText: an Error's message, and the plain string a backend call rejects with (not 'undefined')", () => {
+  assert.equal(errorText(new Error("bad header")), "bad header");
+  assert.equal(errorText("No such file or directory (os error 2)"), "No such file or directory (os error 2)");
+  assert.equal(errorText({ message: "from a DOMException-like object" }), "from a DOMException-like object");
+  assert.equal(errorText(42), "42");
+  const nameless = new Error(""); nameless.name = "AbortError";
+  assert.equal(errorText(nameless), "AbortError");
+});
 
 test("only os errors 2 and 3 are 'not found', in any language and whether a string or an Error", () => {
   assert.equal(isNotFoundError("The system cannot find the file specified. (os error 2)"), true);

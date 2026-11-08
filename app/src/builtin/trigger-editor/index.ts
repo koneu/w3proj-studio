@@ -25,6 +25,7 @@ import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
+import { errorText } from "../../lib/oserror";
 
 /** The project's trigger file (war3map.wtg.json, or a raw war3map.wtg), or null. */
 const triggerFile = (w3: W3Api) => wtgPath(w3.workspace.files());
@@ -220,7 +221,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           file = await readWtgFile(doc, doc.path, async () => data);
         } catch (e) {
-          el.replaceChildren(errorView(`Can't read ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.replaceChildren(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
         const game = doc.path.startsWith("game:");

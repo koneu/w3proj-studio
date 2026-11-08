@@ -1,6 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { errorView, formatBytes, h } from "../../workbench/dom";
 import { decodeImage, type Mip } from "../../lib/image/index.ts";
+import { errorText } from "../../lib/oserror";
 
 type Channel = "rgba" | "rgb" | "r" | "g" | "b" | "a";
 
@@ -31,7 +32,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           img = decodeImage(bytes, doc.path);
         } catch (e) {
-          el.append(errorView(`Can't decode ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.append(errorView(`Can't decode ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
 
@@ -69,7 +70,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           try {
             current = img.mip(level);
           } catch (e) {
-            w3.window.showError(`Mip ${level}: ${(e as Error).message}`);
+            w3.window.showError(`Mip ${level}: ${errorText(e)}`);
             return;
           }
           canvas.width = current.width;

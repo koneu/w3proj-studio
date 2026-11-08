@@ -13,6 +13,7 @@ import { readWtgFile, writeWtgFile, wtgPath, type Param } from "../../lib/trigge
 import { bindUndoKeys, History } from "../../lib/undo";
 import { exportSound, replaceSound } from "./soundfiles";
 import { h } from "../../workbench/dom";
+import { errorText } from "../../lib/oserror";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
   type Sound, type SoundLabel,
@@ -227,7 +228,7 @@ class SoundEditor {
     const type = ext === "mp3" ? "audio/mpeg" : ext === "ogg" ? "audio/ogg" : ext === "wav" ? "audio/wav" : "audio/flac";
     this.audioUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
     this.audio = new Audio(this.audioUrl);
-    void this.audio.play().catch((e) => this.w3.window.showWarning(`Can't play ${path}: ${(e as Error).message}`));
+    void this.audio.play().catch((e) => this.w3.window.showWarning(`Can't play ${path}: ${errorText(e)}`));
   }
 
   // ---- browser ----------------------------------------------------------------------

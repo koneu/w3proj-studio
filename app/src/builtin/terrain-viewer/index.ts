@@ -6,6 +6,7 @@ import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
+import { errorText } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
@@ -1094,7 +1095,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           savedW3e = await readTerrainBytes(doc.path, doc);
           terrain = parseW3e(savedW3e);
         } catch (e) {
-          el.append(errorView(`Can't read ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.append(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
         const canvas = h("canvas.model-canvas");
@@ -1109,7 +1110,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           renderer = new TerrainRenderer(canvas, terrain);
         } catch (e) {
-          el.append(errorView(`WebGL: ${(e as Error).message}`));
+          el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
         }
         let dirty = true, loadDirty = false;

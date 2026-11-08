@@ -18,6 +18,7 @@ import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
 import { diffObjects, type ObjectChange } from "./objdiff";
+import { errorText } from "../../lib/oserror";
 
 interface Status { branch: string; outer_repo: string; changes: Change[] }
 
@@ -409,7 +410,7 @@ function objectSummary(w3: W3Api, path: string, before: string, after: string): 
   try {
     changes = diffObjects(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null);
   } catch (e) {
-    el.append(h("div.muted", {}, `Objects can't be compared: ${(e as Error).message}`));
+    el.append(h("div.muted", {}, `Objects can't be compared: ${errorText(e)}`));
     return el;
   }
   if (!changes.length) return el;

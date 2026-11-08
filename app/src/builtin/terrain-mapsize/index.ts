@@ -12,6 +12,7 @@ import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type Te
 import { playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from "../../lib/terrain/resize";
 import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO } from "../../lib/terrain/resizeundo";
 import { h } from "../../workbench/dom";
+import { errorText } from "../../lib/oserror";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
@@ -37,7 +38,7 @@ function stepResize(w3: W3Api, which: "undo" | "redo", quiet: boolean): () => Pr
     try {
       await settleWithin(() => w3.commands.execute("w3.terrain.settle"), 5 * 60_000);
     } catch (e) {
-      void w3.window.showError(`${word} Resize: ${(e as Error).message}`);
+      void w3.window.showError(`${word} Resize: ${errorText(e)}`);
       return false;
     }
     await w3.commands.execute("w3.script.settle").catch(() => {});

@@ -4,6 +4,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
+import { errorText } from "../../lib/oserror";
 
 const FILTER_NAMES = ["none", "transparent", "blend", "additive", "add alpha", "modulate", "modulate 2x"];
 
@@ -41,7 +42,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           model = parseMdx(bytes);
         } catch (e) {
-          el.append(errorView(`Can't read ${doc.path}: ${(e as Error).message}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
+          el.append(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};
         }
 
@@ -51,7 +52,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         try {
           renderer = new ModelRenderer(canvas, model);
         } catch (e) {
-          el.append(errorView(`WebGL: ${(e as Error).message}`));
+          el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
         }
 
