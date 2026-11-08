@@ -2219,6 +2219,106 @@ async function drawCalls(page, found) {
   if (away.instances >= b.instances / 4) fail(`looking away from the objects still drew ${away.instances} of ${b.instances} instances`);
 }
 
+/** A lost WebGL context (a GPU reset, a driver hiccup), made with WEBGL_lose_context. The terrain viewer stops drawing,
+ *  says so, keeps the unsaved edit, saves it, and opens again only once nothing is unsaved; the model viewer draws
+ *  again once the context is given back. */
+async function contextLoss(page, found) {
+  const fail = (what) => found.push(`context loss: ${what}`);
+  const root = join(work, "context-loss");
+  rmSync(root, { recursive: true, force: true });
+  cpSync(FIXTURE, root, { recursive: true });
+  const ground = "map/war3map.w3e.txt";
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  // Frames per canvas: a frame starts with its clear. The canvas shown is the one of the active tab.
+  await page.evaluate(`(() => {
+    if (window.__glFrames) return;
+    const P = WebGL2RenderingContext.prototype, clear = P.clear;
+    window.__glFrames = new WeakMap();
+    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
+  })()`);
+  const canvasNow = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+  const frames = () => page.evaluate(`(() => { const c = ${canvasNow}; return c ? window.__glFrames.get(c) ?? 0 : -1; })()`);
+  const lostShown = () => page.evaluate(`(() => { const c = ${canvasNow}; const m = c?.parentElement.querySelector(".gl-lost"); return !!m && !m.hidden; })()`);
+  /** Loses or restores the shown canvas's context; the canvas is kept as __lostCanvas. */
+  const glCall = async (what) => {
+    const r = await page.evaluate(`(() => {
+      const c = ${canvasNow};
+      if (!c) return "no canvas";
+      window.__lostCanvas = c;
+      const gl = c.getContext("webgl2");
+      if (!gl) return "no WebGL2 context on the canvas";
+      const ext = window.__loseExt = gl.getExtension("WEBGL_lose_context") ?? window.__loseExt;
+      if (!ext) return "no WEBGL_lose_context";
+      ext.${what}();
+      return null;
+    })()`);
+    if (r) throw new Error(`${what}: ${r}`);
+  };
+  const clickReopen = () => page.evaluate(`(() => { const c = ${canvasNow}; const b = [...(c?.parentElement.querySelectorAll(".gl-lost button") ?? [])].find((x) => /Reopen/.test(x.textContent)); b?.click(); return !!b; })()`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(ground)})`);
+  const look = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(${JSON.stringify(ground)})(0, 0))()`);
+
+  // The terrain viewer.
+  await page.evaluate(`w3.editors.open(${JSON.stringify(ground)})`);
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(ground)} && !!(${canvasNow})`), 20000);
+  await until("a frame of the terrain (control: the view draws)", async () => (await frames()) > 0, 20000);
+  // An unsaved edit, painted by mouse (the MCP tools save what they change).
+  const hands = new Hands(page);
+  await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
+  await sleep(300);
+  await until("the terrain view's size", () => page.evaluate(`(${canvasNow})?.clientWidth > 200`), 10000);
+  const at = await page.evaluate(`(() => { const r = (${canvasNow}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await hands.drag({ x: at.x - 80, y: at.y }, { x: at.x + 80, y: at.y }).catch((e) => { throw new Error(`painting at ${JSON.stringify(at)}: ${e.message}`); });
+  await sleep(300);
+  if (!(await dirty())) return fail("painting left the terrain without unsaved changes (control)");
+  await glCall("loseContext");
+  await until("the message about the lost view", lostShown, 5000).catch(() => fail("no message over the terrain view after its WebGL context was lost"));
+  await sleep(300);
+  const stopped = await frames();
+  await look();
+  await sleep(600);
+  if ((await frames()) !== stopped) fail("the terrain view still draws on a lost context");
+  if (!(await clickReopen())) fail("the message over the lost terrain view has no Reopen button");
+  await sleep(800);
+  const same = await page.evaluate(`window.__lostCanvas.isConnected`);
+  if (!same || !(await dirty())) fail("Reopen with unsaved edits opened the terrain editor again: the edits are gone");
+  await glCall("restoreContext").catch(() => {});
+  await sleep(500);
+  if (!(await lostShown())) fail("the terrain view's message went when the context came back, but its renderer has nothing on the GPU any more");
+  await page.evaluate(`w3.editors.saveAll()`);
+  if (await dirty()) fail("saving after the loss left the terrain unsaved");
+  const saved = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8");
+  if (saved === readFileSync(join(FIXTURE, "map", "war3map.w3e.txt"), "utf8")) fail("the edit made before the loss isn't in the saved terrain");
+  await clickReopen();
+  await until("the terrain editor to open again", () => page.evaluate(`!window.__lostCanvas.isConnected && w3.editors.activePath() === ${JSON.stringify(ground)} && !!(${canvasNow})`), 20000)
+    .catch(() => fail("Reopen with nothing unsaved didn't open the terrain editor again"));
+  await until("a frame of the reopened terrain", async () => (await frames()) > 0, 20000).catch(() => fail("the reopened terrain view doesn't draw"));
+  if (await lostShown()) fail("the reopened terrain view still shows the message");
+  await page.evaluate(`w3.editors.closeAll()`);
+
+  // The model viewer, on a model of the game.
+  if (!game) return fail("the model viewer's part needs W3PROJ_GAME");
+  const model = `game:${["Units", "Human", "Footman", "Footman.mdx"].join(String.fromCharCode(92))}`;
+  await page.evaluate(`w3.editors.open(${JSON.stringify(model)}, "w3.modelViewer")`);
+  await until("the model viewer", () => page.evaluate(`!!(${canvasNow})`), 20000);
+  await until("a frame of the model (control)", async () => (await frames()) > 0, 20000);
+  await glCall("loseContext");
+  await until("the message about the lost model view", lostShown, 5000).catch(() => fail("no message over the model view after its WebGL context was lost"));
+  await sleep(300);
+  const modelStopped = await frames();
+  await sleep(500);
+  if ((await frames()) !== modelStopped) fail("the model view still draws on a lost context");
+  await glCall("restoreContext");
+  await until("the model view to come back", async () => !(await lostShown()), 5000).catch(() => fail("the model view's message stayed after the context came back"));
+  const back = await frames();
+  await until("frames of the restored model", async () => (await frames()) > back + 2, 5000).catch(() => fail("the model view doesn't draw again after the context came back"));
+  // What the restored view draws comes from a renderer made again: its programs are of the new context.
+  const err = await page.evaluate(`(() => { const gl = window.__lostCanvas.getContext("webgl2"); return gl.isContextLost() ? "lost" : gl.getError(); })()`);
+  if (err !== 0) fail(`the restored model view gives GL error ${err}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -2280,7 +2380,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, gameReadsOnce, moduleFunctions, drawCalls, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2366,6 +2466,7 @@ async function run() {
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
+    await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
     found.push(...problems(page.events));
     if (exited() !== null) found.push(`the app exited with ${exited()}`);
 

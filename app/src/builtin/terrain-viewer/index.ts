@@ -1,5 +1,6 @@
 import { fogOf } from "../../lib/model/fog";
 import { worldSphere } from "../../lib/model/frustum";
+import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
@@ -1114,6 +1115,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
         }
+        // A lost context (a GPU reset, a driver hiccup) takes every texture, mesh and model on the GPU
+        // with it, and they come from a long load (ground, cliffs, doodads, units, splats, shadows,
+        // weather) that this view can't run again in place. Opening the editor again would, but it reads
+        // the terrain from disk: unsaved edits would be gone. So drawing stops for good and a message says
+        // so, over the view (it takes the mouse, so no edit lands on a view that isn't drawn). The edits
+        // stay in memory and saving works as before; Reopen is refused while some are unsaved.
+        /** Set at a loss, and never cleared: the renderer's GPU objects are gone even once the context is back. */
+        let glDead = false;
+        const glMessage = h("div.gl-lost-text");
+        const glLost = h("div.gl-lost", { hidden: true }, glMessage);
+        const reopenAfterLoss = async () => {
+          if (w3.editors.isDirty(doc.path)) {
+            void w3.window.showWarning("Save first (Ctrl+S): opening the editor again reads the terrain from disk, and the unsaved edits would be lost.");
+            return;
+          }
+          await w3.editors.close(doc.path);
+          await w3.editors.open(doc.path, "w3.terrainViewer");
+        };
+        const glWatch = watchContextLoss(canvas, {
+          lost: () => {
+            glDead = true;
+            glMessage.replaceChildren(
+              h("div", {}, "The graphics device was reset (WebGL context lost), and the 3D view stopped."),
+              h("div", {}, "Your edits are kept, and saving works. Save (Ctrl+S), then open the editor again to see the map."),
+              h("button", { onclick: () => void reopenAfterLoss() }, "Reopen editor"));
+            glLost.hidden = false;
+          },
+          restored: () => {},
+        });
         let dirty = true, loadDirty = false;
         const redraw = () => { dirty = true; };
         /** A texture or other art came in: drawn with the next frame the load lets through (see tick). */
@@ -3307,7 +3337,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
-            h("div.model-stage", {}, canvas, labelLayer)),
+            h("div.model-stage", {}, canvas, labelLayer, glLost)),
           side));
 
         // ---- camera ------------------------------------------------------------------
@@ -3457,6 +3487,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
+          // No edits by key on a view that isn't drawn (the message over it takes the mouse). Ctrl+S still saves: it's a command.
+          if (glDead) return;
           if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
           if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
           if (clipboardKey(e)) { e.preventDefault(); return; }
@@ -3563,7 +3595,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const byItself = loadDirty || renderer.animating;
           const due = dirty || size !== lastSize || (byItself && !(loading && now - lastFrame < LOADING_FRAME_MS));
           // Particle effects move by themselves: then every frame is drawn.
-          if (canvas.clientWidth > 0 && due) {
+          if (canvas.clientWidth > 0 && due && !glDead) {
             renderer.render();
             placeLabels();
             dirty = loadDirty = false;
@@ -3625,6 +3657,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           clearTimeout(timer);
           if (!inTime) void w3.window.showWarning(`Some models or textures were still loading after ${PICTURE_WAIT_MS / 1000} seconds: the terrain picture leaves them out.`);
           if (!canvas.clientWidth) throw new Error("The terrain editor isn't visible.");
+          if (glDead) throw new Error("The terrain editor's 3D view stopped (the graphics device was reset): save, then open the editor again.");
           const before = handle.view();
           if (area) {
             const middle = heightAt(terrain, (area.left + area.right) / 2, (area.bottom + area.top) / 2);
@@ -3808,6 +3841,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             window.removeEventListener("mouseup", onUp);
             window.removeEventListener("keyup", areaKeyUp);
             window.removeEventListener("blur", areaKeyLost);
+            glWatch.dispose();
             renderer.dispose();
           },
         };

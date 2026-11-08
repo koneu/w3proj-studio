@@ -446,6 +446,9 @@ const sharedByContext = new WeakMap<WebGL2RenderingContext, Shared>();
 
 function shared(gl: WebGL2RenderingContext): Shared {
   let s = sharedByContext.get(gl);
+  // A context that was lost and restored is the same object, but what was made on it before is gone:
+  // its program isn't one any more, and everything is made again.
+  if (s && !gl.isContextLost() && !gl.isProgram(s.prog)) s = undefined;
   if (!s) {
     const solid = (rgba: number[]) => {
       const t = gl.createTexture()!;

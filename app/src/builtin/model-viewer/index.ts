@@ -1,7 +1,8 @@
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { errorView, formatBytes, h } from "../../workbench/dom";
-import { decodeImage } from "../../lib/image/index.ts";
-import { parseMdx } from "../../lib/model/mdx";
+import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
+import { parseMdx, type Model } from "../../lib/model/mdx";
+import { watchContextLoss } from "../../lib/model/contextloss";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
 import { errorText } from "../../lib/oserror";
@@ -56,24 +57,73 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return {};
         }
 
+        // A lost context (a GPU reset, a driver hiccup): drawing stops and a message says so. When the
+        // context comes back, a new renderer is made on it with what the old one had: the model is
+        // read-only and already parsed, and its textures are kept decoded, so nothing is read again.
+        /** From a loss until a renderer is made again: the one there is draws nothing. */
+        let glDead = false;
+        /** The team colour chosen. */
+        let team = 0;
+        const glMessage = h("div.gl-lost-text");
+        const glLost = h("div.gl-lost", { hidden: true }, glMessage);
+        const rebuild = () => {
+          const old = renderer, next = new ModelRenderer(canvas, model);
+          next.setTeamColor(team);
+          for (const i of old.hidden) next.hidden.add(i);
+          Object.assign(next, { wireframe: old.wireframe, showGrid: old.showGrid, showParticles: old.showParticles, yaw: old.yaw, pitch: old.pitch, distance: old.distance, target: [...old.target] });
+          textureImages.forEach((img, i) => { if (img) next.setTexture(i, img); });
+          if (effectModel) {
+            next.setEffectModel(effectModel);
+            effectImages.forEach((img, i) => { if (img) next.setEffectTexture(i, img); });
+          }
+          // The old renderer isn't disposed: its dispose() would lose the context that was just given back.
+          renderer = next;
+        };
+        const glWatch = watchContextLoss(canvas, {
+          lost: () => {
+            glDead = true;
+            glMessage.textContent = "The graphics device was reset (WebGL context lost). The view comes back when the system gives it back.";
+            glLost.hidden = false;
+          },
+          restored: () => {
+            try {
+              rebuild();
+              glDead = false;
+              glLost.hidden = true;
+            } catch (e) {
+              glMessage.replaceChildren(`The view couldn't be made again: ${errorText(e)} `,
+                h("button", { onclick: () => void w3.editors.close(doc.path).then(() => w3.editors.open(doc.path, "w3.modelViewer")) }, "Reopen"));
+            }
+          },
+        });
+
         // Reforged copies (_DE/_HD) have PopcornFX effects (CORN, not drawn): show the classic
         // model's particles and ribbons instead, as the terrain view does.
         let classicFx = false;
+        /** What was handed to the renderer, kept to hand it to a new one when the context comes back. */
+        let effectModel: Model | null = null;
+        const textureImages: (DecodedImage | undefined)[] = [], effectImages: (DecodedImage | undefined)[] = [];
         const gamePath = doc.path.startsWith("game:") ? doc.path.slice(5) : null;
         if (gamePath && /:_(hd|de)\.w3mod:/i.test(gamePath) && !model.particleEmitters2.length && !model.ribbons.length && model.skipped.includes("CORN")) {
           try {
             const sd = parseMdx(await w3.game.read(`War3.w3mod:${gamePath.slice(gamePath.lastIndexOf(":") + 1)}`));
             if (sd.particleEmitters2.length || sd.ribbons.length) {
               renderer.setEffectModel(sd);
+              effectModel = sd;
               classicFx = true;
               const load = textureLoader(w3, { path: "game:War3.w3mod:" } as EditorDocument);
               sd.textures.forEach((t, i) => {
                 if (t.replaceableId !== 0 || !t.path) return;
-                load(t.path).then((buf) => renderer.setEffectTexture(i, decodeImage(buf, t.path)), () => {});
+                load(t.path).then((buf) => {
+                  effectImages[i] = decodeImage(buf, t.path);
+                  if (!glDead) renderer.setEffectTexture(i, effectImages[i]!);
+                }, () => {});
               });
             }
           } catch { /* no classic copy */ }
         }
+
+        stage.append(glLost);
 
         // ---- animation state ----------------------------------------------------
         let seqIndex = model.sequences.findIndex((s) => /^stand/i.test(s.name));
@@ -92,7 +142,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const playBtn = h("button", { title: "Play / pause", onclick: () => { playing = !playing; playBtn.textContent = playing ? "❚❚" : "▶"; } }, "❚❚");
         const speedSelect = h("select", { title: "Speed", onchange: () => { speed = Number(speedSelect.value); } },
           ...[0.1, 0.25, 0.5, 1, 1.5, 2].map((s) => h("option", { value: String(s), selected: s === 1 }, `${s}×`)));
-        const teamSelect = h("select", { title: "Team colour", onchange: () => renderer.setTeamColor(Number(teamSelect.value)) },
+        const teamSelect = h("select", { title: "Team colour", onchange: () => { team = Number(teamSelect.value); renderer.setTeamColor(team); } },
           ...TEAM_COLORS.map(([name], i) => h("option", { value: String(i) }, name)));
         const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
           const box = h("input", { type: "checkbox", checked: get(), onchange: () => set(box.checked) });
@@ -112,7 +162,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const row = h("div.model-row", { title: label }, h("span.model-dot.pending", {}, "●"), h("span", {}, label));
             if (paths[i]) {
               load(paths[i]!).then((buf) => {
-                renderer.setTexture(i, decodeImage(buf, paths[i]!));
+                textureImages[i] = decodeImage(buf, paths[i]!);
+                if (!glDead) renderer.setTexture(i, textureImages[i]!);
                 row.firstElementChild!.className = "model-dot ok";
               }).catch((e) => {
                 row.firstElementChild!.className = "model-dot missing";
@@ -210,7 +261,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           const clock: Clock = { frame, seqStart: s?.start ?? 0, seqEnd: s?.end ?? 0, time };
           // Hidden tabs have zero size; skip drawing until visible.
-          if (canvas.clientWidth > 0) renderer.render(clock);
+          if (canvas.clientWidth > 0 && !glDead) renderer.render(clock);
           raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
@@ -220,6 +271,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             cancelAnimationFrame(raf);
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
+            glWatch.dispose();
             renderer.dispose();
           },
         };
