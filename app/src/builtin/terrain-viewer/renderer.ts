@@ -9,7 +9,7 @@ import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
 import { compile, INSTANCE_BYTES, mat4, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { hdLight, setTone, shadeWrap, TONE_FS, type Tone } from "../../lib/model/tone";
+import { facing, hdLight, setTone, shadeWrap, TONE_FS, type Tone } from "../../lib/model/tone";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -393,8 +393,7 @@ export class TerrainRenderer {
    *  (shadeWrap); without the map's lighting the even light, 1. `sun` is already drawnLight's. */
   private flatLight(sun: SceneLight | null): number[] {
     if (!sun) return [1, 1, 1];
-    const d = Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1));
-    const up = d + (1 - d) * shadeWrap(this.tone, sun);
+    const up = facing([0, 0, 1], sun.dir, shadeWrap(this.tone, sun));
     return [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up);
   }
   /** Particle effects (fires, glows, …) of placed objects. */

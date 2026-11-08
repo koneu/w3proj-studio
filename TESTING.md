@@ -205,11 +205,17 @@ cliff.w3m 42.8 and 14.1 before, 26.8 and 7.1 after. What is left on map 03 is th
 location, which the editor hides in game view. The editor's HD game view draws no shoreline waves (its classic game
 view and its unlit view do: white crests at the water's edge, where Studio's foam sits about a tile farther up the
 shore); Studio leaves them out in HD with the lighting on (renderer.ts `groupShown`). On
-cliff.w3m lit, its own lighting (sun 1.95, shadow intensity 5.85) still comes out brighter in the editor.
+cliff.w3m lit, its own lighting (sun 1.95, shadow intensity 5.85) came out brighter in the editor (grass green 248
+against 218) until branch render-fixes-4 (below): 245 now, the opening view's mean difference 28.3 → 19.9; light_map.w3m
+(the same lighting) 19.9 → 9.1 at its centre and 33.3 → 25.2 close up; map 03 7.0 → 7.2.
 
 The camera lines up on raised ground too: on map 03 (ground 256 high at the centre) the start location's ring is
 within 1 px of the editor's and the two footmen within 3–5 px. The lake's edge differs by how each fades the water
-in from the shore (in SD within 3–14 px, in HD 10–30 px), not by the camera.
+in from the shore (in SD within 3–14 px, in HD 10–30 px), not by the camera. The editor fades each corner by its own
+stored water level, flagged or not: map 03's shore corners are stored far below (-346 under the bank), so its lake's
+edge follows the wet corners tile by tile; the same map with them stored at the lake's level shows a smooth oval
+(we-drive, both, 2026-11-08). Its HD lake is opaque sooner from the shore than the classic ramp (about 0.37 at depth
+11, 0.59 at 22, 0.85 at 71). Both are in renderer.ts (`waterTile`, the HD branch of the water shader).
 
 **Making the editor show a light**: `--look` maps are copies, so a variant of a map with a lighting model written
 for the test (war3map.w3l naming two `<guid>.mdl` files, unpacked and packed with the release CLI) shows what the
@@ -227,9 +233,24 @@ Measured again on 2026-11-08 (branch render-fixes-3), with both of cliff.w3m's l
   simulating the tone curve per pixel of the unlit picture, so values near white aren't underestimated): sun 1.95,
   ambient 0.2, shadow 0 / 1 / 2 / 3 / 5.85: 0.93 / 1.45 / 2.12 / 3.14 / 16.4 (Studio's hdLight and shadeWrap: 1.31
   / 1.81 / 2.32 / 2.83 / 4.28); shadow 5.85 with sun 0.5 / 1: 2.43 / 4.01; sun 1.95, shadow 5.85, ambient 0 / 1:
-  13.4 / 32.7; shadow 0, ambient 0: sun 1.95 0.79. The cliff walls, which face away from that sun, aren't lifted as
-  much, so a lift growing with (1 − cos) alone doesn't fit; the editor's shadow map may be what decides. tone.ts is
-  unchanged until a model fits walls and ground together.
+  13.4 / 32.7; shadow 0, ambient 0: sun 1.95 0.79.
+
+Measured once more (branch render-fixes-4) with the cliff's south walls close up (`--look 0,600,1000`, the same twelve
+variants and an unlit picture; walls told apart by their brown in the unlit picture, k per channel the same way):
+- The sun is in the south-west (the unit shadows fall to the north-east), so those walls face it (cosine about 0.4),
+  not away. Their green k for shadow 0 / 1 / 2 / 3 / 5.85: 0.71 / 1.22 / 1.67 / 2.14 / 3.81, about 0.5 more per unit,
+  the same as the grass's while its green is below 200 (0.92 / 1.45 / 2.13): **the lift is the same on every
+  surface**, 1.32 × (1 − 0.62) per unit for this sun, none with the sun straight down (`facing` in tone.ts). A lift by
+  the surface's own (1 − cos), which shadeWrap was, whitened the walls (0.75 per unit).
+- Beside a sun the ambient adds as it reads (walls 3.63 / 3.81 / 4.65 for ambient 0 / 0.2 / 1; 0.14–0.18 for 0.2 at
+  shadow 0), not as the ambient-alone fit's 1.24 × colour^0.52 (hdLight).
+- The large k above came from the tone curve, not the light: the walls' red (226) and the bright grass (238) need far
+  more k under ACES than their green and the dim grass. With the light as above, ACES is 10.5 levels rms off over all
+  36 means, ACES with a shoulder that reaches white from linear 0.69 on (`HD_SHOULDER`) 3.9.
+- The ground doesn't follow the unit model after all, at least not the game's own: map 03 (no lighting of its own,
+  so Lordaeron's terrain and unit models) with the ground under the unit light came out 18 levels darker than the
+  editor's grass (106 against 125); under the terrain light it's within 0.1. The render-fixes-3 finding came from
+  cliff.w3m, whose two files both name their model `DNCLordaeronTerrain`.
 
 ## Process
 

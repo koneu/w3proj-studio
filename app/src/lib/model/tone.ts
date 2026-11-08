@@ -22,10 +22,40 @@ export const toneOf = (graphicsMode: string | undefined): Tone => (graphicsMode 
  *  texture, fitted on map 03 and cliff.w3m (0.70 and 0.71) against Studio's even light (1.01 on flat ground). */
 export const HD_EXPOSURE = 0.7;
 
+/**
+ * The HD picture's shoulder: near white the editor's picture is brighter than the ACES curve, which reaches white
+ * only slowly. Fitted (we-drive, 2026-11-08) on cliff.w3m's walls (red and green) and grass (green) under twelve
+ * lighting variants together with the light of hdLight and shadeWrap: o + 46 o^10.4 (1 - o), o the curve's linear
+ * value, white from o = 0.69 (sRGB 218) on, and the same as the curve below about 0.5 (sRGB 190). Plain ACES was 10.5
+ * levels rms off (the bright grass 238 against 214, the walls' red 226 against 205), this 3.9.
+ */
+export const HD_SHOULDER = { gain: 46, power: 10.4 };
+
+/** A linear light value (texture × light × exposure) through the HD picture's curve: ACES (Narkowicz's fit) with the
+ *  editor's shoulder (HD_SHOULDER), linear 0–1 out. The shaders' `toned` does the same per channel. */
+export function hdTone(x: number): number {
+  const v = Math.max(0, x);
+  const o = Math.min(1, (v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14));
+  return Math.min(1, o + HD_SHOULDER.gain * o ** HD_SHOULDER.power * (1 - o));
+}
+
+/** How much a surface of normal `n` gets of a sun from `l`: the cosine, and in HD the lift by the shadow intensity
+ *  (`wrap`, see shadeWrap), the same for every surface. The shaders' `facing` does the same. */
+export function facing(n: readonly number[], l: readonly number[], wrap: number): number {
+  const ln = Math.hypot(l[0], l[1], l[2]) || 1, nn = Math.hypot(n[0], n[1], n[2]) || 1;
+  const d = Math.max(0, (n[0] * l[0] + n[1] * l[1] + n[2] * l[2]) / (ln * nn));
+  return d + (1 - Math.max(0, l[2] / ln)) * wrap;
+}
+
+const glsl = (v: number) => v.toFixed(3);
+
 /** For fragment shaders: `toned(base, light)`, base an sRGB colour (a texture's), light the scene light on it, and
- *  `facing(n, l)`, how much a surface of normal n gets of a light from l (shadeWrap: HD's use of the shadow intensity). */
+ *  `facing(n, l)`, how much a surface of normal n gets of a light from l (as facing above). */
 export const TONE_FS = `uniform float uTone; uniform float uShadeWrap;
-float facing(vec3 n, vec3 l) { float d = max(dot(normalize(n), normalize(l)), 0.0); return d + (1.0 - d) * uShadeWrap; }
+float facing(vec3 n, vec3 l) {
+  vec3 L = normalize(l);
+  return max(dot(normalize(n), L), 0.0) + (1.0 - max(L.z, 0.0)) * uShadeWrap;
+}
 vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }
 vec3 linearToSrgb(vec3 c) {
   c = clamp(c, 0.0, 1.0);
@@ -34,7 +64,8 @@ vec3 linearToSrgb(vec3 c) {
 vec3 toned(vec3 base, vec3 light) {
   if (uTone > 1.5) {
     vec3 x = srgbToLinear(clamp(base, 0.0, 1.0)) * max(light, vec3(0.0)) * ${HD_EXPOSURE.toFixed(3)};
-    return linearToSrgb((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
+    vec3 o = min((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3(1.0));
+    return linearToSrgb(o + ${glsl(HD_SHOULDER.gain)} * pow(o, vec3(${glsl(HD_SHOULDER.power)})) * (1.0 - o));
   }
   if (uTone > 0.5) return base * clamp(light, 0.0, 1.0);
   return base * light;
@@ -47,11 +78,14 @@ export function setTone(gl: WebGL2RenderingContext, where: (name: string) => Web
 }
 
 /**
- * How far HD shading lifts a surface's share of the sun toward all of it: by the light's shadow intensity, the share
- * d (the cosine to the sun) becoming d + (1 - d) × intensity. Measured: a sun 52° from straight up with shadow
- * intensity 5.85 (cliff.w3m's own lighting) lights flat ground about four times as much as with 0, and the same sun
- * straight down is the same with either; 0.62 + 0.38 × 5.85 is 2.9 against the measured 2.5 (the tone curve is near
- * white there). The classic picture shades by the cosine alone, as does a light without the field.
+ * How far HD shading lifts every surface by the light's shadow intensity: its share of the sun d (the cosine to it)
+ * becomes d + (1 - z) × intensity, z the cosine of the sun to straight up. So the lift is the same on walls as on
+ * flat ground (where it is d + (1 - d) × intensity), and none with the sun straight down. Measured (we-drive,
+ * 2026-11-08, cliff.w3m's lighting with one value changed at a time; the light factor from the picture's tone): with
+ * the sun 52° from straight up at intensity 1.95, shadow intensity 0, 1, 2, 3, 5.85 gave the south walls 0.71, 1.22,
+ * 1.67, 2.14, 3.81 and the grass 0.92, 1.45, 2.13 and up: the same 0.5 more per unit, which is 1.32 × (1 - 0.62).
+ * A lift by the surface's own (1 - d) whitened the walls (0.75 per unit). The classic picture shades by the cosine
+ * alone, as does a light without the field.
  */
 export function shadeWrap(tone: Tone | undefined, light?: SceneLight | null): number {
   return tone === 2 ? Math.max(0, light?.shadow ?? 0) : 0;
@@ -66,13 +100,19 @@ export function shadeWrap(tone: Tone | undefined, light?: SceneLight | null): nu
  * 1.24 × colour^0.52; negative ambient (the HD models' -0.03) is none. Map 03's game lighting (Lordaeron's HD model at
  * 06:00) then gives 0.92 against the editor's 0.89.
  *
+ * Beside a sun the ambient adds only as it reads: cliff.w3m's lighting (sun 1.95 from 52°, ambient colour 0.84 at
+ * 06:00) with ambient intensity 0, 0.2 and 1 lit its walls 3.63, 3.81, 4.65 and, at shadow intensity 0, walls and
+ * grass 0.18 and 0.14 more for 0.2 (1.24 × colour^0.52 would be 0.49).
+ *
  * The shadow intensity changes the shading, not the light: see shadeWrap.
  */
 export function hdLight(l: SceneLight): SceneLight {
   const pow = (v: number, p: number) => Math.max(0, v) ** p;
+  const sun = Math.max(...l.diffuse) > 0;
+  const ambient = (v: number) => (sun ? Math.max(0, v) : 1.24 * pow(v, 0.52));
   return {
     dir: l.dir, shadow: l.shadow,
     diffuse: [pow(l.diffuse[0], 0.42), pow(l.diffuse[1], 0.42), pow(l.diffuse[2], 0.42)],
-    ambient: [1.24 * pow(l.ambient[0], 0.52), 1.24 * pow(l.ambient[1], 0.52), 1.24 * pow(l.ambient[2], 0.52)],
+    ambient: [ambient(l.ambient[0]), ambient(l.ambient[1]), ambient(l.ambient[2])],
   };
 }
