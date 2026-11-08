@@ -177,8 +177,10 @@ It never starts the game itself.
 - **Time and lighting**: with the day fixed (we-drive's default) the status bar says "Time: 06:00". Measured
   2026-11-08 at the opening view (pic-compare, whole picture), the editor's three states hardly differ: on cliff.w3m
   game view off with View > Lighting on, with it off, and game view on are within a mean absolute difference of
-  0.7 and 1.3; on map 03 (Water Ford Lake Boats) 2.5 and 3.0. So in this build most of the darkness and colour
-  difference to Studio isn't the editor's lighting.
+  0.7 and 1.3; on map 03 (Water Ford Lake Boats) 2.5 and 3.0. In SD that holds for any light (the classic picture
+  clamps the light to 1); in HD it holds for map 03, but cliff.w3m's own strong lighting makes its game view much
+  brighter than the editor's light (green about 233 against 123). The rest of the colour difference to Studio was
+  the HD picture's tone (`lib/model/tone.ts`).
 
 ### Comparing pictures with Studio
 
@@ -197,12 +199,21 @@ node scripts/pic-compare.mjs we.png st.png --sample --diff d.png
 | `--look x,y[,distance[,aoa[,fov[,rotation]]]]` | `--camera "we:x,y[,distance…]"` (only angle 304 and field of view 70 are fitted) |
 
 Studio's defaults are lighting on at hour 12 (`terrain.lighting.*` in the terrain viewer's extension.json). On map
-03 at the opening view (2026-11-08, SD), the pairs differ by a mean absolute difference of 19.8 (lit) and 21.3
-(unlit); Studio is greener and less red and blue in both (mean delta lit -14.9, +6.5, -10.4; unlit -14.6, +19.0,
--11.1), Studio's lighting at 06:00 darkens its green by 14 against its even light. The worst cell is the lake (top
-right): the editor draws its water blue, Studio green. Off-centre looks and rotation 0 line up on cliff.w3m
-(grass edge masks agree at no shift); on map 03, whose ground at the centre is 256 high, the lake edge is about
-25 px off, which is open.
+03 at the opening view (HD, both pairs), the mean absolute difference was 17.5 (lit) and 16.5 (unlit) before the
+editor's picture tone went into Studio (`lib/model/tone.ts`, branch render-fixes-2), and is 7.7 and 6.9 after; on
+cliff.w3m 42.8 and 14.1 before, 26.8 and 7.1 after. What is left on map 03 is the lake's shore (Studio's foam
+models; the editor shows none in game view) and the start location, which the editor hides in game view. On
+cliff.w3m lit, its own lighting (sun 1.95, shadow intensity 5.85) still comes out brighter in the editor.
+
+The camera lines up on raised ground too: on map 03 (ground 256 high at the centre) the start location's ring is
+within 1 px of the editor's and the two footmen within 3–5 px. The lake's edge differs by how each fades the water
+in from the shore (in SD within 3–14 px, in HD 10–30 px), not by the camera.
+
+**Making the editor show a light**: `--look` maps are copies, so a variant of a map with a lighting model written
+for the test (war3map.w3l naming two `<guid>.mdl` files, unpacked and packed with the release CLI) shows what the
+editor does with one value at a time. That is how tone.ts was fitted: flat ground of cliff.w3m, the sun straight
+down at intensity 0.5, 1 and 2, at 52° from the south, north, east and south-west, ambient alone, shadow intensity
+0, 2 and 5.85; with no light at all the view is black and `--compare-ready` never sees it drawn.
 
 ## Process
 

@@ -9,6 +9,7 @@ import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
 import type { SceneLight } from "./dnclight";
+import { setTone, TONE_FS, type Tone } from "./tone";
 
 /** Shading without a scene light (model viewer): soft ambient plus a light from the front left. */
 export const DEFAULT_LIGHT: SceneLight = { dir: [0.4, -0.3, 0.85], diffuse: [0.7, 0.7, 0.7], ambient: [0.45, 0.45, 0.45] };
@@ -354,7 +355,19 @@ void main() {
   vNormal = mat3(aWorld) * mat3(m) * aNormal;
   vUV = (uTexMatrix * vec3(aUV, 1.0)).xy;
   vec4 world = aWorld * m * vec4(aPos, 1.0);
-  if (uUseHeight > 0.5) world.z += groundAt(world.xy);
+  if (uUseHeight > 0.5) {
+    world.z += groundAt(world.xy);
+    // A cliff's top and foot are ground: shaded with the ground's normal there (as the terrain works it out,
+    // across two tiles), not the model's own tilted one, or each cliff tile shows as a lighter or darker square.
+    vec3 n = normalize(vNormal);
+    float flatness = smoothstep(0.85, 0.95, n.z);
+    if (flatness > 0.0) {
+      vec2 p = world.xy;
+      float sx = (groundAt(p + vec2(128.0, 0.0)) - groundAt(p - vec2(128.0, 0.0))) / 256.0;
+      float sy = (groundAt(p + vec2(0.0, 128.0)) - groundAt(p - vec2(0.0, 128.0))) / 256.0;
+      vNormal = mix(n, normalize(vec3(-sx, -sy, 1.0)), flatness);
+    }
+  }
   gl_Position = uViewProj * world;
   vFogDepth = gl_Position.w;
 }`;
@@ -363,19 +376,23 @@ const FS = `#version 300 es
 precision mediump float;
 in vec3 vNormal; in vec2 vUV;
 uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform float uUnshaded;
+// uOpaque 1: an opaque layer (filter mode None), whose texture's alpha doesn't count (layerAlpha).
+uniform float uOpaque;
 // HD materials: the ORM texture's alpha masks where team colour goes.
 uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix;
 // Scene light: direction toward it, diffuse and ambient colour (intensity included).
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
 ${FOG_FS}
+${TONE_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c *= uColor;
+  if (uOpaque > 0.5) c.a = uColor.a;
   if (c.a < uAlphaTest) discard;
-  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-  outColor = vec4(fogged(mix(c.rgb * light, uMix.rgb, uMix.a)), c.a);
+  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * facing(vNormal, uLightDir);
+  outColor = vec4(fogged(mix(toned(c.rgb, light), uMix.rgb, uMix.a)), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -456,7 +473,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -542,6 +559,8 @@ export interface DrawOptions {
   onTop?: boolean;
   /** Scene light (default: DEFAULT_LIGHT). */
   light?: SceneLight;
+  /** How the lit colour becomes a pixel (tone.ts; default 0, colour × light). */
+  tone?: Tone;
 }
 
 export interface HeightMap {
@@ -560,6 +579,14 @@ export interface HeightMap {
  *  (ShimmeringPortal's disc). Any fade (alpha under 1) is the layer blending again. */
 export function effectiveFilterMode(filterMode: number, alpha: number, opaqueTexture: boolean): number {
   return filterMode === 2 && alpha >= 0.999 && opaqueTexture ? 0 : filterMode;
+}
+
+/** How a layer of this (effective) filter mode uses alpha: the alpha test's threshold, and whether the texture's
+ *  alpha counts. An opaque layer (0, None) draws its texture whole, whatever its alpha channel holds: HD models'
+ *  diffuse textures often have alpha 0 throughout (Wood_Debris_Barrels_01, YCde), which a test on the texture's
+ *  alpha threw away entirely. Transparent (1) cuts at 0.75; the blended modes drop only what is all but clear. */
+export function layerAlpha(mode: number): { test: number; textureAlpha: boolean } {
+  return { test: mode === 1 ? 0.75 : 0.01, textureAlpha: mode !== 0 };
 }
 
 type Layer = Model["materials"][number]["layers"][number];
@@ -818,6 +845,7 @@ export class ModelGpu {
     gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
     setFog(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.fog);
     const light = opts.light ?? DEFAULT_LIGHT;
+    setTone(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.tone, light);
     gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
     gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
     gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);
@@ -851,7 +879,9 @@ export class ModelGpu {
       gl.uniform1f(u.uUnshaded, sf & 0x1 ? 1 : 0);
       if (sf & 0x10) gl.disable(gl.CULL_FACE); else { gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK); }
       if (sf & 0x40) gl.disable(gl.DEPTH_TEST); else gl.enable(gl.DEPTH_TEST);
-      gl.uniform1f(u.uAlphaTest, (mode === 1 ? 0.75 : 0.01) * (opts.tint?.[3] ?? 1));
+      const rule = layerAlpha(mode);
+      gl.uniform1f(u.uOpaque, rule.textureAlpha ? 0 : 1);
+      gl.uniform1f(u.uAlphaTest, rule.test * (opts.tint?.[3] ?? 1));
       switch (mode) {
         case 0: case 1: gl.disable(gl.BLEND); gl.depthMask(true); break;
         case 2: gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); break;

@@ -9,6 +9,7 @@ import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
 import { compile, INSTANCE_BYTES, mat4, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
+import { hdLight, setTone, shadeWrap, TONE_FS, type Tone } from "../../lib/model/tone";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -51,10 +52,11 @@ uniform sampler2D uTex;
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
 ${FOG_FS}
+${TONE_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
-  vec3 light = uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-  outColor = vec4(fogged(c.rgb * light * vShade), c.a);
+  vec3 light = uAmbient + uDiffuse * facing(vNormal, uLightDir);
+  outColor = vec4(fogged(toned(c.rgb, light) * vShade), c.a);
 }`;
 
 const COLOR_VS = `#version 300 es
@@ -82,17 +84,27 @@ uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; unif
 // The scene light on a flat surface (the map's water tint is in the ramp: waterRamp); uGrey 1: the
 // texture gives only its brightness (tinted water).
 uniform vec3 uLight; uniform float uGrey;
+// HD (uTone 2): the colour the editor shows (hdWaterColor), the texture only rippling it.
+uniform vec3 uHdWater; uniform float uWaterBrightness;
 out vec4 outColor;
 ${FOG_FS}
+${TONE_FS}
 void main() {
   const float minDepth = 10.0 / 128.0, deepLevel = 64.0 / 128.0, maxDepth = 72.0 / 128.0;
   vec4 c = vDepth <= deepLevel
     ? mix(uShallowMin, uShallowMax, clamp((vDepth - minDepth) / (deepLevel - minDepth), 0.0, 1.0))
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
+  if (uTone > 1.5) {
+    // Fades in from the shore as the ramp's opacity does, to all of it where the ramp is deepest.
+    float a = clamp(c.a / max(uDeepMax.a, 0.01), 0.0, 1.0) * t.a;
+    float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
+    outColor = vec4(fogged(uHdWater * mix(1.0, ripple, 0.5)), a);
+    return;
+  }
   t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);
   vec4 w = t * c;
-  outColor = vec4(fogged(w.rgb * uLight), w.a);
+  outColor = vec4(fogged(toned(w.rgb, uLight)), w.a);
 }`;
 
 /** A tileset's water: animation frames (by index; null until loaded), frames per second and
@@ -118,6 +130,35 @@ export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & {
   return { shallowMin: apply(look.shallowMin), shallowMax: apply(look.shallowMax), deepMin: apply(look.deepMin), deepMax: apply(look.deepMax), grey: true };
 }
 
+/**
+ * The water's colour in HD (sRGB, 0–1), as the World Editor draws it: Reforged's water doesn't take its colour
+ * from Water.slk's HD ramp (Lordaeron's is green, 0, 200, 80; Northrend's near white; Barrens' pink) but comes
+ * out a dark teal on every tileset measured (we-drive, game view on and off, 2026-11-08: Lordaeron 22, 54–61, 73;
+ * Northrend 22, 48–52, 39–41; Barrens 25–26, 41–46, 42–44), Lordaeron Summer bluer, the one tileset with its own
+ * water environment map (Environment\EnvironmentMap\LordaeronSummer\Water_IBL). A map's water tint takes that blue
+ * away (03b_Water_Tint, red: 23, 50, 40) rather than showing its colour.
+ */
+export function hdWaterColor(tileset: string, tinted: boolean): [number, number, number] {
+  return tileset.toUpperCase() === "L" && !tinted ? [22 / 255, 57 / 255, 73 / 255] : [23 / 255, 47 / 255, 41 / 255];
+}
+
+/** The brightness HD water's ripple is measured against until the texture is known (Lordaeron's Water00). */
+const WATER_BRIGHTNESS = 0.45;
+
+/** An image's mean brightness (0–1, Rec. 601 weights), from a small mip level; null if it can't be decoded. */
+export function meanBrightness(img: DecodedImage): number | null {
+  try {
+    let level = 0;
+    while (level + 1 < img.mipCount && img.height >> (level + 1) >= 16) level++;
+    const { rgba } = img.mip(level);
+    let sum = 0;
+    for (let p = 0; p < rgba.length; p += 4) sum += 0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2];
+    return rgba.length ? sum / (rgba.length / 4) / 255 : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Until the game's water is known: an untextured blue-grey ramp. */
 const WATER_DEFAULT: WaterLook = {
   frames: [], rate: 1,
@@ -137,7 +178,8 @@ in vec2 vUv;
 uniform sampler2D uTex; uniform vec4 uColor; uniform vec3 uLight;
 out vec4 outColor;
 ${FOG_FS}
-void main() { vec4 c = texture(uTex, vUv) * uColor; outColor = vec4(fogged(c.rgb * uLight), c.a); }`;
+${TONE_FS}
+void main() { vec4 c = texture(uTex, vUv) * uColor; outColor = vec4(fogged(toned(c.rgb, uLight)), c.a); }`;
 
 // Ground overlay: a texture spread over the map (one texel per 32×32 pathing
 // cell), e.g. the pathing editor's view.
@@ -275,6 +317,8 @@ export class TerrainRenderer {
   private waterLook: WaterLook = WATER_DEFAULT;
   /** Water frame shown by the last render (the view redraws when it changes). */
   private waterFrameShown = -1;
+  /** Mean brightness of the water's first frame (meanBrightness): HD water ripples around it. */
+  private waterBrightness = WATER_BRIGHTNESS;
   /** White texture for untextured water. */
   private waterWhite: WebGLTexture;
   /** The map's water tint as stored (b, g, r, a in 0–255; see waterRamp) when tinting is on; null: none. */
@@ -309,6 +353,22 @@ export class TerrainRenderer {
    *  units; null: a neutral default light. */
   terrainLight: SceneLight | null = null;
   unitLight: SceneLight | null = null;
+  /** How lit colours become pixels: the graphics mode's (tone.ts). */
+  tone: Tone = 2;
+
+  /** A map light as it's drawn: in HD the editor's response to it (hdLight). */
+  private drawnLight(l: SceneLight | null): SceneLight | null {
+    return l && this.tone === 2 ? hdLight(l) : l;
+  }
+
+  /** The light on a flat surface (normal straight up: water, building marks), shaded as the ground is
+   *  (shadeWrap); without the map's lighting the even light, 1. `sun` is already drawnLight's. */
+  private flatLight(sun: SceneLight | null): number[] {
+    if (!sun) return [1, 1, 1];
+    const d = Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1));
+    const up = d + (1 - d) * shadeWrap(this.tone, sun);
+    return [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up);
+  }
   /** Particle effects (fires, glows, …) of placed objects. */
   showEffects = true;
   private particleRenderer: ParticleRenderer | null = null;
@@ -643,6 +703,7 @@ export class TerrainRenderer {
   setWaterFrame(i: number, img: DecodedImage) {
     if (i >= this.waterLook.frames.length) return;
     this.waterLook.frames[i] = createTexture(this.gl, img, { repeat: [true, true] });
+    if (i === 0) this.waterBrightness = meanBrightness(img) ?? WATER_BRIGHTNESS;
   }
 
   /** The water animation frame for now. */
@@ -1084,7 +1145,9 @@ export class TerrainRenderer {
     gl.useProgram(this.groundProg);
     setFog(gl, (name) => gl.getUniformLocation(this.groundProg, name), fog);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.groundProg, "uViewProj"), false, viewProj);
-    const groundLight = this.terrainLight ?? GROUND_DEFAULT;
+    const terrainLight = this.drawnLight(this.terrainLight), unitLight = this.drawnLight(this.unitLight);
+    const groundLight = terrainLight ?? GROUND_DEFAULT;
+    setTone(gl, (name) => gl.getUniformLocation(this.groundProg, name), this.tone, groundLight);
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uLightDir"), groundLight.dir);
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uDiffuse"), groundLight.diffuse);
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uAmbient"), groundLight.ambient);
@@ -1127,9 +1190,8 @@ export class TerrainRenderer {
       setFog(gl, (name) => gl.getUniformLocation(this.splatProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.splatProg, "uTex"), 0);
-      const sun = this.terrainLight;
-      const up = sun ? Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1)) : 0;
-      const lit = sun ? [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up) : [1, 1, 1];
+      setTone(gl, (name) => gl.getUniformLocation(this.splatProg, name), this.tone);
+      const lit = this.flatLight(terrainLight);
       gl.uniform3f(gl.getUniformLocation(this.splatProg, "uLight"), lit[0], lit[1], lit[2]);
       gl.activeTexture(gl.TEXTURE0);
       gl.enable(gl.BLEND);
@@ -1166,10 +1228,10 @@ export class TerrainRenderer {
     }
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
-        const light = (b.group === "units" ? this.unitLight : this.terrainLight) ?? undefined;
+        const light = (b.group === "units" ? unitLight : terrainLight) ?? undefined;
         // A see-through batch is blended whole, after everything opaque (which then shows through it).
         if (b.tint && pass === "opaque") continue;
-        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint });
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone });
       }
     }
     if (this.showEffects || this.showWeather) {
@@ -1211,10 +1273,10 @@ export class TerrainRenderer {
         gl.uniform4fv(gl.getUniformLocation(this.waterProg, name), v);
       }
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uGrey"), ramp.grey ? 1 : 0);
-      // Lit like flat ground (normal straight up); the even light without the map's.
-      const sun = this.terrainLight;
-      const up = sun ? Math.max(0, sun.dir[2] / (Math.hypot(...sun.dir) || 1)) : 0;
-      const lit = sun ? [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up) : [1, 1, 1];
+      setTone(gl, (name) => gl.getUniformLocation(this.waterProg, name), this.tone);
+      gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
+      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);
+      const lit = this.flatLight(terrainLight);
       gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, look.frames[frame] ?? look.frames.find((f) => f) ?? this.waterWhite);

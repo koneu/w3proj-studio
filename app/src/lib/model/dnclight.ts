@@ -333,6 +333,8 @@ export interface SceneLight {
   dir: [number, number, number];
   diffuse: [number, number, number];
   ambient: [number, number, number];
+  /** The light's shadow intensity (HD shading uses it, see tone.ts hdLight); absent: 0. */
+  shadow?: number;
 }
 
 /** A track's value at `time` (keys in order; Hermite/Bezier use their tangents). */
@@ -384,5 +386,6 @@ export function lightAt(m: LightModel, hour: number): SceneLight | null {
     dir,
     diffuse: rgb(propAt(l.color, time), propAt(l.intensity, time)[0] ?? 1),
     ambient: rgb(propAt(l.ambColor, time), propAt(l.ambIntensity, time)[0] ?? 0),
+    shadow: l.shadowIntensity,
   };
 }
