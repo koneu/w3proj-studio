@@ -32,15 +32,31 @@ pub fn proton_for(exe: &Path) -> Result<Proton, String> {
         .ancestors()
         .find(|a| a.file_name().is_some_and(|n| n == "pfx") && a.parent().and_then(Path::parent).and_then(Path::file_name).is_some_and(|n| n == "compatdata"))
         .ok_or_else(|| format!("{} is a Windows program, and on Linux it's started through Steam (Proton), but it isn't in a Steam prefix (…/steamapps/compatdata/<id>/pfx/…). Add the game to Steam and run it there once.", exe.display()))?;
-    let compat_data = pfx.parent().unwrap().to_path_buf();
-    let app_id = compat_data.file_name().unwrap().to_string_lossy().into_owned();
-    let steam_root = compat_data.parent().and_then(Path::parent).and_then(Path::parent).unwrap().to_path_buf();
+    let odd = || format!("{} isn't laid out like a Steam prefix (…/steamapps/compatdata/<id>/pfx/…).", exe.display());
+    let compat_data = pfx.parent().ok_or_else(odd)?.to_path_buf();
+    let app_id = compat_data.file_name().ok_or_else(odd)?.to_string_lossy().into_owned();
+    let library = compat_data.parent().and_then(Path::parent).and_then(Path::parent).ok_or_else(odd)?;
+    let steam_root = steam_root_for(library, std::env::var_os("HOME").map(PathBuf::from).as_deref());
     let info = std::fs::read_to_string(compat_data.join("config_info"))
         .map_err(|_| format!("Steam hasn't run the game in {} yet (no config_info), so it isn't known which Proton to use. Start it from Steam once.", compat_data.display()))?;
     let tool = tool_from_config_info(&info)
         .filter(|t| t.join("proton").is_file())
         .ok_or_else(|| format!("The Proton build Steam used for {} isn't there any more (see its config_info). Start the game from Steam once, so Steam sets it up again.", compat_data.display()))?;
     Ok(Proton { tool, compat_data, steam_root, app_id })
+}
+
+/// Steam's own folder (STEAM_COMPAT_CLIENT_INSTALL_PATH). The library a prefix is in is Steam's own folder only
+/// for the first library; a game in a further library (another drive) has its prefix there, so Steam's folder
+/// comes from `~/.steam/root`, the link Steam keeps to itself. A library with Steam's own files is Steam's folder.
+pub fn steam_root_for(library: &Path, home: Option<&Path>) -> PathBuf {
+    let is_steam = |p: &Path| p.join("steam.sh").is_file() || p.join("ubuntu12_32").is_dir();
+    if is_steam(library) {
+        return library.to_path_buf();
+    }
+    home.map(|h| h.join(".steam").join("root"))
+        .and_then(|link| std::fs::canonicalize(link).ok())
+        .filter(|p| is_steam(p))
+        .unwrap_or_else(|| library.to_path_buf())
 }
 
 /// The Proton build's folder, from a config_info: the first line naming a path inside it (`…/files/…` or,
@@ -83,6 +99,8 @@ mod tests {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!("w3proj-proton-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("steam.sh"), "").unwrap();
         let tool = root.join("compatibilitytools.d/Proton-GE Latest");
         std::fs::create_dir_all(tool.join("files/share/fonts")).unwrap();
         std::fs::write(tool.join("proton"), "#!/bin/sh\n").unwrap();
@@ -113,6 +131,27 @@ mod tests {
         std::fs::remove_file(root.join("steamapps/compatdata/4104009084/config_info")).unwrap();
         assert!(proton_for(&exe).unwrap_err().contains("no config_info"));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_game_in_a_second_library_gets_steams_own_folder_from_the_steam_root_link() {
+        let (root, _) = steam();
+        let home = root.join("home");
+        std::fs::create_dir_all(home.join(".steam")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&root, home.join(".steam/root")).unwrap();
+        let library = root.join("other-drive/SteamLibrary");
+        std::fs::create_dir_all(&library).unwrap();
+        #[cfg(unix)]
+        assert_eq!(steam_root_for(&library, Some(&home)), std::fs::canonicalize(&root).unwrap());
+        assert_eq!(steam_root_for(&root, Some(&home)), root, "the first library is Steam's folder itself");
+        assert_eq!(steam_root_for(&library, None), library, "nothing better known: the library");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_path_without_a_folder_above_steamapps_is_an_error_not_a_crash() {
+        assert!(proton_for(Path::new("/compatdata/1/pfx/x.exe")).is_err());
     }
 
     #[test]
