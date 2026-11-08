@@ -6,7 +6,7 @@ import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/s
 import { paramText } from "../../lib/triggers/display";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
-import { h } from "../../workbench/dom";
+import { focusAfterClick, h } from "../../workbench/dom";
 import { callParam, FUNCTION, functionsFor, PRESET, presetsFor, takesValue, VALUE, VARIABLE, variablesFor } from "./params";
 
 /** A modal over the whole window; resolves with what `body` passes to `done`. */
@@ -53,7 +53,7 @@ function listPicker<T>(items: ListItem<T>[], done: (v: T) => void, opts: {
     const counts = new Map<string, number>();
     for (const it of matching) if (it.category) counts.set(it.category, (counts.get(it.category) ?? 0) + 1);
     const chip = (c: string | null, label: string, n: number) => h(`button.chip${category === c ? ".on" : ""}`, {
-      onclick: () => { category = c; filter(); search.focus(); },
+      onclick: () => { category = c; filter(); focusAfterClick(search); },
     }, label, h("small", {}, String(n)));
     chips.replaceChildren(chip(null, "All", matching.length),
       ...[...counts].map(([c, n]) => [c, opts.categoryName!(c), n] as const).sort((a, b) => a[1].localeCompare(b[1])).map(([c, l, n]) => chip(c, l, n)));
