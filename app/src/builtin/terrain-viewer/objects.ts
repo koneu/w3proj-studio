@@ -77,8 +77,11 @@ const SKIN_FILES: [string, string][] = [
 export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
   const mode = w3.settings.get<string>("game.graphicsMode") ?? "hd";
   const out = new Map<string, Skin>();
-  for (const [f, kind] of SKIN_FILES) {
-    const text = await w3.game.readText(f).catch(() => "");
+  // All asked at once (the map's models wait for them), used in this order whichever lands first.
+  const read = (f: string) => w3.game.readText(f).catch(() => "");
+  const skinTexts = SKIN_FILES.map(([f]) => read(f)), funcTexts = UNIT_FUNC.map(read), unitData = read("Units\\UnitData.slk");
+  for (const [i, [, kind]] of SKIN_FILES.entries()) {
+    const text = await skinTexts[i];
     for (const [id, sec] of parseIni(text)) {
       const get = (k: string) => sec.get(`${k}:${mode}`) ?? sec.get(k);
       const file = get("file");
@@ -98,8 +101,8 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
       });
     }
   }
-  for (const f of UNIT_FUNC) addAnimProps(out, await w3.game.readText(f).catch(() => ""));
-  addMoveTypes(out, parseSlk(await w3.game.readText("Units\\UnitData.slk").catch(() => "")));
+  for (const text of funcTexts) addAnimProps(out, await text);
+  addMoveTypes(out, parseSlk(await unitData));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
