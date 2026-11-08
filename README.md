@@ -131,6 +131,15 @@ It sets up:
 - **Node 22** through [nvm](https://github.com/nvm-sh/nvm), not apt: Ubuntu's `nodejs` package is too old.
 - **`tauri-driver`** (`cargo install tauri-driver --locked`, into `~/.cargo/bin`, which must be on `PATH`).
 - **`npm ci`** in `app/`.
+- **Warcraft III:** finds the installs in Steam (Proton), Lutris/Battle.net and Wine prefixes, shows each one's
+  build, and writes the newest to `.game-path` (git-ignored; `--game PATH` picks another). The gate and the test
+  scripts read it when `W3PROJ_GAME` isn't set (`tests/gamepath.mjs`); on Windows, without either, they use the
+  folder above the repository. The app itself takes the folder from its `game.installDir` setting: when that
+  folder (by default `C:\Program Files (x86)\Warcraft III`) doesn't open, it offers the installs it finds in the
+  same places at start, newest first. "Game Data: Choose Warcraft III Folder…" changes it later.
+
+Use an up-to-date game: Studio's generated map scripts call natives of the current build, and an older one
+(e.g. 2.0.x) rejects them.
 
 Why the extra test tools: on Windows the smoke tests drive the app's WebView2 over the Chrome DevTools
 Protocol. WebKitGTK doesn't speak that protocol, so on Linux they drive it over WebDriver

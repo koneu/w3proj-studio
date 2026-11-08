@@ -25,7 +25,8 @@
 //
 // Needs for `coverage`: cargo-llvm-cov and the llvm-tools component.
 // Needs for `corpus`: the maps (W3PROJ_CORPUS, default smoketest_maps next to the main checkout)
-// and the game (W3PROJ_GAME, default the Warcraft III folder above it).
+// and the game (W3PROJ_GAME, else the folder in `.game-path`, else the Warcraft III folder above it:
+// tests/gamepath.mjs).
 
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -33,6 +34,7 @@ import { availableParallelism } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Locks, schedule } from "./gate-scheduler.mjs";
+import { gamePath } from "./gamepath.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(repo, "app");
@@ -46,7 +48,7 @@ function mainCheckout() {
 }
 
 const corpus = process.env.W3PROJ_CORPUS ?? join(mainCheckout(), "smoketest_maps");
-const game = process.env.W3PROJ_GAME ?? dirname(mainCheckout());
+const game = gamePath(repo);
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 

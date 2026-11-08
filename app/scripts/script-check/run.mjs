@@ -13,11 +13,12 @@ import { availableParallelism } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mergeSections, mergeValid, printSections, printValid } from "./report.mjs";
+import { chosenGamePath } from "../../../tests/gamepath.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, "..", "..");
 const repo = resolve(app, "..");
-const game = process.env.W3PROJ_GAME;
+const game = chosenGamePath();
 const bin = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${process.platform === "win32" ? ".exe" : ""}`);
 const work = join(repo, "target", "script-check");
 const baselineFile = join(repo, "tests", "script-baseline.json");

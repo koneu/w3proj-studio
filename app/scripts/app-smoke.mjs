@@ -23,6 +23,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
+import { chosenGamePath } from "../../tests/gamepath.mjs";
 
 const LINUX = process.platform === "linux";
 
@@ -54,7 +55,7 @@ function freePort() {
   });
 }
 
-const game = process.env.W3PROJ_GAME;
+const game = chosenGamePath();
 const installArgs = game ? ["--install", game] : [];
 
 /** What World Editor 3.0.1 writes for a new map, by project file. */

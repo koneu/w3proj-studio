@@ -5,10 +5,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { chosenGamePath } from "../../tests/gamepath.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const bin = process.env.W3PROJ_BIN ?? join(app, "..", "target", "release", "w3proj");
-const game = process.env.W3PROJ_GAME;
+const game = chosenGamePath();
 const dir = join(app, "..", "target", "hostile-seeds");
 
 /** Name here (its ending picks what reads it), the game's path, and how much of it. */

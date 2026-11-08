@@ -7,3 +7,4 @@ node_modules/
 /openpoints/
 CLAUDE.md
 /.claude/*
+/.game-path

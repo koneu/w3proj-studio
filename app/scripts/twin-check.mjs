@@ -16,10 +16,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { chosenGamePath } from "../../tests/gamepath.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = process.env.W3PROJ_BIN ?? join(app, "..", "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
-const game = process.env.W3PROJ_GAME ?? "C:\\Program Files (x86)\\Warcraft III";
+const game = chosenGamePath() ?? "C:\\Program Files (x86)\\Warcraft III";
 if (!existsSync(bin)) throw new Error(`${bin} not found: run cargo build --release first`);
 
 const maps = [];

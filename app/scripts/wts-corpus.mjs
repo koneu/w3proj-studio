@@ -15,11 +15,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { chosenGamePath } from "../../tests/gamepath.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const root = join(app, "..");
 const bin = process.env.W3PROJ_BIN ?? join(root, "target", "release", "w3proj" + (process.platform === "win32" ? ".exe" : ""));
-const game = process.env.W3PROJ_GAME;
+const game = chosenGamePath();
 const cache = process.env.W3_WTS_CACHE ?? join(root, "target", "wts-corpus");
 const corpus = process.argv[2] ?? process.env.W3PROJ_CORPUS;
 const run = (...args) => execFileSync(bin, args, { maxBuffer: 1 << 29, stdio: ["ignore", "pipe", "ignore"] });

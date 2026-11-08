@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, problems, sleep, until } from "./cdp.mjs";
+import { chosenGamePath } from "../../tests/gamepath.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
@@ -26,7 +27,7 @@ const exe = process.env.W3_BENCH_EXE ?? join(repo, "target", "debug", `w3proj-st
 const cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
 const IDENTIFIER = process.env.W3_SMOKE_ID ?? "dev.w3proj.studio.smoke";
 const work = process.env.W3_BENCH_DIR ?? join(tmpdir(), `problems-bench-${IDENTIFIER}`);
-const game = process.env.W3PROJ_GAME;
+const game = chosenGamePath();
 
 const opt = (name, fallback) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
 const inputs = process.argv.slice(2).filter((a) => !a.startsWith("--"));
