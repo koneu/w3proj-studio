@@ -25,6 +25,18 @@ export function pastedFlags(flags: number, preserve: boolean): number {
   return preserve ? flags : flags & ~FIXED_HEIGHT;
 }
 
+/** Movement types (UnitData.slk `movetp`, object data `umvt`) whose units the game puts on the water surface:
+ *  ships always, amphibious units where they are in water. */
+const ON_WATER = new Set(["float", "amph"]);
+export const goesOnWater = (moveType: string | undefined) => !!moveType && ON_WATER.has(moveType.toLowerCase());
+
+/** Where a unit is drawn in height: the game places a unit by its movement type, not by the height the
+ *  placement file holds (03_Water_Ford_Lake_Boats' ships hold the sea bed's), so a floating or amphibious unit over water
+ *  (`surface`, from waterSurfaceAt; null without) sits on the surface. Anything else stays at `stored`. */
+export function unitDrawHeight(moveType: string | undefined, stored: number, surface: number | null): number {
+  return goesOnWater(moveType) && surface !== null && surface > stored ? surface : stored;
+}
+
 /** A number typed for a height, or null: it has to be finite. A comma may be the decimal mark. */
 export function parseHeight(text: string): number | null {
   const t = text.trim().replace(",", ".");

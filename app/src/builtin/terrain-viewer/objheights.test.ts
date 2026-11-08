@@ -1,7 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
+
+test("ships float on the water surface, whatever height the placement file gives them", () => {
+  // 03_Water_Ford_Lake_Boats: the transport (hbot), destroyer and battleship are stored at z 0, the sea bed;
+  // UnitData.slk gives them movetp "float". In the game they sit on the water.
+  assert.equal(unitDrawHeight("float", 0, 38.4), 38.4);
+  assert.equal(unitDrawHeight("float", -120, -51.2), -51.2, "a surface below zero");
+  // Naga and sea turtles (amph) swim on the surface where there is water, and walk on the ground elsewhere.
+  assert.equal(unitDrawHeight("amph", -60, 38.4), 38.4);
+  assert.equal(unitDrawHeight("amph", 12, null), 12);
+  // Others stay where they are stored: a footman wades along the river bed, a flyer keeps its height.
+  for (const m of ["foot", "horse", "fly", "hover", "_", "", undefined]) assert.equal(unitDrawHeight(m, -20, 38.4), -20, String(m));
+  // A ship on dry ground (no surface, or the surface under the ground) stays on the ground.
+  assert.equal(unitDrawHeight("float", 64, null), 64);
+  assert.equal(unitDrawHeight("float", 64, 38.4), 64);
+});
 
 test("a pasted fixed-height object keeps its height over the ground, only when preserving", () => {
   assert.equal(pastedHeight(100, 40, true, true), 140);

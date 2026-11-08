@@ -251,6 +251,22 @@ export function heightAt(t: Terrain, wx: number, wy: number): number {
   return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
 }
 
+/** Height of the water surface at a world position, as the terrain viewer draws it: a tile with water at a
+ *  corner and above the ground at one, its dry corners at the wet ones' level, bilinear between. Null where
+ *  no water is drawn, or where the ground there rises through the surface. Past the edge the nearest tile counts. */
+export function waterSurfaceAt(t: Terrain, wx: number, wy: number): number | null {
+  const fx = Math.min(Math.max((wx - t.offsetX) / 128, 0), t.width - 1.000001);
+  const fy = Math.min(Math.max((wy - t.offsetY) / 128, 0), t.height - 1.000001);
+  const x = Math.floor(fx), y = Math.floor(fy), u = fx - x, v = fy - y;
+  const cs = [t.corners[y * t.width + x], t.corners[y * t.width + x + 1], t.corners[(y + 1) * t.width + x], t.corners[(y + 1) * t.width + x + 1]];
+  const wet = cs.filter((c) => c.hasWater);
+  if (!wet.length || cs.every((c) => c.water <= c.height)) return null;
+  const level = Math.max(...wet.map((c) => c.water));
+  const [a, b, c, d] = cs.map((k) => (k.hasWater ? k.water : level));
+  const surface = (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+  return surface > heightAt(t, wx, wy) ? surface : null;
+}
+
 /** Serializes a terrain; an unedited one comes out byte for byte as it was read. */
 export function writeW3e(t: Terrain): Uint8Array {
   const per = t.version === 12 ? 8 : 7;
