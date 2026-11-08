@@ -126,7 +126,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const row = (label: string, onclick: () => void, extra?: HTMLElement, title = "") =>
           h("div.tree-row.obj-kind", { onclick, title }, h("span.tree-icon", {}, "›"), h("span.tree-label", {}, label), extra ?? null);
-        el.append(h("div.tree", {}, ...SECTIONS.map(([id, label]) => row(label, run(() => open(id))))));
+        el.append(h("div.tree", {}, ...SECTIONS.map(([id, label]) => row(label, run(() => open(id)))),
+          row("Gameplay Constants", run(() => w3.commands.execute("w3.gameplayConstants.open")), undefined, "The campaign's war3campaignMisc.txt"),
+          row("Game Interface", run(() => w3.commands.execute("w3.gameInterface.open")), undefined, "The campaign's war3campaignSkin.txt")));
         const list = h("div.tree.camp-side-chapters", {}, h("div.view-empty", {}, "Loading chapters…"));
         el.append(h("div.camp-side-head", {}, "Chapters"), list,
           h("div.camp-side-actions", {},
@@ -385,6 +387,7 @@ class CampaignView {
 
   private general(): HTMLElement[] {
     const c = this.info;
+    const run = (f: () => Promise<unknown>) => () => { f().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))); };
     return [
       h("div.form-section", {},
         this.row("Name", this.text(() => c.name, (v) => { c.name = v; })),
@@ -396,6 +399,11 @@ class CampaignView {
           this.bit("Variable difficulty", () => c.flags, (v) => { c.flags = v; }, 1),
           this.bit("Flag 2", () => c.flags, (v) => { c.flags = v; }, 2, "Meaning unknown (set in one sample)"),
           this.bit("Flag 4", () => c.flags, (v) => { c.flags = v; }, 4, "Meaning unknown (set in one sample)"))),
+      // The World Editor's Campaign Editor › Advanced: the campaign's own values, which apply to its chapters.
+      h("div.form-section", {}, h("h3", {}, "Advanced"),
+        h("div.camp-advanced", {},
+          h("button.camp-gameplay", { title: "war3campaignMisc.txt: max hero level, experience, damage tables, … for every chapter", onclick: run(() => this.w3.commands.execute("w3.gameplayConstants.open")) }, "Gameplay Constants…"), " ",
+          h("button.camp-interface", { title: "war3campaignSkin.txt: icons, models, sounds and texts of the interface for every chapter", onclick: run(() => this.w3.commands.execute("w3.gameInterface.open")) }, "Game Interface…"))),
       h("div.form-section", {}, h("h3", {}, "File"),
         h("p.muted", {}, `Format version ${c.version} · saved ${c.campaignVersion} times · editor ${c.editorVersion}`)),
     ];

@@ -2,9 +2,9 @@
   "id": "w3.gameSettings",
   "name": "Gameplay Constants & Game Interface",
   "version": "0.1.0",
-  "description": "The World Editor's Advanced > Gameplay Constants (war3mapMisc.txt: max hero level, experience, damage tables, …) and Advanced > Game Interface (war3mapSkin.txt: icons, models, sounds and texts of the interface). Shows every value with the game's default; the map stores only what it changes.",
+  "description": "The World Editor's Advanced > Gameplay Constants (war3mapMisc.txt: max hero level, experience, damage tables, …) and Advanced > Game Interface (war3mapSkin.txt: icons, models, sounds and texts of the interface). Shows every value with the game's default; the map stores only what it changes. In a campaign project the same for the campaign (war3campaignMisc.txt, war3campaignSkin.txt, texts in war3campaign.wts).",
   "contributes": {
-    "editors": [{ "id": "w3.gameSettings", "title": "Gameplay Constants / Game Interface", "patterns": ["war3mapMisc.txt", "war3mapSkin.txt"] }],
+    "editors": [{ "id": "w3.gameSettings", "title": "Gameplay Constants / Game Interface", "patterns": ["war3mapMisc.txt", "war3mapSkin.txt", "war3campaignMisc.txt", "war3campaignSkin.txt"] }],
     "commands": [
       { "id": "w3.gameplayConstants.open", "when": "project", "menu": "Scenario:1:2", "title": "Gameplay Constants…", "category": "Scenario" },
       { "id": "w3.gameInterface.open", "when": "project", "menu": "Scenario:1:3", "title": "Game Interface…", "category": "Scenario" }

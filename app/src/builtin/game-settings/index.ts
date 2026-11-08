@@ -11,8 +11,8 @@ import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
+import { settingsFiles, settingsOf } from "./files";
 
-const MISC = "map/war3mapMisc.txt", SKIN = "map/war3mapSkin.txt", WTS = "map/war3map.wts";
 type Mode = "misc" | "skin";
 
 interface Field {
@@ -131,15 +131,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.editors.open(real, "w3.gameSettings");
   };
   ctx.subscriptions.push(
-    w3.commands.register("w3.gameplayConstants.open", () => open(MISC)),
-    w3.commands.register("w3.gameInterface.open", () => open(SKIN)),
+    // A campaign project has the campaign's files (war3campaignMisc.txt, war3campaignSkin.txt).
+    w3.commands.register("w3.gameplayConstants.open", () => open(settingsFiles(w3.workspace.files().map((f) => f.path)).misc)),
+    w3.commands.register("w3.gameInterface.open", () => open(settingsFiles(w3.workspace.files().map((f) => f.path)).skin)),
     w3.editors.registerProvider("w3.gameSettings", {
       async resolve(el, doc) {
-        const mode: Mode = /misc\.txt$/i.test(doc.path) ? "misc" : "skin";
+        const { mode, wts, campaign } = settingsOf(doc.path);
         el.append(h("div.muted.gs-loading", {}, "Loading game data…"));
-        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), w3.workspace.readText(WTS).catch(() => null),
+        const [fields, text, wtsText, objects, cols] = await Promise.all([loadFields(w3, mode), doc.readText(), w3.workspace.readText(wts).catch(() => null),
           w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null), loadColumns(w3).catch(() => ({ defense: [], attack: [] }))]);
-        const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), objects, cols);
+        const view = new SettingsView(w3, el, mode, fields, text, wtsText !== null ? new StringTable(wtsText) : null, !doc.readOnly, (d) => doc.setDirty(d), objects, cols,
+          wts, doc.path.replace(/\\/g, "/").split("/").pop() ?? doc.path, campaign);
         return {
           undo: () => view.undo(),
           redo: () => view.redo(),
@@ -150,7 +152,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             view.saved();
           },
           focus: () => el.focus(),
-          watches: [WTS],
+          watches: [wts],
           // A file left empty (opened, nothing changed) isn't kept: the game's values apply anyway.
           dispose: () => {
             if (doc.readOnly) return;
@@ -178,7 +180,9 @@ class SettingsView {
 
   constructor(private w3: W3Api, private el: HTMLElement, private mode: Mode, private fields: Field[], public text: string,
     private strings: StringTable | null, private editable: boolean, private setDirty: (d: boolean) => void,
-    private objects: ObjectsService | null, private columns: Columns) {
+    private objects: ObjectsService | null, private columns: Columns,
+    /** The string table its TRIGSTR references point into, the file's name, and whether it is a campaign's. */
+    private wts: string, private fileName: string, private campaign: boolean) {
     el.classList.add("gs-editor");
     el.tabIndex = -1;
     el.addEventListener("keydown", (e) => {
@@ -209,9 +213,9 @@ class SettingsView {
     const base = this.strings.serialize();
     const edited = new StringTable(base);
     for (const [n, t] of this.texts) edited.set(n, t);
-    const current = await this.w3.workspace.readText(WTS).catch(() => base);
+    const current = await this.w3.workspace.readText(this.wts).catch(() => base);
     const merged = StringTable.merge(base, edited, current);
-    if (merged !== current) await this.w3.workspace.writeText(WTS, merged);
+    if (merged !== current) await this.w3.workspace.writeText(this.wts, merged);
     this.strings.rebase(merged);
   }
 
@@ -374,10 +378,10 @@ class SettingsView {
         })),
       ];
     }));
-    const file = this.mode === "misc" ? "war3mapMisc.txt" : "war3mapSkin.txt";
+    const file = this.fileName;
     this.el.replaceChildren(
       h("div.gs-toolbar", {},
-        h("strong", {}, this.mode === "misc" ? "Gameplay Constants" : "Game Interface"),
+        h("strong", {}, `${this.campaign ? "Campaign " : ""}${this.mode === "misc" ? "Gameplay Constants" : "Game Interface"}`),
         search,
         h("label.gs-check", {}, h("input", { type: "checkbox", checked: this.changedOnly, onchange: (e: Event) => { this.changedOnly = (e.target as HTMLInputElement).checked; this.render(); } }), " Changed only"),
         h("span.muted", {}, `${changed} of ${this.fields.length} changed in ${file}`),

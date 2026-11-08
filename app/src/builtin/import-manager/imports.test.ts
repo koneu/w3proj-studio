@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { clickSelection } from "../../lib/selection";
-import { importPath, importTreePath, isJunkFile } from "./imports";
+import { importPath, importTreePath, isJunkFile, isMapFile } from "./imports";
+
+test("a campaign's own files aren't imports, its imports are", () => {
+  for (const f of ["war3campaign.w3f", "war3campaign.wts", "war3campaignSkin.w3u", "war3campaignSkin.txt", "war3campaignMisc.txt", "war3campaignExtra.txt", "war3mapMisc.txt"]) {
+    assert.ok(isMapFile(f), f);
+  }
+  for (const f of ["war3campaignMiscs.txt", "war3campImported\\war3campaignMisc.txt", "war3campaignOther.txt"]) assert.ok(!isMapFile(f), f);
+});
 
 test("imports go below the import folder, numbered if taken", () => {
   const taken = new Set(["war3mapImported\\a.blp", "war3mapImported\\a (2).blp"]);

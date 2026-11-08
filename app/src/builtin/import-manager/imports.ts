@@ -26,7 +26,7 @@ export const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerC
 
 /** The map's own files at the archive root (and their JSON or text project forms), which aren't
  *  imports. */
-const OWN = /^(war3map(\.[a-z0-9]+|Map\.[a-z]+|Skin\.[a-z0-9]+|Units\.doo|Misc\.txt|Extra\.txt)|war3campaign\.[a-z0-9]+|conversation\.json|\(listfile\)|\(attributes\)|\(signature\))(\.json|\.txt)?$/i;
+const OWN = /^(war3map(\.[a-z0-9]+|Map\.[a-z]+|Skin\.[a-z0-9]+|Units\.doo|Misc\.txt|Extra\.txt)|war3campaign(\.[a-z0-9]+|Skin\.[a-z0-9]+|Misc\.txt|Extra\.txt)|conversation\.json|\(listfile\)|\(attributes\)|\(signature\))(\.json|\.txt)?$/i;
 
 const SOUND = /\.(flac|ogg|mp3|wav)$/i;
 /** The project files that can stand for an archive path: itself, and for sounds the same name with
