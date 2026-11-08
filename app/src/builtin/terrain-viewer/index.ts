@@ -3187,6 +3187,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             Object.assign(renderer, Object.fromEntries((["yaw", "pitch", "distance", "fov"] as const).filter((k) => v[k] !== undefined).map((k) => [k, v[k]])));
             redraw();
           },
+          frameCost: () => {
+            const c = renderer.frameCost, out = { ...c };
+            c.frames = c.frameMs = c.poseMs = c.particleMs = 0;
+            return out;
+          },
         };
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
         if (lastView?.key === viewKey) handle.setView(lastView.view);
