@@ -558,6 +558,88 @@ async function heightsUniform(page, found) {
   await k.verify(fail);
 }
 
+/** Three things of the terrain viewer that only the real app shows:
+ *  - the Camera Objects layer draws a camera made in the Cameras tab before it is saved (the layer against itself off,
+ *    and the file on disk still without it, show it's the unsaved one);
+ *  - terrain_screenshot, in a project with two terrain files, takes the tab in front and doesn't switch to the other;
+ *  - a click on an object without a model (only its marker is drawn) selects it, as a selection box does. */
+async function terrainSelectCameras(page, found) {
+  const fail = (what) => found.push(`terrain select and cameras: ${what}`);
+  const k = await heightKit(page, "SelectCameras");
+  const TXT = "map/war3map.w3e.txt", BIN = "map/war3map.w3e";
+  const active = () => page.evaluate(`w3.editors.activePath()`);
+  const cameras = () => k.read("war3map.w3c.json").cameras ?? [];
+
+  // Cameras: a still picture (no water, no animation), the plain view against itself first.
+  await page.evaluate(`w3.settings.set("terrain.animate", false)`);
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
+  await k.tab("Select");
+  await k.look(0, 0);
+  await k.clearToasts();
+  await sleep(1500);
+  await mapPicture(page);
+  const plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
+  if (noise > 200) fail(`the same view gave two pictures ${noise} pixels apart`);
+  if (cameras().length) fail(`a new map has ${cameras().length} cameras`);
+  await k.tab("Cameras");
+  await page.evaluate(`[...document.querySelectorAll(".terrain-group-tools button")].find((b) => b.textContent === "Create from view").click()`);
+  await sleep(300);
+  // Back on Select, the Cameras tab draws nothing of its own: what shows is the layer.
+  await k.tab("Select");
+  const err = await k.run("w3.terrain.toggleCameraObjects");
+  if (err) fail(`Toggle Camera Objects: ${err}`);
+  const shown = await pixelsApart(page, plain, await mapPicture(page));
+  await k.run("w3.terrain.toggleCameraObjects");
+  if (cameras().length) fail("the camera was saved before the picture, so the picture proves nothing");
+  else if (shown < 150 + noise) fail(`the Camera Objects layer doesn't show the unsaved camera (${shown} pixels changed, noise ${noise})`);
+  await k.save();
+  if (cameras().length !== 1) fail(`saved, the map has ${cameras().length} cameras`);
+
+  // Two terrain files: the binary one, from the packed map, next to the text one.
+  const map = join(work, "heights", "SelectCameras.w3x");
+  const packed = spawnSync(cli, ["pack", k.root, "-o", map], { encoding: "utf8" });
+  const w3e = packed.status === 0 ? spawnSync(cli, ["cat", map, "war3map.w3e"]) : null;
+  if (!w3e || w3e.status !== 0 || !w3e.stdout.length) return fail(`no binary war3map.w3e: ${packed.stderr}${w3e?.stderr ?? ""}`);
+  writeFileSync(join(k.root, "map", "war3map.w3e"), w3e.stdout);
+  await page.evaluate(`w3.workspace.refresh()`);
+  for (const path of [BIN, TXT]) {
+    await page.evaluate(`w3.editors.open(${JSON.stringify(path)}, "w3.terrainViewer")`);
+    await until(`the editor of ${path}`, async () => (await active()) === path, 30000);
+  }
+  await sleep(1000);
+  await k.tool("terrain_screenshot", { maxSize: 64 }).catch((e) => fail(e.message));
+  if ((await active()) !== TXT) fail(`terrain_screenshot switched from the text terrain's tab to ${await active()}`);
+  await k.tool("terrain_screenshot", { maxSize: 64, file: BIN }).catch((e) => fail(`with file: ${e.message}`));
+  if ((await active()) !== BIN) fail(`terrain_screenshot of ${BIN} left ${await active()} in front`);
+  const wrong = await k.tool("terrain_screenshot", { maxSize: 64, file: "map/war3map.j" }).then(() => null, (e) => e.message);
+  if (!wrong || !/terrain files/.test(wrong)) fail(`terrain_screenshot of a file that isn't terrain: ${wrong ?? "a picture"}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+  rmSync(join(k.root, "map", "war3map.w3e"));
+  await page.evaluate(`w3.workspace.refresh()`);
+
+  // An object without a model: a footman given an id no table knows, written as another tool would.
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 512, y: 512, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const units = k.read("war3mapUnits.doo.json");
+  for (const u of units.units) if (u.id === "hfoo") { u.id = "Zzzz"; if (u.skinId !== undefined) u.skinId = "Zzzz"; }
+  await page.evaluate(`w3.workspace.writeText("map/war3mapUnits.doo.json", ${JSON.stringify(JSON.stringify(units))})`);
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor", async () => (await active()) === TXT, 20000);
+  await k.tab("Select");
+  await k.look(512, 512);
+  const at = `(() => { const i = document.querySelectorAll(".terrain-sel-triple input"); return i.length >= 2 ? [Number(i[0].value), Number(i[1].value)] : null; })()`;
+  const name = `document.querySelector(".terrain-sel-name")?.textContent ?? ""`;
+  if (await page.evaluate(at)) fail("something was selected before the click");
+  // Clicked until it's selected: the marker is drawn once the reloaded file is in. A click that can't select it never will.
+  await until("Zzzz selected by a click on its marker", async () => {
+    await k.clickMiddle();
+    await sleep(300);
+    const p = await page.evaluate(at);
+    return p && Math.abs(p[0] - 512) <= 32 && Math.abs(p[1] - 512) <= 32 && (await page.evaluate(name)) === "Zzzz";
+  }, 20000).catch(async (e) => fail(`${e.message} (the selection: ${JSON.stringify(await page.evaluate(at))} "${await page.evaluate(name)}")`));
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
@@ -883,24 +965,17 @@ async function resizeUndo(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
-/** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
- *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
- *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
-async function viewCommands(page, fail, shots) {
-  const bad = (what) => fail(`view commands: ${what}`);
-  mkdirSync(shots, { recursive: true });
-  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
-  const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
-  /** The map's part of the window, as PNG data. */
-  const picture = async (name) => {
-    await sleep(700);
-    const r = await page.evaluate(`(() => { const b = document.querySelector(".model-stage canvas").getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height, scale: 1 }; })()`);
-    const shot = await page.send("Page.captureScreenshot", { format: "png", clip: r });
-    writeFileSync(join(shots, `${name}.png`), Buffer.from(shot.data, "base64"));
-    return shot.data;
-  };
-  /** How many pixels two pictures differ in, by more than rounding: counted in the page, which can decode PNGs. */
-  const differ = (a, b) => page.evaluate(`(async () => {
+/** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
+async function mapPicture(page) {
+  await sleep(700);
+  const r = await page.evaluate(`(() => { const b = document.querySelector(".model-stage canvas").getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height, scale: 1 }; })()`);
+  const shot = await page.send("Page.captureScreenshot", { format: "png", clip: r });
+  return shot.data;
+}
+
+/** How many pixels two pictures differ in, by more than rounding: counted in the page, which can decode PNGs. */
+function pixelsApart(page, a, b) {
+  return page.evaluate(`(async () => {
     const load = (data) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + data; });
     const pixels = async (data) => { const i = await load(data), c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d"); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
     const [p, q] = await Promise.all([pixels(${JSON.stringify(a)}), pixels(${JSON.stringify(b)})]);
@@ -916,6 +991,22 @@ async function viewCommands(page, fail, shots) {
     }
     return n;
   })()`);
+}
+
+/** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
+ *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
+ *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
+async function viewCommands(page, fail, shots) {
+  const bad = (what) => fail(`view commands: ${what}`);
+  mkdirSync(shots, { recursive: true });
+  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
+  const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+  const picture = async (name) => {
+    const data = await mapPicture(page);
+    writeFileSync(join(shots, `${name}.png`), Buffer.from(data, "base64"));
+    return data;
+  };
+  const differ = (a, b) => pixelsApart(page, a, b);
   // No water (it ripples) and no animation, so that the same view is the same picture.
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
@@ -2400,7 +2491,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2478,6 +2569,7 @@ async function run() {
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+    await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
