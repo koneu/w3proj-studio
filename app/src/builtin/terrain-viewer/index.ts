@@ -1,4 +1,5 @@
 import { fogOf } from "../../lib/model/fog";
+import { toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
@@ -1181,6 +1182,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let renderer: TerrainRenderer;
         try {
           renderer = new TerrainRenderer(canvas, terrain);
+          // The art and the lighting come in the graphics mode the view opened with; so does the picture's tone.
+          renderer.tone = toneOf(w3.settings.get<string>("game.graphicsMode"));
         } catch (e) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};

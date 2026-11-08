@@ -94,3 +94,34 @@ test("a track of a global sequence stays at its first key all day (the sun of a 
   m.lights[0].rotation.globalSeq = -1;
   near(lightAt(m, 12)!.dir, [-0.383, 0.811, 0.442]);
 });
+
+test("cliff.w3m's own lighting is the same at 06:00, 08:00 and 12:00, and carries its shadow intensity", () => {
+  // Its colour keys (Hermite, stored blue first): white from 15172 to 43700 of 333–60333, so 06:00 (15333), 08:00
+  // (20333) and 12:00 (30333) all fall on it; the ambient is flat from 14950 to 19932 and from 19932 to 45115.
+  const m = sample();
+  m.sequences = [{ name: "Stand", start: 333, end: 60333, moveSpeed: 0, nonLooping: false, rarity: 0 }];
+  const k = (time: number, value: number[], inTan: number[], outTan: number[]) => ({ time, value, inTan, outTan });
+  const zero = [0, 0, 0];
+  m.lights[0].color = { track: { interp: 2, globalSeq: -1, keys: [
+    k(333, [0.799191, 0.532794, 0.313408], zero, [0.196887, 0.223073, 0.313408]), k(13506, zero, zero, zero),
+    k(13989, [0.2, 0.352941, 0.0235294], [0.196887, 0.223073, 0.313408], [0, 0.240211, 0.369262]),
+    k(15172, [0.996078, 0.996078, 0.996078], [0, 0.240211, 0.369262], zero), k(15367, [0.996078, 0.996078, 0.996078], zero, zero),
+    k(43700, [0.996078, 0.996078, 0.996078], zero, zero), k(45367, [0.996078, 0.996078, 0.996078], zero, [0, -0.147828, -0.324197]),
+  ] } };
+  m.lights[0].ambColor = { track: { interp: 2, globalSeq: -1, keys: [
+    k(13826, zero, zero, zero), k(14950, [0.980392, 0.839852, 0.839852], [0.0145619, 0.317505, 0.37233], zero),
+    k(19932, [0.980392, 0.839852, 0.839852], zero, zero), k(45115, [0.980392, 0.839852, 0.839852], zero, [-0.0775508, -0.317505, -0.203499]),
+  ] } };
+  m.lights[0].ambIntensity = { value: [0.2] };
+  m.lights[0].shadowIntensity = 5.85;
+  // Its sun: global sequence 0, so the first key all day.
+  m.globalSequences = [0];
+  m.lights[0].rotation = { interp: 0, globalSeq: 0, keys: [{ time: 333, value: [0.381539, -0.215864, -0.442587, 0.782271] }, { time: 17235, value: [-0.477628, -0.225547, 0, 0.849117] }] };
+  const [six, eight, noon] = [6, 8, 12].map((h) => lightAt(m, h)!);
+  const same = (a: number[], b: number[], what: string) => assert.ok(a.every((v, i) => Math.abs(v - b[i]) < 1e-9), `${what}: ${a} ≠ ${b}`);
+  for (const [other, hour] of [[eight, 8], [noon, 12]] as const) {
+    for (const key of ["dir", "diffuse", "ambient"] as const) same(other[key], six[key], `${key} at ${hour}:00`);
+  }
+  same(six.diffuse, [1.9423521, 1.9423521, 1.9423521], "06:00 is the white key at intensity 1.95");
+  assert.equal(six.shadow, 5.85);
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { waterRamp, withGroup } from "./renderer";
+import { hdWaterColor, meanBrightness, waterRamp, withGroup } from "./renderer";
 
 const b = (group: string, name: string) => ({ group, name });
 const names = (list: { name: string }[]) => list.map((x) => x.name).join(" ");
@@ -55,4 +55,29 @@ test("the map's water tint replaces the ramp's colour, stored blue first, and ke
   // The tint's alpha makes all of it more see-through, the shore still fading out.
   const half = waterRamp(LORDAERON, [100, 100, 255, 51]);
   near([half.shallowMin[3], half.deepMax[3]], [(10 / 255) * 0.2, (250 / 255) * 0.2]);
+});
+
+test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-drive, 2026-11-08)", () => {
+  const rgb = (c: number[]) => c.map((v) => Math.round(v * 255));
+  // Measured in the deep middle of map 03's lake, and of the same map on Northrend and Barrens, game view on and off.
+  const within = (got: number[], lo: number[], hi: number[], what: string) =>
+    assert.ok(got.every((v, i) => v >= lo[i] - 3 && v <= hi[i] + 3), `${what}: ${got} outside ${lo}–${hi}`);
+  within(rgb(hdWaterColor("L", false)), [22, 54, 73], [23, 61, 73], "Lordaeron");
+  within(rgb(hdWaterColor("N", false)), [22, 48, 39], [23, 52, 41], "Northrend");
+  within(rgb(hdWaterColor("B", false)), [25, 41, 42], [26, 46, 44], "Barrens");
+  // 03b_Water_Tint (red): the editor's HD water loses Lordaeron's blue instead of turning red.
+  within(rgb(hdWaterColor("L", true)), [22, 50, 40], [23, 50, 40], "Lordaeron tinted");
+});
+
+test("a texture's mean brightness comes from a small mip level", () => {
+  const level = (w: number, h: number, rgba: number[]) => ({ width: w, height: h, rgba: new Uint8ClampedArray(rgba) });
+  const asked: number[] = [];
+  const img = {
+    format: "t", width: 64, height: 64, hasAlpha: false, mipCount: 4,
+    // Levels 64, 32, 16, 8: the 16-high one is read.
+    mip(l: number) { asked.push(l); return l === 2 ? level(1, 2, [255, 255, 255, 255, 0, 0, 0, 255]) : level(1, 1, [9, 9, 9, 255]); },
+  };
+  assert.equal(meanBrightness(img), 0.5);
+  assert.deepEqual(asked, [2]);
+  assert.equal(meanBrightness({ ...img, mip() { throw new Error("truncated"); } }), null, "an image that can't be decoded");
 });

@@ -9,6 +9,7 @@ import { standSequence } from "./stand";
 import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
 import type { SceneLight } from "./dnclight";
+import { setTone, TONE_FS, type Tone } from "./tone";
 
 /** Shading without a scene light (model viewer): soft ambient plus a light from the front left. */
 export const DEFAULT_LIGHT: SceneLight = { dir: [0.4, -0.3, 0.85], diffuse: [0.7, 0.7, 0.7], ambient: [0.45, 0.45, 0.45] };
@@ -354,7 +355,19 @@ void main() {
   vNormal = mat3(aWorld) * mat3(m) * aNormal;
   vUV = (uTexMatrix * vec3(aUV, 1.0)).xy;
   vec4 world = aWorld * m * vec4(aPos, 1.0);
-  if (uUseHeight > 0.5) world.z += groundAt(world.xy);
+  if (uUseHeight > 0.5) {
+    world.z += groundAt(world.xy);
+    // A cliff's top and foot are ground: shaded with the ground's normal there (as the terrain works it out,
+    // across two tiles), not the model's own tilted one, or each cliff tile shows as a lighter or darker square.
+    vec3 n = normalize(vNormal);
+    float flatness = smoothstep(0.85, 0.95, n.z);
+    if (flatness > 0.0) {
+      vec2 p = world.xy;
+      float sx = (groundAt(p + vec2(128.0, 0.0)) - groundAt(p - vec2(128.0, 0.0))) / 256.0;
+      float sy = (groundAt(p + vec2(0.0, 128.0)) - groundAt(p - vec2(0.0, 128.0))) / 256.0;
+      vNormal = mix(n, normalize(vec3(-sx, -sy, 1.0)), flatness);
+    }
+  }
   gl_Position = uViewProj * world;
   vFogDepth = gl_Position.w;
 }`;
@@ -371,14 +384,15 @@ uniform sampler2D uOrm; uniform float uHd; uniform vec3 uTeam; uniform vec4 uMix
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
 ${FOG_FS}
+${TONE_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c *= uColor;
   if (uOpaque > 0.5) c.a = uColor.a;
   if (c.a < uAlphaTest) discard;
-  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
-  outColor = vec4(fogged(mix(c.rgb * light, uMix.rgb, uMix.a)), c.a);
+  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * facing(vNormal, uLightDir);
+  outColor = vec4(fogged(mix(toned(c.rgb, light), uMix.rgb, uMix.a)), c.a);
 }`;
 
 const LINE_VS = `#version 300 es
@@ -459,7 +473,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -545,6 +559,8 @@ export interface DrawOptions {
   onTop?: boolean;
   /** Scene light (default: DEFAULT_LIGHT). */
   light?: SceneLight;
+  /** How the lit colour becomes a pixel (tone.ts; default 0, colour × light). */
+  tone?: Tone;
 }
 
 export interface HeightMap {
@@ -829,6 +845,7 @@ export class ModelGpu {
     gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
     setFog(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.fog);
     const light = opts.light ?? DEFAULT_LIGHT;
+    setTone(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.tone, light);
     gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
     gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
     gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);

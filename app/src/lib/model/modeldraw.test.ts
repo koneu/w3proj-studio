@@ -26,15 +26,18 @@ function model(filterMode: number) {
   } as unknown as ConstructorParameters<typeof ModelGpu>[1];
 }
 
-/** The values the layer's draw gave the named uniform. */
-function drawn(filterMode: number, name: string, tint?: [number, number, number, number]) {
+type DrawOpts = Parameters<ModelGpu["drawInstances"]>[2];
+
+/** The values a draw of a one-layer model gave the named uniform. */
+function drawnWith(filterMode: number, name: string, opts: DrawOpts) {
   const { gl, floats } = recordingGl();
   const gpu = new ModelGpu(gl, model(filterMode));
   gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
   floats.length = 0;
-  gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, { tint });
+  gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, opts);
   return floats.filter(([n]) => n === name).map(([, v]) => v);
 }
+const drawn = (filterMode: number, name: string, tint?: [number, number, number, number]) => drawnWith(filterMode, name, { tint });
 
 test("an opaque layer (filter mode None) ignores its texture's alpha: HD diffuse textures with alpha 0 still show", () => {
   // Wood_Debris_Barrels_01 (YCde): one layer, mode 0, its _Diffuse.dds alpha 0 everywhere; the editor draws it whole.
@@ -51,4 +54,13 @@ test("transparent and blended layers keep using the texture's alpha", () => {
 test("a see-through tint scales the threshold as before", () => {
   assert.deepEqual(drawn(1, "uAlphaTest", [1, 1, 1, 0.5]), [0.375]);
   assert.deepEqual(drawn(0, "uOpaque", [1, 1, 1, 0.5]), [1]);
+});
+
+test("a model is drawn in the tone it's asked for (tone.ts), with its light's HD shading", () => {
+  // cliff.w3m's own sun: from the south-west, shadow intensity 5.85.
+  const light = { dir: [-0.675, -0.406, 0.616] as [number, number, number], diffuse: [1.95, 1.95, 1.95] as [number, number, number], ambient: [0, 0, 0] as [number, number, number], shadow: 5.85 };
+  const both = (opts: DrawOpts) => [drawnWith(0, "uTone", opts), drawnWith(0, "uShadeWrap", opts)];
+  assert.deepEqual(both({}), [[0], [0]], "the model viewer: colour × light, plain shading, as before");
+  assert.deepEqual(both({ tone: 2, light }), [[2], [5.85]], "HD");
+  assert.deepEqual(both({ tone: 1, light }), [[1], [0]], "classic: the cosine alone");
 });
