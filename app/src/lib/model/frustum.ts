@@ -14,6 +14,15 @@ export function frustumPlanes(m: Float32Array, out = new Float32Array(24)): Floa
   return out;
 }
 
+/** A model-space sphere [x, y, z, r] placed by a world matrix (column-major): its centre goes where
+ *  the matrix puts it, its radius grows by the matrix's largest axis scale. Turning or scaling an
+ *  object moves the centre of an off-centre model too, not only moving it. */
+export function worldSphere(m: ArrayLike<number>, local: readonly number[]): [number, number, number, number] {
+  const [x, y, z, r] = local;
+  const s = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
+  return [m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14], Math.max(16, r * s)];
+}
+
 /** A model's bounding sphere comes from its standing pose: what it does while it animates (a tree
  *  swaying, an arm raised) can reach past it. It counts as this much bigger, so nothing is left out
  *  at the edge of the view. */

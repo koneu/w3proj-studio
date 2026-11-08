@@ -8,6 +8,7 @@ import { parseMdx } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
+import { worldSphere } from "../../lib/model/frustum";
 import { bounds, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni } from "../../lib/formats/text";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
@@ -337,19 +338,13 @@ export class ObjectLoader {
       try {
         const gpu = await this.model(req);
         const model = gpu.model;
-        // Bounding sphere per instance, for picking.
+        // Bounding sphere per instance, for picking and culling; the model's own is kept for when the object turns.
         const b = bounds(model);
-        const c = [0, 1, 2].map((k) => (b.min[k] + b.max[k]) / 2);
-        const r = Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2;
+        const local: [number, number, number, number] = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2,
+          Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2];
         for (const inst of req.instances) {
-          const m = inst.world;
-          const s = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
-          inst.sphere = [
-            m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12],
-            m[1] * c[0] + m[5] * c[1] + m[9] * c[2] + m[13],
-            m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14],
-            Math.max(16, r * s),
-          ];
+          inst.bounds = local;
+          inst.sphere = worldSphere(inst.world, local);
         }
         loaded[index] = { group, gpu, instances: req.instances, effects: await this.effects(req, gpu) ?? undefined };
       } catch (e) {

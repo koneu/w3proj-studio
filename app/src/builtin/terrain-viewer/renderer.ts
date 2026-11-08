@@ -193,6 +193,8 @@ export interface ObjectInstance {
   pick?: PickInfo;
   /** World-space bounding sphere [x, y, z, r]. */
   sphere?: [number, number, number, number];
+  /** The model's own bounding sphere [x, y, z, r], in model space: `sphere` is it placed by `world`. */
+  bounds?: readonly [number, number, number, number];
 }
 
 /** One model placed any number of times; `group` is a toggle name (e.g. "doodads"). */

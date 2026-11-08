@@ -1,4 +1,5 @@
 import { fogOf } from "../../lib/model/fog";
+import { worldSphere } from "../../lib/model/frustum";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
@@ -1790,7 +1791,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objectsTouched = true;
           if (inst?.pick) {
             inst.world = placement(entry, inst.pick.extraScale);
-            if (inst.sphere) inst.sphere = [inst.sphere[0] + dx, inst.sphere[1] + dy, inst.sphere[2] + dz, inst.sphere[3]];
+            // Turning an off-centre model (a wall, a bridge) swings its bounds round too: placed again from the model's own.
+            if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
+            else if (inst.sphere) inst.sphere = [inst.sphere[0] + dx, inst.sphere[1] + dy, inst.sphere[2] + dz, inst.sphere[3]];
             if (inst === selected) selectObject(inst);
             if (strays.some((s) => s.inst === inst)) drawMarkers();
           }
