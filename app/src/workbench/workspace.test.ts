@@ -80,6 +80,13 @@ const make = (recent: string[] = [], failSetAfter = Infinity) => {
   return { ws, saved };
 };
 
+test("with no project open, a full path still resolves (the settings file on Linux); a project path doesn't", () => {
+  const { ws } = make();
+  assert.equal(ws.resolve("C:\\Users\\u\\settings.json"), "C:\\Users\\u\\settings.json");
+  assert.equal(ws.resolve("/home/u/.config/dev.w3proj.studio/settings.json"), "/home/u/.config/dev.w3proj.studio/settings.json");
+  assert.throws(() => ws.resolve("map/war3map.j"), /no project is open/);
+});
+
 test("a new file written into the project is listed at once, alone, and isn't an external change", async () => {
   reset();
   const { ws } = make();

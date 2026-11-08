@@ -21,9 +21,13 @@ export function joinPath(root: string, ...parts: string[]): string {
   return base.endsWith(sep) ? base + rest.join(sep) : `${base}${sep}${rest.join(sep)}`;
 }
 
-/** Whether a path is a full file system path on either system: `C:\…`, `\\server\…` or `/…`. For a path
- *  with no root to compare with (a folder the user or an AI client gave). Project paths never start with `/`. */
-export const isFullPath = (p: string) => /^(?:[a-z]:[\\/]|\\\\|\/)/i.test(p);
+/** Whether the app runs on Windows (the webview says so in its user agent). */
+export const onWindows = () => typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent ?? "");
+
+/** Whether a path is a full file system path, for a path with no project root to compare with (a folder the
+ *  user or an AI client gave, a saved tab): `C:\…` or `\\server\…`, and off Windows also `/…`. On Windows a
+ *  leading `/` means the current drive's root, which isn't a full path. Project paths never start with `/`. */
+export const isFullPath = (p: string, windows = onWindows()) => /^(?:[a-z]:[\\/]|\\\\)/i.test(p) || (!windows && p.startsWith("/"));
 
 /** A program of the game (`World Editor.exe`, `Warcraft III.exe`): the path set for it if there is one, else the
  *  one in the game's folder. With the default game folder this is the old default path on Windows; on Linux it

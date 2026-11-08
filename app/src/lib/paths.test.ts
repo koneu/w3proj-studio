@@ -11,8 +11,13 @@ test("gameProgram: the path set for it wins; else the program in the game's fold
 });
 
 test("isFullPath: a full path on either system; a project path isn't one", () => {
-  for (const p of ["C:\\maps", "c:/maps", "\\\\server\\share", "/home/u/maps", "/"]) assert.equal(isFullPath(p), true, p);
-  for (const p of ["map/war3map.j", "maps\\x", "", "C:", "war3map.j"]) assert.equal(isFullPath(p), false, p);
+  for (const p of ["C:\\maps", "c:/maps", "\\\\server\\share", "/home/u/maps", "/"]) assert.equal(isFullPath(p, false), true, p);
+  for (const p of ["map/war3map.j", "maps\\x", "", "C:", "war3map.j"]) assert.equal(isFullPath(p, false), false, p);
+});
+
+test("isFullPath on Windows: a leading slash is the current drive's root, not a full path", () => {
+  for (const p of ["C:\\maps", "c:/maps", "\\\\server\\share"]) assert.equal(isFullPath(p, true), true, p);
+  for (const p of ["/tmp", "/", "map/x"]) assert.equal(isFullPath(p, true), false, p);
 });
 
 // Project roots come from the backend in the system's own form: `C:\…` or `\\server\…` on Windows, `/…` on Linux.
