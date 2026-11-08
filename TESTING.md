@@ -138,8 +138,9 @@ It never starts the game itself.
   `Heroes`, `Icons`, `Textures`, `Units`, `Vfx`) to 0, `--mode hd` (the default) to 1; told apart by pictures of
   footmen, a barracks and trees close up (classic red-roofed barracks and round trees in SD, the white stone barracks
   and new trees in HD). The install's text locale goes into the prefix's registry (else the editor shows
-  `WESTRING_…` names). The first start of a new prefix shows the editor's welcome, which we-drive answers with
-  Continue (accepting the editor's terms, as the user did in their own install).
+  `WESTRING_…` names). The first start of a new prefix shows the editor's welcome, which asks to accept Blizzard's
+  terms. Only the user may decide that: we-drive presses Continue only with `W3PROJ_WE_ACCEPT_TERMS=1` and otherwise
+  reports the dialog and stops. The shared prefix keeps the answer, so this comes up once per new prefix.
 - **Layout** in the fixed display: main window 4,30 1352x937, terrain view 156,79 1184x844, tool palette 1356,30
   240x600. Keys go to the main window (without a window manager the palette keeps the keyboard otherwise). Closing
   answers the "Save changes?" box (titled "Warning") with No; system dialogs are in English.
