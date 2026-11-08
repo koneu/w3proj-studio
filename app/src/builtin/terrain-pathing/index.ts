@@ -23,7 +23,22 @@ const WALK = NO_WALK | BLOCKED;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((terrain) => {
-    ctx.subscriptions.push(terrain.registerToolGroup({ id: "pathing", title: "Pathing", order: 30, create: (ed) => pathingGroup(w3, ed) }));
+    ctx.subscriptions.push(terrain.registerToolGroup({
+      id: "pathing", title: "Pathing", order: 30, create: (ed) => pathingGroup(w3, ed),
+      filterSavedPathing: async (cells, width, height) => {
+        const text = await w3.workspace.readText(FILE).catch(() => null);
+        if (text === null) return;
+        // An unreadable file or one of another size: its overrides are ignored, as the editor does.
+        let parsed: unknown = null;
+        try { parsed = JSON.parse(text); } catch { /* said below */ }
+        const j = overridesForSize(parsed, width, height);
+        if (!j) {
+          w3.window.showWarning(`${FILE} isn't a pathing overrides file for this ${width}×${height} pathing map; its overrides are ignored.`);
+          return;
+        }
+        for (const [x, y, set, clear] of j.cells) if (x >= 0 && x < width && y >= 0 && y < height) cells[y * width + x] = (cells[y * width + x] | set) & ~clear;
+      },
+    }));
   });
 }
 

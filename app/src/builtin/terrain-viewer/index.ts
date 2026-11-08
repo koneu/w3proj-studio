@@ -2,6 +2,7 @@ import { fogOf } from "../../lib/model/fog";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
+import { deriveFromProject, editMapDoc, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
@@ -25,14 +26,11 @@ import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
 import { exportMinimap } from "./minimapexport";
-import { buildMinimap, buildMinimapIcons, minimapSettings } from "./minimapgen";
-import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
+import { buildMinimap, minimapSettings } from "./minimapgen";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
-import { buildPathingMap, loadPathingData, readMapJson, type PathingData } from "./pathmap";
-import { predictShadows } from "./shadowmap";
-import { updateShadows } from "./shadows";
+import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { placedText, splitOwners } from "../../lib/terrain/owner";
@@ -222,16 +220,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const run = rebuilding.then(async () => {
       const job = rebuild;
       if (!job || job.key !== w3.workspace.project()?.root) return;
-      // The editor of the project's own terrain; closed since the edit, it is opened again: the work is
-      // done there (the derived files need what the editor has loaded).
       const failed = (why: unknown) => {
         const text = `Pathing, shadows and the minimap weren't rebuilt: ${why instanceof Error ? why.message : String(why)}`;
         w3.window.showError(text);
         return new Error(text);
       };
-      let editor = ownEditor();
+      // The editor of the project's own terrain does the work from what it has loaded. Closed since the edit,
+      // it stays closed: the files are made from the project's saved ones.
+      const editor = ownEditor();
       if (!editor) {
-        try { editor = await liveEditor("read"); } catch (e) { throw failed(e); }
+        const path = projectTerrain(w3);
+        if (!path) return;
+        rebuild = null;
+        const doc = { path } as EditorDocument;
+        await deriveFromProject(w3, {
+          terrainPath: path,
+          from: job.from,
+          objects: async () => {
+            const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
+            return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
+          },
+          read: (p) => readFile(w3, doc, p),
+          groups: toolGroups.all(),
+          // Another project opened meanwhile: nothing of this one's is written into it.
+          stillOpen: () => w3.workspace.project()?.root === job.key,
+        }).catch((e) => { throw failed(e); });
+        return;
       }
       // The wait was long enough for another project to be opened: its job and editor are not this one's.
       if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
@@ -2848,33 +2862,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const entryFile = new WeakMap<Placed, PlacedFile>();
         /** Rewrites a project JSON document of the format engine (or its raw file when the project keeps it raw). */
         /** Edits a JSON-backed map file in either project form; `change` returning false skips the write. */
-        const editDoc = async (name: string, change: (d: Record<string, unknown>) => void | boolean) => {
-          const root = w3.workspace.project()!.root, path = `map/${name}`;
-          const json = await w3.workspace.readText(`${path}.json`).catch(() => null);
-          const raw = json === null ? await w3.backend.invoke<string>("codec_decode", { root, path }).catch(() => null) : null;
-          if (json === null && raw === null) return;
-          const d = JSON.parse((json ?? raw)!) as Record<string, unknown>;
-          if (change(d) === false) return;
-          if (json !== null) await w3.workspace.writeText(`${path}.json`, await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${path}.json`, text: JSON.stringify(d) }));
-          else await w3.backend.invoke("codec_write", { root, path, text: JSON.stringify(d) });
-        };
-        /** The minimap icons (war3map.mmp) of the placed units on a terrain, written only when they
-         *  differ from the stored ones by more than order and rounding. */
+        const editDoc = (name: string, change: (d: Record<string, unknown>) => void | boolean) => editMapDoc(w3, name, change);
+        /** The minimap icons (war3map.mmp) of the placed units on a terrain; none when the map has no units file. */
         const updateMinimapIcons = async (t: Terrain, units: Placed[] | undefined = unitsFile?.list) => {
-          if (!unitsFile || !units) return;
-          try {
-            const icons = await buildMinimapIcons(w3, t, units);
-            const stored = await readMapJson<{ icons?: MinimapIcon[] }>(w3, "war3map.mmp").catch(() => null);
-            if (!stored) {
-              const text = JSON.stringify({ format: "w3proj.minimap/1", version: 0, icons });
-              const root = w3.workspace.project()!.root;
-              await w3.workspace.writeText("map/war3map.mmp.json", await w3.backend.invoke<string>("codec_canonicalize", { root, path: "map/war3map.mmp.json", text }));
-            } else if (!sameIcons(icons, stored.icons ?? [])) {
-              await editDoc("war3map.mmp", (d) => { d.icons = icons; });
-            }
-          } catch (e) {
-            w3.window.showError(`The minimap icons (war3map.mmp) couldn't be updated: ${(e as Error).message ?? e}`);
-          }
+          if (unitsFile && units) await writeMinimapIcons(w3, t, units);
         };
         /** Map Size and Camera Bounds (see TerrainEditorHandle.resizeMap). */
         /** One resize, undo or redo at a time (see ResizeHistory.exclusive). */
@@ -3693,42 +3684,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Files derived from the terrain and doodads: pathing, shadows, minimap. `baseTerrain` and
          *  `baseDoodads` are the state the shadows were last updated for. */
         const updateDerived = async (doodads: Placed[], baseTerrain: Terrain, baseDoodads: Placed[], now: Terrain = terrain, units?: Placed[], staleAt: number = minimapStale.take()) => {
-          const rf = (p: string) => readFile(w3, doc, p);
-          const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
-          if (cfg<boolean>("pathing.regenerate")) try {
-            const { wpm, missing } = await buildPathingMap(w3, now, doodads, rf, cfg<number>("pathing.deepWater"));
-            filterPathing(wpm);
-            await w3.workspace.writeBytes("map/war3map.wpm", wpm);
-            if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
-          } catch (e) {
-            w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
-          }
-          // Shadows: only cells whose prediction changed since the last save.
-          if (cfg<boolean>("shadows.update")) try {
-            const skins = objCtx?.skins ?? new Map(), baseOf = (id: string) => objCtx?.bases.get(id);
-            const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
-            const before = await predictShadows(baseTerrain, baseDoodads, skins, baseOf, rf, sun);
-            const after = await predictShadows(now, doodads, skins, baseOf, rf, sun);
-            const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
-            const shd = updateShadows(stored, before, after);
-            if (!stored || shd.some((v, i) => v !== stored[i])) await w3.workspace.writeBytes("map/war3map.shd", shd);
-          } catch (e) {
-            w3.window.showError(`The shadow map (war3map.shd) couldn't be updated: ${(e as Error).message ?? e}`);
-          }
-          // The minimap is redrawn when something changed since the last save (by default).
-          const minimapMode = cfg<string>("minimap.regenerate");
-          if (minimapMode === "always" || (minimapMode !== "never" && minimapStale.isSet())) {
-            try {
-              await w3.workspace.writeBytes("map/war3mapMap.blp", await buildMinimap(w3, now, doodads, rf, minimapSettings(w3), cfg<number>("minimap.jpegQuality")));
-              // Clean only for what the snapshot had: an edit made since keeps it set, and the next save redraws.
-              minimapStale.clear(staleAt);
-            } catch (e) {
-              w3.window.showError(`The minimap (war3mapMap.blp) couldn't be regenerated: ${(e as Error).message ?? e}`);
-            }
-          }
-          // Its icons (gold mines, neutral buildings, start locations) follow the placed units;
-          // written only when they differ from the stored ones by more than order and rounding.
-          if (minimapMode !== "never") await updateMinimapIcons(now, units);
+          const icons = units ?? unitsFile?.list;
+          await writeDerived(w3, {
+            now, doodads, baseTerrain, baseDoodads,
+            units: unitsFile && icons ? icons : null,
+            skins: objCtx?.skins ?? new Map(), baseOf: (id) => objCtx?.bases.get(id),
+            read: (p) => readFile(w3, doc, p),
+            filterPathing,
+            minimapStale: minimapStale.isSet(),
+            // Clean only for what the snapshot had: an edit made since keeps it set, and the next save redraws.
+            minimapWritten: () => minimapStale.clear(staleAt),
+          });
         };
 
         const ready = () => Promise.all([objectsPlaced.catch(() => {}), objectReload.settled()]).then(() => {});

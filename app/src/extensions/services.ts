@@ -79,6 +79,9 @@ export interface TerrainToolGroup {
   order?: number;
   /** Called once per open terrain editor. */
   create(editor: TerrainEditorHandle): TerrainToolGroupInstance;
+  /** With no terrain editor open (a rebuild after a tool's edit): what the instance's filterPathing would do,
+   *  from the group's saved files. */
+  filterSavedPathing?(cells: Uint8Array, width: number, height: number): Promise<void>;
 }
 
 export interface TerrainToolGroupInstance {

@@ -383,6 +383,21 @@ async function waterPathing(page, found) {
   let tree = false;
   for (let y = 46; y <= 50; y++) for (let x = 46; x <= 50; x++) if (cell(closed, x, y) & 0x02) tree = true;
   if (!tree) fail("a doodad placed just before the terrain tab was closed doesn't block in the packed pathing map");
+  // Neither that save nor the rebuild after an edit made with the tab closed opens it again: the files are
+  // written without it. remove_objects works on the files, so it needs no editor itself.
+  const tab = () => page.evaluate(`w3.editors.activePath()`);
+  if (await tab()) fail(`saving with the terrain tab closed opened ${await tab()}`);
+  await tool("remove_objects", { kind: "doodads", left: 1400, bottom: 1400, right: 1700, top: 1700 });
+  let freed = false;
+  await until("the rebuild after the edit", () => {
+    const b = readFileSync(wpmFile);
+    let blocked = false;
+    for (let y = 46; y <= 50; y++) for (let x = 46; x <= 50; x++) if (cell(b, x, y) & 0x02) blocked = true;
+    freed = !blocked;
+    return freed;
+  }, 20000).catch(() => {});
+  if (!freed) fail("the pathing map wasn't rebuilt after a doodad was removed with the terrain tab closed");
+  if (await tab()) fail(`the rebuild after an edit with the terrain tab closed opened ${await tab()}`);
 
   // A commit straight after a tool's edit takes the rebuilt pathing map with it: nothing of the project is left uncommitted.
   const git = (...args) => spawnSync("git", ["-c", "user.name=Smoke", "-c", "user.email=smoke@example.invalid", ...args], { cwd: root, encoding: "utf8" });
@@ -2494,7 +2509,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
