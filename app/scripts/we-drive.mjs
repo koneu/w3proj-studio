@@ -13,14 +13,28 @@
 //   --work DIR          scratch folder (default: target/we-drive of this checkout): map copies, the editor's log
 //   --timeout S         how long --wait-ready and --close wait (default 300)
 //   --mode sd|hd        the editor's graphics (default hd): written into its preferences before the start
-//   --day-night cycle|fixed   whether the editor's day and night turn (its default) or stand still (default cycle)
+//   --day-night cycle|fixed   whether the editor's day and night turn (its own default) or stand still (default fixed:
+//                       a turning day changes the brightness from one run to the next, which spoils comparisons)
 //
 // Steps (in the order given; each prints one JSON line):
 //   --map FILE          start the editor with a copy of this map (`World Editor.exe -launch -loadfile Z:\…`)
 //   --start             start the editor without a map
 //   --wait-ready        wait until the map is shown: the main window has the map's name, no dialog is open, and the
 //                       terrain view has drawn. A dialog that stays open (an error, "no longer a melee map", …) is
-//                       reported with its title and a picture of the screen, and the run stops, rather than hanging
+//                       reported with its title and a picture of the screen, and the run stops, rather than hanging.
+//                       The "Progress" window ("Loading Units n/300") isn't a question: it's waited for, up to --timeout
+//   --compare-ready     --wait-ready, then game view on, with the day and night fixed (--day-night cycle is refused;
+//                       the editor then stands at 06:00): the state to compare with Studio's lit view, app-drive's
+//                       --compare-ready lit (TESTING.md, "Comparing pictures")
+//   --compare-ready-unlit  --wait-ready, then game view off and View > Lighting off: the pair of app-drive's
+//                       --compare-ready unlit
+//   --look SPEC         look through a camera: SPEC is x,y[,distance[,aoa[,fov[,rotation]]]] or center[,distance…]
+//                       (the terrain's centre); missing values are the editor's opening camera (3000, 304, 70, 90).
+//                       Every --look of the run becomes a camera object in we-drive's copy of the map before the
+//                       editor starts (unpacked with the release CLI, war3map.w3c.json changed, packed again; the
+//                       map's own cameras stay, after them), and this step shows it as TESTING.md records: the camera
+//                       layer (m), its row in the palette, View Selected Camera. Prints the camera, and Studio's
+//                       equivalent for app-drive's --camera when there is one (we-camera.mjs)
 //   --shot FILE.png     picture of the terrain view (the main window's 3D area)
 //   --shot-window FILE  picture of the main window
 //   --shot-screen FILE  picture of the whole display (dialogs included)
@@ -32,6 +46,9 @@
 //                       picture of the View menu's check mark; on/off press V until it matches, and check again.
 //                       Also reports cornerRedPixels, the pinkish red of a "Game View Settings" note in the view's
 //                       top-right corner (this build doesn't draw one here: it stays 0 either way)
+//   --view-menu         the View menu's items, their shortcuts and check marks (read from a picture of the open menu)
+//   --view NAME=STATE   set a View menu item ("Lighting=off", "Info Display=off") by clicking it, "NAME=status" reads it.
+//                       With game view on the items above it are greyed: their marks then read as unchecked
 //   --fps MS            how often the terrain view's picture changes during MS (it animates day and night)
 //   --sleep MS          wait
 //   --close             quit without saving: closes the main window and answers "don't save" questions
@@ -49,12 +66,16 @@
 // Examples:
 //   node scripts/we-drive.mjs --map ../smoketest_maps/cliff.w3m --wait-ready --shot ../target/we-shots/cliff.png --close
 //   node scripts/we-drive.mjs --map m.w3x --wait-ready --game-view on --shot a.png --game-view off --shot b.png --close
+//   node scripts/we-drive.mjs --map m.w3x --compare-ready --look center --shot c.png --look 1000,-500 --shot d.png --close
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
+import { addLookCameras, fartherPark, parkingLooks, parseLook, resolveLook, studioCamera, terrainHead } from "./we-camera.mjs";
+import { ensureCli } from "./appctl.mjs";
+import { decodePng } from "./pic-compare.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
@@ -69,15 +90,64 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const VIEW_INSET = { x: 152, y: 49, w: 168, h: 93 };
 // The View menu: its title in the menu bar, and the check mark of "Lock to Game View Settings" in the open menu.
 const VIEW_MENU = { x: 78, y: 11 };
-const GAME_VIEW_CHECK = { x: 2, y: 381, w: 18, h: 16 };
+/** The check-mark column of the open View menu, from the menu's corner, and a row's half height. */
+const VIEW_CHECK = { x: 2, w: 18, half: 8 };
+/**
+ * The View menu's items (this build, English): name, shortcut, and the middle of the row from the menu's top
+ * (measured in a picture of the open menu, 2026-11-08). Terrain and Grid open submenus and have no check mark.
+ */
+export const VIEW_ITEMS = Object.freeze([
+  ["Terrain", "Ctrl+T", 14], ["Foliage", "Ctrl+F", 31], ["Doodads", "Ctrl+D", 48], ["Units", "Ctrl+U", 65],
+  ["Water", "W", 82], ["Blight", "H", 99], ["Shadows", "S", 116], ["Lighting", "L", 133], ["Weather", "E", 150],
+  ["Sky", "K", 167], ["Fog Effects", "F", 184], ["Light Ranges", "Ctrl+Shift+L", 201], ["Bloom", "Q", 218],
+  ["Ambient Occlusion", "O", 235], ["Grid", "G", 261], ["Camera Bounds", "B", 278], ["Pathing - Ground", "P", 295],
+  ["Pathing - Naval", "N", 312], ["Info Display", "I", 329], ["Regions", "Ctrl+R", 346], ["Camera Objects", "Ctrl+M", 363],
+  ["Lock to Game View Settings", "V", 389], ["Lock to Game Camera", "C", 406], ["Letterbox Mode", "X", 423],
+  ["Snap to Game Camera", "Ctrl+Shift+C", 440], ["Free Camera Mode", "Alt+C", 457], ["Preview DoF", "Shift+C", 474],
+].map(([item, key, y]) => Object.freeze({ item, key, y })));
+
+/**
+ * The check states of the View menu from a picture of its check-mark column (decoded: { width, height, rgba }, its
+ * top the menu's top): an item is checked when its row has 8 or more dark pixels (the mark; the empty column is the
+ * menu's light grey).
+ */
+export function viewChecks(column, items = VIEW_ITEMS) {
+  return items.map(({ item, key, y }) => {
+    let dark = 0;
+    for (let row = Math.max(0, y - VIEW_CHECK.half); row < Math.min(column.height, y + VIEW_CHECK.half); row++) {
+      for (let x = 0; x < column.width; x++) {
+        const o = (row * column.width + x) * 4;
+        if (column.rgba[o] + column.rgba[o + 1] + column.rgba[o + 2] < 200) dark++;
+      }
+    }
+    return { item, key, checked: dark >= 8, dark };
+  });
+}
 // The first-start dialog's Continue button, from the dialog's corner.
 const WELCOME = { title: "Welcome to the Warcraft III World Editor", button: { x: 473, y: 470 } };
+// The tool palette (at 1356,30 in the display): the first row of the camera layer's list, the rows' height, and
+// View Selected Camera, from the palette's corner (TESTING.md, "Applying a camera object").
+const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, y: 89 } };
+/** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
+const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--wheel", "--game-view", "--fps", "--sleep"]);
-const FLAG_STEPS = new Set(["--start", "--wait-ready", "--windows", "--close"]);
+const VALUE_STEPS = new Set(["--map", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
 
-function parseArgs(argv) {
-  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "cycle" };
+/** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
+const PROGRESS_TITLE = "Progress";
+
+/**
+ * The dialogs among `unknown` (those answerKnown didn't answer) that are questions: a dialog with a title, except
+ * the loading window. An untitled window and the "Progress" window come and go while the map loads.
+ */
+export function questionDialogs(unknown) {
+  return unknown.filter((d) => d.title && d.title !== PROGRESS_TITLE);
+}
+
+export function parseArgs(argv) {
+  const opts = { game: null, work: join(repo, "target", "we-drive"), timeout: 300, mode: "hd", dayNight: "fixed" };
+  let dayNightGiven = false;
   const steps = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -89,13 +159,56 @@ function parseArgs(argv) {
     else if (a === "--work") opts.work = resolve(value());
     else if (a === "--timeout") opts.timeout = Number(value());
     else if (a === "--mode") opts.mode = value();
-    else if (a === "--day-night") opts.dayNight = value();
+    else if (a === "--day-night") { opts.dayNight = value(); dayNightGiven = true; }
     else if (VALUE_STEPS.has(a)) steps.push([a, value()]);
     else if (FLAG_STEPS.has(a)) steps.push([a, null]);
     else if (a === "-h" || a === "--help") opts.help = true;
     else throw new Error(`unknown argument ${a} (see the top of we-drive.mjs)`);
   }
-  return { opts, steps };
+  if (dayNightGiven && opts.dayNight === "cycle" && steps.some(([s]) => s === "--compare-ready")) {
+    throw new Error("--compare-ready takes pictures with the day and night fixed: leave out --day-night cycle");
+  }
+  // Every look's camera goes into the map before the editor starts: parsed (and refused) here, numbered by order.
+  const looks = steps.filter(([s]) => s === "--look").map(([, v]) => parseLook(v));
+  if (looks.length > MAX_LOOKS) throw new Error(`at most ${MAX_LOOKS} --look steps in one run`);
+  if (looks.length && steps.findIndex(([s]) => s === "--look") < steps.findIndex(([s]) => s === "--map")) {
+    throw new Error("--look needs --map before it (its cameras go into the map)");
+  }
+  if (looks.length && !steps.some(([s]) => s === "--map")) throw new Error("--look needs --map (its cameras go into the map)");
+  return { opts, steps, looks };
+}
+
+/**
+ * Puts the looks' cameras into `copy`, a copy of a map: unpacks it with the release CLI into `project`, adds the
+ * cameras to war3map.w3c.json (or makes the file), and packs it over the copy. A camera file the CLI couldn't read
+ * (kept as war3map.w3c) is refused, not replaced. Two parking cameras follow the looks' (we-camera.mjs parkingLooks).
+ * Returns { looks, parks }: the looks with their targets filled in, and the parking cameras (none when the terrain
+ * couldn't be read). `cli` is the CLI's path, or a function taking its arguments (the tests' stand-in).
+ */
+export function addCamerasToMap(cli, copy, project, looks) {
+  rmSync(project, { recursive: true, force: true });
+  const run = typeof cli === "function" ? cli : (args) => {
+    const r = spawnSync(cli, args, { encoding: "utf8", timeout: 600000 });
+    if (r.status !== 0) throw new Error(`w3proj ${args[0]} failed: ${(r.stderr || r.stdout || `exit ${r.status}`).trim().split("\n").pop()}`);
+  };
+  // The game's TriggerData isn't needed: the triggers stay as the map has them.
+  run(["unpack", copy, project, "--game", "none"]);
+  const map = join(project, "map");
+  const w3e = join(map, "war3map.w3e.txt");
+  const head = existsSync(w3e) ? terrainHead(readFileSync(w3e, "utf8")) : null;
+  const resolved = looks.map((l) => {
+    if (l.center && !head) throw new Error("--look center needs the terrain's size, and the CLI couldn't read war3map.w3e");
+    return resolveLook(l, head);
+  });
+  // Without the terrain's size there are no parking cameras: the selected camera's circle stays in the picture.
+  const parks = head ? parkingLooks(head) : [];
+  const json = join(map, "war3map.w3c.json"), raw = join(map, "war3map.w3c");
+  let doc = null;
+  if (existsSync(json)) doc = JSON.parse(readFileSync(json, "utf8"));
+  else if (existsSync(raw)) throw new Error("the map's war3map.w3c can't be read by the cameras codec: not replacing it");
+  writeFileSync(json, `${JSON.stringify(addLookCameras(doc, resolved, parks), null, 2)}\n`);
+  run(["pack", project, "--output", copy]);
+  return { looks: resolved, parks };
 }
 
 /** The Proton build Steam uses for the game's prefix, as app/src-tauri/src/proton.rs finds it. */
@@ -306,10 +419,9 @@ class Session {
     if (after !== before) writeFileSync(file, after);
   }
 
-  async start(map) {
+  /** Starts the editor, with a copy of `map` if given; `looks` are the run's --look cameras to put into the copy. */
+  async start(map, looks = []) {
     if (this.editor) throw new Error("the editor is already running (one map per run)");
-    await this.ensureLocale();
-    this.writePrefs();
     const exe = join(farmDir(), "_retail_", "x86_64", "World Editor.exe");
     const args = ["-launch"];
     if (map) {
@@ -317,9 +429,12 @@ class Session {
       mkdirSync(dir, { recursive: true });
       const copy = join(dir, basename(map));
       copyFileSync(map, copy);
+      if (looks.length) ({ looks: this.looks, parks: this.parks } = addCamerasToMap(ensureCli(), copy, join(this.opts.work, "look-project"), looks));
       args.push("-loadfile", winePath(copy));
       this.mapName = basename(map);
     }
+    await this.ensureLocale();
+    this.writePrefs();
     this.startedAt = Date.now();
     this.editor = this.spawnWine(exe, args);
     this.editor.on("exit", () => { this.editorExited = true; });
@@ -368,14 +483,17 @@ class Session {
   async waitReady() {
     if (!this.editor) throw new Error("the editor isn't running: add --map or --start first");
     const deadline = Date.now() + this.opts.timeout * 1000;
-    let readySince = 0, dialogSince = 0, mainAt = null;
+    let readySince = 0, dialogSince = 0, mainAt = null, progressPolls = 0;
     for (;;) {
       if (this.editorExited) throw new Error(`the editor exited while starting (see ${this.log})`);
       const { main, dialogs } = this.windows();
       if (main && !mainAt) mainAt = Date.now() - this.startedAt;
       const unknown = this.answerKnown(dialogs);
-      // A loading window (no title, small) comes and goes while the map loads; a titled dialog that stays is a question.
-      const questions = unknown.filter((d) => d.title);
+      // A loading window (no title, or "Progress") comes and goes while the map loads; a titled dialog that stays is
+      // a question. While one is open the map isn't ready (below), so a long load waits up to the timeout.
+      const questions = questionDialogs(unknown);
+      // How long the loading window was seen (polls of 0.5 s and more), for the report.
+      if (unknown.some((d) => d.title === PROGRESS_TITLE)) progressPolls++;
       if (questions.length) {
         dialogSince ||= Date.now();
         if (Date.now() - dialogSince > 3000) {
@@ -394,7 +512,7 @@ class Session {
       if (drawn) {
         readySince ||= Date.now();
         if (Date.now() - readySince > 3000) {
-          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: Date.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [] };
+          return { ready: true, title: main.title, mainWindowMs: mainAt, readyMs: Date.now() - this.startedAt, view: this.viewRect(main), answered: this.answered ?? [], progressPolls };
         }
       } else readySince = 0;
       if (Date.now() > deadline) {
@@ -410,8 +528,8 @@ class Session {
     return w;
   }
 
-  /** Lock to Game View Settings, from the View menu's check mark. */
-  async gameViewState() {
+  /** Opens the View menu; returns its window. */
+  async openViewMenu() {
     const { main } = this.mainOrThrow();
     x11(this.display, "click", `${main.rect[0] + VIEW_MENU.x},${main.rect[1] + VIEW_MENU.y}`);
     let menu = null;
@@ -421,12 +539,49 @@ class Session {
     }
     if (!menu) throw new Error("the View menu didn't open");
     await sleep(200);
-    const rect = [menu.rect[0] + GAME_VIEW_CHECK.x, menu.rect[1] + GAME_VIEW_CHECK.y, GAME_VIEW_CHECK.w, GAME_VIEW_CHECK.h];
-    const s = x11(this.display, "stats", "--rect", rect.join(","));
+    return menu;
+  }
+
+  async closeMenu() {
     x11(this.display, "key", "Escape");
     x11(this.display, "key", "Escape");
     await sleep(200);
-    return { on: s.darkPixels >= 8, checkDarkPixels: s.darkPixels };
+  }
+
+  /** The View menu's items and their check marks (from a picture of its check-mark column). */
+  async viewMenu() {
+    const menu = await this.openViewMenu();
+    const file = join(this.opts.work, "view-menu-checks.png");
+    try {
+      this.shot(file, [menu.rect[0] + VIEW_CHECK.x, menu.rect[1], VIEW_CHECK.w, menu.rect[3]]);
+      return viewChecks(decodePng(readFileSync(file)));
+    } finally {
+      await this.closeMenu();
+    }
+  }
+
+  /** Sets a View menu item on or off by clicking it in the menu (checked again afterwards); "status" only reads. */
+  async viewItem(name, want) {
+    if (!["on", "off", "status"].includes(want)) throw new Error("--view wants NAME=on, NAME=off or NAME=status");
+    const spec = VIEW_ITEMS.find((v) => v.item.toLowerCase() === name.toLowerCase());
+    if (!spec) throw new Error(`no View menu item "${name}" (${VIEW_ITEMS.map((v) => v.item).join(", ")})`);
+    const state = async () => (await this.viewMenu()).find((v) => v.item === spec.item).checked;
+    let on = await state(), clicks = 0;
+    while (want !== "status" && on !== (want === "on")) {
+      if (clicks >= 2) throw new Error(`View > ${spec.item} is still ${on ? "on" : "off"} after clicking it ${clicks} times`);
+      const menu = await this.openViewMenu();
+      x11(this.display, "click", `${menu.rect[0] + 60},${menu.rect[1] + spec.y}`);
+      clicks++;
+      await sleep(this.opts.mode === "hd" ? 3000 : 1000);
+      on = await state();
+    }
+    return { item: spec.item, state: on ? "on" : "off", clicks };
+  }
+
+  /** Lock to Game View Settings, from the View menu's check mark. */
+  async gameViewState() {
+    const item = (await this.viewMenu()).find((v) => v.item === "Lock to Game View Settings");
+    return { on: item.checked, checkDarkPixels: item.dark };
   }
 
   async gameView(want) {
@@ -445,6 +600,37 @@ class Session {
     const [vx, vy, vw] = this.viewRect(main);
     const corner = x11(this.display, "stats", "--rect", [vx + vw - 260, vy, 260, 40].join(","));
     return { gameView: st.on ? "on" : "off", pressedV: presses.length, checkDarkPixels: st.checkDarkPixels, cornerRedPixels: corner.redPixels };
+  }
+
+  /** Shows the camera of look `i` (row i of the camera palette): camera layer, its row, View Selected Camera. */
+  async look(i) {
+    const look = this.looks?.[i];
+    if (!look) throw new Error(`no camera for look ${i + 1} in the map (was it started with --map?)`);
+    const { main } = this.mainOrThrow();
+    x11(this.display, "key", "--window", main.id, "m");
+    await sleep(500);
+    const palette = this.windows().palettes.find((p) => p.rect[0] > main.rect[0] + main.rect[2] / 2);
+    if (!palette) throw new Error("no tool palette right of the main window");
+    const [px, py] = palette.rect;
+    const row = (r) => x11(this.display, "click", `${px + CAMERA_PALETTE.row.x},${py + CAMERA_PALETTE.row.y + r * CAMERA_PALETTE.rowHeight}`);
+    row(i);
+    await sleep(300);
+    x11(this.display, "click", `${px + CAMERA_PALETTE.view.x},${py + CAMERA_PALETTE.view.y}`);
+    // The selected camera's circle is in the middle of the picture: selecting the parking camera farther away (only
+    // selected, not viewed) moves it out.
+    let parked = null;
+    if (this.parks?.length) {
+      await sleep(300);
+      parked = fartherPark(look, this.parks);
+      row(this.looks.length + parked);
+    }
+    // The view draws about 14 frames a second in SD and 2 in HD.
+    await sleep(this.opts.mode === "hd" ? 4000 : 1500);
+    let studio = null;
+    try { studio = studioCamera(look); } catch { /* not fitted for this angle or field of view */ }
+    const camera = studio && Object.entries(studio).map(([k, v]) => `${k}=${v}`).join(",");
+    const selected = parked === null ? null : [this.parks[parked].x, this.parks[parked].y];
+    return { row: i, look: { x: look.x, y: look.y, distance: look.distance, aoa: look.aoa, fov: look.fov, rotation: look.rotation }, studioCamera: camera, selectedParkingCamera: selected };
   }
 
   async close() {
@@ -492,7 +678,7 @@ class Session {
 }
 
 async function main() {
-  const { opts, steps } = parseArgs(process.argv.slice(2));
+  const { opts, steps, looks } = parseArgs(process.argv.slice(2));
   if (opts.help || !steps.length) {
     console.log("usage: node scripts/we-drive.mjs [options] <steps>; the steps and options are listed at the top of the file");
     return 0;
@@ -516,7 +702,7 @@ async function main() {
   const onSignal = () => { stopAll(); process.exit(130); };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-  let failed = false;
+  let failed = false, lookIndex = 0;
   try {
     await s.startDisplay();
     for (const [step, arg] of steps) {
@@ -524,8 +710,8 @@ async function main() {
         if (step === "--map") {
           const map = resolve(arg);
           if (!existsSync(map)) throw new Error(`no map at ${map}`);
-          await s.start(map);
-          out({ step, map, display: s.display });
+          await s.start(map, looks);
+          out({ step, map, display: s.display, ...(looks.length ? { cameras: looks.length } : {}) });
         } else if (step === "--start") {
           await s.start(null);
           out({ step, display: s.display });
@@ -533,6 +719,24 @@ async function main() {
           const r = await s.waitReady();
           out({ step, ...r });
           if (!r.ready) { failed = true; break; }
+        } else if (step === "--compare-ready") {
+          if (opts.dayNight !== "fixed") throw new Error("--compare-ready wants the day and night fixed");
+          const r = await s.waitReady();
+          if (!r.ready) { out({ step, ...r }); failed = true; break; }
+          out({ step, ...r, dayNight: opts.dayNight, ...(await s.gameView("on")) });
+        } else if (step === "--compare-ready-unlit") {
+          const r = await s.waitReady();
+          if (!r.ready) { out({ step, ...r }); failed = true; break; }
+          const gv = await s.gameView("off");
+          out({ step, ...r, ...gv, lighting: (await s.viewItem("Lighting", "off")).state });
+        } else if (step === "--look") {
+          out({ step, ...(await s.look(lookIndex++)) });
+        } else if (step === "--view-menu") {
+          out({ step, items: await s.viewMenu() });
+        } else if (step === "--view") {
+          const eq = arg.lastIndexOf("=");
+          if (eq < 1) throw new Error("--view wants NAME=on|off|status");
+          out({ step, ...(await s.viewItem(arg.slice(0, eq), arg.slice(eq + 1))) });
         } else if (step === "--shot") {
           const { main } = s.mainOrThrow();
           out({ step, ...s.shot(arg, s.viewRect(main)) });
