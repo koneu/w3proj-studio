@@ -13,7 +13,7 @@ import { errorText } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, limitTo, scaledNudge, waterLimitHits, type Bounds } from "./limits";
+import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Box, type GridSize } from "./viewcmds";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
@@ -2431,12 +2431,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const placeObjects = (f: Fragment, g: Vec3, renames: ReadonlyMap<string, string> = new Map()) => {
           const added: { entry: Placed; f: PlacedFile }[] = [];
-          let off = 0;
+          const skips: PasteSkips = { noFile: 0, offMap: 0, pastPlayable: 0, outsideBounds: 0 };
           for (const o of f.objects) {
             const file = o.list === "doodads" ? dooFile : unitsFile, spot = pasteSpot(o, g);
+            if (!file) { skips.noFile++; continue; }
+            if (!spot) { skips.offMap++; continue; }
             // Units and items can't stand past the playable map, trees and doodads can.
-            const standing = spot && (o.list === "doodads" || !playableEdge || inArea(spot[0], spot[1], playableEdge));
-            if (!file || !spot || !standing || !insideBounds(heldTo(), spot[0], spot[1])) { off++; continue; }
+            if (o.list !== "doodads" && playableEdge && !inArea(spot[0], spot[1], playableEdge)) { skips.pastPlayable++; continue; }
+            if (!insideBounds(heldTo(), spot[0], spot[1])) { skips.outsideBounds++; continue; }
             // A type given another id here: its skin, and the items and abilities the object has, follow.
             const made = pastedEntry(file, renames.size ? { ...o, entry: renamedEntry(o.entry, renames) } : o, spot);
             if (typeof (made as Placed & { flags?: number }).flags === "number") (made as Placed & { flags?: number }).flags = pastedFlags((made as Placed & { flags: number }).flags, preserveHeight());
@@ -2444,7 +2446,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             repositioned.add(made);
             added.push({ entry: made, f: file });
           }
-          if (off) void w3.window.showWarning(`${off} of ${f.objects.length} would land off the map, past its playable part or outside the camera bounds, and weren't placed.`);
+          const skipped = pasteSkipText(f.objects.length, skips);
+          if (skipped) void w3.window.showWarning(skipped);
           if (!added.length) return;
           const remove = () => { for (const a of added) a.f.list.splice(a.f.list.indexOf(a.entry), 1); };
           const put = () => { for (const a of added) a.f.list.push(a.entry); };

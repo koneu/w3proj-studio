@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clampPoint, cameraRect, insideBounds, limitTo, scaledNudge, waterLimitHits } from "./limits";
+import { clampPoint, cameraRect, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits } from "./limits";
 import { clampShift } from "./moveedit";
 import { WATER_LEVEL_MAX, WATER_LEVEL_MIN, waterLevelAt } from "../../lib/terrain/w3e";
 
@@ -83,4 +83,16 @@ test("a nudge is held to the bounds with its steps: a building, which goes twice
   // Not held back: the full steps.
   assert.deepEqual(scaledNudge([[10, 50], [10, 50]], [bounds, bounds], [1, 2], [32, 0]), [[32, 0], [64, 0]]);
   assert.deepEqual(scaledNudge([[10, 50]], [bounds], [2], [0, -32]), [[0, -50]], "down to the bottom edge, 50 away, where 64 were asked");
+});
+
+test("a paste's word on what it didn't place names each reason that holds, and no other", () => {
+  const none = { noFile: 0, offMap: 0, pastPlayable: 0, outsideBounds: 0 };
+  assert.equal(pasteSkipText(3, none), null);
+  const bounds = pasteSkipText(3, { ...none, outsideBounds: 2 })!;
+  assert.match(bounds, /^2 of 3 pasted objects weren't placed: 2 would land outside the camera bounds/);
+  assert.doesNotMatch(bounds, /playable|off the map|placement file/);
+  const all = pasteSkipText(10, { noFile: 1, offMap: 2, pastPlayable: 3, outsideBounds: 4 })!;
+  assert.match(all, /^10 of 10 pasted objects weren't placed: 2 would land off the map; 3 are units or items past the playable part/);
+  assert.match(all, /; 4 would land outside the camera bounds .*; 1 has no placement file in this map\.$/);
+  assert.match(pasteSkipText(1, { ...none, pastPlayable: 1 })!, /^1 of 1 pasted object wasn't placed: 1 is a unit or item past the playable part/);
 });

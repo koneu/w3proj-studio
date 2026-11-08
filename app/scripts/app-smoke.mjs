@@ -776,6 +776,8 @@ async function heightsLimits(page, found) {
   await k.save();
   if (count() !== n0) fail("a paste outside the camera bounds placed a doodad with Enforce Camera Bounds on");
   if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
+  // On the map and a doodad: only the camera bounds are the reason, and the word says no other.
+  if (/playable|off the map/.test(await k.toasts())) fail(`the refused paste names reasons that don't hold: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await hands.click(".model-stage canvas");
   await k.save();

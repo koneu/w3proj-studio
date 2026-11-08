@@ -58,3 +58,27 @@ export function limitTo(own: Bounds, camera: Bounds | null): Bounds {
   if (!camera) return own;
   return { left: Math.max(own.left, camera.left), right: Math.min(own.right, camera.right), bottom: Math.max(own.bottom, camera.bottom), top: Math.min(own.top, camera.top) };
 }
+
+/** Why pasted objects weren't placed, each counted once by the first reason that holds. */
+export interface PasteSkips {
+  /** The map has no placement file for them. */
+  noFile: number;
+  offMap: number;
+  /** Units and items past the playable part. */
+  pastPlayable: number;
+  /** Outside the camera bounds, with Enforce Camera Bounds on. */
+  outsideBounds: number;
+}
+
+/** What a paste says about the objects it didn't place, each reason on its own; null when it placed them all. */
+export function pasteSkipText(total: number, s: PasteSkips): string | null {
+  const skipped = s.noFile + s.offMap + s.pastPlayable + s.outsideBounds;
+  if (!skipped) return null;
+  const reasons = [
+    s.offMap ? `${s.offMap} would land off the map` : "",
+    s.pastPlayable ? `${s.pastPlayable} ${s.pastPlayable === 1 ? "is a unit or item" : "are units or items"} past the playable part of the map, where they can't stand` : "",
+    s.outsideBounds ? `${s.outsideBounds} would land outside the camera bounds (turn off Enforce Camera Bounds to allow it)` : "",
+    s.noFile ? `${s.noFile} ${s.noFile === 1 ? "has" : "have"} no placement file in this map` : "",
+  ].filter(Boolean);
+  return `${skipped} of ${total} pasted object${total === 1 ? "" : "s"} ${skipped === 1 ? "wasn't" : "weren't"} placed: ${reasons.join("; ")}.`;
+}
