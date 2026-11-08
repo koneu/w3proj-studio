@@ -1832,7 +1832,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Waited for by ready(): a tool that follows the save (create_object, then place_objects)
         // sees the new types. Selection, camera, undo steps and the dirty flag aren't touched.
         let pathingChanged = false;
+        /** A project's terrain has placed objects from the project's object data; a game map's view has none. */
+        const projectObjects = !doc.path.startsWith("game:") && !!w3.workspace.project();
         const objectReload = new DebouncedReload(async () => {
+          // A save while the first load still reads: that load may have read the old files, so this reload follows it.
+          await firstLoad.catch(() => {});
           const imports = importsChanged, pathing = pathingChanged;
           importsChanged = pathingChanged = false;
           try {
@@ -1867,14 +1871,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
           const art = changesObjectData(p);
           const imported = changesImports(p);
-          if (!objCtx || (!art && !imported)) return;
+          // Also before the first load is done (see objectReload): it may have read the file before this save.
+          if (!projectObjects || (!art && !imported)) return;
           importsChanged ||= imported;
           pathingChanged ||= changesPathing(p);
           objectReload.schedule();
         });
         let objectsPlaced: Promise<void> = Promise.resolve();
-        if (!doc.path.startsWith("game:") && w3.workspace.project()) {
-          objectsPlaced = Promise.all([
+        /** The first load of the placed objects and their types. */
+        let firstLoad: Promise<void> = Promise.resolve();
+        if (projectObjects) {
+          objectsPlaced = firstLoad = Promise.all([
             loadPlacedFile(w3, "war3map.doo", "doodads").catch(() => null),
             loadPlacedFile(w3, "war3mapUnits.doo", "units").catch(() => null),
             loadSkins(w3),

@@ -415,6 +415,40 @@ async function waterPathing(page, found) {
   if (!git("show", "--stat", "--format=", "HEAD").stdout.includes("war3map.wpm")) fail("the commit straight after a tool's edit has no new pathing map");
 }
 
+/** Object data saved while the terrain editor opens (a tool writing then) reaches it: the first load of the placed
+ *  objects is held after it read the units file, a new unit type is made meanwhile, and the editor knows it afterwards. */
+async function objectsWhileOpening(page, found) {
+  const fail = (what) => found.push(`objects while opening: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "opening");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Opening", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  await page.evaluate(`w3.editors.closeAll()`);
+  // The next read of the units file returns what it read only once released.
+  await page.evaluate(`(() => {
+    const space = w3Workbench.workspace, read = (space.__read ??= space.readText);
+    const g = window.__heldRead = { reads: 0 };
+    g.hold = new Promise((r) => { g.release = r; });
+    space.readText = async function (p) {
+      const text = await read.call(this, p);
+      if (g.reads === 0 && String(p).split(String.fromCharCode(92)).join("/") === "map/war3mapUnits.doo.json") { g.reads++; await g.hold; }
+      return text;
+    };
+  })()`);
+  try {
+    await page.evaluate(`void w3.commands.execute("w3.terrain.open")`);
+    await until("the editor's first load", () => page.evaluate(`window.__heldRead.reads === 1`), 20000);
+    const made = JSON.parse(await tool("create_object", { kind: "units", base: "hfoo" })).id;
+    await page.evaluate(`window.__heldRead.release()`);
+    const r = await tool("place_objects", { objects: [{ id: made, x: 0, y: 0, player: 1 }], ignoreRoom: true }).then(JSON.parse, (e) => ({ error: e.message }));
+    if (r.placed !== 1) fail(`a unit type made while the terrain editor opened is unknown to it: ${JSON.stringify(r)}`);
+  } finally {
+    await page.evaluate(`(() => { window.__heldRead?.release(); const s = w3Workbench.workspace; if (s.__read) s.readText = s.__read; })()`);
+  }
+}
+
 /** The terrain painter's tile templates (Tiles…, Template, Use its tiles): another tileset's tiles make the w3e's
  *  list custom, and the tileset's own tiles again clear the flag, as the World Editor writes it. */
 async function tileTemplate(page, found) {
@@ -2578,7 +2612,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, heightsLimits, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, objectsWhileOpening, heightsLimits, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2655,6 +2689,7 @@ async function run() {
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
+    await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
