@@ -132,11 +132,12 @@ export function createTexture(gl: WebGL2RenderingContext, image: DecodedImage, o
  *  emissive and other maps, which the shader here doesn't sample: of its slots, only the diffuse (0)
  *  and ORM (2) count. A texture anything else names, like a particle emitter, counts too. */
 /** An HD layer's emissive texture (its slot 3 of [diffuse, normal, ORM, emissive, team colour, environment]), drawn
- *  as light of its own: the Ashenvale obelisk's red runes, the totem's lamp. Null for a classic layer. */
+ *  as light of its own: the Ashenvale obelisk's red runes, the totem's lamp. Null for a classic layer, and for the
+ *  black placeholder most HD layers name there (Textures\Black32.blp: no light, not worth reading). */
 export function emissiveSlot(model: Pick<Model, "textures">, layer: { textureIds: number[] }): number | null {
   const id = layer.textureIds.length >= 4 ? layer.textureIds[3] : -1;
   const tex = model.textures[id];
-  return tex && tex.replaceableId === 0 && tex.path ? id : null;
+  return tex && tex.replaceableId === 0 && tex.path && !/(^|[\\/])black32\.\w+$/i.test(tex.path) ? id : null;
 }
 
 export function drawnTextures(model: Pick<Model, "textures" | "materials" | "particleEmitters2">): Set<number> {

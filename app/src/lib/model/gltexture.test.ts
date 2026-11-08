@@ -200,6 +200,8 @@ test("a Reforged layer's emissive texture is drawn too (the Ashenvale obelisk's 
   assert.deepEqual([...drawnTextures(m)], [0, 2, 3]);
   assert.equal(emissiveSlot(m, layer([0, 1, 2, 4])), null, "a replaceable texture in the slot");
   assert.equal(emissiveSlot(m, layer([0])), null, "a classic layer");
+  const black = { ...m, textures: [...m.textures.slice(0, 3), { path: "Textures/Black32.blp", replaceableId: 0, flags: 0 }] } as typeof m;
+  assert.equal(emissiveSlot(black, layer([0, 1, 2, 3])), null, "the black placeholder (the HD footman's)");
 });
 
 test("a classic model needs every texture, used by a layer or not", () => {
