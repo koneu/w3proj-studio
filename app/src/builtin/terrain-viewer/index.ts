@@ -1444,8 +1444,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const tileImages = new Map<string, Promise<{ img: DecodedImage; name: string }>>();
         /** Rebuilds the side list and the renderer's textures after the tile list changed. */
         const syncTileList = async () => {
-          texList.replaceChildren();
           const paths = await tilePaths(w3);
+          // Emptied only now: rows added meanwhile (another sync, a tile being added) would stay otherwise.
+          texList.replaceChildren();
+          texHeading.textContent = `Ground textures (${terrain.groundTiles.length})`;
+          groundFacts.textContent = `${terrain.groundTiles.length} ground · ${terrain.cliffTiles.length} cliff textures`;
           terrain.groundTiles.forEach((_, i) => loadTile(i, paths));
         };
 
@@ -1559,8 +1562,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return p;
         };
         /** Index of a ground tile type, adding it to the map's list if needed
-         *  (null when the list is full). */
-        const ensureTile = async (id: string): Promise<number | null> => {
+         *  (null when the list is full). At once, with no wait: see placePaste. */
+        const ensureTile = (id: string): number | null => {
           const have = terrain.groundTiles.indexOf(id);
           if (have >= 0) return have;
           if (terrain.groundTiles.length >= MAX_GROUND_TILES) {
@@ -1568,17 +1571,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return null;
           }
           terrain.groundTiles.push(id);
-          // The tile list no longer matches the tileset's default.
-          terrain.customTilesets = true;
-          terrain.customTilesetsRaw = 1;
+          // The tile list no longer matches the tileset's default (as a rule).
+          terrain.customTilesetsRaw = customTilesFlag(terrain.groundTiles, ownTiles?.get(terrain.tileset));
+          terrain.customTilesets = terrain.customTilesetsRaw !== 0;
           // A tile with its own cliff type adds that type (cliff indices follow the tile order).
           if (cliffData) {
             const ct = [...cliffData.types.values()].find((c) => c.groundTile === id);
             if (ct && !terrain.cliffTiles.includes(ct.cliffID)) terrain.cliffTiles.push(ct.cliffID);
           }
           const added = terrain.groundTiles.length - 1;
-          // Load in the background so the stroke starts right away.
-          void tilePaths(w3).then((paths) => loadTile(added, paths));
+          // Load in the background so the stroke starts right away. A paste that was refused took it out again meanwhile.
+          void tilePaths(w3).then((paths) => { if (terrain.groundTiles[added] === id) loadTile(added, paths); });
           minimapStale.set();
           return terrain.groundTiles.length - 1;
         };
@@ -2376,18 +2379,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           drawArea(null);
           clearSelection();
         };
-        /** This map's number for each of the ground's tiles, adding those it lacks. Null where it's full. */
-        const tileNumbers = async (ids: readonly string[], used: ReadonlySet<number>) => {
-          const out: number[] = [];
-          for (let i = 0; i < ids.length; i++) out[i] = used.has(i) ? await handle.ensureGroundTile(ids[i]).then((n) => n ?? -1) : 0;
-          return out;
-        };
-        const placeGround = async (f: Fragment, g: Vec3) => {
+        /** This map's number for each of the ground's tiles, adding those it lacks. -1 where it's full. */
+        const tileNumbers = (ids: readonly string[], used: ReadonlySet<number>) => ids.map((id, i) => (used.has(i) ? ensureTile(id) ?? -1 : 0));
+        /** Stamps the ground of a paste, adding the tiles it needs. At once, with no wait in between: placePaste
+         *  takes the tile lists before and puts them back if the edit is refused. */
+        const placeGround = (f: Fragment, g: Vec3) => {
           const ground = f.ground;
           if (!ground) return null;
-          const tiles = await tileNumbers(ground.tiles, new Set(ground.corners.map((c) => c.texture)));
+          const tiles = tileNumbers(ground.tiles, new Set(ground.corners.map((c) => c.texture)));
           const full = tiles.filter((n) => n < 0).length;
-          if (glDead) return undefined;
           if (full) void w3.window.showWarning(`This map can't take ${full} more ground tile${full === 1 ? "" : "s"}; its first tile stands in.`);
           const cliffs = ground.cliffs.map((id) => Math.max(0, terrain.cliffTiles.indexOf(id)));
           return stampGround(terrain, ground, groundOrigin(terrain, ground, g[0], g[1]), tiles.map((n) => Math.max(0, n)), cliffs);
@@ -2401,10 +2401,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Another project, or the paste ended, while the question was open: nothing is placed.
           if (!renames || pasting !== f || w3.workspace.project()?.root !== root || refuseLost()) return;
           // Tiles the ground needs are added to the map's lists as it is stamped; if the ground is refused they go again.
+          // From here to the end there is no wait: the lists are taken right before the tiles are added, so putting them
+          // back can't drop a tile another edit added in between.
           const tiles = tileSnapshot(terrain);
-          const stamped = await placeGround(f, g);
-          // Lost while the ground's tiles were added: nothing was stamped, and the tiles go again.
-          if (stamped === undefined) { restoreTiles(terrain, tiles); refuseLost(); return; }
+          const stamped = placeGround(f, g);
           // Ground and objects are one undo step, and objects stand on the new ground. Each click is its
           // own step: without clearing keyStep this click would join the one before.
           keyStep = null;
@@ -2413,7 +2413,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!applied) {
             // Neither the ground nor the objects that stand on it.
             keyPress = null;
+            const added = terrain.groundTiles.length !== tiles.ground.length;
             restoreTiles(terrain, tiles);
+            // The side list's rows and counts for the tiles that went again.
+            if (added) void syncTileList();
             return;
           }
           keyPress = "repeat";
@@ -3010,7 +3013,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return id;
           },
           setMapTileset: (id) => editDoc("war3map.w3i", (d) => { if (d.tileset === id) return false; d.tileset = id; }),
-          ensureGroundTile: (id) => ensureTile(id),
+          ensureGroundTile: async (id) => ensureTile(id),
           groundTileUsage: () => {
             const n = terrain.groundTiles.map(() => 0);
             for (const c of terrain.corners) if (c.texture < n.length) n[c.texture]++;

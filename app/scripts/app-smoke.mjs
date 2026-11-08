@@ -852,6 +852,27 @@ async function heightsLimits(page, found) {
   await k.focusMap();
   await hands.key("c", "KeyC", 67, 2);
   await hands.key("Escape", "Escape", 27);
+  // The paste needs a ground tile the map no longer has: the most used one (the mound's) is taken out of the list now
+  // (Tiles…, ✕, Remove). When the paste is refused that tile goes again, and the side list says so at once.
+  await k.tab("Terrain");
+  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
+  const tileRows = `[...document.querySelectorAll(".terrain-tilemgr-row")].filter((r) => r.querySelector("img"))`;
+  await until("the map's tile list", () => page.evaluate(`${tileRows}.length > 1`), 10000);
+  const gone = await page.evaluate(`(() => {
+    const rows = ${tileRows}, share = (r) => parseFloat(r.querySelector(".muted")?.textContent ?? "0");
+    const top = rows.reduce((a, b) => (share(b) > share(a) ? b : a));
+    top.querySelector('button[title^="Remove from the map"]').click();
+    return top.querySelector(".terrain-tilemgr-name").textContent;
+  })()`);
+  await until("the removal's question", () => page.evaluate(`!!document.querySelector(".terrain-tilemgr-row.removing")`), 5000);
+  await page.evaluate(`[...document.querySelectorAll(".terrain-tilemgr-row.removing button")].find((b) => b.textContent === "Remove").click()`);
+  await sleep(300);
+  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
+  await k.save();
+  const groundLine = () => /^ground (.*)$/m.exec(readFileSync(w3e, "utf8"))?.[1].trim().split(" ") ?? [];
+  const goneId = /\((\w{4})\)$/.exec(gone)?.[1];
+  if (!goneId || groundLine().includes(goneId)) fail(`the tile ${gone} wasn't taken out of the map's list (control): ${groundLine().join(" ")}`);
+  await k.tab("Select");
   await k.look(1024, -1536);
   await sleep(500);
   await k.run("w3.terrain.toggleEnforceWaterLimits");
@@ -865,6 +886,15 @@ async function heightsLimits(page, found) {
   if (hash(w3e) !== w3eNow) fail("a paste with water past the limit changed the ground with Enforce Water Height Limits on");
   if (count() !== treesNow) fail("a paste whose ground was refused still placed its objects");
   if (!/water/i.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
+  // The side list: its rows and count are the map's tiles, without the one the refused paste added and took out again.
+  await sleep(500);
+  const side = await page.evaluate(`(() => {
+    const head = [...document.querySelectorAll(".model-side h4")].find((e) => e.textContent.startsWith("Ground textures"));
+    return { head: head.textContent, rows: [...head.nextElementSibling.querySelectorAll(".model-row")].map((r) => r.children[1].textContent.trim()) };
+  })()`);
+  const kept = groundLine();
+  if (kept.includes(goneId)) fail(`the refused paste left ${goneId} in the map's tile list`);
+  if (side.head !== `Ground textures (${kept.length})` || side.rows.join(" ") !== kept.join(" ")) fail(`after the refused paste the side list shows ${side.head}: ${side.rows.join(" ")}; the map has ${kept.join(" ")}`);
   await k.run("w3.terrain.toggleEnforceWaterLimits");
   await k.clickMiddle();
   await k.save();
@@ -2548,7 +2578,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, heightsLimits, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
