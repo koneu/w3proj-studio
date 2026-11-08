@@ -80,3 +80,17 @@ test("lighting at an hour: colours BGR → RGB times intensity, hours over the d
   m.lights[0].rotation = { interp: 0, globalSeq: -1, keys: [{ time: 0, value: [Math.SQRT1_2, 0, 0, Math.SQRT1_2] }] };
   near(lightAt(m, 6)!.dir, [0, -1, 0]);
 });
+
+test("a track of a global sequence stays at its first key all day (the sun of a map's own lighting)", () => {
+  const m = sample();
+  // As the 3.0.1 lighting editor saved it into smoketest_maps/cliff.w3m: a second rotation key at 17235, but
+  // the track belongs to global sequence 0 (0 long). The World Editor keeps the sun of the first key.
+  m.globalSequences = [0];
+  const sw = [0.381539, -0.215864, -0.442587, 0.782271], north = [-0.477628, -0.225547, 0, 0.849117];
+  m.lights[0].rotation = { interp: 0, globalSeq: 0, keys: [{ time: 333, value: sw }, { time: 17235, value: north }] };
+  const near = (a: number[], b: number[]) => assert.ok(a.every((v, i) => Math.abs(v - b[i]) < 1e-3), `${a} ≉ ${b}`);
+  for (const hour of [0, 6, 12, 18]) near(lightAt(m, hour)!.dir, [-0.675, -0.406, 0.616]);
+  // The same keys outside a global sequence follow the day: the north key from 17235 on.
+  m.lights[0].rotation.globalSeq = -1;
+  near(lightAt(m, 12)!.dir, [-0.383, 0.811, 0.442]);
+});

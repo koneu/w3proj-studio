@@ -357,7 +357,14 @@ export function sampleTrack(t: Track, time: number): Vec {
   return a.value.map((v, k) => iu * iu * iu * v + 3 * iu * iu * u * a.outTan![k] + 3 * iu * u * u * b.inTan![k] + u * u * u * b.value[k]);
 }
 
-const propAt = (p: Prop, time: number): Vec => ("track" in p ? sampleTrack(p.track, time) : p.value);
+/** A track at the day's `time`. A track of a global sequence doesn't follow the day: it runs on its
+ *  own clock (the game's models give the sun's rotation global sequence 0, 0 long), and the World
+ *  Editor shows it at that clock's start, time 0, so its first key: a map whose lighting has a
+ *  second rotation key later in the day still gets the first one (checked in the editor by moving
+ *  that key to 400 and by swapping the two keys, 2026-11-08). */
+const trackAt = (t: Track, time: number): Vec => sampleTrack(t, t.globalSeq >= 0 ? 0 : time);
+
+const propAt = (p: Prop, time: number): Vec => ("track" in p ? trackAt(p.track, time) : p.value);
 
 /** The model's first directional light at `hour` (0–24 over its first sequence, the game day).
  *  Colours are stored BGR (night is blue). The direction is the light's +Z axis turned by its
@@ -369,7 +376,7 @@ export function lightAt(m: LightModel, hour: number): SceneLight | null {
   const seq = m.sequences[0] ?? { start: 0, end: 60000 };
   const time = seq.start + (((hour % 24) + 24) % 24 / 24) * (seq.end - seq.start);
   const rgb = (bgr: Vec, k: number): [number, number, number] => [(bgr[2] ?? 1) * k, (bgr[1] ?? 1) * k, (bgr[0] ?? 1) * k];
-  const q = l.rotation ? sampleTrack(l.rotation, time) : [0, 0, 0, 1];
+  const q = l.rotation ? trackAt(l.rotation, time) : [0, 0, 0, 1];
   const [x, y, z, w] = q.length === 4 ? q : [0, 0, 0, 1];
   // +Z rotated by q: the third column of the rotation matrix.
   const dir: [number, number, number] = [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)];
