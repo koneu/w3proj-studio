@@ -457,6 +457,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Name"), h("th", {}, "Controller"), h("th", {}, "Race"), h("th", {}, "Fixed start"), h("th", {}, "Start X"), h("th", {}, "Start Y"))),
                   h("tbody", {}, ...ids.map((id) => {
                     const p = info.players.find((x) => x.id === id);
+                    // A player with a start location starts there: the terrain editor's next save writes its
+                    // position here, so it's shown, not typed. Only players without one keep their own.
+                    const followed = starts.get(id);
+                    const startCell = (axis: 0 | 1) => followed
+                      ? h("td.muted", { title: `Player ${id + 1}'s start location: move it in the terrain editor (Objects ▸ Start location) and save there.` }, String(followed[axis]))
+                      : h("td", {}, num(() => p!.start[axis], (n) => { p!.start[axis] = n; }));
                     if (!p) {
                       const at = starts.get(id)!;
                       return h("tr.muted", {}, h("td", {}, String(id + 1)), h("td", {}, `Player ${id + 1}`), h("td", {}, controller(id)),
@@ -468,11 +474,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                       h("td", {}, controller(id)),
                       h("td", {}, select(RACES, () => p.race as 0 | 1 | 2 | 3 | 4, (n) => { p.race = n; })),
                       h("td", {}, bit(() => p.fixedStart, (n) => { p.fixedStart = n; }, 1, "")),
-                      h("td", {}, num(() => p.start[0], (n) => { p.start[0] = n; })),
-                      h("td", {}, num(() => p.start[1], (n) => { p.start[1] = n; })));
+                      startCell(0), startCell(1));
                   })))),
               h("small.muted", {}, "To add a player, place its start location in the terrain editor (Objects ▸ Start location) and save there. "
-                + "Players set to None keep their start location but aren't in the map. Saving the terrain editor moves each player's start to its start location."),
+                + "Players set to None keep their start location but aren't in the map. A player with a start location starts there: "
+                + "Start X and Y show it, and change by moving it in the terrain editor, whose save writes them here. Only a player without one has them to type."),
             ];
           },
           forces: () => [
