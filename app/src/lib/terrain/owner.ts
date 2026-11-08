@@ -18,6 +18,15 @@ export function hasPlayerUnits(list: readonly (Owned & { id: string })[], isItem
   return list.some((u) => u.id !== "sloc" && !isItem(u.id) && (ownerOf(u.player) ?? FIRST_NEUTRAL) < FIRST_NEUTRAL);
 }
 
+/** war3map.w3i flag: a melee map. */
+export const MELEE_MAP = 4;
+
+/** The map's flags with `list` placed on it: Melee goes off once a player owns something placed (see
+ *  hasPlayerUnits), as the World Editor does when saving. It never comes back on by itself. */
+export function meleeFlagsAfter(flags: number, list: readonly (Owned & { id: string })[], isItem: (id: string) => boolean): number {
+  return flags & MELEE_MAP && hasPlayerUnits(list, isItem) ? flags & ~MELEE_MAP : flags;
+}
+
 /** Replaces each entry's field by its owner, keeping the rest in `playerFlags` until saving. */
 export function splitOwners(list: Owned[]): void {
   for (const e of list) {

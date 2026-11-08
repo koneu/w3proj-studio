@@ -35,7 +35,7 @@ import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { placedText, splitOwners } from "../../lib/terrain/owner";
+import { meleeFlagsAfter, placedText, splitOwners } from "../../lib/terrain/owner";
 import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -52,7 +52,7 @@ import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
-import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainView } from "../../extensions/services";
+import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
@@ -313,7 +313,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** One edit of a placement file. */
-  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
+  /** `isItem` (units only): the map stops being a melee map in the same edit once a player owns a placed
+   *  unit, as the map script's regeneration does after a save. Done here, it doesn't depend on that running:
+   *  it waits for saves to settle, is off with script.generateOnSave, and is lost when the project closes first. */
+  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>, isItem?: (id: string) => boolean) => {
     const { root } = requireProject(w3);
     // Every object tool comes through here (remove_objects without liveEditor too).
     refuseLostView(projectTerrain(w3));
@@ -328,7 +331,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       splitOwners(list);
       before = key === "doodads" ? structuredClone(list) : [];
       await change({ name, key, doc, list, json: true, dirty: false });
-      return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
+      const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
+      // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
+      const infoPath = "map/war3map.w3i.json", infoText = key === "units" && isItem ? await read(infoPath).catch(() => null) : null;
+      let info: { flags?: unknown } | null = null;
+      try { info = infoText === null ? null : JSON.parse(infoText) as { flags?: unknown }; } catch { /* left alone */ }
+      if (info && typeof info.flags === "number") {
+        const flags = info.flags, after = meleeFlagsAfter(flags, list, isItem!);
+        if (after !== flags) {
+          info.flags = after;
+          files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
+        }
+      }
+      return files;
     }, async () => {
       // Doodads block pathing and cast shadows. With no editor open the ground is the project's, as the rebuild finds it.
       if (key === "doodads") rebuildSoon(() => ({ doodads: before }));
@@ -862,11 +877,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
-      /** Works out what fits; `place` then puts it there. A dry run doesn't mark what it finds, since
-       *  that would stay in the editor's map of what's taken: objects in it can overlap each other. */
+      /** Works out what fits; `place` then puts it there. A dry run marks what it finds on a copy of the
+       *  editor's map of what's taken, so it refuses the same overlaps among its own objects a real run does. */
       const plan = async (place: ((o: typeof wanted[number], i: number, x: number, y: number, facing: number) => Promise<void>) | null) => {
         skipped.length = shifted.length = 0;
-        const room = ignoreRoom === true ? null : await handle.objects.occupancy();
+        const shared = ignoreRoom === true ? null : await handle.objects.occupancy();
+        const room = place ? shared : shared?.scratch() ?? null;
         let placed = 0;
         for (const [i, o] of wanted.entries()) {
           const id = o.id as string, x = o.x as number, y = o.y as number, type = handle.objects.type(id), kindOf = type?.kind ?? "w3u";
@@ -896,14 +912,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1])}` });
             continue;
           }
-          if (place) {
-            await place(o, i, spot[0], spot[1], facing);
-            // A line's pieces touch each other on purpose.
-            if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
-            if (paired) {
-              await place(o, i, twin[0], twin[1], twinFacing);
-              if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
-            }
+          await place?.(o, i, spot[0], spot[1], facing);
+          // A line's pieces touch each other on purpose.
+          if (ownPieces === undefined) await room?.mark(kindOf, id, spot[0], spot[1], angle);
+          if (paired) {
+            await place?.(o, i, twin[0], twin[1], twinFacing);
+            if (ownPieces === undefined) await room?.mark(kindOf, id, twin[0], twin[1], twinAngle);
           }
           placed += paired ? 2 : 1;
         }
@@ -919,7 +933,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           else markBackdrop(entry, x, y, edge);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
-      });
+      }, (id) => handle.objects.type(id)?.kind === "w3t");
       return { placed, shifted, skipped };
     }),
     w3.mcp.registerTool("scatter_objects", async (args) => {
@@ -3114,9 +3128,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               return Occupancy.mask(terrain, await pathingData, placed);
             })()),
             occupancy: async () => {
-              const occ = await occupancy();
-              return {
+              const wrap = (occ: Occupancy): TerrainOccupancy => ({
                 blocked: occ.blocked,
+                scratch: () => wrap(occ.copy()),
                 footprint: async (kind, id) => { const fp = await occ.footprint(id, kind); return fp && { width: fp.width, height: fp.height }; },
                 fits: async (kind, id, x, y, angle) => {
                   // Units and items can't stand on painted Boundary. Doodads can, as past the map's edge.
@@ -3125,7 +3139,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   return !fp || occ.fits(fp, x, y, angle);
                 },
                 mark: async (kind, id, x, y, angle) => { const fp = await occ.footprint(id, kind); if (fp) occ.mark(fp, x, y, angle); },
-              };
+              });
+              return wrap(await occupancy());
             },
           },
           pushEdit: (e) => pushEdit(e),

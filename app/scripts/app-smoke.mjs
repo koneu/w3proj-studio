@@ -334,6 +334,39 @@ async function terrainWiring(page, found) {
   }
 }
 
+/** place_objects on a new map: a dry run refuses the overlaps among its own objects that the real run refuses,
+ *  and the placing itself takes the Melee flag off (not the map script's regeneration a moment after a save,
+ *  which is off here, as it is with script.generateOnSave unset or a project closed right after). */
+async function placeObjects(page, found) {
+  const fail = (what) => found.push(`place objects: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "placing");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Placing", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const flags = () => JSON.parse(readFileSync(join(root, "map", "war3map.w3i.json"), "utf8")).flags;
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    const two = { objects: [{ id: "hbar", x: 1024, y: 1024, player: 1 }, { id: "hbar", x: 1024, y: 1024, player: 1 }] };
+    const dry = JSON.parse(await tool("place_objects", { ...two, dryRun: true }));
+    if (dry.wouldPlace !== 1 || dry.skipped.length !== 1) fail(`a dry run of two barracks on one spot: ${JSON.stringify(dry)}`);
+    // The dry run's own marks stay out of the editor's map of what's taken.
+    const again = JSON.parse(await tool("place_objects", { objects: [two.objects[0]], dryRun: true }));
+    if (again.wouldPlace !== 1) fail(`a dry run left its objects in the way: ${JSON.stringify(again)}`);
+    if (!(flags() & 4)) fail("a new map isn't a melee map (control)");
+    const real = JSON.parse(await tool("place_objects", two));
+    if (real.placed !== 1 || JSON.stringify(real.skipped) !== JSON.stringify(dry.skipped)) fail(`the real run refused other things than its dry run: ${JSON.stringify(real)} vs ${JSON.stringify(dry)}`);
+    if (flags() & 4) fail("a map with a player's unit placed is still a melee map");
+    // One undo step takes the unit and the flag back.
+    await tool("undo_last_edit");
+    if (!(flags() & 4)) fail("undoing the placing didn't make it a melee map again");
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
+  }
+}
+
 /** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
  *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
  *  right when the project is saved and packed straight after. */
@@ -2494,7 +2527,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, terrainSelectCameras, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -2569,6 +2602,7 @@ async function run() {
     }
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
+    await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));

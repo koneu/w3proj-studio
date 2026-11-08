@@ -109,4 +109,11 @@ export class Occupancy {
   mark(fp: Footprint, x: number, y: number, angle: number) {
     this.cells(fp, x, y, angle, (i) => { this.blocked[i] = 1; });
   }
+
+  /** A copy to mark on without changing this one (a dry run's own objects), sharing the footprints. */
+  copy(): Occupancy {
+    const o = Object.create(Occupancy.prototype) as Occupancy;
+    Object.assign(o, this, { blocked: this.blocked.slice() });
+    return o;
+  }
 }
