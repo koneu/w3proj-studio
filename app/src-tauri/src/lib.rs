@@ -1014,9 +1014,39 @@ fn world_editor_open(app: AppHandle, watches: State<Watches>, exe: String, map: 
 /// difficulty, the "WorldEdit" test profile (not the player's own), a fixed random seed.
 /// Unlike the World Editor, which Battle.net starts with its session, the game asks for a
 /// login when this app wasn't started by Battle.net.
+/// `args`: the Test Map options as flags (map-project/testmap.ts builds them from the settings); without them
+/// the defaults above. Only the World Editor's Test Map flags are let through.
 #[tauri::command]
-fn game_test_map(exe: String, map: String) -> CmdResult<()> {
-    launch(&exe, &map, &["-mapdiff", "1", "-testmapprofile", "WorldEdit", "-fixedseed", "1"]).map(|_| ())
+fn game_test_map(exe: String, map: String, args: Option<Vec<String>>) -> CmdResult<()> {
+    let args = args.unwrap_or_else(|| ["-mapdiff", "1", "-testmapprofile", "WorldEdit", "-fixedseed", "1"].map(String::from).to_vec());
+    check_test_map_args(&args)?;
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    launch(&exe, &map, &args).map(|_| ())
+}
+
+/// Whether `args` are Test Map flags the World Editor passes, each with a value it allows (a profile is any name
+/// that doesn't look like a flag): nothing else reaches the game's command line.
+fn check_test_map_args(args: &[String]) -> CmdResult<()> {
+    let mut i = 0;
+    while i < args.len() {
+        let flag = args[i].as_str();
+        let value = args.get(i + 1).map(String::as_str);
+        let ok = match flag {
+            "-nowfpause" => { i += 1; continue; }
+            "-windowmode" => matches!(value, Some("windowed" | "windowedfullscreen" | "fullscreen")),
+            "-hd" => matches!(value, Some("0" | "1" | "2")),
+            "-teen" => matches!(value, Some("0" | "1")),
+            "-mapdiff" => matches!(value, Some("0" | "1" | "2" | "3")),
+            "-fixedseed" => matches!(value, Some("0" | "1")),
+            "-testmapprofile" => value.is_some_and(|v| !v.is_empty() && !v.starts_with('-') && !v.contains('"')),
+            _ => false,
+        };
+        if !ok {
+            return Err(format!("Test Map: {flag} {} isn't a Test Map option the game takes", value.unwrap_or("")));
+        }
+        i += 2;
+    }
+    Ok(())
 }
 
 /// What an external tool run printed and returned.
@@ -1531,5 +1561,38 @@ mod fs_tests {
         assert_eq!(files, ["sub/a.txt", "sub/deep/b.txt", "top.txt"]);
         assert!(list_tree(&dir.join("missing")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod test_map_tests {
+    use super::check_test_map_args;
+
+    fn args(s: &[&str]) -> Vec<String> {
+        s.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn the_world_editors_flags_pass() {
+        assert!(check_test_map_args(&args(&["-mapdiff", "1", "-testmapprofile", "WorldEdit", "-fixedseed", "1"])).is_ok());
+        let all = ["-windowmode", "windowedfullscreen", "-hd", "2", "-teen", "0", "-nowfpause", "-mapdiff", "2", "-testmapprofile", "My Name"];
+        assert!(check_test_map_args(&args(&all)).is_ok());
+        assert!(check_test_map_args(&[]).is_ok());
+    }
+
+    #[test]
+    fn anything_else_is_refused() {
+        for bad in [
+            &["-loadfile", "x.w3x"][..],
+            &["-mapdiff", "9"],
+            &["-hd", "3"],
+            &["-windowmode", "maximized"],
+            &["-testmapprofile", "-launch"],
+            &["-testmapprofile"],
+            &["-fixedseed"],
+            &["-mapdiff", "1", "extra"],
+        ] {
+            assert!(check_test_map_args(&args(bad)).is_err(), "{bad:?}");
+        }
     }
 }

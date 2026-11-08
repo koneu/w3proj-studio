@@ -17,6 +17,18 @@
       { "id": "w3.project.reveal", "when": "project", "menu": "Tools:4:1", "title": "Reveal Project in File Explorer", "category": "Project" },
       { "id": "w3.project.showManifest", "title": "Open Project Manifest", "category": "Project" },
       { "id": "w3.project.close", "when": "project", "menu": "File:2:3", "title": "Close Project", "category": "Project" }
-    ]
+    ],
+    "configuration": {
+      "title": "Test Map",
+      "properties": {
+        "testMap.difficulty": { "type": "string", "scope": "user", "default": "normal", "enum": ["easy", "normal", "hard"], "enumDescriptions": ["Easy", "Normal", "Hard"], "description": "Difficulty Level the game starts the map at (-mapdiff)." },
+        "testMap.profile": { "type": "string", "scope": "user", "default": "WorldEdit", "description": "Player Profile the test runs under (-testmapprofile), as the World Editor's \"WorldEdit\" profile keeps tests out of your own. Empty: your own profile." },
+        "testMap.windowMode": { "type": "string", "scope": "user", "default": "default", "enum": ["default", "windowed", "windowedFullscreen", "fullscreen"], "enumDescriptions": ["Default (the game's own setting)", "Windowed", "Windowed Fullscreen", "Fullscreen"], "description": "Window Mode of the game (-windowmode)." },
+        "testMap.assetMode": { "type": "string", "scope": "user", "default": "default", "enum": ["default", "sd", "hd", "de"], "enumDescriptions": ["Default (the game's own setting)", "SD (classic)", "HD (Reforged)", "DE"], "description": "Asset Mode the game shows the map in (-hd 0, 1 or 2)." },
+        "testMap.teenData": { "type": "string", "scope": "user", "default": "default", "enum": ["default", "on", "off"], "enumDescriptions": ["Default (the game's own setting)", "On", "Off"], "description": "Teen Data: the game's toned-down art and sounds (-teen)." },
+        "testMap.fixedSeed": { "type": "boolean", "scope": "user", "default": true, "description": "Use Fixed Random Seed: every test plays the same random numbers (-fixedseed 1)." },
+        "testMap.noFocusPause": { "type": "boolean", "scope": "user", "default": false, "description": "Use No Window Focus Pause: the game keeps running while its window isn't in front (-nowfpause)." }
+      }
+    }
   }
 }

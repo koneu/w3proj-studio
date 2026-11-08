@@ -1,6 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
 import { gameProgram, joinPath, onWindows } from "../../lib/paths";
+import { testMapArgs, testMapOptions } from "./testmap";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -211,10 +212,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
     w3.commands.register("w3.project.testMap", async () => {
       await needStartLocation();
+      // The options are read before packing, so a wrong one stops before anything is written.
+      const args = testMapArgs(testMapOptions(w3.settings));
       const r = await pack(null, true);
       if (!r) return;
-      await w3.backend.invoke("game_test_map", { exe: program("game.path", "Warcraft III.exe"), map: r.output });
-      out.append(`launched game with ${r.output}`);
+      await w3.backend.invoke("game_test_map", { exe: program("game.path", "Warcraft III.exe"), map: r.output, args });
+      out.append(`launched game with ${r.output} (${args.join(" ")})`);
       // Under Proton the game's own login can stay invisible, and then the game never gets past its first screen.
       if (!onWindows()) {
         const c = await w3.window.showInfo("Warcraft III is starting. If it stays on its first screen (its login can stay hidden under Proton), pack the map into the game's Maps folder and start it from Custom Game.", "Pack into Game's Maps");
