@@ -389,7 +389,8 @@ export class Workbench {
     c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit", menu: "Edit:1:2", when: "undo" });
     c("workbench.openSettings", "Open Settings (JSON)", async () => {
       const p = this.settings.settingsPath();
-      if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("worldEditor.path", this.settings.get("worldEditor.path"));
+      // The file is made with the setting most likely to need changing: the game's folder (the programs follow it).
+      if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.settings.set("game.installDir", this.settings.get("game.installDir"));
       await this.editors.open(p, "w3.textEditor");
     }, { category: "Preferences" });
     c("workbench.openProjectSettings", "Open Project Settings (JSON)", async () => {

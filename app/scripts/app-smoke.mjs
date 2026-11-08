@@ -2244,7 +2244,13 @@ async function run() {
   // machine is. The checks count the checkpoints that commands make.
   // The game's folder goes to the app as well as to the CLI: without it the app looks in its default
   // (C:\Program Files (x86)\Warcraft III), which on Linux, or on another drive, isn't there.
-  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true, "checkpoints.enabled": false, ...(game ? { "game.installDir": game } : {}) }));
+  // The game's programs follow game.installDir unless set: here they're set to files that aren't there, so no step
+  // can start the game or the World Editor.
+  writeFileSync(join(configDir, "settings.json"), JSON.stringify({
+    "mcp.enabled": false, "mcp.writeTools": true, "mcp.saveTool": true, "checkpoints.enabled": false,
+    "game.path": join(work, "no-game", "Warcraft III.exe"), "worldEditor.path": join(work, "no-game", "World Editor.exe"),
+    ...(game ? { "game.installDir": game } : {}),
+  }));
   const triggerData = join(repo, "tests", "fixtures", "TriggerData.txt");
   // Windows: the app's WebView2 over the DevTools Protocol. Linux: WebKitGTK over WebDriver (webdriver.mjs),
   // which gives a page that takes the same calls.

@@ -281,8 +281,8 @@ export class WorkspaceService {
 /** settings.json in the app config dir. */
 /** The workbench's own settings (machine-specific, so user scope). */
 const CORE_SETTINGS: Record<string, ConfigurationProperty> = {
-  "worldEditor.path": { type: "string", scope: "user", default: "C:\\Program Files (x86)\\Warcraft III\\_retail_\\x86_64\\World Editor.exe", description: "World Editor executable (Open in World Editor, F5)." },
-  "game.path": { type: "string", scope: "user", default: "C:\\Program Files (x86)\\Warcraft III\\_retail_\\x86_64\\Warcraft III.exe", description: "Game executable (Test Map, Ctrl+F5)." },
+  "worldEditor.path": { type: "string", scope: "user", default: "", description: "World Editor executable (Open in World Editor, F5). Empty: _retail_/x86_64/World Editor.exe in game.installDir. On Linux a Windows program is started through Steam's Proton, in the Steam prefix it's in." },
+  "game.path": { type: "string", scope: "user", default: "", description: "Game executable (Test Map, Ctrl+F5). Empty: _retail_/x86_64/Warcraft III.exe in game.installDir. On Linux started through Steam's Proton, in the Steam prefix it's in." },
   "game.installDir": { type: "string", scope: "user", default: "C:\\Program Files (x86)\\Warcraft III", description: "Game install folder whose data (CASC) is read." },
   "game.graphicsMode": { type: "string", scope: "user", default: "hd", enum: ["sd", "hd", "de"], enumDescriptions: ["Classic", "Reforged HD", "Reforged (DE)"], description: "Art set used to resolve game files (models, textures)." },
   "game.cacheMegabytes": { type: "number", scope: "user", default: 1024, description: "Game files read are kept in memory up to this size, so a map opened again reads nothing from the game's storage. Less than what a map reads (GoldRush in HD: about 600 MB) keeps little of it. 0 keeps nothing." },

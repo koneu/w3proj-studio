@@ -1,6 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
-import { joinPath } from "../../lib/paths";
+import { gameProgram, joinPath } from "../../lib/paths";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -108,6 +108,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
   };
 
+  /** A program of the game: as set (user or project settings), else the one in game.installDir. */
+  const program = (key: string, file: string) => {
+    const set = w3.settings.inspect(key);
+    return gameProgram(set.project ?? set.user, w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III", file);
+  };
+
   const editBuild = () => {
     const p = w3.workspace.project()!;
     return joinPath(p.root, "build", `${baseName(p.root)}.edit.w3x`);
@@ -171,7 +177,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
     w3.commands.register("w3.project.openInWorldEditor", async () => {
       root();
-      const exe = w3.settings.get<string>("worldEditor.path");
+      const exe = program("worldEditor.path", "World Editor.exe");
       const map = editBuild();
       await pack(map);
       await w3.backend.invoke("world_editor_open", { exe, map, root: root() });
@@ -188,7 +194,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
       const r = await pack(null, true);
       if (!r) return;
-      await w3.backend.invoke("game_test_map", { exe: w3.settings.get<string>("game.path"), map: r.output });
+      await w3.backend.invoke("game_test_map", { exe: program("game.path", "Warcraft III.exe"), map: r.output });
       out.append(`launched game with ${r.output}`);
     }),
 

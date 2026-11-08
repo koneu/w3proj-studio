@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAbsolutePath, isFullPath, joinPath } from "./paths";
+import { gameProgram, isAbsolutePath, isFullPath, joinPath } from "./paths";
+
+test("gameProgram: the path set for it wins; else the program in the game's folder", () => {
+  assert.equal(gameProgram(undefined, "C:\\Program Files (x86)\\Warcraft III", "World Editor.exe"), "C:\\Program Files (x86)\\Warcraft III\\_retail_\\x86_64\\World Editor.exe");
+  const steam = "/home/u/.steam/steamapps/compatdata/1/pfx/drive_c/Program Files (x86)/Warcraft III";
+  assert.equal(gameProgram(undefined, steam, "Warcraft III.exe"), `${steam}/_retail_/x86_64/Warcraft III.exe`);
+  assert.equal(gameProgram("D:\\WE\\World Editor.exe", steam, "World Editor.exe"), "D:\\WE\\World Editor.exe");
+  assert.equal(gameProgram("  ", steam, "Warcraft III.exe"), `${steam}/_retail_/x86_64/Warcraft III.exe`);
+});
 
 test("isFullPath: a full path on either system; a project path isn't one", () => {
   for (const p of ["C:\\maps", "c:/maps", "\\\\server\\share", "/home/u/maps", "/"]) assert.equal(isFullPath(p), true, p);

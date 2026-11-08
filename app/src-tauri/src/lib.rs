@@ -12,6 +12,8 @@ use std::time::{Duration, SystemTime};
 mod gamefind;
 mod mcp;
 mod mcpclients;
+#[cfg_attr(windows, allow(dead_code))]
+mod proton;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -643,23 +645,43 @@ fn fs_exists(path: String) -> bool {
 
 #[tauri::command]
 fn reveal_in_explorer(path: String) -> CmdResult<()> {
-    // Explorer only understands backslashes, and needs `/select,"path"` as one
-    // raw argument (Rust would quote the whole thing, which it misreads).
-    let native = path.replace('/', "\\");
-    let p = PathBuf::from(&native);
-    let mut cmd = Command::new("explorer");
+    reveal_command(&path).spawn().map(|_| ()).map_err(err)
+}
+
+/// Shows a file in the system's file manager: selected in Explorer (Windows) and Finder (macOS); on Linux its
+/// folder is opened with xdg-open, as there's no common way to select a file. A folder is opened itself.
+fn reveal_command(path: &str) -> Command {
     #[cfg(windows)]
     {
+        // Explorer only understands backslashes, and needs `/select,"path"` as one
+        // raw argument (Rust would quote the whole thing, which it misreads).
         use std::os::windows::process::CommandExt;
-        if p.is_file() {
+        let native = path.replace('/', "\\");
+        let mut cmd = Command::new("explorer");
+        if Path::new(&native).is_file() {
             cmd.raw_arg(format!("/select,\"{native}\""));
         } else {
             cmd.raw_arg(format!("\"{native}\""));
         }
+        cmd
     }
-    #[cfg(not(windows))]
-    cmd.arg(&p);
-    cmd.spawn().map(|_| ()).map_err(err)
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = Command::new("open");
+        if Path::new(path).is_file() {
+            cmd.arg("-R");
+        }
+        cmd.arg(path);
+        cmd
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let p = Path::new(path);
+        let folder = if p.is_file() { p.parent().unwrap_or(p) } else { p };
+        let mut cmd = Command::new("xdg-open");
+        cmd.arg(folder);
+        cmd
+    }
 }
 
 // ---------------------------------------------------------------- settings & extensions
@@ -854,12 +876,25 @@ fn launch(exe: &str, map: &str, extra: &[&str]) -> CmdResult<std::process::Child
     if !Path::new(exe).exists() {
         return Err(format!("not found: {exe} (check settings)"));
     }
-    Command::new(exe)
-        .args(["-launch", "-loadfile", map])
-        .args(extra)
+    let args: Vec<String> = ["-launch", "-loadfile", map].iter().chain(extra).map(|s| s.to_string()).collect();
+    program(exe, args)?
         .current_dir(Path::new(exe).parent().unwrap_or(Path::new(".")))
         .spawn()
         .map_err(err)
+}
+
+/// A program with its arguments. On Linux a Windows program (`.exe`) is started through Steam's Proton in
+/// the Steam prefix it's in (proton.rs), and full paths among the arguments become Wine's `Z:\…`.
+fn program(exe: &str, args: Vec<String>) -> CmdResult<Command> {
+    #[cfg(not(windows))]
+    if proton::is_windows_program(Path::new(exe)) {
+        let p = proton::proton_for(Path::new(exe))?;
+        let args: Vec<String> = args.iter().map(|a| proton::wine_path(a)).collect();
+        return Ok(proton::command(&p, Path::new(exe), &args));
+    }
+    let mut cmd = Command::new(exe);
+    cmd.args(args);
+    Ok(cmd)
 }
 
 /// Opens a map in the World Editor and watches it. Every time the editor
@@ -915,8 +950,8 @@ struct ToolResult {
 #[tauri::command]
 async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<ToolResult> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = Command::new(&exe);
-        cmd.args(&args).current_dir(&cwd);
+        let mut cmd = program(&exe, args)?;
+        cmd.current_dir(&cwd);
         // No console to answer on: a remote that wants a password fails instead of hanging.
         if exe == "git" {
             cmd.env("GIT_TERMINAL_PROMPT", "0");
@@ -1196,6 +1231,29 @@ mod fs_tests {
     fn rand_suffix() -> usize {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    #[test]
+    fn on_linux_a_file_is_shown_by_opening_its_folder_with_xdg_open() {
+        let (dir, root) = project();
+        let file = dir.join("map/sub/a.txt");
+        let cmd = reveal_command(&file.to_string_lossy());
+        assert_eq!(cmd.get_program(), "xdg-open");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), [dir.join("map/sub").as_os_str()]);
+        let cmd = reveal_command(&root);
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), [dir.as_os_str()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn on_linux_a_windows_program_outside_a_steam_prefix_is_refused_and_others_run_as_they_are() {
+        let e = program("/home/u/Games/battlenet/drive_c/Warcraft III/World Editor.exe", vec![]).unwrap_err();
+        assert!(e.contains("Steam"), "{e}");
+        let cmd = program("git", vec!["status".into()]).unwrap();
+        assert_eq!(cmd.get_program(), "git");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), ["status"]);
     }
 
     #[test]

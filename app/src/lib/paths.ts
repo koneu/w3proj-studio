@@ -25,6 +25,13 @@ export function joinPath(root: string, ...parts: string[]): string {
  *  with no root to compare with (a folder the user or an AI client gave). Project paths never start with `/`. */
 export const isFullPath = (p: string) => /^(?:[a-z]:[\\/]|\\\\|\/)/i.test(p);
 
+/** A program of the game (`World Editor.exe`, `Warcraft III.exe`): the path set for it if there is one, else the
+ *  one in the game's folder. With the default game folder this is the old default path on Windows; on Linux it
+ *  follows the folder chosen for the game (in a Steam prefix, started through Proton by the backend). */
+export function gameProgram(own: unknown, installDir: string, file: string): string {
+  return typeof own === "string" && own.trim() ? own : joinPath(installDir, "_retail_", "x86_64", file);
+}
+
 /** Whether a path is already a full path in the root's system, rather than one inside the project. */
 export function isAbsolutePath(p: string, root: string): boolean {
   if (/^[a-z]:[\\/]/i.test(p) || p.startsWith("\\\\")) return true;
