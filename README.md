@@ -150,10 +150,11 @@ On Linux:
 
 - **The game and the World Editor** (Test Map, Open in World Editor, and JassHelper for vJass) are Windows programs,
   started through **Steam's Proton**: the game has to be in Steam (a non-Steam game with Proton is fine) and
-  run from there once. Studio then runs `proton run <exe>` with the Proton build Steam uses for it (from
+  run from there once. Studio then runs `proton runinprefix <exe>` with the Proton build Steam uses for it (from
   `steamapps/compatdata/<id>/config_info`), in the same prefix and with Steam's environment, so it's the setup
   Steam itself starts. (Steam can't pass a map to a game it starts itself, so Studio doesn't go through the Steam
-  client.) The programs follow `game.installDir` unless `game.path` / `worldEditor.path` are set.
+  client. `proton run` isn't used: its steam.exe stays until every other program in the prefix, Battle.net
+  included, has ended.) The programs follow `game.installDir` unless `game.path` / `worldEditor.path` are set.
 - **The MCP server** uses a Unix socket in `$XDG_RUNTIME_DIR` (only you can reach it) instead of the Windows
   named pipe; `w3proj mcp` connects to it the same way. "Try to set up for …" looks for clients in `~/.config`
   and the home folder.

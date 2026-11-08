@@ -1564,6 +1564,34 @@ mod fs_tests {
     }
 }
 
+/// A Windows program on Linux starts through Proton in a way that ends with the program (see proton::command):
+/// Test Map and Open in World Editor left a `proton run` and its steam.exe behind for as long as Battle.net ran.
+#[cfg(all(test, not(windows)))]
+mod program_tests {
+    use super::program;
+
+    #[test]
+    fn a_windows_program_runs_through_proton_runinprefix_not_run() {
+        let root = std::env::temp_dir().join(format!("w3proj-program-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let tool = root.join("compatibilitytools.d/GE");
+        std::fs::create_dir_all(tool.join("files/share/fonts")).unwrap();
+        std::fs::write(tool.join("proton"), "").unwrap();
+        std::fs::write(root.join("steam.sh"), "").unwrap();
+        let data = root.join("steamapps/compatdata/123");
+        let bin = data.join("pfx/drive_c/Warcraft III/_retail_/x86_64");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(data.join("config_info"), format!("GE\n{}/files/share/fonts/\n", tool.display())).unwrap();
+        let exe = bin.join("Warcraft III.exe");
+        let cmd = program(&exe.to_string_lossy(), vec!["-launch".into(), "-loadfile".into(), "/m/a.w3x".into()]).unwrap();
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(cmd.get_program(), tool.join("proton").as_os_str());
+        assert_eq!(args[0], "runinprefix", "proton run's steam.exe waits for every program in the prefix, Battle.net too");
+        assert_eq!(args[1..], [exe.to_string_lossy().into_owned(), "-launch".into(), "-loadfile".into(), r"Z:\m\a.w3x".into()]);
+    }
+}
+
 #[cfg(test)]
 mod test_map_tests {
     use super::check_test_map_args;

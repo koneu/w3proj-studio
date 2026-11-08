@@ -1,7 +1,7 @@
 //! Windows programs on Linux (the game, the World Editor, JassHelper) are started through Steam's Proton,
 //! the way Steam starts them: the Proton build Steam uses for that game, in the game's own Steam prefix,
 //! with Steam's environment. Steam can't pass arguments (`-loadfile <map>`) to a game it starts itself, so
-//! the app runs `proton run <exe> <args>` with the same build and prefix instead.
+//! the app runs `proton runinprefix <exe> <args>` with the same build and prefix instead (see `command`).
 //!
 //! An install in a Steam prefix sits at `<steam>/steamapps/compatdata/<app id>/pfx/drive_c/…`. Steam writes
 //! the Proton build it last used into `<compatdata>/<app id>/config_info`: its second line is a path inside
@@ -73,10 +73,19 @@ pub fn wine_path(p: &str) -> String {
     if p.starts_with('/') { format!("Z:{}", p.replace('/', "\\")) } else { p.to_string() }
 }
 
-/// `proton run <exe> <args>`, with the environment Steam gives the game.
+/// `proton runinprefix <exe> <args>`, with the environment Steam gives the game.
+///
+/// Not `proton run`: that starts the program through Proton's own steam.exe, which after the program has ended
+/// keeps waiting until no other (non-system) Windows program runs in the prefix's wineserver. The game's prefix
+/// usually has the user's Battle.net and its Agent running, so every `proton run` and its steam.exe stayed until
+/// Battle.net was closed (seen 2026-11-08: four games and two World Editors, hours after their windows closed),
+/// and Studio never heard that the World Editor had ended. `runinprefix` runs the program with Wine directly, in
+/// the same prefix and environment, and ends with it. It also leaves the prefix's files alone (no prefix
+/// update), which `run` would do in the user's prefix; Steam has set the prefix up (proton_for needs its config_info).
+/// Nothing else in the prefix is touched: no `wineserver -k`, which would end the user's other programs there.
 pub fn command(proton: &Proton, exe: &Path, args: &[String]) -> Command {
     let mut cmd = Command::new(proton.tool.join("proton"));
-    cmd.arg("run").arg(exe).args(args);
+    cmd.arg("runinprefix").arg(exe).args(args);
     cmd.env("STEAM_COMPAT_DATA_PATH", &proton.compat_data)
         .env("STEAM_COMPAT_CLIENT_INSTALL_PATH", &proton.steam_root)
         .env("SteamAppId", &proton.app_id)
@@ -168,14 +177,15 @@ mod tests {
         assert_eq!(wine_path("-launch"), "-launch");
     }
 
+    /// `runinprefix`, not `run`: `run`'s steam.exe outlives the program while the user's Battle.net runs in the prefix.
     #[test]
-    fn the_command_is_proton_run_with_steams_environment() {
+    fn the_command_is_proton_runinprefix_with_steams_environment() {
         let (root, exe) = steam();
         let p = proton_for(&exe).unwrap();
         let cmd = command(&p, &exe, &["-launch".into(), "-loadfile".into(), wine_path("/m/a.w3x")]);
         assert_eq!(cmd.get_program(), p.tool.join("proton").as_os_str());
         let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(args, ["run".to_string(), exe.to_string_lossy().into_owned(), "-launch".into(), "-loadfile".into(), r"Z:\m\a.w3x".into()]);
+        assert_eq!(args, ["runinprefix".to_string(), exe.to_string_lossy().into_owned(), "-launch".into(), "-loadfile".into(), r"Z:\m\a.w3x".into()]);
         let env: std::collections::HashMap<_, _> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.unwrap().to_string_lossy().into_owned())).collect();
         assert_eq!(env["STEAM_COMPAT_DATA_PATH"], root.join("steamapps/compatdata/4104009084").to_string_lossy());
         assert_eq!(env["STEAM_COMPAT_CLIENT_INSTALL_PATH"], root.to_string_lossy());
