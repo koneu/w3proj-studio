@@ -415,10 +415,11 @@ export class ObjectLoader {
   /** Placed doodads/units: models from the skin tables. Custom object ids
    *  use their base object's model (`baseOf`, from the map's object data). An object whose model doesn't load
    *  (or whose id is unknown) is drawn as the World Editor's checkered cube, a batch of its own in the group, and
-   *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray. */
+   *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray.
+   *  `looksOf`: looks a placed object stands in besides its type's Animprops (a swimming unit's "swim"). */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
     baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
-    placeholders = true): Promise<LoadResult> {
+    placeholders = true, looksOf?: (p: Placed, skin: Skin) => readonly string[]): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
@@ -431,11 +432,13 @@ export class ObjectLoader {
         continue;
       }
       const path = modelPath(skin, p.variation);
-      const key = `${path}|${skin.texFile}|${skin.animProps ?? ""}`;
+      const more = looksOf?.(p, skin).filter((l) => !skin.animProps?.includes(l)) ?? [];
+      const props = more.length ? [...(skin.animProps ?? []), ...more] : skin.animProps;
+      const key = `${path}|${skin.texFile}|${props ?? ""}`;
       let entry = byModel.get(key);
       if (!entry) {
         const replaceable = skinTextures(skin);
-        entry = { req: { path, replaceable, props: skin.animProps, instances: [] }, items: [] };
+        entry = { req: { path, replaceable, props, instances: [] }, items: [] };
         byModel.set(key, entry);
       }
       entry.items.push(p);

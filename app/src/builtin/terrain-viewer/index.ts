@@ -13,7 +13,7 @@ import { joinPath } from "../../lib/paths";
 import { errorText } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight } from "./objheights";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Box, type GridSize } from "./viewcmds";
@@ -1818,7 +1818,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         function drawnZ(p: Placed, moveType = moveTypeOf(p)): number {
           return unitDrawHeight(moveType, p.position[2], moveType ? waterSurfaceAt(terrain, p.position[0], p.position[1]) : null);
         }
-        /** After the water or the ground changed: ships and amphibious units go to the new surface, in place. */
+        /** Whether a unit is drawn in its model's swim look (an amphibious unit in deep water). */
+        function swims(p: Placed, moveType = moveTypeOf(p)): boolean {
+          if (moveType?.toLowerCase() !== "amph") return false;
+          const [x, y] = p.position;
+          return unitSwims(moveType, heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y));
+        }
+        /** After the water or the ground changed: ships and amphibious units go to the new surface, in place. A unit
+         *  that starts or stops swimming needs its other look: the objects are made again. */
         function refloat() {
           let moved = false;
           for (const b of renderer.batches) {
@@ -1826,6 +1833,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             for (const inst of b.instances) {
               const p = inst.pick?.placed;
               if (!p || !goesOnWater(moveTypeOf(p))) continue;
+              // (A checkered cube, model "", has no looks.)
+              if (inst.pick!.model && swims(p) !== b.gpu.props.includes("swim")) { void rebuildObjects(); return; }
               const z = drawnZ(p);
               if (Math.abs(inst.world[14] - z) < 0.01) continue;
               inst.world = placement(p, inst.pick!.extraScale, z);
@@ -1846,7 +1855,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
           const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
-            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType)),
+            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType), true,
+              (p, skin) => (swims(p, skin.moveType) ? ["swim"] : [])),
             loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;

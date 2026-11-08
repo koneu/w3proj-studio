@@ -2,6 +2,7 @@
 // Set Uniform Doodad Heights and Reset Fixed Object Heights. A doodad with FIXED_HEIGHT (flag 4) has a
 // height of its own; any other stands on the ground, and follows it when the ground is edited.
 
+import { DEEP_WATER } from "../../lib/terrain/pathing";
 import { FIXED_HEIGHT } from "./selectionkeys";
 
 /** What of a placed object these functions read. */
@@ -35,6 +36,14 @@ export const goesOnWater = (moveType: string | undefined) => !!moveType && ON_WA
  *  (`surface`, from waterSurfaceAt; null without) sits on the surface. Anything else stays at `stored`. */
 export function unitDrawHeight(moveType: string | undefined, stored: number, surface: number | null): number {
   return goesOnWater(moveType) && surface !== null && surface > stored ? surface : stored;
+}
+
+/** Whether a unit is drawn swimming (the "swim" look of its model: Stand Swim, with the body under the surface and,
+ *  in the classic models, a ripple ring): an amphibious unit where the water is deeper than units can walk
+ *  (`ground`, `surface`: heights under it; DEEP_WATER, the pathing's). The World Editor (we-drive, 2026-11-08, map 03
+ *  with naga at depths 24, 45, 62, 66 and 102) shows those at 62 and more swimming, the others standing. */
+export function unitSwims(moveType: string | undefined, ground: number, surface: number | null): boolean {
+  return moveType?.toLowerCase() === "amph" && surface !== null && surface - ground > DEEP_WATER;
 }
 
 /** A number typed for a height, or null: it has to be finite. A comma may be the decimal mark. */
