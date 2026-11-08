@@ -137,6 +137,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const customAbilities = await customIds("map/war3map.w3a"), customItems = await customIds("map/war3map.w3t");
     const kindOf = (id: string): ReturnType<NonNullable<ScriptInput["kindOf"]>> => {
       if (id === "sloc") return "sloc";
+      // A random item has no type of its own.
+      if (id === "iDNR") return "item";
       if (g.abilities.has(id) || customAbilities.has(id)) return "ability";
       if (g.items.has(id) || customItems.has(id)) return "item";
       const c = customUnits.get(id);

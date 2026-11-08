@@ -50,6 +50,10 @@ export interface Skin {
   moveType?: string;
 }
 
+/** Random unit, building and item (war3mapUnits.doo) and the object kind each is placed as. */
+export const RANDOM_KINDS: readonly (readonly [string, string])[] = [["uDNR", "w3u"], ["bDNR", "w3u"], ["iDNR", "w3t"]];
+const RANDOM_MODEL = "Objects\\RandomObject\\RandomObject.mdl";
+
 /** The tables with units' Animprops, which the skin table doesn't carry. */
 const UNIT_FUNC = ["Human", "Orc", "Undead", "NightElf", "Neutral", "Campaign"].map((r) => `Units\\${r}UnitFunc.txt`);
 
@@ -134,6 +138,11 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
     out.set("sloc", { kind: "w3u", file: "Objects\\StartLocation\\StartLocation.mdl", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
+  }
+  // Random units, buildings and items (chosen when the game starts) have no type either: the World Editor draws
+  // them with its question mark (WorldEditData.txt, RandomUnitModel).
+  for (const [id, kind] of RANDOM_KINDS) {
+    if (!out.has(id)) out.set(id, { kind, file: RANDOM_MODEL, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "" });
   }
   return out;
 }
@@ -418,13 +427,16 @@ export class ObjectLoader {
    *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray. */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
     baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
-    placeholders = true): Promise<LoadResult> {
+    placeholders = true, shownAs?: (p: Placed) => string | undefined): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
     const unknown = new Map<string, Placed[]>();
+    // `shownAs`: drawn as another type (Cycle Random Groups shows a group's unit), its own when that has no model.
+    const skinFor = (id: string) => skins.get(id) ?? skins.get(baseOf(id) ?? "");
     for (const [index, p] of placed.entries()) {
-      const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
+      const other = shownAs?.(p);
+      const skin = (other !== undefined ? skinFor(other) : undefined) ?? skinFor(p.id);
       if (!skin) {
         unresolved.push(p);
         if (p.id !== "sloc") unknown.set(p.id, [...(unknown.get(p.id) ?? []), p]);

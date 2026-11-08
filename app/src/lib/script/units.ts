@@ -18,7 +18,7 @@ export interface UnitJson {
   inventory: { slot: number; id: string }[]; abilities: { id: string; autocast: number; level: number }[];
   color: number; waygate: number; editorId: number;
   /** Random units (ids uDNR, bDNR): 0 any by level, 1 from a random group, 2 from a list. */
-  randomType?: number; randomLevel?: string; randomGroup?: number; randomPosition?: number; randomUnits?: { id: string; chance: number }[];
+  randomType?: number; randomLevel?: string; randomClass?: number; randomGroup?: number; randomPosition?: number; randomUnits?: { id: string; chance: number }[];
 }
 
 export interface UnitsInput {
@@ -60,6 +60,25 @@ const owner = (u: UnitJson) => u.player & 0xffff, uprooted = (u: UnitJson) => (u
 /** Placeholders for a random unit and a random building: no such unit types exist. */
 const RANDOM_BUILDING = "bDNR", RANDOM_UNIT = "uDNR";
 const isRandom = (u: UnitJson) => u.id === RANDOM_UNIT || u.id === RANDOM_BUILDING;
+/** A random item: no item type, whatever the object data's lookup says (it isn't an item there). */
+export const RANDOM_ITEM = "iDNR";
+const isItem = (i: UnitsInput, u: UnitJson) => u.id === RANDOM_ITEM || i.kindOf(u.id) === "item";
+/** Item classes of a random item by level (randomClass 0 any, then as the World Editor lists them). */
+const ITEM_TYPES = ["ANY", "PERMANENT", "CHARGED", "POWERUP", "ARTIFACT", "PURCHASABLE", "CAMPAIGN", "MISCELLANEOUS"];
+
+/** The expression or lines that put a random item's type into itemID. The World Editor's form isn't known (no map
+ *  of the game's places one): this follows its random units and its item drops (ChooseRandomItemEx). */
+function pickRandomItem(it: UnitJson, editorVersion: number): string[] {
+  if (it.randomType === 1) return [`    set itemID = gg_rg_${String(it.randomGroup ?? 0).padStart(3, "0")}[${it.randomPosition ?? 0}]`];
+  if (it.randomType === 2) {
+    return ["    call RandomDistReset(  )", ...(it.randomUnits ?? []).map((r) => `    call RandomDistAddItem( '${r.id}', ${r.chance} )`), "    set itemID = RandomDistChoose(  )"];
+  }
+  const raw = parseInt((it.randomLevel ?? "").slice(0, 2), 16);
+  const level = Number.isNaN(raw) || raw === 255 ? -1 : raw;
+  const type = ITEM_TYPES[it.randomClass ?? 0] ?? "ANY";
+  // As in the drops: any class from editor 7000 on is the plain ChooseRandomItem.
+  return [type === "ANY" && editorVersion >= 7000 ? `    set itemID = ChooseRandomItem( ${level} )` : `    set itemID = ChooseRandomItemEx( ITEM_TYPE_${type}, ${level} )`];
+}
 
 /** Lines that put a random unit's type into unitID. */
 function pickRandom(u: UnitJson): string[] {
@@ -130,7 +149,7 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
 export function itemsSection(i: UnitsInput): string {
   // Items are created by type id (character codes), then by creation number (not exact for
   // every map).
-  const items = i.units.filter((u) => i.kindOf(u.id) === "item")
+  const items = i.units.filter((u) => isItem(i, u))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.editorId - b.editorId));
   if (!items.length) return "";
   const global = (it: UnitJson) => `gg_item_${it.id}_${String(it.editorId).padStart(4, "0")}`;
@@ -144,9 +163,13 @@ export function itemsSection(i: UnitsInput): string {
   for (const it of items) {
     const g = global(it);
     const v = i.referenced.has(g) ? g : colorOf(it) !== -1 ? "i" : null;
-    const create = `BlzCreateItemWithSkin( '${it.id}', ${r1(it.position[0])}, ${r1(it.position[1])}, '${it.skinId ?? it.id}' )`;
-    lines.push(v ? `    set ${v} = ${create}` : `    call ${create}`);
-    if (v && colorOf(it) !== -1) lines.push(`    call ${colorFn ?? "BlzSetItemColor"}( ${v}, ConvertPlayerColor(${colorOf(it)}) )`);
+    const random = it.id === RANDOM_ITEM;
+    const create = random ? `BlzCreateItemWithSkin( itemID, ${r1(it.position[0])}, ${r1(it.position[1])}, itemID )`
+      : `BlzCreateItemWithSkin( '${it.id}', ${r1(it.position[0])}, ${r1(it.position[1])}, '${it.skinId ?? it.id}' )`;
+    const made = [v ? `    set ${v} = ${create}` : `    call ${create}`];
+    if (v && colorOf(it) !== -1) made.push(`    call ${colorFn ?? "BlzSetItemColor"}( ${v}, ConvertPlayerColor(${colorOf(it)}) )`);
+    // A group's line can leave a slot empty: then nothing is placed there.
+    lines.push(...(random ? [...pickRandomItem(it, ev), "    if (itemID != -1) then", ...made.map((l) => `    ${l}`), "    endif"] : made));
   }
   lines.push("endfunction", "");
   return lines.join(EOL);
@@ -160,7 +183,7 @@ function creator(name: string, player: string, lines: string[]): string {
 /** The "Unit Creation" section (without its banner), or "" without placed units. */
 export function unitsSection(i: UnitsInput): string {
   // Units are created in the order they were placed (creation number).
-  const placed = i.units.filter((u) => { const k = i.kindOf(u.id); return k === "unit" || k === "building"; })
+  const placed = i.units.filter((u) => { const k = i.kindOf(u.id); return u.id !== RANDOM_ITEM && (k === "unit" || k === "building"); })
     .sort((a, b) => a.editorId - b.editorId);
   if (!placed.length) return "";
   const parts: string[] = [];

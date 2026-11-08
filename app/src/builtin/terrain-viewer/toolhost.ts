@@ -15,6 +15,9 @@ export interface ViewCommands {
   toggleLayer(layer: "naval" | "heights" | "cameras"): boolean;
   /** Small, Medium or Large Grid Display: the same size again switches the grid off. Returns the grid shown now. */
   toggleGrid(size: "small" | "medium" | "large"): "none" | "small" | "medium" | "large";
+  /** Cycle Random Groups - Next (1) or Previous (-1): objects placed from a random group show the unit, building or item
+   *  the group's next line puts there, then the question mark again. Says what is shown now. */
+  cycleRandomGroups(step: 1 | -1): Promise<string>;
   /** What is shown, for the status line and tests. */
   state(): { grid: "none" | "small" | "medium" | "large"; naval: boolean; heights: boolean; cameras: boolean; camera: { target: [number, number, number]; distance: number } };
 }

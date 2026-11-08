@@ -3,6 +3,8 @@
 // or Scatter (forests): a click or drag fills the brush, spaced by the
 // objects' footprints, with random variation, facing and scale. Start locations: one per
 // player, placing it again moves it; saving adds/moves/removes the map's players to match.
+// One at a time, an object takes the toolbar's look (lib/terrain/randomplace): a chosen or random
+// variation, random rotation and random scale. "Random…" places a Random Unit, Building or Item.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import {
@@ -11,7 +13,9 @@ import {
 } from "../../extensions/services";
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
-import { capped, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
+import { applyRandom, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
+import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { readArea } from "../../lib/terrain/area";
 import { h } from "../../workbench/dom";
@@ -41,11 +45,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 }
 
 function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
-  /** Type chosen with "Place…". */
-  let placing: { kind: string; id: string; name: string } | null = null;
+  /** Type chosen with "Place…", or a random unit, building or item chosen with "Random…". */
+  let placing: { kind: string; id: string; name: string; random?: RandomSpec } | null = null;
   let owner = 0, scatter = false, size = 2;
   const respect = () => w3.settings.get<boolean>("terrain.placement.respectPathing");
   const deg = (d: number) => (d * Math.PI) / 180;
+
+  /** A variation chosen in the toolbar for the type being placed; null: random or the first (the setting). */
+  let chosenVariation: number | null = null;
+  const lookOptions = (): LookOptions => ({
+    variation: chosenVariation,
+    randomVariation: w3.settings.get<boolean>("terrain.placement.randomVariation") === true,
+    randomRotation: w3.settings.get<boolean>("terrain.placement.randomRotation") === true,
+    randomScale: w3.settings.get<RandomScale>("terrain.placement.randomScale") ?? "off",
+  });
+  /** How the next single placement looks: rolled ahead, so the ghost shows what a click places. */
+  let next: Look | null = null;
+  let lastGround: [number, number, number] | null = null;
+  const reroll = () => {
+    next = placing ? rollLook(ed.objects.type(placing.id), lookOptions()) : null;
+    void showGhost(lastGround);
+  };
 
   /** Ghost preview at the pointer: the latest request wins (fit checks are async). */
   let ghostSeq = 0;
@@ -54,7 +74,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     if (!g || !placing || scatter) { ed.objects.setGhost(null); return; }
     const { kind, id } = placing;
     const type = ed.objects.type(id);
-    const angle = type?.fixedRot != null ? deg(type.fixedRot) : deg(270);
+    const angle = next?.angle ?? (type?.fixedRot != null ? deg(type.fixedRot) : deg(DEFAULT_FACING));
     let ok = true;
     const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, g[0], g[1]) : g;
     if (respect()) {
@@ -63,7 +83,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     }
     ok = ok && ed.objects.inBounds(x, y);
     if (seq !== ghostSeq) return;
-    ed.objects.setGhost({ id, x, y, angle, player: kind === "w3u" ? owner : undefined, ok });
+    ed.objects.setGhost({ id, x, y, angle, variation: next?.variation, player: kind === "w3u" ? owner : undefined, ok });
   };
 
   const START = { kind: "w3u", id: "sloc", name: "Start Location" };
@@ -96,15 +116,17 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const placeAt = async (pos: [number, number, number], stroke?: { entries: PlacedEntry[] }) => {
     if (!placing) return;
     if (isStart()) { if (!stroke) placeStart(pos); return; }
-    const { kind, id, name } = placing;
+    const { kind, id, name, random } = placing;
     const type = ed.objects.type(id);
+    // Taken before the waits below: a click places what its ghost showed, even if the pointer moved on meanwhile.
+    const look = stroke ? null : next ?? rollLook(type, lookOptions());
     const occ = respect() || stroke ? await ed.objects.occupancy() : null;
     const fp = occ ? await occ.footprint(kind, id) : null;
-    const facing = () => (type?.fixedRot != null ? deg(type.fixedRot) : stroke ? Math.random() * Math.PI * 2 : deg(270));
+    const facing = () => (type?.fixedRot != null ? deg(type.fixedRot) : Math.random() * Math.PI * 2);
 
     const spots: { x: number; y: number; angle: number }[] = [];
     if (!stroke) {
-      const angle = facing();
+      const angle = look!.angle;
       const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, pos[0], pos[1]) : pos;
       if (!ed.objects.inBounds(x, y)) {
         w3.window.showWarning("Not placed: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it.");
@@ -151,12 +173,20 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
           const k = type.minScale + Math.random() * (type.maxScale - type.minScale);
           e.scale = [k, k, k];
         }
+      } else {
+        e.variation = look!.variation;
+        e.scale = [...look!.scale];
       }
+      if (random) applyRandom(e as unknown as Record<string, unknown>, random);
       entries.push(e);
     }
     ed.objects.insert(entries);
     if (stroke) stroke.entries.push(...entries);
-    else ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
+    else {
+      ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
+      // The next one looks different again (when anything is random).
+      if (placing?.id === id) reroll();
+    }
   };
 
   // ---- toolbar -----------------------------------------------------------------------
@@ -173,29 +203,90 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const densityWrap = h("label.terrain-place-opt", { title: "Scatter density: 100% packs objects as close as their footprints allow (setting terrain.placement.scatterDensity)" }, "Density ",
     h("input", { type: "range", min: "10", max: "100", value: String(Math.round((w3.settings.get<number>("terrain.placement.scatterDensity") ?? 1) * 100)),
       onchange: (e: Event) => { void w3.settings.set("terrain.placement.scatterDensity", Number((e.target as HTMLInputElement).value) / 100); ed.focus(); } }));
+  // Per placement (not Scatter, which always varies): Variation, Random Rotation and Random Scale, as the World
+  // Editor's palettes and Tools › Random Doodad Scaling. Settings, so they stay for the next session.
+  const variationSel = h("select.terrain-place-variation", { title: "Variation of the placed object: one of the type's, or a random one each time (setting terrain.placement.randomVariation)",
+    onchange: () => {
+      if (variationSel.value === "random") { chosenVariation = null; void w3.settings.set("terrain.placement.randomVariation", true); }
+      else { chosenVariation = Number(variationSel.value); void w3.settings.set("terrain.placement.randomVariation", false); }
+      reroll();
+      ed.focus();
+    } });
+  const variationWrap = h("label.terrain-tool-opt", {}, "Variation ", variationSel);
+  const rotationWrap = toggle("Random rotation", "Each placed object faces a random way (types with a fixed rotation keep theirs); setting terrain.placement.randomRotation",
+    () => w3.settings.get<boolean>("terrain.placement.randomRotation") === true, (v) => { void w3.settings.set("terrain.placement.randomRotation", v).then(reroll); });
+  rotationWrap.classList.add("terrain-place-rotation");
+  const scaleSel = h("select.terrain-place-scale", { title: "Random Scale within the type's scale range: the same on every axis (symmetric), each axis on its own (asymmetric), only the height (Z) or only the width (XY); setting terrain.placement.randomScale",
+    onchange: () => { void w3.settings.set("terrain.placement.randomScale", scaleSel.value).then(reroll); ed.focus(); } },
+    ...RANDOM_SCALES.map(([v, label]) => h("option", { value: v, selected: v === lookOptions().randomScale }, label)));
+  const scaleWrap = h("label.terrain-tool-opt", {}, "Random scale ", scaleSel);
+  /** The variations of the type being placed (and Random); what was chosen stays while the type does. */
+  const fillVariations = () => {
+    const n = placing && !isStart() ? ed.objects.type(placing.id)?.numVar ?? 1 : 1;
+    variationSel.replaceChildren(h("option", { value: "random" }, "Random"), ...Array.from({ length: n }, (_, i) => h("option", { value: String(i) }, String(i + 1))));
+    variationSel.value = chosenVariation !== null && chosenVariation < n ? String(chosenVariation) : lookOptions().randomVariation ? "random" : "0";
+    variationWrap.hidden = n <= 1 || scatter;
+  };
   const update = () => {
     hint.textContent = !placing ? "Choose what to place."
       : isStart() ? "Placing the start location: click the ground (moves it if the player has one) · Esc to stop"
       : `Placing ${placing.name} (${placing.id}): click the ground · Esc to stop`;
     ownerWrap.hidden = placing?.kind !== "w3u";
     sizeWrap.hidden = densityWrap.hidden = !scatter || isStart();
+    const type = placing && !isStart() ? ed.objects.type(placing.id) : null;
+    fillVariations();
+    rotationWrap.hidden = !placing || isStart() || scatter || type?.fixedRot != null;
+    scaleWrap.hidden = !placing || isStart() || scatter || !(type?.randScale && type.maxScale > type.minScale);
+  };
+  /** Starts placing another type: its look is rolled anew, a variation chosen for the last one doesn't carry over. */
+  const startPlacing = (p: typeof placing) => {
+    if (p?.id !== placing?.id || p?.random !== placing?.random) chosenVariation = null;
+    placing = p;
+    update();
+    reroll();
   };
   const choose = async () => {
     try {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
       const r = await objects.pick(ed.host, { title: "Place…", kinds: ["w3u", "w3t", "w3b", "w3d"] });
-      if (r) placing = { kind: r.kind, id: r.id, name: r.name };
+      if (r) startPlacing({ kind: r.kind, id: r.id, name: r.name });
     } catch (e) {
       w3.window.showError(String((e as Error).message ?? e));
     }
     update();
     ed.focus();
   };
+  /** Random Unit, Building or Item, by level or from one of Map Properties' random groups. */
+  let lastRandom: RandomSpec | null = null;
+  const chooseRandom = async () => {
+    try {
+      const strings = await mapStrings(w3).catch(() => (v: string) => v);
+      // A file that isn't there has no groups; one that can't be read is said, and only Random is offered.
+      const info = await readMapDocStrict<{ unitTables?: RandomGroup[] }>(w3, "map/war3map.w3i.json").catch((e) => {
+        w3.window.showWarning(`Map Properties couldn't be read, so its random groups aren't offered: ${(e as Error).message ?? e}`);
+        return null;
+      });
+      const groups = (info?.unitTables ?? []).map((g) => ({ ...g, name: strings(g.name) }));
+      const spec = await askRandom(ed.host, groups, lastRandom);
+      if (spec) {
+        lastRandom = spec;
+        const id = RANDOM_IDS[spec.what];
+        startPlacing({ kind: spec.what === "item" ? "w3t" : "w3u", id, name: randomName(spec, groups), random: spec });
+      }
+    } catch (e) {
+      w3.window.showError(String((e as Error).message ?? e));
+    }
+    ed.focus();
+  };
   const select = async (what: { kind: string; id: string; player?: number }) => {
-    if (what.id === START.id) placing = START;
-    else {
+    if (what.id === START.id) startPlacing(START);
+    else if (/^[uib]DNR$/.test(what.id)) {
+      // A random object chosen from the map: random again, of any level (Random… sets the rest).
+      const spec: RandomSpec = { what: what.id === "iDNR" ? "item" : what.id === "bDNR" ? "building" : "unit", by: "level", level: -1 };
+      startPlacing({ kind: spec.what === "item" ? "w3t" : "w3u", id: what.id, name: randomName(spec), random: spec });
+    } else {
       const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE);
-      placing = { kind: what.kind, id: what.id, name: await objects.name(what.id, [what.kind]).catch(() => undefined) ?? what.id };
+      startPlacing({ kind: what.kind, id: what.id, name: await objects.name(what.id, [what.kind]).catch(() => undefined) ?? what.id });
     }
     if (what.kind === "w3u" && typeof what.player === "number" && what.player >= 0 && what.player < 28) { owner = what.player; ownerSel.value = String(owner); }
     update();
@@ -204,9 +295,11 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   };
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "Choose a unit, item, doodad or destructable", onclick: () => void choose() }, "Place…"),
+    h("button.terrain-place-random", { title: "Place a Random Unit, Random Building or Random Item: chosen when the game starts, by level or from a random group of Map Properties",
+      onclick: () => void chooseRandom() }, "Random…"),
     h("button", { title: "Place or move a player's start location; saving adds, moves or removes the map's players to match",
-      onclick: () => { placing = START; update(); ed.focus(); } }, "Start location"),
-    hint, ownerWrap,
+      onclick: () => { startPlacing(START); ed.focus(); } }, "Start location"),
+    hint, ownerWrap, variationWrap, rotationWrap, scaleWrap,
     toggle("Scatter", "Click or drag to fill the brush with this object, spaced by its footprint, with random variation, facing and scale",
       () => scatter, (v) => { scatter = v; update(); void showGhost(null); }),
     sizeWrap, densityWrap,
@@ -229,6 +322,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       return true;
     },
     pointerMove(p) {
+      lastGround = p.ground ?? null;
       ed.setBrush(scatter && placing && !isStart() && p.ground ? { x: p.ground[0], y: p.ground[1], r: size * 128, rgb: [140, 230, 140] } : null);
       void showGhost(p.ground);
       const d = drag;
@@ -249,7 +343,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         ed.pushEdit({ undo: () => ed.objects.remove(entries), redo: () => ed.objects.insert(entries), terrain: false, objects: true });
       });
     },
-    pointerLeave() { ed.setBrush(null); void showGhost(null); },
+    pointerLeave() { lastGround = null; ed.setBrush(null); void showGhost(null); },
     keyDown(e) {
       if (e.key === "Escape" && placing) { placing = null; update(); void showGhost(null); return true; }
       return false;

@@ -544,6 +544,11 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .newmap-error { color: var(--error); min-height: 1em; }
 .scm-outer { padding: 2px 12px 4px; font-size: 11px; overflow-wrap: anywhere; }
 .newmap-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.minimap-export-dialog { width: min(420px, 94%); }
+.minimap-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.random-dialog { width: min(440px, 94%); }
+.random-dialog .newmap-row[hidden], .random-dialog .muted[hidden] { display: none; }
+.camp-advanced { display: flex; gap: 8px; }
 .newmap-tiles { display: flex; flex-direction: column; gap: 6px; margin-left: 98px; }
 .newmap-tiles[hidden] { display: none; }
 .newmap-tiles > button { align-self: flex-start; }

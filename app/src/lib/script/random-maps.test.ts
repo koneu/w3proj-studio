@@ -131,7 +131,9 @@ function randomMap(seed: number, lua: boolean): ScriptInput {
     itemTable: r.pick([-1, -1, 0]), itemSets: r.bool() ? [[{ id: "ratc", chance: 40 }, { id: "YiI2", chance: 30 }]] : [], ...extra,
   });
   const randomUnit = (k: number) => placed(r.pick(["uDNR", "bDNR"]), 200 + k, r.pick<object>([{ randomType: 0, randomLevel: "020000" }, { randomType: 2, randomUnits: [{ id: "hfoo", chance: 100 }] }, ...(groups ? [{ randomType: 1, randomGroup: 2, randomPosition: 1 }] : [])]));
-  const units = [...Array.from({ length: r.int(5) }, (_, k) => placed(r.pick(["hfoo", "hbar", "ngol", "ugol", "nwgt", "sloc"]), k)), ...Array.from({ length: r.int(3) }, (_, k) => randomUnit(k)), ...Array.from({ length: r.int(3) }, (_, k) => placed("ratc", 100 + k))];
+  const randomItem = (k: number) => placed("iDNR", 300 + k, r.pick<object>([{ randomType: 0, randomLevel: r.pick(["020000", "ffffff"]), randomClass: r.int(8) }, { randomType: 2, randomUnits: [{ id: "ratc", chance: 100 }] }, ...(groups ? [{ randomType: 1, randomGroup: 2, randomPosition: 1 }] : [])]));
+  const units = [...Array.from({ length: r.int(5) }, (_, k) => placed(r.pick(["hfoo", "hbar", "ngol", "ugol", "nwgt", "sloc"]), k)), ...Array.from({ length: r.int(3) }, (_, k) => randomUnit(k)), ...Array.from({ length: r.int(3) }, (_, k) => placed("ratc", 100 + k)),
+    ...Array.from({ length: r.int(3) }, (_, k) => randomItem(k))];
   const doodads = Array.from({ length: r.int(4) }, (_, k) => ({
     id: r.pick(["LTlt", "ATg1"]), editorId: k, variation: 1, position: [1, 2, 3], angle: 1, scale: [1, 1, 1], flags: r.pick([0, 2, 4]), life: r.pick([0, 50, 100]),
     itemTable: -1, itemSets: r.bool() ? [[{ id: "ratc", chance: 100 }]] : [],

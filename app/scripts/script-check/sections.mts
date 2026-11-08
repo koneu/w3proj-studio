@@ -93,6 +93,7 @@ for (const m of maps) {
   const customItems = new Set<string>((json(d, "war3map.w3t")?.custom ?? []).map((o: any) => o.id));
   const kindOf = (id: string): any => {
     if (id === "sloc") return "sloc";
+    if (id === "iDNR") return "item";
     if (abilityIds.has(id) || customAbilities.has(id)) return "ability";
     if (itemIds.has(id) || customItems.has(id)) return "item";
     const c = customUnits.get(id);

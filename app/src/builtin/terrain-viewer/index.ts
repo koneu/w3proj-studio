@@ -27,6 +27,7 @@ import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
+import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { exportMinimap, type ExportOptions, type ExportSource } from "./minimapexport";
 import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
@@ -202,6 +203,8 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleSmallGrid", (v) => { v.toggleGrid("small"); return null; }],
   ["w3.terrain.toggleMediumGrid", (v) => { v.toggleGrid("medium"); return null; }],
   ["w3.terrain.toggleLargeGrid", (v) => { v.toggleGrid("large"); return null; }],
+  ["w3.terrain.cycleRandomGroupsNext", (v) => v.cycleRandomGroups(1)],
+  ["w3.terrain.cycleRandomGroupsPrevious", (v) => v.cycleRandomGroups(-1)],
 ];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -1751,7 +1754,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let objectsTouched = false;
         /** An object to select once the placed objects have models (Object Manager double-click). */
         let pendingSel: PlacedRef | null = null;
-        const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: drawnZ(p), rgb });
+        /** Cycle Random Groups: 0 shows objects placed from a random group as the question mark, n as what the group's
+         *  nth line puts there (a shorter group wraps). `randomGroups` is Map Properties' list, read when cycling starts
+         *  and again after war3map.w3i is saved. A view setting: nothing in the map changes. */
+        let groupCycle = 0;
+        let randomGroups: RandomGroup[] = [];
+        const shownAs = (p: Placed) => (groupCycle > 0 ? cycledId(p as Placed & { randomType?: number }, randomGroups, groupCycle - 1) : undefined);
+        const marker =(p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: drawnZ(p), rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
         const NEUTRALS: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Extra", 26: "Neutral Victim", 27: "Neutral Passive" };
@@ -1850,7 +1859,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
           const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
-            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType)),
+            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType), true, shownAs),
             loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
@@ -1939,6 +1948,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         },(e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
           if (projectObjects && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void reloadRaces();
+          if (projectObjects && groupCycle > 0 && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void readRandomGroups().then((g) => { if (g && !disposed) { randomGroups = g; void rebuildObjects(); } });
           // The properties panel reads its lists and the types' facts anew.
           if (/(^|\/)war3map(\.w3[ir]|\.wts)(\.json)?$/i.test(p)) mapLists = null;
           if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) factsData = null;
@@ -1953,6 +1963,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Player id → race (war3map.w3i), for the start buildings the start locations show. A file that can't
          *  be read keeps the races last read: they only change what is drawn. */
         let startRaces = new Map<number, number>();
+        /** Map Properties' random groups; null when war3map.w3i can't be read (what is shown stays). */
+        const readRandomGroups = async (): Promise<RandomGroup[] | null> => {
+          // A file that isn't there has no groups; one that can't be read keeps what is shown.
+          return readMapDocStrict<{ unitTables?: RandomGroup[] }>(w3, "map/war3map.w3i.json").then((i) => i?.unitTables ?? [], () => null);
+        };
+        /** Cycle Random Groups - Next (1) or Previous (-1): what is shown now, for the status line. */
+        const cycleRandomGroups = async (step: 1 | -1): Promise<string> => {
+          const groups = (await readRandomGroups()) ?? randomGroups;
+          if (disposed) return "";
+          randomGroups = groups;
+          const most = Math.max(0, ...groups.map((g) => g.lines?.length ?? 0));
+          if (!most) { groupCycle = 0; void rebuildObjects(); return "This map has no random groups with lines (Map Properties › Random Groups)."; }
+          groupCycle = (((groupCycle + step) % (most + 1)) + most + 1) % (most + 1);
+          await rebuildObjects();
+          return groupCycle === 0 ? "Random groups: objects from a group show as the question mark." : `Random groups: showing line ${groupCycle} of each group.`;
+        };
         const readRaces = async (): Promise<Map<number, number> | null> => {
           const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
           return info ? playerRaces(info) : null;
@@ -3653,7 +3679,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return viewState[layer];
         };
         const viewCommands: ViewCommands = {
-          viewSelection, viewEntireMap, selectInPalette, toggleLayer,
+          viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups,
           toggleGrid: (size) => { setGrid(toggleGrid(viewState.grid, size)); return viewState.grid; },
           state: () => ({ ...viewState, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance } }),
         };

@@ -363,6 +363,28 @@ test("items are created by type, then by number", () => {
   has(s, "    call BlzCreateItemWithSkin( 'zzzz', 100.0, 200.0, 'zzzz' )");
 });
 
+test("a placed random item picks its type when the map starts, and is no unit", () => {
+  // The object data's lookup calls iDNR a unit (it is no item type): the id decides.
+  const kindOf = (id: string) => (id === "ratc" ? "item" as const : "unit" as const);
+  const placed = [unit({ id: "iDNR", randomType: 0, randomLevel: "030000", randomClass: 1 }), unit({ id: "ratc", editorId: 2 })];
+  const s = itemsSection({ units: placed, kindOf, referenced: new Set() });
+  has(s, "    set itemID = ChooseRandomItemEx( ITEM_TYPE_PERMANENT, 3 )");
+  has(s, "    if (itemID != -1) then");
+  has(s, "        call BlzCreateItemWithSkin( itemID, 100.0, 200.0, itemID )");
+  hasNot(s, "'iDNR'");
+  hasNot(unitsSection({ units: placed, kindOf, referenced: new Set() }), "iDNR");
+  // Any level and class; newer editors' plain form; a group's position; a list.
+  has(items([unit({ id: "iDNR", randomType: 0, randomLevel: "ffffff", randomClass: 0 })]), "    set itemID = ChooseRandomItemEx( ITEM_TYPE_ANY, -1 )");
+  has(items([unit({ id: "iDNR", randomType: 0, randomLevel: "020000", randomClass: 0 })], 7000), "    set itemID = ChooseRandomItem( 2 )");
+  has(items([unit({ id: "iDNR", randomType: 0, randomLevel: "020000", randomClass: 7 })], 7000), "    set itemID = ChooseRandomItemEx( ITEM_TYPE_MISCELLANEOUS, 2 )");
+  has(items([unit({ id: "iDNR", randomType: 1, randomGroup: 4, randomPosition: 1 })]), "    set itemID = gg_rg_004[1]");
+  const list = items([unit({ id: "iDNR", randomType: 2, randomUnits: [{ id: "ratc", chance: 60 }] })]);
+  has(list, "    call RandomDistAddItem( 'ratc', 60 )");
+  has(list, "    set itemID = RandomDistChoose(  )");
+  // Coloured (newer editors) inside the if.
+  has(items([unit({ id: "iDNR", randomType: 1, randomGroup: 0, randomPosition: 0 })], 7003), "        call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+});
+
 test("newer editors colour every item", () => {
   hasNot(items([unit()]), "ItemColor");
   has(items([unit()], 7000), "    call SetItemColor( i, ConvertPlayerColor(0) )");

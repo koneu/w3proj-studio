@@ -28,7 +28,10 @@
       "title": "Object Placer",
       "properties": {
         "terrain.placement.respectPathing": { "type": "boolean", "default": true, "description": "Place objects only where their footprint is free: no cliffs, deep water, unwalkable ground or other objects." },
-        "terrain.placement.scatterDensity": { "type": "number", "default": 1, "minimum": 0.1, "maximum": 1, "description": "How closely Scatter packs objects: 1 = as close as their footprints allow; 0.5 = half as many per area." }
+        "terrain.placement.randomVariation": { "type": "boolean", "default": false, "description": "Place Random Variation: each object placed one at a time gets a random variation of its type (else the one chosen in the toolbar, the first by default)." },
+        "terrain.placement.randomRotation": { "type": "boolean", "default": false, "description": "Random Rotation: each object placed one at a time faces a random way (else 270°); types with a fixed rotation keep theirs." },
+        "terrain.placement.randomScale": { "type": "string", "enum": ["off", "symmetric", "asymmetric", "z", "xy"], "default": "off", "description": "Random Scale for doodads and destructables placed one at a time, within their type's scale range: the same on every axis (symmetric), each axis on its own (asymmetric), only the height (z) or only the width (xy)." },
+        "terrain.placement.scatterDensity":{ "type": "number", "default": 1, "minimum": 0.1, "maximum": 1, "description": "How closely Scatter packs objects: 1 = as close as their footprints allow; 0.5 = half as many per area." }
       }
     }
   }
