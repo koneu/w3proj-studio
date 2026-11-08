@@ -14,6 +14,12 @@ test("the key ignores a trailing slash and case", () => {
   assert.equal(tabsKey(LONG + "\\"), tabsKey(LONG.toLowerCase()));
 });
 
+test("on Linux two folders differing only in case are two projects; a trailing slash still doesn't count", () => {
+  assert.notEqual(tabsKey("/home/u/maps/MyMap"), tabsKey("/home/u/maps/mymap"));
+  assert.equal(tabsKey("/home/u/maps/MyMap/"), tabsKey("/home/u/maps/MyMap"));
+  assert.equal(tabsKey("/"), "w3.openEditors:/");
+});
+
 test("tabs saved under the 8.3 spelling are adopted by the long one, once", async () => {
   const other = String.raw`w3.openEditors:c:\other`;
   const s = memory({ [tabsKey(SHORT)]: "S", [other]: "O", unrelated: "U" });

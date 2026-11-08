@@ -1,11 +1,20 @@
 // Open tabs are remembered per project in the webview's storage, under the project's root.
 
+import { isWindowsPath } from "../lib/paths";
+
 export const TABS_PREFIX = "w3.openEditors:";
 
-/** The storage key for a project root (as the backend spells it: one spelling per folder). */
-export const tabsKey = (root: string) => `${TABS_PREFIX}${root.replace(/[\\/]+$/, "").toLowerCase()}`;
+/** Case only counts where the file system tells it apart: a Windows path is compared in lower case, a Linux
+ *  one as it is (two folders differing only in case are two projects there). */
+const folded = (path: string) => (isWindowsPath(path) ? path.toLowerCase() : path);
 
-const leaf = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop()!.toLowerCase();
+/** The storage key for a project root (as the backend spells it: one spelling per folder). */
+export const tabsKey = (root: string) => `${TABS_PREFIX}${folded(root.length > 1 ? root.replace(/[\\/]+$/, "") : root)}`;
+
+const leaf = (path: string) => {
+  const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop()!;
+  return isWindowsPath(path) ? name.toLowerCase() : name;
+};
 
 /** Whether an old key's path could be another spelling of `root`: the same last folder name, or a
  *  short (8.3) name, which has a `~`. Others aren't asked about: resolving the path of an unrelated
