@@ -1,5 +1,6 @@
 import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { outside, rangeNote } from "../../lib/objects/limits";
+import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits, type GameplayLimits } from "../../lib/objects/constlimits";
 import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
@@ -380,6 +381,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Set when this editor is closed: a paste that was asking something doesn't go on into it. */
         let closed = false;
+        /** The Gameplay Constants that limit fields (map first, else the game's); empty until read, and while the
+         *  map's file can't be read (it may set any of them). */
+        let gameplayLimits: GameplayLimits = {};
+        let limitsRead = 0;
+        const loadLimits = async () => {
+          const seq = ++limitsRead;
+          const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === MAP_CONSTANTS.toLowerCase());
+          // A file that is there but can't be read isn't "no overrides": the game's defaults could be wrong for it.
+          const map = listed ? await w3.workspace.readText(MAP_CONSTANTS).then((t) => ({ text: t }), () => null) : { text: null };
+          const game = await Promise.all(GAME_CONSTANT_FILES.map((p) => w3.game.readText(p).catch(() => "")));
+          if (closed || seq !== limitsRead) return;
+          const next = map ? readGameplayLimits(map.text, game) : {};
+          if (JSON.stringify(next) === JSON.stringify(gameplayLimits)) return;
+          gameplayLimits = next;
+          renderDetail();
+        };
         const listEl = h("div.obj-list");
         // Created once and re-attached on every render, so typing keeps focus
         // and caret (a fresh input per render lost both after each key).
@@ -703,17 +720,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Whether an object sets a field past the World Editor's range. Only what the map sets
          *  counts: inherited values are the game's own. */
-        const overLimit = (o: Obj, f: FieldMeta, level: number) => {
+        const overRange = (o: Obj, f: FieldMeta, level: number) => {
           const found = findMod(o, f.id, level);
           return !!found && outside(f.range, found.m.value);
         };
-        /** Puts a number field's range in its tooltip, under what the tooltip already says. */
-        const withRange = (cell: HTMLElement, f: FieldMeta, over: boolean) => {
-          const note = rangeNote(f.range, over), target = cell.matches("input") ? cell : cell.querySelector("input");
+        /** A value past what a Gameplay Constant (or the unit's own clamp) lets the game use, when the map
+         *  made it so (see constantWarning); null otherwise. */
+        const overConstant = (o: Obj, f: FieldMeta, level: number) => {
+          if (!kd || kind !== "w3u") return null;
+          const found = findMod(o, f.id, level);
+          const value = found ? found.m.value : (kd.defaultValue(o.base, f, level) ?? "");
+          const warning = constantWarning(f.id, value, !!found, gameplayLimits, (id) => {
+            const other = kd!.fieldById.get(id);
+            if (!other) return undefined;
+            const m = findMod(o, id, 0);
+            return { value: m ? m.m.value : (kd!.defaultValue(o.base, other, 0) ?? ""), set: !!m };
+          });
+          return warning?.setByMap ? warning : null;
+        };
+        const overLimit = (o: Obj, f: FieldMeta, level: number) => overRange(o, f, level) || !!overConstant(o, f, level);
+        /** Puts a number field's range, and a Gameplay Constant it runs into, in its tooltip, under what the tooltip
+         *  already says. */
+        const withRange = (cell: HTMLElement, f: FieldMeta, objs: Obj[], level: number) => {
+          const constant = objs.map((o) => overConstant(o, f, level)).find((w) => w);
+          const note = [rangeNote(f.range, objs.some((o) => overRange(o, f, level))), constant?.text ?? ""].filter(Boolean).join("\n");
+          const target = cell.matches("input") ? cell : cell.querySelector("input");
           if (note && target) target.title = [target.title, note].filter(Boolean).join("\n");
+          if (constant) cell.dataset.constantLimit = constant.text;
           return cell;
         };
-        const outsideToggle = (label: string) => h("label", { title: "Show only values past the World Editor's range" },
+        const outsideToggle = (label: string) => h("label", { title: "Show only values past the World Editor's range, or past what Gameplay Constants let the game use" },
           h("input", { type: "checkbox", checked: outsideOnly, onchange: (e: Event) => { outsideOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), ` ${label}`);
         /** The World Editor's Auto Fill Levels, with its preview. */
         const openAutoFill = (o: Obj, f: FieldMeta, levels: number) => {
@@ -781,7 +817,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("span.obj-field-label", {}, f.label),
               h("code", {}, f.id)),
             h("td.muted", {}, levels > 1 ? String(level) : ""),
-            h("td", {}, withRange(valueEditor(f.valueType, f.type, current, inherited, commit), f, over)),
+            h("td", {}, withRange(valueEditor(f.valueType, f.type, current, inherited, commit), f, [o], level)),
             h("td", {}, found
               ? h("button.icon-button", {
                   title: def !== undefined ? `Reset to inherited value: ${def}` : "Remove modification",
@@ -913,7 +949,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   h("tbody", {}, ...rows)),
               ));
             }
-            if (!byCategory.size) sections.push(h("div.muted", {}, outsideOnly ? "No values outside the World Editor's range." : modifiedOnly ? "No modified fields." : "No fields match."));
+            if (!byCategory.size) sections.push(h("div.muted", {}, outsideOnly ? "No values outside the World Editor's range or the Gameplay Constants." : modifiedOnly ? "No modified fields." : "No fields match."));
           }
           // Mods the field table didn't show: unknown fields, or levels beyond the level count.
           const other = modLists(o).flatMap((l) => l.mods).filter((m) => !known.has(m));
@@ -977,7 +1013,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const row = h(`tr${anyModified ? ".modified" : ""}${over ? ".obj-over" : ""}`, {},
               h("td", { title: `${f.category} · ${f.type}` }, h("span.obj-field-label", {}, f.label), h("code", {}, f.id)),
               h("td.muted", {}, level ? String(level) : ""),
-              h("td", {}, withRange(valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : values, each), f, over)),
+              h("td", {}, withRange(valueEditor(f.valueType, f.type, isSame ? values[0] : "", !anyModified, commit, isSame ? undefined : values, each), f, objs, level)),
               h("td", {}, anyModified
                 ? h("button.icon-button", { title: "Reset all selected to their inherited values", onclick: () => { for (const o of objs) resetValue(o, f, level); markDirty(); renderDetail(); } }, "↺")
                 : null));
@@ -1200,6 +1236,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         status.textContent ||= "Loading game data…";
         loadEditorTypes(w3).then((t) => { editorTypes = t; renderDetail(); }, () => {});
+        // Gameplay Constants limit some fields (units only: see constlimits). Read again when the map's change.
+        const limitSubs = kind === "w3u" ? [
+          w3.workspace.onDidSave((p) => { if (p.toLowerCase() === MAP_CONSTANTS.toLowerCase()) void loadLimits(); }),
+          w3.workspace.onDidChange(() => void loadLimits()),
+        ] : [];
+        if (kind === "w3u") void loadLimits();
         loadKind(w3, kind).then(
           (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderList(); renderDetail(); },
           (e) => { status.textContent = `Game data unavailable — showing raw ids (${e})`; },
@@ -1269,7 +1311,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
           },
           focus: () => search.focus(),
-          dispose: () => { closed = true; focusers.delete(doc.path); preview?.dispose(); sounds.stop(); },
+          dispose: () => { closed = true; focusers.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose(); },
           watches: ["map/war3map.wts"],
         };
       },
