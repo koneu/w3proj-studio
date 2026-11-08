@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addAnimProps, objectsInRect, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addMoveTypes, objectsInRect, placement, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
 
 const skin = (file: string): Skin => ({
   kind: "w3u", file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "",
@@ -47,4 +47,33 @@ test("an object without a model gets a stand-in that a selection box can pick, l
   assert.deepEqual(objectsInRect(strays, project, new Set(["units"]), kinds, 0, 0, 400, 400), [], "a hidden group");
   assert.deepEqual(objectsInRect(strays, project, hidden, new Set(["w3t"]), 0, 0, 400, 400), [], "kinds not wanted");
   assert.deepEqual(objectsInRect(strays, () => null, hidden, kinds, 0, 0, 400, 400), [], "behind the camera");
+});
+
+test("units get their movement type from the unit table, and a map's own movement type wins", () => {
+  const skins = new Map([["hbot", skin("transport")], ["hfoo", skin("footman")]]);
+  addMoveTypes(skins, [{ unitID: "hbot", movetp: "float" }, { unitID: "hfoo", movetp: "foot" }, { unitID: "nope", movetp: "fly" }, { unitID: "", movetp: "x" }]);
+  assert.equal(skins.get("hbot")?.moveType, "float");
+  assert.equal(skins.get("hfoo")?.moveType, "foot");
+  assert.equal(skins.has("nope"), false);
+  const out = withObjectArt(skins, [{ kind: "w3u", original: [{ base: "hfoo", mods: [{ field: "umvt", value: "amph" }] }],
+    custom: [{ base: "hbot", id: "h000", mods: [] }, { base: "hbot", id: "h001", mods: [{ field: "umvt", value: "foot" }] }] }]);
+  assert.equal(out.get("hfoo")?.moveType, "amph", "a changed standard unit");
+  assert.equal(out.get("h000")?.moveType, "float", "a custom unit keeps its base's");
+  assert.equal(out.get("h001")?.moveType, "foot");
+});
+
+test("a selection box goes by where an object is drawn: a ship on the water above its stored height", () => {
+  const ship = placed("hbot", 100, 100, { player: 0 });
+  const [stray] = strayInstances("units", [ship], [ship], new Map(), () => 0);
+  stray.inst.world = placement(ship, 1, 300);
+  // Seen from the side: pixel y is the height.
+  const side = (p: [number, number, number]): [number, number] => [p[0], p[2]];
+  assert.deepEqual(objectsInRect([stray], side, new Set(), new Set(["w3u"]), 0, 250, 200, 350), [ship]);
+  assert.deepEqual(objectsInRect([stray], side, new Set(), new Set(["w3u"]), 0, -50, 200, 50), []);
+  // A ship whose model didn't load: its stand-in floats too, picked round where it is drawn.
+  const skins = new Map([["hbot", { ...skin("transport"), moveType: "float" }]]);
+  const [standIn] = strayInstances("units", [ship], [ship], skins, () => 0, undefined, (p, s) => (s.moveType === "float" ? 300 : p.position[2]));
+  assert.equal(standIn.inst.world[14], 300);
+  assert.deepEqual(standIn.inst.sphere, [100, 100, 300, 32]);
+  assert.deepEqual(ship.position, [100, 100, 0], "the stored height stays");
 });

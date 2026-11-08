@@ -11,7 +11,7 @@ import { joinPath } from "../../lib/paths";
 import { errorText } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight } from "./objheights";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, scaledNudge, waterLimitHits, type Bounds } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, cameraColors, composeLayers, GRID_STEP, navalColors, toggleGrid, viewOfBox, type Box, type CameraObject, type GridSize } from "./viewcmds";
@@ -57,7 +57,7 @@ import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
@@ -1307,7 +1307,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           if (e.terrain && areaPanel) void showAreaPanel();
-          if (e.terrain) { replanCliffs(); renderer.terrainChanged(); }
+          if (e.terrain) { replanCliffs(); renderer.terrainChanged(); if (!e.objects) refloat(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
           refreshLayersSoon();
           doc.setDirty(mark.isDirty(at));
@@ -1379,7 +1379,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             redo: () => { st.redo(); if (moved) setZ(zAfter); },
             terrain: true, objects: moved,
           });
-          if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); }
+          if (moved) { setZ(zAfter); objectsTouched = true; void rebuildObjects(); } else refloat();
           if (st.cliffs) replanCliffs(); else void replanShore();
           renderer.terrainChanged();
           redraw();
@@ -1652,7 +1652,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let objectsTouched = false;
         /** An object to select once the placed objects have models (Object Manager double-click). */
         let pendingSel: PlacedRef | null = null;
-        const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: p.position[2], rgb });
+        const marker = (p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: drawnZ(p), rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
         const NEUTRALS: Record<number, string> = { 24: "Neutral Hostile", 25: "Neutral Extra", 26: "Neutral Victim", 27: "Neutral Passive" };
@@ -1714,6 +1714,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Each rebuild takes a number: one that is overtaken by a later one drops its result, or an older
          *  load finishing last would draw old skins over new. */
         let rebuildGen = 0;
+        /** The movement type of a placed object's type (units; see Skin.moveType). */
+        function moveTypeOf(p: Placed): string | undefined {
+          return (objCtx?.skins.get(p.id) ?? objCtx?.skins.get(objCtx.bases.get(p.id) ?? ""))?.moveType;
+        }
+        /** The height an object is drawn at: ships, and amphibious units in water, on the water's surface
+         *  (as the game puts them); anything else at its stored height. The stored height doesn't change. */
+        function drawnZ(p: Placed, moveType = moveTypeOf(p)): number {
+          return unitDrawHeight(moveType, p.position[2], moveType ? waterSurfaceAt(terrain, p.position[0], p.position[1]) : null);
+        }
+        /** After the water or the ground changed: ships and amphibious units go to the new surface, in place. */
+        function refloat() {
+          let moved = false;
+          for (const b of renderer.batches) {
+            if (b.group !== "units") continue;
+            for (const inst of b.instances) {
+              const p = inst.pick?.placed;
+              if (!p || !goesOnWater(moveTypeOf(p))) continue;
+              const z = drawnZ(p);
+              if (Math.abs(inst.world[14] - z) < 0.01) continue;
+              inst.world = placement(p, inst.pick!.extraScale, z);
+              if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
+              moved = true;
+            }
+          }
+          if (!moved) return;
+          if (selected?.pick) selectObject(selected);
+          if (group.length) { groupRingsStale = true; refreshGroupRings(); }
+        }
         async function rebuildObjects() {
           const ctx = nextCtx ?? objCtx;
           if (!ctx) return;
@@ -1722,7 +1750,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const doodads = dooFile?.list ?? [], units = unitsFile?.list ?? [];
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
-          const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf), loader.load("units", units, skins, team, baseOf)]);
+          const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
+            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType))]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
           renderer.setGroup("doodads", d.batches);
@@ -1848,7 +1877,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const inst = findInstance(entry);
           const [gx, gy] = onGrid(entry.id, wanted[0], wanted[1]);
           const position: [number, number, number] = gx === wanted[0] && gy === wanted[1] ? wanted : [gx, gy, heightAt(terrain, gx, gy)];
-          const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1], dz = position[2] - entry.position[2];
+          const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1];
           if (dx || dy) {
             repositioned.add(entry);
             if (skinOf(entry)?.uberSplat) moveSplats();
@@ -1857,7 +1886,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           entry.angle = angle;
           objectsTouched = true;
           if (inst?.pick) {
-            inst.world = placement(entry, inst.pick.extraScale);
+            // The drawn height moves, which for a ship on the water isn't the stored one's move.
+            const wasZ = inst.world[14];
+            inst.world = placement(entry, inst.pick.extraScale, drawnZ(entry));
+            const dz = inst.world[14] - wasZ;
             // Turning an off-centre model (a wall, a bridge) swings its bounds round too: placed again from the model's own.
             if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
             else if (inst.sphere) inst.sphere = [inst.sphere[0] + dx, inst.sphere[1] + dy, inst.sphere[2] + dz, inst.sphere[3]];
@@ -2262,7 +2294,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!m || !position) return [];
             const entry = { ...(o.entry as unknown as Placed), position, angle: o.angle };
             const team = entry.player !== undefined && entry.player < TEAM_COLORS.length ? entry.player : NEUTRAL;
-            return [{ gpu: m.gpu, world: placement(entry, m.modelScale), team, ok: true }];
+            return [{ gpu: m.gpu, world: placement(entry, m.modelScale, drawnZ(entry)), team, ok: true }];
           });
           redraw();
         };
@@ -2593,7 +2625,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Until the size is known: a modest share of the model bounds.
           const r = radiusOf(inst.pick!.kind, inst.pick!.id) ?? Math.min(96, Math.max(24, sr * 0.4));
           // Centred on the object position (model bounds can be off-centre).
-          return { x: pl.position[0], y: pl.position[1], z: ((flagsOf(pl) ?? 0) & FIXED_HEIGHT) !== 0 ? pl.position[2] : undefined, r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
+          // A ship's ring goes round it on the water, not on the sea bed.
+          const onWater = goesOnWater(moveTypeOf(pl)) ? drawnZ(pl) : pl.position[2];
+          const z = ((flagsOf(pl) ?? 0) & FIXED_HEIGHT) !== 0 ? pl.position[2] : onWater !== pl.position[2] ? onWater : undefined;
+          return { x: pl.position[0], y: pl.position[1], z, r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
         };
         /** Click target per object: the same radius as its selection ring. */
         const pickRadius = (inst: ObjectInstance) =>
@@ -3029,7 +3064,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const entry = { id: g.id, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
               void loader.modelFor(skin, entry.variation).then((gpu) => {
                 if (req !== ghostReq) return;
-                renderer.ghost = { gpu, world: placement(entry, skin.modelScale), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
+                renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
                 redraw();
               }).catch(() => { renderer.ghost = null; redraw(); });
             },

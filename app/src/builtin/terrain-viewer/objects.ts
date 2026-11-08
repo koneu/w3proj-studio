@@ -10,7 +10,7 @@ import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { worldSphere } from "../../lib/model/frustum";
 import { bounds, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
-import { parseIni } from "../../lib/formats/text";
+import { parseIni, parseSlk } from "../../lib/formats/text";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
 export interface Placed {
@@ -44,6 +44,9 @@ export interface Skin {
   uberSplat: string;
   /** The look of a model that holds several, as its words (Animprops, see lib/model/stand). */
   animProps?: string[];
+  /** Units: movement type (UnitData.slk movetp: foot, horse, fly, hover, float, amph), which decides
+   *  how high the game puts them (see unitDrawHeight). */
+  moveType?: string;
 }
 
 /** The tables with units' Animprops, which the skin table doesn't carry. */
@@ -54,6 +57,14 @@ export function addAnimProps(skins: Map<string, Skin>, text: string) {
   for (const [id, sec] of parseIni(text)) {
     const skin = skins.get(id.trim()), props = parseAnimProps(sec.get("animprops") ?? "");
     if (skin && props.length) skin.animProps = props;
+  }
+}
+
+/** Puts the unit table's movement types on the skins. */
+export function addMoveTypes(skins: Map<string, Skin>, rows: readonly Record<string, string>[]) {
+  for (const r of rows) {
+    const skin = r.unitID ? skins.get(r.unitID) : undefined;
+    if (skin && r.movetp) skin.moveType = r.movetp;
   }
 }
 
@@ -88,6 +99,7 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
     }
   }
   for (const f of UNIT_FUNC) addAnimProps(out, await w3.game.readText(f).catch(() => ""));
+  addMoveTypes(out, parseSlk(await w3.game.readText("Units\\UnitData.slk").catch(() => "")));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
@@ -99,7 +111,7 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
 /** Object data fields that change a skin entry, per kind (UnitMetaData & co., "Profile" fields;
  *  units' alternate models umd1/umd2 and selection scale aren't drawn). */
 const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
-  w3u: { file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani" },
+  w3u: { file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt" },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr" },
   w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr" },
@@ -129,7 +141,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         const m = art.find((x) => x.field === field);
         if (!m) continue;
         const n = Number(m.value);
-        if (key === "file" || key === "texFile" || key === "uberSplat") skin[key] = String(m.value);
+        if (key === "file" || key === "texFile" || key === "uberSplat" || key === "moveType") skin[key] = String(m.value);
         else if (key === "animProps") skin.animProps = parseAnimProps(String(m.value));
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
@@ -154,11 +166,12 @@ export function modelPath(skin: Skin, variation: number): string {
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
 
-/** World matrix: translate · rotate about z · scale (column-major). */
-export function placement(p: Placed, extraScale: number): Mat4 {
+/** World matrix: translate · rotate about z · scale (column-major). `z`: drawn at another height than
+ *  the stored one (a ship on the water, see unitDrawHeight). */
+export function placement(p: Placed, extraScale: number, z = p.position[2]): Mat4 {
   const c = Math.cos(p.angle), s = Math.sin(p.angle);
   const [sx, sy, sz] = p.scale.map((v) => v * extraScale);
-  const [x, y, z] = p.position;
+  const [x, y] = p.position;
   return new Float32Array([c * sx, s * sx, 0, 0, -s * sy, c * sy, 0, 0, 0, 0, sz, 0, x, y, z, 1]);
 }
 
@@ -358,7 +371,7 @@ export class ObjectLoader {
   /** Placed doodads/units: models from the skin tables. Custom object ids
    *  use their base object's model (`baseOf`, from the map's object data). */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
-    baseOf: (id: string) => string | undefined = () => undefined): Promise<LoadResult> {
+    baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
@@ -380,7 +393,7 @@ export class ObjectLoader {
       }
       entry.items.push(p);
       entry.req.instances.push({
-        world: placement(p, skin.modelScale), team: teamOf(p),
+        world: placement(p, skin.modelScale, heightOf?.(p, skin)), team: teamOf(p),
         pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path, extraScale: skin.modelScale },
       });
     }
@@ -391,7 +404,7 @@ export class ObjectLoader {
       ...failed.map((f) => ({ message: f.error, items: entries[f.index].items })),
       ...[...unknown].map(([id, items]) => ({ message: `${id}: unknown object (no model; not in the game's or the map's object data)`, items })),
     ];
-    return { batches, unresolved, strays: strayInstances(group, placed, unresolved, skins, teamOf, baseOf), problems };
+    return { batches, unresolved, strays: strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf), problems };
   }
 }
 
@@ -402,15 +415,16 @@ export interface Stray { group: string; inst: ObjectInstance }
 /** Stand-ins for the unresolved objects of one group. Start locations are left out: they stay
  *  markers that can't be moved or deleted (a player needs one). */
 export function strayInstances(group: string, placed: readonly Placed[], unresolved: readonly Placed[], skins: Map<string, Skin>,
-  teamOf: (p: Placed) => number, baseOf: (id: string) => string | undefined = () => undefined): Stray[] {
+  teamOf: (p: Placed) => number, baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number): Stray[] {
   const index = new Map(placed.map((p, i) => [p, i]));
   return unresolved.filter((p) => p.id !== "sloc").map((p) => {
     const skin = skins.get(p.id) ?? skins.get(baseOf(p.id) ?? "");
-    const [x, y, z] = p.position;
+    // A known type whose model didn't load stands where its model would (a ship on the water).
+    const [x, y] = p.position, z = skin && heightOf ? heightOf(p, skin) : p.position[2];
     return {
       group,
       inst: {
-        world: placement(p, 1), team: teamOf(p), sphere: [x, y, z, 32] as [number, number, number, number],
+        world: placement(p, 1, z), team: teamOf(p), sphere: [x, y, z, 32] as [number, number, number, number],
         pick: { kind: skin?.kind ?? (group === "doodads" ? "w3d" : "w3u"), id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index: index.get(p) ?? -1, placed: p, model: "", extraScale: 1 },
       },
     };
@@ -426,7 +440,8 @@ export function objectsInRect(sources: Iterable<Stray>, project: (position: [num
   for (const { group, inst } of sources) {
     if ((group !== "doodads" && group !== "units") || hidden.has(group)) continue;
     if (!inst.pick || !kinds.has(inst.pick.kind)) continue;
-    const s = project(inst.pick.placed.position);
+    // Where it's drawn: a ship sits on the water, above its stored height.
+    const s = project([inst.world[12], inst.world[13], inst.world[14]]);
     if (s && s[0] >= ax && s[0] <= bx && s[1] >= ay && s[1] <= by) out.push(inst.pick.placed);
   }
   return out;

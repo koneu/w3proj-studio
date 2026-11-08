@@ -12,7 +12,7 @@ export interface MapLighting {
   unit: LightModel | null;
   /** Where they come from, for the toolbar's tooltip. */
   source: string;
-  /** Map flags (war3map.w3i; 0 without) and the water tint (r, g, b, a in 0–255). */
+  /** Map flags (war3map.w3i; 0 without) and the water tint as stored (b, g, r, a in 0–255). */
   flags: number;
   waterTint: number[] | null;
 }
