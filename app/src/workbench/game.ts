@@ -19,12 +19,18 @@ export const MAX_READS_IN_FLIGHT = 32;
  *  waiting background read: a map that keeps asking for files can't hold a check back for good. */
 export const BACKGROUND_TURN = 8;
 
+/** Background reads running at most, even with places free: the reads someone then waits on (a map
+ *  opened while the Object Manager reads its tables) wait behind these few, not behind a full queue.
+ *  Taking every free place, they put GoldRush's first model reads 150 ms and its picture 0.4 s later. */
+export const BACKGROUND_IN_FLIGHT = 8;
+
 /** The share of the cache that files read more than once can hold (the rest is for files read
  *  once so far). A pass over many files read once (a check, a big map's models) only replaces
  *  others read once; the ones read again stay. */
 export const PROTECTED_SHARE = 3 / 4;
 
-interface Waiting { key: string; background: boolean; give: () => void }
+/** A queued read; `give` starts it, saying whether it runs as a background read. */
+interface Waiting { key: string; background: boolean; give: (asBackground: boolean) => void }
 
 /** Read-only access to the installed game's data via the backend. The game's files don't change
  *  while the app runs, so what was read is kept (up to `game.cacheMegabytes`) and a file that isn't
@@ -58,6 +64,8 @@ export class GameService {
   private queuedByKey = new Map<string, Waiting>();
   /** Places given to reads someone waits on since a background read had one (see BACKGROUND_TURN). */
   private sinceLater = 0;
+  /** Background reads running (see BACKGROUND_IN_FLIGHT). */
+  private backgroundInFlight = 0;
 
   /** Backend reads not finished yet, running or queued: the app smoke waits for none before it counts. */
   get readsPending(): number { return this.inFlight + this.queuedNow.length + this.queuedLater.length; }
@@ -165,9 +173,13 @@ export class GameService {
   /** Runs a backend read when one of MAX_READS_IN_FLIGHT places is free; a finished read hands
    *  its place to the next queued (see next). */
   private async limited<T>(key: string, background: boolean, job: () => Promise<T>): Promise<T> {
-    if (this.inFlight < MAX_READS_IN_FLIGHT) this.inFlight++;
-    else {
-      await new Promise<void>((give) => {
+    // Whether it runs as a background read (it may be moved up while queued).
+    let asBackground = background;
+    if (this.inFlight < MAX_READS_IN_FLIGHT && (!background || this.backgroundInFlight < BACKGROUND_IN_FLIGHT)) {
+      this.inFlight++;
+      if (background) this.backgroundInFlight++;
+    } else {
+      asBackground = await new Promise<boolean>((give) => {
         const waiting: Waiting = { key, background, give };
         (background ? this.queuedLater : this.queuedNow).push(waiting);
         this.queuedByKey.set(key, waiting);
@@ -176,22 +188,26 @@ export class GameService {
     try {
       return await job();
     } finally {
+      if (asBackground) this.backgroundInFlight--;
       const next = this.next();
       if (next) {
         if (this.queuedByKey.get(next.key) === next) this.queuedByKey.delete(next.key);
-        next.give();
+        if (next.background) this.backgroundInFlight++;
+        next.give(next.background);
       } else this.inFlight--;
     }
   }
 
   /** The queued read that gets a free place: the longest waiting of those someone waits on, except
-   *  every BACKGROUND_TURN-th place, which goes to the longest waiting background read. */
+   *  every BACKGROUND_TURN-th place, which goes to the longest waiting background read. A background
+   *  read gets one only while fewer than BACKGROUND_IN_FLIGHT run. */
   private next(): Waiting | undefined {
-    if (this.queuedLater.length && (!this.queuedNow.length || this.sinceLater >= BACKGROUND_TURN - 1)) {
+    const later = this.queuedLater.length > 0 && this.backgroundInFlight < BACKGROUND_IN_FLIGHT;
+    if (later && (!this.queuedNow.length || this.sinceLater >= BACKGROUND_TURN - 1)) {
       this.sinceLater = 0;
       return this.queuedLater.shift();
     }
-    if (this.queuedLater.length) this.sinceLater++;
+    if (later) this.sinceLater++;
     return this.queuedNow.shift();
   }
 

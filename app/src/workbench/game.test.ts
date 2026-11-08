@@ -219,6 +219,28 @@ test("a background read someone then waits on moves up to the reads waited on", 
   assert.deepEqual(kept, ["n1.dds", "n2.dds"]);
 });
 
+test("background reads take a few places only: a read someone waits on asked after them starts at once", async () => {
+  const { game } = make();
+  const { BACKGROUND_IN_FLIGHT, MAX_READS_IN_FLIGHT } = await import("./game");
+  assert.ok(BACKGROUND_IN_FLIGHT < MAX_READS_IN_FLIGHT);
+  const n = MAX_READS_IN_FLIGHT * 2;
+  for (let i = 0; i < n; i++) stored.set(`bg${i}.dds`, new Uint8Array([i]));
+  stored.set("now.dds", new Uint8Array([7]));
+  let open!: () => void;
+  hold = new Promise((r) => { open = r; });
+  const later = Array.from({ length: n }, (_, i) => game.read(`bg${i}.dds`, undefined, true));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(asked.length, BACKGROUND_IN_FLIGHT, "the rest of the background reads wait, with places free");
+  const now = game.read("now.dds");
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(asked.at(-1)?.path, "now.dds", "the read waited on didn't queue behind them");
+  open();
+  assert.equal((await now)[0], 7);
+  const got = await Promise.all(later);
+  assert.deepEqual(got.map((b) => b[0]), Array.from({ length: n }, (_, i) => i), "every background read arrives");
+  assert.equal(game.readsPending, 0);
+});
+
 test("a pass over many files read once doesn't push out the files read again", async () => {
   const { game } = make(10_000);
   const count = (path: string) => asked.filter((x) => x.path === path).length;
