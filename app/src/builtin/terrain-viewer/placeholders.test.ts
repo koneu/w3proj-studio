@@ -6,8 +6,8 @@ import { ObjectLoader, type Placed, type Skin } from "./objects";
 // what it asserts (scripts/fails-without.mjs).
 
 /** A WebGL context that accepts every call (nothing is drawn): enough to make models and textures. */
-function fakeGl(): WebGL2RenderingContext {
-  return new Proxy({ getError: () => 0, getAttribLocation: () => 0, getExtension: () => null, getParameter: () => 16384 } as Record<string, unknown>, {
+function fakeGl(extra: Record<string, unknown> = {}): WebGL2RenderingContext {
+  return new Proxy({ getError: () => 0, getAttribLocation: () => 0, getExtension: () => null, getParameter: () => 16384, ...extra } as Record<string, unknown>, {
     get: (t, k) => (k in t ? t[k as string] : typeof k === "string" && /^[A-Z_0-9]+$/.test(k) ? 1 : () => ({})),
   }) as unknown as WebGL2RenderingContext;
 }
@@ -34,4 +34,19 @@ test("the loader draws objects whose model doesn't load (or whose id is unknown)
   const previews = await loader.load("units", [rock], skins, () => 0, undefined, undefined, false);
   assert.equal(previews.batches.length, 0, "a start building that doesn't load is left out");
   assert.equal(previews.strays.length, 1);
+});
+
+test("with the context lost (the shader doesn't compile) the objects stay markers, and a later load still makes the cube", async () => {
+  const rock = placed("LRsr", 64, -64);
+  const skins = new Map([["LRsr", rockSkin]]);
+  let lost = true;
+  const gl = fakeGl({ getShaderParameter: () => !lost, getProgramParameter: () => !lost, getShaderInfoLog: () => "context lost", isContextLost: () => lost });
+  const loader = new ObjectLoader(gl, () => Promise.reject(new Error("not stored")), () => {});
+  const out = await loader.load("doodads", [rock], skins, () => 0);
+  assert.equal(out.batches.length, 0);
+  assert.deepEqual(out.unresolved, [rock], "a marker, no unhandled rejection");
+  assert.equal(out.strays.length, 1, "still selectable");
+  lost = false;
+  const again = await new ObjectLoader(gl, () => Promise.reject(new Error("not stored")), () => {}).load("doodads", [rock], skins, () => 0);
+  assert.equal(again.batches.length, 1);
 });

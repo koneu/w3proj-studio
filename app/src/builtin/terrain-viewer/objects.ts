@@ -403,9 +403,11 @@ export class ObjectLoader {
   /** The World Editor's checkered cube (placeholder.ts), made once. */
   private placeholder(): ModelGpu {
     if (!this.placeholderGpu) {
-      this.placeholderGpu = new ModelGpu(this.gl, placeholderModel());
-      this.placeholderGpu.pose(standClock(this.placeholderGpu.model));
-      this.placeholderGpu.textures[0] = createTexture(this.gl, placeholderImage(), { repeat: [false, false] });
+      // Kept only once whole: a context lost on the way throws, and the next load tries again.
+      const gpu = new ModelGpu(this.gl, placeholderModel());
+      gpu.pose(standClock(gpu.model));
+      gpu.textures[0] = createTexture(this.gl, placeholderImage(), { repeat: [false, false] });
+      this.placeholderGpu = gpu;
     }
     return this.placeholderGpu;
   }
@@ -451,7 +453,9 @@ export class ObjectLoader {
     ];
     const strays = strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf);
     if (!placeholders || !strays.length) return { batches, unresolved, strays, problems };
-    const gpu = this.placeholder();
+    let gpu: ModelGpu;
+    // A lost context can't compile the model shader: the objects stay markers (the view is reopened anyway).
+    try { gpu = this.placeholder(); } catch { return { batches, unresolved, strays, problems }; }
     const instances = placeholderInstances(strays, bounds(gpu.model));
     const cubes = new Set(instances.map((inst) => inst.pick?.placed));
     return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: [], problems };
