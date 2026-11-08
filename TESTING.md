@@ -252,6 +252,16 @@ variants and an unlit picture; walls told apart by their brown in the unlit pict
   editor's grass (106 against 125); under the terrain light it's within 0.1. The render-fixes-3 finding came from
   cliff.w3m, whose two files both name their model `DNCLordaeronTerrain`.
 
+**Fire and particle colours in HD** (branch render-fixes-4, 2026-11-09, a test map with AObr, ZObz, LObr, OOgr, ZZdt,
+AOob and AOnt in a row, the editor in SD and HD): the particle colours are read right (red, green, blue): the
+editor's classic view shows the same yellow-green fire on ZObz and the same faint green-yellow haze over the grate
+OOgr as Studio's stand-ins. The HD editor draws the Reforged PopcornFX effects instead (orange glows), which Studio
+can't; its stand-ins are the classic emitters, additive, so orange over the bright HD grass turns lime and blue
+turns cyan. Particles don't go through the HD tone curve. What was wrong and is fixed: HD emissive textures (layer
+slot 3: AOob's red runes were black, AOnt's lamp unlit), Reforged models whose classic emitters are empty
+placeholders (LObr: no fire at all), the HD City cliffs' placeholder textures (`ReplaceableTextures\Cliff\Cliff1_…`,
+drawn white on OrcX02_03) and Cityscape's HD water colour (blue).
+
 ## Process
 
 **Every change.** Run the gate. Fixing a bug starts with a test that fails because of it.
