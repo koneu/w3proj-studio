@@ -12,7 +12,7 @@ import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors } from "./objects";
 import { AMBIENCE, configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
-import { triggersSection } from "./triggers";
+import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText, triggersSection } from "./triggers";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
 
 const EOL = "\r\n";
@@ -640,6 +640,36 @@ test("custom text stays as written; without an InitTrig it's a library", () => {
   has(s, "function Helper takes nothing returns nothing");
   hasNot(s, "InitTrig_Lib");
   has(s, "    call InitTrig_Own(  )");
+});
+
+test("Convert to Custom Text: the trigger's functions as the World Editor writes them, without the banner", () => {
+  const t = trigger("Melee Init", [eca(0, "MapInitializationEvent"), eca(2, "DoNothing")]);
+  const text = triggerCustomText({ data, triggers: wtg([t]) }, t);
+  assert.equal(text, [
+    "function Trig_Melee_Init_Actions takes nothing returns nothing", "    call DoNothing(  )", "endfunction", "",
+    "//===========================================================================",
+    "function InitTrig_Melee_Init takes nothing returns nothing", "    set gg_trg_Melee_Init = CreateTrigger(  )",
+    "    call TriggerAddAction( gg_trg_Melee_Init, function Trig_Melee_Init_Actions )", "endfunction", "",
+  ].join(EOL));
+  convertToCustom(t);
+  assert.deepEqual([t.isCustom, t.ecas, t.runOnInit], [true, [], true], "the map initialization event becomes Run on Map Initialization");
+  const lua = triggerCustomText({ data, triggers: wtg([trigger("Melee Init", [eca(2, "DoNothing")])]), lua: true }, trigger("Melee Init", [eca(2, "DoNothing")]));
+  assert.deepEqual(lua.split(EOL), ["function Trig_Melee_Init_Actions()", "DoNothing()", "end", "", "function InitTrig_Melee_Init()", "gg_trg_Melee_Init = CreateTrigger()",
+    "TriggerAddAction(gg_trg_Melee_Init, Trig_Melee_Init_Actions)", "end", "", ""]);
+  const plain = trigger("Later", [eca(2, "DoNothing")]);
+  convertToCustom(plain);
+  assert.equal(plain.runOnInit, false, "without the event it isn't run at the start");
+});
+
+test("the placed objects whose globals only a trigger keeps", () => {
+  const kill = (g: string, extra: Partial<Eca> = {}) => eca(2, "KillUnit", [{ type: 1, value: g }], extra);
+  const a = trigger("A", [kill("gg_unit_hfoo_0001"), kill("gg_unit_hfoo_0002"), kill("gg_unit_hfoo_0003"), kill("udg_x")]);
+  const b = trigger("B", [kill("gg_unit_hfoo_0002")]);
+  const off = trigger("Off", [kill("gg_unit_hfoo_0003")], { enabled: false });
+  // 0002 stays (B uses it); 0003 stays declared (Off mentions it) but is no longer created into it.
+  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), a), ["gg_unit_hfoo_0001", "gg_unit_hfoo_0003"]);
+  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), b), []);
+  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), off), []);
 });
 
 // ---- Lua ----------------------------------------------------------------------------------

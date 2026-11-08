@@ -15,6 +15,7 @@ import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
 import { addScriptTrigger, addVariable, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
+import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText } from "../../lib/script/triggers";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
   allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
@@ -26,6 +27,9 @@ import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
+
+/** A trigger of events, conditions and actions (not custom text, a script item or a comment). */
+const isGuiTrigger = (it: Item): it is TriggerItem => "ecas" in it && it.type === 8 && !it.isCustom && !it.isComment;
 
 /** The project's trigger file (war3map.wtg.json, or a raw war3map.wtg), or null. */
 const triggerFile = (w3: W3Api) => wtgPath(w3.workspace.files());
@@ -163,6 +167,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.commands.execute("w3.triggers.open");
       const it = openView?.file.items.find((i) => "ecas" in i && i.name === name);
       if (it) openView!.revealItem(it);
+    }),
+    w3.commands.register("w3.triggers.convertToCustomText", async () => {
+      if (!openView) throw new Error("Open the Trigger Editor and select a GUI trigger first.");
+      await openView.convertSelected();
     }),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
@@ -408,7 +416,35 @@ class TriggerView {
     this.renderDetail();
   }
 
-  dispose() { this.body?.dispose?.(); this.unsubscribe(); this.el.removeEventListener("keydown", this.keydown); }
+  private disposed = false;
+  dispose() { this.disposed = true; this.body?.dispose?.(); this.unsubscribe(); this.el.removeEventListener("keydown", this.keydown); }
+
+  /** The World Editor's Convert to Custom Text: the selected GUI trigger becomes the script the map script
+   *  has for it (InitTrig_<name> and all), after a question, as one undo step. False if not done. */
+  async convertSelected(): Promise<boolean> {
+    const it = this.find(this.selected);
+    if (!it || !isGuiTrigger(it)) throw new Error("Select a GUI trigger to convert to custom text.");
+    if (!this.handle.editable) throw new Error("This trigger file can't be changed here.");
+    const lua = this.handle.language === "lua", was = JSON.stringify(it);
+    const lost = placedGlobalsOnlyIn(this.file, it);
+    const listed = lost.length > 4 ? `${lost.slice(0, 4).join(", ")} and ${lost.length - 4} more` : lost.join(", ");
+    const ok = await this.w3.window.confirm(`Convert ${it.name} to custom text? Its events, conditions and actions become the ${lua ? "Lua" : "JASS"} the map script has for them. `
+      + "It can't be turned back into a GUI trigger; Ctrl+Z takes the conversion back."
+      + (lost.length ? ` The map script keeps placed objects in globals only for what GUI triggers use, so ${listed} won't be set up for this script any more, as in the World Editor.` : ""), "Convert", 60_000);
+    if (!ok || this.disposed) return false;
+    // While the question was open the trigger may have been edited, undone or deleted: then nothing happens.
+    const now = this.file.items.find((i) => i.type === 8 && i.id === it.id);
+    if (!now || !("ecas" in now) || JSON.stringify(now) !== was) {
+      void this.w3.window.showWarning(`Not converted: ${it.name} changed while the question was open.`);
+      return false;
+    }
+    this.edit(`Convert ${now.name} to custom text`, () => {
+      const text = triggerCustomText({ data: this.handle.data, triggers: this.file, custom: this.customFile(), lua }, now);
+      convertToCustom(now);
+      this.texts.set(now, text);
+    });
+    return true;
+  }
 
   /** Every trigger and variable from elsewhere, as one undo step. */
   replaceAll(file: TriggerFile, custom: CustomTextFile | null) {
@@ -678,6 +714,7 @@ class TriggerView {
       h("button", { title: "Replace all triggers and variables with a .wtg and .wct", onclick: () => this.run("w3.triggers.import") }, "Import…"));
   }
   private run(command: string) { this.w3.commands.execute(command).catch((e) => this.w3.window.showError(String((e as Error).message ?? e))); }
+  private convertCommand() { this.run("w3.triggers.convertToCustomText"); }
 
   // ---- tree -------------------------------------------------------------------------
   private row(label: string, cls: string, depth: number, sel: Selection, opts: { toggle?: number; title?: string; off?: boolean } = {}) {
@@ -712,6 +749,8 @@ class TriggerView {
         items.push("-", { label: "Move Up", run: () => this.move(-1) }, { label: "Move Down", run: () => this.move(1) },
           "-", { label: "Cut", hint: "Ctrl+X", run: () => this.copyItem(true) }, { label: "Copy", hint: "Ctrl+C", run: () => this.copyItem(false) });
       }
+      const it = this.find(sel);
+      if (it && isGuiTrigger(it)) items.push("-", { label: "Convert to Custom Text…", run: () => this.convertCommand() });
       if (treeClipboard) items.push("-", { label: `Paste ${treeClipboard.items[0].name}`, hint: "Ctrl+V", run: () => this.pasteItems() });
       if (sel.kind === "item") items.push("-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
     }
@@ -868,6 +907,9 @@ class TriggerView {
         flag("Enabled", () => it.enabled, (v) => { it.enabled = v; }),
         // A script item is no trigger: nothing to turn on.
         ...(it.type === 32 ? [] : [flag("Initially on", () => !it.initiallyOff, (v) => { it.initiallyOff = !v; })]),
+        // Custom text has no events: this is its Map Initialization (RunInitializationTriggers).
+        ...(it.type === 8 && it.isCustom ? [flag("Run on map initialization", () => it.runOnInit, (v) => { it.runOnInit = v; })] : []),
+        ...(isGuiTrigger(it) && editable ? [h("button.trig-convert", { title: "Replace the events, conditions and actions with the script the map script has for them (one way; Ctrl+Z takes it back)", onclick: () => this.convertCommand() }, "Convert to Custom Text…")] : []),
       ]));
     if (it.type === 16) { this.detail.replaceChildren(head, desc); return; }
     const kind = this.kinds.all().find((k) => k.matches(it, this.handle));

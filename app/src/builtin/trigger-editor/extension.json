@@ -34,6 +34,7 @@
       { "id": "w3.triggers.import", "when": "project", "title": "Import Triggers…", "category": "Triggers" },
       { "id": "w3.triggers.open", "when": "project", "menu": "Module:1:3", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" },
       { "id": "w3.triggers.variables", "title": "Trigger Editor: Variables", "category": "Module" },
+      { "id": "w3.triggers.convertToCustomText", "when": "project", "title": "Convert Trigger to Custom Text…", "category": "Triggers" },
       { "id": "w3.triggers.reveal", "title": "Trigger Editor: Go to Trigger", "category": "Module", "hidden": true }
     ],
     "services": [{ "id": "w3.triggers", "description": "Trigger kinds (GUI, custom script, …) shown in the trigger editor: registerKind." }]

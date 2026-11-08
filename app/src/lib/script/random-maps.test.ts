@@ -9,8 +9,9 @@ import { checkJass } from "../jass/check";
 import { miniGameEnv } from "../jass/mini-game.fixture";
 import { checkLua } from "../lua/check";
 import { parseTriggerData } from "../triggers/triggerdata";
-import type { Eca, Param, TriggerFile, TriggerItem, Variable } from "../triggers/wtg";
+import { textTriggers, type Eca, type Param, type TriggerFile, type TriggerItem, type Variable } from "../triggers/wtg";
 import { generateScript, type ScriptInput } from "./jass";
+import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText } from "./triggers";
 
 const data = parseTriggerData(`
 [TriggerTypes]
@@ -194,6 +195,63 @@ test("the random maps reach what they're meant to reach", () => {
     "RunInitializationTriggers", "InitAllyPriorities", "ItemTable000000_DropItems", "Unit000000_DropItems", "bj_forLoopAIndex", "exitwhen (i >", "CreateBlightedGoldmine", "WaygateActivate", "gg_rg_002[1]", "ChooseRandomCreep", "ChooseRandomNPBuilding"]) {
     assert.ok(scripts.includes(want), `no random map has ${want}`);
   }
+});
+
+/** The map with every GUI trigger converted to custom text, as the trigger editor does it; how many were. */
+function converted(map: ScriptInput, keepInit = true): { map: ScriptInput; count: number; lost: string[] } {
+  const out = structuredClone({ triggers: map.triggers, custom: map.custom });
+  const copy: ScriptInput = { ...map, triggers: out.triggers, custom: out.custom };
+  if (!copy.triggers) return { map: copy, count: 0, lost: [] };
+  const custom = copy.custom ?? { reforged: false, version: 1, comment: "", header: null, texts: [] };
+  copy.custom = custom;
+  const lua = map.info.scriptType === 1;
+  let count = 0;
+  const lost: string[] = [];
+  textTriggers(copy.triggers).forEach((t, k) => {
+    if (t.isCustom || t.type !== 8) return;
+    lost.push(...placedGlobalsOnlyIn(copy.triggers!, t));
+    custom.texts[k] = triggerCustomText({ data: copy.data, triggers: copy.triggers!, custom, lua }, t);
+    const runOnInit = t.runOnInit;
+    convertToCustom(t);
+    if (!keepInit) t.runOnInit = runOnInit;
+    count++;
+  });
+  return { map: copy, count, lost };
+}
+
+/** Placed objects' globals that the map's GUI triggers use (the map script declares only those). */
+function placedRefs(map: ScriptInput): Set<string> {
+  const out = new Set<string>();
+  const visitP = (p: Param) => { if (p.type === 1 && /^gg_(unit|item|dest)_/.test(p.value)) out.add(p.value); p.call?.params.forEach(visitP); if (p.index) visitP(p.index); };
+  const visit = (e: Eca) => { e.params.forEach(visitP); e.children.forEach(visit); };
+  for (const t of map.triggers?.items ?? []) if ("ecas" in t && !t.isCustom) t.ecas.forEach(visit);
+  return out;
+}
+
+test("converting every GUI trigger to custom text leaves war3map.j and war3map.lua the same, but for placed objects' globals", () => {
+  let count = 0, init = 0, same = 0, withPlaced = 0;
+  for (const lua of [false, true]) {
+    for (let seed = 1; seed <= ROUNDS; seed++) {
+      const map = randomMap(seed, lua), after = converted(map), before = generateScript(map), refs = placedRefs(map);
+      count += after.count;
+      assert.ok((after.map.triggers?.items ?? []).every((t) => !("ecas" in t) || t.isCustom), "every trigger is custom text now");
+      assert.deepEqual(new Set(after.lost), refs, `seed ${seed}: the globals the conversion would take out are named`);
+      if (!refs.size) {
+        assert.equal(generateScript(after.map), before, `seed ${seed}${lua ? " (Lua)" : ""}`);
+        same++;
+      } else {
+        // The World Editor declares a placed object's global only for GUI triggers: these go, as there.
+        const script = generateScript(after.map);
+        for (const g of refs) assert.ok(before.includes(g) && !new RegExp(`\\b${g}\\s*=\\s*null`).test(script.split("endglobals")[0]), `seed ${seed}: ${g}`);
+        withPlaced++;
+      }
+      // Control: without Run on Map Initialization a converted map initialization trigger no longer runs at the start.
+      if (!refs.size && generateScript(converted(map, false).map) !== before) init++;
+    }
+  }
+  assert.ok(count > ROUNDS, `${count} triggers converted`);
+  assert.ok(same > ROUNDS / 2 && withPlaced > 0, `${same} maps the same, ${withPlaced} with placed objects`);
+  assert.ok(init > 0, "no random map had a map initialization trigger the control could lose");
 });
 
 test("the check can fail: a broken script is reported", () => {

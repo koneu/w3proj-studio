@@ -1586,6 +1586,21 @@ async function byHand(page, found) {
   await sleep(300);
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
 
+  // Noise: held on the ground it roughens it while the button is down, and the whole stroke is one undo step.
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Noise:"]').click()`);
+  if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].find((l) => l.textContent.startsWith("Strength"))?.hidden !== false`)) fail("Noise has no Strength slider");
+  await hands.drag({ x: canvas.x - 40, y: canvas.y + 20 }, { x: canvas.x + 40, y: canvas.y + 20 });
+  await sleep(300);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const noisy = hash(ground);
+  if (noisy === untouched) fail("a Noise stroke changed nothing on disk");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  if (hash(ground) !== untouched) fail(`one undo didn't take the whole Noise stroke back (${hash(ground) === noisy ? "nothing happened" : "the file differs"})`);
+
   await objectByHand(page, hands, root, fail);
   await triggerByHand(page, hands, root, fail);
 }
@@ -1712,6 +1727,40 @@ async function triggerByHand(page, hands, root, fail) {
   if (!script.includes("function InitTrig_Typed_Trigger takes")) fail("the renamed trigger isn't in the script");
   if (script.includes("InitTrig_Melee_Initialization")) fail("the old trigger name is still in the script");
   if (!script.includes("BlzCreateUnitWithSkin") && !script.includes("function main")) fail("the script looks empty");
+
+  // Convert to Custom Text: asked first (No leaves it), then the trigger is the script the map script had for it, so the
+  // packed war3map.j stays the same; one undo turns it back.
+  const wtgFile = join(root, "map", "war3map.wtg.json");
+  const typed = () => JSON.parse(readFileSync(wtgFile, "utf8")).items.find((i) => i.name === "Typed Trigger");
+  const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
+  await page.evaluate(`(() => { window.__asked = []; w3.window.confirm = async (m) => { window.__asked.push(m); return false; }; })()`);
+  await hands.click("button.trig-convert");
+  await sleep(300);
+  if (!/can't be turned back/.test(await page.evaluate(`window.__asked[0] ?? ""`))) fail(`Convert to Custom Text didn't ask first: ${await page.evaluate(`JSON.stringify(window.__asked)`)}`);
+  if (await dirty()) fail("answering No to Convert to Custom Text changed the trigger file");
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await hands.click("button.trig-convert");
+  await until("the converted trigger's script", () => page.evaluate(`!document.querySelector("button.trig-convert") && !!document.querySelector(".trig-code, .trig-code-edit")`), 5000)
+    .catch(() => fail("the trigger doesn't show as custom text after converting"));
+  if (!(await dirty())) fail("converting didn't mark the trigger file as changed");
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  const t = typed();
+  if (!t?.isCustom || t.ecas.length || !t.runOnInit) fail(`the converted trigger is ${JSON.stringify(t)?.slice(0, 300)}`);
+  rmSync(map, { force: true });
+  await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
+  await until("the build", () => existsSync(map), 20000);
+  await sleep(300);
+  const after = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
+  if (after !== script) {
+    const a = script.split("\r\n"), b = after.split("\r\n"), at = a.findIndex((l, k) => l !== b[k]);
+    fail(`war3map.j changed with the conversion, from line ${at + 1}: "${a[at]}" became "${b[at]}"`);
+  }
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(300);
+  if (typed()?.isCustom !== false || !typed()?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
 }
 
 /** Test Map when the game can't start: the user is told why, whichever way it was asked for, and
@@ -2908,7 +2957,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }

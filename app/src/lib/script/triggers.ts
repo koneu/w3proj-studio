@@ -9,7 +9,7 @@
 import { ACTION, CALL, CONDITION, EVENT, type TriggerData } from "../triggers/triggerdata";
 import type { Call, CustomTextFile, Eca, Param, TriggerFile, TriggerItem } from "../triggers/wtg";
 
-import { CONCAT, INT_DIV, RAW } from "./lua";
+import { CONCAT, INT_DIV, jassToLua, RAW } from "./lua";
 import { ident } from "./names";
 
 const EOL = "\r\n";
@@ -285,6 +285,42 @@ export function scriptItems(i: Pick<TriggerScriptInput, "triggers" | "custom">):
   const items = i.triggers.items.filter((t): t is TriggerItem => "ecas" in t && (t.type === 8 || t.type === 32));
   return items.map((t, k) => ({ t, text: i.custom?.texts[k] ?? "" }))
     .filter(({ t }) => t.type === 32 && t.enabled && !t.isComment).map(({ t, text }) => ({ name: t.name, text: text ?? "" }));
+}
+
+/** A GUI trigger as custom text, as the World Editor's Convert to Custom Text makes it: the functions
+ *  the map script would have for it (helpers, Conditions, Actions, InitTrig_<name>) without the banner,
+ *  which the script adds to custom text too; for Lua maps (`lua`) translated to Lua as war3map.lua has it. */
+export function triggerCustomText(i: TriggerScriptInput, t: TriggerItem): string {
+  const jass = new TriggerCompiler(i, t).compile();
+  return i.lua ? jassToLua(jass) : jass;
+}
+
+/** Globals of placed units, items and destructibles (gg_unit_…, gg_item_…, gg_dest_…) that `t` uses and the
+ *  map script has only for it. The map script declares such a global for what GUI triggers mention (disabled
+ *  ones too) and creates the object into it for what compiled triggers use; the World Editor doesn't read
+ *  custom text for them, so converting `t` changes these in war3map.j. */
+export function placedGlobalsOnlyIn(file: TriggerFile, t: TriggerItem): string[] {
+  const triggers = file.items.filter((i): i is TriggerItem => "ecas" in i && i.type !== 16 && i.type !== 32);
+  const used = (item: TriggerItem, compiled: boolean) => {
+    const out = new Set<string>();
+    if (compiled && (!item.enabled || item.isComment)) return out;
+    const visitP = (p: Param) => { if (p.type === 1 && /^gg_(?:unit|item|dest)_/.test(p.value)) out.add(p.value); p.call?.params.forEach(visitP); if (p.index) visitP(p.index); };
+    const visit = (e: Eca) => { if (compiled && !e.enabled) return; e.params.forEach(visitP); e.children.forEach(visit); };
+    item.ecas.forEach(visit);
+    return out;
+  };
+  const others = (compiled: boolean) => new Set(triggers.filter((o) => o !== t).flatMap((o) => [...used(o, compiled)]));
+  const declared = others(false), created = others(true), mineCompiled = used(t, true);
+  return [...used(t, false)].filter((g) => !declared.has(g) || (mineCompiled.has(g) && !created.has(g))).sort();
+}
+
+/** Turns a GUI trigger into a custom text trigger with `text` (from triggerCustomText): its events,
+ *  conditions and actions go. A map initialization event becomes Run on Map Initialization, so the map
+ *  script still runs it at the start. */
+export function convertToCustom(t: TriggerItem) {
+  if (t.ecas.some((e) => e.enabled && e.kind === EVENT && e.name === "MapInitializationEvent")) t.runOnInit = true;
+  t.isCustom = true;
+  t.ecas = [];
 }
 
 /** The trigger part of war3map.j (after the "Triggers" banner). */
