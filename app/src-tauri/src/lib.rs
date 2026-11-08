@@ -139,18 +139,79 @@ fn modified_ms(meta: &std::fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
-/// All project files except build output and VCS metadata.
+/// All project files except build output and VCS metadata. Any folder that can't be read fails the
+/// whole list: the workspace takes a file missing from it for one deleted by another program.
 #[tauri::command]
 fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
-    let root = PathBuf::from(root);
+    walk_project(Path::new(&root), false).map(|(files, _)| files)
+}
+
+/// A folder (or entry) `project_files_partial` couldn't read, below the root, and why.
+#[derive(Serialize, Debug)]
+struct Unreadable {
+    path: String,
+    error: String,
+}
+
+#[derive(Serialize)]
+struct PartialFiles {
+    files: Vec<FileInfo>,
+    /// What was skipped: the caller decides whether a skipped folder matters to it.
+    unreadable: Vec<Unreadable>,
+}
+
+/// As `project_files`, but a subfolder that can't be read is skipped and named in `unreadable`
+/// instead of failing the whole list (an unreadable root still fails): for a campaign's files,
+/// where one chapter's unreadable folder must not hide the campaign's own files from every chapter.
+#[tauri::command]
+fn project_files_partial(root: String) -> CmdResult<PartialFiles> {
+    walk_project(Path::new(&root), true).map(|(files, unreadable)| PartialFiles { files, unreadable })
+}
+
+/// The files below `root` (forward slashes, sorted without case), without build output and VCS
+/// metadata. `skip_unreadable`: a subfolder or entry that can't be read is listed in the second
+/// value and left out, instead of failing.
+fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileInfo>, Vec<Unreadable>)> {
     let mut out = Vec::new();
-    let mut stack = vec![root.clone()];
+    let mut unreadable = Vec::new();
+    let rel_of = |path: &Path| path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+    let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).map_err(err)? {
-            let entry = entry.map_err(err)?;
+        // Fails the walk, or (when skipping, below the root) notes what was skipped.
+        let mut skip = |path: &Path, e: std::io::Error| -> CmdResult<()> {
+            if skip_unreadable && path != root {
+                unreadable.push(Unreadable { path: rel_of(path), error: e.to_string() });
+                Ok(())
+            } else {
+                Err(err(e))
+            }
+        };
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                skip(&dir, e)?;
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    // The rest of this folder can't be trusted to come: it counts as unreadable.
+                    skip(&dir, e)?;
+                    break;
+                }
+            };
             let path = entry.path();
-            let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
-            if entry.file_type().map_err(err)?.is_dir() {
+            let rel = rel_of(&path);
+            let is_dir = match entry.file_type() {
+                Ok(t) => t.is_dir(),
+                Err(e) => {
+                    skip(&path, e)?;
+                    continue;
+                }
+            };
+            if is_dir {
                 if !matches!(rel.as_str(), "build" | ".git" | "node_modules") {
                     stack.push(path);
                 }
@@ -163,7 +224,8 @@ fn project_files(root: String) -> CmdResult<Vec<FileInfo>> {
         }
     }
     out.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
-    Ok(out)
+    unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((out, unreadable))
 }
 
 /// Imports a map into `dir` (new project) or re-syncs an existing one.
@@ -1171,6 +1233,7 @@ pub fn run() {
             path_normalize,
             fs_stat,
             project_files,
+            project_files_partial,
             project_folders,
             project_unpack,
             project_create,
@@ -1296,6 +1359,39 @@ mod fs_tests {
         let st = fs_stat(w).unwrap();
         assert_eq!((wrote.size, wrote.modified), (5, st.modified));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A campaign with one chapter folder that can't be read: the partial list skips and names it and
+    /// still has the campaign's own files; the strict list (the workspace's) fails as before.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_subfolder_is_skipped_and_named_by_the_partial_list_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, root) = project();
+        let locked = dir.join("maps/Chapter 2");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("secret.txt"), b"s").unwrap();
+        std::fs::create_dir_all(dir.join("maps/Chapter 1/map")).unwrap();
+        std::fs::write(dir.join("maps/Chapter 1/map/war3map.w3i"), b"i").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Running as root reads it anyway: then there's nothing unreadable to test with.
+        let readable = std::fs::read_dir(&locked).is_ok();
+        let partial = project_files_partial(root.clone());
+        let strict = project_files(root.clone());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        if readable {
+            return;
+        }
+        let partial = partial.expect("one unreadable chapter folder failed the whole campaign list");
+        let paths: Vec<&str> = partial.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["map/sub/a.txt", "maps/Chapter 1/map/war3map.w3i"]);
+        assert_eq!(partial.unreadable.len(), 1, "{:?}", partial.unreadable);
+        assert_eq!(partial.unreadable[0].path, "maps/Chapter 2");
+        assert!(!partial.unreadable[0].error.is_empty());
+        assert!(strict.is_err(), "the workspace's list must not pass a folder it couldn't read for an empty one");
+        // An unreadable root fails the partial list too: there is nothing it could list.
+        assert!(project_files_partial(dir.join("nope").to_string_lossy().into_owned()).is_err());
     }
 
     #[test]
