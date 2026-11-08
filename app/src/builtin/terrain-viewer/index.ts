@@ -55,6 +55,7 @@ import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainOccupancy, type Te
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
+import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
@@ -1812,12 +1813,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const doodads = dooFile?.list ?? [], units = unitsFile?.list ?? [];
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
-          const [d, u] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
-            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType))]);
+          const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
+            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType)),
+            loader.load("units", startPreviews(units, startRaces), skins, team)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
           renderer.setGroup("doodads", d.batches);
-          renderer.setGroup("units", u.batches);
+          // The start buildings inside the start locations' rings: drawn see-through without their particles
+          // (the editor shows no fire on an orc hall's preview), never picked (no pick), shown and hidden with
+          // the units; a town hall that doesn't load is just left out.
+          for (const b of s.batches) for (const inst of b.instances) delete inst.pick;
+          renderer.setGroup("units", [...u.batches, ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number] }))]);
           void artLoad(showSplats());
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.
@@ -1896,6 +1902,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         },(e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
+          if (projectObjects && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void reloadRaces();
           const art = changesObjectData(p);
           const imported = changesImports(p);
           // Also before the first load is done (see objectReload): it may have read the file before this save.
@@ -1904,6 +1911,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pathingChanged ||= changesPathing(p);
           objectReload.schedule();
         });
+        /** Player id → race (war3map.w3i), for the start buildings the start locations show. A file that can't
+         *  be read keeps the races last read: they only change what is drawn. */
+        let startRaces = new Map<number, number>();
+        const readRaces = async (): Promise<Map<number, number> | null> => {
+          const info = await readMapDoc<Parameters<typeof playerRaces>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
+          return info ? playerRaces(info) : null;
+        };
+        /** After the map's players were saved (Map Properties): the start buildings follow their races. */
+        const reloadRaces = async () => {
+          await firstLoad.catch(() => {});
+          const races = await readRaces();
+          if (!races || disposed || JSON.stringify([...races]) === JSON.stringify([...startRaces])) return;
+          startRaces = races;
+          await rebuildObjects();
+        };
         let objectsPlaced: Promise<void> = Promise.resolve();
         /** The first load of the placed objects and their types. */
         let firstLoad: Promise<void> = Promise.resolve();
@@ -1913,7 +1935,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             loadPlacedFile(w3, "war3mapUnits.doo", "units").catch(() => null),
             loadSkins(w3),
             mapObjectData(w3),
-          ]).then(async ([df, uf, skins, { bases, art }]) => {
+            readRaces(),
+          ]).then(async ([df, uf, skins, { bases, art }, races]) => {
+            if (races) startRaces = races;
             dooFile = df;
             savedDoodads = structuredClone(df?.list ?? []);
             unitsFile = uf;

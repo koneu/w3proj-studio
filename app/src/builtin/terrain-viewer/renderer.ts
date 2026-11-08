@@ -244,6 +244,8 @@ export interface ObjectBatch {
   effects?: EffectSource;
   /** Bend the model onto the ground height map (cliffs). */
   followGround?: boolean;
+  /** Drawn see-through with this colour and alpha, among the blended layers (start buildings). */
+  tint?: [number, number, number, number];
 }
 
 interface Mesh {
@@ -1165,7 +1167,9 @@ export class TerrainRenderer {
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
         const light = (b.group === "units" ? this.unitLight : this.terrainLight) ?? undefined;
-        b.gpu.drawInstances(viewProj, list, { pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog });
+        // A see-through batch is blended whole, after everything opaque (which then shows through it).
+        if (b.tint && pass === "opaque") continue;
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint });
       }
     }
     if (this.showEffects || this.showWeather) {
