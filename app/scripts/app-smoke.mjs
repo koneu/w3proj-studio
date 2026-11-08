@@ -3175,6 +3175,12 @@ async function shouldHaves(page, found) {
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`)) fail("Map Properties is unsaved after its save");
   await page.evaluate(`w3.editors.closeAll()`);
 
+  // edit_text_file (MCP) on war3map.wts: a "}" line inside a text is refused with the reason, a " }" line is fine.
+  const mcpCut = await k.tool("edit_text_file", { path: "map/war3map.wts", find: "Line three", replace: "Line three\r\n}\r\nLine five" }).then(() => null, (e) => e.message);
+  if (!/outside every string/.test(mcpCut ?? "") || readFileSync(wtsPath, "utf8") !== saved) fail(`edit_text_file with a } line gave ${JSON.stringify(mcpCut)}`);
+  await k.tool("edit_text_file", { path: "map/war3map.wts", find: "Line three", replace: "Line three\r\n }\r\nLine five" })
+    .catch((e) => fail(`edit_text_file with a " }" line was refused: ${e.message}`));
+
   // war3map.wts by hand: text typed after a string's end (where a "}" line puts the rest of a text) is asked about.
   await page.evaluate(`w3.editors.open("map/war3map.wts", "w3.textEditor")`);
   await until("the text editor", () => page.evaluate(`!!document.querySelector(".cm-content")`), 20000);
