@@ -10,7 +10,7 @@ import { toProjectPath } from "../../lib/formats/archivepath";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
-import { StringTable } from "../../lib/formats/wts";
+import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderGone, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
@@ -1259,6 +1259,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 w3.window.showError("The map folder is missing, so nothing was saved. Restore it (a checkpoint or the packed map has the files) and save again.");
                 return;
               }
+            }
+            // A text with a `}` line would be cut by the game: change it (one undo step) or save nothing,
+            // before the object file is written.
+            const cuts = hasWts ? wts.table.cuts() : [];
+            if (cuts.length) {
+              if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
+              const now = wts.table.cuts();
+              for (const c of now) wts.set(c.num, wtsSafeText(wts.table.get(c.num)!));
+              if (now.length) { markDirty(); renderDetail(); }
             }
             // The backend encodes the JSON to binary (validating it) and returns
             // it in canonical formatting, so diffs stay minimal.

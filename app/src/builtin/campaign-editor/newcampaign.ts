@@ -6,6 +6,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
+import { WtsCutError, wtsCuts } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 
 export interface NewCampaignOptions { dir: string; name: string; author: string; difficulty: string; description: string; race: number }
@@ -37,6 +38,13 @@ export function askNewCampaign(w3: W3Api): Promise<NewCampaignOptions | null> {
     const create = () => {
       if (!parent) { error.textContent = "Choose where to create the project."; return; }
       if (!name.value.trim()) { error.textContent = "The campaign needs a name."; return; }
+      // The texts go into war3campaign.wts, where a line starting with `}` would cut them.
+      const cuts = wtsCuts([name, difficulty, author, description].map((e, i) => [i + 1, e.value.trim()] as [number, string]));
+      if (cuts.length) {
+        const label = ["Name", "Difficulty", "Author", "Description"];
+        error.textContent = `${cuts.map((c) => `${label[c.num - 1]} (line ${c.lines.join(", ")})`).join(", ")}: a line that starts with "}" ends the text in the game, and the rest is dropped. Start it with a space (" }") or remove it.`;
+        return;
+      }
       close({
         dir: target(), name: name.value.trim(), author: author.value.trim(), difficulty: difficulty.value.trim(),
         description: description.value.trim(), race: Number(race.value),
@@ -79,6 +87,9 @@ function stringTable(values: string[]): string {
 
 /** Writes the campaign project for `o` and opens it (the workspace switches to it). */
 export async function createCampaign(w3: W3Api, o: NewCampaignOptions): Promise<void> {
+  // Before anything is created: a text with a `}` line would be cut in war3campaign.wts.
+  const cuts = wtsCuts([o.name, o.difficulty, o.author, o.description].map((v, i) => [i + 1, v] as [number, string]));
+  if (cuts.length) throw new WtsCutError(cuts, "Not created: ");
   await w3.backend.invoke("project_create", { dir: o.dir, name: o.name, flags: 0, maxPlayers: 0, campaign: true });
   await w3.workspace.open(o.dir);
   const root = w3.workspace.project()!.root;

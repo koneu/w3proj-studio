@@ -1,7 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { importStrings, StringTable } from "../../lib/formats/wts";
+import { askWtsCuts, importStrings, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -523,6 +523,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => { history.undo(); },
           redo: () => { history.redo(); },
           async save() {
+            // A text with a `}` line would be cut by the game: change it (one undo step) or save nothing.
+            const cuts = strings?.cuts() ?? [];
+            if (cuts.length) {
+              if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
+              if (strings!.fixCuts().length) { update(); show(section); }
+            }
             const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(info) });
             await doc.writeText(text);
             if (strings && wtsBase !== null) {

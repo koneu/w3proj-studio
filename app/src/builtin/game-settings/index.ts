@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
-import { StringTable } from "../../lib/formats/wts";
+import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 
 const MISC = "map/war3mapMisc.txt", SKIN = "map/war3mapSkin.txt", WTS = "map/war3map.wts";
@@ -144,6 +144,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => view.undo(),
           redo: () => view.redo(),
           save: async () => {
+            await view.checkCuts();
             await doc.writeText(view.text);
             await view.saveStrings();
             view.saved();
@@ -192,6 +193,15 @@ class SettingsView {
   }
 
   saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+  /** Before a save: a text with a `}` line would be cut by the game, so it is changed (one undo step) or
+   *  the save stops with the reason. */
+  async checkCuts() {
+    const cuts = wtsCuts(this.texts);
+    if (!cuts.length) return;
+    if (!(await askWtsCuts((m, yes, ms) => this.w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
+    const now = wtsCuts(this.texts);
+    if (now.length) this.change(() => { this.texts = new Map(this.texts); for (const c of now) this.texts.set(c.num, wtsSafeText(this.texts.get(c.num)!)); });
+  }
   /** Merges the edited texts onto war3map.wts as it is now (other editors may have saved
    *  strings since it was read); `strings` holds the file as read or last saved here. */
   async saveStrings() {

@@ -11,7 +11,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { joinPath } from "../../lib/paths";
 import { addChapter } from "./chapters";
-import { StringTable } from "../../lib/formats/wts";
+import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { askNewCampaign, createCampaign } from "./newcampaign";
 
@@ -153,6 +153,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const wtsText = await w3.workspace.readText(WTS).catch(() => null);
         const save = async () => {
           const root = w3.workspace.project()!.root;
+          await view.checkCuts();
           await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(view.info) }));
           await view.saveStrings();
           view.saved();
@@ -200,6 +201,16 @@ class CampaignView {
     this.section = section;
     if (chapter !== undefined) this.selected = chapter;
     this.render();
+  }
+
+  /** Before a save: a text with a `}` line would be cut by the game, so it is changed (one undo step) or
+   *  the save stops with the reason. */
+  async checkCuts() {
+    const cuts = wtsCuts(this.texts);
+    if (!cuts.length) return;
+    if (!(await askWtsCuts((m, yes, ms) => this.w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
+    const now = wtsCuts(this.texts);
+    if (now.length) this.change(() => { this.texts = new Map(this.texts); for (const c of now) this.texts.set(c.num, wtsSafeText(this.texts.get(c.num)!)); });
   }
 
   async saveStrings() {

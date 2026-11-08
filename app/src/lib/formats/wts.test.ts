@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StringTable, importStrings } from "./wts";
+import { StringTable, askWtsCuts, importStrings, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
 
 const map = "STRING 1\r\n// Name\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nA hero\r\n}\r\n\r\nSTRING 3\r\n{\r\nKept\r\n}\r\n";
 
@@ -148,4 +148,59 @@ test("many unclosed blocks are read in one pass, not one search to the end each"
   table.set(n, "x");
   assert.ok(table.serialize().includes("x\r\n}"));
   assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
+});
+
+// A line that is just `}` (or starts with it) inside a text: the game ends the string there and drops the
+// rest (map 17, "Test 2"), and so does this parser. Such a text is never written silently.
+
+// (The refusal itself: wtscut.test.ts.)
+
+test("a cut text is listed with its lines", () => {
+  const t = new StringTable(map);
+  t.set(2, "Line one\n}\nLine three");
+  assert.deepEqual(t.cuts(), [{ num: 2, lines: [2] }]);
+});
+
+test("the offered change keeps the whole text when read back", () => {
+  const t = new StringTable(map);
+  t.set(2, "}\nLine one\n}\n} more\nLine five");
+  assert.deepEqual(t.fixCuts(), [2]);
+  assert.deepEqual(t.cuts(), []);
+  const back = new StringTable(t.serialize());
+  assert.equal(back.get(2), " }\r\nLine one\r\n }\r\n } more\r\nLine five");
+  assert.equal(back.get(3), "Kept");
+});
+
+test("a brace ending a line before something that reads as a header is caught and changed too", () => {
+  const v = "Cast at once}\nSTRING 9\n{\nnot a string";
+  assert.deepEqual(wtsCutLines(v), [1]);
+  const safe = wtsSafeText(v);
+  assert.equal(safe, "Cast at once} \nSTRING 9\n{\nnot a string");
+  const t = new StringTable(map);
+  t.set(2, safe);
+  assert.equal(new StringTable(t.serialize()).get(2), safe.replace(/\n/g, "\r\n"));
+});
+
+test("braces elsewhere in a line, an indented brace and untouched strings are fine", () => {
+  for (const v of ["set {a}", "a } b", " }", "\t}", "{\n  }\n", "end}", ""]) assert.deepEqual(wtsCutLines(v), [], v);
+  assert.deepEqual(wtsCuts([[4, "x\r\n}"], [1, "ok"], [2, "}"]]), [{ num: 2, lines: [1] }, { num: 4, lines: [2] }]);
+  // a string that is not changed is never refused, whatever the file holds
+  assert.doesNotThrow(() => new StringTable("STRING 1\n{\n}\nb\n}\n").serialize());
+});
+
+test("asking: agreed changes, declined stops, nothing to ask passes", async () => {
+  const cuts = [{ num: 3, lines: [2] }];
+  let asked = "";
+  assert.equal(await askWtsCuts(async (m) => { asked = m; return true; }, cuts), true);
+  assert.match(asked, /string 3/);
+  assert.equal(await askWtsCuts(async () => false, cuts), false);
+  assert.equal(await askWtsCuts(async () => { throw new Error("not asked"); }, []), true);
+});
+
+test("hand-written text outside every string is found by line", () => {
+  assert.deepEqual(wtsStrayLines(map), []);
+  assert.deepEqual(wtsStrayLines(credits), []);
+  assert.deepEqual(wtsStrayLines(String.fromCharCode(0xfeff) + "STRING 1\n// c\n{\na\n}\n// after\n\nSTRING 2\n{\nb\n}\n"), []);
+  const typed = "STRING 1\r\n{\r\nLine one\r\n}\r\nLine three\r\n}\r\n\r\nSTRING 2\r\n{\r\nb\r\n}\r\n";
+  assert.deepEqual(wtsStrayLines(typed), [{ line: 5, text: "Line three" }, { line: 6, text: "}" }]);
 });
