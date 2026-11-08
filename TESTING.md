@@ -106,11 +106,58 @@ falls short, rather than copying their insides into a scratch file.
 | run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--wheel N`, `--windows`, `--game-view on\|off\|status`, `--fps ms`, `--close`; options `--mode sd\|hd`, `--day-night cycle\|fixed`. The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
 line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
 The CLI reads `W3PROJ_GAME` too. The smoke app's identifier is one per checkout (`W3_SMOKE_ID` overrides it), so
-runs in two worktrees don't share settings; none of these tools starts the game or the World Editor.
+runs in two worktrees don't share settings; none of these tools starts the game or the World Editor, except
+`we-drive.mjs`, which starts the World Editor only.
+
+### The real World Editor: we-drive.mjs
+
+**Local only: it needs the installed game, Proton, Xvfb, bubblewrap, a C compiler, python3 with python-xlib and Pillow,
+and Mesa's lavapipe; it is not part of CI or the gate.** Without one of them it prints `{"skipped": why}` and exits 0.
+It never starts the game itself.
+
+- **Nothing of the user's is touched.** `we-setup.mjs` keeps one farm for all worktrees in `target/we` of the main
+  checkout (`W3PROJ_WE_DIR` moves it): `install/` holds hardlinks of the install, except what the editor writes (the
+  CASC `.idx` files, `shmem`, `ecache`: about 10 MB of copies), and `prefix/` is a Wine prefix of its own (about
+  0.35 GB). The farm is made again only for another game build (`.build.info`), `--clean` removes it all. The editor
+  runs in bubblewrap with the user's whole Steam prefix and every hardlink mounted read-only; the editor opens the
+  CASC data files for writing, so `we-rofs.c` (preloaded) turns those opens into read-only ones. One World Editor runs
+  at a time (`target/we/lock`; a second run waits and says so). `we-setup.mjs --snapshot` and `--compare` show the
+  install and the user's `Documents/Warcraft III` unchanged; the user's own Battle.net app writes elsewhere in that
+  prefix while it runs (and touches the install's `shmem` files when it checks the game), which `--compare` lists.
+- **Nothing on the screen, no sound.** A display of its own (Xvfb, 1600x1000), Vulkan through lavapipe. Wine's audio
+  drivers are off, PulseAudio and PipeWire are pointed at nothing and their sockets and `/dev/snd` are hidden, and
+  the editor's interface sounds are off in its preferences: nothing of it shows in `pactl list sink-inputs`.
+- **Preferences** (`Documents/Warcraft III/WorldEditPreferences.txt` in the farm's prefix, written before each start,
+  the rest kept): `Has Been Run=true`, no interface or splash sounds, `Fixed Day Night Cycle` from `--day-night`, and
+  the graphics: `--mode sd` sets `assetMode`, `hd` and the Reforged switches (`Buildings`, `Environment`, `EnvOld`,
+  `Heroes`, `Icons`, `Textures`, `Units`, `Vfx`) to 0, `--mode hd` (the default) to 1; told apart by pictures of
+  footmen, a barracks and trees close up (classic red-roofed barracks and round trees in SD, the white stone barracks
+  and new trees in HD). The install's text locale goes into the prefix's registry (else the editor shows
+  `WESTRING_…` names). The first start of a new prefix shows the editor's welcome, which we-drive answers with
+  Continue (accepting the editor's terms, as the user did in their own install).
+- **Layout** in the fixed display: main window 4,30 1352x937, terrain view 156,79 1184x844, tool palette 1356,30
+  240x600. Keys go to the main window (without a window manager the palette keeps the keyboard otherwise). Closing
+  answers the "Save changes?" box (titled "Warning") with No; system dialogs are in English.
+- **Timings** (this machine): a warm start shows the map after 10–14 s (main window after 6 s), a start with a new
+  prefix after 23 s (39 s with closing). The terrain view draws about 14 frames a second in SD and about 2 in HD.
+- **Game view** (`V`, View > Lock to Game View Settings) is read from the View menu's check mark. This build draws no
+  "Game View Settings" note in the view, so the picture of the view can't tell.
+- **The default camera when a map opens** is deterministic: the camera object with target = the terrain's centre
+  (`offset + (corners - 1) * 64`), distance 3000, angle of attack 304, field of view 70, rotation 90 gives the same
+  picture (mean difference under 1/255). It doesn't depend on the start locations, the camera bounds or the map size
+  (eight test maps). In Studio's terms, at the view's 1184:844, fitted from a 256 grid of marked ground corners
+  (0.5 px rms): `node scripts/app-drive.mjs … --terrain --camera "x=CX,y=CY-298,distance=2738,pitch=57.2,yaw=-90,fov=41.06"`
+  (CX, CY the map's centre); Studio's picture with that camera fits back to the same numbers. For another camera of
+  angle 304 and field of view 70 the numbers scale with its distance d (target `y - 0.0993 d`, distance `0.9127 d`).
+  The editor puts the target above the middle of the view (an off-centre projection, at 0.385 of the height), which
+  a centred camera matches only at this aspect.
+- **Applying a camera object**: `--key m` (camera layer), `--click 1396,177` (the first camera in the palette's list,
+  13 px per row), `--click 1476,119` (View Selected Camera). Three runs gave the same picture.
 
 ## Process
 
