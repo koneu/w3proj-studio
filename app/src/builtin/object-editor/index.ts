@@ -1290,7 +1290,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (!outcome.ok) {
                   // The object file is written; saving again rewrites it unchanged and retries the strings.
                   await w3.workspace.refresh().catch(() => {});
-                  w3.window.showError(`war3map.wts: strings not saved (${outcome.error})`);
+                  w3.window.showError(`war3map.wts: strings not saved (${outcome.error instanceof Error ? outcome.error.message : outcome.error})`);
                 } else {
                   result = outcome.value;
                 }

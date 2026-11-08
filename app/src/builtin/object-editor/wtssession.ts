@@ -15,6 +15,10 @@ interface Owned {
    *  it meanwhile, their text stays. A fresh edit (typed, or redone from after the last save) is
    *  a normal edit, where the last save wins. */
   undone: boolean;
+  /** Put back by undo/redo while a save was writing: whether that undo went past the save can't be told
+   *  (the save count changed under it). If another editor saves the string meanwhile, the next save is
+   *  refused rather than written over their text; typing it, or undo/redo once more, settles it. */
+  racy: boolean;
 }
 
 const norm = (s: string | undefined) => s?.replace(/\r\n/g, "\n");
@@ -33,6 +37,8 @@ export class WtsSession {
   private savedValues: Map<number, string>;
   private owned = new Map<number, Owned>();
   private saves = 0;
+  /** Per save that is writing: the strings undo/redo put back since its strings were taken (typing takes one out). */
+  private writes = new Set<Set<number>>();
   constructor(text: string) {
     this.saved = text;
     this.table = new StringTable(text);
@@ -44,8 +50,9 @@ export class WtsSession {
     const was = this.table.get(n);
     if (was === undefined || was === text) return;
     const o = this.owned.get(n);
-    if (o) o.undone = false;
-    else this.owned.set(n, { text: was, since: this.saves, undone: false });
+    if (o) { o.undone = false; o.racy = false; }
+    else this.owned.set(n, { text: was, since: this.saves, undone: false, racy: false });
+    for (const w of this.writes) w.delete(n);
     this.table.set(n, text);
   }
 
@@ -70,6 +77,8 @@ export class WtsSession {
       if (this.table.get(n) === to) continue;
       this.table.set(n, to);
       o.undone = entry === undefined || snap.v < this.saves;
+      o.racy = false;
+      for (const w of this.writes) w.add(n);
     }
   }
 
@@ -105,10 +114,18 @@ export class WtsSession {
       // Nothing on disk to merge with: the editor's table is the file.
       const text = this.table.serialize();
       const mine = new Map(this.table.entries());
-      await write(text);
-      return { shown: this.took(text, mine), recreated: true };
+      return this.writing(async () => { await write(text); }, (restored) => ({ shown: this.took(text, mine, restored), recreated: true }));
     }
     const disk = new StringTable(current);
+    // Another editor saved a string whose undo raced a save: whether to keep their text or write the editor's
+    // can't be told, so nothing is written (the editor stays dirty) rather than overwrite theirs.
+    const clash = [...this.owned].filter(([n, o]) => o.racy && disk.has(n)
+      && norm(disk.get(n)) !== norm(this.savedValues.get(n)) && norm(disk.get(n)) !== norm(this.table.get(n))).map(([n]) => n);
+    if (clash.length) {
+      throw new Error(`Not saved: ${clash.length === 1 ? `string ${clash[0]}` : `strings ${clash.join(", ")}`} of war3map.wts ${clash.length === 1 ? "was" : "were"} undone while `
+        + "the last save was writing, and another editor has saved its own text since. Saving now could overwrite that text. "
+        + "Undo or redo once more, or type the text again, then save.");
+    }
     const mine = new Map(this.table.entries());
     // What to write: the editor's table, but another editor's newer text over an undo.
     const edited = new StringTable(this.table.serialize());
@@ -116,12 +133,24 @@ export class WtsSession {
       if (o.undone && disk.has(n) && norm(disk.get(n)) !== norm(this.savedValues.get(n))) edited.set(n, disk.get(n)!);
     }
     const merged = StringTable.merge(this.saved, edited, current);
-    if (merged !== current) await write(merged);
-    return { shown: this.took(merged, mine), recreated: false };
+    return this.writing(async () => { if (merged !== current) await write(merged); }, (restored) => ({ shown: this.took(merged, mine, restored), recreated: false }));
   }
 
-  /** Written: now the session takes it over. Strings typed during the write stay the editor's. */
-  private took(merged: string, mine: Map<number, string>): boolean {
+  /** Runs a save's write, noting the strings undo/redo put back meanwhile; then `done` with them. */
+  private async writing<T>(write: () => Promise<void>, done: (restored: Set<number>) => T): Promise<T> {
+    const restored = new Set<number>();
+    this.writes.add(restored);
+    try {
+      await write();
+    } finally {
+      this.writes.delete(restored);
+    }
+    return done(restored);
+  }
+
+  /** Written: now the session takes it over. Strings typed during the write stay the editor's; those undo/redo
+   *  put back during it are racy (see Owned). */
+  private took(merged: string, mine: Map<number, string>, restored: Set<number>): boolean {
     const next = new StringTable(merged);
     const typed = new Set<number>();
     for (const [n, v] of this.table.entries()) {
@@ -133,7 +162,7 @@ export class WtsSession {
       this.owned.delete(n); // the other editor's now
       shown = true;
     }
-    for (const o of this.owned.values()) o.undone = false;
+    for (const [n, o] of this.owned) { o.undone = false; o.racy = typed.has(n) && restored.has(n); }
     this.table = next;
     this.saved = merged;
     this.savedValues = new Map(new StringTable(merged).entries());

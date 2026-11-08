@@ -224,6 +224,55 @@ test("a string typed while the save is writing is kept, and the editor stays dir
   assert.equal(a.dirty, false);
 });
 
+/** A saves string 1 twice; during the second save's write it undoes string 1 back past the first save. */
+async function undoneDuringTheWrite() {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); const s1 = a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "TWO"); const s2 = a.snapshot();
+  a.set(2, "X"); a.snapshot();
+  await a.save(d.read, async (t) => { a.restore(s1); await d.write(t); });
+  return { d, a, s1, s2 };
+}
+
+test("undone during the write, then saved by another editor: the next save is refused, not written over theirs", async () => {
+  const { d, a, s2 } = await undoneDuringTheWrite();
+  assert.equal(get(d.text, 1), "TWO", "the write carried the text from before the undo");
+  assert.equal(a.table.get(1), "ONE");
+  assert.equal(a.dirty, true);
+  d.b(1, "B1");
+  const before = d.text;
+  await assert.rejects(a.save(d.read, d.write), /string 1 .*undone while the last save was writing.*another editor/s);
+  assert.equal(d.text, before, "nothing written");
+  assert.equal(a.dirty, true, "the editor stays dirty");
+  assert.equal(a.table.get(1), "ONE");
+  // Undo or redo once more settles it: then the other editor's text is kept, as for any undo past a save.
+  a.restore(s2);
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "B1");
+});
+
+test("undone during the write: typing the string again makes it a normal edit, and no other editor's text means no refusal", async () => {
+  const typed = await undoneDuringTheWrite();
+  typed.d.b(1, "B1");
+  typed.a.set(1, "MINE");
+  await typed.a.save(typed.d.read, typed.d.write);
+  assert.equal(get(typed.d.text, 1), "MINE", "typed since: the last save wins");
+  const alone = await undoneDuringTheWrite();
+  await alone.a.save(alone.d.read, alone.d.write);
+  assert.equal(get(alone.d.text, 1), "ONE", "nobody else saved it: the undo is written");
+  assert.equal(alone.a.dirty, false);
+});
+
+test("a failed write doesn't leave an undo made during it marked as racing", async () => {
+  const d = disk(), a = new WtsSession(d.text);
+  a.set(1, "ONE"); const s1 = a.snapshot(); await a.save(d.read, d.write);
+  a.set(1, "TWO"); a.snapshot();
+  await assert.rejects(a.save(d.read, async () => { a.restore(s1); throw new Error("disk full"); }));
+  d.b(1, "B1");
+  await a.save(d.read, d.write);
+  assert.equal(get(d.text, 1), "B1", "an ordinary undo past the save: the other editor's text stays");
+});
+
 // --- war3map.wts gone missing ---
 
 const gone = async (): Promise<string> => { throw "Das System kann die angegebene Datei nicht finden. (os error 2)"; };
