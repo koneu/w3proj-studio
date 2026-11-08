@@ -14,5 +14,5 @@ mpq.workspace = true
 casc.workspace = true
 w3proj.workspace = true
 anyhow.workspace = true
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 serde_json.workspace = true
