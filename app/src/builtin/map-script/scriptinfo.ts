@@ -6,20 +6,56 @@ const SHOWN = 30;
 
 interface Found { from: number; message: string; severity: string }
 
+/** Counts the steps describeProblems takes (lines looked at, binary search rounds): for a test that
+ *  pins the work as linear in the script's size. */
+export interface Work { steps: number }
+
+/** Offset of each line's first character (line 1 at index 0). */
+function lineStarts(text: string, work?: Work): number[] {
+  const starts = [0];
+  for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1)) {
+    starts.push(i + 1);
+    if (work) work.steps++;
+  }
+  return starts;
+}
+
+/** The 1-based line holding `offset`, as `text.slice(0, offset).split("\n").length` counts it: the
+ *  last line start at or before the offset (an offset past the end is on the last line). */
+function lineAt(starts: readonly number[], offset: number, work?: Work): number {
+  let lo = 0, hi = starts.length - 1;
+  while (lo < hi) {
+    if (work) work.steps++;
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+const FUNCTION_LINE = /^\s*(?:constant\s+)?function\s+(\w+)/;
+const ENDFUNCTION_LINE = /^\s*endfunction\b/;
+
 /** Errors first, each with what a reader needs to fix it without opening the script: the code at
  *  that line, and which trigger wrote the function around it. */
-export function describeProblems(text: string, found: Found[], triggers: ReadonlyMap<string, string>) {
+export function describeProblems(text: string, found: Found[], triggers: ReadonlyMap<string, string>, work?: Work) {
   const lines = text.split("\n");
-  const inFunction = (line: number) => {
-    for (let i = line; i >= 0; i--) {
-      const m = /^\s*(?:constant\s+)?function\s+(\w+)/.exec(lines[i]);
-      if (m) return m[1];
-      if (/^\s*endfunction\b/.test(lines[i]) && i !== line) return null;
+  const starts = lineStarts(text, work);
+  // The function a line belongs to, found in one pass over the lines up to the last one asked about:
+  // `before[i]` is the function open at line i counting an `endfunction` there as closing it.
+  const before: (string | null)[] = [];
+  const opening = (i: number) => FUNCTION_LINE.exec(lines[i])?.[1] ?? null;
+  const closedBy = (i: number) => {
+    for (let j = before.length; j <= i; j++) {
+      if (work) work.steps++;
+      before.push(opening(j) ?? (ENDFUNCTION_LINE.test(lines[j]) ? null : (before[j - 1] ?? null)));
     }
-    return null;
+    return before[i];
   };
+  // The line's own `function` names it; an `endfunction` on the line itself still belongs to the function.
+  const inFunction = (line: number) => opening(line) ?? (line > 0 ? closedBy(line - 1) : null);
   const items = [...found].sort((a, b) => Number(a.severity !== "error") - Number(b.severity !== "error") || a.from - b.from).map((d) => {
-    const line = text.slice(0, d.from).split("\n").length;
+    const line = lineAt(starts, d.from, work);
     const fn = inFunction(line - 1), trigger = fn ? triggers.get(fn) : undefined;
     return { severity: d.severity, message: d.message, line, code: lines[line - 1]?.trim() ?? "", ...(fn ? { function: fn } : {}), ...(trigger ? { trigger } : {}) };
   });
