@@ -2,6 +2,7 @@
 //! them back.
 
 mod mcp;
+mod slk;
 
 /// `println!`/`print!` that end the command quietly when the reader has gone away
 /// (`w3proj ... | head`) instead of panicking. Any other write error is reported.
@@ -302,7 +303,7 @@ enum Cmd {
         /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
         /// file names are tried when a map's names are missing (protected maps, files replacing
         /// the game's). "none" to skip both.
-        #[arg(long, default_value = DEFAULT_INSTALL)]
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         game: String,
         /// Read GUI triggers with this TriggerData.txt instead of the game's.
         #[arg(long, hide = true)]
@@ -332,7 +333,7 @@ enum Cmd {
         /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
         /// file names are tried when a map's names are missing (protected maps, files replacing
         /// the game's). "none" to skip both.
-        #[arg(long, default_value = DEFAULT_INSTALL)]
+        #[arg(long, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         game: String,
         /// Read GUI triggers with this TriggerData.txt instead of the game's.
         #[arg(long, hide = true)]
@@ -358,7 +359,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: GameCmd,
         /// Game install folder (the one containing .build.info).
-        #[arg(long, global = true, default_value = DEFAULT_INSTALL)]
+        #[arg(long, global = true, env = "W3PROJ_GAME", default_value = DEFAULT_INSTALL)]
         install: PathBuf,
         /// Art set used to resolve plain paths: sd, hd or de.
         #[arg(long, global = true, default_value = "sd")]
@@ -377,6 +378,14 @@ enum GameCmd {
     Cat { path: String },
     /// Show which stored file a plain path resolves to.
     Resolve { path: String },
+    /// Print a SYLK table (Units/UnitData.slk) tab-separated, header line first: the rows whose id (first
+    /// column) is one of IDS, all without; only the --col columns (comma-separated, any case) if given.
+    Slk {
+        path: String,
+        ids: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        col: Vec<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -595,6 +604,30 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         game.read(&path, mode, None)?.1
                     };
                     write_stdout(&bytes)?;
+                }
+                GameCmd::Slk { path, ids, col } => {
+                    let bytes = if path.contains(".w3mod:") { game.read_exact(&path)? } else { game.read(&path, mode, None)?.1 };
+                    let table = slk::parse(&String::from_utf8_lossy(&bytes));
+                    let cols: Vec<usize> = if col.is_empty() {
+                        (0..table.columns.len()).collect()
+                    } else {
+                        table.column_indexes(&col).map_err(|missing| anyhow::anyhow!("no column {} in {path}", missing.join(", ")))?
+                    };
+                    let line = |cells: &[String]| cols.iter().map(|&i| cells.get(i).map_or("", |c| c.as_str())).collect::<Vec<_>>().join("\t");
+                    let mut out = format!("{}\n", line(&table.columns));
+                    let mut shown = 0;
+                    for row in &table.rows {
+                        let id = row.first().map_or("", |c| c.as_str());
+                        if ids.is_empty() || ids.iter().any(|w| w.eq_ignore_ascii_case(id)) {
+                            out.push_str(&line(row));
+                            out.push('\n');
+                            shown += 1;
+                        }
+                    }
+                    write_stdout(out.as_bytes())?;
+                    if !ids.is_empty() && shown == 0 {
+                        anyhow::bail!("no row {} in {path}", ids.join(", "));
+                    }
                 }
                 GameCmd::Resolve { path } => match game.resolve(&path, mode, None) {
                     Some(full) => println!("{full}"),

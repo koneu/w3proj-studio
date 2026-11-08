@@ -93,6 +93,25 @@ Parts of it: `npm test`, `cargo test`, `npm run coverage`, `npm run ui-smoke`. R
 hostile-input tests are set with `W3PROJ_ROBUSTNESS_ROUNDS`. The corpus tier finds its maps with
 `W3PROJ_CORPUS` and the game with `W3PROJ_GAME`.
 
+## Tools: look before writing a scratch script
+
+These exist so a session doesn't write the same one-off script again. Use them, and extend them when one
+falls short, rather than copying their insides into a scratch file.
+
+| To… | Use |
+|---|---|
+| run one TypeScript test file | `npm test -- src/lib/undo.test.ts` (in `app/`; other arguments go to node, e.g. `--test-name-pattern=…`) |
+| show a test fails without the fix | `node scripts/fails-without.mjs <test> <changed source files…>` (in `app/`): passes as is, fails with those files as on `dev` (`--base`), files put back. Exit 3 means the old code merely didn't build: weak evidence. Rust: `--run "cargo test -p <crate> <name>"` |
+| look at the app, ask it something | `node scripts/app-drive.mjs <steps>` (in `app/`): the hidden smoke app (Xvfb on Linux), `--map`/`--project` (a copy), `--terrain`, `--camera game`, `--look x,y`, `--shot file.png`, `--mcp tool={…}`, `--command id`, `--eval "…"`. Steps run in order; the list is at the top of the file |
+| run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too |
+| read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
+| look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
+
+The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
+line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
+The CLI reads `W3PROJ_GAME` too. The smoke app's identifier is one per checkout (`W3_SMOKE_ID` overrides it), so
+runs in two worktrees don't share settings; none of these tools starts the game or the World Editor.
+
 ## Process
 
 **Every change.** Run the gate. Fixing a bug starts with a test that fails because of it.

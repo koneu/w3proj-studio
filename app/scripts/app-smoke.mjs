@@ -23,6 +23,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
+import { ensureCli, smokeId } from "./appctl.mjs";
 import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 
 const LINUX = process.platform === "linux";
@@ -33,9 +34,10 @@ const repo = resolve(app, "..");
 const work = process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke");
 const exeName = process.platform === "win32" ? ".exe" : "";
 const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
-const cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
-// W3_SMOKE_ID: another identifier, when several runs share the machine (they share the settings folder otherwise).
-const IDENTIFIER = process.env.W3_SMOKE_ID ?? "dev.w3proj.studio.smoke";
+let cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
+// W3_SMOKE_ID: another identifier; without it one per checkout, the one the gate uses (so a run by hand doesn't
+// rebuild the gate's app for another identifier, and two worktrees don't share a settings folder).
+const IDENTIFIER = smokeId(repo);
 const FIXTURE = join(repo, "tests", "fixtures", "mini-map");
 
 function build() {
@@ -2344,7 +2346,8 @@ async function run() {
   mkdirSync(work, { recursive: true });
   if (!process.argv.includes("--no-build")) build();
   if (!existsSync(exe)) throw new Error(`no app at ${exe}: run without --no-build`);
-  if (!existsSync(cli)) throw new Error(`no w3proj at ${cli}`);
+  // The release CLI is built when it isn't there (unless W3PROJ_BIN names another).
+  cli = ensureCli();
 
   const project = join(work, "project");
   cpSync(FIXTURE, project, { recursive: true });
