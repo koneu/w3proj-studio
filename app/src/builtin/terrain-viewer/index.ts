@@ -35,7 +35,7 @@ import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { meleeFlagsAfter, placedText, splitOwners } from "../../lib/terrain/owner";
-import { jsonPathOf, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
+import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
@@ -63,6 +63,9 @@ import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from 
 import { pictureTarget } from "./picturetarget";
 import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
+import { changeAll, propSnapshot, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
+import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
+import { propsPanel } from "./propspanel";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
@@ -1903,6 +1906,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         },(e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
           if (projectObjects && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void reloadRaces();
+          // The properties panel reads its lists and the types' facts anew.
+          if (/(^|\/)war3map(\.w3[ir]|\.wts)(\.json)?$/i.test(p)) mapLists = null;
+          if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) factsData = null;
           const art = changesObjectData(p);
           const imported = changesImports(p);
           // Also before the first load is done (see objectReload): it may have read the file before this save.
@@ -2053,6 +2059,73 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pushEdit({ undo: () => Object.assign(entry, structuredClone(before)), redo: () => Object.assign(entry, structuredClone(after)), terrain: false, objects: true });
           objectsTouched = true;
           void rebuildObjects();
+        };
+        // ---- properties: hit points, hero, inventory, drops, … (unitprops.ts) ---------------------
+        /** The types' facts, read once and again after the object data or gameplay constants are saved. */
+        let factsData: Promise<FactsData> | null = null;
+        /** The map's item tables and regions, for the drops and the waygate destination; read again after they're saved. */
+        let mapLists: Promise<{ tables: { number: number; name: string }[] | null; regions: { index: number; name: string }[] }> | null = null;
+        const loadMapLists = () => mapLists ??= (async () => {
+          const text = await mapStrings(w3).catch(() => (v: string) => v);
+          // A file that isn't there has no tables or regions; one that can't be read leaves the tables unknown (null):
+          // then nothing is refused for naming a table, and nothing is offered either.
+          const info = await readMapDocStrict<{ itemTables?: { number: number; name: string }[] }>(w3, "map/war3map.w3i.json").then(
+            (i) => (i?.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name) })), () => null);
+          const regions = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
+          return { tables: info, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
+        })();
+        const kindOfEntry = (p: Placed) => {
+          const k = skinOf(p)?.kind;
+          return fileOf(p) === dooFile ? (k === "w3d" ? "w3d" : k ?? "w3d") : k === "w3t" ? "w3t" : "w3u";
+        };
+        const factsOf = async (entries: Placed[]): Promise<{ entry: Placed; facts: TypeFacts }[]> => {
+          const load = factsData ??= loadFactsData(w3);
+          // A failed read is tried again next time.
+          const d = await load.catch((e) => { if (factsData === load) factsData = null; throw e; });
+          return entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOfEntry(entry), d) }));
+        };
+        /** A properties change to the objects as one undo step; the reason when it's refused, and then nothing changed. */
+        const changeProps = (items: { entry: Placed; facts: TypeFacts }[], c: PropChange, ctx: PropContext): string | null => {
+          if (refuseLost()) return null;
+          // Objects deleted or reloaded since the panel was made aren't changed.
+          if (items.some((it) => !fileOf(it.entry)?.list.includes(it.entry))) return "the selection changed meanwhile; select the objects again.";
+          const before = items.map((it) => propSnapshot(it.entry));
+          const r = changeAll(items, c, ctx);
+          if ("error" in r) return r.error;
+          if (!r.changed.length) return null;
+          const after = items.map((it) => propSnapshot(it.entry));
+          const set = (v: Record<string, unknown>[]) => items.forEach((it, i) => Object.assign(it.entry, structuredClone(v[i])));
+          pushEdit({ undo: () => set(before), redo: () => set(after), terrain: false, objects: true });
+          objectsTouched = true;
+          void rebuildObjects();
+          return null;
+        };
+        /** The Properties part of the selection panel for `entries`, filled in once the types' facts are read. Nothing
+         *  is shown if the selection has moved on by then. */
+        const propsSlot = (entries: Placed[]) => {
+          const slot = h("div.terrain-props-slot");
+          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
+          void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
+            if (!stillShown()) return;
+            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
+            const show = () => { const panel = propsPanel(host); slot.replaceChildren(...(panel ? [panel] : [])); };
+            const host: Parameters<typeof propsPanel>[0] = {
+              items, tables: lists.tables, regions: lists.regions, readOnly: !editable,
+              change: (c) => changeProps(items, c, ctx),
+              name: (id, kinds) => w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.name(id, kinds)),
+              pick: (title, kinds) => w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.pick(el, { title, kinds })).then((o) => o?.id),
+              colorName: (n) => TEAM_COLORS[n]?.[0] ?? `#${n}`,
+              warn: (m) => {
+                void w3.window.showWarning(m);
+                // The boxes show the values again, not what was typed.
+                if (stillShown()) show();
+              },
+            };
+            show();
+          }).catch((e) => {
+            if (stillShown()) slot.replaceChildren(h("div.muted", {}, `Properties couldn't be read: ${(e as Error).message ?? e}`));
+          });
+          return slot;
         };
         // ---- mass edit, select by type/filter, face point ---------------------------------
         const skinOf = (p: Placed) => objCtx?.skins.get(p.id) ?? objCtx?.skins.get(objCtx.bases.get(p.id) ?? "");
@@ -2656,6 +2729,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               row("Variation", String(pl.variation)),
             ]),
             row("Model", p.model),
+            propsSlot([pl]),
             h("div.terrain-sel-actions", {},
               h("button", { title: "Ctrl+F1", onclick: () => openObject(p.kind, p.id) }, "Open in Object Editor")),
             // The same order as for several objects below, with Delete last.
@@ -2809,6 +2883,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ...(editable ? [] : [h("div.terrain-sel-actions", {}, quick("Select all of these types", "Select every object of the selected types", selectSameTypes))]),
             ...(editable ? [
               ...(ownerSel ? [h("div.terrain-sel-row", {}, h("span.muted", {}, `Owner (${units.length})`), ownerSel)] : []),
+              propsSlot(group),
               h("div.terrain-sel-sub.muted", { title: help }, "Edit all (Enter applies; hover for help)"),
               massField("X", "x", help), massField("Y", "y", help), massField("Z", "z", help),
               massField("Facing", "facing", help), massField("Scale", "scale", help), massField("Variation", "variation", help),
