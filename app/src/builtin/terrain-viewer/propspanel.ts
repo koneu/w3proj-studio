@@ -117,8 +117,9 @@ export function propsPanel(host: PropsPanelHost): HTMLElement | null {
           next[i] = v;
           send({ field: "attributes", value: next });
         }));
-        if (isDefault) for (const b of boxes) b.disabled = true;
-        const def = h("input", { type: "checkbox", checked: isDefault, "data-prop": "attr-default", onchange: () => {
+        // Mixed attributes: one box would set the other two as well, so only Default can be chosen for all.
+        if (isDefault || stats === undefined) for (const b of boxes) b.disabled = true;
+        const def = h("input", { type: "checkbox", checked: isDefault, indeterminate: stats === undefined, "data-prop": "attr-default", onchange: () => {
           send({ field: "attributes", value: def.checked ? null : (attributesAt(facts, level) ?? [1, 1, 1]) });
         } });
         rows.push(row("Attributes", h("label.terrain-prop-check", { title: "The hero's own attributes for its level" }, def, " Default")),
