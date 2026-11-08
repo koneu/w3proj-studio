@@ -9,6 +9,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+mod gamefind;
 mod mcp;
 mod mcpclients;
 
@@ -779,6 +780,14 @@ struct GameInfo {
     stored: usize,
 }
 
+/// Warcraft III installs in the usual places (Windows default folders; Steam, Lutris and Wine prefixes on
+/// Linux), newest build first. Reads only each one's .build.info.
+#[tauri::command]
+async fn game_find() -> CmdResult<Vec<gamefind::FoundGame>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    Ok(gamefind::find(home.as_deref()))
+}
+
 #[tauri::command]
 async fn game_info(state: State<'_, Game>, install: String) -> CmdResult<GameInfo> {
     let g = game_data(&state, &install)?;
@@ -1156,6 +1165,7 @@ pub fn run() {
             git_size,
             tool_temp_dir,
             watched_maps,
+            game_find,
             game_info,
             game_list,
             game_resolve,

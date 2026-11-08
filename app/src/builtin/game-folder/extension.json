@@ -1,0 +1,12 @@
+{
+  "id": "w3.gameFolder",
+  "name": "Game Folder",
+  "version": "0.1.0",
+  "description": "Finds the installed Warcraft III: if the configured folder doesn't open, offers the installs found in the usual places (the Windows default; Steam, Lutris and Wine prefixes on Linux).",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "commands": [
+      { "id": "w3.game.chooseFolder", "title": "Choose Warcraft III Folder…", "category": "Game Data" }
+    ]
+  }
+}
