@@ -41,11 +41,12 @@ const SECTIONS: [string, [Tool, string, string][]][] = [
   ["Terrain", [
     ["raise", "Raise", "Raise the ground"], ["lower", "Lower", "Lower the ground"],
     ["plateau", "Plateau", "Level to the height where the stroke starts"], ["smooth", "Smooth", "Smooth bumps"],
+    ["noise", "Noise", "Roughen the ground: every corner under the brush goes up or down at random, while the button is held"],
   ]],
 ];
 
 const BRUSH_COLORS: Record<Tool, [number, number, number]> = {
-  raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], paint: [140, 255, 140],
+  raise: [120, 220, 255], lower: [255, 150, 90], plateau: [255, 230, 120], smooth: [190, 160, 255], noise: [160, 230, 190], paint: [140, 255, 140],
   cliffUp: [255, 200, 120], cliffUp2: [255, 180, 90], cliffLevel: [240, 220, 160], cliffDown: [220, 140, 80], cliffDown2: [200, 110, 60], shallow: [110, 190, 255], deep: [60, 120, 255], dry: [210, 190, 150],
   ramp: [255, 170, 220], blight: [170, 120, 200], unblight: [200, 220, 160], boundary: [120, 120, 130], unboundary: [220, 220, 230],
 };
@@ -93,7 +94,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     stroke.last = performance.now();
     if (did) ed.terrainChanged(isLayerTool(tool));
   };
-  /** Raise, Lower and Smooth go by time, not by mouse events: what a moment adds is shared out along
+  /** Raise, Lower, Smooth and Noise go by time, not by mouse events: what a moment adds is shared out along
    *  the way the mouse went, so a quick drag is lower but has no gaps, and holding still goes on. */
   let holding: ReturnType<typeof setInterval> | undefined;
   const heightTick = () => {
@@ -302,7 +303,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     for (const [k, b] of buttons) b.classList.toggle("active", k === t);
     texWrap.hidden = t !== "paint";
     if (t !== "paint") { tilePanel.hidden = true; tilesButton.classList.remove("active"); }
-    strengthWrap.hidden = t !== "raise" && t !== "lower";
+    strengthWrap.hidden = t !== "raise" && t !== "lower" && t !== "noise";
     cliffWrap.hidden = !isLayerTool(t) || t === "dry";
     if (!cliffWrap.hidden) void fillCliffTypes();
     ed.setBrush(null);
@@ -358,7 +359,7 @@ function painter(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
         const step = ({ cliffUp: 1, cliffUp2: 2, cliffDown: -1, cliffDown2: -2, shallow: -1, deep: -2 } as Partial<Record<Tool, number>>)[tool] ?? 0;
         const layer: LayerTarget = c ? { layer: Math.max(0, Math.min(15, c.layer + step)), waterLevel: waterLevelAt(c.height - WATER_OFFSET) } : { layer: 2 };
         stroke = { s: new Stroke(tool), target: c ? groundHeight(c) : 0, layer, last: performance.now() };
-        if (tool === "raise" || tool === "lower" || tool === "smooth") startHeight(g);
+        if (tool === "raise" || tool === "lower" || tool === "smooth" || tool === "noise") startHeight(g);
         else applyAt(g);
       };
       void start();

@@ -6,6 +6,7 @@ const PATHS: Record<string, string> = {
   lower: "M3 20h18M5 20c2-5 12-5 14 0M12 3v9M8.5 8.5L12 12l3.5-3.5",
   plateau: "M2 19h5l3-7h4l3 7h5",
   smooth: "M3 15c3-6 6 6 9 0s6 6 9 0",
+  noise: "M2 19h20M2 15l3-4 2 3 3-6 2 5 3-3 2 4 3-5 2 3",
   paint: "M5 20c2.5 0 4-1.5 4-3.5L18 7.5 16.5 6 7.5 15C5.5 15 4 16.5 4 19zM15 4.5l4.5 4.5",
   cliffUp: "M2 20h8v-8h12M16 8l3-4 3 4",
   cliffDown: "M2 12h8v8h12M16 4l3 4 3-4",

@@ -1,11 +1,11 @@
-// Terrain brushes: height (raise, lower, plateau, smooth) and ground texture
+// Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
 
-export type HeightTool = "raise" | "lower" | "plateau" | "smooth";
+export type HeightTool = "raise" | "lower" | "plateau" | "smooth" | "noise";
 /** Cliff layer up/down by one or two, level (the start's layer); water: shallow (one layer
  *  down), deep (two), dry. */
 export type LayerTool = "cliffUp" | "cliffUp2" | "cliffDown" | "cliffDown2" | "cliffLevel" | "shallow" | "deep" | "dry";
@@ -88,9 +88,10 @@ export class Stroke {
 }
 
 /** One application of a height brush. `amount` is world units at the centre
- *  (raise/lower), the target height (plateau) or ignored (smooth). Returns
- *  whether anything changed. */
-export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: number, stroke: Stroke): boolean {
+ *  (raise/lower), the most a corner moves up or down (noise: each corner by its own
+ *  random share, from `random`), the target height (plateau) or ignored (smooth).
+ *  Returns whether anything changed. */
+export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: number, stroke: Stroke, random: () => number = Math.random): boolean {
   const cs = cornersIn(t, b);
   if (!cs.length) return false;
   const before = cs.map(({ i }) => groundHeight(t.corners[i]));
@@ -100,6 +101,7 @@ export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: numb
     if (tool === "raise") h += amount * w;
     else if (tool === "lower") h -= amount * w;
     else if (tool === "plateau") h += (amount - h) * Math.min(1, w * 1.5);
+    else if (tool === "noise") h += (random() * 2 - 1) * amount * w;
     else {
       // Average of the 3×3 neighbourhood, blended by the brush weight.
       const x = i % t.width, y = Math.floor(i / t.width);

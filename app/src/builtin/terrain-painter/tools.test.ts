@@ -169,6 +169,40 @@ test("painting grass at a dirt cliff makes it a grass cliff; flat ground keeps i
   assert.equal(matchCliffTypes(t, far.area(), CLIFF_GROUND, far), false);
 });
 
+/** The same numbers every run (seed printed in the test's name). */
+const seeded = (seed: number) => () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+
+test("Noise (seed 7) roughens the ground under the brush only, within the strength, the same every time", () => {
+  const brush = { ...centre(flatMap()), radius: 3 };
+  const run = () => {
+    const t = flatMap(), s = new Stroke("noise"), random = seeded(7);
+    for (let k = 0; k < 4; k++) applyHeight(t, brush, "noise", 16, s, random);
+    return { t, s };
+  };
+  const { t, s } = run();
+  const heights = t.corners.map(groundHeight);
+  assert.deepEqual(run().t.corners.map(groundHeight), heights, "the same seed gives the same ground");
+  const inside = new Set(s.corners());
+  const moved = heights.filter((h, i) => inside.has(i) && h !== 0);
+  assert.ok(moved.length > inside.size / 2, `${moved.length} of ${inside.size} corners moved`);
+  assert.ok(moved.some((h) => h > 0) && moved.some((h) => h < 0), "some go up and some down");
+  assert.ok(heights.every((h) => Math.abs(h) <= 4 * 16), "no corner moves more than the strength per stamp");
+  assert.ok(heights.every((h, i) => inside.has(i) || h === 0), "nothing outside the brush moves");
+  assert.equal(s.finish(t), true);
+  s.undo(t);
+  assert.ok(t.corners.every((c) => groundHeight(c) === 0), "undo takes the whole stroke back");
+  s.redo(t);
+  assert.deepEqual(t.corners.map(groundHeight), heights);
+});
+
+test("Noise keeps to the stored height range like the other height tools", () => {
+  const t = flatMap(), s = new Stroke("noise");
+  for (let k = 0; k < 400; k++) applyHeight(t, { ...centre(t), radius: 1 }, "noise", 64, s, () => 1);
+  assert.equal(t.corners[16 * t.width + 16].rawHeight, 0x7fff, "pushed past the top, the centre stops at it");
+  assert.ok(t.corners.every((c) => c.rawHeight >= -0x8000 && c.rawHeight <= 0x7fff));
+  assert.deepEqual(writeW3e(parseW3e(writeW3e(t))), writeW3e(t));
+});
+
 test("the terrain survives w3e and text round trips", () => {
   const t = flatMap();
   applyLayer(t, { ...centre(t), radius: 2 }, "cliffUp", { layer: 3 }, new Stroke("cliffUp"));
