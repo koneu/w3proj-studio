@@ -176,12 +176,15 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const custom: MapContents["custom"] = [];
   const objectData: MapContents["objects"] = [];
   const kindIds = new Map<string, Set<string>>();
+  // Every kind's game tables asked at once, as background reads: a map opening while this view is
+  // built goes first.
+  const kindData = new Map(KINDS.map(([ext]) => [ext, loadKind(w3, ext, { background: true }).catch(() => null)]));
   for (const [ext, label] of KINDS) {
     const file = await json<{ custom: { id: string; base: string }[]; original?: ObjectEntry[] }>(`war3map.${ext}`);
     const ids = (file?.custom ?? []).map((o) => ({ id: o.id, base: o.base }));
     objectData.push({ ext, label: label.replace(/s$/, ""), objects: [...(file?.original ?? []), ...(file?.custom ?? [])] });
     custom.push({ ext, label, ids });
-    const kd = await loadKind(w3, ext).catch(() => null);
+    const kd = await kindData.get(ext)!;
     kindIds.set(ext, new Set([...(kd?.baseIds ?? []), ...ids.map((o) => o.id)]));
   }
   const kindOf = (id: string) => (kindIds.get("w3t")?.has(id) ? "w3t" : kindIds.get("w3b")?.has(id) ? "w3b" : kindIds.get("w3u")?.has(id) ? "w3u" : "w3d");
@@ -192,7 +195,7 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const names = new Map<string, string>();
   await Promise.all([...ids].map(async (id) => { const n = await objects?.name(id).catch(() => undefined); if (n) names.set(id, n); }));
   const wtg = wtgPath(w3.workspace.files());
-  const triggers = wtg ? await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt"))).catch(() => null) : null;
+  const triggers = wtg ? await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null) : null;
   const imp = await json<{ files: { path: string }[] }>("war3map.imp");
   const script = await w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => "");
   return {

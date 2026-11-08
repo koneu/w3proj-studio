@@ -15,8 +15,10 @@ import { mapChecks } from "./mapchecks";
 
 /** Every backend call of a run, from the most it may be: the count after the shared reads and batched
  *  lookups (40 calls on the mini map with the additions below, against 75 before them). A new check
- *  that reads more raises it, on purpose. */
-const BUDGET = 121;
+ *  that reads more raises it, on purpose. (121 → 127: the object data asks for a kind's tables and its
+ *  metadata at once, so for the kinds this made-up game hasn't the tables of, the metadata is asked
+ *  for too before the load fails; twice, as a failed load is tried again. The real game has them all.) */
+const BUDGET = 127;
 
 /** The mini map, found from where the tests run (app/ or the repository). */
 function fixture(): string {
