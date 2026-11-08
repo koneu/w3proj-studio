@@ -159,6 +159,22 @@ export function dropsOf(entry: Placed): Drops {
   return { mode: "none" };
 }
 
+/** What choosing "Map item table" does with the map's tables (null: war3map.w3i couldn't be read): the first table,
+ *  an offer to make one when there are none, or why neither can be. */
+export function tableChoice(tables: readonly { number: number }[] | null): { table: number } | { offer: true } | { error: string } {
+  if (tables === null) return { error: "The map's item tables couldn't be read (war3map.w3i)." };
+  return tables.length ? { table: tables[0].number } : { offer: true };
+}
+
+/** Why the drops offer only the objects' own sets: their file has the older layout (Reign of Chaos, units subversion 9)
+ *  without a field for a map item table. Null when a map item table can be chosen. */
+export function ownSetsOnly(entries: readonly Placed[]): string | null {
+  const without = entries.filter((e) => !("itemTable" in e)).length;
+  if (!without) return null;
+  const which = entries.length === 1 ? "This object is" : without === entries.length ? "These objects are" : `${without} of these objects ${without === 1 ? "is" : "are"}`;
+  return `${which} in a file with the older layout (Reign of Chaos) that has no map item tables: only own item sets can be given.`;
+}
+
 /** Chances of a set spread evenly to 100, the first items taking what doesn't divide (three items: 34,
  *  33, 33, as the World Editor's Redistribute Chances leaves them in the game's maps). */
 export function redistribute(set: readonly DropItem[]): DropItem[] {

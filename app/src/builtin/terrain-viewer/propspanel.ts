@@ -7,7 +7,7 @@
 import { h } from "../../workbench/dom";
 import {
   ACQUIRE_CAMP, ACQUIRE_NORMAL, CAMP_RANGE, COLORS, DEFAULT, attributesAt, commonFields, dropsOf, maxSkillLevel, pointsSpent,
-  heroPools, randomItemLabel, redistribute, sameValue, setTotal, type DropItem, type Drops, type PropChange, type TypeFacts,
+  heroPools, ownSetsOnly, randomItemLabel, redistribute, sameValue, setTotal, tableChoice, type DropItem, type Drops, type PropChange, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
 
@@ -29,6 +29,10 @@ export interface PropsPanelHost {
   colorName(n: number): string;
   /** Tells the user why a change was refused. */
   warn(message: string): void;
+  /** Opens Map Properties at its item tables. */
+  openItemTables(): void;
+  /** Makes a new map item table (Map Properties opens on it) and has the objects drop from it. */
+  createItemTable(): Promise<void>;
 }
 
 type Entry = Placed & Record<string, unknown>;
@@ -204,24 +208,42 @@ export function propsPanel(host: PropsPanelHost): HTMLElement | null {
 /** Items dropped on death: none, a map item table, or the object's own sets with chances. */
 function dropRows(host: PropsPanelHost, entries: Entry[], send: (c: PropChange) => void): HTMLElement[] {
   const drops = sameValue(entries, (e) => dropsOf(e));
-  const tableAllowed = entries.every((e) => "itemTable" in e);
+  const onlyOwn = ownSetsOnly(entries);
   const mode = drops?.mode;
   const tables = host.tables ?? [];
   const setDrops = (d: Drops) => send({ field: "drops", value: d });
-  const modes: [string, string][] = [["none", "Nothing"], ...(tableAllowed ? [["table", "Map item table"] as [string, string]] : []), ["custom", "Own item sets"]];
-  const out: HTMLElement[] = [row("Drops", select(mode, modes, "drops-mode", (v) => {
+  const modes: [string, string][] = [["none", "Nothing"], ...(onlyOwn ? [] : [["table", "Map item table"] as [string, string]]), ["custom", "Own item sets"]];
+  // The map has no item tables yet: choosing one offers to make one, rather than only saying so.
+  const create = h("button", { "data-prop": "create-table", title: "A new item table in Map Properties (saved with it), opened there to fill in; these objects drop from it",
+    onclick: async () => {
+      create.disabled = true;
+      try { await host.createItemTable(); } finally { create.disabled = false; }
+    } }, "Create an item table");
+  const offer = h("div.terrain-prop-offer",{ "data-prop": "table-offer", hidden: true },
+    h("span.muted", {}, "The map has no item tables yet."), " ", create);
+  const modeSelect = select(mode, modes, "drops-mode", (v) => {
+    offer.hidden = true;
     if (v === "none") setDrops({ mode: "none" });
     else if (v === "table") {
-      if (host.tables === null) { host.warn("The map's item tables couldn't be read (war3map.w3i)."); return; }
-      if (!tables.length) { host.warn("The map has no item tables yet: make one in Map Properties › Techtree & tables."); return; }
-      setDrops({ mode: "table", table: tables[0].number });
+      const choice = tableChoice(host.tables);
+      if ("error" in choice) host.warn(choice.error);
+      else if ("offer" in choice) { modeSelect.value = mode ?? ""; offer.hidden = false; create.focus(); }
+      else setDrops({ mode: "table", table: choice.table });
     } else setDrops({ mode: "custom", sets: drops?.mode === "custom" ? drops.sets : [[]] });
-  }))];
+  });
+  const out: HTMLElement[] = [row("Drops", modeSelect), offer];
+  if (onlyOwn) out.push(h("div.muted.terrain-prop-hint", { "data-prop": "drops-hint" }, onlyOwn));
+  const editTables = () => h("button", { "data-prop": "edit-tables", title: "Map Properties › Techtree & Tables › Item tables", onclick: () => host.openItemTables() }, "Edit item tables…");
   if (drops?.mode === "table") {
     // Tables that couldn't be read (null) aren't taken for missing ones.
     const known = host.tables === null || tables.some((t) => t.number === drops.table);
     out.push(row("Item table", select(String(drops.table), [...tables.map((t) => [String(t.number), `${t.name} (#${t.number})`] as [string, string]),
-      ...(known ? [] : [[String(drops.table), `#${drops.table} (not in the map)`] as [string, string]])], "drops-table", (v) => setDrops({ mode: "table", table: Number(v) }))));
+      ...(known ? [] : [[String(drops.table), `#${drops.table} (not in the map)`] as [string, string]])], "drops-table", (v) => setDrops({ mode: "table", table: Number(v) })),
+      " ", editTables()));
+  }
+  if (drops?.mode === "custom" && !onlyOwn) {
+    out.push(h("div.terrain-prop-link", {}, h("a", { href: "#", "data-prop": "use-map-table", title: "Map Properties › Techtree & Tables › Item tables: tables any object can drop from",
+      onclick: (ev: Event) => { ev.preventDefault(); host.openItemTables(); } }, "or use a map item table…")));
   }
   if (drops?.mode === "custom") {
     const sets = drops.sets;
