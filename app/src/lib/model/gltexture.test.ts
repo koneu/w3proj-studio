@@ -206,6 +206,13 @@ test("an animated layer can show any of them", () => {
   assert.deepEqual([...drawnTextures(model(4, [layer([0, 1, 2, 3], track)]))], [0, 1, 2, 3]);
 });
 
+test("a Reforged flipbook needs the diffuse frames its track names, not the normal maps' frames", () => {
+  const frames = (values: number[]) => ({ values: new Float32Array(values) }) as unknown as NonNullable<Layer["textureTrack"]>;
+  // Textures: 0 stone diffuse, 1 stone normal, 2 ORM, 3–4 water frames, 5–6 their normal maps, 7 named by nothing.
+  const water = { ...layer([0, 0, 2], frames([3, 4])), slotTracks: [frames([3, 4]), frames([5, 6]), undefined] } as Layer;
+  assert.deepEqual([...drawnTextures(model(8, [layer([0, 1, 2]), water]))], [0, 2, 3, 4, 7]);
+});
+
 test("a level for a size: the smallest that's tall enough", () => {
   const image = { height: 1024, mipCount: 11 };
   assert.equal(levelFor(image, 128), 3);

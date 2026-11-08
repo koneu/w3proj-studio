@@ -56,6 +56,22 @@ test("a see-through tint scales the threshold as before", () => {
   assert.deepEqual(drawn(0, "uOpaque", [1, 1, 1, 0.5]), [1]);
 });
 
+test("a geoset animation's colour is red, green, blue as stored (ShimmeringPortal's ring is violet, not pink)", () => {
+  // The fire ring of Doodads\Cinematic\ShimmeringPortal (geoset 6) stores 0.467, 0, 0.992: the World Editor and the
+  // game show the portal violet (we-drive, example-maps/image-7.png); read blue first it was pink.
+  const colours: number[][] = [];
+  const { gl } = recordingGl();
+  const recording = new Proxy(gl as unknown as Record<string, unknown>, {
+    get: (t, k) => (k === "uniform4f" ? (loc: string, ...v: number[]) => { if (loc === "uColor") colours.push(v); } : t[k as string]),
+  }) as unknown as WebGL2RenderingContext;
+  const m = model(3);
+  m.geosetAnims.push({ geosetId: 0, alpha: 1, color: [0.467, 0, 0.992] });
+  const gpu = new ModelGpu(recording, m);
+  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+  gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 1 }] }, {});
+  assert.deepEqual(colours.map((c) => c.slice(0, 3).map((v) => +v.toFixed(3))), [[0.467, 0, 0.992]]);
+});
+
 test("a model is drawn in the tone it's asked for (tone.ts), with its light's HD shading", () => {
   // cliff.w3m's own sun: from the south-west, shadow intensity 5.85.
   const light = { dir: [-0.675, -0.406, 0.616] as [number, number, number], diffuse: [1.95, 1.95, 1.95] as [number, number, number], ambient: [0, 0, 0] as [number, number, number], shadow: 5.85 };

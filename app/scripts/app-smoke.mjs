@@ -845,7 +845,7 @@ async function heightsUniform(page, found) {
  *  - the Camera Objects layer draws a camera made in the Cameras tab before it is saved (the layer against itself off,
  *    and the file on disk still without it, show it's the unsaved one);
  *  - terrain_screenshot, in a project with two terrain files, takes the tab in front and doesn't switch to the other;
- *  - a click on an object without a model (only its marker is drawn) selects it, as a selection box does. */
+ *  - a click on an object without a model (drawn as the World Editor's checkered cube) selects it, as a selection box does. */
 async function terrainSelectCameras(page, found) {
   const fail = (what) => found.push(`terrain select and cameras: ${what}`);
   const k = await heightKit(page, "SelectCameras");
@@ -913,8 +913,8 @@ async function terrainSelectCameras(page, found) {
   const at = `(() => { const i = document.querySelectorAll(".terrain-sel-triple input"); return i.length >= 2 ? [Number(i[0].value), Number(i[1].value)] : null; })()`;
   const name = `document.querySelector(".terrain-sel-name")?.textContent ?? ""`;
   if (await page.evaluate(at)) fail("something was selected before the click");
-  // Clicked until it's selected: the marker is drawn once the reloaded file is in. A click that can't select it never will.
-  await until("Zzzz selected by a click on its marker", async () => {
+  // Clicked until it's selected: the cube is drawn once the reloaded file is in. A click that can't select it never will.
+  await until("Zzzz selected by a click on its cube", async () => {
     await k.clickMiddle();
     await sleep(300);
     const p = await page.evaluate(at);

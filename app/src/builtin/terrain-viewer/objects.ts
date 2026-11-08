@@ -8,6 +8,7 @@ import { parseMdx } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
+import { placeholderImage, placeholderModel } from "../../lib/model/placeholder";
 import { worldSphere } from "../../lib/model/frustum";
 import { bounds, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
@@ -397,10 +398,27 @@ export class ObjectLoader {
     return { batches: loaded.filter((b): b is ObjectBatch => b !== undefined), failed };
   }
 
+  private placeholderGpu: ModelGpu | null = null;
+
+  /** The World Editor's checkered cube (placeholder.ts), made once. */
+  private placeholder(): ModelGpu {
+    if (!this.placeholderGpu) {
+      // Kept only once whole: a context lost on the way throws, and the next load tries again.
+      const gpu = new ModelGpu(this.gl, placeholderModel());
+      gpu.pose(standClock(gpu.model));
+      gpu.textures[0] = createTexture(this.gl, placeholderImage(), { repeat: [false, false] });
+      this.placeholderGpu = gpu;
+    }
+    return this.placeholderGpu;
+  }
+
   /** Placed doodads/units: models from the skin tables. Custom object ids
-   *  use their base object's model (`baseOf`, from the map's object data). */
+   *  use their base object's model (`baseOf`, from the map's object data). An object whose model doesn't load
+   *  (or whose id is unknown) is drawn as the World Editor's checkered cube, a batch of its own in the group, and
+   *  selected like any other; without `placeholders` (the start buildings' previews) it's only a stray. */
   async load(group: string, placed: Placed[], skins: Map<string, Skin>, teamOf: (p: Placed) => number,
-    baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number): Promise<LoadResult> {
+    baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number,
+    placeholders = true): Promise<LoadResult> {
     const byModel = new Map<string, { req: ModelRequest; items: Placed[] }>();
     const unresolved: Placed[] = [];
     // Ids without a model (start locations have none on purpose).
@@ -433,8 +451,22 @@ export class ObjectLoader {
       ...failed.map((f) => ({ message: f.error, items: entries[f.index].items })),
       ...[...unknown].map(([id, items]) => ({ message: `${id}: unknown object (no model; not in the game's or the map's object data)`, items })),
     ];
-    return { batches, unresolved, strays: strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf), problems };
+    const strays = strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf);
+    if (!placeholders || !strays.length) return { batches, unresolved, strays, problems };
+    let gpu: ModelGpu;
+    // A lost context can't compile the model shader: the objects stay markers (the view is reopened anyway).
+    try { gpu = this.placeholder(); } catch { return { batches, unresolved, strays, problems }; }
+    const instances = placeholderInstances(strays, bounds(gpu.model));
+    const cubes = new Set(instances.map((inst) => inst.pick?.placed));
+    return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: [], problems };
   }
+}
+
+/** The strays as instances of the placeholder cube: picked and culled by the cube's bounds (`box`, model space). */
+export function placeholderInstances(strays: readonly Stray[], box: { min: readonly number[]; max: readonly number[] }): ObjectInstance[] {
+  const local: [number, number, number, number] = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2,
+    Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2];
+  return strays.map(({ inst }) => ({ ...inst, bounds: local, sphere: worldSphere(inst.world, local) }));
 }
 
 /** A placed object without a model (an unknown id, a model that didn't load). Only a marker

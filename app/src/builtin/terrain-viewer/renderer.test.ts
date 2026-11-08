@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hdWaterColor, meanBrightness, waterRamp, withGroup } from "./renderer";
+import { hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, withGroup } from "./renderer";
 
 const b = (group: string, name: string) => ({ group, name });
 const names = (list: { name: string }[]) => list.map((x) => x.name).join(" ");
@@ -28,6 +28,22 @@ test("replacing a group swaps only its batches, in their own order", () => {
   // A group without a place goes last; the input isn't changed.
   assert.equal(names(withGroup(list, "extra", [b("extra", "x1")])), "c1 d1 d2 u1 x1");
   assert.equal(names(list), "c1 d1 d2 u1");
+});
+
+test("HD with the lighting on (the editor's game view) draws no shoreline waves; classic, or unlit, does", () => {
+  // A view with nothing but the shoreline's particle emitters: whether it animates says whether they're drawn.
+  const animating = Object.getOwnPropertyDescriptor(TerrainRenderer.prototype, "animating")!.get!;
+  const view = (tone: number, gameView: boolean, hidden: string[] = []) => ({
+    showWater: false, water: { count: 0 }, animate: false, showWeather: false, weather: [], showEffects: true,
+    batches: [{ group: "shoreline", instances: [{}], effects: {}, gpu: { model: { sequences: [] } } }],
+    hiddenGroups: new Set(hidden), tone, gameView, groupShown: TerrainRenderer.prototype.groupShown,
+  });
+  assert.equal(animating.call(view(2, true)), false, "HD game view");
+  assert.equal(animating.call(view(2, false)), true, "HD, lighting off");
+  assert.equal(animating.call(view(1, true)), true, "classic game view");
+  assert.equal(animating.call(view(1, false, ["shoreline"])), false, "hidden by its toggle");
+  const shown = (tone: number, gameView: boolean, group: string) => TerrainRenderer.prototype.groupShown.call({ hiddenGroups: new Set(), tone, gameView } as unknown as TerrainRenderer, group);
+  assert.equal(shown(2, true, "doodads"), true, "only the shoreline");
 });
 
 // Lordaeron Summer's ramp from TerrainArt\Water.slk (Smin/Smax/Dmin/Dmax: r, g, b, a in 0–1).

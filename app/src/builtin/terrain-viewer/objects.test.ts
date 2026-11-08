@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addMoveTypes, loadSkins, objectsInRect, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addMoveTypes, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer } from "./renderer";
+import { placeholderModel } from "../../lib/model/placeholder";
+import { bounds } from "../../lib/model/renderer";
+
+const near = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} not within ${tol} of ${b}`);
 
 const skin = (file: string): Skin => ({
   kind: "w3u", file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "",
@@ -93,6 +97,24 @@ test("a click picks an object without a model through its stand-in, as a selecti
   assert.equal(pick(110, 95)?.pick?.placed, unknown, "within its click radius");
   assert.equal(pick(300, 300), null, "the ground beside it");
   assert.equal(pick(100, 100, new Set(["units"])), null, "units hidden");
+});
+
+test("an object whose model doesn't load is the editor's cube: picked over the cube's height, scaled and placed as the object", () => {
+  const big = placed("LRsr", 500, 500, { scale: [2, 2, 2] }), small = placed("YOtc", 100, 100);
+  const strays = strayInstances("doodads", [big, small], [big, small], new Map(), () => 0);
+  const cubes = placeholderInstances(strays, bounds(placeholderModel()));
+  assert.deepEqual(cubes.map((c) => c.pick?.placed), [big, small], "the same objects, picked the same way");
+  assert.deepEqual(cubes[1].sphere?.slice(0, 3), [100, 100, 64], "round the cube's middle, half its side up");
+  near(cubes[1].sphere![3], Math.hypot(64, 64, 64), 1e-3, "the cube's corners inside");
+  assert.deepEqual(cubes[0].sphere?.slice(0, 3), [500, 500, 128], "the object's scale scales the cube");
+  near(cubes[0].sphere![3], 2 * Math.hypot(64, 64, 64), 1e-3, "and its bounds");
+  // A click from the side at the cube's top edge picks it, where a marker's small sphere didn't reach.
+  const view = { batches: [{ group: "doodads", instances: cubes }], hiddenGroups: new Set<string>() };
+  const side = (z: number) => TerrainRenderer.prototype.pickObject.call(view as unknown as TerrainRenderer, { origin: [100, -2000, z], dir: [0, 1, 0] });
+  assert.equal(side(120)?.pick?.placed, small);
+  assert.equal(TerrainRenderer.prototype.pickObject.call({ batches: [], hiddenGroups: new Set() } as unknown as TerrainRenderer,
+    { origin: [100, -2000, 120], dir: [0, 1, 0] }, undefined, strays), null, "the old stand-in's sphere (32 round the foot) misses there");
+  assert.equal(side(400), null, "above it");
 });
 
 test("units get their movement type from the unit table, and a map's own movement type wins", () => {

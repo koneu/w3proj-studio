@@ -120,23 +120,7 @@ impl GameData {
 
     /// Mod prefixes searched for a plain path, most specific first.
     pub fn layers(&self, mode: Mode, tileset: Option<char>) -> Vec<String> {
-        let loc = &self.locale;
-        let mut out = Vec::new();
-        let mut art = |base: &str| {
-            if let Some(t) = tileset {
-                out.push(format!("{base}_tilesets/{}.w3mod:", t.to_ascii_lowercase()));
-            }
-            out.push(format!("{base}_locales/{loc}.w3mod:"));
-            out.push(base.to_string());
-        };
-        match mode {
-            Mode::De => art("war3.w3mod:_de.w3mod:"),
-            Mode::Hd => art("war3.w3mod:_hd.w3mod:"),
-            Mode::Sd => {}
-        }
-        art("war3.w3mod:");
-        out.push("war3.w3mod:_deprecated.w3mod:".into());
-        out
+        layer_prefixes(mode, tileset, &self.locale)
     }
 
     /// Resolves a plain game path through the layers. Returns the full root
@@ -210,9 +194,50 @@ impl GameData {
     }
 }
 
+/// Mod prefixes searched for a plain path in `mode`, most specific first (see `GameData::layers`).
+///
+/// HD falls back to the 3.0 art layer (`_de.w3mod`) for what neither `_hd.w3mod` nor the base game has: the World
+/// Editor in HD draws models stored only there (map 14's capital bridge, tall pillar, arch with pillar; we-drive,
+/// 2026-11-08), where Studio found nothing. A file the base game has too keeps the base one, as before.
+pub fn layer_prefixes(mode: Mode, tileset: Option<char>, locale: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut art = |base: &str| {
+        if let Some(t) = tileset {
+            out.push(format!("{base}_tilesets/{}.w3mod:", t.to_ascii_lowercase()));
+        }
+        out.push(format!("{base}_locales/{locale}.w3mod:"));
+        out.push(base.to_string());
+    };
+    match mode {
+        Mode::De => art("war3.w3mod:_de.w3mod:"),
+        Mode::Hd => art("war3.w3mod:_hd.w3mod:"),
+        Mode::Sd => {}
+    }
+    art("war3.w3mod:");
+    if mode == Mode::Hd {
+        art("war3.w3mod:_de.w3mod:");
+    }
+    out.push("war3.w3mod:_deprecated.w3mod:".into());
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hd_falls_back_to_the_de_layer_after_the_base_game() {
+        let hd = layer_prefixes(Mode::Hd, None, "enus");
+        let at = |p: &str| hd.iter().position(|l| l == p).unwrap_or_else(|| panic!("{p} not in {hd:?}"));
+        assert!(at("war3.w3mod:_hd.w3mod:") < at("war3.w3mod:"));
+        assert!(at("war3.w3mod:") < at("war3.w3mod:_de.w3mod:"), "the base game's file wins over DE's");
+        assert!(at("war3.w3mod:_de.w3mod:") < at("war3.w3mod:_deprecated.w3mod:"));
+        let sd = layer_prefixes(Mode::Sd, Some('L'), "enus");
+        assert!(!sd.iter().any(|l| l.contains("_de.w3mod") || l.contains("_hd.w3mod")), "classic stays classic: {sd:?}");
+        assert_eq!(sd[0], "war3.w3mod:_tilesets/l.w3mod:");
+        let de = layer_prefixes(Mode::De, None, "enus");
+        assert_eq!(de.iter().filter(|l| l.as_str() == "war3.w3mod:_de.w3mod:").count(), 1);
+    }
 
     #[test]
     fn aliases() {

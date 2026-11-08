@@ -772,9 +772,9 @@ export class ModelGpu {
       if (this.hidden.has(g.geosetId) || (this.geoAlpha.get(g.geosetId) ?? 1) <= 0.01) continue;
       const mat = m.materials[g.materialId];
       if (!mat) continue;
-      // Geoset animation colours are stored as BGR.
-      const bgr = this.geoColor.get(g.geosetId) ?? [1, 1, 1];
-      const color = [bgr[2], bgr[1], bgr[0]];
+      // Geoset animation colours are red, green, blue as stored (unlike lights' colours, dnclight.ts): read blue
+      // first, ShimmeringPortal's violet ring was pink against the World Editor's and the game's pictures.
+      const color = this.geoColor.get(g.geosetId) ?? [1, 1, 1];
       for (const layer of mat.layers) {
         const alpha = sample(layer.alphaTrack, clock, m.globalSequences, [layer.alpha])[0] * (this.geoAlpha.get(g.geosetId) ?? 1);
         const texIndex = layer.textureTrack ? sample(layer.textureTrack, clock, m.globalSequences, [layer.textureIds[0]])[0] : layer.textureIds[0];
