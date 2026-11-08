@@ -1,6 +1,6 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
-import { gameProgram, joinPath } from "../../lib/paths";
+import { gameProgram, joinPath, onWindows } from "../../lib/paths";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -108,10 +108,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
   };
 
+  const installDir = () => w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III";
+
   /** A program of the game: as set, else the one in game.installDir. Read through `get`, which takes these from the
    *  user's settings only: a project (shared through git or a zip) must never choose a program to run. */
   const program = (key: string, file: string) =>
-    gameProgram(w3.settings.get<string>(key), w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III", file);
+    gameProgram(w3.settings.get<string>(key), installDir(), file);
+
+  /** The game would just stay in its main menu, with nothing to say why. */
+  const needStartLocation = async () => {
+    const units = await w3.workspace.readText("map/war3mapUnits.doo.json").catch(() => null);
+    if (units !== null && !units.includes('"sloc"')) {
+      throw new Error("This map has no start location, so the game can't start it. Place one, or save in the terrain view, which adds Player 1's.");
+    }
+  };
+
+  /** Packs into the game's own Maps folder (in Documents; under Proton, the prefix's), in a "w3proj" folder there,
+   *  so the map can be started from the game's Custom Game when Test Map can't start it directly. */
+  const packToGame = async () => {
+    const p = w3.workspace.project();
+    if (!p) throw new Error("Open or import a project first.");
+    await needStartLocation();
+    const maps = await w3.backend.invoke<string>("game_maps_folder", { install: installDir() });
+    const name = p.default_output.split(/[\\/]/).pop() || `${baseName(p.root)}.w3x`;
+    const r = await pack(joinPath(maps, "w3proj", name), true);
+    if (!r) return;
+    const c = await w3.window.showInfo(`Packed into the game's maps: ${r.output}. In Warcraft III, start it from Custom Game (folder "w3proj").`, "Reveal");
+    if (c === "Reveal") await w3.backend.invoke("reveal_in_explorer", { path: r.output });
+  };
 
   const editBuild = () => {
     const p = w3.workspace.project()!;
@@ -186,16 +210,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
 
     w3.commands.register("w3.project.testMap", async () => {
-      // The game would just stay in its main menu, with nothing to say why.
-      const units = await w3.workspace.readText("map/war3mapUnits.doo.json").catch(() => null);
-      if (units !== null && !units.includes('"sloc"')) {
-        throw new Error("This map has no start location, so the game can't start it. Place one, or save in the terrain view, which adds Player 1's.");
-      }
+      await needStartLocation();
       const r = await pack(null, true);
       if (!r) return;
       await w3.backend.invoke("game_test_map", { exe: program("game.path", "Warcraft III.exe"), map: r.output });
       out.append(`launched game with ${r.output}`);
+      // Under Proton the game's own login can stay invisible, and then the game never gets past its first screen.
+      if (!onWindows()) {
+        const c = await w3.window.showInfo("Warcraft III is starting. If it stays on its first screen (its login can stay hidden under Proton), pack the map into the game's Maps folder and start it from Custom Game.", "Pack into Game's Maps");
+        if (c === "Pack into Game's Maps") await packToGame();
+      }
     }),
+
+    w3.commands.register("w3.project.packToGame", packToGame),
 
     w3.commands.register("w3.project.reveal", async () => {
       await w3.backend.invoke("reveal_in_explorer", { path: root() });

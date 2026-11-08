@@ -10,6 +10,7 @@
       { "id": "w3.project.importMap", "menu": "File:2:2", "title": "Import Map or Campaign as New Project…", "category": "Project" },
       { "id": "w3.project.syncFromMap", "when": "project", "menu": "File:4:5", "title": "Sync Project from .w3x…", "category": "Project" },
       { "id": "w3.project.pack", "when": "project", "menu": "File:4:2", "title": "Pack Release .w3x", "category": "Project", "keybinding": "ctrl+shift+b" },
+      { "id": "w3.project.packToGame", "when": "project", "menu": "File:4:3.5", "title": "Pack into Warcraft III's Maps Folder", "category": "Project" },
       { "id": "w3.project.packAs", "when": "project", "menu": "File:4:3", "title": "Pack Release .w3x As…", "category": "Project" },
       { "id": "w3.project.openInWorldEditor", "when": "project", "menu": "File:4:4", "title": "Open in World Editor", "category": "Project", "keybinding": "f5" },
       { "id": "w3.project.testMap", "when": "project", "menu": "File:4:1", "title": "Test Map in Warcraft III", "category": "Project", "keybinding": "ctrl+f5" },

@@ -810,6 +810,15 @@ async fn game_find() -> CmdResult<Vec<gamefind::FoundGame>> {
     Ok(gamefind::find(home.as_deref()))
 }
 
+/// The game's `Maps` folder for the player's own maps (gamefind::user_folder), which its Custom Game lists. The
+/// folder itself may not exist yet; packing into it makes it.
+#[tauri::command]
+fn game_maps_folder(app: AppHandle, install: String) -> CmdResult<String> {
+    let documents = app.path().document_dir().ok();
+    let dir = gamefind::user_folder(Path::new(&install), documents.as_deref())?;
+    Ok(dir.join("Maps").to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 async fn game_info(state: State<'_, Game>, install: String) -> CmdResult<GameInfo> {
     let g = game_data(&state, &install)?;
@@ -1201,6 +1210,7 @@ pub fn run() {
             tool_temp_dir,
             watched_maps,
             game_find,
+            game_maps_folder,
             game_info,
             game_list,
             game_resolve,

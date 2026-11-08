@@ -100,6 +100,28 @@ pub fn find(home: Option<&Path>) -> Vec<FoundGame> {
     out
 }
 
+/// The game's own folder for the player's files (`Documents/Warcraft III`, where its `Maps` are listed in Custom
+/// Game). For an install inside a Wine prefix (Proton, Lutris, plain Wine) that's the Documents of the prefix's
+/// user: the one that already has the folder (the game made it on its first start), else Proton's `steamuser`.
+/// Otherwise it's in `documents`, the system's Documents folder.
+pub fn user_folder(install: &Path, documents: Option<&Path>) -> Result<PathBuf, String> {
+    let drive_c = install.ancestors().find(|a| a.file_name().is_some_and(|n| n.eq_ignore_ascii_case("drive_c")));
+    let Some(drive_c) = drive_c else {
+        return documents.map(|d| d.join("Warcraft III")).ok_or_else(|| "The system's Documents folder isn't known.".to_string());
+    };
+    let mut users = subdirs(&drive_c.join("users"));
+    users.sort();
+    // Proton's user first, so a stray user of the same prefix doesn't win a tie.
+    users.sort_by_key(|u| u.file_name().is_none_or(|n| n != "steamuser"));
+    let of = |u: &PathBuf| u.join("Documents").join("Warcraft III");
+    users
+        .iter()
+        .map(of)
+        .find(|d| d.is_dir())
+        .or_else(|| users.iter().find(|u| u.file_name().is_some_and(|n| n == "steamuser")).map(of))
+        .ok_or_else(|| format!("No Warcraft III folder in the Documents of {}: start the game there once.", drive_c.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +195,26 @@ mod tests {
         std::os::unix::fs::symlink(h.join(".local/share/Steam"), h.join(".steam/steam")).unwrap();
         assert_eq!(find(Some(&h)).len(), 1);
         std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn the_user_folder_is_in_the_prefixs_documents_or_the_systems() {
+        let h = home();
+        let game = h.join("pfx/drive_c/Program Files (x86)/Warcraft III");
+        install(&game, "3.0.1.24371");
+        std::fs::create_dir_all(h.join("pfx/drive_c/users/Public/Documents")).unwrap();
+        // Before the game's first start: Proton's user, if the prefix has one.
+        assert!(user_folder(&game, None).unwrap_err().contains("start the game there once"));
+        std::fs::create_dir_all(h.join("pfx/drive_c/users/steamuser")).unwrap();
+        assert_eq!(user_folder(&game, None).unwrap(), h.join("pfx/drive_c/users/steamuser/Documents/Warcraft III"));
+        // The user whose Documents the game already uses wins (plain Wine: the login name).
+        std::fs::create_dir_all(h.join("pfx/drive_c/users/koneu/Documents/Warcraft III")).unwrap();
+        assert_eq!(user_folder(&game, None).unwrap(), h.join("pfx/drive_c/users/koneu/Documents/Warcraft III"));
+        std::fs::create_dir_all(h.join("pfx/drive_c/users/steamuser/Documents/Warcraft III")).unwrap();
+        assert_eq!(user_folder(&game, None).unwrap(), h.join("pfx/drive_c/users/steamuser/Documents/Warcraft III"));
+        // Not in a prefix: the system's Documents.
+        let docs = h.join("Documents");
+        assert_eq!(user_folder(&h.join("Warcraft III"), Some(&docs)).unwrap(), docs.join("Warcraft III"));
+        assert!(user_folder(&h.join("Warcraft III"), None).is_err());
     }
 }
