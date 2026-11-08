@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { exportSound, findSoundFile, planReplace, replaceSound, soundVariants, type ImportEntry } from "./soundfiles";
+import { forgetCheckpointsOffWarning } from "../../lib/checkpoint";
+import { commandNotFound } from "../../lib/commanderror";
 
 test("a sound's other extensions are looked for, its own path first", () => {
   assert.deepEqual(soundVariants("Sound\\Music\\a.mp3"), ["Sound\\Music\\a.mp3", "Sound\\Music\\a.flac", "Sound\\Music\\a.ogg", "Sound\\Music\\a.wav"]);
@@ -128,6 +130,26 @@ test("Replace Internal Sound asks, makes a checkpoint, copies the file, removes 
   assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.mp3");
   assert.deepEqual(f.log, ["confirm", "command w3.checkpoints.create", "copy C:\\in\\new.mp3 map/war3mapImported/boom.mp3", "delete map/war3mapImported/boom.wav", "writeText map/war3map.imp.json", "refresh"]);
   assert.deepEqual(JSON.parse(f.imp()!).files, [{ flags: 21, path: "war3mapImported\\boom.mp3" }]);
+});
+
+test("Replace Internal Sound goes on with the Checkpoints extension off, and says no checkpoint was made", async () => {
+  forgetCheckpointsOffWarning();
+  const f = fake({ mapFiles: { "map/war3mapImported/boom.wav": bytes(1) }, imp: IMP });
+  const warned: string[] = [];
+  Object.assign(f.w3.commands, { execute: async (id: string) => { f.log.push(`command ${id}`); throw new Error(commandNotFound(id)); } });
+  Object.assign(f.w3.window, { showWarning: async (m: string) => { warned.push(m); } });
+  assert.equal(await replaceSound(f.w3, "war3mapImported\\boom.wav"), "map/war3mapImported/boom.mp3");
+  assert.ok(f.log.includes("copy C:\\in\\new.mp3 map/war3mapImported/boom.mp3"));
+  assert.equal(warned.length, 1);
+  assert.match(warned[0], /Replace Internal Sound went on without a checkpoint/);
+  forgetCheckpointsOffWarning();
+});
+
+test("Replace Internal Sound stops before changing anything when the checkpoint fails", async () => {
+  const f = fake({ mapFiles: { "map/war3mapImported/boom.wav": bytes(1) }, imp: IMP });
+  Object.assign(f.w3.commands, { execute: async () => { throw new Error("disk full"); } });
+  await assert.rejects(replaceSound(f.w3, "war3mapImported\\boom.wav"), /disk full/);
+  assert.deepEqual(f.log, ["confirm"]);
 });
 
 test("Replace Internal Sound on a game sound registers the override in a new list", async () => {

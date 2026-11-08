@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../extensions/api";
-import { checkpointBefore } from "../lib/checkpoint";
+import { checkpointBefore, checkpointIfOn, forgetCheckpointsOffWarning } from "../lib/checkpoint";
 import { CommandService } from "./commands";
 
 function app(checkpoint: "works" | "fails" | "absent", answer?: string) {
@@ -29,6 +29,26 @@ test("no checkpoints extension: go on, as the callers promise ('where they're en
   const a = app("absent");
   assert.equal(await checkpointBefore(a.w3, "Discard"), true);
   assert.deepEqual(a.asked, []);
+});
+
+test("checkpointIfOn: made, it says nothing; without the extension it goes on and warns once a session; a failure stops", async () => {
+  forgetCheckpointsOffWarning();
+  const on = app("works");
+  assert.equal(await checkpointIfOn(on.w3, "Delete Invalid Objects"), true);
+  assert.deepEqual(on.asked, []);
+  const off = app("absent");
+  assert.equal(await checkpointIfOn(off.w3, "Delete Invalid Objects"), false);
+  assert.equal(await checkpointIfOn(off.w3, "Import Object Data"), false);
+  assert.equal(off.asked.length, 1, "once per session");
+  assert.match(off.asked[0], /Delete Invalid Objects went on without a checkpoint: the Checkpoints extension is off/);
+  // Another caller in the same session (another extension's api) stays quiet too.
+  const other = app("absent");
+  assert.equal(await checkpointIfOn(other.w3, "Replace Internal Sound"), false);
+  assert.deepEqual(other.asked, []);
+  const failing = app("fails");
+  await assert.rejects(checkpointIfOn(failing.w3, "Delete Invalid Objects"), /disk full/);
+  assert.deepEqual(failing.asked, []);
+  forgetCheckpointsOffWarning();
 });
 
 test("a checkpoint that fails asks; only Continue goes on", async () => {

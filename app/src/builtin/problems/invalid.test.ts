@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import { deleteInvalid, describePlan, planInvalid, splitInvalid, type KindLoader } from "./invalid";
+import { forgetCheckpointsOffWarning } from "../../lib/checkpoint";
+import { commandNotFound } from "../../lib/commanderror";
 
 const UNITS = "map/war3mapUnits.doo.json", DOODADS = "map/war3map.doo.json";
 const units = (...ids: string[]) => JSON.stringify({ format: "w3proj.units/1", version: 8, units: ids.map((id, i) => ({ id, position: [i, 0, 0], player: 0 })) });
@@ -80,6 +82,19 @@ test("it asks first, makes a checkpoint, removes them, and keeps everything else
   assert.equal(doc.version, 8);
   assert.deepEqual(log.slice(0, 2), ["confirm", "command w3.checkpoints.create"], "asked, then checkpoint, before any write");
   assert.deepEqual(log.slice(2), [`write ${UNITS}`, `write ${DOODADS}`]);
+});
+
+test("with the Checkpoints extension off it goes on, warns that no checkpoint was made, and doesn't point at one", async () => {
+  forgetCheckpointsOffWarning();
+  const { w3, fs, log } = setup({ [UNITS]: units("hfoo", "xxxx") });
+  const said: string[] = [];
+  Object.assign(w3.commands, { execute: async (id: string) => { log.push(`command ${id}`); throw new Error(commandNotFound(id)); } });
+  Object.assign(w3.window, { showWarning: async (m: string) => { said.push(`warning ${m}`); }, showInfo: async (m: string) => { said.push(`info ${m}`); } });
+  assert.equal(await deleteInvalid(w3, game), 1);
+  assert.deepEqual(idsOf(fs, UNITS, "units"), ["hfoo"]);
+  assert.match(said[0], /^warning Delete Invalid Objects went on without a checkpoint/);
+  assert.equal(said[1], "info Deleted 1 invalid placed object.");
+  forgetCheckpointsOffWarning();
 });
 
 test("a file with nothing invalid isn't written", async () => {

@@ -10,6 +10,7 @@ import { editablePath, EditLog } from "./edits";
 import { GUIDES, guideTemplate, hasRules, isTopic, layoutIdea, ownTopics, parseOwnGuide, rulesTemplate, withOwnRules } from "./guides";
 import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 import { joinPath } from "../../lib/paths";
+import { checkpointIfOn } from "../../lib/checkpoint";
 
 /** One read_file answer; `offset` gets the rest. */
 const READ_LIMIT = 200_000;
@@ -51,7 +52,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (isNew || text === null) await w3.workspace.refresh();
     },
     unsaved: () => w3.editors.unsavedPaths(),
-    checkpoint: () => w3.commands.execute("w3.checkpoints.create", { quiet: true }).then(() => undefined),
+    checkpoint: () => checkpointIfOn(w3, "The first AI edit of this project").then(() => undefined),
     log: (line) => out.append(line),
   });
   // Only this part changes with an edit: redrawing the view would flash everything else in it.

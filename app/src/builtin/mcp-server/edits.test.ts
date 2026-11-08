@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { editablePath, EditLog, type EditIO } from "./edits";
+import type { W3Api } from "../../extensions/api";
+import { checkpointIfOn, forgetCheckpointsOffWarning } from "../../lib/checkpoint";
+import { commandNotFound } from "../../lib/commanderror";
 
 function setup(start: Record<string, string> = {}) {
   const files = new Map(Object.entries(start));
@@ -193,4 +196,26 @@ test("old edits drop off", async () => {
   for (let i = 1; i <= 35; i++) await log.edit(`E${i}`, put("map/a", String(i)));
   assert.equal(log.list().length, 30);
   assert.equal(log.list()[0].title, "E6");
+});
+
+test("with the Checkpoints extension off, AI edits go on and the user is told once that no checkpoint is made", async () => {
+  forgetCheckpointsOffWarning();
+  const warned: string[] = [];
+  // As the MCP server wires it: its checkpoint is checkpointIfOn.
+  const w3 = {
+    commands: { execute: async (id: string) => { throw new Error(commandNotFound(id)); } },
+    window: { showWarning: async (m: string) => { warned.push(m); } },
+  } as unknown as W3Api;
+  for (const project of ["one", "two"]) {
+    const files = new Map([["map/a", "old"]]);
+    const log = new EditLog({
+      read: async (p) => files.get(p) ?? null, write: async (p, t) => { if (t !== null) files.set(p, t); }, unsaved: () => [],
+      checkpoint: () => checkpointIfOn(w3, "The first AI edit of this project").then(() => undefined), log: () => {},
+    });
+    assert.equal(await log.edit("Change a", put("map/a", `new ${project}`)), true);
+    assert.equal(files.get("map/a"), `new ${project}`);
+  }
+  assert.equal(warned.length, 1, "once per session, not per project");
+  assert.match(warned[0], /AI edit of this project went on without a checkpoint/);
+  forgetCheckpointsOffWarning();
 });

@@ -5,6 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import { loadKind } from "../../lib/objects/metadata";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
+import { checkpointIfOn } from "../../lib/checkpoint";
 
 /** How a kind's game data is loaded (a parameter so tests can stand in for the game). */
 export type KindLoader = (w3: W3Api, kind: string) => Promise<{ baseIds: string[] }>;
@@ -138,7 +139,7 @@ export function describePlan(plan: InvalidPlan): string {
   const ids = [...plan.types].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const shown = ids.slice(0, 6).map(([id, n]) => `${id} ×${n}`).join(", ");
   const more = ids.length > 6 ? ` and ${ids.length - 6} more type${ids.length - 6 === 1 ? "" : "s"}` : "";
-  return `Delete ${plan.total} placed object${plan.total === 1 ? "" : "s"} of ${ids.length} unknown type${ids.length === 1 ? "" : "s"} (${shown}${more})? Start locations stay. A checkpoint is made first, to come back to.`;
+  return `Delete ${plan.total} placed object${plan.total === 1 ? "" : "s"} of ${ids.length} unknown type${ids.length === 1 ? "" : "s"} (${shown}${more})? Start locations stay. A checkpoint is made first, to come back to, where they're enabled.`;
 }
 
 /** Removes the objects of unknown types; returns how many went. A checkpoint comes first (the way
@@ -154,7 +155,7 @@ export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Pro
   // Planned again after the question: the files could have changed meanwhile.
   const t = await knownPlacedTypes(w3, load);
   if (!t.gameOk) throw new Error("The game's object data isn't available any more. Nothing was changed.");
-  await w3.commands.execute("w3.checkpoints.create", { quiet: true });
+  const checkpointed = await checkpointIfOn(w3, "Delete Invalid Objects");
   let removed = 0;
   for (const { file, key } of plan.files) {
     await editPlacedFile(w3, file, (doc) => {
@@ -163,6 +164,6 @@ export async function deleteInvalid(w3: W3Api, load: KindLoader = loadKind): Pro
       doc[key] = keep;
     });
   }
-  void w3.window.showInfo(`Deleted ${removed} invalid placed object${removed === 1 ? "" : "s"}. The checkpoint made before is in Restore Checkpoint.`);
+  void w3.window.showInfo(`Deleted ${removed} invalid placed object${removed === 1 ? "" : "s"}.${checkpointed ? " The checkpoint made before is in Restore Checkpoint." : ""}`);
   return removed;
 }

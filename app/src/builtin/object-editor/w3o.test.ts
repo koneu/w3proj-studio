@@ -7,6 +7,8 @@ import type { W3Api } from "../../extensions/api";
 import type { EditFile, EditObject } from "./objectedit";
 import { describeImport, exportParts, onlyObjects, planImport } from "./w3o";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
+import { forgetCheckpointsOffWarning } from "../../lib/checkpoint";
+import { commandNotFound } from "../../lib/commanderror";
 
 const mod = (field: string, value: string | number) => ({ field, type: typeof value === "number" ? "int" : "string", value });
 const file = (version: number, original: EditObject[], custom: EditObject[]): EditFile => ({ format: "w3proj.objects/1", version, original, custom });
@@ -152,6 +154,21 @@ test("Import merges the file into the map's data after asking and a checkpoint",
   const u = JSON.parse(fs.get("map/war3map.w3u.json")!) as EditFile;
   assert.deepEqual(u.custom.map((o) => [o.id, o.mods![0].value]), [["h000", "New"], ["h005", "Added"]]);
   assert.equal((JSON.parse(fs.get("map/war3map.w3t.json")!) as EditFile).custom[0].id, "I000", "a kind the map had no file for is created");
+});
+
+test("Import goes on with the Checkpoints extension off, and says once that no checkpoint was made", async () => {
+  forgetCheckpointsOffWarning();
+  const w3o = [{ kind: "w3u", text: J(file(3, [], [unit("h005", "Added")])) }];
+  const { w3, fs, log } = fake({ "map/war3map.w3u.json": J(file(3, [], [unit("h000", "Old")])) }, { w3o });
+  const warned: string[] = [];
+  Object.assign(w3.commands, { execute: async (id: string) => { log.push(`command ${id}`); throw new Error(commandNotFound(id)); } });
+  Object.assign(w3.window, { showWarning: async (m: string) => { warned.push(m); } });
+  assert.equal(await importObjectData(w3), 1);
+  assert.deepEqual((JSON.parse(fs.get("map/war3map.w3u.json")!) as EditFile).custom.map((o) => o.id), ["h000", "h005"]);
+  assert.equal(await importObjectData(w3), 1, "a second import in the session");
+  assert.equal(warned.length, 1, "said once");
+  assert.match(warned[0], /Import Object Data went on without a checkpoint/);
+  forgetCheckpointsOffWarning();
 });
 
 test("Import changes nothing when declined, cancelled, unsaved, or of another version", async () => {

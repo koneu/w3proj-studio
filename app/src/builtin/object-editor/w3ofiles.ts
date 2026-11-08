@@ -2,6 +2,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { jsonPathOf, mapStrings, readMapDocStrict } from "../../lib/formats/mapdoc";
+import { checkpointIfOn } from "../../lib/checkpoint";
 import type { EditFile, EditObject } from "./objectedit";
 import { describeConflicts, describeImport, describeSkin, exportParts, mergeSkin, KIND_NAMES, onlyObjects, planImport, W3O_KINDS, withOwnTexts } from "./w3o";
 
@@ -84,8 +85,8 @@ export async function importObjectData(w3: W3Api): Promise<number> {
     const path = jsonPathOf(w3, `war3mapSkin.${sk.kind}`);
     texts.push({ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(sk.file) }) });
   }
-  if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${describeConflicts(plan)}${describeSkin(plan)} A checkpoint is made first, to come back to.`, "Import", 60_000))) return 0;
-  await w3.commands.execute("w3.checkpoints.create", { quiet: true });
+  if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${describeConflicts(plan)}${describeSkin(plan)} A checkpoint is made first, to come back to, where they're enabled.`, "Import", 60_000))) return 0;
+  await checkpointIfOn(w3, "Import Object Data");
   for (const t of texts) await w3.workspace.writeText(t.path, t.text);
   await w3.workspace.refresh();
   const total = plan.writes.reduce((n, w) => n + w.added + w.replaced, 0);

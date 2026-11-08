@@ -5,6 +5,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { checkpointIfOn } from "../../lib/checkpoint";
 import { SOUND_EXTENSIONS } from "./sounds";
 
 export const SOUND_FILTER = [{ name: "Sound files", extensions: ["flac", "wav", "mp3", "ogg"] }];
@@ -125,8 +126,8 @@ export async function replaceSound(w3: W3Api, soundFile: string): Promise<string
   doc.files ??= [];
   const plan = planReplace({ soundFile, sourceName: name, projectFiles: w3.workspace.files().map((f) => f.path), imports: doc.files });
   const what = plan.inMap ? `The map's ${toArchiveName(plan.write.slice(4))} is replaced` : `The game's ${soundFile} is overridden by a file of the map at ${plan.archive}`;
-  if (!(await w3.window.confirm(`Replace the sound ${soundFile} with ${name}? ${what}${plan.remove ? `, and ${toArchiveName(plan.remove.slice(4))} removed` : ""}. A checkpoint is made first, to come back to.`, "Replace", 60_000))) return null;
-  await w3.commands.execute("w3.checkpoints.create", { quiet: true });
+  if (!(await w3.window.confirm(`Replace the sound ${soundFile} with ${name}? ${what}${plan.remove ? `, and ${toArchiveName(plan.remove.slice(4))} removed` : ""}. A checkpoint is made first, to come back to, where they're enabled.`, "Replace", 60_000))) return null;
+  await checkpointIfOn(w3, "Replace Internal Sound");
   await w3.workspace.copy(source, plan.write);
   if (plan.remove) await w3.workspace.delete(plan.remove);
   if (plan.importsChanged) {
