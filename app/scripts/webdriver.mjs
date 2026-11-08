@@ -164,11 +164,19 @@ export async function launch(exe, env = {}) {
   driver.stderr.on("data", (d) => { stderr = (stderr + d).slice(-4000); });
   let exited = null;
   driver.on("exit", (code) => { exited = code; });
+  // The driver runs in a process group of its own (so it can be stopped with everything it started), which also
+  // keeps a Ctrl+C in the terminal from reaching it: an interrupted run stops the group itself before it ends.
+  const killGroup = (signal) => { try { process.kill(-driver.pid, signal); } catch { /* gone already */ } };
+  const interrupted = (signal) => { killGroup("SIGKILL"); process.exit(signal === "SIGINT" ? 130 : 143); };
+  process.once("SIGINT", interrupted);
+  process.once("SIGTERM", interrupted);
   const stop = async (page) => {
+    process.off("SIGINT", interrupted);
+    process.off("SIGTERM", interrupted);
     await page?.close();
-    try { process.kill(-driver.pid, "SIGTERM"); } catch { /* gone already */ }
+    killGroup("SIGTERM");
     await sleep(300);
-    try { process.kill(-driver.pid, "SIGKILL"); } catch { /* gone */ }
+    killGroup("SIGKILL");
   };
 
   const base = `http://127.0.0.1:${port}`;
