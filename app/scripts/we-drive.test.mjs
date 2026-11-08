@@ -3,10 +3,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classify, editorPrefs, setPrefs, winePath } from "./we-drive.mjs";
+import { addCamerasToMap, classify, editorPrefs, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, takeLock, userCompatData } from "./we-setup.mjs";
 
 const PREFS = ["[Misc]", "assetMode=-1", "Has Been Run=false", "hd=1", "Undo Limit=0", "", "[Test Map]", "hd=0", "teen=0", ""].join("\r\n");
@@ -52,6 +53,95 @@ test("classify tells the main window, the palettes, dialogs and menus apart", ()
   assert.deepEqual(c.dialogs.map((x) => x.title), ["Warcraft III World Editor", "Warning"], "a small window with the editor's title is an error box, not the main window");
   assert.deepEqual(c.menus.map((x) => x.rect), [[65, 49, 243, 483]]);
   assert.equal(classify(windows.slice(3)).main, null);
+});
+
+test("questionDialogs: the loading windows (untitled, \"Progress\") aren't questions; titled dialogs are", () => {
+  const d = (title) => ({ id: 1, title, rect: [600, 400, 300, 100] });
+  assert.deepEqual(questionDialogs([d(""), d("Progress")]), [], "a big map's \"Loading Units n/300\" window is waited for");
+  assert.deepEqual(questionDialogs([d("Progress"), d("Warning"), d("Warcraft III World Editor")]).map((x) => x.title), ["Warning", "Warcraft III World Editor"]);
+  assert.deepEqual(questionDialogs([d("Progress report")]).map((x) => x.title), ["Progress report"], "only the loading window's own title");
+});
+
+test("viewChecks reads the View menu's check marks from a picture of its check column", () => {
+  const width = 18, height = 480;
+  const column = { width, height, rgba: new Uint8Array(width * height * 4).fill(240) };
+  // A mark (dark pixels) in the rows of Lighting and Lock to Game View Settings; one stray dark pixel in Sky's.
+  const ink = (y0, n) => { for (let i = 0; i < n; i++) { const o = ((y0 + Math.floor(i / 6)) * width + 6 + (i % 6)) * 4; column.rgba[o] = column.rgba[o + 1] = column.rgba[o + 2] = 20; } };
+  const at = (name) => VIEW_ITEMS.find((v) => v.item === name).y;
+  ink(at("Lighting") - 3, 18);
+  ink(at("Lock to Game View Settings") - 3, 18);
+  ink(at("Sky"), 1);
+  const checks = viewChecks({ ...column, rgba: column.rgba });
+  assert.deepEqual(checks.filter((c) => c.checked).map((c) => c.item), ["Lighting", "Lock to Game View Settings"]);
+  assert.equal(checks.find((c) => c.item === "Sky").dark, 1);
+  assert.equal(checks.length, VIEW_ITEMS.length);
+  assert.ok(VIEW_ITEMS.every((v, i) => i === 0 || v.y - VIEW_ITEMS[i - 1].y >= 16), "the rows don't overlap");
+});
+
+test("parseArgs: the day and night fixed by default; --compare-ready refuses a turning day", () => {
+  assert.equal(parseArgs(["--start"]).opts.dayNight, "fixed");
+  assert.equal(parseArgs(["--day-night", "cycle", "--start"]).opts.dayNight, "cycle");
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--compare-ready"]).steps.map(([s]) => s), ["--map", "--compare-ready"]);
+  assert.throws(() => parseArgs(["--day-night", "cycle", "--map", "m.w3x", "--compare-ready"]), /day and night fixed/);
+});
+
+test("parseArgs: the looks are parsed up front, need a map before them, and are numbered in order", () => {
+  const { looks, steps } = parseArgs(["--map", "m.w3x", "--wait-ready", "--look", "center", "--shot", "a.png", "--look", "100,200,2000"]);
+  assert.deepEqual(looks.map((l) => [l.center, l.x, l.y, l.distance]), [[true, null, null, 3000], [false, 100, 200, 2000]]);
+  assert.deepEqual(steps.filter(([s]) => s === "--look").map(([, v]) => v), ["center", "100,200,2000"]);
+  assert.throws(() => parseArgs(["--look", "1,2", "--map", "m.w3x"]), /--map before it/);
+  assert.throws(() => parseArgs(["--start", "--look", "1,2"]), /needs --map/);
+  assert.throws(() => parseArgs(["--map", "m.w3x", "--look", "1"]), /a look is/);
+  assert.throws(() => parseArgs(["--map", "m.w3x", ...Array.from({ length: 17 }, () => ["--look", "1,2"]).flat()]), /at most 16/);
+});
+
+test("addCamerasToMap: the looks' cameras go first in war3map.w3c.json, a missing file is made, an unreadable one refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "we-look-"));
+  try {
+    const copy = join(dir, "m.w3x"), project = join(dir, "p");
+    writeFileSync(copy, "map");
+    const looks = parseArgs(["--map", copy, "--look", "center", "--look", "10,20,1500"]).looks;
+    // A stand-in for the CLI: unpack writes the project's files, pack keeps the cameras it finds.
+    const cli = (files) => {
+      let packed = null;
+      const run = (args) => {
+        if (args[0] === "unpack") {
+          assert.deepEqual([args[1], args[2], args[3], args[4]], [copy, project, "--game", "none"]);
+          mkdirSync(join(project, "map"), { recursive: true });
+          for (const [name, text] of Object.entries(files)) writeFileSync(join(project, "map", name), text);
+        } else if (args[0] === "pack") {
+          assert.deepEqual(args, ["pack", project, "--output", copy]);
+          packed = JSON.parse(readFileSync(join(project, "map", "war3map.w3c.json"), "utf8"));
+        }
+      };
+      return { run, packed: () => packed };
+    };
+    const w3e = "W3E version 11\ncorners 5 3\noffset -128 -64\n";
+    const own = { format: "w3proj.cameras/1", version: 0, localAngles: true, cameras: [{ targetX: 1, targetY: 2, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, farZ: 5000, nearZ: 100, localPitch: 0, localYaw: 0, localRoll: 0, name: "Intro" }] };
+    const withOwn = cli({ "war3map.w3e.txt": w3e, "war3map.w3c.json": JSON.stringify(own) });
+    const { looks: resolved, parks } = addCamerasToMap(withOwn.run, copy, project, looks);
+    assert.deepEqual(resolved.map((l) => [l.x, l.y, l.distance]), [[128, 64, 3000], [10, 20, 1500]]);
+    assert.deepEqual(parks.map((p) => [p.x, p.y]), [[-128, -64], [384, 192]], "parking cameras at the terrain's corners");
+    assert.deepEqual(withOwn.packed().cameras.map((c) => c.name), [lookName(0), lookName(1), ...PARK_NAMES, "Intro"]);
+    assert.deepEqual([withOwn.packed().cameras[0].targetX, withOwn.packed().cameras[0].targetY], [128, 64]);
+
+    const none = cli({ "war3map.w3e.txt": w3e });
+    addCamerasToMap(none.run, copy, project, looks);
+    assert.equal(none.packed().version, 3, "no camera file: one is made");
+    assert.equal(none.packed().cameras.length, 4);
+
+    const unreadable = cli({ "war3map.w3e.txt": w3e, "war3map.w3c": "\u0007garbage" });
+    assert.throws(() => addCamerasToMap(unreadable.run, copy, project, looks), /can't be read by the cameras codec/);
+    assert.equal(unreadable.packed(), null, "nothing is packed over the copy");
+
+    const noTerrain = cli({});
+    assert.throws(() => addCamerasToMap(noTerrain.run, copy, project, looks), /needs the terrain's size/);
+    // Without a centre look, no terrain is needed (and there are no parking cameras).
+    assert.deepEqual(addCamerasToMap(noTerrain.run, copy, project, looks.slice(1)).parks, []);
+    assert.deepEqual(noTerrain.packed().cameras.map((c) => c.targetX), [10]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("winePath puts a Linux path on Wine's Z: drive", () => {

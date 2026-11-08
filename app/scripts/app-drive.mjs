@@ -19,7 +19,15 @@
 //   --open PATH         open a project file in its editor (e.g. map/war3map.w3i.json)
 //   --terrain           open the terrain view (map/war3map.w3e.txt) and wait until its game files are read
 //   --camera SPEC       terrain camera: "game" (the game's default: 1650 away, 56° down, 70° wide at 4:3),
-//                       "top", or key=value pairs: x, y (target), distance, pitch, yaw (degrees), fov (degrees, vertical)
+//                       "top", or key=value pairs: x, y (target), distance, pitch, yaw (degrees), fov (degrees, vertical);
+//                       "we" is the World Editor's opening view (the terrain's centre), "we:X,Y[,distance[,aoa[,fov[,
+//                       rotation]]]]" (or "we:center,…") what the editor shows for we-drive's --look with the same
+//                       values, fitted at the editor view's 1184:844 (use --view-size 1184x844; we-camera.mjs)
+//   --view-size WxH     give the terrain view's canvas this size in pixels (over the rest of the window), so its
+//                       pictures line up with another's, e.g. 1184x844 for the World Editor's view; "off" undoes it
+//   --compare-ready MODE  the terrain view's lighting for comparing with the World Editor: "lit" (the map's lighting
+//                       at 06:00, the pair of we-drive's --compare-ready) or "unlit" (even light, the pair of
+//                       --compare-ready-unlit); sets terrain.lighting.* and waits for the view (TESTING.md)
 //   --look X,Y          point the terrain camera at a map position (keeps its angle and distance)
 //   --settle            wait until the game's files are read and the terrain view's layers are done
 //   --sleep MS          wait
@@ -30,24 +38,28 @@
 //   --shot-window FILE  picture of the whole window
 //   --mcp NAME[=JSON]   call an MCP tool with JSON arguments; prints its text answer
 //   --command ID        run a command (as the palette does); prints its error if it fails
-//   --eval EXPR         evaluate in the page (statements or an expression; a promise is awaited); prints the value.
-//                       With a top-level `await`: an expression, or statements that `return` the value
+//   --eval EXPR         evaluate in the page (statements or an expression; a promise is awaited); prints the value:
+//                       an expression's, else the last statement's, or what statements `return` (with or without
+//                       a top-level `await`)
 //
 // Examples:
 //   node scripts/app-drive.mjs --map ../openpoints/example-maps/02c_Fog_Linear_Near.w3x --terrain --camera game --shot /tmp/02c.png
 //   node scripts/app-drive.mjs --no-build --project tests/fixtures/mini-map --mcp list_problems --mcp project_info
 //   node scripts/app-drive.mjs --project P --terrain --camera "pitch=30,distance=3000" --look 0,-1500 --shot a.png
+//   node scripts/app-drive.mjs --map m.w3x --terrain --view-size 1184x844 --camera we --shot studio.png
 //
 // Never starts the game or the World Editor (their programs are set to files that don't exist), and uses its own
 // identifier and settings folder (W3_SMOKE_ID, else one per checkout), so your own app's settings aren't touched.
 
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { Script } from "node:vm";
 import { problems, sleep, until } from "./cdp.mjs";
 import { buildApp, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
+import { parseLook, resolveLook, studioCamera, studioLighting } from "./we-camera.mjs";
 
-const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval"]);
+const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
 function parseArgs(argv) {
@@ -81,10 +93,21 @@ const deg = (d) => (d * Math.PI) / 180;
  *  across a 4:3 screen (the renderer's fov is vertical). */
 const GAME_FOV = 2 * Math.atan(Math.tan(deg(35)) / (4 / 3));
 
-/** A camera spec as setView takes it (radians), with an optional target x/y. */
-function cameraOf(spec) {
+/** Whether a camera spec is the World Editor's view ("we", "we:…"), which needs the terrain's size (head). */
+export const isWeCamera = (spec) => spec === "we" || spec.startsWith("we:");
+
+/**
+ * A camera spec as setView takes it (radians), with an optional target x/y. `head` is the terrain's size and corner
+ * ({ width, height, offsetX, offsetY }), for the World Editor's view.
+ */
+export function cameraOf(spec, head = null) {
   if (spec === "game") return { yaw: -Math.PI / 2, pitch: deg(56), distance: 1650, fov: GAME_FOV };
   if (spec === "top") return { yaw: -Math.PI / 2, pitch: deg(89), distance: 4000 };
+  if (isWeCamera(spec)) {
+    if (!head) throw new Error("--camera we needs the terrain");
+    const c = studioCamera(resolveLook(parseLook(spec === "we" ? "center" : spec.slice(3)), head));
+    return { x: c.x, y: c.y, distance: c.distance, pitch: deg(c.pitch), yaw: deg(c.yaw), fov: deg(c.fov) };
+  }
   const v = {};
   for (const part of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
     const [k, raw] = part.split("=");
@@ -95,6 +118,29 @@ function cameraOf(spec) {
     else throw new Error(`--camera: unknown key ${k} (x, y, distance, pitch, yaw, fov)`);
   }
   return v;
+}
+
+/** "WxH" in pixels, or null for "off". */
+export function parseViewSize(spec) {
+  if (spec === "off") return null;
+  const m = /^(\d+)x(\d+)$/.exec(spec);
+  if (!m || Number(m[1]) < 16 || Number(m[2]) < 16) throw new Error(`--view-size wants WxH in pixels (at least 16x16) or off, not ${spec}`);
+  return { width: Number(m[1]), height: Number(m[2]) };
+}
+
+/**
+ * What --eval sends to the page for `source`: the source itself if it is a script (an expression or statements:
+ * the page answers with its completion value and awaits a promise), else an async function around it, as an
+ * expression when it is one with a top-level `await`, else as statements, which `return` their value (`return` is
+ * no script's statement, with or without `await`). Which form it is is found by parsing here (the first that is a
+ * script as sent): nothing runs twice. Source with the word `await` is never sent as is: `await (f)()` parses as a
+ * script too, calling a function named await.
+ */
+export function evalSource(source) {
+  const forms = [`(async () => (${source}\n))()`, `(async () => {\n${source}\n})()`];
+  if (!/\bawait\b/.test(source)) forms.unshift(source);
+  // None parses: a syntax error, which the page reports.
+  return forms.find((f) => { try { new Script(f); return true; } catch { return false; } }) ?? source;
 }
 
 async function main() {
@@ -175,7 +221,8 @@ async function main() {
           out({ step, view: await page.evaluate(`window.__driveEd.view()`) });
         } else if (step === "--camera") {
           await editor();
-          const { x, y, ...v } = cameraOf(arg);
+          const head = isWeCamera(arg) ? await page.evaluate(`(({ width, height, offsetX, offsetY }) => ({ width, height, offsetX, offsetY }))(window.__driveEd.terrain)`) : null;
+          const { x, y, ...v } = cameraOf(arg, head);
           if (x !== undefined || y !== undefined) {
             const t = await page.evaluate(`window.__driveEd.view().target`);
             await page.evaluate(`window.__driveEd.lookAt(${x ?? t[0]}, ${y ?? t[1]})`);
@@ -183,6 +230,36 @@ async function main() {
           await page.evaluate(`(() => { const t = window.__driveEd.view().target; window.__driveEd.setView({ target: t, ...${JSON.stringify(v)} }); })()`);
           await sleep(500);
           out({ step, view: await page.evaluate(`window.__driveEd.view()`) });
+        } else if (step === "--compare-ready") {
+          await editor();
+          const settings = studioLighting(arg);
+          for (const [k, v] of Object.entries(settings)) await page.evaluate(`w3.settings.set(${JSON.stringify(k)}, ${JSON.stringify(v)})`);
+          await settle();
+          out({ step, mode: arg, settings });
+        } else if (step === "--view-size") {
+          await editor();
+          const size = parseViewSize(arg);
+          // The canvas fills .model-stage (absolute, inset 0) and takes its drawing size from its own size each
+          // frame: the stage is put over the window's top-left corner at that size in pixels (CSS pixels times the
+          // display's ratio), then the view redrawn.
+          const got = await page.evaluate(`(async () => {
+            const stage = window.__driveEd.host.querySelector(".model-stage");
+            if (!stage) throw new Error("no .model-stage in the terrain view");
+            const size = ${JSON.stringify(size)};
+            if (size) {
+              const r = devicePixelRatio;
+              Object.assign(stage.style, { position: "fixed", left: "0", top: "0", flex: "none", zIndex: "10000",
+                width: size.width / r + "px", height: size.height / r + "px" });
+              if (size.width / r > innerWidth || size.height / r > innerHeight) throw new Error("the window is smaller than " + size.width + "x" + size.height);
+            } else for (const k of ["position", "left", "top", "flex", "zIndex", "width", "height"]) stage.style[k] = "";
+            window.__driveEd.redraw();
+            await new Promise((r) => setTimeout(r, 300));
+            const c = stage.querySelector("canvas");
+            return { width: c.width, height: c.height };
+          })()`);
+          if (size && (got.width !== size.width || got.height !== size.height)) throw new Error(`the canvas draws ${got.width}x${got.height}, not ${arg}`);
+          await sleep(300);
+          out({ step, canvas: got });
         } else if (step === "--look") {
           await editor();
           const [x, y] = arg.split(",").map(Number);
@@ -219,16 +296,7 @@ async function main() {
           const r = await page.evaluate(`Promise.race([w3.commands.execute(${JSON.stringify(arg)}).then(() => null, (e) => String(e)), new Promise((r) => setTimeout(() => r("still running after 10 s (waiting for an answer?)"), 10000))])`);
           out({ step, command: arg, error: r });
         } else if (step === "--eval") {
-          // `await` at the top: as an async expression, else as async statements (which `return` their value).
-          let value;
-          if (/\bawait\b/.test(arg)) {
-            // Which form it is, found by parsing it here (nothing runs twice in the page).
-            const AsyncFunction = (async () => {}).constructor;
-            let expression = true;
-            try { new AsyncFunction(`return (${arg});`); } catch { expression = false; }
-            value = await page.evaluate(expression ? `(async () => (${arg}))()` : `(async () => { ${arg} })()`);
-          } else value = await page.evaluate(arg);
-          out({ step, value });
+          out({ step, value: await page.evaluate(evalSource(arg)) });
         }
       } catch (e) {
         failed = true;
@@ -244,9 +312,12 @@ async function main() {
   }
 }
 
-try {
-  process.exit(await main());
-} catch (e) {
-  console.error(`app-drive: ${e.message}`);
-  process.exit(1);
+// Run as a program, not imported (a test bundles this file, so import.meta.url can't tell).
+if (process.argv[1] && basename(process.argv[1]) === "app-drive.mjs") {
+  try {
+    process.exit(await main());
+  } catch (e) {
+    console.error(`app-drive: ${e.message}`);
+    process.exit(1);
+  }
 }
