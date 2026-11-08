@@ -39,12 +39,15 @@ export const mat4 = {
     m[12] = -dot(x, eye); m[13] = -dot(y, eye); m[14] = -dot(z, eye);
     return m;
   },
-  /** T(pivot) · T(t) · R(q) · S(s) · T(-pivot) */
-  node(pivot: Vec3, t: Vec3, q: number[], s: Vec3): Mat4 {
-    const [x, y, z, w] = q, m = new Float32Array(16);
+  /** T(pivot) · T(t) · R(q) · S(s) · T(-pivot), into `out` (all of it written). */
+  node(pivot: Vec3, t: Vec3, q: number[], s: Vec3, out: Mat4 = new Float32Array(16)): Mat4 {
+    const x = q[0], y = q[1], z = q[2], w = q[3], m = out;
     const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
-    const r = [1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy)];
-    for (let c = 0; c < 3; c++) for (let rr = 0; rr < 3; rr++) m[c * 4 + rr] = r[c * 3 + rr] * s[c];
+    // The rotation's columns, each scaled (no array made: poses do this for every node each frame).
+    const s0 = s[0], s1 = s[1], s2 = s[2];
+    m[0] = (1 - 2 * (yy + zz)) * s0; m[1] = 2 * (xy + wz) * s0; m[2] = 2 * (xz - wy) * s0; m[3] = 0;
+    m[4] = 2 * (xy - wz) * s1; m[5] = (1 - 2 * (xx + zz)) * s1; m[6] = 2 * (yz + wx) * s1; m[7] = 0;
+    m[8] = 2 * (xz + wy) * s2; m[9] = 2 * (yz - wx) * s2; m[10] = (1 - 2 * (xx + yy)) * s2; m[11] = 0;
     m[15] = 1;
     // translation = pivot + t - (R·S)·pivot
     for (let rr = 0; rr < 3; rr++) {
@@ -69,16 +72,20 @@ export interface Clock {
   time: number;
 }
 
-/** Whether a track's key times never go down (as the format has them), checked once per list. */
-const timesInOrder = new WeakMap<Uint32Array, boolean>();
-function inOrder(times: Uint32Array): boolean {
-  let ok = timesInOrder.get(times);
-  if (ok === undefined) {
-    ok = true;
-    for (let k = 1; k < times.length && ok; k++) if (times[k] < times[k - 1]) ok = false;
-    timesInOrder.set(times, ok);
+/** What sampling a track's key times found last: whether they never go down (as the format has them;
+ *  checked once per list), the keys of the interval asked for last, and the key the last moment came
+ *  after. A pose asks for the same interval frame after frame, at moments a little later each time. */
+interface KeyLookup { sorted: boolean; start: number; end: number; first: number; last: number; at: number }
+const keyLookups = new WeakMap<Uint32Array, KeyLookup>();
+function keyLookup(times: Uint32Array): KeyLookup {
+  let k = keyLookups.get(times);
+  if (!k) {
+    let sorted = true;
+    for (let i = 1; i < times.length && sorted; i++) if (times[i] < times[i - 1]) sorted = false;
+    k = { sorted, start: NaN, end: NaN, first: -1, last: -1, at: -1 };
+    keyLookups.set(times, k);
   }
-  return ok;
+  return k;
 }
 
 /** The first index in [lo, hi) whose time is at least `v` (`orAbove` false) or above it (true), or hi; times in order. */
@@ -117,12 +124,18 @@ export function sampleInto(track: Track | undefined, clock: Clock, globalSeqs: n
     start = 0; end = dur; t = clock.time % dur;
   }
   let first = -1, last = -1, i: number;
-  const sorted = inOrder(times);
+  const lookup = keyLookup(times), sorted = lookup.sorted;
   if (sorted) {
-    // The keys of every sequence are in one list, in time order: the sequence's are found by halving.
-    first = firstFrom(times, 0, times.length, start, false);
-    last = firstFrom(times, first, times.length, end, true) - 1;
-    if (first > last) first = last = -1;
+    // The keys of every sequence are in one list, in time order: the sequence's are found by halving,
+    // once for as long as the same interval is asked for.
+    if (lookup.start !== start || lookup.end !== end) {
+      first = firstFrom(times, 0, times.length, start, false);
+      last = firstFrom(times, first, times.length, end, true) - 1;
+      if (first > last) first = last = -1;
+      lookup.start = start; lookup.end = end; lookup.first = first; lookup.last = last;
+    } else {
+      first = lookup.first; last = lookup.last;
+    }
   } else {
     for (let k = 0; k < times.length; k++) {
       if (times[k] < start || times[k] > end) continue;
@@ -133,8 +146,13 @@ export function sampleInto(track: Track | undefined, clock: Clock, globalSeqs: n
   if (first < 0) return fallback;
   if (t <= times[first] || first === last) return keyInto(values, size, first, out);
   if (t >= times[last]) return keyInto(values, size, last, out);
-  // The last key at or before t (t is between the first and the last key here).
-  i = sorted ? Math.min(last - 1, Math.max(first, firstFrom(times, first, last + 1, t, true) - 1)) : first;
+  // The last key at or before t (t is between the first and the last key here): the one of the last
+  // moment when it still is, else found by halving.
+  if (sorted) {
+    const h = lookup.at;
+    i = h >= first && h < last && times[h] <= t && times[h + 1] > t ? h : Math.min(last - 1, Math.max(first, firstFrom(times, first, last + 1, t, true) - 1));
+    lookup.at = i;
+  } else i = first;
   while (i < last && times[i + 1] <= t) i++;
   const a = i, b = i + 1, u = (t - times[a]) / (times[b] - times[a]);
   if (track.interp === 0) return keyInto(values, size, a, out);
@@ -219,11 +237,14 @@ export function poseNodes(model: Model, clock: Clock): Mat4[] {
     const t = sampleInto(n.translation, clock, model.globalSequences, NO_MOVE, T) as Vec3;
     const r = sampleInto(n.rotation, clock, model.globalSequences, NO_TURN, R);
     const s = sampleInto(n.scaling, clock, model.globalSequences, NO_SCALE, S) as Vec3;
-    const local = mat4.node(pivot, t, r, s);
-    world[id] = n.parentId >= 0 && world[n.parentId] ? mat4.mul(world[n.parentId], local) : local;
+    const parent = n.parentId >= 0 ? world[n.parentId] : undefined;
+    // A child's own matrix is only a step on the way: it's made in a scratch matrix, and only the result is new.
+    world[id] = parent ? mat4.mul(parent, mat4.node(pivot, t, r, s, LOCAL)) : mat4.node(pivot, t, r, s);
   }
   return world;
 }
+/** poseNodes' scratch matrix for a child node's own transform. */
+const LOCAL = new Float32Array(16);
 
 /** Whether a track gives the same value at every moment of a sequence (or of its global sequence),
  *  going by what sample() does: no key or one key in it, or keys that are all the same and are
@@ -261,9 +282,17 @@ export function poseStill(model: Model, seqStart: number, seqEnd: number): boole
   return true;
 }
 
+/** standClock's Stand animation per model (its sequence list) and look (the props joined). */
+const standChoices = new WeakMap<Model["sequences"], Map<string, Model["sequences"][number] | undefined>>();
+
 /** The start of the Stand animation of a look (see ./stand): how placed objects stand. */
 export function standClock(model: Model, props: readonly string[] = []): Clock {
-  const stand = standSequence(model.sequences, props);
+  // Asked for every animated model each frame: the choice (words of every animation name) is made once per look.
+  let looks = standChoices.get(model.sequences);
+  if (!looks) standChoices.set(model.sequences, (looks = new Map()));
+  const look = props.join(",");
+  let stand = looks.get(look);
+  if (stand === undefined && !looks.has(look)) looks.set(look, (stand = standSequence(model.sequences, props)));
   return { frame: stand?.start ?? 0, seqStart: stand?.start ?? 0, seqEnd: stand?.end ?? 0, time: 0 };
 }
 
