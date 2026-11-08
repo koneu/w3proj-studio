@@ -69,6 +69,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const rebuild = () => {
           const old = renderer, next = new ModelRenderer(canvas, model);
           next.setTeamColor(team);
+          // Exactly the old set: a new renderer starts with the LOD geosets hidden, which the person may have shown.
+          next.hidden.clear();
           for (const i of old.hidden) next.hidden.add(i);
           Object.assign(next, { wireframe: old.wireframe, showGrid: old.showGrid, showParticles: old.showParticles, yaw: old.yaw, pitch: old.pitch, distance: old.distance, target: [...old.target] });
           textureImages.forEach((img, i) => { if (img) next.setTexture(i, img); });

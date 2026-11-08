@@ -2272,6 +2272,10 @@ async function contextLoss(page, found) {
   await hands.drag({ x: at.x - 80, y: at.y }, { x: at.x + 80, y: at.y }).catch((e) => { throw new Error(`painting at ${JSON.stringify(at)}: ${e.message}`); });
   await sleep(300);
   if (!(await dirty())) return fail("painting left the terrain without unsaved changes (control)");
+  // The terrain as the editor holds it (unsaved edits included): every corner's height and tile.
+  const tool = mcpTool(page);
+  const held = () => tool("terrain_info", { heights: true });
+  const beforeLoss = await held();
   await glCall("loseContext");
   await until("the message about the lost view", lostShown, 5000).catch(() => fail("no message over the terrain view after its WebGL context was lost"));
   await sleep(300);
@@ -2279,11 +2283,23 @@ async function contextLoss(page, found) {
   await look();
   await sleep(600);
   if ((await frames()) !== stopped) fail("the terrain view still draws on a lost context");
+  // Nothing edits the terrain while its view is lost: painting over it, Ctrl+Z, a command, an MCP tool.
+  await hands.drag({ x: at.x, y: at.y - 60 }, { x: at.x, y: at.y + 60 }).catch(() => {});
+  await page.evaluate(`(${canvasNow}).focus()`);
+  await hands.key("z", "KeyZ", 90, 2);
+  await sleep(300);
+  if (!(await dirty())) fail("Ctrl+Z on a lost terrain view took the unsaved edit back");
+  if ((await held()) !== beforeLoss) fail("painting or Ctrl+Z edited the terrain while its view was lost");
+  const command = await page.evaluate(`w3.commands.execute("w3.terrain.resetVariations").then(() => null, (e) => e.message)`);
+  if (!/3D view stopped/.test(command ?? "")) fail(`Reset Variations on a lost terrain view wasn't refused: ${command}`);
+  const sculpt = await tool("sculpt_terrain", { mode: "raise", amount: 100, left: -128, bottom: -64, right: 384, top: 192, shape: "box" }).then(() => null, (e) => e.message);
+  if (!/3D view stopped/.test(sculpt ?? "")) fail(`sculpt_terrain on a lost terrain view wasn't refused: ${sculpt}`);
+  if ((await held()) !== beforeLoss) fail("a command edited the terrain while its view was lost");
   if (!(await clickReopen())) fail("the message over the lost terrain view has no Reopen button");
   await sleep(800);
   const same = await page.evaluate(`window.__lostCanvas.isConnected`);
   if (!same || !(await dirty())) fail("Reopen with unsaved edits opened the terrain editor again: the edits are gone");
-  await glCall("restoreContext").catch(() => {});
+  await glCall("restoreContext");
   await sleep(500);
   if (!(await lostShown())) fail("the terrain view's message went when the context came back, but its renderer has nothing on the GPU any more");
   await page.evaluate(`w3.editors.saveAll()`);

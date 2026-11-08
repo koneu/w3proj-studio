@@ -229,7 +229,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       };
       let editor = ownEditor();
       if (!editor) {
-        try { editor = await liveEditor(); } catch (e) { throw failed(e); }
+        try { editor = await liveEditor("read"); } catch (e) { throw failed(e); }
       }
       // The wait was long enough for another project to be opened: its job and editor are not this one's.
       if (rebuild !== job || job.key !== w3.workspace.project()?.root || editor.root !== job.key) return;
@@ -264,6 +264,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
+  /** Terrain editors (by document path) whose 3D view was lost (a GPU reset): nothing is edited there
+   *  until it is opened again, so no edit lands on a view that isn't drawn. Saving still works. */
+  const lostViews = new Set<string>();
+  const VIEW_LOST = "The terrain editor's 3D view stopped (the graphics device was reset): save, then reopen the editor. Nothing is edited there until then.";
+  const refuseLostView = (path: string | null | undefined) => { if (path && lostViews.has(path)) throw new Error(VIEW_LOST); };
   /** The editor of the project's own terrain, which is the only one that writes into the project. */
   const ownEditor = () => {
     const p = projectTerrain(w3), found = p ? openedBy.get(p) : undefined;
@@ -273,14 +278,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let lastView: { key: string; view: TerrainView } | null = null;
 
   /** The terrain editor, opened if needed, with its objects in place. An edit reopens it, so it can take a moment. */
-  const liveEditor = async () => {
+  /** The editor of the project's terrain, opened if need be. For an edit (the default) it is refused while its 3D view is lost. */
+  const liveEditor = async (use: "edit" | "read" = "edit") => {
     await w3.commands.execute("w3.terrain.open");
     for (let n = 0; n < 200; n++) {
       const editor = ownEditor();
       if (editor) {
         await editor.ready();
         // Taking a change in place can end in reopening: then it's the next one's turn.
-        if (ownEditor() === editor) return editor;
+        if (ownEditor() === editor) {
+          if (use === "edit") refuseLostView(projectTerrain(w3));
+          return editor;
+        }
       } else await new Promise((done) => setTimeout(done, 100));
     }
     throw new Error("The terrain editor couldn't start (see its tab).");
@@ -437,7 +446,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** What the melee tools go by: units, trees, routes, and how wide things are. */
   const meleeFacts = async (size: number) => {
-    const { handle } = await liveEditor();
+    const { handle } = await liveEditor("read");
     const [balance, weapons, destructables, game, data, grid] = await Promise.all([
       w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
       w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle),
@@ -594,17 +603,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32;
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       return withNeighbour(handle, checkPath(await walkGrid(handle), start, goal, size));
     }),
     w3.mcp.registerTool("check_route", async ({ points, unitSize, corridorWidth }) => {
       if (!Array.isArray(points) || points.length < 2 || !points.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) throw new Error("points must be at least two [x, y].");
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       const size = typeof unitSize === "number" && unitSize >= 0 ? unitSize : 32, wide = typeof corridorWidth === "number" && corridorWidth > 0 ? corridorWidth : 400;
       return withNeighbour(handle, checkRoute(await walkGrid(handle), points as [number, number][], size, wide));
     }),
     w3.mcp.registerTool("find_pockets", async (args) => {
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       const grid = await walkGrid(handle), bounds = await playable().catch(() => null);
       // What's past the playable part isn't ground anyone walks on.
       if (bounds) for (let y = 0; y < grid.height; y++) for (let x = 0; x < grid.width; x++) {
@@ -649,7 +658,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return { seed, ...(await placeObjects({ kind: args.kind, objects, ignoreRoom: args.ignoreRoom, seed, mirror: args.mirror })) as object };
     }),
     w3.mcp.registerTool("list_ground_tiles", async ({ filter }) => {
-      const { handle } = await liveEditor();
+      const { handle } = await liveEditor("read");
       const wanted = typeof filter === "string" ? filter.toLowerCase() : "";
       const seen = new Map<string, string[]>();
       for (const s of await handle.tilesets()) for (const id of s.tiles) seen.set(id, [...(seen.get(id) ?? []), s.name]);
@@ -778,7 +787,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }, typeof count === "number" ? Math.max(1, Math.min(30, count)) : 12, mirror === true);
     }),
     w3.mcp.registerTool("terrain_info", async (args) => {
-      const editor = await liveEditor();
+      const editor = await liveEditor("read");
       const t = editor.handle.terrain;
       const whole = { left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 };
       // The game's pathing file leaves out trees and other destructables: what stands there counts.
@@ -1010,6 +1019,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const path = w3.editors.activePath();
       const view = path ? toolGroups.viewCommands.get(path) : undefined;
       if (!view) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
       const why = await run(view);
       if (why) void w3.window.showInfo(why);
     })),
@@ -1043,6 +1053,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const path = w3.editors.activePath();
       const reset = path ? toolGroups.resetVariations.get(path) : undefined;
       if (!reset) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
       if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
     // `opts` (other extensions): dialog preset, and a step before the map is created (and opened).
@@ -1119,8 +1130,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // with it, and they come from a long load (ground, cliffs, doodads, units, splats, shadows,
         // weather) that this view can't run again in place. Opening the editor again would, but it reads
         // the terrain from disk: unsaved edits would be gone. So drawing stops for good and a message says
-        // so, over the view (it takes the mouse, so no edit lands on a view that isn't drawn). The edits
-        // stay in memory and saving works as before; Reopen is refused while some are unsaved.
+        // so, over the view. No edit lands on a view that isn't drawn: the message takes the mouse, the
+        // toolbar and panels go inert, keys, undo and redo do nothing, and the commands and MCP tools that
+        // edit refuse (lostViews). The edits stay in memory and saving works as before; Reopen is refused
+        // while some are unsaved.
         /** Set at a loss, and never cleared: the renderer's GPU objects are gone even once the context is back. */
         let glDead = false;
         const glMessage = h("div.gl-lost-text");
@@ -1136,6 +1149,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const glWatch = watchContextLoss(canvas, {
           lost: () => {
             glDead = true;
+            lostViews.add(doc.path);
+            // The toolbar, the tool tabs and the side panels can't be used either: only the message and saving.
+            for (const x of el.querySelectorAll<HTMLElement>(".model-main > :not(.model-stage), .model-side")) x.inert = true;
             glMessage.replaceChildren(
               h("div", {}, "The graphics device was reset (WebGL context lost), and the 3D view stopped."),
               h("div", {}, "Your edits are kept, and saving works. Save (Ctrl+S), then open the editor again to see the map."),
@@ -1290,8 +1306,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         // Past its own steps, undo and redo go on to a map resize (Map Size), which reopens the editor.
         const resizeStep = (which: "undo" | "redo") => void w3.commands.execute(`w3.terrainMapSize.${which}`, { quiet: true }).catch(() => {});
-        const undo = () => { if (at > 0) { const e = history[--at]; e.undo(); changed(e); } else resizeStep("undo"); };
-        const redo = () => { if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } else resizeStep("redo"); };
+        /** True, with a warning, when the view is lost: then nothing is edited (see lostViews). */
+        const refuseLost = () => { if (glDead) void w3.window.showWarning(VIEW_LOST); return glDead; };
+        const undo = () => { if (refuseLost()) return; if (at > 0) { const e = history[--at]; e.undo(); changed(e); } else resizeStep("undo"); };
+        const redo = () => { if (refuseLost()) return; if (at < history.length) { const e = history[at++]; e.redo(); changed(e); } else resizeStep("redo"); };
         /** While a key edits: whether it's the first press or a repeat of a held key. */
         let keyPress: "first" | "repeat" | null = null;
         /** The undo step a held key is building; a repeat joins it. */
@@ -2053,6 +2071,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           firstDoodadHeight: () => selectedDoodads()[0]?.position[2] ?? null,
           setUniformHeights: async (height) => {
             if (!editable) return "This terrain is read-only.";
+            if (glDead) return VIEW_LOST;
             const doodads = selectedDoodads();
             if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
             const z = height ?? doodads[0].position[2];
@@ -2063,6 +2082,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           resetFixedHeights: () => {
             if (!editable) return "This terrain is read-only.";
+            if (glDead) return VIEW_LOST;
             const doodads = selectedDoodads();
             if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
             const steps = history.length, atBefore = at;
@@ -3173,6 +3193,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         toolGroups.look.set(doc.path, look);
         const resetGround = () => {
           if (!editable) throw new Error("This terrain is read-only.");
+          if (glDead) throw new Error(VIEW_LOST);
           const log = new CornerUndo();
           if (!resetVariations(terrain, log)) return false;
           commitTerrain(log.step(terrain));
@@ -3479,6 +3500,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         });
         // Undo/redo anywhere in the editor (toolbars, panels), except while typing.
         el.addEventListener("keydown", (e) => {
+          if (glDead) return;
           const t = e.target as HTMLElement;
           if (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "range", "button"].includes((t as HTMLInputElement).type))) return;
           if (!(e.ctrlKey || e.metaKey)) return;
@@ -3842,6 +3864,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             window.removeEventListener("keyup", areaKeyUp);
             window.removeEventListener("blur", areaKeyLost);
             glWatch.dispose();
+            if (glDead) lostViews.delete(doc.path);
             renderer.dispose();
           },
         };

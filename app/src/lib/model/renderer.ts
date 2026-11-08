@@ -441,14 +441,16 @@ interface Shared {
   /** 1×1 team colour and generated team glow, per player colour. */
   team: WebGLTexture[];
   glow: WebGLTexture[];
+  /** The context was lost since these were made: they are gone, and are made again on the next use. */
+  stale: boolean;
 }
 const sharedByContext = new WeakMap<WebGL2RenderingContext, Shared>();
 
 function shared(gl: WebGL2RenderingContext): Shared {
   let s = sharedByContext.get(gl);
   // A context that was lost and restored is the same object, but what was made on it before is gone:
-  // its program isn't one any more, and everything is made again.
-  if (s && !gl.isContextLost() && !gl.isProgram(s.prog)) s = undefined;
+  // everything is made again. (Not asked of the GPU each time: hundreds of models are made while a map opens.)
+  if (s?.stale && !gl.isContextLost()) s = undefined;
   if (!s) {
     const solid = (rgba: number[]) => {
       const t = gl.createTexture()!;
@@ -472,6 +474,8 @@ function shared(gl: WebGL2RenderingContext): Shared {
     gl.bindBuffer(gl.ARRAY_BUFFER, one);
     gl.bufferData(gl.ARRAY_BUFFER, INSTANCE_BYTES, gl.DYNAMIC_DRAW);
     s = {
+      // Made on a lost context, they're nothing already.
+      stale: gl.isContextLost(),
       prog,
       u: Object.fromEntries(UNIFORMS.map((n) => [n, gl.getUniformLocation(prog, n)])) as Shared["u"],
       world: gl.getAttribLocation(prog, "aWorld"),
@@ -481,6 +485,9 @@ function shared(gl: WebGL2RenderingContext): Shared {
       glow: TEAM_COLORS.map(([, c]) => glow(c)),
     };
     sharedByContext.set(gl, s);
+    const made = s;
+    // (The unit tests' stand-in context has a canvas without events.)
+    gl.canvas.addEventListener?.("webglcontextlost", () => { made.stale = true; }, { once: true });
   }
   return s;
 }
