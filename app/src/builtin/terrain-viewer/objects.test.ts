@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addAnimProps, addMoveTypes, objectsInRect, placement, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import { TerrainRenderer } from "./renderer";
 
 const skin = (file: string): Skin => ({
   kind: "w3u", file, numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat: "",
@@ -47,6 +48,20 @@ test("an object without a model gets a stand-in that a selection box can pick, l
   assert.deepEqual(objectsInRect(strays, project, new Set(["units"]), kinds, 0, 0, 400, 400), [], "a hidden group");
   assert.deepEqual(objectsInRect(strays, project, hidden, new Set(["w3t"]), 0, 0, 400, 400), [], "kinds not wanted");
   assert.deepEqual(objectsInRect(strays, () => null, hidden, kinds, 0, 0, 400, 400), [], "behind the camera");
+});
+
+test("a click picks an object without a model through its stand-in, as a selection box does", () => {
+  const unknown = placed("zzzz", 100, 100, { player: 0 });
+  const strays = strayInstances("units", [unknown], [unknown], new Map(), () => 0);
+  // The renderer's own pick, on a renderer with no models drawn (it needs no graphics for this).
+  const view = { batches: [], hiddenGroups: new Set<string>() };
+  const pick = (x: number, y: number, hidden = view.hiddenGroups) =>
+    TerrainRenderer.prototype.pickObject.call({ ...view, hiddenGroups: hidden } as unknown as TerrainRenderer,
+      { origin: [x, y, 2000], dir: [0, 0, -1] }, () => 24, strays);
+  assert.equal(pick(100, 100)?.pick?.placed, unknown, "straight down onto the marker");
+  assert.equal(pick(110, 95)?.pick?.placed, unknown, "within its click radius");
+  assert.equal(pick(300, 300), null, "the ground beside it");
+  assert.equal(pick(100, 100, new Set(["units"])), null, "units hidden");
 });
 
 test("units get their movement type from the unit table, and a map's own movement type wins", () => {

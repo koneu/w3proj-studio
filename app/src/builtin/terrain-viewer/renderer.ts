@@ -833,14 +833,18 @@ export class TerrainRenderer {
     return heightAt(this.terrain, x, y);
   }
 
-  /** The nearest placed object (with a model) hit by a ray. */
   /** The nearest placed object a ray hits. With `radiusOf`, objects are
    *  upright cylinders of that radius (their footprint) standing at their
-   *  position up to the top of the model; otherwise the model's bounding sphere. */
-  pickObject(ray: { origin: Vec3; dir: Vec3 }, radiusOf?: (inst: ObjectInstance) => number | undefined): ObjectInstance | null {
+   *  position up to the top of the model; otherwise the model's bounding sphere.
+   *  `extra` are objects drawn without a model of their own (the stand-ins of
+   *  objects shown as markers), picked the same way; a hidden group's are left out too. */
+  pickObject(ray: { origin: Vec3; dir: Vec3 }, radiusOf?: (inst: ObjectInstance) => number | undefined,
+    extra: readonly { group: string; inst: ObjectInstance }[] = []): ObjectInstance | null {
     const { origin: o, dir: d } = ray;
     let best: ObjectInstance | null = null, bestT = Infinity;
-    for (const b of this.batches) {
+    const sources = [...this.batches.map((b) => ({ group: b.group, instances: b.instances })),
+      ...extra.map((s) => ({ group: s.group, instances: [s.inst] }))];
+    for (const b of sources) {
       if (this.hiddenGroups.has(b.group)) continue;
       for (const inst of b.instances) {
         if (!inst.pick || !inst.sphere) continue;

@@ -2756,7 +2756,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
           const ray = renderer.ray(e.clientX - rect.left, e.clientY - rect.top);
-          const inst = renderer.pickObject(ray, pickRadius);
+          // Objects shown only as markers are clicked through their stand-ins, as a box selects them.
+          const inst = renderer.pickObject(ray, pickRadius, strays);
           // Shift+click adds or removes an object, as in the World Editor; so does Ctrl+click with nothing
           // selected yet, when it has no point to face.
           if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -3501,7 +3502,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
-            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius) : null;
+            const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius, strays) : null;
             // Dragging a selected object moves the whole selection.
             const entries = selectedEntries();
             const anchor = inst?.pick && entries.includes(inst.pick.placed) ? groundAt(e) : null;
