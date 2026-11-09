@@ -2,6 +2,8 @@
 // only in war3map.j / war3map.lua (W3Champions' maps: 800 injected functions), and regenerating
 // the script from the triggers would drop it without a trace.
 
+import { isCampaignObjectFile } from "../objects/campaign";
+
 /** Project file holding the hash of the script this app wrote last: a script that still has it holds nothing but
  *  what the map's data made, so it's replaced without asking. */
 export const SCRIPT_STAMP = ".w3proj/generated-script";
@@ -15,6 +17,19 @@ export const SCRIPT_FILES = ["map/war3map.j", "map/war3map.lua"];
 
 /** Files the map script is made from (also as their .json documents): saving one regenerates it. */
 export const SCRIPT_INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a|w3b)|war3mapUnits\.doo|war3mapSkin\.(w3u|w3a|w3b))(\.json)?$/i;
+
+/** A campaign's object files the map script of its chapter maps is made from too (in the campaign project's map/
+ *  folder; also as their .json documents). */
+const CAMPAIGN_INPUTS = /^war3campaign(\.(w3u|w3t|w3a|w3b)|Skin\.(w3u|w3a|w3b))(\.json)?$/i;
+
+/** Whether saving `path` (a project path, or an absolute one as the workspace reports saves outside the project)
+ *  changes the map script: one of the map's inputs, or, for a chapter map, one of its campaign's object files
+ *  (`campaign`: the campaign project's folder, see lib/objects/campaign). */
+export function isScriptInput(path: string, campaign?: string): boolean {
+  if (SCRIPT_INPUTS.test(path)) return true;
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? "";
+  return CAMPAIGN_INPUTS.test(name) && isCampaignObjectFile(path, campaign);
+}
 
 /** Top-level functions of a JASS or Lua script ("function f", also Lua's "f = function"). */
 function functionsOf(script: string): Set<string> {
