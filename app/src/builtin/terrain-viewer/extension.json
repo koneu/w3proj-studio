@@ -60,6 +60,8 @@
       { "id": "w3.map.new", "menu": "File:1:1", "title": "New Map…", "category": "Project", "keybinding": "ctrl+n" },
       { "id": "w3.terrain.exportMinimap", "when": "project", "menu": "File:4:6", "title": "Export Minimap…", "category": "Terrain" },
       { "id": "w3.terrain.resetVariations", "when": "project", "title": "Reset Texture Variations", "category": "Terrain" },
+      { "id": "w3.terrain.resetHeightField", "when": "project", "title": "Reset Height Field", "category": "Terrain" },
+      { "id": "w3.terrain.adjustCliffLevels", "when": "project", "title": "Adjust Cliff Levels…", "category": "Terrain" },
       { "id": "w3.terrain.removeUnusedTiles", "when": "project", "title": "Remove Unused Ground Tiles", "category": "Terrain" },
       { "id": "w3.terrain.replaceCliffType", "when": "project", "title": "Replace Cliff Type…", "category": "Terrain" },
       { "id": "w3.terrain.replaceTiles", "when": "project", "title": "Replace Tiles…", "category": "Terrain" },

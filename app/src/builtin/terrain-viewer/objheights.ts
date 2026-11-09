@@ -31,11 +31,23 @@ export function pastedFlags(flags: number, preserve: boolean): number {
 const ON_WATER = new Set(["float", "amph"]);
 export const goesOnWater = (moveType: string | undefined) => !!moveType && ON_WATER.has(moveType.toLowerCase());
 
-/** Where a unit is drawn in height: the game places a unit by its movement type, not by the height the
- *  placement file holds (03_Water_Ford_Lake_Boats' ships hold the sea bed's), so a floating or amphibious unit over water
- *  (`surface`, from waterSurfaceAt; null without) sits on the surface. Anything else stays at `stored`. */
-export function unitDrawHeight(moveType: string | undefined, stored: number, surface: number | null): number {
-  return goesOnWater(moveType) && surface !== null && surface > stored ? surface : stored;
+/** Whether a placed object's drawn height comes from its movement type rather than the height the placement file
+ *  holds: any unit type with one (UnitData.slk `movetp`; buildings have "_"). */
+export const heightByMoveType = (moveType: string | undefined) => !!moveType;
+
+/** Where a unit is drawn in height. The World Editor places a unit by its type, not by the height the placement file
+ *  holds (we-drive, 2026-11-09, on copies of 03_Water_Ford_Lake_Boats): at its flying height (UnitData.slk
+ *  `moveHeight`, object data `umvh`: `lift.height`) over the ground under it (`lift.ground`, heightAt: the bed under
+ *  water, the cliff as it's drawn), whatever its movement type: footmen stored at 0, 256 and 600 on ground 256 stood on
+ *  the ground alike, as did gryphons (flying height 240) stored at those heights 240 over it; a footman and a banshee
+ *  given 300 in the map's object data and a gryphon given 600 were drawn that high; a gryphon over the lake is 240 over
+ *  its bed, its shadow close under it on the water. A floating or amphibious unit over water (`surface`, from
+ *  waterSurfaceAt; null without) sits on the surface where that is higher (map 03's ships hold the sea bed's height).
+ *  Without `lift` (an object whose type isn't known as a unit) the stored height counts. */
+export function unitDrawHeight(moveType: string | undefined, stored: number, surface: number | null,
+  lift?: { ground: number; height: number }): number {
+  const base = lift && heightByMoveType(moveType) ? lift.ground + (Number.isFinite(lift.height) ? lift.height : 0) : stored;
+  return goesOnWater(moveType) && surface !== null && surface > base ? surface : base;
 }
 
 /** Whether a unit is drawn swimming (the "swim" look of its model: Stand Swim, with the body under the surface and,

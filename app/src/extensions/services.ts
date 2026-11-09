@@ -161,6 +161,9 @@ export interface TerrainEditorHandle {
   /** The last frame's real shadows (HD): whether they were cast, how big a texel of the sun's shadow map was on the
    *  ground (world units), and how many objects cast into it. For tests and measuring. */
   sunShadows(): { drawn: boolean; texel: number; casters: number };
+  /** Where the placed units' models are drawn now (a flyer at its flying height, a ship on the water), by their
+   *  placement's id and position. For tests and measuring. */
+  drawnUnits(): { id: string; x: number; y: number; z: number }[];
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore

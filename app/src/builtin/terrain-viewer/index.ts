@@ -12,8 +12,8 @@ import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
-import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -27,7 +27,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { exportMinimap, type ExportOptions, type ExportSource } from "./minimapexport";
 import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
@@ -44,6 +44,7 @@ import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStr
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
 import { resetVariations } from "../../lib/terrain/variation";
+import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, snapped, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
@@ -1141,6 +1142,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       refuseLostView(path);
       if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
     }),
+    // Reset Height Field and Adjust Cliff Levels (the World Editor's Advanced menu): the terrain editor in front. Unlike
+    // the World Editor's, each is one undo step, so neither asks first.
+    w3.commands.register("w3.terrain.resetHeightField", async () => {
+      const path = w3.editors.activePath();
+      const ground = path ? toolGroups.wholeMapGround.get(path) : undefined;
+      if (!ground) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
+      const r = ground.resetHeightField();
+      if (typeof r === "string") void w3.window.showWarning(r);
+      else if (r === 0) void w3.window.showInfo("The ground is flat over its cliff levels already.");
+    }),
+    w3.commands.register("w3.terrain.adjustCliffLevels", async (given?: number) => {
+      const path = w3.editors.activePath();
+      const ground = path ? toolGroups.wholeMapGround.get(path) : undefined;
+      if (!ground) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
+      let by = typeof given === "number" ? given : undefined;
+      if (by === undefined) {
+        const { min, max } = ground.range();
+        const typed = await w3.window.inputBox({ prompt: `Cliff levels to move the whole map by (${min} to +${max}; negative is down)`, value: "0" });
+        if (typed === undefined) return;
+        const t = typed.trim();
+        by = /^[+-]?\d+$/.test(t) ? Number(t) : Number.NaN;
+        if (!Number.isInteger(by)) { void w3.window.showWarning(`"${typed}" isn't a whole number of cliff levels.`); return; }
+        // The editor may have closed while the box was open.
+        if (toolGroups.wholeMapGround.get(path!) !== ground) return;
+      }
+      const r = ground.adjustCliffLevels(by);
+      if (typeof r === "string") void w3.window.showWarning(r);
+    }),
     // Replace Cliff Type, Tiles, Doodads, Units: the dialog, or `req` as given (scripts and tests). How many changed.
     ...([["w3.terrain.replaceCliffType", "cliffs"], ["w3.terrain.replaceTiles", "tiles"], ["w3.terrain.replaceDoodads", "doodads"], ["w3.terrain.replaceUnits", "units"]] as const)
       .map(([id, kind]) => w3.commands.register(id, async (given?: ReplaceRequest) => {
@@ -1919,14 +1950,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Each rebuild takes a number: one that is overtaken by a later one drops its result, or an older
          *  load finishing last would draw old skins over new. */
         let rebuildGen = 0;
-        /** The movement type of a placed object's type (units; see Skin.moveType). */
-        function moveTypeOf(p: Placed): string | undefined {
-          return (objCtx?.skins.get(p.id) ?? objCtx?.skins.get(objCtx.bases.get(p.id) ?? ""))?.moveType;
+        /** A placed object's type's skin, and its movement type (units; see Skin.moveType). */
+        function skinOf(p: Placed): Skin | undefined {
+          return objCtx?.skins.get(p.id) ?? objCtx?.skins.get(objCtx.bases.get(p.id) ?? "");
         }
-        /** The height an object is drawn at: ships, and amphibious units in water, on the water's surface
-         *  (as the game puts them); anything else at its stored height. The stored height doesn't change. */
-        function drawnZ(p: Placed, moveType = moveTypeOf(p)): number {
-          return unitDrawHeight(moveType, p.position[2], moveType ? waterSurfaceAt(terrain, p.position[0], p.position[1]) : null);
+        function moveTypeOf(p: Placed): string | undefined {
+          return skinOf(p)?.moveType;
+        }
+        /** The height an object is drawn at: a unit at its flying height over the ground (0 for most), ships and
+         *  amphibious units in water on the water's surface (as the World Editor puts them); anything else at its
+         *  stored height. The stored height doesn't change. */
+        function drawnZ(p: Placed, moveType = moveTypeOf(p), skin = skinOf(p)): number {
+          const [x, y] = p.position;
+          return unitDrawHeight(moveType, p.position[2], goesOnWater(moveType) ? waterSurfaceAt(terrain, x, y) : null,
+            heightByMoveType(moveType) ? { ground: heightAt(terrain, x, y), height: skin?.moveHeight ?? 0 } : undefined);
         }
         /** Whether a unit is drawn in its model's swim look (an amphibious unit in deep water). */
         function swims(p: Placed, moveType = moveTypeOf(p)): boolean {
@@ -1934,15 +1971,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [x, y] = p.position;
           return unitSwims(moveType, heightAt(terrain, x, y), waterSurfaceAt(terrain, x, y));
         }
-        /** After the water or the ground changed: ships and amphibious units go to the new surface, in place. A unit
-         *  that starts or stops swimming needs its other look: the objects are made again. */
+        /** After the water or the ground changed: ships and amphibious units go to the new surface, flying and
+         *  hovering units to their height over the new ground, in place. A unit that starts or stops swimming needs
+         *  its other look: the objects are made again. */
         function refloat() {
           let moved = false;
           for (const b of renderer.batches) {
             if (b.group !== "units") continue;
             for (const inst of b.instances) {
               const p = inst.pick?.placed;
-              if (!p || !goesOnWater(moveTypeOf(p))) continue;
+              if (!p || !heightByMoveType(moveTypeOf(p))) continue;
               // (A checkered cube, model "", has no looks.)
               if (inst.pick!.model && swims(p) !== b.gpu.props.includes("swim")) { void rebuildObjects(); return; }
               const z = drawnZ(p);
@@ -1965,7 +2003,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
           const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
-            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType), true, shownAs,
+            loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
             loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false)]);
           // The later rebuild does the selection and the rest.
@@ -2326,7 +2364,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return slot;
         };
         // ---- mass edit, select by type/filter, face point ---------------------------------
-        const skinOf = (p: Placed) => objCtx?.skins.get(p.id) ?? objCtx?.skins.get(objCtx.bases.get(p.id) ?? "");
         const DEG = 180 / Math.PI;
         const varsOf = (p: Placed): ObjVars => ({
           x: p.position[0], y: p.position[1], z: p.position[2],
@@ -3003,9 +3040,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // Until the size is known: a modest share of the model bounds.
           const r = radiusOf(inst.pick!.kind, inst.pick!.id) ?? Math.min(96, Math.max(24, sr * 0.4));
           // Centred on the object position (model bounds can be off-centre).
-          // A ship's ring goes round it on the water, not on the sea bed.
-          const onWater = goesOnWater(moveTypeOf(pl)) ? drawnZ(pl) : pl.position[2];
-          const z = ((flagsOf(pl) ?? 0) & FIXED_HEIGHT) !== 0 ? pl.position[2] : onWater !== pl.position[2] ? onWater : undefined;
+          // A ship's ring goes round it on the water, not on the sea bed. A flyer's lies on the ground under it, as
+          // the World Editor draws it (we-drive, 2026-11-09: a gryphon's green circle on the grass, 240 below it).
+          const moveType = moveTypeOf(pl);
+          const onWater = goesOnWater(moveType) ? unitDrawHeight(moveType, pl.position[2], waterSurfaceAt(terrain, pl.position[0], pl.position[1]),
+            { ground: heightAt(terrain, pl.position[0], pl.position[1]), height: 0 }) : undefined;
+          const z = onWater !== undefined ? (Math.abs(onWater - heightAt(terrain, pl.position[0], pl.position[1])) > 0.01 ? onWater : undefined)
+            : !heightByMoveType(moveType) && ((flagsOf(pl) ?? 0) & FIXED_HEIGHT) !== 0 ? pl.position[2] : undefined;
           return { x: pl.position[0], y: pl.position[1], z, r, rgb: (pl.player !== undefined && pl.player < 24 ? TEAM_COLORS[pl.player][1] : [120, 255, 120]) as Vec3 };
         };
         /** Click target per object: the same radius as its selection ring. */
@@ -3443,7 +3484,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const entry = { id: g.id, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
               void loader.modelFor(skin, entry.variation).then((gpu) => {
                 if (req !== ghostReq) return;
-                renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
+                renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType, skin)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
                 redraw();
               }).catch(() => { renderer.ghost = null; redraw(); });
             },
@@ -3527,6 +3568,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return out;
           },
           sunShadows: () => ({ ...renderer.sunShadowState }),
+          drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
+            const p = i.pick?.placed;
+            return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14] }] : [];
+          })),
         };
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
         const carried = lastView?.key === viewKey ? lastView : null;
@@ -3646,6 +3691,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return true;
         };
         toolGroups.resetVariations.set(doc.path, resetGround);
+        // Reset Height Field and Adjust Cliff Levels: the whole map's ground, one undo step each. What stands on the
+        // ground follows it (commitTerrain), doodads with a height of their own stay, as in the World Editor.
+        const wholeGround = (change: (log: CornerUndo) => number | string): number | string => {
+          if (!editable) throw new Error("This terrain is read-only.");
+          if (glDead) throw new Error(VIEW_LOST);
+          const log = new CornerUndo();
+          const r = change(log);
+          if (typeof r === "string" || r === 0) return r;
+          return commitTerrain({ ...log.step(terrain), cliffs: true }) ? r : "Not done: the water would go past the game's limits.";
+        };
+        const wholeGroundCmds: WholeMapGround = {
+          resetHeightField: () => wholeGround((log) => resetHeightField(terrain, log)),
+          adjustCliffLevels: (by) => wholeGround((log) => adjustCliffLevels(terrain, by, log)),
+          range: () => cliffShiftRange(terrain),
+        };
+        toolGroups.wholeMapGround.set(doc.path, wholeGroundCmds);
         // ---- Replace Cliff Type, Tiles, Doodads, Units (commands; the dialog is in replace.ts) -------------------
         const replaceTypes: ReplaceTypes = {
           choices: async (kind) => {
@@ -4520,6 +4581,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
+            if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);
             if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);
             if (toolGroups.heightCommands.get(doc.path) === heightCommands) toolGroups.heightCommands.delete(doc.path);
             if (toolGroups.replaceTypes.get(doc.path) === replaceTypes) toolGroups.replaceTypes.delete(doc.path);

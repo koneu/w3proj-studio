@@ -11,11 +11,33 @@ test("ships float on the water surface, whatever height the placement file gives
   // Naga and sea turtles (amph) swim on the surface where there is water, and walk on the ground elsewhere.
   assert.equal(unitDrawHeight("amph", -60, 38.4), 38.4);
   assert.equal(unitDrawHeight("amph", 12, null), 12);
-  // Others stay where they are stored: a footman wades along the river bed, a flyer keeps its height.
+  // Without the ground (a type not known as a unit) the others stay where they are stored.
   for (const m of ["foot", "horse", "fly", "hover", "_", "", undefined]) assert.equal(unitDrawHeight(m, -20, 38.4), -20, String(m));
   // A ship on dry ground (no surface, or the surface under the ground) stays on the ground.
   assert.equal(unitDrawHeight("float", 64, null), 64);
   assert.equal(unitDrawHeight("float", 64, 38.4), 64);
+  assert.equal(unitDrawHeight("float", 0, null, { ground: 64, height: 0 }), 64, "on the ground, whatever was stored");
+  assert.equal(unitDrawHeight("float", 0, 38.4, { ground: -100, height: 0 }), 38.4, "on the surface over its bed");
+});
+
+test("units are drawn at their flying height over the ground, whatever height is stored", () => {
+  // we-drive on copies of map 03 (2026-11-09): gryphons (moveHeight 240) stored at 0, 256 and 600 on ground 256 all
+  // flew 240 over it; footmen stored at 0, 256 and 600 all stood on it; a footman given 300 flew.
+  for (const stored of [0, 256, 600]) {
+    assert.equal(unitDrawHeight("fly", stored, null, { ground: 256, height: 240 }), 496, `gryphon stored at ${stored}`);
+    assert.equal(unitDrawHeight("foot", stored, null, { ground: 256, height: 0 }), 256, `footman stored at ${stored}`);
+  }
+  assert.equal(unitDrawHeight("foot", 256, null, { ground: 256, height: 300 }), 556, "a footman with a flying height");
+  assert.equal(unitDrawHeight("hover", 0, null, { ground: 256, height: 50 }), 306, "a banshee hovers");
+  assert.equal(unitDrawHeight("_", 7, null, { ground: 128, height: 0 }), 128, "a building on the ground");
+  // Over water a flyer is over the bed, not the surface (its shadow lies close under it on the lake).
+  assert.equal(unitDrawHeight("fly", 0, 38.4, { ground: -300, height: 240 }), -60);
+  // A flying ship higher than the surface stays at its height.
+  assert.equal(unitDrawHeight("float", 0, 38.4, { ground: -100, height: 200 }), 100);
+  // A broken flying height (NaN from a damaged table) counts as none.
+  assert.equal(unitDrawHeight("fly", 0, null, { ground: 10, height: NaN }), 10);
+  // An object that isn't a unit type (no movement type) keeps its stored height.
+  assert.equal(unitDrawHeight(undefined, 77, null, { ground: 10, height: 240 }), 77);
 });
 
 test("a pasted fixed-height object keeps its height over the ground, only when preserving", () => {
