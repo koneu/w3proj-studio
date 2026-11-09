@@ -10,7 +10,8 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { joinPath } from "../../lib/paths";
-import { addChapter } from "./chapters";
+import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
+import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { askNewCampaign, createCampaign } from "./newcampaign";
@@ -96,6 +97,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await open("general");
     }),
     w3.commands.register("w3.campaign.newMap", async () => { await open("chapters"); await [...openViews][0]?.newMap(); }),
+    // A chapter's map (`map`, else the selected button's): through the editor, which keeps the undo step.
+    ...(["exportMap", "replaceMap", "removeMap"] as const).map((action) => w3.commands.register(`w3.campaign.${action}`, async (map?: unknown) => {
+      await open("chapters");
+      const view = [...openViews][0];
+      if (!view) throw new Error("The Campaign Editor didn't open.");
+      const name = typeof map === "string" && map ? map : view.selectedMap();
+      if (!name) throw new Error("Select a chapter button whose map to take, or name the map.");
+      await view[action](name);
+    })),
     w3.commands.register("w3.campaign.back", async () => {
       const parent = await parentCampaign(w3);
       if (!parent) throw new Error("This project isn't a chapter map of a campaign.");
@@ -169,15 +179,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redo: () => view.redo(),
           save,
           focus: () => el.focus(),
-          dispose: () => { stop.dispose(); openViews.delete(view); },
+          dispose: () => { stop.dispose(); openViews.delete(view); view.disposed = true; },
         };
       },
     }),
   );
 }
 
-/** What undo restores: the campaign info and the edited string table texts. */
-interface State { info: CampaignInfo; texts: Map<number, string> }
+/** What undo restores: the campaign info and the edited string table texts; `files`: a change of the campaign's map
+ *  files made with it (done at once on disk; undone and redone there). */
+interface State { info: CampaignInfo; texts: Map<number, string>; files?: FileStep }
 
 class CampaignView {
   private section: SectionId = "general";
@@ -226,22 +237,37 @@ class CampaignView {
   // ---- changes and undo ---------------------------------------------------------------
   private snapshot(): State { return { info: structuredClone(this.info), texts: new Map(this.texts) }; }
   private restore(s: State) { this.info = s.info; this.texts = s.texts; }
-  /** `rerender`: false while typing (the field keeps focus). */
-  private change(fn: () => void, rerender = true) {
+  /** `rerender`: false while typing (the field keeps focus). `files`: the map files this change moved already. */
+  private change(fn: () => void, rerender = true, files?: FileStep) {
     if (!this.editable) return;
-    this.undoStack.push(this.snapshot());
+    this.undoStack.push({ ...this.snapshot(), files });
     this.redoStack = [];
     if (this.savedAt > this.undoStack.length - 1) this.savedAt = -1;
     fn();
     this.setDirty(this.undoStack.length !== this.savedAt);
     if (rerender) this.render();
   }
-  undo() { this.step(this.undoStack, this.redoStack); }
-  redo() { this.step(this.redoStack, this.undoStack); }
-  private step(from: State[], to: State[]) {
-    const s = from.pop();
+  /** A map file change (or its undo) is being done: undo, redo and other map changes wait for it (refused). */
+  private busy = false;
+  /** The editor closed: a map change waiting for a question or a file choice stops. */
+  disposed = false;
+  undo() { void this.step(this.undoStack, this.redoStack, -1); }
+  redo() { void this.step(this.redoStack, this.undoStack, 1); }
+  private async step(from: State[], to: State[], dir: -1 | 1) {
+    if (this.busy) return;
+    const s = from.at(-1);
     if (!s) return;
-    to.push(this.snapshot());
+    if (s.files) {
+      // The files first: if they can't move back (something took their place), the step stays where it is.
+      this.busy = true;
+      try { await (dir < 0 ? s.files.undo() : s.files.redo()); } catch (e) {
+        void this.w3.window.showError(`Can't ${dir < 0 ? "undo" : "redo"} the change of the campaign's maps: ${e instanceof Error ? e.message : e}`);
+        return;
+      } finally { this.busy = false; }
+      if (from.at(-1) !== s) return;
+    }
+    from.pop();
+    to.push({ ...this.snapshot(), files: s.files });
     this.restore(s);
     this.setDirty(this.undoStack.length !== this.savedAt);
     this.render();
@@ -251,8 +277,8 @@ class CampaignView {
     if ((t instanceof HTMLInputElement && t.type !== "checkbox") || t instanceof HTMLTextAreaElement) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = e.key.toLowerCase();
-    if (k === "z" && !e.shiftKey) { this.step(this.undoStack, this.redoStack); e.preventDefault(); }
-    else if (k === "y" || (k === "z" && e.shiftKey)) { this.step(this.redoStack, this.undoStack); e.preventDefault(); }
+    if (k === "z" && !e.shiftKey) { this.undo(); e.preventDefault(); }
+    else if (k === "y" || (k === "z" && e.shiftKey)) { this.redo(); e.preventDefault(); }
   }
 
   // ---- strings -------------------------------------------------------------------------
@@ -365,6 +391,88 @@ class CampaignView {
     });
   }
 
+  // ---- a chapter's map: export, replace, remove ----------------------------------------
+  private campaignFs(): CampaignFs {
+    const ws = this.w3.workspace, root = ws.project()!.root;
+    return {
+      exists: (p) => this.w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, p) }),
+      rename: (from, to) => ws.rename(from, to),
+      unpack: async (src, dir) => { await this.w3.backend.invoke("project_unpack", { map: src, dir: joinPath(root, dir), allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir") }); },
+      copy: (from, to) => ws.copy(from, to),
+      pack: async (dir, output) => { await this.w3.backend.invoke("project_pack", { root: joinPath(root, dir), output }); },
+    };
+  }
+  /** The map of the selected chapter button, if any. */
+  selectedMap(): string | null { return this.info.chapters[this.selected]?.map ?? null; }
+  private mapOf(map: string) { return this.campaignMaps().find((m) => m.name.toLowerCase() === map.toLowerCase()) ?? null; }
+  /** Runs a change of the campaign's map files, one at a time, only while this editor and its project are open. */
+  private async mapChange(map: string, ask: () => Promise<boolean>, apply: (m: { name: string; project: boolean }) => Promise<void>) {
+    if (!this.editable) throw new Error("This campaign can't be changed here.");
+    if (this.busy) throw new Error("Another change of the campaign's maps is still being done.");
+    const m = this.mapOf(map);
+    if (!m) throw new Error(`${map} isn't in the campaign.`);
+    const root = this.w3.workspace.project()?.root;
+    if (!(await ask())) return;
+    if (this.disposed || this.busy || this.w3.workspace.project()?.root !== root) return;
+    this.busy = true;
+    try { await apply(m); } finally { this.busy = false; }
+  }
+
+  /** Export Map: the chapter's map as a map file of its own (a project map packed). */
+  async exportMap(map: string) {
+    const m = this.mapOf(map);
+    if (!m) throw new Error(`${map} isn't in the campaign.`);
+    const ext = /\.w3m$/i.test(m.name) ? "w3m" : "w3x";
+    const target = await this.w3.window.pickSaveFile({ title: `Export ${m.name}`, defaultPath: m.name, filters: [{ name: "Warcraft III map", extensions: [ext] }] });
+    if (!target || this.disposed) return;
+    await this.w3.window.withProgress(`Exporting ${m.name}`, () => exportMap(this.campaignFs(), m.name, m.project, target));
+    void this.w3.window.showInfo(`Exported ${m.name} to ${target}.`);
+  }
+  /** Replace Map: another map file in the chapter map's place (same file name; its buttons keep opening it). One undo step. */
+  async replaceMap(map: string) {
+    let src: string | null = null;
+    await this.mapChange(map, async () => {
+      src = await this.w3.window.pickFile({ title: `Replace ${map} with`, filters: [{ name: "Warcraft III map", extensions: ["w3x", "w3m"] }] });
+      return !!src;
+    }, async (m) => {
+      const files = await this.w3.window.withProgress(`Replacing ${m.name}`, () => replaceMap(this.campaignFs(), m.name, m.project, src!));
+      this.change(() => {}, true, files);
+      void this.w3.window.showInfo(`${m.name} now holds ${src!.split(/[\\/]/).pop()}. Ctrl+Z puts the old map back.`);
+    });
+  }
+  /** Remove Map: the map leaves the campaign (and its map order); buttons opening it stay and show it missing, as in
+   *  the World Editor, which asks first. One undo step. */
+  async removeMap(map: string) {
+    await this.mapChange(map, () => (buttonsOf(this.info, map).length
+      ? this.w3.window.confirm(`This map is still in use by one or more chapter buttons. Remove ${map} anyway?`, "Remove", 60000)
+      : this.w3.window.askDelete(`Remove ${map} from the campaign?`, "Remove")), async (m) => {
+      const files = await removeMap(this.campaignFs(), m.name, m.project);
+      this.change(() => dropFromMapOrder(this.info, m.name), true, files);
+    });
+  }
+  /** Remove Button: when no other button opens its map, asks whether the map goes too (one undo step either way). */
+  async removeButton(index: number) {
+    if (!this.editable) return;
+    const ch = this.info.chapters[index];
+    if (!ch) return;
+    const alone = buttonsOf(this.info, ch.map).length === 1 && !!this.mapOf(ch.map);
+    let withMap = false;
+    if (alone) {
+      const a = await this.w3.window.showWarning(`No other button opens ${ch.map}. Remove the map from the campaign too?`, "Remove button and map", "Remove button only");
+      if (a === undefined || this.disposed) return;
+      withMap = a === "Remove button and map";
+    }
+    // During the question the buttons may have changed (undo, another edit): the button is looked for again.
+    const at = this.info.chapters.findIndex((x) => x.map === ch.map && x.chapter === ch.chapter && x.title === ch.title && x.flags === ch.flags);
+    if (at < 0) { void this.w3.window.showWarning("Not removed: the button changed while the question was open."); return; }
+    const drop = () => { this.info.chapters.splice(at, 1); this.selected = Math.min(at, this.info.chapters.length - 1); };
+    if (!withMap) { this.change(drop); return; }
+    await this.mapChange(ch.map, async () => true, async (m) => {
+      const files = await removeMap(this.campaignFs(), m.name, m.project);
+      this.change(() => { drop(); dropFromMapOrder(this.info, m.name); }, true, files);
+    });
+  }
+
   async openMap(map: string) {
     const dir = this.projectDir(map);
     if (!dir) throw new Error(`${map} isn't unpacked as a project (it stays packed in the campaign, e.g. because not all of its files could be named).`);
@@ -468,7 +576,7 @@ class CampaignView {
             h("button", { disabled: !unused.length, onclick: () => this.change(() => {
               this.selected = addChapter(c, unused[0].name, unused[0].name.replace(/\.w3[mx]$/i, ""));
             }) }, "New chapter button"),
-            h("button", { disabled: !ch, onclick: () => this.change(() => { c.chapters.splice(i, 1); this.selected = Math.min(i, c.chapters.length - 1); }) }, "Remove button"),
+            h("button.camp-remove-button", { disabled: !ch, title: "Asks whether its map goes too when no other button opens it", onclick: run(() => this.removeButton(i)) }, "Remove button"),
             h("button", { disabled: i <= 0, onclick: () => move(-1) }, "Move up"),
             h("button", { disabled: i < 0 || i >= c.chapters.length - 1, onclick: () => move(1) }, "Move down"),
           ] : []),
@@ -483,7 +591,14 @@ class CampaignView {
         c.version === 1 && ch.flags > 3 ? h("p.muted", {}, `Stored flags: ${ch.flags} (old campaigns store leftover values here).`) : null) : null,
       h("div.form-section", {}, h("h3", {}, "Maps in the campaign"),
         h("p.muted", {}, `${maps.length} maps: ${maps.filter((m) => m.project).length} unpacked as projects under maps/, ${maps.filter((m) => !m.project).length} packed.` +
-          (unused.length ? ` Not on a chapter button: ${unused.map((m) => m.name).join(", ")}.` : ""))),
+          (unused.length ? ` Not on a chapter button: ${unused.map((m) => m.name).join(", ")}.` : "")),
+        maps.length ? h("table.form-table.camp-maps", {}, h("tbody", {}, ...maps.map((m) => h("tr.camp-map-row", { "data-map": m.name },
+          h("td", {}, m.name), h("td.muted", {}, m.project ? "project" : "packed"),
+          h("td", {},
+            h("button.camp-map-export", { title: "Save it as a map file of its own", onclick: run(() => this.exportMap(m.name)) }, "Export…"),
+            ...(this.editable ? [
+              h("button.camp-map-replace", { title: "Another map file in its place, under the same name (Ctrl+Z takes it back)", onclick: run(() => this.replaceMap(m.name)) }, "Replace…"),
+              h("button.camp-map-remove", { title: "Take it out of the campaign (Ctrl+Z puts it back)", onclick: run(() => this.removeMap(m.name)) }, "Remove")] : [])))))) : null),
     ];
   }
 }

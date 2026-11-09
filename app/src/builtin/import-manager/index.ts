@@ -11,6 +11,7 @@ import { clickSelection } from "../../lib/selection";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
+import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
 const lists = (campaign: boolean) => {
@@ -31,6 +32,8 @@ interface ImportsDoc { format?: string; version: number; files: ImportEntry[] }
 interface ImportSource { src: string; relative?: string }
 const entryKey = (e: ImportEntry) => e.path.toLowerCase();
 const plural = (n: number, what: string) => `${n.toLocaleString()} ${what}${n === 1 ? "" : "s"}`;
+/** The open Import Manager that can change files (for its commands). */
+let openView: ImportView | null = null;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   ctx.subscriptions.push(
@@ -41,6 +44,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.importManager"); return; }
       // A map without imports opens an empty list; the file is written with the first import.
       await w3.editors.open(FILE, "w3.importManager");
+    }),
+    w3.commands.register("w3.imports.replace", async () => {
+      if (!openView) throw new Error("Open the Import Manager and select a file first.");
+      openView.replaceSelected();
     }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
@@ -60,7 +67,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const campaign = /war3campaign\.imp(\.json)?$/i.test(doc.path);
         const view = new ImportView(w3, el, list, write, !doc.readOnly, campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER);
         const stop = w3.workspace.onDidChange(() => view.render());
-        return { dispose: () => stop.dispose() };
+        if (!doc.readOnly) openView = view;
+        // Replace File is the one change here with a way back (the others act on the files at once, as there).
+        return { undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; stop.dispose(); if (openView === view) openView = null; } };
       },
     }),
   );
@@ -76,6 +85,13 @@ class ImportView {
   private query = "";
   /** The image last previewed (the list redraws often; decoding it each time would be slow). */
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
+  /** Replace File steps, for undo and redo; `at` of them are done. */
+  private history: ReplaceStep[] = [];
+  private at = 0;
+  /** A replace, undo or redo is writing: another waits for it to finish (refused). */
+  private busy = false;
+  /** The editor closed: a replace that was waiting for a file choice stops. */
+  disposed = false;
 
   constructor(private w3: W3Api, private el: HTMLElement, private list: ImportsDoc, private write: () => Promise<void>, private editable: boolean,
     private folder: string) {
@@ -235,6 +251,61 @@ class ImportView {
       if (error) throw new Error(`${gone.size} of ${entries.length} removed, then: ${error}`);
     });
   }
+  /** The workspace as a replace uses it. */
+  private replaceFs(): ReplaceFs {
+    const ws = this.w3.workspace;
+    return {
+      readBytes: (p) => ws.readBytes(p), writeBytes: (p, b) => ws.writeBytes(p, b), copy: (a, b) => ws.copy(a, b), delete: (p) => ws.delete(p),
+      size: (p) => this.files().get(p.toLowerCase())?.size,
+    };
+  }
+  /** Replace File: the entry keeps its path and flags, the project file (`file`) gets the content of a file chosen
+   *  on disk, as one undo step. Editors showing the file take the new content (it is saved through the workspace). */
+  replace(e: ImportEntry, file: string) {
+    void this.run("Replace", async () => {
+      if (this.busy) throw new Error("Another replace is still being written.");
+      const root = this.w3.workspace.project()?.root;
+      const src = await this.w3.window.pickFile({ title: `Replace ${e.path} with` });
+      // The editor closed or another project opened during the choice: nothing is done.
+      if (!src || this.disposed || this.w3.workspace.project()?.root !== root) return;
+      const ext = (p: string) => (/\.([^.\\/]+)$/.exec(p)?.[1] ?? "").toLowerCase();
+      if (ext(src) !== ext(e.path) && !(await this.w3.window.confirm(`${src.split(/[\\/]/).pop()} isn't a .${ext(e.path) || "(no extension)"} file. It is stored as ${e.path} anyway, and what uses that path reads it as such.`, "Replace", 60000))) return;
+      const size = this.files().get(file.toLowerCase())?.size ?? 0;
+      if (size > UNDO_LIMIT && !(await this.w3.window.confirm(`${e.path} is too large to keep for undo: replacing it can't be taken back.`, "Replace", 60000))) return;
+      if (this.disposed || this.w3.workspace.project()?.root !== root || this.busy) return;
+      this.busy = true;
+      try {
+        const step = await this.w3.window.withProgress(`Replacing ${e.path}`, () => replaceFile(this.replaceFs(), file, src));
+        this.history.splice(this.at, this.history.length, step);
+        this.at = this.history.length;
+      } finally { this.busy = false; }
+      this.preview_ = null;
+      void this.w3.window.showInfo(`Replaced ${e.path}.`);
+    });
+  }
+  /** Replace File on the one selected entry (the command). */
+  replaceSelected() {
+    const sel = this.shown.filter((s) => this.selected.has(entryKey(s)));
+    if (sel.length !== 1) throw new Error("Select one imported file to replace.");
+    const f = this.fileOf(sel[0]);
+    if (!f) throw new Error(`${sel[0].path} isn't in the project's map folder.`);
+    this.replace(sel[0], f.path);
+  }
+  /** Undo (-1) or redo (1) of Replace File. */
+  step(dir: -1 | 1) {
+    const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
+    if (!step) return;
+    void this.run(dir < 0 ? "Undo Replace File" : "Redo Replace File", async () => {
+      if (this.busy) throw new Error("A replace is still being written.");
+      this.busy = true;
+      try {
+        await stepReplace(this.replaceFs(), step, dir);
+        this.at += dir;
+      } finally { this.busy = false; }
+      this.preview_ = null;
+    });
+  }
+
   /** `file`: the project file (its name may differ from the listed path for sounds). */
   private exportFile(path: string, file: string) {
     void this.run("Export", async () => {
@@ -352,7 +423,9 @@ class ImportView {
         h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : "",
           onclick: () => file && this.openFile(e.path, file.path) }, kindOf(e.path) === "Sound" ? "▶ Play" : "Open"),
         h("button", { disabled: !exists, onclick: () => file && this.exportFile(e.path, file.path) }, "Export…"),
-        ...(this.editable ? [h("button", { onclick: () => this.remove([e]) }, "Remove")] : [])),
+        ...(this.editable ? [
+          h("button.imp-replace", { disabled: !exists, title: "Another file's content under this path (Ctrl+Z takes it back)", onclick: () => file && this.replace(e, file.path) }, "Replace…"),
+          h("button", { onclick: () => this.remove([e]) }, "Remove")] : [])),
       file ? this.preview(e.path, file) : null);
   }
 

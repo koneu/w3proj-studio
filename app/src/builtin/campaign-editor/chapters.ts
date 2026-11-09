@@ -9,6 +9,17 @@ export interface ChapterList { chapters: ChapterButton[]; mapOrder: { unknown: s
 
 export const CHAPTER_SHOWN = 1;
 
+/** The buttons (indices) that open `map`. */
+export function buttonsOf(info: ChapterList, map: string): number[] {
+  return info.chapters.flatMap((c, i) => (c.map.toLowerCase() === map.toLowerCase() ? [i] : []));
+}
+
+/** Takes `map` out of the map order (its file is removed from the campaign); buttons naming it stay, as in the
+ *  World Editor (they show the map as missing). */
+export function dropFromMapOrder(info: ChapterList, map: string) {
+  info.mapOrder = info.mapOrder.filter((m) => m.map.toLowerCase() !== map.toLowerCase());
+}
+
 /** Adds `map` as the next chapter (button, and its place in the map order); returns its index. */
 export function addChapter(info: ChapterList, map: string, title: string): number {
   const first = !info.chapters.some((c) => c.flags & CHAPTER_SHOWN);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
+import { autoFill, autoFillText, mergeObjects, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, objectToEdit, pastedObject, removeObject, setObjectField, answerHolds, assertPlanFits, describeUse, rawOnlySkin, signature, kindsOf, summary, summaryTypes, withoutSkinEntries, writeInto, type EditFile, type EditObject } from "./objectedit";
 import type { Plan, PlanItem } from "../../lib/objects/copydeps";
 
 const field = (id: string, valueType: string, repeat = 0, data = 0) => ({ id, label: id.toUpperCase(), valueType, repeat, data }) as FieldMeta;
@@ -16,6 +16,19 @@ test("values take their field's type", () => {
   assert.throws(() => fieldValue(field("uhpm", "int"), ""), /takes a number/);
   assert.throws(() => fieldValue(field("uhpm", "int"), true), /takes a number/);
   assert.throws(() => fieldValue(field("usca", "unreal"), -1), /negative/);
+});
+
+test("Allow negative real values: unreal fields take values below 0 only with the setting", () => {
+  assert.throws(() => fieldValue(field("usca", "unreal"), -1, { allowNegative: false }), /Allow negative real values/);
+  assert.equal(fieldValue(field("usca", "unreal"), -1, { allowNegative: true }), -1);
+  assert.equal(fieldValue(field("usca", "unreal"), "-0.5", { allowNegative: true }), -0.5);
+  // The setting changes nothing else: other types, 0 and up, what isn't a number.
+  assert.equal(fieldValue(field("usca", "unreal"), 0), 0);
+  assert.equal(fieldValue(field("uhpm", "int"), -3), -3);
+  assert.throws(() => fieldValue(field("usca", "unreal"), "x", { allowNegative: true }), /takes a number/);
+  assert.equal(negativeRefused("unreal", -1, false) !== null, true);
+  assert.equal(negativeRefused("unreal", -1, true), null);
+  assert.equal(negativeRefused("real", -1, false), null);
 });
 
 test("levels: from 1 where a field has them, none elsewhere", () => {

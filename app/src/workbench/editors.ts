@@ -375,6 +375,8 @@ export class EditorService {
   async fileSaved(path: string) {
     const key = path.replace(/\\/g, "/").toLowerCase();
     for (const t of this.tabs.filter((x) => x.provider && x.writing === 0)) {
+      // Closed while an earlier tab of this loop was reloading.
+      if (!this.tabs.includes(t)) continue;
       // Still loading: it may have read the file before this save. Looked at once it's there.
       if (t.loading) { t.missed?.add(key); continue; }
       const own = t.path.toLowerCase() === key;

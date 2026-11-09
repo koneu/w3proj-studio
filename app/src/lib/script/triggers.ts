@@ -295,6 +295,14 @@ export function triggerCustomText(i: TriggerScriptInput, t: TriggerItem): string
   return i.lua ? jassToLua(jass) : jass;
 }
 
+/** Lines of the GUI trigger `t` as script (Copy As Script on lines): the functions a trigger of the same name
+ *  holding only these lines would have. A line from inside a block stands at the top level, as what it is
+ *  (an event registers in InitTrig_, a condition goes into Conditions, an action into Actions). */
+export function linesCustomText(i: TriggerScriptInput, t: TriggerItem, lines: readonly Eca[]): string {
+  const ecas = lines.map((e) => { const c = structuredClone(e); delete c.group; return c; });
+  return triggerCustomText(i, { ...t, ecas });
+}
+
 /** Globals of placed units, items and destructibles (gg_unit_…, gg_item_…, gg_dest_…) that `t` uses and the
  *  map script has only for it. The map script declares such a global for what GUI triggers mention (disabled
  *  ones too) and creates the object into it for what compiled triggers use; the World Editor doesn't read

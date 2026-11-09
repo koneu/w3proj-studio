@@ -760,6 +760,9 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .om-trigger { cursor: pointer; padding: 1px 0; }
 .om-trigger:hover { text-decoration: underline; }
 .om-hint { margin-top: 4px; font-size: 11px; }
+.om-summary { margin-top: 4px; border-collapse: collapse; width: 100%; }
+.om-summary td { padding: 1px 4px 1px 0; }
+.om-summary-value { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* AI Editor */
 .ai-editor { display: flex; flex-direction: column; height: 100%; overflow: hidden; outline: none; }
@@ -805,6 +808,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .camp-row.active { background: #37414f; }
 .camp-missing { color: var(--error); }
 .camp-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.camp-maps td { white-space: nowrap; padding-right: 8px; }
+.camp-maps button { margin-right: 4px; }
 .camp-side-head { padding: 10px 14px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); }
 .camp-side-chapters .tree-label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .camp-side-open { visibility: hidden; }

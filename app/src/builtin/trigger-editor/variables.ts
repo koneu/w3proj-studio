@@ -137,36 +137,44 @@ function viewRow(ed: TriggerEditorHandle, data: TriggerData, v: Variable): HTMLE
       : h("span.muted", {}, "default")));
 }
 
+/** Renames a variable as one undo step: the GUI parameters using it follow, custom script after a question.
+ *  False if not renamed (the same name, a bad or taken one, the question dismissed). */
+export async function renameVariable(w3: W3Api, host: VariableHost, v: Variable, n: string): Promise<boolean> {
+  const ed = host.handle;
+  if (n === v.name) return false;
+  const clash = ed.file.variables.some((x) => x !== v && x.name === n);
+  if (!validName(n) || clash) {
+    w3.window.showError(clash ? `There already is a variable ${n}.` : "Names start with a letter and use letters, digits and _ (not at the end).");
+    return false;
+  }
+  // Custom script isn't updated by the World Editor; here it's offered.
+  let scripts = false;
+  const inScript = scriptUses(host, v.name);
+  if (inScript) {
+    const c = await w3.window.showWarning(`udg_${v.name} appears ${inScript} time${inScript === 1 ? "" : "s"} in custom script. Rename it there too?`,
+      "Rename in script too", "Only GUI triggers");
+    if (c === undefined) return false;
+    scripts = c === "Rename in script too";
+  }
+  // While the question was open the variable may have gone or been renamed (undo, another edit).
+  const target = ed.file.variables.find((x) => x.id === v.id && x.name === v.name);
+  if (!target) return false;
+  ed.edit(`Rename ${v.name}`, () => {
+    if (scripts) renameInScripts(host, target.name, n);
+    for (const p of variableParams(ed.file, target.name)) p.value = n;
+    const it = treeItem(ed.file, target);
+    if (it) it.name = n;
+    target.name = n;
+  });
+  return true;
+}
+
 function editRow(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable): HTMLElement {
   const ed = host.handle;
   const used = () => variableParams(ed.file, v.name).length;
 
   const name = h("input.trig-var-name", { type: "text", value: v.name, title: `udg_${v.name} in the script`, onchange: async () => {
-    const n = name.value.trim();
-    if (n === v.name) return;
-    const clash = ed.file.variables.some((x) => x !== v && x.name === n);
-    if (!validName(n) || clash) {
-      w3.window.showError(clash ? `There already is a variable ${n}.` : "Names start with a letter and use letters, digits and _ (not at the end).");
-      name.value = v.name;
-      return;
-    }
-    // Custom script isn't updated by the World Editor; here it's offered.
-    let scripts = false;
-    const inScript = scriptUses(host, v.name);
-    if (inScript) {
-      const c = await w3.window.showWarning(`udg_${v.name} appears ${inScript} time${inScript === 1 ? "" : "s"} in custom script. Rename it there too?`,
-        "Rename in script too", "Only GUI triggers");
-      if (c === undefined) { name.value = v.name; return; }
-      scripts = c === "Rename in script too";
-    }
-    ed.edit(`Rename ${v.name}`, () => {
-      const target = ed.file.variables.find((x) => x.id === v.id && x.name === v.name)!;
-      if (scripts) renameInScripts(host, target.name, n);
-      for (const p of variableParams(ed.file, target.name)) p.value = n;
-      const it = treeItem(ed.file, target);
-      if (it) it.name = n;
-      target.name = n;
-    });
+    if (!(await renameVariable(w3, host, v, name.value.trim()))) name.value = v.name;
   } });
 
   const globalTypes = [...data.types].filter(([, t]) => t.global);

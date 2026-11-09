@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ProjectGuard, idsInText, markUnused, objectRefs, type Node } from "./data";
+import { ProjectGuard, buildTree, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -71,6 +71,70 @@ test("project guard: rows aren't owned while another project is open but unannou
   // Opening B failed half way: the workspace holds B, the guard was never told, A's rows still show.
   assert.equal(g.owns("A", "B"), false);
   assert.equal(g.owns("A", "A"), true);
+});
+
+let editorId = 0;
+const placed = (id: string, player?: number) => ({ id, position: [64 * editorId, 0], editorId: editorId++, ...(player === undefined ? {} : { player }) });
+const contents = (extra: Partial<MapContents> = {}): MapContents => ({
+  units: [placed("hfoo", 0), placed("hfoo", 0), placed("hkni", 1), placed("nwlf", 24), placed("sloc", 0), placed("ratc", 27)],
+  doodads: [placed("LTlt"), placed("LTlt"), placed("ARrk")],
+  kindOf: (id) => (id === "ratc" ? "w3t" : id === "LTlt" ? "w3b" : id === "ARrk" ? "w3d" : "w3u"),
+  nameOf: (id) => id,
+  custom: [{ ext: "w3u", label: "Units", ids: [{ id: "h000", base: "hfoo" }] }, { ext: "w3a", label: "Abilities", ids: [{ id: "A000", base: "AHbz" }, { id: "A001", base: "AHbz" }] }],
+  regions: [{ name: "Gate", left: 0, right: 1, bottom: 0, top: 1 }], cameras: [], sounds: [{ name: "gg_snd_Boom", file: "Boom.wav", flags: 0 }],
+  triggers: { reforged: false, version: 7, counts: [], unknown: 2, variables: [{ name: "Count", type: "integer" } as never], items: [
+    { type: 4, id: 0, name: "Cat", isComment: 0, expanded: 1, parent: -1 } as never,
+    { type: 8, name: "Init", description: "", isComment: 0, id: 0, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0, ecas: [] },
+    { type: 16, name: "Note", description: "", isComment: 1, id: 1, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0, ecas: [] },
+  ] },
+  imports: [], objects: [], texts: [],
+  info: { name: "Smoke", playableWidth: 84, playableHeight: 76, tileset: "L" },
+  ...extra,
+});
+
+test("Map Summary: what the map holds, counted per kind as the World Editor's rows", () => {
+  const rows = new Map(mapSummary(contents()));
+  assert.equal(rows.get("Map Name"), "Smoke");
+  assert.equal(rows.get("Playable Map Size"), "84 × 76");
+  // Start locations and items aren't units; units are counted per owner too.
+  assert.equal(rows.get("Total Units"), "4");
+  assert.equal(rows.get("Units (Player 1)"), "2");
+  assert.equal(rows.get("Units (Player 2)"), "1");
+  assert.equal(rows.get("Units (Neutral Hostile)"), "1");
+  assert.equal(rows.get("Items"), "1");
+  assert.equal(rows.get("Doodads (Trees/Destructibles)"), "2");
+  assert.equal(rows.get("Doodads (Other)"), "1");
+  assert.equal(rows.get("Regions"), "1");
+  assert.equal(rows.get("Cameras"), "0");
+  // Comments aren't triggers.
+  assert.equal(rows.get("Triggers"), "1");
+  assert.equal(rows.get("Variables"), "1");
+  assert.equal(rows.get("Sounds"), "1");
+  assert.equal(rows.get("Custom Objects (Total)"), "3");
+  assert.equal(rows.get("Custom Units"), "1");
+  assert.equal(rows.get("Custom Abilities"), "2");
+  assert.equal(rows.get("Custom Upgrades"), "0");
+  // Without war3map.w3i: no name rows, the counts still.
+  assert.equal(new Map(mapSummary(contents({ info: null }))).has("Map Name"), false);
+});
+
+test("Object Manager actions: rename and delete where the owning editor can, play for sounds", () => {
+  const tree = buildTree(contents());
+  const find = (label: RegExp): Node => {
+    const walk = (ns: Node[]): Node | undefined => { for (const n of ns) { if (label.test(n.label)) return n; const k = walk(n.children ?? []); if (k) return k; } return undefined; };
+    return walk(tree)!;
+  };
+  const custom = find(/^h000$/), placedType = find(/^hfoo \(2\)$/), trigger = find(/^Init$/), sound = find(/^Boom$/), variable = find(/^Count$/), region = find(/^Gate$/);
+  assert.deepEqual(nodeActions(custom), { edit: true, rename: true, remove: true, play: false });
+  // A standard object's type and a region: only going to them.
+  assert.deepEqual(nodeActions(placedType), { edit: true, rename: false, remove: false, play: false });
+  assert.deepEqual(nodeActions(region), { edit: true, rename: false, remove: false, play: false });
+  assert.deepEqual(nodeActions(trigger), { edit: true, rename: true, remove: true, play: false });
+  assert.deepEqual(nodeActions(sound), { edit: true, rename: true, remove: true, play: true });
+  assert.deepEqual(sound.target, { kind: "sounds", name: "gg_snd_Boom", file: "Boom.wav" });
+  assert.deepEqual(nodeActions(variable), { edit: true, rename: true, remove: true, play: false });
+  // A group has nothing to go to.
+  assert.deepEqual(nodeActions(tree[0]), { edit: false, rename: false, remove: false, play: false });
 });
 
 test("project guard: a project that is open but not yet announced is stale until switched", () => {

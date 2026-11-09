@@ -18,7 +18,7 @@ import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terra
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, NEGATIVE_REALS_SETTING, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
 import { jsonPathOf } from "../../lib/formats/mapdoc";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
@@ -87,10 +87,11 @@ function modLists(o: Obj): { label: string; mods: Mod[] }[] {
   return [{ label: "", mods: o.mods }];
 }
 
-function parseValue(type: ValueType, text: string): number | string | null {
+function parseValue(type: ValueType, text: string, allowNegative: boolean): number | string | null {
   if (type === "string") return text;
   const n = Number(text);
   if (text.trim() === "" || Number.isNaN(n) || (type === "int" && !Number.isInteger(n))) return null;
+  if (negativeRefused(type, n, allowNegative)) return null;
   return n;
 }
 
@@ -149,6 +150,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.mcp.registerTool("set_object_fields", async ({ kind, id, changes }) => {
       if (!Array.isArray(changes) || !changes.length) throw new Error("changes must list what to change.");
       const list = changes as { field: string; level?: unknown; value: unknown }[];
+      const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
       const changed = await editObjects(`Set ${list.length} field${list.length === 1 ? "" : "s"} of ${String(id)}`, kind, (file, ext, data) => {
         const o = objectToEdit(file, String(id), data.baseIds.includes(String(id)));
         // Runs on a parsed copy: a throw here leaves the file as it was.
@@ -156,7 +158,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const f = data.fieldsFor(o.base).find((x) => x.id === c.field);
           if (!f) throw new Error(`${String(c.field)} isn't a field of ${o.base}. get_object with gameValues lists them.`);
           const at = fieldLevel(f, c.level);
-          setObjectField(o, ext, f, at, c.value === null ? null : fieldValue(f, c.value), data.defaultValue(o.base, f, at));
+          setObjectField(o, ext, f, at, c.value === null ? null : fieldValue(f, c.value, { allowNegative }), data.defaultValue(o.base, f, at));
         }
       });
       return changed ? `Changed ${list.length} field${list.length === 1 ? "" : "s"} of ${String(id)}.` : "It already had those values.";
@@ -239,6 +241,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const focusers = new Map<string, (id: string) => void>();
   /** Object to show once an editor that is being opened has loaded. */
   let pendingFocus: { path: string; id: string } | null = null;
+  /** Open editors by document path: rename and remove an object as the editor does (its undo step, its question). */
+  const actors = new Map<string, { rename(id: string, name: string): void; remove(id: string): Promise<boolean> }>();
 
   ctx.subscriptions.push(
     w3.services.provide(OBJECTS_SERVICE, objects),
@@ -289,6 +293,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
     }),
 
+    // Rename or delete an object from elsewhere (the Object Manager): the editor opens at it and does it as it does by
+    // hand, as an unsaved change with its undo step (delete asks first). True when it was done.
+    w3.commands.register("w3.objectEditor.objectAction", async (ext: unknown, id: unknown, action: unknown, name?: unknown) => {
+      if (typeof ext !== "string" || typeof id !== "string" || (action !== "rename" && action !== "delete")) throw new Error("w3.objectEditor.objectAction takes a kind, an id and \"rename\" or \"delete\".");
+      if (action === "rename" && (typeof name !== "string" || !name.trim())) throw new Error("Renaming needs a name.");
+      await w3.commands.execute("w3.objectEditor.open", ext, id);
+      const path = [...actors.keys()].find((p) => p.toLowerCase() === `map/war3map.${ext}.json`);
+      const actor = path ? actors.get(path) : undefined;
+      if (!actor) throw new Error(`The Object Editor for ${ext} didn't open.`);
+      if (action === "delete") return actor.remove(id);
+      actor.rename(id, (name as string).trim());
+      return true;
+    }),
     w3.editors.registerProvider("w3.objectEditor", {
       async resolve(el, doc) {
         const exists = () => w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
@@ -706,8 +723,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             placeholder: shown ? `mixed: ${shown.slice(0, 4).join(" / ")}${shown.length > 4 ? " / …" : ""}` : "",
             title: shown ? shown.join("\n") : (resolved ?? ""),
             onchange: () => {
-              const v = parseValue(type, input.value);
-              if (v === null) { input.classList.add("invalid"); return; }
+              const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
+              const v = parseValue(type, input.value, allowNegative);
+              if (v === null) {
+                input.classList.add("invalid");
+                const n = Number(input.value);
+                if (negativeRefused(type, n, allowNegative)) void w3.window.showWarning(`${input.value} ${negativeRefused(type, n, allowNegative)}.`);
+                return;
+              }
               input.classList.remove("invalid");
               onCommit(v);
             },
@@ -838,8 +861,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const add = () => {
             if (newField.value.length !== 4) return w3.window.showWarning("Field ids are exactly four characters, e.g. unam.");
             const type = newType.value as ValueType;
-            const value = parseValue(type, newValue.value);
-            if (value === null) return w3.window.showWarning(`"${newValue.value}" is not a valid ${type}.`);
+            const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
+            const value = parseValue(type, newValue.value, allowNegative);
+            if (value === null) {
+              const why = negativeRefused(type, Number(newValue.value), allowNegative);
+              return w3.window.showWarning(why ? `${newValue.value} ${why}.` : `"${newValue.value}" is not a valid ${type}.`);
+            }
             const mod: Mod = { field: newField.value, type, value };
             if (hasLevels) { mod.level = Number(newLevel.value || 0); mod.data = 0; }
             primaryMods(o).push(mod);
@@ -1228,6 +1255,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }, () => { status.textContent = `${id}: game data unavailable.`; });
         };
         focusers.set(doc.path, focusObject);
+        const shownObject = (id: string) => {
+          const o = file.custom.find((c) => c.id === id) ?? file.original.find((c) => c.base === id);
+          if (!o) throw new Error(`${id} isn't in this map's object data.`);
+          return o;
+        };
+        actors.set(doc.path, {
+          // As typing the name in its field: the map's string table keeps the text where the name is a TRIGSTR.
+          rename: (id, name) => {
+            if (doc.readOnly) throw new Error("This object data can't be changed here.");
+            const o = shownObject(id);
+            if (!kd) throw new Error("The game's object data isn't loaded yet; try again in a moment.");
+            const f = kd.fieldsFor(o.base).find((x) => /nam$/.test(x.id) && x.valueType === "string");
+            if (!f) throw new Error(`${id} has no name field.`);
+            const level = f.repeat > 0 ? 1 : 0;
+            const ref = trigRef(findMod(o, f.id, level)?.m.value);
+            if (ref !== null) wts.set(ref, name); else setValue(o, f, level, name);
+            select(o);
+            markDirty();
+            renderList();
+            renderDetail();
+          },
+          // As the Delete key on the selected object: its question, then one undo step.
+          remove: async (id) => {
+            if (doc.readOnly) throw new Error("This object data can't be changed here.");
+            select(shownObject(id));
+            const before = file.custom.length + file.original.length;
+            await removeSelection();
+            return file.custom.length + file.original.length < before;
+          },
+        });
         renderList();
         renderDetail();
         if (pendingFocus?.path === doc.path) {
@@ -1320,7 +1377,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
           },
           focus: () => search.focus(),
-          dispose: () => { closed = true; focusers.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose(); },
+          dispose: () => { closed = true; focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose(); },
           watches: ["map/war3map.wts"],
         };
       },

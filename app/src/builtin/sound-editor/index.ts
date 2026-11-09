@@ -58,6 +58,35 @@ function loadGameSounds(w3: W3Api): Promise<GameSounds> {
   return gameSounds;
 }
 
+/** Plays a sound file: imported ones from the project, game ones from storage (other extensions tried). The audio
+ *  and its object URL (to stop it and free the URL), or null (said why) when there's nothing to play. */
+async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null): Promise<{ audio: HTMLAudioElement; url: string } | null> {
+  let bytes: Uint8Array | null = await w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => null);
+  if (!bytes && game) {
+    const full = game.files.get(path)
+      ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => game.files.get(path.replace(SOUND_EXTENSIONS, e))).find(Boolean);
+    bytes = await w3.game.read(full ?? path).catch(() => null);
+  }
+  if (!bytes) { void w3.window.showWarning(`Can't find ${path}.`); return null; }
+  const ext = (/\.(\w+)$/.exec(path)?.[1] ?? "").toLowerCase();
+  const type = ext === "mp3" ? "audio/mpeg" : ext === "ogg" ? "audio/ogg" : ext === "wav" ? "audio/wav" : "audio/flac";
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
+  const audio = new Audio(url);
+  void audio.play().catch((e) => w3.window.showWarning(`Can't play ${path}: ${errorText(e)}`));
+  return { audio, url };
+}
+
+/** Why `name` (without gg_snd_) can't be the name of `s` among `sounds`, or null if it can. */
+export function soundNameProblem(sounds: readonly Sound[], s: Sound, name: string): string | null {
+  const n = `gg_snd_${name.trim()}`;
+  return !/^gg_snd_[A-Za-z][A-Za-z0-9_]*$/.test(n) || n.endsWith("_") || sounds.some((x) => x !== s && x.name === n)
+    ? "Names start with a letter, use letters, digits and _ (not at the end) and are unique." : null;
+}
+
+/** The sound played by w3.sounds.play (one at a time). */
+let playing: { audio: HTMLAudioElement; url: string } | null = null;
+const stopPlaying = () => { playing?.audio.pause(); if (playing) URL.revokeObjectURL(playing.url); playing = null; };
+
 /** The Sound Editor shown last, for the commands of the palette. */
 let current: SoundEditor | null = null;
 const needEditor = () => {
@@ -75,6 +104,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!files.has(FILE) && files.has(RAW)) { await w3.editors.open(RAW, "w3.soundEditor"); return; }
       await w3.editors.open(FILE, "w3.soundEditor");
     }),
+    // Plays a sound file (the map's or the game's) without opening anything: the Object Manager's Play Sound.
+    w3.commands.register("w3.sounds.play", async (file: unknown) => {
+      if (typeof file !== "string" || !file) throw new Error("w3.sounds.play takes a sound file.");
+      stopPlaying();
+      const game = await loadGameSounds(w3).catch(() => null);
+      playing = await playSoundFile(w3, file, game);
+      return playing !== null;
+    }),
+    // Rename or delete a map sound from elsewhere (the Object Manager), as the Sound Editor does by hand: it opens at the
+    // sound, and the change is an unsaved undo step there (a rename reaches triggers and regions when saved). Delete asks
+    // first. True when it was done.
+    w3.commands.register("w3.sounds.soundAction", async (name: unknown, action: unknown, to?: unknown) => {
+      if (typeof name !== "string" || (action !== "rename" && action !== "delete")) throw new Error("w3.sounds.soundAction takes a sound name and \"rename\" or \"delete\".");
+      if (action === "rename" && (typeof to !== "string" || !to.trim())) throw new Error("Renaming needs a name.");
+      await w3.commands.execute("w3.sounds.open");
+      const editor = current;
+      if (!editor) throw new Error("The Sound Editor didn't open.");
+      if (!editor.canEdit) throw new Error("This sound list can't be changed here.");
+      const s = editor.select(name);
+      if (action === "rename") return editor.rename(s, (to as string).replace(/^gg_snd_/, ""));
+      if (!(await w3.window.askDelete(`Delete the sound ${name.replace(/^gg_snd_/, "")}? Triggers and regions using it keep its name.`, "Delete"))) return false;
+      // The editor closed during the question: nothing is done.
+      if (current !== editor) return false;
+      editor.remove(s);
+      return true;
+    }),
+    { dispose: stopPlaying },
     w3.commands.register("w3.sounds.export", () => needEditor().exportCurrent()),
     w3.commands.register("w3.sounds.replace", () => needEditor().replaceCurrent()),
     w3.editors.registerProvider("w3.soundEditor", {
@@ -217,18 +273,8 @@ class SoundEditor {
   /** Plays a sound file: imported ones from the project, game ones from storage (other extensions tried). */
   private async play(path: string) {
     this.stop();
-    let bytes: Uint8Array | null = await this.w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => null);
-    if (!bytes && this.game) {
-      const full = this.game.files.get(path)
-        ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => this.game!.files.get(path.replace(SOUND_EXTENSIONS, e))).find(Boolean);
-      bytes = await this.w3.game.read(full ?? path).catch(() => null);
-    }
-    if (!bytes) { void this.w3.window.showWarning(`Can't find ${path}.`); return; }
-    const ext = (/\.(\w+)$/.exec(path)?.[1] ?? "").toLowerCase();
-    const type = ext === "mp3" ? "audio/mpeg" : ext === "ogg" ? "audio/ogg" : ext === "wav" ? "audio/wav" : "audio/flac";
-    this.audioUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
-    this.audio = new Audio(this.audioUrl);
-    void this.audio.play().catch((e) => this.w3.window.showWarning(`Can't play ${path}: ${errorText(e)}`));
+    const p = await playSoundFile(this.w3, path, this.game);
+    if (p) ({ audio: this.audio, url: this.audioUrl } = p);
   }
 
   // ---- browser ----------------------------------------------------------------------
@@ -312,6 +358,39 @@ class SoundEditor {
   }
 
   // ---- the map's sounds ---------------------------------------------------------------
+  /** Renames a sound (`name` without gg_snd_) as one undo step; its references follow when saved. False if refused. */
+  rename(s: Sound, name: string): boolean {
+    const problem = soundNameProblem(this.doc.sounds, s, name);
+    if (problem) { void this.w3.window.showError(problem); return false; }
+    const n = `gg_snd_${name.trim()}`;
+    if (n === s.name) return false;
+    s.name = n;
+    if (s.variableName !== undefined) s.variableName = n;
+    this.changed();
+    this.renderList();
+    this.renderDetail();
+    return true;
+  }
+  /** Removes a sound from the map's list as one undo step. */
+  remove(s: Sound) {
+    if (!this.doc.sounds.includes(s)) return;
+    this.doc.sounds = this.doc.sounds.filter((x) => x !== s);
+    if (this.selected === s) this.selected = null;
+    this.changed();
+    this.renderList();
+    this.renderDetail();
+  }
+  /** The map's sound `name` (gg_snd_…), selected; throws if there's none. */
+  select(name: string): Sound {
+    const s = this.doc.sounds.find((x) => x.name === name);
+    if (!s) throw new Error(`The map has no sound ${name}.`);
+    this.selected = s;
+    this.renderList();
+    this.renderDetail();
+    return s;
+  }
+  get canEdit() { return this.editable; }
+
   private renderList() {
     const rows = this.doc.sounds.map((s) => h(`tr.snd-row${this.selected === s ? ".active" : ""}`, {
       onclick: () => { this.selected = s; this.renderList(); this.renderDetail(); },
@@ -376,13 +455,7 @@ class SoundEditor {
     const row = (label: string, ...control: (HTMLElement | string)[]) => h("div.snd-field", {}, h("label", {}, label), h("div", {}, ...control));
 
     const name = text(s.name.replace(/^gg_snd_/, ""), (v) => {
-      const n = `gg_snd_${v.trim()}`;
-      if (!/^gg_snd_[A-Za-z][A-Za-z0-9_]*$/.test(n) || n.endsWith("_") || this.doc.sounds.some((x) => x !== s && x.name === n)) {
-        void this.w3.window.showError("Names start with a letter, use letters, digits and _ (not at the end) and are unique.");
-        name.value = s.name.replace(/^gg_snd_/, "");
-        return;
-      }
-      set(() => { s.name = n; if (s.variableName !== undefined) s.variableName = n; });
+      if (!this.rename(s, v)) name.value = s.name.replace(/^gg_snd_/, "");
     });
     const music = !!(s.flags & MUSIC);
     const channels = (this.game?.channels ?? []).map(([k, n]): [string, string] => [String(k), n]);
@@ -391,14 +464,7 @@ class SoundEditor {
         h("button", { onclick: () => void this.play(s.file) }, "▶ Play"),
         h("button", { onclick: () => this.stop() }, "■ Stop"),
         h("button", { title: "Save this sound's file to a file of your own", onclick: () => void this.exportCurrent().catch(this.failed) }, "Export…"),
-        ...(this.editable ? [h("button", { title: "Put a sound file from disk in this sound's place in the map", onclick: () => void this.replaceCurrent().catch(this.failed) }, "Replace Internal Sound…"), h("button", { onclick: () => {
-          if (!this.doc.sounds.includes(s)) return;
-          this.doc.sounds = this.doc.sounds.filter((x) => x !== s);
-          this.selected = null;
-          this.changed();
-          this.renderList();
-          this.renderDetail();
-        } }, "Delete")] : [])),
+        ...(this.editable ? [h("button", { title: "Put a sound file from disk in this sound's place in the map", onclick: () => void this.replaceCurrent().catch(this.failed) }, "Replace Internal Sound…"), h("button", { onclick: () => this.remove(s) }, "Delete")] : [])),
       row("Name", "gg_snd_", name),
       row("File", text(s.file, (v) => set(() => { s.file = v.trim(); if (s.assetFile) s.assetFile = s.file; })),
         ...(this.editable && this.selectedFile ? [h("button", { title: "Use the file selected on the left", onclick: () => set(() => { s.file = this.selectedFile!.path; this.renderDetail(); }) }, "Use selected file")] : [])),
