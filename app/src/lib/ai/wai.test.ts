@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CALL, CONDITION, parseTriggerData } from "../triggers/triggerdata";
-import { aiArgCount, aiTriggerData, embeddedObjectData, newWai, NO_ID, parseWai, writeWai, type AiCondition, type AiFile } from "./wai";
+import {
+  aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, newWai, NO_ID, parseWai, w3oOfKind, writeWai,
+  type AiCondition, type AiFile,
+} from "./wai";
 
 const data = parseTriggerData(`
 [TriggerConditions]
@@ -182,6 +185,30 @@ test("no object data without its flag or its two strings", () => {
   assert.equal(embeddedObjectData(ai), null, "the date isn't terminated");
   ai.extra = new Uint8Array([0x61]);
   assert.equal(embeddedObjectData(ai), null, "the path isn't terminated");
+});
+
+test("object data goes in as path, date and the .w3o, and comes out as it went in", () => {
+  const ai = newWai();
+  const w3o = w3oOfKind("w3t", new Uint8Array([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+  embedObjectData(ai, "C:/maps/Custom.w3o", editorDate(new Date(2019, 10, 6, 1, 21, 35)), w3o);
+  const back = parseWai(writeWai(ai), n);
+  assert.deepEqual(embeddedObjectData(back), { path: "C:/maps/Custom.w3o", date: "Wed Nov  6 01:21:35 2019" });
+  assert.deepEqual(embeddedObjectBytes(back), w3o);
+  assert.equal(back.trailer, 1);
+  clearObjectData(back);
+  assert.equal(embeddedObjectBytes(parseWai(writeWai(back), n)), null);
+  assert.deepEqual(writeWai(back), writeWai(newWai()), "cleared, the AI is as one that never had any");
+});
+
+test("a .w3o of one kind: version 1, a flag per kind, the file after its kind's flag", () => {
+  const file = new Uint8Array([9, 9, 9]);
+  const w = w3oOfKind("w3b", file);
+  const words = (from: number, count: number) => Array.from({ length: count }, (_, i) => new DataView(w.buffer).getUint32(from + 4 * i, true));
+  assert.deepEqual(words(0, 4), [1, 0, 0, 1], "version, units, items, destructables");
+  assert.deepEqual([...w.subarray(16, 19)], [9, 9, 9]);
+  assert.deepEqual(words(19, 4), [0, 0, 0, 0], "doodads, abilities, buffs, upgrades");
+  assert.equal(w.length, 4 + 7 * 4 + 3);
+  assert.throws(() => w3oOfKind("w3x", file), /not an object data kind/);
 });
 
 test("AI functions are the ones marked for AI, plus the AI Editor's own", () => {

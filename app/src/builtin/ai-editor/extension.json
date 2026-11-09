@@ -10,7 +10,10 @@
     "commands": [
       { "id": "w3.ai.open", "menu": "Module:2:1", "title": "AI Editor: Open AI…", "category": "Module" },
       { "id": "w3.ai.new", "title": "AI Editor: New AI…", "category": "Module" },
-      { "id": "w3.ai.exportScript", "title": "AI Editor: Export AI Script…", "category": "Module" }
+      { "id": "w3.ai.exportScript", "title": "AI Editor: Export AI Script…", "category": "Module" },
+      { "id": "w3.ai.addToMap", "when": "project", "title": "AI Editor: Add To Map", "category": "Module" },
+      { "id": "w3.ai.importCustomData", "title": "AI Editor: Import Custom Data…", "category": "Module" },
+      { "id": "w3.ai.exportCustomData", "title": "AI Editor: Export Custom Data…", "category": "Module" }
     ]
   }
 }

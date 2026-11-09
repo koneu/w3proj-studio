@@ -9,10 +9,11 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, TRIGGER_GUI_SERVICE, type ObjectsService, type TriggerGuiService } from "../../extensions/services";
 import {
-  AI_OPTIONS, aiArgCount, aiTriggerData, embeddedObjectData, newWai, NO_ID, parseWai, writeWai,
+  AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
 import { generateAiScript } from "../../lib/ai/script";
+import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { callText, paramText, type DisplayContext } from "../../lib/triggers/display";
 import { CONDITION, parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
@@ -94,7 +95,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.append(h("div.camp-side-actions", {},
           h("button", { onclick: run(() => w3.commands.execute("w3.ai.new")) }, "New AI…"), " ",
           h("button", { onclick: run(() => w3.commands.execute("w3.ai.open")) }, "Open AI…"), " ",
-          h("button", { title: "Export the open AI's script (.ai)", onclick: run(() => w3.commands.execute("w3.ai.exportScript")) }, "Export…")));
+          h("button", { title: "Export the open AI's script (.ai)", onclick: run(() => w3.commands.execute("w3.ai.exportScript")) }, "Export…"), " ",
+          h("button", { title: "Put the open AI's script into the open map as Scripts\\<name>.ai", disabled: !w3.workspace.project(), onclick: run(() => w3.commands.execute("w3.ai.addToMap")) }, "Add To Map")));
         const own = w3.workspace.project() ? w3.workspace.files().filter((f) => /\.wai$/i.test(f.path)) : [];
         el.append(h("div.camp-side-head", {}, "In this project"),
           own.length
@@ -122,7 +124,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!current) throw new Error("Open an AI file in the AI Editor first.");
       await current.exportScript();
     }),
+    w3.commands.register("w3.ai.addToMap", async () => {
+      if (!current) throw new Error("Open an AI file in the AI Editor first.");
+      return current.addToMap();
+    }),
+    w3.commands.register("w3.ai.importCustomData", async () => {
+      if (!current) throw new Error("Open an AI file in the AI Editor first.");
+      return current.importCustomData();
+    }),
+    w3.commands.register("w3.ai.exportCustomData", async () => {
+      if (!current) throw new Error("Open an AI file in the AI Editor first.");
+      return current.exportCustomData();
+    }),
   );
+}
+
+/** Object data files the AI Editor takes in: a .w3o, or one kind's file. */
+const OBJECT_FILTER = [{ name: "Object data (.w3o, .w3u, .w3t, .w3b, .w3d, .w3a, .w3h, .w3q)", extensions: ["w3o", ...W3O_KINDS] }];
+/** Flags of an import entry current editors write (the path as listed). */
+const IMPORT_FLAGS = 21;
+interface ImportList { format?: string; version: number; files: { flags: number; path: string }[] }
+
+/** The map's import list: the project's JSON, the raw file through its codec, or none (null). One that is
+ *  there and can't be read throws: it is never taken for an empty list. */
+async function readImportList(w3: W3Api): Promise<{ doc: ImportList; raw: boolean } | null> {
+  const has = (p: string) => w3.workspace.files().some((f) => f.path.toLowerCase() === p);
+  const root = w3.workspace.project()!.root;
+  try {
+    if (has("map/war3map.imp.json")) return { doc: JSON.parse(await w3.workspace.readText("map/war3map.imp.json")), raw: false };
+    if (has("map/war3map.imp")) return { doc: JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: "map/war3map.imp" })), raw: true };
+  } catch (e) {
+    throw new Error(`The map's import list can't be read (${e instanceof Error ? e.message : String(e)}), so nothing was added.`);
+  }
+  return null;
 }
 
 /** The AI Editor last opened (for the export command). */
@@ -159,13 +193,91 @@ class AiView {
 
   saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
 
+  /** Runs a button's work; a failure is shown. */
+  private act(f: () => Promise<unknown>) { f().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))); }
+
+  /** The AI's file name without .wai. */
+  private baseName() { return this.source.replace(/\\/g, "/").split(/[/:]/).pop()!.replace(/\.wai$/i, ""); }
+
+  /** Add To Map: the AI script, as it is now (unsaved changes included), into the open map as
+   *  Scripts\<name>.ai, registered in its import list, as the World Editor's AI Editor does. A script of
+   *  that name in the map is replaced after a question (and a checkpoint). The archive path, or null when
+   *  cancelled. */
+  async addToMap(): Promise<string | null> {
+    const project = this.w3.workspace.project();
+    if (!project) throw new Error("Open a map's project first: Add To Map puts the AI script into its imports.");
+    const busy = this.w3.editors.unsavedPaths().filter((p) => /^map\/war3map\.imp(\.json)?$/i.test(p));
+    if (busy.length) throw new Error(`Save or discard the changes of ${busy.join(", ")} first.`);
+    const base = this.baseName(), archive = `Scripts\\${base}.ai`;
+    const script = generateAiScript(this.ai, this.data);
+    const existing = this.w3.workspace.files().find((f) => f.path.toLowerCase() === `map/scripts/${base.toLowerCase()}.ai`);
+    if (existing && !(await this.w3.window.confirm(`The map has ${archive} already. Replace it with this AI's script? A checkpoint is made first, to come back to, where they're enabled.`, "Replace", 60_000))) return null;
+    // Another project meanwhile: not the map that was asked about.
+    if (this.w3.workspace.project()?.root !== project.root) throw new Error("The project changed meanwhile; nothing was added.");
+    // Read after the question: the list may have changed while it was open.
+    const list = await readImportList(this.w3);
+    if (existing) await checkpointIfOn(this.w3, "Add AI To Map");
+    await this.w3.workspace.writeText(existing?.path ?? `map/Scripts/${base}.ai`, script);
+    const doc = list?.doc ?? { format: "w3proj.imports/1", version: 1, files: [] };
+    doc.files ??= [];
+    if (!doc.files.some((e) => e.path.replace(/\//g, "\\").toLowerCase() === archive.toLowerCase())) {
+      doc.files.push({ flags: IMPORT_FLAGS, path: archive });
+      if (list?.raw) await this.w3.backend.invoke("codec_write", { root: project.root, path: "map/war3map.imp", text: JSON.stringify({ format: "w3proj.imports/1", ...doc }) });
+      else await this.w3.workspace.writeText("map/war3map.imp.json", await this.w3.backend.invoke<string>("codec_canonicalize", { root: project.root, path: "map/war3map.imp.json", text: JSON.stringify(doc) }));
+    }
+    await this.w3.workspace.refresh();
+    void this.w3.window.showInfo(`${existing ? "Replaced" : "Added"} ${archive} in the map's imports. Triggers start it with "AI - Start Melee AI Script" or "Start Campaign AI Script" and the path ${archive}.`);
+    return archive;
+  }
+
+  /** Import Custom Data: object data the AI carries (a .w3o, or one kind's file), which the AI Editor shows its
+   *  custom objects from, instead of the open map's. One undo step. False when cancelled. */
+  async importCustomData(): Promise<boolean> {
+    if (!this.editable) throw new Error("This AI is read-only.");
+    const path = await this.w3.window.pickFile({ title: "Import Custom Data", filters: OBJECT_FILTER });
+    if (!path) return false;
+    const ext = path.split(".").pop()!.toLowerCase();
+    const bytes = await this.w3.backend.readBytes(path);
+    const objects = (text: string) => { const f = JSON.parse(text) as { custom?: unknown[]; original?: unknown[] }; return (f.custom?.length ?? 0) + (f.original?.length ?? 0); };
+    // Read through the object data code first: what it can't read doesn't go into the AI.
+    let w3o: Uint8Array, count: number;
+    if (ext === "w3o") {
+      const parts = await this.w3.backend.invoke<{ kind: string; text: string }[]>("w3o_import", { path });
+      count = parts.reduce((n, p) => n + objects(p.text), 0);
+      w3o = bytes;
+    } else if (W3O_KINDS.includes(ext)) {
+      count = objects(await this.w3.backend.invoke<string>("objects_import", { name: `war3map.${ext}`, path }));
+      w3o = w3oOfKind(ext, bytes);
+    } else throw new Error("Choose a .w3o or one kind's object data (.w3u, .w3t, .w3b, .w3d, .w3a, .w3h, .w3q).");
+    if (!count) throw new Error(`${path} holds no objects.`);
+    this.change(() => embedObjectData(this.ai, slashes(path), editorDate(new Date()), w3o));
+    void this.w3.window.showInfo(`The AI carries ${count} object${count === 1 ? "" : "s"} from ${slashes(path).split("/").pop()} now.`);
+    return true;
+  }
+
+  /** Export Custom Data: the object data the AI carries, as a .w3o (which Import Object Data takes). The path,
+   *  or null when cancelled. */
+  async exportCustomData(): Promise<string | null> {
+    const bytes = embeddedObjectBytes(this.ai);
+    if (!bytes) throw new Error("This AI carries no custom data.");
+    const target = await this.w3.window.pickSaveFile({ title: "Export Custom Data", defaultPath: `${this.baseName()}.w3o`, filters: [{ name: "Object data (.w3o)", extensions: ["w3o"] }] });
+    if (!target) return null;
+    const path = /\.w3o$/i.test(target) ? target : `${target}.w3o`;
+    await this.w3.backend.writeBytes(path, bytes);
+    // Read back as Import Object Data would: say so if it can't be.
+    const parts = await this.w3.backend.invoke<{ kind: string; text: string }[]>("w3o_import", { path }).catch((e) => e instanceof Error ? e : new Error(String(e)));
+    if (parts instanceof Error) void this.w3.window.showWarning(`Wrote ${path} as the AI holds it, but it doesn't read as object data: ${parts.message}`);
+    else void this.w3.window.showInfo(`Exported the AI's custom data (${parts.map((p) => p.kind).join(", ")}) to ${path}.`);
+    return path;
+  }
+
   /** Writes the .ai script for the AI as it is now (unsaved changes included). */
   async exportScript() {
-    const base = this.source.replace(/\\/g, "/").split("/").pop()!.replace(/\.wai$/i, "");
+    const base = this.baseName();
     const target = await this.w3.window.pickSaveFile({ title: "Export AI script", defaultPath: `${base}.ai`, filters: [{ name: "AI scripts", extensions: ["ai"] }] });
     if (!target) return;
     await this.w3.workspace.writeText(target, generateAiScript(this.ai, this.data));
-    void this.w3.window.showInfo(`AI script written to ${target}. Import it into a map (e.g. Scripts\\${base}.ai) and start it with "AI - Start Campaign AI Script" or "Start Melee AI Script".`);
+    void this.w3.window.showInfo(`AI script written to ${target}. Add To Map puts it into the open map as Scripts\\${base}.ai; triggers start it with "AI - Start Campaign AI Script" or "Start Melee AI Script".`);
   }
 
   // ---- changes and undo ---------------------------------------------------------------
@@ -388,7 +500,9 @@ class AiView {
       h("div.ai-tabs", {}, ...tabs.map((t, i) => h(`button${i === this.tab ? ".active" : ""}`, { onclick: () => { this.tab = i; this.render(); } }, t)),
         h("span.muted.ai-title", {}, this.ai.name), this.editable ? null : h("span.muted", {}, "(read-only)"),
         h("button.ai-export", { title: "Write the AI script (.ai) the game runs, like the World Editor's File > Export AI Script",
-          onclick: () => void this.exportScript().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))) }, "Export AI Script…")),
+          onclick: () => void this.exportScript().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))) }, "Export AI Script…"),
+        h("button.ai-add-to-map", { title: "Put the AI script into the open map as Scripts\\<name>.ai, in its imports, like the World Editor's Add To Map",
+          onclick: () => this.act(() => this.addToMap()) }, "Add To Map")),
       body);
     this.el.querySelectorAll(".ai-scroll").forEach((e, i) => { e.scrollTop = scroll[i] ?? 0; });
     // The changed control was replaced (or a dialog closed): keep the keys (undo) here.
@@ -415,9 +529,12 @@ class AiView {
       ...workers.map(([l, what, kinds], i) => this.field(l, this.objectButton(ai.workers[i] ?? NO_ID, `${l} (a ${what})`, kinds, (id) => { ai.workers[i] = id; }),
         custom ? null : h("span.muted", {}, " used by Custom race AIs only"))),
       this.field("Custom Data", obj
-        ? h("span", {}, `Object data from ${obj.path} (${obj.date}) `,
-          this.editable ? h("button", { onclick: () => this.change(() => { ai.trailer = 0; ai.extra = new Uint8Array(); }) }, "Clear") : null)
-        : h("span.muted", {}, "None: custom units come from the map the AI is used in.")),
+        ? h("span.ai-custom-data", {}, `Object data from ${obj.path} (${obj.date}) `,
+          h("button.ai-custom-export", { title: "Save it as a .w3o, which Import Object Data takes", onclick: () => this.act(() => this.exportCustomData()) }, "Export…"), " ",
+          this.editable ? h("button.ai-custom-import", { title: "Replace it with a .w3o or one kind's object data", onclick: () => this.act(() => this.importCustomData()) }, "Import…") : null, " ",
+          this.editable ? h("button.ai-custom-clear", { onclick: () => this.change(() => clearObjectData(ai)) }, "Clear") : null)
+        : h("span.ai-custom-data", {}, h("span.muted", {}, "None: custom units come from the map the AI is used in. "),
+          this.editable ? h("button.ai-custom-import", { title: "Take in a .w3o or one kind's object data (.w3u, .w3a, …): the AI carries its objects", onclick: () => this.act(() => this.importCustomData()) }, "Import…") : null)),
       h("h3", {}, "Conditions (used by building and attacking)"),
       ai.conditions.length ? conds : h("p.muted", {}, "No conditions yet."),
       this.buttons(

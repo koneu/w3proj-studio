@@ -67,6 +67,58 @@ export function embeddedObjectData(f: AiFile): { path: string; date: string } | 
   return e2 < 0 ? null : { path: decodeLossless(b.subarray(0, e1)), date: decodeLossless(b.subarray(e1 + 1, e2)) };
 }
 
+/** The object data an AI file carries: a .w3o (version, then a flag and an object file per kind), the
+ *  rest of the file after the path and date. Checked on the five Reforged campaign AIs that have it. */
+export function embeddedObjectBytes(f: AiFile): Uint8Array | null {
+  const b = f.extra;
+  if (f.trailer !== 1 || !b.length) return null;
+  const e1 = b.indexOf(0), e2 = e1 < 0 ? -1 : b.indexOf(0, e1 + 1);
+  return e2 < 0 ? null : b.slice(e2 + 1);
+}
+
+/** Puts object data into an AI as the World Editor does: where it came from, when (editorDate), and the
+ *  .w3o's bytes. */
+export function embedObjectData(f: AiFile, path: string, date: string, w3o: Uint8Array): void {
+  const head = encodeLossless(`${path}\0${date}\0`);
+  const extra = new Uint8Array(head.length + w3o.length);
+  extra.set(head);
+  extra.set(w3o, head.length);
+  f.trailer = 1;
+  f.extra = extra;
+}
+
+/** No object data any more: the AI uses the map's. */
+export function clearObjectData(f: AiFile): void {
+  f.trailer = 0;
+  f.extra = new Uint8Array();
+}
+
+/** A date as the AI files store it ("Wed Nov  6 01:21:35 2019", C's asctime without the line end). */
+export function editorDate(d: Date): string {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${String(d.getDate()).padStart(2, " ")} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())} ${d.getFullYear()}`;
+}
+
+/** The kinds of a .w3o, in its order. */
+export const W3O_KINDS = ["w3u", "w3t", "w3b", "w3d", "w3a", "w3h", "w3q"];
+
+/** A .w3o holding one kind's object file (as war3map.w3u and the like). */
+export function w3oOfKind(kind: string, file: Uint8Array): Uint8Array {
+  const at = W3O_KINDS.indexOf(kind);
+  if (at < 0) throw new Error(`${kind} is not an object data kind`);
+  const out = new Uint8Array(4 + 4 * W3O_KINDS.length + file.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, 1, true);
+  let o = 4;
+  W3O_KINDS.forEach((_, i) => {
+    dv.setUint32(o, i === at ? 1 : 0, true);
+    o += 4;
+    if (i === at) { out.set(file, o); o += file.length; }
+  });
+  return out;
+}
+
 /** Option bits of the options field. */
 export const AI_OPTIONS: [number, string][] = [
   [0x0001, "Melee game"], [0x0002, "Target heroes"], [0x0004, "Repair structures"], [0x0008, "Heroes flee"],
