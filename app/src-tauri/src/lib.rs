@@ -14,6 +14,7 @@ mod mcp;
 mod mcpclients;
 #[cfg_attr(windows, allow(dead_code))]
 mod proton;
+mod strays;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -506,7 +507,7 @@ fn format_customize(root: String, name: String) -> CmdResult<String> {
     let dir = w3proj::format::project_dir(Path::new(&root));
     std::fs::create_dir_all(&dir).map_err(err)?;
     let path = dir.join(format!("{name}.json"));
-    if !path.exists() {
+    if !exists_checked(&path)? {
         std::fs::write(&path, text).map_err(err)?;
     }
     Ok(path.to_string_lossy().into_owned())
@@ -693,7 +694,7 @@ fn fs_rename(root: String, from: String, to: String) -> CmdResult<()> {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
     let dst = inside(&root, &to)?;
-    if dst.exists() {
+    if exists_checked(&dst)? {
         return Err(format!("{to} already exists"));
     }
     std::fs::rename(&src, &dst).map_err(|e| format!("{}: {e}", src.display()))?;
@@ -743,9 +744,27 @@ fn list_tree(root: &Path) -> CmdResult<Vec<String>> {
     Ok(files)
 }
 
+/// Whether something is at the path. A path that can't be checked (a folder above it may not be looked
+/// into) is an error, never "not there": callers create or write over what they take for absent.
 #[tauri::command]
-fn fs_exists(path: String) -> bool {
-    Path::new(&path).exists()
+fn fs_exists(path: String) -> CmdResult<bool> {
+    exists_checked(Path::new(&path))
+}
+
+fn exists_checked(path: &Path) -> CmdResult<bool> {
+    path.try_exists().map_err(|e| format!("{}: can't be checked: {e}", path.display()))
+}
+
+/// Stray files of the project at `root` (see `strays`): found, never changed.
+#[tauri::command]
+async fn project_strays(root: String) -> CmdResult<Vec<strays::Stray>> {
+    tauri::async_runtime::spawn_blocking(move || strays::scan(Path::new(&root))).await.map_err(err)
+}
+
+/// Moves one stray file of the project where it belongs, or deletes it when it is a copy of the file there.
+#[tauri::command]
+async fn project_fix_stray(root: String, path: String) -> CmdResult<strays::Fixed> {
+    tauri::async_runtime::spawn_blocking(move || strays::fix(Path::new(&root), Path::new(&path))).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -1335,6 +1354,8 @@ pub fn run() {
             fs_list_tree,
             fs_read_bytes,
             fs_exists,
+            project_strays,
+            project_fix_stray,
             reveal_in_explorer,
             app_paths,
             extensions_scan,
@@ -1484,6 +1505,39 @@ mod fs_tests {
         let st = fs_stat(w).unwrap();
         assert_eq!((wrote.size, wrote.modified), (5, st.modified));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A file in a folder that can't be looked into isn't "not there": fs_exists says it can't tell, as
+    /// fs_rename does before moving onto it. Absent and present are answered as before.
+    #[cfg(unix)]
+    #[test]
+    fn fs_exists_tells_a_path_it_cant_check_from_one_that_isnt_there() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, root) = project();
+        let locked = dir.join("maps").join("Chapter 2");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("war3campaign.w3f"), b"c").unwrap();
+        let inside = locked.join("war3campaign.w3f").to_string_lossy().into_owned();
+        // As the app receives the answers (a value, or an error it rejects with).
+        let answer = |p: String| format!("{:?}", fs_exists(p));
+        let present = answer(dir.join("map").join("sub").join("a.txt").to_string_lossy().into_owned());
+        let absent = answer(dir.join("map").join("nope.txt").to_string_lossy().into_owned());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Running as root looks into it anyway: then there's nothing unreadable to test with.
+        let readable = std::fs::metadata(locked.join("war3campaign.w3f")).is_ok();
+        let unknown = answer(inside.clone());
+        let from = dir.join("map").join("sub").join("a.txt").to_string_lossy().into_owned();
+        let renamed = fs_rename(root.clone(), from.clone(), inside.clone());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let kept = std::fs::read(locked.join("war3campaign.w3f")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        if !readable {
+            assert!(unknown.starts_with("Err(") && unknown.contains("can't be checked"), "a file in a folder that can't be looked into was answered {unknown}");
+            assert!(renamed.is_err(), "a move onto a path that can't be checked went ahead");
+        }
+        assert_eq!(kept, b"c");
+        assert_eq!(present, "Ok(true)");
+        assert_eq!(absent, "Ok(false)");
     }
 
     /// A campaign with one chapter folder that can't be read: the partial list skips and names it and
