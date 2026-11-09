@@ -1,17 +1,38 @@
 // Runs the TypeScript unit tests (src/**/*.test.ts, and scripts/*.test.mjs for the tooling) with
 // Node's test runner: each test file is bundled with esbuild (the app's imports are extensionless
-// TypeScript) into node_modules/.cache/w3-tests, or W3_TEST_OUT (coverage needs them outside
-// node_modules), and run with `node --test`. Test files given as arguments run alone (`npm test --
-// src/lib/undo.test.ts`); other arguments go to node (e.g. `npm test -- --test-name-pattern=undo`).
+// TypeScript) into a folder of this run's own, node_modules/.cache/w3-tests/run-<pid> (removed after
+// the run; two runs in one checkout, e.g. the gate's and an `npm test` beside it, don't clobber each
+// other), or W3_TEST_OUT (coverage needs them outside node_modules, and kept), and run with `node
+// --test`. Test files given as arguments run alone (`npm test -- src/lib/undo.test.ts`); other
+// arguments go to node (e.g. `npm test -- --test-name-pattern=undo`).
 
 import { build } from "esbuild";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
-const out = process.env.W3_TEST_OUT ?? join(app, "node_modules", ".cache", "w3-tests");
+const cache = join(app, "node_modules", ".cache", "w3-tests");
+const own = process.env.W3_TEST_OUT === undefined;
+const out = own ? join(cache, `run-${process.pid}`) : process.env.W3_TEST_OUT;
+
+/** Whether a process is still there (a run's folder whose process is gone is left over, e.g. from Ctrl+C). */
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+if (own) {
+  mkdirSync(cache, { recursive: true });
+  for (const name of readdirSync(cache)) {
+    const pid = /^run-(\d+)$/.exec(name)?.[1];
+    if (pid && Number(pid) !== process.pid && !alive(Number(pid))) rmSync(join(cache, name), { recursive: true, force: true });
+  }
+}
 
 const tests = [];
 const walk = (dir) => {
@@ -58,4 +79,5 @@ await build({
 });
 const bundles = tests.map((t) => join(out, relative(app, t)).replace(/\.m?ts$|\.mjs$/, ".mjs"));
 const run = spawnSync(process.execPath, ["--enable-source-maps", "--test", ...args, ...bundles], { stdio: "inherit" });
+if (own) rmSync(out, { recursive: true, force: true });
 process.exit(run.status ?? 1);
