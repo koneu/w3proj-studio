@@ -57,6 +57,7 @@
         "category": "Object Editor",
         "keybinding": "f6"
       },
+      { "id": "w3.objectEditor.resetAllStandard", "when": "project", "menu": "File:3:3", "title": "Reset Standard Objects to Defaults…", "category": "Object Editor" },
       { "id": "w3.objectEditor.objectAction", "title": "Object Editor: Rename or Delete an Object", "category": "Object Editor", "hidden": true }
     ],
     "viewContainers": [

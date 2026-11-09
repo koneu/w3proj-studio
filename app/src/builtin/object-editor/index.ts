@@ -242,7 +242,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** Object to show once an editor that is being opened has loaded. */
   let pendingFocus: { path: string; id: string } | null = null;
   /** Open editors by document path: rename and remove an object as the editor does (its undo step, its question). */
-  const actors = new Map<string, { rename(id: string, name: string): void; remove(id: string): Promise<boolean> }>();
+  const actors = new Map<string, { rename(id: string, name: string): void; remove(id: string): Promise<boolean>; resetAll(): Promise<boolean> }>();
 
   ctx.subscriptions.push(
     w3.services.provide(OBJECTS_SERVICE, objects),
@@ -305,6 +305,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (action === "delete") return actor.remove(id);
       actor.rename(id, (name as string).trim());
       return true;
+    }),
+    // Reset Standard Objects To Defaults (the World Editor's File menu): of the open Object Editor's kind, `ext` for another
+    // (else asked when none is open). Asks first; one undo step in that editor, saved with it. True when done.
+    w3.commands.register("w3.objectEditor.resetAllStandard", async (ext?: unknown) => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      const active = w3.editors.activePath();
+      let kindExt = typeof ext === "string" ? ext.toLowerCase() : active && actors.has(active) ? active.replace(/\.json$/i, "").split(".").pop()!.toLowerCase() : undefined;
+      kindExt ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: `Reset Standard ${k.label} to Defaults`, description: `war3map.${k.ext}`, value: k.ext })), { placeholder: "Which object data?" }))?.value;
+      if (!kindExt) return false;
+      if (!KINDS.some((k) => k.ext === kindExt)) throw new Error(`No object data kind ${kindExt}.`);
+      await w3.commands.execute("w3.objectEditor.open", kindExt);
+      const path = [...actors.keys()].find((p) => p.toLowerCase() === `map/war3map.${kindExt}.json`);
+      if (!path) throw new Error(`The Object Editor for ${kindExt} didn't open.`);
+      return actors.get(path)!.resetAll();
     }),
     w3.editors.registerProvider("w3.objectEditor", {
       async resolve(el, doc) {
@@ -502,6 +516,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return [
             { label: "New…", run: () => void newObject() },
             { label: held > 1 ? `Paste ${held} objects` : "Paste", shortcut: "Ctrl+V", disabled: !held, run: () => void paste() },
+            "-",
+            { label: `Reset Standard ${kindInfo?.label ?? "Objects"} to Defaults…`, disabled: !file.original.length || doc.readOnly, run: () => void resetAllStandard().catch(failed) },
           ];
         };
         listEl.addEventListener("contextmenu", (e) => {
@@ -594,6 +610,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const o of [...selection]) if (!file.custom.includes(o) && !keep.includes(o)) selection.delete(o);
           if (!selected || !selection.has(selected)) select([...selection][0] ?? file.custom[0] ?? keep[0] ?? null);
           markDirty(); renderDetail();
+        };
+        /** The World Editor's Reset Standard Objects To Defaults: every change to the game's objects of this kind goes, after
+         *  its question, as one undo step. Custom objects stay (they keep pointing at their bases). True when done. */
+        const resetAllStandard = async () => {
+          if (doc.readOnly) throw new Error("This object data can't be changed here.");
+          const changed = file.original.filter(hasMods).length;
+          const plural = kindInfo?.label.toLowerCase() ?? "objects";
+          if (!file.original.length) { void w3.window.showInfo(`No standard ${plural} are changed in this map.`); return false; }
+          const ask = `Are you sure you want to reset all standard ${plural} to the default settings? ${changed} changed in this map lose their changes; Ctrl+Z takes it back.`;
+          if (!(await w3.window.confirm(ask, "Reset", 60_000)) || closed) return false;
+          const going = new Set(file.original);
+          file.original = [];
+          selection = new Set([...selection].filter((o) => !going.has(o)));
+          select((selected && !going.has(selected) ? selected : null) ?? file.custom[0] ?? null);
+          markDirty(); renderDetail();
+          return true;
         };
 
         /** The mod list new modifications go to (the first set). */
@@ -1284,6 +1316,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             await removeSelection();
             return file.custom.length + file.original.length < before;
           },
+          resetAll: resetAllStandard,
         });
         renderList();
         renderDetail();
