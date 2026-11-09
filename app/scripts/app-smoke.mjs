@@ -1255,6 +1255,28 @@ async function unitProperties(page, found) {
   await k.save();
   if (!dropping().every((o) => o.itemTable === -1 && JSON.stringify(o.itemSets) === "[[]]")) fail(`one undo back to own (empty) sets: ${JSON.stringify(dropping().map((o) => [o.id, o.itemTable, o.itemSets]))}`);
   if (unit("sloc") && JSON.stringify(unit("sloc").itemSets) !== "[]") fail("the start location took drops");
+
+  // The same through the AI tool set_object_properties: what the panel offers, with its checks, all or nothing.
+  const indexOf = (id) => k.units().findIndex((u) => u.id === id);
+  const paladin = { index: indexOf("Hpal"), id: "Hpal" }, footman = { index: indexOf("hfoo"), id: "hfoo" };
+  await k.tool("set_object_properties", { kind: "units", items: [paladin], properties: { level: 4, skills: { AHhb: 2, AHds: 1 }, hp: 60, inventory: [{ slot: 3, item: "ankh" }], active: {} } })
+    .catch((e) => fail(`set_object_properties on the Paladin: ${e.message}`));
+  h = unit("Hpal");
+  if (h.level !== 4 || h.hp !== 60 || JSON.stringify(h.abilities) !== JSON.stringify([{ id: "AHhb", autocast: 0, level: 2 }, { id: "AHds", autocast: 0, level: 1 }]) || JSON.stringify(h.inventory) !== JSON.stringify([{ slot: 2, id: "ankh" }])) {
+    fail(`set_object_properties on the Paladin wrote ${JSON.stringify([h.level, h.hp, h.abilities, h.inventory])}`);
+  }
+  const unitsBefore = hash(join(k.root, "map", "war3mapUnits.doo.json"));
+  const refusals = [
+    [[footman], { gold: 5 }, /hfoo has no gold/],
+    [[paladin, footman], { level: 2 }, /Nothing was changed.*hfoo has no level/],
+    [[paladin], { level: 5, hp: 0 }, /hp: Hit points go from 1 to 100/],
+    [[footman], { active: { Ahea: true } }, /isn't one of this unit's abilities/],
+  ];
+  for (const [items, properties, why] of refusals) {
+    const r = await k.tool("set_object_properties", { kind: "units", items, properties }).then(() => "accepted", (e) => e.message);
+    if (!why.test(r)) fail(`set_object_properties ${JSON.stringify(properties)}: ${r}`);
+  }
+  if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== unitsBefore) fail("a refused set_object_properties changed war3mapUnits.doo");
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
   // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene

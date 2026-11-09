@@ -418,6 +418,21 @@ export function changeAll(items: readonly { entry: Placed; facts: TypeFacts }[],
   return { changed: items.filter((it) => applyChange(it.entry, it.facts, c)).map((it) => it.entry) };
 }
 
+/** The panel's field a change is made in. */
+export const fieldOfChange = (c: PropChange): PropField =>
+  c.field === "skill" ? "skills" : c.field === "slot" ? "inventory" : c.field;
+
+/** Why a change isn't one the panel would offer for one of the objects (a footman's "gold", a start location's hit
+ *  points), or null. What the panel shows is what an AI tool may set. */
+export function notOffered(items: readonly { entry: Placed; facts: TypeFacts }[], changes: readonly PropChange[]): string | null {
+  for (const it of items) {
+    const shown = fieldsFor(it.entry, it.facts);
+    const missing = changes.map(fieldOfChange).find((f) => !shown.includes(f));
+    if (missing) return `${it.entry.id} has no ${missing} in Unit Properties${shown.length ? ` (it has ${shown.join(", ")})` : ""}.`;
+  }
+  return null;
+}
+
 /** Several changes to several objects, in order (a hero's level before its skills): all of them, or with the first
  *  reason none, and then nothing is changed. The objects that changed. */
 export function changeAllOf(items: readonly { entry: Placed; facts: TypeFacts }[], changes: readonly PropChange[], ctx: PropContext = {}): { error: string } | { changed: Placed[] } {

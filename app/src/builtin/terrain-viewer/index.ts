@@ -70,7 +70,7 @@ import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from 
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
-import { changeAll, propSnapshot, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
+import { changeAll, changeAllOf, notOffered, propChangesOf, propSnapshot, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
@@ -1076,6 +1076,42 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         f.list.splice(0, f.list.length, ...f.list.filter((e) => !gone.has(e)));
       });
       return { removed };
+    }),
+    // The terrain editor's Properties panel for AI tools: the same fields per type, the same checks, all or nothing.
+    w3.mcp.registerTool("set_object_properties", async ({ kind, items, properties }) => {
+      if (!Array.isArray(items) || !items.length || items.length > 3000) throw new Error("items must list 1 to 3000 objects by index and id (list_placed gives them).");
+      if (!properties || typeof properties !== "object" || Array.isArray(properties)) throw new Error("properties must be an object, like { hp: 50 }.");
+      const listed = items as { index: unknown; id: unknown }[];
+      for (const [i, it] of listed.entries()) if (!Number.isInteger(it?.index) || typeof it?.id !== "string") throw new Error(`items[${i}] needs an index and an id.`);
+      const key = fileKey(kind);
+      const { handle } = await liveEditor();
+      // As the panel: regions by name for a waygate; a war3map.w3i that can't be read leaves the item tables unchecked.
+      const text = await mapStrings(w3).catch(() => (v: string) => v);
+      const regionDoc = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
+      const regions = (regionDoc?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) }));
+      const tables = await readMapDocStrict<{ itemTables?: { number: number }[] }>(w3, "map/war3map.w3i.json").then((i) => (i?.itemTables ?? []).map((t) => t.number), () => undefined);
+      const changes = propChangesOf(properties as Record<string, unknown>, regions);
+      if (!changes.length) throw new Error("properties names nothing to change.");
+      const data = await loadFactsData(w3);
+      const kindOf = (id: string) => {
+        const t = handle.objects.type(id)?.kind;
+        return key === "units" ? (t === "w3t" ? "w3t" : "w3u") : (t === "w3b" ? "w3b" : "w3d");
+      };
+      let changed = 0;
+      await editPlaced(`Set properties of ${listed.length} object${listed.length === 1 ? "" : "s"}`, key, (f) => {
+        const entries = [...new Set(listed.map((it) => {
+          const e = f.list[it.index as number];
+          if (!e || e.id !== it.id) throw new Error(`Number ${String(it.index)} isn't a ${String(it.id)} any more. list_placed gives the numbers.`);
+          return e;
+        }))];
+        const objects = entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOf(entry.id), data) }));
+        const why = notOffered(objects, changes);
+        if (why) throw new Error(`Nothing was changed: ${why}`);
+        const r = changeAllOf(objects, changes, { tables, regions: regions.map((x) => x.index) });
+        if ("error" in r) throw new Error(`Nothing was changed: ${r.error}`);
+        changed = r.changed.length;
+      });
+      return changed ? { changed } : "They already have these properties.";
     }),
     w3.services.provide(TERRAIN_SERVICE, toolGroups),
     // The dialog, or `given` options as they are (scripts and tests); the picture is of the terrain editor as it is.

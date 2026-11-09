@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  activeOthers, applyChange, attributesAt, changeAll, changeAllOf, checkChange, commonFields, dropsOf, fieldsFor, fitSkills, heroPools, isActive, maxSkillLevel, propSnapshot,
+  activeOthers, applyChange, attributesAt, changeAll, changeAllOf, checkChange, notOffered, commonFields, dropsOf, fieldsFor, fitSkills, heroPools, isActive, maxSkillLevel, propSnapshot,
   ownSetsOnly, propChangesOf, randomItemLabel, redistribute, setTotal, tableChoice, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
@@ -300,6 +300,14 @@ test("an AI tool's properties become the panel's changes: names, words and numbe
   assert.throws(() => propChangesOf({ waygate: "Nowhere" }, regions), /no region called "Nowhere"/);
   assert.throws(() => propChangesOf({ inventory: [{ slot: 1 }] }), /inventory must list/);
   assert.throws(() => propChangesOf({ active: { Adef: 1 } }), /active must map/);
+});
+
+test("an AI tool may set only what the panel shows for a type", () => {
+  // A footman stores 12500 in its gold field, a start location hit points: neither is offered.
+  assert.match(notOffered([{ entry: unit("hfoo"), facts: facts() }], [{ field: "gold", value: 5 }]) ?? "", /hfoo has no gold in Unit Properties \(it has hp, acquire, drops\)/);
+  assert.match(notOffered([{ entry: unit("sloc"), facts: facts() }], [{ field: "hp", value: 50 }]) ?? "", /sloc has no hp in Unit Properties\.$/);
+  assert.equal(notOffered([{ entry: unit("Hpal"), facts: PALADIN }], [{ field: "skill", id: "AHhb", level: 1 }, { field: "slot", slot: 0, id: "ankh" }]), null);
+  assert.equal(notOffered([{ entry: unit("hmpr"), facts: PRIEST }], [{ field: "active", id: "Ahea", on: true }]), null);
 });
 
 test("several changes to several objects: all of them, or none when one is refused", () => {

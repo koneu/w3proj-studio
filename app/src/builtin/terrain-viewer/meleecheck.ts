@@ -51,7 +51,7 @@ const FIX: Record<string, string> = {
   "camp distance": "move_object or remove_objects, then find_spots with kind camp.",
   "camp overlap": "Move one camp away: find_spots with kind camp gives free places.",
   "camp strength": "Replace the strongest creep with a weaker one, or move the camp further out.",
-  "camp mode": "remove_objects and place again with camp set, or not.",
+  "camp mode": "set_object_properties with acquireRange camp, or normal.",
   "camp access": "Open the way with remove_objects on trees, or move the camp: find_spots checks the way in.",
   "narrow path": "Close it with fill_rows, or widen it with remove_objects. A path should be wide enough for an army, or not exist.",
   drops: "Give its strongest creep drops, by the table in the melee guide.",
