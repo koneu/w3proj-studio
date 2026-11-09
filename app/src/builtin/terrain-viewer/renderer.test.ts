@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { castsSunShadow, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, withGroup } from "./renderer";
+import { castsSunShadow, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -110,6 +110,23 @@ test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-dri
   within(rgb(hdWaterColor("Y", false)), [50, 61, 121], [50, 61, 121], "Cityscape");
   // 03b_Water_Tint (red): the editor's HD water loses Lordaeron's blue instead of turning red.
   within(rgb(hdWaterColor("L", true)), [22, 50, 40], [23, 50, 40], "Lordaeron tinted");
+});
+
+test("HD water over the ground as the editor's pools of set depths show it (we-drive, Lighting off)", () => {
+  // Five pools on map 03's flat grass (the ground there 3, 132, 0 with Water off): their mean colour in the editor.
+  const ground = [3, 132, 0];
+  const measured: [number, number[]][] = [[8, [23, 126, 29]], [16, [30, 119, 41]], [32, [34, 109, 51]], [48, [29, 92, 55]], [96, [25, 60, 69]]];
+  const deepColour = hdWaterColor("L", false).map((v) => v * 255);
+  for (const [depth, editor] of measured) {
+    const { alpha, deep } = hdWaterAt(depth);
+    const water = HD_WATER.shallow.map((s, k) => s + (deepColour[k] - s) * deep);
+    const got = ground.map((g, k) => g + (water[k] - g) * alpha);
+    assert.ok(got.every((v, k) => Math.abs(v - editor[k]) <= 5), `depth ${depth}: ${got.map(Math.round)} against the editor's ${editor}`);
+  }
+  // The shore fades in: barely any water at the very edge, all of it from the full depth on.
+  assert.equal(hdWaterAt(0).alpha, 0);
+  assert.equal(hdWaterAt(HD_WATER.full + 50).alpha, 1);
+  assert.ok(hdWaterAt(8).alpha < 0.3, "the outermost band is see-through");
 });
 
 test("a texture's mean brightness comes from a small mip level", () => {

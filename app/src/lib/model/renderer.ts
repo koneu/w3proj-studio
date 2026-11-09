@@ -401,7 +401,7 @@ void main() {
   if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
   c.rgb *= uColor.rgb;
   float lit = uUnshaded > 0.5 ? 1.0 : sunLit(vWorldPos, vNormal);
-  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : sunLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
+  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : objectLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
   vec3 glow = uGlow > 0.5 ? texture(uEmissive, vUV).rgb * uColor.rgb : vec3(0.0);
   outColor = vec4(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), c.a);
 }`;
@@ -484,7 +484,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uSunFill", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {

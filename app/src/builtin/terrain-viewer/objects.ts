@@ -66,7 +66,13 @@ export interface Skin {
   /** Doodads: false when the World Editor leaves them out of the baked shadow map, war3map.shd (DoodadSkins.txt
    *  `shadow=0`, field `dshd`: corn, flowers, rubble, …); otherwise they cast into it. */
   bakesShadow?: boolean;
+  /** Units: a team colour of the type's own (UnitSkin.txt `teamColor`, field `utco`; the tavern and the mercenary
+   *  camps), drawn whoever owns it; absent: the owner's. */
+  teamColor?: number;
 }
+
+/** The team colour a placed object of this type is drawn in: the type's own (Skin.teamColor), else its owner's. */
+export const drawnTeam = (skin: Skin, owner: number): number => skin.teamColor ?? owner;
 
 /** Random unit, building and item (war3mapUnits.doo) and the object kind each is placed as. */
 export const RANDOM_KINDS: readonly (readonly [string, string])[] = [["uDNR", "w3u"], ["bDNR", "w3u"], ["iDNR", "w3t"]];
@@ -152,6 +158,8 @@ function shadowFields(get: (k: string) => string | undefined, kind: string): Par
     }
   }
   if (building) out.buildingShadow = building;
+  const team = Number(get("teamcolor"));
+  if (get("teamcolor")?.trim() && Number.isInteger(team) && team >= 0) out.teamColor = team;
   return out;
 }
 
@@ -202,7 +210,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
 const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
   w3u: {
     file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt", moveHeight: "umvh",
-    unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb",
+    unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb", teamColor: "utco",
   },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd" },
@@ -239,6 +247,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "bakesShadow") skin.bakesShadow = n !== 0;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
+        else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
           || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH" || key === "moveHeight") && Number.isFinite(n)) skin[key] = n;
       }
@@ -531,7 +540,7 @@ export class ObjectLoader {
       }
       entry.items.push(p);
       entry.req.instances.push({
-        world: placement(p, skin.modelScale, heightOf?.(p, skin)), team: teamOf(p),
+        world: placement(p, skin.modelScale, heightOf?.(p, skin)), team: drawnTeam(skin, teamOf(p)),
         pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path, extraScale: skin.modelScale },
       });
     }

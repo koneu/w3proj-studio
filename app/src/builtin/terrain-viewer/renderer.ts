@@ -15,8 +15,31 @@ import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunS
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
 /** How much of HD water's colour a model's real shadow on it keeps: map 03's ships' shadows on its lake, 0.76, 0.64,
- *  0.82 by channel (we-drive, 2026-11-09, the World Editor's HD view with View > Shadows on over off). */
-const WATER_SHADE = 0.74;
+ *  0.82 by channel (we-drive, 2026-11-09, the World Editor's HD view with View > Shadows on over off), and a flying
+ *  gryphon's on map 03's lake 0.77, 0.73, 0.86 (branch render-fixes-5; one 0.74 for all three made it too dark in blue). */
+const WATER_SHADE: readonly [number, number, number] = [0.77, 0.69, 0.84];
+
+/**
+ * HD water by its depth (world units from the ground to the surface), measured (we-drive, branch render-fixes-5) on
+ * five pools of set depths, 8, 16, 32, 48 and 96, on map 03's flat grass, the editor's HD view with Lighting off and
+ * with Water off for the ground: each pool's colour is the ground's mixed with the water's by 0.24, 0.36, 0.51, 0.65
+ * and 0.97 (`(depth / full)^power` within 0.03), and the water's own colour goes from a light grey-blue (`shallow`,
+ * sRGB) to the deep colour (hdWaterColor) over the classic ramp's depths (`ramp`, Water.slk's shallow to deep), 1.3
+ * levels rms over all fifteen channels. TwistedMeadows' centre is such shallow water (38 deep) over rock, which the
+ * editor shows nearly as the rock. Before, Studio's alpha ((depth - 4) / 96)^0.4, fitted on map 03's lake edge, was
+ * 0.29, 0.48, 0.66, 0.77 there, and the colour the deep one throughout.
+ */
+export const HD_WATER = { full: 100, power: 0.58, ramp: [10, 64] as const, shallow: [88, 104, 120] as const };
+
+/** HD water at a depth (world units): how opaque, and how far its colour is from `shallow` to the deep colour (0–1).
+ *  The water shader does the same. */
+export function hdWaterAt(depth: number): { alpha: number; deep: number } {
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  return {
+    alpha: clamp01(depth / HD_WATER.full) ** HD_WATER.power,
+    deep: clamp01((depth - HD_WATER.ramp[0]) / (HD_WATER.ramp[1] - HD_WATER.ramp[0])),
+  };
+}
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
@@ -113,14 +136,15 @@ void main() {
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
   if (uTone > 1.5) {
-    // Fades in from the shore faster than the classic ramp, then slowly to all of it at a depth of 100: the
-    // World Editor's HD lake on map 03 (we-drive, 2026-11-08) is about 0.37 opaque at depth 11, 0.59 at 22,
-    // 0.75 at 38, 0.85 at 71 (as Studio's old ramp placed those depths), ((depth - 4) / 96)^0.4 within 0.06.
-    float a = pow(clamp((vDepth * 128.0 - 4.0) / 96.0, 0.0, 1.0), 0.4) * t.a;
+    // How opaque and which colour by the depth: hdWaterAt (the editor's pools of set depths).
+    float depth = vDepth * 128.0;
+    float a = pow(clamp(depth / ${HD_WATER.full.toFixed(1)}, 0.0, 1.0), ${HD_WATER.power.toFixed(3)}) * t.a;
+    float deep = clamp((depth - ${HD_WATER.ramp[0].toFixed(1)}) / ${(HD_WATER.ramp[1] - HD_WATER.ramp[0]).toFixed(1)}, 0.0, 1.0);
+    vec3 colour = mix(vec3(${HD_WATER.shallow.map((v) => (v / 255).toFixed(4)).join(", ")}), uHdWater, deep);
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
-    // The models' real shadows fall on the water too: map 03's ships' keep about 0.74 of its colour (we-drive).
-    float shade = mix(${WATER_SHADE.toFixed(3)}, 1.0, sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
-    outColor = vec4(fogged(uHdWater * mix(1.0, ripple, 0.5) * shade), a);
+    // The models' real shadows fall on the water too, keeping WATER_SHADE of its colour.
+    vec3 shade = mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
+    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade), a);
     return;
   }
   t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);

@@ -59,7 +59,7 @@ import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
 import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
-import { loadSplatTable, planSplats, type SplatDef } from "./splats";
+import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
@@ -1873,7 +1873,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const tex of new Set(splats.map((s) => s.def.texture))) {
             if (splatImages.has(tex.toLowerCase())) continue;
             splatImages.add(tex.toLowerCase());
-            void artLoad(readFile(w3, doc, tex, terrain.tileset).then((buf) => { renderer.setSplatTexture(tex, decodeImage(buf, tex)); loadRedraw(); }, () => {}));
+            const files = splatTextureFiles(tex, w3.settings.get<string>("game.graphicsMode") ?? "hd");
+            const first = async (): Promise<{ buf: Uint8Array; name: string }> => {
+              let last: unknown;
+              for (const name of files) {
+                try { return { buf: await readFile(w3, doc, name, terrain.tileset), name }; } catch (e) { last = e; }
+              }
+              throw last;
+            };
+            void artLoad(first().then(({ buf, name }) => { renderer.setSplatTexture(tex, decodeImage(buf, name)); loadRedraw(); }, () => {}));
           }
           redraw();
         };

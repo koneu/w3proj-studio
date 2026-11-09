@@ -38,6 +38,14 @@ export async function loadSplatTable(w3: W3Api): Promise<Map<string, SplatDef>> 
   return out;
 }
 
+/** The files a mark's texture is read from, the first that's there: in HD and DE (`mode` not "sd") the Reforged
+ *  `_Diffuse` texture (the tileset's own, `_Tilesets/<letter>.w3mod`, where it has one), as the ground's tiles; the
+ *  World Editor's HD root mark of a rooted Ancient is that texture's green (Lordaeron's mean 41, 119, 24 against the
+ *  classic one's 69, 82, 32: we-drive, branch render-fixes-5), not the classic brown ring. */
+export function splatTextureFiles(texture: string, mode: string | undefined): string[] {
+  return mode === "sd" ? [texture] : [texture.replace(/\.\w+$/, "_Diffuse.blp"), texture];
+}
+
 /** The ground marks of placed units (buildings) whose type names one. An Ancient placed uprooted has none: it
  *  walks, its roots are out of the ground (the World Editor draws its root mark only rooted; we-drive, 2026-11-08). */
 export function planSplats(units: Placed[], skins: Map<string, Skin>, table: Map<string, SplatDef>, baseOf: (id: string) => string | undefined): Splat[] {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Placed, Skin } from "./objects";
-import { planSplats, type SplatDef } from "./splats";
+import { planSplats, splatTextureFiles, type SplatDef } from "./splats";
 
 const skin = (uberSplat: string): Skin => ({
   kind: "w3u", file: "x", numVar: 1, texId: -1, texFile: "", modelScale: 1, minScale: 1, maxScale: 1, randScale: false, fixedRot: null, uberSplat,
@@ -14,6 +14,13 @@ test("buildings get their ground mark; custom types their base's; others none", 
   const table = new Map([["HMED", hmed]]);
   const splats = planSplats([placed("hbar", 100, 200), placed("hfoo", 0, 0), placed("h000", -50, 50)], skins, table, (id) => (id === "h000" ? "hbar" : undefined));
   assert.deepEqual(splats, [{ x: 100, y: 200, def: hmed }, { x: -50, y: 50, def: hmed }]);
+});
+
+test("HD reads a mark's Reforged _Diffuse texture first, classic the plain one (the editor's green HD root mark)", () => {
+  const tex = "ReplaceableTextures\\Splats\\AncientUberSplat.blp";
+  assert.deepEqual(splatTextureFiles(tex, "hd"), ["ReplaceableTextures\\Splats\\AncientUberSplat_Diffuse.blp", tex]);
+  assert.deepEqual(splatTextureFiles(tex, "de"), ["ReplaceableTextures\\Splats\\AncientUberSplat_Diffuse.blp", tex]);
+  assert.deepEqual(splatTextureFiles(tex, "sd"), [tex]);
 });
 
 test("an Ancient placed uprooted has no root mark, as the file has it and as the editor splits it", () => {
