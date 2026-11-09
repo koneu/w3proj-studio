@@ -8,6 +8,11 @@
 // turned so its made-for side points at the tile's. Two diagonal land corners get nothing.
 // The orientations are read off the models' emitters: their waves roll from the water toward
 // the land (Shoreline0: from x = 80 toward −X). Not compared with the game.
+//
+// Compared with the World Editor (we-drive, Lighting off, HD and SD, branch render-fixes-5): pools of set depths on
+// flat ground get waves from 26 deep on, none at 8, 16, 20 or 23 (SHORE_DEPTH), so on map 03's lake, whose outer wet
+// corners are 12–21 deep, the waves stand a tile further in than at the last wet corner; and only along the pools'
+// and the river's −X and −Y sides: a tile gets a model only when its +X +Y corner is under water.
 
 import type { Terrain } from "../../lib/terrain/w3e";
 import type { ModelRequest } from "./objects";
@@ -16,6 +21,10 @@ export interface ShoreModels { straight: string; outside: string; inside: string
 
 /** Corner offsets from a tile's centre, in the order bottom-left, bottom-right, top-right, top-left. */
 const CORNERS: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+
+/** How deep (world units) water must be over a corner for the shore's waves to count it as under water: the editor's
+ *  pools got none at 23 deep and waves at 26. */
+export const SHORE_DEPTH = 24.5;
 
 /** `cliffShores`/`rollingShores`: the map's "Show water waves on cliff / rolling shores" flags
  *  (a shore tile on a cliff — corners on different layers — or not). */
@@ -30,9 +39,10 @@ export function planShoreline(t: Terrain, models: ShoreModels, waves = { cliffSh
     for (let x = 0; x < t.width - 1; x++) {
       const cs = [t.corners[y * t.width + x], t.corners[y * t.width + x + 1], t.corners[(y + 1) * t.width + x + 1], t.corners[(y + 1) * t.width + x]];
       if (!cs.some((c) => c.hasWater)) continue;
-      const under = cs.map((c) => c.hasWater && c.water > c.height);
+      const under = cs.map((c) => c.hasWater && c.water - c.height > SHORE_DEPTH);
       const n = under.filter(Boolean).length;
-      if (n === 0 || n === 4) continue;
+      // The editor's waves stand only where the tile's +X +Y corner is under water (see the top).
+      if (n === 0 || n === 4 || !under[2]) continue;
       const cliff = !cs.every((c) => c.layer === cs[0].layer);
       if (cliff ? !waves.cliffShores : !waves.rollingShores) continue;
       const level = Math.max(...cs.filter((c) => c.hasWater).map((c) => c.water));
