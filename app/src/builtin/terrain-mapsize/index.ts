@@ -13,6 +13,7 @@ import { playableSize, resizedSize, resizeProblem, SIZE_STEP, type Sides } from 
 import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO } from "../../lib/terrain/resizeundo";
 import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
+import { KEPT_SCRIPT_WORDS } from "../../lib/script/guard";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
@@ -21,7 +22,7 @@ const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 function withdrawScriptWarnings(shownBefore: ReadonlySet<unknown> | undefined) {
   if (!shownBefore) return;
   for (const toast of document.querySelectorAll(".toast")) {
-    if (shownBefore.has(toast) || !/functions? that the map's triggers don't make/.test(toast.textContent ?? "")) continue;
+    if (shownBefore.has(toast) || !(toast.textContent ?? "").includes(KEPT_SCRIPT_WORDS)) continue;
     for (const b of toast.querySelectorAll("button")) if (b.textContent === "Keep it") { (b as HTMLButtonElement).click(); break; }
   }
 }

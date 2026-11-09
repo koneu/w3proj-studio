@@ -3,7 +3,14 @@ import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesServ
 import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
-import { lostFunctions, scriptHash } from "../../lib/script/guard";
+import { KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP, scriptDecision, scriptHash } from "../../lib/script/guard";
+import { isNotFoundError } from "../../lib/oserror";
+import { h } from "../../workbench/dom";
+import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { getChunks, goToNextChunk, goToPreviousChunk, MergeView } from "@codemirror/merge";
+import { EditorState } from "@codemirror/state";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { EditorView, lineNumbers } from "@codemirror/view";
 import { capped, requireProject } from "../../lib/formats/mapdoc";
 import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env";
@@ -21,7 +28,10 @@ import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } 
 
 /** Hash of the script this app wrote last: a script that still has it holds nothing but what the
  *  map's triggers made, so it's replaced without looking (see lib/script/guard). */
-const STAMP = ".w3proj/generated-script";
+const STAMP = SCRIPT_STAMP;
+
+/** The tab showing how the script differs from what the map's data makes ("w3:script-diff:map/war3map.j"). */
+const DIFF = "w3:script-diff:";
 
 const INFO_JSON = "map/war3map.w3i.json";
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
@@ -30,7 +40,7 @@ const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
 
 /** Files war3map.j is made from (also as their .json documents). */
-const INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a)|war3mapUnits\.doo|war3mapSkin\.w3u)(\.json)?$/i;
+const INPUTS = SCRIPT_INPUTS;
 
 /** vJASS in trigger texts (libraries, scopes, structs, block comments, //! directives), or a
  *  script JassHelper compiled ("//globals from <library>:", LIBRARY_<name> constants). Such
@@ -88,8 +98,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return tables;
   };
 
-  /** Builds the map script from the project's files. */
-  const generate = async (): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
+  /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
+ *  script is what the data makes): nothing is written, not even the melee flag a save turns off. */
+  const generate = async (look = false): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
     // Read directly rather than from the file list, which lags behind fresh saves (New Map).
     const json = async <T>(p: string): Promise<T | null> => {
       // Projects made before a format got its JSON form keep the raw file until they're re-synced.
@@ -154,9 +165,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const flags = Number(info.flags), unmelee = meleeFlagsAfter(flags, placed, (id) => kindOf(id) === "item");
     if (unmelee !== flags && !w3.editors.isDirty(INFO_JSON)) {
       info.flags = unmelee;
-      const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()?.root, path: INFO_JSON, text: JSON.stringify(info) });
-      await w3.workspace.writeText(INFO_JSON, canonical);
-      out.append("war3map.w3i: not a melee map any more, players own units on it");
+      if (!look) {
+        const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()?.root, path: INFO_JSON, text: JSON.stringify(info) });
+        await w3.workspace.writeText(INFO_JSON, canonical);
+        out.append("war3map.w3i: not a melee map any more, players own units on it");
+      }
     }
 
     const lightEnv = ((info.lightEnvironment as string) || (info.tileset as string)).toLowerCase();
@@ -212,12 +225,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let running: Promise<boolean> = Promise.resolve(true);
   /** Projects already told that their vJASS script isn't regenerated. */
   const warned = new Set<string>();
-  /** Writes the script; false when it stays as it is. `force`: also over code of its own. */
-  const write = (reason: string, force = false): Promise<boolean> => {
+  /** The script's text; null when there is none, undefined when it's there but can't be read (not taken for none). */
+  const readScript = (path: string): Promise<string | null | undefined> =>
+    w3.workspace.readText(path).then((t) => t, (e) => (isNotFoundError(e) ? null : undefined));
+  /** The script as the map's data makes it now, replacing what is there, for the project at `root` only (a question
+   *  answered after switching projects must not reach the next one). A checkpoint first: what it replaces exists
+   *  nowhere else (where they're enabled; a failed one asks before going on). */
+  const replaceScript = async (root: string, file: string) => {
+    if (w3.workspace.project()?.root !== root) {
+      void w3.window.showWarning(`${file} wasn't replaced: another project is open now.`);
+      return;
+    }
+    if (!(await checkpointBefore(w3, `Replace ${file}`))) return;
+    await write("replaced on request", true, root).catch(() => {});
+  };
+  const showDifference = (path: string) => w3.editors.open(`${DIFF}${path}`, "w3.scriptDiff");
+  /** Writes the script; false when it stays as it is. `force`: also over a script that isn't the one this app
+   *  wrote last. `onlyFor`: only in that project (else nothing is written). */
+  const write = (reason: string, force = false, onlyFor?: string): Promise<boolean> => {
     // The queue goes on after a failed run (the caller of that run has its error).
     running = running.catch(() => true).then(async () => {
       try {
         const root = w3.workspace.project()?.root;
+        if (onlyFor !== undefined && root !== onlyFor) { out.append(`${reason}: not written: another project is open now`); return false; }
         const { path, text, vjass, language } = await generate();
         const file = path.slice(4);
         // Generating can take a while: this script must not land in another project.
@@ -232,27 +262,42 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return false;
         }
-        const current = await w3.workspace.readText(path).catch(() => null);
-        if (current === text) { out.append(`${reason}: ${file} up to date`); return true; }
+        const current = await readScript(path);
         const stamp = await w3.workspace.readText(STAMP).catch(() => null);
-        if (!force && current !== null && stamp?.trim() !== scriptHash(current)) {
-          const lost = lostFunctions(current, text);
+        const decision = scriptDecision(current, text, stamp, force);
+        if (decision.action === "same") {
+          // The data makes this very script (a fresh import, a script put back): it's this app's from now on.
+          if (stamp?.trim() !== scriptHash(text)) await w3.workspace.writeText(STAMP, `${scriptHash(text)}
+`);
+          out.append(`${reason}: ${file} up to date`);
+          return true;
+        }
+        if (decision.action === "keep") {
+          const { lost } = decision;
+          const here = root ?? "";
+          // Once per project on saves; asked for by name, always.
+          const key = `${lost.length ? "custom" : "edited"}:${here}`;
+          const tell = reason === "command" || !warned.has(key);
+          warned.add(key);
+          const answer = (c: string | undefined) => {
+            if (c === "Replace the script") void replaceScript(here, file);
+            else if (c === "Show Difference") void showDifference(path).catch((e) => w3.window.showError(String(e)));
+          };
           if (lost.length) {
             out.append(`${reason}: ${file} not written: it has ${lost.length} functions the triggers don't make (${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ", …" : ""}); the script stays as it is.`);
-            // Once per project on saves; asked for by name, always.
-            const key = `custom:${w3.workspace.project()?.root ?? ""}`;
-            if (reason !== "command" && warned.has(key)) return false;
-            warned.add(key);
-            void w3.window.showWarning(`${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} that the map's triggers don't make (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""}), so it isn't regenerated and changed triggers don't reach it. Replacing it deletes that code.`,
-              "Replace the script", "Keep it").then(async (c) => {
-                if (c !== "Replace the script") return;
-                // That code exists nowhere else: a checkpoint keeps it, where they're enabled; a
-                // failed one asks before the script is replaced.
-                if (!(await checkpointBefore(w3, `Replace ${file}`))) return;
-                await write("replaced on request", true).catch(() => {});
-              });
+            if (tell) {
+              void w3.window.showWarning(`${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} that the map's triggers don't make (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""}), ${KEPT_SCRIPT_WORDS} and changed triggers don't reach it. Replacing it deletes that code (a checkpoint keeps it).`,
+                "Replace the script", "Show Difference", "Keep it").then(answer);
+            }
             return false;
           }
+          const why = current === undefined ? "can't be read as text" : "isn't the script Studio wrote last (it was changed by hand or by another program, or comes from the World Editor and differs from what Studio makes)";
+          out.append(`${reason}: ${file} not written: it ${why}; the script stays as it is. "Replace the script" in the warning (Generate Map Script shows it again) replaces it.`);
+          if (tell) {
+            void w3.window.showWarning(`${file} ${why}, ${KEPT_SCRIPT_WORDS}: saved changes to triggers, regions, cameras, sounds, placed objects or map info don't reach it. Replacing it writes over its changes (a checkpoint keeps them).`,
+              "Replace the script", "Show Difference", "Keep it").then(answer);
+          }
+          return false;
         }
         await w3.workspace.writeText(path, text);
         await w3.workspace.writeText(STAMP, `${scriptHash(text)}
@@ -278,7 +323,84 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     warned.add(key);
     void w3.window.showWarning(`The map script couldn't be regenerated, so saved changes don't reach it: ${e instanceof Error ? e.message : String(e)}`);
   });
+
+  /** A project whose script isn't stamped as this app's (a fresh import, a sync from the World Editor, a project from
+   *  before the stamp): if the script is exactly what the map's data makes, it gets the stamp, so the next save
+   *  regenerates it without a question. Writes nothing else; a failure only leaves the stamp out. */
+  const adopt = (why: string): Promise<void> => {
+    running = running.catch(() => true).then(async () => {
+      try {
+        const root = w3.workspace.project()?.root;
+        if (!root || !w3.settings.get<boolean>("script.generateOnSave")) return true;
+        const stamp = (await w3.workspace.readText(STAMP).catch(() => null))?.trim();
+        for (const p of SCRIPT_FILES) {
+          const t = await w3.workspace.readText(p).catch(() => null);
+          if (t !== null && stamp === scriptHash(t)) return true;
+        }
+        const { path, text, vjass } = await generate(true);
+        if (vjass || w3.workspace.project()?.root !== root) return true;
+        if ((await readScript(path)) !== text) return true;
+        await w3.workspace.writeText(STAMP, `${scriptHash(text)}
+`);
+        out.append(`${why}: ${path.slice(4)} is what the map's data makes, so saves regenerate it`);
+      } catch (e) {
+        out.append(`${why}: couldn't compare the map script with what the map's data makes: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return true;
+    });
+    return running.then(() => {}, () => {});
+  };
+  /** The project last seen opened: each opening is a new one, the same folder opened again too (an import over it). */
+  let openProject: object | null = null;
+  const opened = () => {
+    const project = w3.workspace.project();
+    if (project === openProject) return;
+    openProject = project;
+    if (project) void adopt("opened");
+  };
+  opened();
+
   ctx.subscriptions.push(
+    w3.workspace.onDidChange(opened),
+    // After a sync from a map (the World Editor's save): a script it wrote that Studio would write too is Studio's.
+    w3.commands.register("w3.script.adopt", () => adopt("synced")),
+    w3.editors.registerProvider("w3.scriptDiff", {
+      async resolve(el, doc) {
+        const path = doc.path.slice(DIFF.length);
+        const file = path.slice(4);
+        el.classList.add("diff-pane");
+        let view: MergeView | null = null;
+        const render = async () => {
+          const root = w3.workspace.project()?.root;
+          if (!root) throw new Error("No project is open.");
+          const [current, made] = await Promise.all([readScript(path), generate(true)]);
+          view?.destroy();
+          view = null;
+          const head = h("div.diff-head", {}, h("span", {}, file), h("small.muted", {}, "  the script now ↔ what the map's data makes"));
+          if (made.vjass) { el.replaceChildren(head, h("div.view-empty", {}, `Not regenerated: ${made.vjass}.`)); return; }
+          if (made.path !== path) { el.replaceChildren(head, h("div.view-empty", {}, `This map's script is ${made.path.slice(4)}.`)); return; }
+          if (current === undefined) { el.replaceChildren(head, h("div.view-empty", {}, `${file} can't be read as text.`)); return; }
+          const box = h("div.diff-view");
+          const ro = [EditorState.readOnly.of(true), EditorView.editable.of(false), lineNumbers(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }), oneDark];
+          view = new MergeView({ a: { doc: current ?? "", extensions: ro }, b: { doc: made.text, extensions: ro }, parent: box, collapseUnchanged: { margin: 3, minSize: 6 }, gutter: true });
+          const chunks = getChunks(view.b.state)?.chunks ?? [];
+          const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };
+          head.append(
+            h("small.muted", {}, current === made.text ? "  the same" : `  ${chunks.length} change${chunks.length === 1 ? "" : "s"}`),
+            h("span.diff-actions", {},
+              h("button", { title: "Previous change", onclick: step(goToPreviousChunk) }, "↑"),
+              h("button", { title: "Next change", onclick: step(goToNextChunk) }, "↓"),
+              h("button", { title: "Read both again", onclick: () => void render().catch((e) => w3.window.showError(String(e))) }, "Refresh"),
+              current === made.text ? null : h("button.script-diff-replace", {
+                title: "Write what the map's data makes over the script (a checkpoint keeps the script first)",
+                onclick: () => void replaceScript(root, file).then(() => render()).catch((e) => w3.window.showError(String(e))),
+              }, "Replace the script")));
+          el.replaceChildren(head, box);
+        };
+        await render();
+        return { focus: () => view?.b.focus(), dispose: () => { view?.destroy(); view = null; } };
+      },
+    }),
     w3.mcp.registerTool("build_script", async () => {
       requireProject(w3);
       clearTimeout(timer);
@@ -289,7 +411,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const found = lua !== null ? checkLua(text).map((d) => ({ ...d, severity: "error" })) : checkJass(text, await gameJassEnv((p) => w3.game.readText(p)));
       return {
         // Not rebuilt: what's checked is the old script, so it can't say anything about the latest change.
-        rebuilt: built, ...(built ? {} : { note: "The script wasn't rebuilt: it has code the triggers don't make, or a language no extension compiles. See the Map Script output in the app. What follows is about the old script." }),
+        rebuilt: built, ...(built ? {} : { note: "The script wasn't rebuilt: it isn't the script Studio wrote last (changed by hand or by another program, or code the triggers don't make; the user can replace it from the warning in the app), or it's in a language no extension compiles. See the Map Script output in the app. What follows is about the old script." }),
         language: lua !== null ? "lua" : "jass", lines: text.split("\n").length, ...describeProblems(text, found, triggerOfFunctions(text)),
       };
     }),

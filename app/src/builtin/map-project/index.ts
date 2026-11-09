@@ -106,6 +106,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     logReport(`synced from ${map}`, r);
     if (r.written + r.deleted > 0) await w3.editors.closeAll();
     await w3.workspace.refresh();
+    // A script the map brought that Studio would write the same is Studio's: saves go on regenerating it. (The
+    // extension can be off.)
+    await w3.commands.execute("w3.script.adopt").catch(() => {});
     w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
   };
 

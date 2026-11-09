@@ -4465,6 +4465,92 @@ async function triggersAndAi(page, found) {
   }
 }
 
+/** A map script changed by hand inside the functions the generator writes (main) isn't overwritten by the next save: it
+ *  stays, a warning says so once per project, Show Difference shows it against what the map's data makes, and Replace
+ *  makes a checkpoint first and then regenerates it. A project without the stamp (a fresh import) whose script is what
+ *  the data makes gets the stamp when it opens, so its saves regenerate the script without a question. */
+async function scriptGuard(page, found) {
+  const fail = (what) => found.push(`script guard: ${what}`);
+  const k = await heightKit(page, "ScriptGuard");
+  const script = () => readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  const stampFile = join(k.root, ".w3proj", "generated-script");
+  const settle = () => page.evaluate(`w3.commands.execute("w3.script.settle")`);
+  /** Saves the regions file with one region of this name (as an editor's save does: through the workspace). */
+  const saveRegion = async (name) => {
+    const regions = k.read("war3map.w3r.json");
+    regions.regions = [{ left: -256, bottom: 256, right: 256, top: 640, name, index: 0, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) }];
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${JSON.stringify(JSON.stringify(regions))})`);
+    await settle();
+  };
+  await settle();
+  await page.evaluate(`(() => {
+    window.__sg = { warn: w3.window.showWarning };
+    window.__warns = [];
+    w3.window.showWarning = (m, ...a) => new Promise((r) => window.__warns.push({ m, a, r }));
+  })()`);
+  const warnings = () => page.evaluate(`window.__warns.map((w) => ({ m: w.m, a: w.a }))`);
+  const answer = (i, choice) => page.evaluate(`window.__warns[${i}].r(${JSON.stringify(choice)})`);
+  try {
+    // ---- A project without the stamp (as a fresh import) whose script is what the data makes: stamped on opening ------
+    if (!existsSync(stampFile)) return fail("the new map has no stamp (control)");
+    rmSync(stampFile);
+    await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(k.root)})`);
+    await until("the stamp of the opened project", () => existsSync(stampFile), 60000).catch(() => fail("a project whose script is what its data makes got no stamp on opening"));
+    await settle();
+    await saveRegion("Guard Region");
+    if (!/gg_rct_Guard_Region/.test(script())) fail("saving a region in the freshly stamped project didn't regenerate the script");
+    if ((await warnings()).length) fail(`saving a region in the freshly stamped project asked: ${JSON.stringify(await warnings())}`);
+
+    // ---- A line changed by hand inside main: the next save keeps the script and says so, once ---------------------------
+    const made = script();
+    const at = made.indexOf("function main takes nothing returns nothing");
+    const end = at < 0 ? -1 : made.indexOf("\nendfunction", at);
+    if (end < 0) return fail("no main in the generated script (control)");
+    const hand = `${made.slice(0, end)}\n    call BJDebugMsg("written by hand")${made.slice(end)}`;
+    writeFileSync(join(k.root, "map", "war3map.j"), hand);
+    await sleep(1500);
+    await saveRegion("Second Region");
+    if (script() !== hand) fail(`saving a region overwrote the script changed by hand inside main${/gg_rct_Second_Region/.test(script()) ? " (it has the new region)" : ""}`);
+    let w = await warnings();
+    if (w.length !== 1 || !/war3map\.j isn't the script Studio wrote last/.test(w[0]?.m ?? "") || !w[0].a.includes("Replace the script") || !w[0].a.includes("Show Difference")) {
+      fail(`the kept script's warning: ${JSON.stringify(w)}`);
+    }
+    await saveRegion("Third Region");
+    if (script() !== hand) fail("a second save overwrote the script changed by hand");
+    if ((await warnings()).length !== 1) fail(`a second save warned again: ${(await warnings()).length} warnings`);
+
+    // ---- Show Difference: the script against what the data makes, with Replace in it -------------------------------------
+    if ((await warnings()).length) await answer(0, "Show Difference");
+    await until("the difference", () => page.evaluate(`(w3.editors.activePath() ?? "").startsWith("w3:script-diff:") && !!document.querySelector(".script-diff-replace")`), 30000)
+      .catch(async () => fail(`Show Difference opened no difference with Replace in it (active: ${await page.evaluate(`w3.editors.activePath()`)})`));
+    // The hand-written line and the regions are the changes (the view draws only what's in sight, so it's counted).
+    const head = await page.evaluate(`document.querySelector(".editor-pane:not([hidden]) .diff-head")?.innerText ?? ""`);
+    if (!/war3map\.j/.test(head) || !/[1-9]\d* changes?/.test(head)) fail(`the difference's head: ${JSON.stringify(head)}`);
+
+    // ---- Replace (asked for by name: Generate Map Script asks again): a checkpoint, then the script as the data makes it ---
+    const checkpoints = () => (existsSync(join(k.root, "build", "checkpoints")) ? readdirSync(join(k.root, "build", "checkpoints")) : []);
+    const before = checkpoints().length;
+    await page.evaluate(`window.__warns.length = 0`);
+    await k.run("w3.script.generate", { quiet: true });
+    w = await warnings();
+    if (w.length !== 1 || !w[0].a.includes("Replace the script")) fail(`Generate Map Script on the kept script asked: ${JSON.stringify(w)}`);
+    else {
+      await answer(0, "Replace the script");
+      await until("the replaced script", () => /gg_rct_Third_Region/.test(script()), 60000).catch(() => fail("Replace didn't regenerate the script"));
+      await settle();
+      if (/written by hand/.test(script())) fail("the replaced script still has the line written by hand");
+      if (checkpoints().length <= before) fail("Replace made no checkpoint first");
+      // The replaced script is this app's again: the next save regenerates it without a question.
+      await page.evaluate(`window.__warns.length = 0`);
+      await saveRegion("Fourth Region");
+      if (!/gg_rct_Fourth_Region/.test(script()) || (await warnings()).length) fail(`after Replace a save didn't regenerate quietly: ${JSON.stringify(await warnings())}`);
+    }
+  } finally {
+    await page.evaluate(`(() => { for (const w of window.__warns ?? []) w.r(undefined); w3.window.showWarning = window.__sg.warn; })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** An editor doesn't save over what was saved after it read the file. Round 4 lost a trigger that way: an AI tool created
  *  it right after the project opened, while the Trigger Editor of the last session was coming back, and the editor's next
  *  save deleted it. 1. A tool's save while the editor loads: it opens again once it's there. 2. The triggers' texts
@@ -5148,7 +5234,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5242,6 +5328,7 @@ async function run() {
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
     await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
     await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
+    await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));

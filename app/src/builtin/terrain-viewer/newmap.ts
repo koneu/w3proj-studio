@@ -13,6 +13,7 @@ import { parseIni, parseSlk } from "../../lib/formats/text";
 import { isFullPath, joinPath } from "../../lib/paths";
 import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { w3eToText } from "../../lib/terrain/w3etext";
+import { SCRIPT_STAMP, scriptHash } from "../../lib/script/guard";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { buildMinimap, minimapSettings } from "./minimapgen";
@@ -477,7 +478,10 @@ export async function createMap(w3: W3Api, o: NewMapOptions): Promise<void> {
   await w3.workspace.writeBytes("map/war3map.w3grp", new Uint8Array(12));
   await w3.workspace.writeText("map/conversation.json", '{\n    "stringTablePath": "war3map.wts",\n    "conversation": {}\n}');
   await w3.workspace.writeText("map/war3map.w3e.txt", w3eToText(writeW3e(t)));
-  await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", mapScript(o, t, lights));
+  const script = mapScript(o, t, lights);
+  await w3.workspace.writeText(o.lua ? "map/war3map.lua" : "map/war3map.j", script);
+  // Written here, so it's this app's: the generator below replaces it without asking (lib/script/guard).
+  await w3.workspace.writeText(SCRIPT_STAMP, `${scriptHash(script)}\n`);
   await w3.workspace.writeBytes("map/war3map.shd", terrainShadows(t));
   await w3.workspace.refresh();
   const read = (p: string) => w3.game.read(p);
