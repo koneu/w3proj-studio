@@ -952,7 +952,7 @@ async function viewModes(page, found) {
   await k.clearToasts();
   await sleep(1500);
   await mapPicture(page);
-  const plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
+  let plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
   if (noise > 200) return fail(`the same view gave two pictures ${noise} pixels apart`);
   const changed = async () => (await pixelsApart(page, plain, await mapPicture(page))) - noise;
   // The window isn't reloaded by Ctrl+R in the map: this stays.
@@ -1011,17 +1011,37 @@ async function viewModes(page, found) {
   if ((await state()).terrain !== "hidden") fail("Ctrl+T twice isn't hidden terrain");
   await key("t", "KeyT", 84, CTRL);
   if ((await state()).terrain !== "textured" || (await changed()) > 150) fail("Ctrl+T three times isn't the textured picture again");
-  for (const [label, field, press, least] of [
+  for (const [label, field, press, least, at] of [
     ["Ctrl+U", "units", () => key("u", "KeyU", 85, CTRL), 300],
-    ["Ctrl+D", "doodads", () => key("d", "KeyD", 68, CTRL), 100],
+    // The tree in the middle of the view and zoomed in: seen from the start location it was under a hundred pixels, as
+    // near the noise as the threshold was (round 4). Close up the tree and its shadow image make about 670.
+    ["Ctrl+D", "doodads", () => key("d", "KeyD", 68, CTRL), 300, [-384, 0]],
     ["P", "pathing", () => key("p", "KeyP", 80), 300],
     ["Ctrl+Shift+L", "lightRanges", () => key("L", "KeyL", 76, CTRL | SHIFT), 100],
   ]) {
+    if (at) {
+      await k.look(at[0], at[1]);
+      for (let i = 0; i < 3; i++) await key("ArrowUp", "ArrowUp", 38, CTRL);
+      await sleep(800);
+      await mapPicture(page);
+      plain = await mapPicture(page);
+      noise = await pixelsApart(page, plain, await mapPicture(page));
+    }
     s = await state();
-    await trial(label, field, press, least);
+    const on = await trial(label, field, press, least);
+    // Hidden doodads leave no shadow images on the ground (the tree's and the brazier's).
+    if (field === "doodads" && !(s.shadowImages >= 1 && on.shadowImages === 0)) fail(`Ctrl+D left shadow images on the ground: ${s.shadowImages} before, ${on.shadowImages} after`);
     if (field === "units" && await page.evaluate(`[...document.querySelectorAll(".model-side label.model-row")].find((l) => /Units/.test(l.textContent))?.querySelector("input")?.checked`)) fail("the side panel's Units box didn't follow Ctrl+U");
     await press();
     if ((await changed()) > 150) fail(`${label} twice isn't the plain picture`);
+    if (at) {
+      for (let i = 0; i < 3; i++) await key("ArrowDown", "ArrowDown", 40, CTRL);
+      await k.look(start.position[0], start.position[1] + 128);
+      await sleep(800);
+      await mapPicture(page);
+      plain = await mapPicture(page);
+      noise = await pixelsApart(page, plain, await mapPicture(page));
+    }
   }
   // The camera keys, with nothing selected (viewmodes.ts cameraKey): Up scrolls north, Shift+Up further, Ctrl+Up and
   // Ctrl+Down zoom in and back, Ctrl+Left turns; Page Up moves nothing.

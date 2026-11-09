@@ -1873,7 +1873,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           } : null,
         });
         void artLoad(viewShadows.reloadBaked());
-        const showShadowObjects = () => { if (objCtx) void viewShadows.objectsChanged(unitsFile?.list ?? [], dooFile?.list ?? [], skinOf); };
+        /** Whether units and doodads are shown (View, Ctrl+U, Ctrl+D): hidden ones leave no shadow on the ground either. */
+        const shadowsOf = { units: true, doodads: true };
+        const showShadowObjects = () => {
+          if (objCtx) void viewShadows.objectsChanged(shadowsOf.units ? unitsFile?.list ?? [] : [], shadowsOf.doodads ? dooFile?.list ?? [] : [], skinOf);
+        };
         /** Set while a new prediction of the shadow map is due: it waits for the edits to pause. */
         let shadowTimer: ReturnType<typeof setTimeout> | undefined;
         const NO_DOODADS: Placed[] = [];
@@ -3868,6 +3872,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const hide = (g: string, hidden: boolean) => { if (hidden) renderer.hiddenGroups.add(g); else renderer.hiddenGroups.delete(g); };
           hide("doodads", !shown.doodads);
           hide("units", !shown.units);
+          if (shadowsOf.units !== shown.units || shadowsOf.doodads !== shown.doodads) {
+            shadowsOf.units = shown.units;
+            shadowsOf.doodads = shown.doodads;
+            showShadowObjects();
+          }
           hide("cliffs", !shown.cliffs);
           // The shoreline foam goes with the water.
           hide("shoreline", !shown.water);
@@ -3918,7 +3927,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
-          state: () => ({ ...viewState, gameView: gameViewOn(), shown: { ...shown }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState } }),
+          state: () => ({ ...viewState, gameView: gameViewOn(), shown: { ...shown }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);

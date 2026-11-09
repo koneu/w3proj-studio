@@ -260,6 +260,11 @@ export class ViewShadows {
     this.s.redraw();
   }
 
+  /** How many objects put a shadow image on the ground (those last given to `objectsChanged` whose skin has one). */
+  get stampCount(): number {
+    return this.stamps.length;
+  }
+
   private image(name: string): Promise<ShadowImage | null> {
     const key = name.toLowerCase();
     let p = this.images.get(key);
