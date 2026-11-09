@@ -951,10 +951,12 @@ async function viewModes(page, found) {
   await k.look(start.position[0], start.position[1] + 128);
   await k.clearToasts();
   await sleep(1500);
-  await mapPicture(page);
-  let plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
+  await countFrames(page);
+  // The pictures compared are taken once the view stands still: on a busy machine a redraw after a key, or the end of a
+  // camera move, can come later than a fixed wait (Ctrl+D measured a handful of pixels in a full run now and then).
+  let plain = await settledMapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
   if (noise > 200) return fail(`the same view gave two pictures ${noise} pixels apart`);
-  const changed = async () => (await pixelsApart(page, plain, await mapPicture(page))) - noise;
+  const changed = async () => (await pixelsApart(page, plain, await settledMapPicture(page))) - noise;
   // The window isn't reloaded by Ctrl+R in the map: this stays.
   await page.evaluate(`window.__viewModesMark = 1`);
 
@@ -994,7 +996,10 @@ async function viewModes(page, found) {
 
   /** A View key: the state (against `s`, taken before) changes and the picture by at least `least` pixels. */
   const trial = async (label, field, press, least) => {
+    const before = await framesDrawn(page);
     await press();
+    // The view draws what the key changed before the picture is judged.
+    await until(`a frame after ${label}`, async () => (await framesDrawn(page)) > before, 5000).catch(() => {});
     const on = await state();
     if (on[field] === s[field]) fail(`${label} didn't change ${field} (${JSON.stringify(on[field])})`);
     const diff = await changed();
@@ -1044,9 +1049,7 @@ async function viewModes(page, found) {
     if (at) {
       await k.look(at[0], at[1]);
       for (let i = 0; i < 3; i++) await key("ArrowUp", "ArrowUp", 38, CTRL);
-      await sleep(800);
-      await mapPicture(page);
-      plain = await mapPicture(page);
+      plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
     }
     s = await state();
@@ -1059,9 +1062,7 @@ async function viewModes(page, found) {
     if (at) {
       for (let i = 0; i < 3; i++) await key("ArrowDown", "ArrowDown", 40, CTRL);
       await k.look(start.position[0], start.position[1] + 128);
-      await sleep(800);
-      await mapPicture(page);
-      plain = await mapPicture(page);
+      plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
     }
   }
@@ -2067,6 +2068,36 @@ async function resizeUndo(page, found) {
   const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
   if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
   await page.evaluate(`w3.editors.closeAll()`);
+}
+
+/** The canvas of the active tab's view (an expression in the page). */
+const SHOWN_CANVAS = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+
+/** Counts frames per canvas from now on (`window.__glFrames`): a frame starts with its clear. */
+async function countFrames(page) {
+  await page.evaluate(`(() => {
+    if (window.__glFrames) return;
+    const P = WebGL2RenderingContext.prototype, clear = P.clear;
+    window.__glFrames = new WeakMap();
+    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
+  })()`);
+}
+
+/** Frames the shown view has drawn since countFrames (-1 without a view). */
+function framesDrawn(page) {
+  return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
+}
+
+/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
+ *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
+async function settledMapPicture(page, still = 100, tries = 8) {
+  let prev = await mapPicture(page);
+  for (let i = 1; i < tries; i++) {
+    const next = await mapPicture(page);
+    if ((await pixelsApart(page, prev, next)) <= still) return next;
+    prev = next;
+  }
+  return prev;
 }
 
 /** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
@@ -3803,14 +3834,8 @@ async function contextLoss(page, found) {
   const ground = "map/war3map.w3e.txt";
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
-  // Frames per canvas: a frame starts with its clear. The canvas shown is the one of the active tab.
-  await page.evaluate(`(() => {
-    if (window.__glFrames) return;
-    const P = WebGL2RenderingContext.prototype, clear = P.clear;
-    window.__glFrames = new WeakMap();
-    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
-  })()`);
-  const canvasNow = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+  await countFrames(page);
+  const canvasNow = SHOWN_CANVAS;
   const frames = () => page.evaluate(`(() => { const c = ${canvasNow}; return c ? window.__glFrames.get(c) ?? 0 : -1; })()`);
   const lostShown = () => page.evaluate(`(() => { const c = ${canvasNow}; const m = c?.parentElement.querySelector(".gl-lost"); return !!m && !m.hidden; })()`);
   /** Loses or restores the shown canvas's context; the canvas is kept as __lostCanvas. */
@@ -5162,9 +5187,13 @@ async function editorExtras(page, found) {
     const added = await run("w3.campaign.addMap");
     if (added.e) fail(`Add map: ${added.e}`);
     await until("the chapter project", () => existsSync(chapterInfo), 30000).catch(() => fail("Add map didn't unpack One.w3x under maps/"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length !== 1) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
+    /** Saves until the campaign file says what `ok` wants (the editor's change can land after a first save on a busy
+     *  machine): waited for, not a fixed pause. */
+    const savedCampaign = (what, ok) => until(what, async () => {
+      await page.evaluate(`w3.editors.saveAll()`);
+      try { return ok(w3f()); } catch { return false; }
+    }, 10000).then(() => true, () => false);
+    if (!(await savedCampaign("one button saved", (f) => f.chapters.length === 1))) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
     // Export: the chapter's project packed, as the CLI packs it.
     const exported = join(dir, "exported.w3x"), byCli = join(dir, "by-cli-chapter.w3x");
     await answer("pickSaveFile", exported);
@@ -5191,25 +5220,18 @@ async function editorExtras(page, found) {
     await sleep(200);
     await page.evaluate(`document.querySelector(".camp-remove-button")?.click()`);
     await until("the map to go", () => !existsSync(join(camp, "maps", "One.w3x")), 10000).catch(() => fail("Remove button, answered with the map, left maps/One.w3x"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length || w3f().mapOrder.length) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
+    if (!(await savedCampaign("no button and no map saved", (f) => !f.chapters.length && !f.mapOrder.length))) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await until("the map back", () => existsSync(chapterInfo), 10000).catch(() => fail("one undo of Remove button and map didn't bring the map back"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length !== 1 || w3f().mapOrder.length !== 1) fail(`after the undo the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
+    if (!(await savedCampaign("the button and the map back", (f) => f.chapters.length === 1 && f.mapOrder.length === 1))) fail(`after the undo the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     // Remove map while a button opens it: asked, the map goes, the button stays; undo brings it back.
     const rm = await run("w3.campaign.removeMap", "One.w3x");
     if (rm.e) fail(`Remove map: ${rm.e}`);
     if (existsSync(join(camp, "maps", "One.w3x"))) fail("Remove map left maps/One.w3x");
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length !== 1 || w3f().mapOrder.length !== 0) fail(`after Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
+    if (!(await savedCampaign("the button without its map saved", (f) => f.chapters.length === 1 && f.mapOrder.length === 0))) fail(`after Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await until("the map back again", () => existsSync(chapterInfo), 10000).catch(() => fail("one undo of Remove map didn't bring the map back"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
+    if (!(await savedCampaign("the map back in order", (f) => f.chapters.length === 1 && f.mapOrder.length === 1))) fail(`after undoing Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     // The campaign builds, with its chapter.
     const w3n = join(dir, "campaign-maps.w3n");
     const packed = spawnSync(cli, ["pack", camp, "-o", w3n], { encoding: "utf8" });
