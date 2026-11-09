@@ -154,6 +154,8 @@ function madeUpSeeds(): Seed[] {
   add("image", "bomb: TGA of 65535×65535", copy(tga, (b) => b.set([255, 255, 255, 255], 12)));
   add("image", "bomb: palettized BLP of 16384×16384", copy(blp, (b) => { u32(b, 12, 16384); u32(b, 16, 16384); }));
   add("mdx", "bomb: a node numbered 2 billion", mdxSeed(0x7ffffff0));
+  // An object whose stated size is 0 sent the reader back to where the object began, for ever.
+  for (const tag of ["ATCH", "PREM", "CORN"]) add("mdx", `loop: ${tag} object of size 0`, mdxObjectSeed(tag, 0));
   const wai2 = wai.slice();
   new DataView(wai2.buffer).setUint32(14, 0xffffffff, true);
   add("wai", "bomb: 4 billion workers", wai2);
@@ -195,6 +197,20 @@ function mdxSeed(boneId = 0) {
   d.setUint32(bone + 8, 96, true);
   d.setUint32(bone + 8 + 84, boneId, true);
   d.setInt32(bone + 8 + 88, -1, true);
+  return b;
+}
+
+/** MDLX, a version, and a chunk `tag` of one object that states `size` as its size, holding a node of its own. */
+function mdxObjectSeed(tag: string, size: number) {
+  const b = new Uint8Array(4 + 12 + 8 + 4 + 96), d = new DataView(b.buffer);
+  b.set(new TextEncoder().encode("MDLXVERS"), 0);
+  d.setUint32(8, 4, true);
+  d.setUint32(12, 800, true);
+  b.set(new TextEncoder().encode(tag), 16);
+  d.setUint32(20, 4 + 96, true);
+  d.setUint32(24, size, true);
+  d.setUint32(28, 96, true);
+  d.setInt32(28 + 88, -1, true);
   return b;
 }
 

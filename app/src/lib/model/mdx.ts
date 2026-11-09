@@ -268,6 +268,14 @@ class Reader {
   }
   bytes(n: number) { const s = this.u8.slice(this.p, this.p + n); this.p += n; return s; }
   need(n: number, what: string) { if (n < 0 || n > this.left) throw new Error(`${what}: ${n} bytes needed, ${this.left} left at ${this.p}`); }
+  /** Reads an object's stated size (which counts its size field) and returns where the object ends. A size that
+   *  doesn't cover the field itself, or reaches past `end` (the chunk's end), is refused: the reader is set to the
+   *  object's end afterwards, and a size of 0 would send it back to the same place for ever. */
+  objectEnd(end: number, what: string) {
+    const start = this.p, size = this.u32();
+    if (size < 4 || start + size > end) throw new Error(`${what}: size ${size} at ${start}, ${end - start} bytes left in the chunk`);
+    return start + size;
+  }
   extent(): Extent {
     return { radius: this.f32(), min: [this.f32(), this.f32(), this.f32()], max: [this.f32(), this.f32(), this.f32()] };
   }
@@ -568,25 +576,22 @@ export function parseMdx(buf: Uint8Array): Model {
           break;
         case "LITE":
           while (r.p < end) {
-            const oStart = r.p;
-            const oSize = r.u32();
-            r.need(oSize - 4, "light");
+            const oEnd = r.objectEnd(end, "light");
             const n = readNode(r, "lite");
             node(n);
             // A light whose values can't be read is left out; its node stays, as the other objects' do.
-            const light = readLight(r, n, oStart + oSize);
+            const light = readLight(r, n, oEnd);
             if (light) (model.lights ??= []).push(light);
-            r.p = oStart + oSize;
+            r.p = oEnd;
           }
           model.skipped.push(tag);
           break;
         // Objects with an outer size: only their node matters here.
         case "ATCH": case "PREM": case "CORN":
           while (r.p < end) {
-            const oStart = r.p;
-            const oSize = r.u32();
+            const oEnd = r.objectEnd(end, tag.toLowerCase());
             node(readNode(r, tag.toLowerCase()));
-            r.p = oStart + oSize;
+            r.p = oEnd;
           }
           if (tag !== "ATCH") model.skipped.push(tag);
           break;

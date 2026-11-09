@@ -112,6 +112,42 @@ test("lights: a damaged one is left out or warned about, never read past its end
   assert.ok(tiny.warnings.some((w) => w.startsWith("LITE")));
 });
 
+/** A chunk `tag` of objects with an outer size (attachments, emitters, cameras' kin): each a node numbered `i` and
+ *  8 bytes of the object's own after it; `sizes[i]` overrides an object's stated size. */
+function objectModel(tag: string, count: number, sizes: Record<number, number> = {}): Uint8Array {
+  const parts: number[] = [];
+  const u32 = (v: number) => parts.push(v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255);
+  const put = (s: string) => parts.push(...[...s].map((c) => c.charCodeAt(0)));
+  put("MDLX");
+  put("VERS"); u32(4); u32(800);
+  put(tag);
+  const chunk = parts.length; u32(0);
+  for (let i = 0; i < count; i++) {
+    const at = parts.length; u32(0);
+    u32(96); parts.push(...new Array(80).fill(0)); u32(i); u32(0xffffffff); u32(0); // node: size, name, id, parent, flags
+    u32(7); u32(7);
+    const n = sizes[i] ?? parts.length - at;
+    parts.splice(at, 4, n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24);
+  }
+  const n = parts.length - chunk - 4;
+  parts.splice(chunk, 4, n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24);
+  return new Uint8Array(parts);
+}
+
+test("objects with an outer size: their nodes are read and the rest skipped; a size of 0 or past the chunk is refused", () => {
+  for (const tag of ["ATCH", "PREM", "CORN", "LITE"]) {
+    const sane = parseMdx(objectModel(tag, 2));
+    assert.deepEqual(sane.nodes.map((n) => n.objectId), [0, 1], tag);
+    assert.deepEqual(sane.warnings, [], tag);
+    // A size of 0 (or under the size field) sent the reader back to the object's start for ever; past the chunk
+    // it read the next chunk as this one's objects. Either way the chunk is left out with a warning.
+    for (const size of [0, 3, 4 + 104 + 4]) {
+      const bad = parseMdx(objectModel(tag, 2, { 1: size }));
+      assert.ok(bad.warnings.some((w) => w.startsWith(`${tag}: `)), `${tag}, size ${size}: ${bad.warnings}`);
+    }
+  }
+});
+
 test("texture paths are renamed in place; the rest of the file stays", () => {
   const src = model(["Doodads/X/Rock_Diffuse.tif", "ReplaceableTextures/EnvironmentMap.blp"]);
   const out = renameTextures(src, (p) => p.replace(/\.tif$/, ".dds"));
