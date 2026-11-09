@@ -50,6 +50,8 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Set when overrides changed since loading or saving. */
   let unsaved = false;
   let fileExists = false;
+  /** The file as read: its fields other than the overrides are saved along with them. */
+  let readFile: unknown = null;
   let mode: Mode = "block", radius = 2;
   const flags = { walk: true, fly: false, build: true };
   let active = false;
@@ -63,6 +65,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   const load = w3.workspace.readText(FILE).then((text) => {
     const parsed = JSON.parse(text) as unknown;
     fileExists = true;
+    readFile = parsed;
     const j = overridesForSize(parsed, W, H);
     if (!j) {
       w3.window.showWarning(validPathingOverrides(parsed)
@@ -215,9 +218,11 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     async save() {
       if (!unsaved || (!fileExists && !overrides.size)) return;
       const cells = [...overrides].sort((a, b) => a[0] - b[0]).map(([i, o]) => [i % W, Math.floor(i / W), o.set, o.clear]);
-      const text = pathingOverridesText({ format: FORMAT, width: W, height: H, cells: cells as [number, number, number, number][] });
-      await w3.workspace.writeText(FILE, text);
+      const own = readFile && typeof readFile === "object" && !Array.isArray(readFile) ? readFile : {};
+      const file = { ...own, format: FORMAT, width: W, height: H, cells: cells as [number, number, number, number][] };
+      await w3.workspace.writeText(FILE, pathingOverridesText(file));
       fileExists = true;
+      readFile = file;
       unsaved = false;
     },
     dispose() { ed.setGroundOverlay(null); },

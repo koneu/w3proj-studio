@@ -135,10 +135,13 @@ export function planPathingOverrides(stored: unknown, t: Terrain, change: Sides)
   return { file, write: !same };
 }
 
-/** The file's text, one cell per line to keep diffs small. */
+/** The file's text, one cell per line to keep diffs small. Fields of its own (a hand-written note, a tool's data)
+ *  are kept, between the sizes and the cells. */
 export function pathingOverridesText(file: PathingOverrides): string {
-  const { cells } = file;
-  return `{\n  "format": ${JSON.stringify(file.format ?? "w3proj.pathing/1")},\n  "width": ${file.width},\n  "height": ${file.height},\n  "cells": [${cells.map((c) => `\n    ${JSON.stringify(c)}`).join(",")}${cells.length ? "\n  " : ""}]\n}\n`;
+  const { format, width, height, cells, ...rest } = file;
+  const own = Object.entries(rest).filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `\n  ${JSON.stringify(k)}: ${JSON.stringify(v, null, 2).replace(/\n/g, "\n  ")},`).join("");
+  return `{\n  "format": ${JSON.stringify(format ?? "w3proj.pathing/1")},\n  "width": ${width},\n  "height": ${height},${own}\n  "cells": [${cells.map((c) => `\n    ${JSON.stringify(c)}`).join(",")}${cells.length ? "\n  " : ""}]\n}\n`;
 }
 
 /** Applies the overrides to a wpm (16-byte header, then one byte per cell) of terrain `t`.

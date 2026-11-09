@@ -189,12 +189,31 @@ test("pathing plan: a real shift of a hand-ordered file rewrites it sorted; dupl
   assert.equal(dup.file.cells.length, 2);
 });
 
-test("pathing file: fields other than format, width, height and cells are dropped on rewrite", () => {
+test("pathing file: fields other than format, width, height and cells are kept on rewrite", () => {
   const t = big();
-  const f = { ...file(t, [[1, 1, 1, 0]]), note: "hand written" } as PathingOverrides;
-  const plan = planPathingOverrides(f, t, [32, 0, 0, 0]);
-  assert.ok(plan);
-  assert.equal("note" in JSON.parse(applyResizePathing(new Uint8Array(16 + 384 * 256), plan, resizeTerrain(t, [32, 0, 0, 0]), [32, 0, 0, 0])!), false);
+  const extra = { note: "hand written", tool: { name: "x", list: [1, "two", { three: 3 }] }, flag: false };
+  const f = { ...file(t, [[1, 1, 1, 0]]), ...extra } as PathingOverrides;
+  // A resize that moves the cells, and a camera-bounds-only change that drops a hand-written cell outside the map,
+  // both rewrite it.
+  for (const change of [[32, 0, 0, 0], [0, 0, 0, 0]] as Sides[]) {
+    const stray = change[0] === 0;
+    const plan = planPathingOverrides(stray ? { ...f, cells: [...f.cells, [300, 4, 8, 0]] } : f, t, change);
+    assert.ok(plan?.write);
+    const next = resizeTerrain(t, change);
+    const text = applyResizePathing(new Uint8Array(16 + (next.width - 1) * 4 * (next.height - 1) * 4), plan, next, change)!;
+    const back = JSON.parse(text);
+    for (const [k, v] of Object.entries(extra)) assert.deepEqual(back[k], v, `${k} after ${change.join()}`);
+    // Control: the overrides themselves were rewritten.
+    assert.deepEqual(back.cells, stray ? [[1, 1, 1, 0]] : [[129, 1, 1, 0]]);
+  }
+});
+
+test("pathing file: the text keeps the fields of its own that the Pathing Editor's save passes along", () => {
+  const read = { format: "w3proj.pathing/1", width: 8, height: 8, cells: [[1, 1, 1, 0]], note: "keep me", nested: { a: [1, 2] } };
+  const saved = JSON.parse(pathingOverridesText({ ...read, cells: [[2, 3, 4, 0]] } as PathingOverrides));
+  assert.deepEqual(saved, { format: "w3proj.pathing/1", width: 8, height: 8, cells: [[2, 3, 4, 0]], note: "keep me", nested: { a: [1, 2] } });
+  // Control: without fields of its own, just the overrides, as before.
+  assert.deepEqual(JSON.parse(pathingOverridesText({ format: "f", width: 4, height: 4, cells: [] })), { format: "f", width: 4, height: 4, cells: [] });
 });
 
 test("applyResizePathing: what resizeMap applies and writes", () => {
