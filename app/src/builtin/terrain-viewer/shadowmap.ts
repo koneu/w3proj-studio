@@ -6,7 +6,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { neverStoredLast } from "../../lib/model/texpath";
 import type { loadSkins, Placed } from "./objects";
-import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, type AlphaMap, type ShadowMesh, type Sun } from "./shadows";
+import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, terrainShadowsInSteps, type AlphaMap, type ShadowMesh, type Sun } from "./shadows";
 import type { Terrain } from "../../lib/terrain/w3e";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
@@ -42,10 +42,17 @@ function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>
   return m;
 }
 
+/** `pause`: the terrain's part is done a few rows at a time, waiting for it in between (the terrain view, where it
+ *  would hold up the page for a second or two on a big map); it returning false stops the work (rejects). */
 export async function predictShadows(terrain: Terrain, doodads: Placed[], skins: Skins, baseOf: (id: string) => string | undefined,
-  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun): Promise<Uint8Array> {
-  const out = terrainShadows(terrain, sun);
+  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun, pause?: () => Promise<boolean>): Promise<Uint8Array> {
+  const out = pause ? await terrainShadowsInSteps(terrain, sun, pause) : terrainShadows(terrain, sun);
+  let since = performance.now();
   for (const d of doodads) {
+    if (pause && performance.now() - since > 8) {
+      if (!(await pause())) throw new Error("superseded");
+      since = performance.now();
+    }
     const skin = skins.get(d.id) ?? skins.get(baseOf(d.id) ?? "");
     if (!skin || skin.kind !== "w3d") continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;

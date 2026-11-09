@@ -36,6 +36,27 @@ function groundAt(t: Terrain, wx: number, wy: number): number {
 /** Terrain shadows: a cell is dark when the ray from its centre toward the
  *  sun passes under the ground. */
 export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN): Uint8Array {
+  const { out, rows, row } = terrainShadowRows(t, s);
+  for (let cy = 0; cy < rows; cy++) row(cy);
+  return out;
+}
+
+/** terrainShadows a few rows at a time, for the terrain view (a big map takes a second or two): `pause` is awaited
+ *  every few milliseconds of work, and stops the work (rejecting) when it returns false. */
+export async function terrainShadowsInSteps(t: Terrain, s: Sun = DEFAULT_SUN, pause: () => Promise<boolean>): Promise<Uint8Array> {
+  const { out, rows, row } = terrainShadowRows(t, s);
+  let since = performance.now();
+  for (let cy = 0; cy < rows; cy++) {
+    row(cy);
+    if (performance.now() - since > 8) {
+      if (!(await pause())) throw new Error("superseded");
+      since = performance.now();
+    }
+  }
+  return out;
+}
+
+function terrainShadowRows(t: Terrain, s: Sun): { out: Uint8Array; rows: number; row: (cy: number) => void } {
   const sun = sunVector(s);
   const w = (t.width - 1) * 4, h = (t.height - 1) * 4;
   const out = new Uint8Array(w * h);
@@ -43,7 +64,7 @@ export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN): Uint8Array {
   const maxX = t.offsetX + (t.width - 1) * 128, maxY = t.offsetY + (t.height - 1) * 128;
   let top = -Infinity;
   for (const c of t.corners) top = Math.max(top, c.height);
-  for (let cy = 0; cy < h; cy++) {
+  const row = (cy: number) => {
     for (let cx = 0; cx < w; cx++) {
       const wx = t.offsetX + cx * 32 + 16, wy = t.offsetY + cy * 32 + 16;
       const h0 = groundAt(t, wx, wy);
@@ -53,8 +74,8 @@ export function terrainShadows(t: Terrain, s: Sun = DEFAULT_SUN): Uint8Array {
         if (groundAt(t, px, py) > z) { out[cy * w + cx] = 0xff; break; }
       }
     }
-  }
-  return out;
+  };
+  return { out, rows: h, row };
 }
 
 /** Alpha channel of a texture, rows top to bottom. */

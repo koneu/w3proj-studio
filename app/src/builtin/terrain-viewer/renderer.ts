@@ -27,9 +27,10 @@ const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] 
 const GROUND_VS = `#version 300 es
 in vec3 aPos; in vec3 aNormal; in vec2 aLocal; in float aCell; in float aShade;
 uniform mat4 uViewProj; uniform float uExtended;
-out vec2 vUV; out vec3 vNormal; out float vShade;
+out vec2 vUV; out vec3 vNormal; out float vShade; out vec2 vWorld;
 ${FOG_VS}
 void main() {
+  vWorld = aPos.xy;
   int cell = int(aCell);
   bool ext = uExtended > 0.5;
   if (cell < 0) {
@@ -47,16 +48,24 @@ void main() {
 }`;
 const GROUND_FS = `#version 300 es
 precision mediump float;
-in vec2 vUV; in vec3 vNormal; in float vShade;
+in vec2 vUV; in vec3 vNormal; in float vShade; in highp vec2 vWorld;
 uniform sampler2D uTex;
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
+// The ground's shadow map (one texel per 32 × 32 cell over uShadowRect: x, y, width, height): red the baked
+// shadows, green the objects' shadow images, which lie half a cell to the north-east (uStampShift, in texels).
+// uShadowDark: how much of the picture a cell in full shadow of each takes away (0 without shadows).
+uniform sampler2D uShadow; uniform highp vec4 uShadowRect; uniform vec2 uStampShift; uniform vec2 uShadowDark;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
+  highp vec2 at = (vWorld - uShadowRect.xy) / uShadowRect.zw;
+  float baked = texture(uShadow, at).r;
+  float stamped = texture(uShadow, at - uStampShift).g;
+  float dark = max(baked * uShadowDark.x, stamped * uShadowDark.y);
   vec3 light = uAmbient + uDiffuse * facing(vNormal, uLightDir);
-  outColor = vec4(fogged(toned(c.rgb, light) * vShade), c.a);
+  outColor = vec4(fogged(toned(c.rgb, light) * vShade * (1.0 - dark)), c.a);
 }`;
 
 const COLOR_VS = `#version 300 es
@@ -360,6 +369,16 @@ export class TerrainRenderer {
   /** Splat meshes by texture path and blend mode. */
   private splats: { texture: string; blend: number; color: number[]; vao: WebGLVertexArrayObject; count: number }[] = [];
   private splatTextures = new Map<string, WebGLTexture>();
+  /** View > Shadows: the ground's shadow map (setShadowMap) and the units' shadow textures (setUnitShadows). */
+  showShadows = true;
+  /** How shadows are drawn (see viewshadows.ts SHADOW_LOOK): how much of the ground's picture a cell in full baked
+   *  shadow and in an object's shadow image takes away, how much a unit's shadow texture at full alpha does, and
+   *  how far (world units, east and north) the objects' shadow images lie from their cells. */
+  shadowLook: { baked: number; stamp: number; unit: number; stampShift: [number, number] } = { baked: 0, stamp: 0, unit: 0, stampShift: [0, 0] };
+  private shadowMap: WebGLTexture | null = null;
+  /** No shadow anywhere: what the ground samples without a shadow map. */
+  private noShadow: WebGLTexture;
+  private unitShadows: { texture: string; vao: WebGLVertexArrayObject; count: number }[] = [];
   private overlayProg: WebGLProgram | null = null;
   private overlay: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   /** The dark over the map's border: its own layer, as tools use the overlay. */
@@ -521,7 +540,10 @@ export class TerrainRenderer {
     this.waterWhite = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.waterWhite);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
-    this.textures = terrain.groundTiles.map(() => null);
+    this.noShadow = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.noShadow);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+    this.textures =terrain.groundTiles.map(() => null);
     this.placeholder = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.placeholder);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([110, 110, 100, 255]));
@@ -702,39 +724,76 @@ export class TerrainRenderer {
   /** Building ground marks: squares (half-size `scale`) draped over the ground in 32-unit
    *  cells, grouped by texture, blend mode and colour. */
   setSplats(list: { x: number; y: number; scale: number; texture: string; blend: number; color: number[] }[]) {
-    const gl = this.gl, t = this.terrain;
     for (const s of this.splats) this.freeVao(s.vao);
     const groups = new Map<string, { texture: string; blend: number; color: number[]; data: number[] }>();
     for (const s of list) {
       const key = `${s.texture}|${s.blend}|${s.color.join(",")}`;
       let g = groups.get(key);
       if (!g) groups.set(key, (g = { texture: s.texture, blend: s.blend, color: s.color, data: [] }));
-      const n = Math.max(1, Math.ceil((2 * s.scale) / 32)), size = 2 * s.scale;
-      const x0 = s.x - s.scale, y0 = s.y - s.scale;
-      const v = (i: number, j: number) => {
-        const x = x0 + (size * i) / n, y = y0 + (size * j) / n;
-        return [x, y, heightAt(t, x, y) + 2, i / n, 1 - j / n];
-      };
-      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-        g.data.push(...v(i, j), ...v(i + 1, j), ...v(i + 1, j + 1), ...v(i, j), ...v(i + 1, j + 1), ...v(i, j + 1));
-      }
+      this.drapeQuad(g.data, s.x - s.scale, s.y - s.scale, 2 * s.scale, 2 * s.scale);
     }
-    this.splats = [...groups.values()].map((g) => {
-      const vao = gl.createVertexArray()!;
-      gl.bindVertexArray(vao);
-      const vb = this.buf(vao);
-      gl.bindBuffer(gl.ARRAY_BUFFER, vb);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(g.data), gl.STATIC_DRAW);
-      const attr = (name: string, size: number, offset: number) => {
-        const loc = gl.getAttribLocation(this.splatProg, name);
-        if (loc < 0) return;
-        gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 20, offset * 4);
-      };
-      attr("aPos", 3, 0); attr("aUv", 2, 3);
-      gl.bindVertexArray(null);
-      return { texture: g.texture, blend: g.blend, color: g.color, vao, count: g.data.length / 5 };
-    });
+    this.splats = [...groups.values()].map((g) => ({ texture: g.texture, blend: g.blend, color: g.color, vao: this.drapedVao(g.data), count: g.data.length / 5 }));
+  }
+
+  /** A texture's square draped over the ground in 32-unit cells: position and texture coordinate per vertex. */
+  private drapeQuad(data: number[], x0: number, y0: number, w: number, h: number) {
+    const t = this.terrain;
+    const nx = Math.max(1, Math.ceil(w / 32)), ny = Math.max(1, Math.ceil(h / 32));
+    const v = (i: number, j: number) => {
+      const x = x0 + (w * i) / nx, y = y0 + (h * j) / ny;
+      return [x, y, heightAt(t, x, y) + 2, i / nx, 1 - j / ny];
+    };
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      data.push(...v(i, j), ...v(i + 1, j), ...v(i + 1, j + 1), ...v(i, j), ...v(i + 1, j + 1), ...v(i, j + 1));
+    }
+  }
+
+  private drapedVao(data: number[]): WebGLVertexArrayObject {
+    const gl = this.gl;
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const vb = this.buf(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    const attr = (name: string, size: number, offset: number) => {
+      const loc = gl.getAttribLocation(this.splatProg, name);
+      if (loc < 0) return;
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 20, offset * 4);
+    };
+    attr("aPos", 3, 0); attr("aUv", 2, 3);
+    gl.bindVertexArray(null);
+    return vao;
+  }
+
+  /** The ground's shadow map: two values per 32 × 32 cell (baked, objects' images; 0 lit, 255 in shadow, see
+   *  viewshadows.ts groundShadows), rows from the south, over the whole map; null: none. Filtered between cells, as
+   *  the World Editor softens it. */
+  setShadowMap(values: Uint8Array | null, width = 0, height = 0) {
+    const gl = this.gl;
+    if (!values) { if (this.shadowMap) gl.deleteTexture(this.shadowMap); this.shadowMap = null; return; }
+    if (gl.isContextLost()) return;
+    this.shadowMap ??= gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.shadowMap);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, width, height, 0, gl.RG, gl.UNSIGNED_BYTE, values);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+
+  /** The units' shadows: textures (by path; their images come through setSplatTexture) draped over the ground,
+   *  each over its rectangle (x0, y0 the south-west corner). */
+  setUnitShadows(list: { x0: number; y0: number; w: number; h: number; texture: string }[]) {
+    for (const s of this.unitShadows) this.freeVao(s.vao);
+    const groups = new Map<string, number[]>();
+    for (const s of list) {
+      let data = groups.get(s.texture);
+      if (!data) groups.set(s.texture, (data = []));
+      this.drapeQuad(data, s.x0, s.y0, s.w, s.h);
+    }
+    this.unitShadows = [...groups].map(([texture, data]) => ({ texture, vao: this.drapedVao(data), count: data.length / 5 }));
   }
 
   setSplatTexture(path: string, img: DecodedImage) {
@@ -1228,6 +1287,15 @@ export class TerrainRenderer {
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uDiffuse"), groundLight.diffuse);
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uAmbient"), groundLight.ambient);
     gl.uniform1i(gl.getUniformLocation(this.groundProg, "uTex"), 0);
+    const shadowMap = this.showShadows ? this.shadowMap : null;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, shadowMap ?? this.noShadow);
+    gl.uniform1i(gl.getUniformLocation(this.groundProg, "uShadow"), 1);
+    const tr = this.terrain;
+    gl.uniform4f(gl.getUniformLocation(this.groundProg, "uShadowRect"), tr.offsetX, tr.offsetY, (tr.width - 1) * 128, (tr.height - 1) * 128);
+    const look = this.shadowLook;
+    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uStampShift"), look.stampShift[0] / ((tr.width - 1) * 128), look.stampShift[1] / ((tr.height - 1) * 128));
+    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uShadowDark"), shadowMap ? look.baked : 0, shadowMap ? look.stamp : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -1281,6 +1349,31 @@ export class TerrainRenderer {
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.uniform4fv(gl.getUniformLocation(this.splatProg, "uColor"), s.color);
         gl.blendFunc(gl.SRC_ALPHA, s.blend === 1 ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+        gl.bindVertexArray(s.vao);
+        gl.drawArrays(gl.TRIANGLES, 0, s.count);
+      }
+      gl.depthMask(true);
+      gl.enable(gl.CULL_FACE);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
+    // The units' shadows: the ground under them darkened by the texture's alpha.
+    if (this.showShadows && this.unitShadows.length && !this.hiddenGroups.has("units")) {
+      gl.useProgram(this.splatProg);
+      setFog(gl, (name) => gl.getUniformLocation(this.splatProg, name), fog);
+      gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
+      gl.uniform1i(gl.getUniformLocation(this.splatProg, "uTex"), 0);
+      setTone(gl, (name) => gl.getUniformLocation(this.splatProg, name), this.tone);
+      gl.uniform4f(gl.getUniformLocation(this.splatProg, "uColor"), 0, 0, 0, this.shadowLook.unit);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
+      for (const s of this.unitShadows) {
+        const tex = this.splatTextures.get(s.texture.toLowerCase());
+        if (!tex) continue;
+        gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.bindVertexArray(s.vao);
         gl.drawArrays(gl.TRIANGLES, 0, s.count);
       }
