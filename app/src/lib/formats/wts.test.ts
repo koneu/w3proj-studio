@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StringTable, askWtsCuts, importStrings, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
+import { StringTable, askWtsCuts, checkStringIds, compactStringIds, importStrings, renumberStringRefs, renumberWts, wtsCutLines, wtsCuts, wtsSafeText, wtsStrayLines } from "./wts";
 
 const map = "STRING 1\r\n// Name\r\n{\r\nMy Map\r\n}\r\n\r\nSTRING 2\r\n{\r\nA hero\r\n}\r\n\r\nSTRING 3\r\n{\r\nKept\r\n}\r\n";
 
@@ -203,4 +203,37 @@ test("hand-written text outside every string is found by line", () => {
   assert.deepEqual(wtsStrayLines(String.fromCharCode(0xfeff) + "STRING 1\n// c\n{\na\n}\n// after\n\nSTRING 2\n{\nb\n}\n"), []);
   const typed = "STRING 1\r\n{\r\nLine one\r\n}\r\nLine three\r\n}\r\n\r\nSTRING 2\r\n{\r\nb\r\n}\r\n";
   assert.deepEqual(wtsStrayLines(typed), [{ line: 5, text: "Line three" }, { line: 6, text: "}" }]);
+});
+
+test("Adjust Map String IDs: headers renumbered in place, texts and everything else byte for byte", () => {
+  const ids = new Map([[1, 7], [3, 1]]);
+  checkStringIds(new StringTable(map), ids);
+  const out = renumberWts(map, ids);
+  assert.equal(out, map.replace("STRING 1\r\n", "STRING 7\r\n").replace("STRING 3\r\n", "STRING 1\r\n"));
+  const t = new StringTable(out);
+  assert.deepEqual([t.get(7), t.get(2), t.get(1)], ["My Map", "A hero", "Kept"]);
+  // Nothing to change: the same text; a padded number keeps its width; an unclosed block is renumbered too.
+  assert.equal(renumberWts(map, new Map()), map);
+  assert.equal(renumberWts(map, new Map([[2, 2]])), map);
+  assert.equal(renumberWts("STRING 007\n{\na\n}\n", new Map([[7, 12]])), "STRING 012\n{\na\n}\n");
+  const unclosed = "STRING 1\n{\none}\nSTRING 2\n{\ntwo\n}\n";
+  assert.equal(renumberWts(unclosed, new Map([[2, 5]])), "STRING 1\n{\none}\nSTRING 5\n{\ntwo\n}\n");
+  // A text that looks like a header isn't one.
+  const tricky = "STRING 1\n{\nSTRING 2 in the text\n}\nSTRING 2\n{\nb\n}\n";
+  assert.equal(renumberWts(tricky, new Map([[2, 9]])), "STRING 1\n{\nSTRING 2 in the text\n}\nSTRING 9\n{\nb\n}\n");
+});
+
+test("Adjust Map String IDs: references follow with their padding; clashes and unknown numbers are refused", () => {
+  const ids = new Map([[1, 7], [3, 12]]);
+  assert.equal(renumberStringRefs('{"name":"TRIGSTR_001","a":"TRIGSTR_3","b":"TRIGSTR_2"}', ids), '{"name":"TRIGSTR_007","a":"TRIGSTR_12","b":"TRIGSTR_2"}');
+  assert.equal(renumberStringRefs('call SetMapName( "TRIGSTR_002" )', ids), null, "nothing changed: null");
+  const table = new StringTable(map);
+  assert.throws(() => checkStringIds(table, new Map([[1, 2]])), /Strings .* would both be 2/);
+  assert.throws(() => checkStringIds(table, new Map([[9, 4]])), /no string 9/);
+  assert.throws(() => checkStringIds(table, new Map([[1, -1]])), /isn't a string ID/);
+  assert.throws(() => checkStringIds(table, new Map([[1, 1.5]])), /isn't a string ID/);
+  // A swap is fine.
+  checkStringIds(table, new Map([[1, 2], [2, 1]]));
+  assert.deepEqual([...compactStringIds(new StringTable("STRING 4\n{\na\n}\nSTRING 9\n{\nb\n}\nSTRING 1\n{\nc\n}\n"))], [[4, 2], [9, 3]]);
+  assert.deepEqual([...compactStringIds(table)], [], "already 1, 2, 3");
 });

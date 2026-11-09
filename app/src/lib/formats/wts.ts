@@ -227,6 +227,62 @@ export class StringTable {
   }
 }
 
+// ---- Adjust Map String IDs ---------------------------------------------------------------------
+
+/** The World Editor's Adjust Map String IDs: `ids` maps a string's number to its new one. Every number that stays or
+ *  goes must end up used once; a number the file doesn't have, a negative or a fractional one is refused. Throws why. */
+export function checkStringIds(table: StringTable, ids: ReadonlyMap<number, number>) {
+  for (const [from, to] of ids) {
+    if (!table.has(from)) throw new Error(`There's no string ${from}.`);
+    if (!Number.isSafeInteger(to) || to < 0) throw new Error(`${to} isn't a string ID (a whole number from 0).`);
+  }
+  const seen = new Map<number, number>();
+  for (const [n] of table.entries()) {
+    const to = ids.get(n) ?? n;
+    const other = seen.get(to);
+    if (other !== undefined) throw new Error(`Strings ${other} and ${n} would both be ${to}.`);
+    seen.set(to, n);
+  }
+}
+
+/** The IDs from `start` up in the order of the current numbers (Adjust's renumbering of the whole table): only the
+ *  strings whose number changes. */
+export function compactStringIds(table: StringTable, start = 1): Map<number, number> {
+  const nums = [...table.entries()].map(([n]) => n).sort((a, b) => a - b);
+  return new Map(nums.map((n, i) => [n, start + i] as [number, number]).filter(([n, to]) => n !== to));
+}
+
+/** war3map.wts with the numbers of its STRING headers changed by `ids` (see checkStringIds); everything else, the
+ *  texts and the order included, stays byte for byte. A zero-padded number keeps its width. */
+export function renumberWts(text: string, ids: ReadonlyMap<number, number>): string {
+  let out = "", at = 0, pos = 0;
+  for (const b of scan(text)) {
+    // The header scan read for this block: the first one from where the last block ended.
+    HEADER.lastIndex = pos;
+    const h = HEADER.exec(text)!;
+    pos = b.end;
+    const to = ids.get(b.num);
+    if (to === undefined || to === b.num) continue;
+    const digits = h.index + h[0].indexOf(h[1], 6);
+    out += text.slice(at, digits) + String(to).padStart(h[1].length, "0");
+    at = digits + h[1].length;
+  }
+  return out + text.slice(at);
+}
+
+/** A text with its TRIGSTR_ references changed by `ids` (JSON, scripts, custom text): a zero-padded number keeps its
+ *  width ("TRIGSTR_007" for 7 → 12 becomes "TRIGSTR_012"). Null when nothing in it changes. */
+export function renumberStringRefs(text: string, ids: ReadonlyMap<number, number>): string | null {
+  let changed = false;
+  const out = text.replace(/TRIGSTR_(\d+)/g, (m, d: string) => {
+    const to = ids.get(Number(d));
+    if (to === undefined || to === Number(d)) return m;
+    changed = true;
+    return `TRIGSTR_${String(to).padStart(d.length, "0")}`;
+  });
+  return changed ? out : null;
+}
+
 /** Strings from `incoming`, a translation say, put into the map's `current` file by their numbers. Only the
  *  changed blocks are rewritten; numbers the map doesn't have stay out, as nothing would use them. */
 export function importStrings(current: string, incoming: string) {

@@ -7,7 +7,9 @@
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
-import { StringTable } from "../../lib/formats/wts";
+import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
+import { resetTriggers } from "../../lib/triggers/defaults";
+import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
@@ -258,6 +260,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       view.replaceAll(file, scripts);
       void w3.window.showInfo(`Imported ${textTriggers(file).length} triggers and ${file.variables.length} variables${scripts ? "" : ", without a .wct: their custom scripts are empty"}.`);
     }),
+    // The World Editor's Reset Triggers: asked first ("Clear all triggers and reset to default?"), a checkpoint of the
+    // saved map, then one undo step in the Trigger Editor (saved with it). True when done.
+    w3.commands.register("w3.triggers.reset", async () => {
+      const view = await theView();
+      if (!view.editable) throw new Error("This trigger file can't be changed here.");
+      const n = textTriggers(view.file).length, v = view.file.variables.length;
+      if (!(await w3.window.confirm(`Clear all triggers and reset to default? ${n} trigger${n === 1 ? "" : "s"} and ${v} variable${v === 1 ? "" : "s"} go; `
+        + "the melee initialization trigger is all that's left. A checkpoint of the saved map is made first; Ctrl+Z takes it back.", "Reset Triggers", 60_000))) return false;
+      await checkpointIfOn(w3, "Reset Triggers");
+      // The editor closed or another opened during the question or the checkpoint: nothing happens.
+      if (openView !== view) return false;
+      view.resetTriggers();
+      return true;
+    }),
+    // Adjust Map String IDs: a string of war3map.wts gets another number (`ids` [[from, to], …], else asked), or all are
+    // numbered from 1 in order; every TRIGSTR_ reference in the map's text files follows. One edit of all the files (Undo
+    // in the message, or the MCP edits' undo); refused while anything is unsaved. How many strings changed number.
+    w3.commands.register("w3.triggers.adjustStringIds", async (ids?: unknown) => adjustStringIds(w3, ids)),
     w3.editors.registerProvider("w3.triggerEditor", {
       async resolve(el, doc) {
         el.classList.add("trig-editor");
@@ -381,6 +401,77 @@ async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][],
   if (n.gui || n.script) await writeWtgFile(w3.workspace, path, file);
   if (custom && n.script) await writeWctFile(w3.workspace, custom, textTriggers(file).map((t) => t.name));
   return { ...n, inEditor: false };
+}
+
+const WTS = "map/war3map.wts";
+/** The map's files that hold text, where TRIGSTR_ references can be (object data, map info, triggers, scripts, …). */
+const TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc)$/i;
+/** The map's own files kept raw (no codec): binary, so a reference in them can't be renumbered as text. */
+const RAW_MAP_FILE = /^map\/war3(map|campaign)[^/]*$/i;
+
+/** See w3.triggers.adjustStringIds. */
+async function adjustStringIds(w3: W3Api, given: unknown): Promise<number> {
+  requireProject(w3);
+  const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === WTS);
+  if (!listed) throw new Error("This map has no string table (war3map.wts).");
+  // There but unreadable is an error, not an empty table.
+  const table = new StringTable(await w3.workspace.readText(WTS));
+  let ids: Map<number, number>;
+  if (given !== undefined) {
+    if (!Array.isArray(given) || !given.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) {
+      throw new Error("w3.triggers.adjustStringIds takes [from, to] pairs of string IDs.");
+    }
+    ids = new Map(given as [number, number][]);
+  } else {
+    const nums = [...table.entries()].map(([n]) => n).sort((a, b) => a - b);
+    if (!nums.length) { void w3.window.showInfo("The map's string table is empty."); return 0; }
+    const ALL = -1;
+    const picked = await w3.window.quickPick<number>([
+      { label: `Renumber all from 1 in order (${nums.length} strings)`, value: ALL },
+      ...nums.map((n) => ({ label: `STRING ${n}`, description: (table.get(n) ?? "").split(/\r?\n/)[0].slice(0, 80), value: n })),
+    ], { placeholder: "Adjust Map String IDs: which string gets a new ID?" });
+    if (picked?.value === undefined) return 0;
+    if (picked.value === ALL) ids = compactStringIds(table);
+    else {
+      const typed = await w3.window.inputBox({ prompt: `New ID for string ${picked.value} (its references in the map follow)`, value: String(picked.value) });
+      if (typed === undefined) return 0;
+      if (!/^\s*\d+\s*$/.test(typed)) throw new Error(`"${typed}" isn't a string ID (a whole number from 0).`);
+      ids = new Map([[picked.value, Number(typed)]]);
+    }
+  }
+  for (const [from, to] of [...ids]) if (from === to) ids.delete(from);
+  checkStringIds(table, ids);
+  if (!ids.size) { void w3.window.showInfo("Nothing to change: the strings keep their IDs."); return 0; }
+  // A raw map file can't be changed as text: a reference in it would be left pointing at another string.
+  const raw: string[] = [];
+  for (const f of w3.workspace.files()) {
+    if (!RAW_MAP_FILE.test(f.path) || TEXT_FILE.test(f.path) || f.path.toLowerCase() === WTS) continue;
+    const bytes = await w3.workspace.readBytes(f.path);
+    if (new TextDecoder("latin1").decode(bytes).includes("TRIGSTR_")) raw.push(f.path);
+  }
+  if (raw.length) throw new Error(`Not changed: ${raw.join(", ")} ${raw.length === 1 ? "is" : "are"} kept raw and refer${raw.length === 1 ? "s" : ""} to strings, which can't be renumbered there.`);
+  const texts = w3.workspace.files().map((f) => f.path).filter((p) => TEXT_FILE.test(p));
+  const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+  let files = 0;
+  const done = await edits.edit("Adjust Map String IDs", async (read) => {
+    const wts = await read(WTS);
+    if (wts === null) throw new Error("The map's string table (war3map.wts) is gone.");
+    // Read again: what was asked is checked against the table as it is now.
+    checkStringIds(new StringTable(wts), ids);
+    const out = [{ path: WTS, text: renumberWts(wts, ids) }];
+    for (const path of texts) {
+      const text = await read(path);
+      const next = text === null ? null : renumberStringRefs(text, ids);
+      if (next !== null) out.push({ path, text: next });
+    }
+    files = out.length;
+    return out;
+  });
+  if (done) {
+    void w3.window.showInfo(`${ids.size} string${ids.size === 1 ? "" : "s"} got a new ID, in war3map.wts and ${files - 1} file${files === 2 ? "" : "s"} that refer to them.`, "Undo")
+      .then((a) => { if (a === "Undo") void w3.commands.execute("w3.mcp.undo").catch((e) => w3.window.showError(String(e))); });
+  }
+  return done ? ids.size : 0;
 }
 
 /** TriggerData with WESTRING_ names resolved, loaded once. */
@@ -662,6 +753,25 @@ class TriggerView {
   get dirty() { return this.state !== this.savedAt; }
   /** Saves the editor (set by its provider). */
   persist: () => Promise<void> = async () => {};
+
+  /** Category is Comment (the World Editor's toggle on a category): flips it on the category `id`, as one undo step. */
+  toggleCategoryComment(id: number) {
+    const cat = this.file.items.find((i) => i.type === 4 && i.id === id);
+    if (!cat || "ecas" in cat || cat.type === 64 || !this.handle.editable) return;
+    this.edit(`${cat.isComment ? "Category is no comment" : "Category is comment"}: ${cat.name}`, () => { cat.isComment = cat.isComment ? 0 : 1; });
+  }
+
+  /** Reset Triggers: the default trigger and nothing else (lib/triggers/defaults.ts resetTriggers), as one undo step. */
+  resetTriggers() {
+    this.edit("Reset triggers", () => {
+      const r = resetTriggers(this.file, this.customFile());
+      this.file = r.file;
+      this.custom = r.custom;
+      this.header = r.custom.header;
+      this.texts = new Map(textTriggers(r.file).map((t, i) => [t, r.custom.texts[i] ?? null]));
+      this.selected = { kind: "header" };
+    });
+  }
 
   /** Every trigger and variable from elsewhere, as one undo step. */
   replaceAll(file: TriggerFile, custom: CustomTextFile | null) {
@@ -973,6 +1083,7 @@ class TriggerView {
       }
       const it = this.find(sel);
       if (it && isGuiTrigger(it)) items.push("-", { label: "Convert to Custom Text…", run: () => this.convertCommand() });
+      if (it && it.type === 4) items.push("-", { label: "Category is Comment", hint: it.isComment ? "✓ on" : "off", run: () => this.toggleCategoryComment(it.id) });
       if (treeClipboard) items.push("-", { label: `Paste ${treeClipboard.items[0].name}`, hint: "Ctrl+V", run: () => this.pasteItems() });
       if (sel.kind === "item") items.push("-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
     }
@@ -1012,7 +1123,9 @@ class TriggerView {
         if (shown && !shown.has(it)) continue;
         const sel: Selection = { kind: "item", type: it.type, id: it.id };
         if (it.type === 2 || it.type === 4) {
-          rows.push(this.row(it.name, it.type === 4 ? "trig-cat" : "trig-lib", depth, sel, { toggle: it.id }));
+          const comment = it.type === 4 && it.isComment;
+          rows.push(this.row(it.name, it.type === 4 ? (comment ? "trig-cat.trig-cat-comment" : "trig-cat") : "trig-lib", depth, sel,
+            { toggle: it.id, title: comment ? "Category is Comment" : undefined }));
           if (shown || !this.collapsed.has(it.id)) walk(it.id, depth + 1);
         } else if (it.type === 64) { if (this.mode !== "triggers") rows.push(this.row(it.name, "trig-var", depth, sel)); }
         else if ("ecas" in it && this.mode !== "variables") {

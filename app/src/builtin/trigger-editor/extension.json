@@ -32,6 +32,8 @@
     "commands": [
       { "id": "w3.triggers.export", "when": "project", "title": "Export Triggers…", "category": "Triggers" },
       { "id": "w3.triggers.import", "when": "project", "title": "Import Triggers…", "category": "Triggers" },
+      { "id": "w3.triggers.reset", "when": "project", "title": "Reset Triggers…", "category": "Triggers" },
+      { "id": "w3.triggers.adjustStringIds", "when": "project", "title": "Adjust Map String IDs…", "category": "Map" },
       { "id": "w3.triggers.open", "when": "project", "menu": "Module:1:3", "title": "Trigger Editor", "category": "Module", "keybinding": "f4" },
       { "id": "w3.triggers.variables", "title": "Trigger Editor: Variables", "category": "Module" },
       { "id": "w3.triggers.convertToCustomText", "when": "project", "title": "Convert Trigger to Custom Text…", "category": "Triggers" },
