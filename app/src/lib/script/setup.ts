@@ -41,6 +41,8 @@ const str = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const RACES = ["", "HUMAN", "ORC", "UNDEAD", "NIGHTELF"];
 const CONTROLLERS = ["", "USER", "COMPUTER", "NEUTRAL", "RESCUABLE"];
 /** Map flags: melee map, "fixed player settings for custom forces", "use custom forces", terrain fog, water tint. */
+/** A player's "fixed start" field: bit 1, the race can be chosen in the lobby (map-info/priorities.ts RACE_SELECTABLE). */
+const RACE_SELECTABLE = 2;
 const MELEE = 4, FIXED_SETTINGS = 0x20, CUSTOM_FORCES = 0x40, TERRAIN_FOG = 0x2000, WATER_TINT = 0x10000;
 /** RACE_PREF_* by its bit value (HUD skins are stored that way). Anything else is RANDOM: World
  *  Editor 3.0.1 gives its own new maps 32759 and writes that. */
@@ -56,7 +58,9 @@ const ALLIANCE: [number, string, string][] = [
 export function playersSection(i: SetupInput): string {
   const players = i.info.players;
   const slots = ["function InitCustomPlayerSlots takes nothing returns nothing", ""];
-  // With "fixed player settings" races can't be changed in the lobby (a "selectable" race always can).
+  // With "fixed player settings" races can't be changed in the lobby, unless the player's flag says so (bit 1 of its
+  // "fixed start" field, which World Editor 7003 pairs with race Selectable but writes as it is: a we-drive save of
+  // Human with the flag gave true, Selectable without it false).
   const fixed = (i.info.flags & FIXED_SETTINGS) !== 0;
   players.forEach((p, index) => {
     const pl = `Player(${p.id})`;
@@ -64,7 +68,7 @@ export function playersSection(i: SetupInput): string {
     if (p.fixedStart & 1) slots.push(`    call ForcePlayerStartLocation( ${pl}, ${index} )`);
     slots.push(`    call SetPlayerColor( ${pl}, ConvertPlayerColor(${p.id}) )`, `    call SetPlayerRacePreference( ${pl}, RACE_PREF_${RACES[p.race] || "RANDOM"} )`);
     if (p.hudSkin !== undefined) slots.push(`    call SetPlayerRaceSkin( ${pl}, RACE_PREF_${RACE_PREFS[p.hudSkin] ?? "RANDOM"} )`);
-    slots.push(`    call SetPlayerRaceSelectable( ${pl}, ${p.race === 0 || !fixed} )`, `    call SetPlayerController( ${pl}, MAP_CONTROL_${CONTROLLERS[p.controller] ?? "USER"} )`);
+    slots.push(`    call SetPlayerRaceSelectable( ${pl}, ${!fixed || (p.fixedStart & RACE_SELECTABLE) !== 0} )`, `    call SetPlayerController( ${pl}, MAP_CONTROL_${CONTROLLERS[p.controller] ?? "USER"} )`);
     // Rescuable players can be rescued by every user player.
     if (p.controller === 4) {
       for (const u of players) if (u.controller === 1) slots.push(`    call SetPlayerAlliance( ${pl}, Player(${u.id}), ALLIANCE_RESCUABLE, true )`);

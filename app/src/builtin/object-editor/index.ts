@@ -14,7 +14,7 @@ import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, findPackedMap, mapFolderGone, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
+import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -1003,7 +1003,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           };
           return h("section.obj-section", {},
             h("h3", {}, title),
-            h("table.obj-table", {},
+            h("table.obj-table.obj-raw-table", {},
               h("tbody", {},
                 ...mods.map((m) =>
                   h("tr.modified", {},
@@ -1163,8 +1163,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const other = modLists(o).flatMap((l) => l.mods).filter((m) => !known.has(m));
           sections.push(rawTable(o, other, kd ? "Other modifications" : "Modifications"));
 
+          // The model preview stands beside the fields, not floated into them: a float pushed the first table under
+          // it (a gap under its heading) and gave the tables beside it a narrower value column than those below.
+          const fields = h("div.obj-fields", {}, ...sections);
           const parts: (HTMLElement | null)[] = [
-            preview && kd ? (preview.show(modelOf(o), looksOf(o)), preview.el) : null,
             h("div.obj-detail-header", {},
               h("h2", {}, nameOf(o) || "(unnamed)"),
               h("code", {}, o.id ? `${o.id} (based on ${o.base}${baseName(o) ? ` · ${stripColors(baseName(o))}` : ""})` : o.base),
@@ -1176,7 +1178,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               outsideToggle(`Outside limits${overCount ? ` (${overCount})` : ""}`),
               LEVEL_FIELD[kind] ? h("span.muted", {}, `${levelCount(o)} level${levelCount(o) === 1 ? "" : "s"}`) : null,
             ) : null,
-            ...sections,
+            preview && kd ? h("div.obj-detail-body", {}, (preview.show(modelOf(o), looksOf(o)), preview.el), fields) : fields,
           ];
           detailEl.replaceChildren(...parts.filter((p): p is HTMLElement => p !== null));
           detailEl.scrollTop = scroll;
@@ -1528,9 +1530,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Nothing is written into a vanished map folder: it would leave a lone file there.
             const root = w3.workspace.project()?.root;
             if (root) {
-              const folderExists = await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, "map") }).catch(() => true);
-              if (mapFolderGone({ folderExists, isNew, hasWts })) {
-                w3.window.showError("The map folder is missing, so nothing was saved. Restore it (a checkpoint or the packed map has the files) and save again.");
+              const stop = await mapFolderStop(() => w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, "map") }), { isNew, hasWts });
+              if (stop) {
+                w3.window.showError(stop);
                 return;
               }
             }

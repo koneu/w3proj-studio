@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, firstStart, MODIFY_ALLY_PRIORITIES, startLocations, syncPlayers, type PlayerInfo, type StartPlayer,
+  addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, firstStart, MODIFY_ALLY_PRIORITIES, startLocations, syncPlayers, syncWithStarts, type PlayerInfo, type StartPlayer,
 } from "./startlocations";
 
 /** A map that lost its only player: what a deleted start location left behind. */
@@ -37,6 +37,18 @@ test("a map with no players comes back whole from a start location", () => {
   assert.deepEqual(syncPlayers(info, startLocations(start), new Map()), ["added player 1"]);
   assert.equal(info.players.length, 1);
   assert.equal(info.forces[0].players, 0xffffffff, "back in the force it was taken from");
+});
+
+test("a tool's move of a start location moves the player's start and its priorities follow; nothing else, nothing", () => {
+  const info = { version: 31, flags: 0x9c14, forces: [{ players: 0xffffffff }],
+    players: [0, 1, 2].map((id) => ({ id, controller: 1, race: 1, fixedStart: 0, name: `P${id}`, start: [id * 1000, 0], allyLow: 0, allyHigh: 0, enemyLow: 0, enemyHigh: 0 })) };
+  const before = new Map([[0, [0, 0]], [1, [1000, 0]], [2, [2000, 0]]]);
+  assert.equal(syncWithStarts(info, new Map(before), before), false, "unchanged starts change nothing");
+  assert.deepEqual(info.players.map((p) => p.allyHigh), [0, 0, 0], "and leave the priorities as they were");
+  const moved = new Map(before).set(2, [-1000, 64]);
+  assert.equal(syncWithStarts(info, moved, before), true);
+  assert.deepEqual(info.players[2].start, [-1000, 64]);
+  assert.equal(info.players[0].allyHigh, (1 << 1) | (1 << 2), "player 1's nearest are now both 1000 away");
 });
 
 test("the first start goes in the middle of the playable part, on the grid", () => {

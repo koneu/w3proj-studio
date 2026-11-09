@@ -367,6 +367,40 @@ async function placeObjects(page, found) {
   }
 }
 
+/** move_object on a start location moves the player's start in war3map.w3i too, in the same edit: one undo takes both
+ *  back. (The terrain editor's own save does this for its moves; a tool's edit reloads the editor, so its save never did.) */
+async function mcpStartMove(page, found) {
+  const fail = (what) => found.push(`start location moved by a tool: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "start-move");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "StartMove", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const read = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+  const sloc = () => { const units = read("war3mapUnits.doo.json").units; const i = units.findIndex((u) => u.id === "sloc" && u.player === 0); return { i, at: units[i]?.position.slice(0, 2) }; };
+  const start = () => read("war3map.w3i.json").players.find((p) => p.id === 0)?.start;
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    const was = sloc(), startWas = start();
+    if (was.i < 0 || JSON.stringify(startWas) !== JSON.stringify(was.at)) { fail(`a new map's player 1 doesn't start at its start location (control): ${JSON.stringify({ was, startWas })}`); return; }
+    const to = [was.at[0] + 512, was.at[1] - 256];
+    const edits = JSON.parse(await tool("list_edits")).length;
+    await tool("move_object", { kind: "units", index: was.i, id: "sloc", x: to[0], y: to[1] });
+    if (JSON.stringify(sloc().at) !== JSON.stringify(to)) fail(`the start location isn't at ${to} after the move (control): ${JSON.stringify(sloc())}`);
+    if (JSON.stringify(start()) !== JSON.stringify(to)) fail(`war3map.w3i still has player 1's start at ${JSON.stringify(start())}, the start location is at ${to}`);
+    const list = JSON.parse(await tool("list_edits"));
+    if (list.length !== edits + 1) fail(`the move made ${list.length - edits} edits, not one`);
+    const files = list.at(-1)?.files ?? [];
+    if (!files.includes("map/war3map.w3i.json") || !files.includes("map/war3mapUnits.doo.json")) fail(`the move's edit has ${files.join(", ")}, not the units and war3map.w3i`);
+    await tool("undo_last_edit");
+    if (JSON.stringify(sloc().at) !== JSON.stringify(was.at) || JSON.stringify(start()) !== JSON.stringify(startWas)) fail(`one undo left the start location at ${sloc().at} and war3map.w3i's start at ${start()}, not both at ${was.at}`);
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
+  }
+}
+
 /** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
  *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
  *  right when the project is saved and packed straight after. */
@@ -1402,7 +1436,8 @@ async function itemTablesAccess(page, found) {
     await toTerrain();
     await settled();
     await k.hands.click(at("edit-tables"));
-    await atItemTables("Edit item tables…");
+    // At the table the footman drops from.
+    await atItemTables("Edit item tables…", "item-table-0");
   }
 
   // The command (palette and Scenario menu), from anywhere.
@@ -1443,6 +1478,164 @@ async function itemTablesAccess(page, found) {
   await settled();
   await k.save();
   if (footman().itemTable !== -1 || footman().itemSets.length) fail(`the undo of the table's choice: ${JSON.stringify([footman().itemTable, footman().itemSets])}`);
+  await k.verify(fail);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
+/** Item drops (dropsedit.ts, dropstab.ts), by mouse and keyboard in the hidden window: the Selection panel shows a creep's
+ *  drops near the top, in words ("Random item, charged, level 2", never "YjI2"), and Edit drops… opens the Item Drops tab
+ *  on it. The tab groups the creeps into camps, shows the map's item table with its contents and who uses it, and edits:
+ *  an item added from the item browser and its chance typed (one undo step each, Ctrl+Z in the tab takes one back), one
+ *  creep's drops copied to its whole camp (one step), a set added to each refused for a camp that uses a table (nothing
+ *  changes), the table given to a whole camp. Show selects the creep in the terrain editor. Everything stays unsaved until
+ *  saved; the saved units file has the drops, the regenerated war3map.j their drop functions, and the packed map verifies. */
+async function itemDrops(page, found) {
+  const fail = (what) => found.push(`item drops: ${what}`);
+  const k = await heightKit(page, "ItemDrops");
+  const TXT = "map/war3map.w3e.txt", TAB = "w3:item-drops";
+  // Camp A (three forest trolls, the first dropping a random charged item of level 2) and camp B (two ogres) far apart.
+  await k.tool("place_objects", { objects: [
+    { id: "nftt", x: 0, y: 0, player: 25, drops: [{ level: 2, kind: "charged" }] }, { id: "nftt", x: 192, y: 0, player: 25 }, { id: "nftt", x: 0, y: 192, player: 25 },
+    { id: "nogr", x: 1280, y: 1280, player: 25 }, { id: "nogr", x: 1472, y: 1280, player: 25 },
+  ], ignoreRoom: true });
+  await k.save();
+  // The newer unit layout (map item tables), a table the first ogre drops from.
+  const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json");
+  if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
+  if (units.units.filter((u) => u.player === 24).length !== 5) return fail(`the creeps aren't Neutral Hostile: ${JSON.stringify(units.units.map((u) => [u.id, u.player]))}`);
+  units.subversion = 11;
+  units.units = units.units.map((u) => {
+    const out = {};
+    for (const [key, v] of Object.entries(u)) {
+      out[key] = v;
+      if (key === "mana" && !("itemTable" in u)) out.itemTable = u.id === "nogr" && u.position[0] === 1280 ? 3 : -1;
+      if (key === "level" && !("strength" in u)) Object.assign(out, { strength: 0, agility: 0, intelligence: 0 });
+    }
+    return out;
+  });
+  info.itemTables = [{ number: 3, name: "Smoke Loot", sets: [[{ chance: 60, id: "ratf" }, { chance: 40, id: "YjI2" }]] }];
+  await page.evaluate(`w3.editors.closeAll()`);
+  for (const [file, doc] of [["war3mapUnits.doo.json", units], ["war3map.w3i.json", info]]) {
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(`map/${file}`)}, ${JSON.stringify(JSON.stringify(doc, null, 2))})`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor", async () => (await page.evaluate(`w3.editors.activePath()`)) === TXT, 20000);
+  await k.tab("Select");
+  const active = () => page.evaluate(`w3.editors.activePath()`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`);
+  const troll = (x, y) => k.units().find((u) => u.id === "nftt" && u.position[0] === x && u.position[1] === y);
+  const ogre = (x) => k.units().find((u) => u.id === "nogr" && u.position[0] === x);
+  const T = (sel) => `.drops-tab ${sel}`;
+  const text = (sel) => page.evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
+  const has = (sel) => page.evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
+  const settled = () => sleep(600);
+  const unitsHash = () => hash(join(k.root, "map", "war3mapUnits.doo.json"));
+
+  // ---- The Selection panel: the drops block near the top, in words -------------------------------------------------
+  await k.look(0, 0, { id: "nftt", x: 0, y: 0 });
+  await until("the drops block", () => has(".terrain-drops"), 20000);
+  const block = await page.evaluate(`(() => {
+    const b = document.querySelector(".terrain-drops"), owner = [...document.querySelectorAll(".terrain-selection .terrain-sel-row")].find((r) => r.textContent.startsWith("Owner"));
+    return { text: b.textContent, aboveOwner: !!owner && !!(b.compareDocumentPosition(owner) & Node.DOCUMENT_POSITION_FOLLOWING), mode: b.querySelector('[data-prop="drops-mode"]').value };
+  })()`);
+  if (!/Random item, charged, level 2/.test(block.text) || /YjI2/.test(block.text)) fail(`the drops block doesn't name the random item in words: ${block.text}`);
+  if (!block.aboveOwner) fail("the drops block isn't above the owner and position (it should be found near the top)");
+  if (block.mode !== "custom") fail(`the troll's drops show as ${block.mode}`);
+  if (!/Set 1 · drops this · 100%/.test(block.text)) fail(`the set's head: ${block.text}`);
+  if (await dirty()) fail("showing the drops made the map changed");
+
+  // ---- Edit drops… opens the tab on the troll ---------------------------------------------------------------------------
+  await k.hands.click(".terrain-drops [data-prop=\"edit-drops\"]");
+  await until("the Item Drops tab", async () => (await active()) === TAB, 20000).catch(() => fail("Edit drops… didn't open the Item Drops tab"));
+  await until("the tab's drops", () => has(T(".drops-pane .drops-editor")), 20000).catch(() => fail("the tab doesn't show the troll's drops"));
+  if (!/Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`the tab edits ${await text(T("[data-prop=\"pane-title\"]"))}, not the troll`);
+  if (!(await has(T(".drops-obj.on[data-entry=\"nftt@0,0\"]")))) fail("the troll isn't marked in the tab's list");
+  const camps = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-group")].map((g) => [g.querySelector("strong").textContent, g.querySelectorAll(".drops-obj").length])`);
+  if (JSON.stringify(camps) !== JSON.stringify([["Camp 1", 2], ["Camp 2", 3]])) fail(`the camps: ${JSON.stringify(camps)} (the ogres are north of the trolls)`);
+  if (!/2 objects drop items · 1 map item table/.test(await text(T("[data-prop=\"drops-count\"]")) ?? "")) fail(`the count: ${await text(T("[data-prop=\"drops-count\"]"))}`);
+  const card = await text(T("[data-table-card=\"3\"]")) ?? "";
+  if (!/Smoke Loot/.test(card) || !/used by 1/.test(card) || !/Claws of Attack/.test(card) || !/Random item, charged, level 2/.test(card) || !/60%/.test(card)) fail(`the table's card: ${card}`);
+
+  // An item from the item browser, then its chance typed: each one undo step.
+  await k.hands.click(T("[data-prop=\"add-item-0\"]"));
+  await until("the item browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
+  await k.hands.click("input.picker-search");
+  await k.hands.type("ankh");
+  await sleep(300);
+  await k.hands.key("Enter", "Enter", 13);
+  await settled();
+  if (!(await dirty())) fail("adding an item in the tab didn't mark the terrain changed");
+  await retype(k.hands, T("[data-prop=\"chance-0-0\"]"), "70");
+  await settled();
+  await retype(k.hands, T("[data-prop=\"chance-0-1\"]"), "30");
+  await settled();
+  if (!/100%/.test(await text(T("[data-prop=\"total-0\"]")) ?? "")) fail(`the set's total after typing: ${await text(T("[data-prop=\"total-0\"]"))}`);
+  // Ctrl+Z in the tab: the last chance only.
+  await k.hands.click(T(".drops-pane h3"));
+  await k.hands.chord("Ctrl+Z");
+  await settled();
+  await k.save();
+  let sets = troll(0, 0)?.itemSets;
+  if (JSON.stringify(sets) !== JSON.stringify([[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 0 }]])) fail(`after the item, two chances and one Ctrl+Z: ${JSON.stringify(sets)}`);
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await settled();
+
+  // Copy the troll's drops, paste them to its whole camp: one step.
+  await k.hands.click(T("[data-prop=\"copy-drops\"]"));
+  await settled();
+  await k.hands.click(T(".drops-group:nth-child(2) [data-prop=\"edit-group\"]"));
+  await settled();
+  if (!/3 objects/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`Edit together on the trolls' camp: ${await text(T("[data-prop=\"pane-title\"]"))}`);
+  if (!(await has(T("[data-prop=\"drops-mixed\"]")))) fail("the camp's different drops aren't shown as such");
+  await k.hands.click(T("[data-prop=\"paste-drops\"]"));
+  await settled();
+  await k.save();
+  const pasted = [[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 30 }]];
+  for (const [x, y] of [[0, 0], [192, 0], [0, 192]]) if (JSON.stringify(troll(x, y)?.itemSets) !== JSON.stringify(pasted)) fail(`the troll at ${x}, ${y} after the paste: ${JSON.stringify(troll(x, y)?.itemSets)}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled();
+  await k.save();
+  if (troll(192, 0)?.itemSets.length || troll(0, 192)?.itemSets.length || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the paste: ${JSON.stringify([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets, troll(0, 192)?.itemSets])}`);
+
+  // The ogres' camp: one drops from the table, so a set added to each is refused whole; then all get the table.
+  await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
+  await settled();
+  const before = unitsHash();
+  await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
+  await page.evaluate(`window.__picked`);
+  await k.hands.click(T("[data-prop=\"add-set-each\"]"));
+  await settled();
+  if (!/drop from a map item table/.test(await k.toasts())) fail(`adding a set to a camp with a table wasn't refused with the reason: ${await k.toasts()}`);
+  await k.clearToasts();
+  await k.save();
+  if (unitsHash() !== before) fail("the refused set changed the units file");
+  const variant = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-variant")].findIndex((v) => /Smoke Loot/.test(v.textContent))`);
+  if (variant < 0) fail("the ogres' variants don't name the table");
+  else {
+    await k.hands.click(T(`[data-prop="use-variant-${variant}"]`));
+    await settled();
+    await k.save();
+    if (ogre(1280)?.itemTable !== 3 || ogre(1472)?.itemTable !== 3 || ogre(1472)?.itemSets.length) fail(`the ogres after Give this to all: ${JSON.stringify([ogre(1280), ogre(1472)].map((o) => [o?.itemTable, o?.itemSets]))}`);
+    if (!/used by 2/.test(await text(T("[data-table-card=\"3\"]")) ?? "")) fail(`the table's card after: ${await text(T("[data-table-card=\"3\"]"))}`);
+  }
+
+  // Show: the terrain editor in front with that ogre selected.
+  await k.hands.click(T("[data-entry=\"nogr@1472,1280\"] [data-prop=\"show-one\"]"));
+  await until("the terrain editor in front", async () => (await active()) === TXT, 20000).catch(() => fail("Show didn't bring the terrain editor to the front"));
+  await until("the ogre selected", async () => {
+    const p = await page.evaluate(`(() => { const i = document.querySelectorAll(".terrain-sel-triple input"); return i.length >= 2 ? [Number(i[0].value), Number(i[1].value)] : null; })()`);
+    return p && Math.abs(p[0] - 1472) <= 32 && Math.abs(p[1] - 1280) <= 32;
+  }, 20000).catch(() => fail("Show didn't select the ogre"));
+  // The panel shows the table by name and what it drops, not only its name.
+  const ogreBlock = await text(".terrain-drops") ?? "";
+  if (!/Smoke Loot \(#3\)/.test(ogreBlock) || !/Claws of Attack/.test(ogreBlock) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
+
+  // The script: the trolls' own drop function with both items, the table's function.
+  await k.save();
+  await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+  const script = readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  if (!/function ItemTable000003_DropItems/.test(script)) fail("war3map.j has no function for the map's item table");
+  if (!/RandomDistAddItem\( 'ankh', 30 \)/.test(script)) fail("war3map.j doesn't drop the ankh the troll was given");
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
 }
@@ -2070,36 +2263,6 @@ async function resizeUndo(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
-/** The canvas of the active tab's view (an expression in the page). */
-const SHOWN_CANVAS = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
-
-/** Counts frames per canvas from now on (`window.__glFrames`): a frame starts with its clear. */
-async function countFrames(page) {
-  await page.evaluate(`(() => {
-    if (window.__glFrames) return;
-    const P = WebGL2RenderingContext.prototype, clear = P.clear;
-    window.__glFrames = new WeakMap();
-    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
-  })()`);
-}
-
-/** Frames the shown view has drawn since countFrames (-1 without a view). */
-function framesDrawn(page) {
-  return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
-}
-
-/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
- *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
-async function settledMapPicture(page, still = 100, tries = 8) {
-  let prev = await mapPicture(page);
-  for (let i = 1; i < tries; i++) {
-    const next = await mapPicture(page);
-    if ((await pixelsApart(page, prev, next)) <= still) return next;
-    prev = next;
-  }
-  return prev;
-}
-
 /** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
  *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
  *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
@@ -2108,7 +2271,8 @@ async function settledMapPicture(page, still = 100, tries = 8) {
  *     hides the other's outside change, and opening the project says they can't both go into the map archive.
  *  4. On Linux files an older version left with a `\` in their name (next to the project) are found when it opens, left
  *     alone when the user says so, and otherwise moved where they belong (a copy of what is there is deleted, a file that
- *     differs from what is there stays). */
+ *     differs from what is there stays). Checkpoints go to build/checkpoints/recovered, which the next checkpoint's
+ *     pruning leaves alone. */
 async function dataSafety(page, found) {
   const fail = (what) => found.push(`data safety: ${what}`);
   const k = await heightKit(page, "DataSafety");
@@ -2212,10 +2376,13 @@ async function dataSafety(page, found) {
     const name = basename(root), parent = dirname(root);
     const stray = (file) => join(parent, [name, "build", "checkpoints", file].join(BS));
     const checkpoints = join(root, "build", "checkpoints");
-    mkdirSync(checkpoints, { recursive: true });
-    writeFileSync(join(checkpoints, "copy.w3x"), "same");
-    writeFileSync(join(checkpoints, "clash.w3x"), "them");
-    writeFileSync(stray("moved.w3x"), "stray");
+    // Stray checkpoints go to build/checkpoints/recovered, where the number kept doesn't prune them.
+    const recovered = join(checkpoints, "recovered");
+    const oldCheckpoint = `${name} 2020-01-01 10-00-00.w3x`;
+    mkdirSync(recovered, { recursive: true });
+    writeFileSync(join(recovered, "copy.w3x"), "same");
+    writeFileSync(join(recovered, "clash.w3x"), "them");
+    writeFileSync(stray(oldCheckpoint), "stray");
     writeFileSync(stray("copy.w3x"), "same");
     writeFileSync(stray("clash.w3x"), "mine");
     const strays = () => readdirSync(parent).filter((f) => f.includes(BS)).sort();
@@ -2233,20 +2400,148 @@ async function dataSafety(page, found) {
     const question = said.find((m) => m.includes("left by an older version on Linux"));
     if (!question) fail(`opening a project with stray files said ${JSON.stringify(said)}`);
     else if (!/3 files/.test(question) || !/1 file can be moved/.test(question) || !/1 file is a copy/.test(question) || !/1 file can't be moved/.test(question)) fail(`the question about stray files: ${question}`);
+    else if (!/Checkpoints go to build\/checkpoints\/recovered, which doesn't count toward the number kept/.test(question)) fail(`the question doesn't say where checkpoints go: ${question}`);
     await sleep(500);
     if (strays().length !== 3) fail(`"Leave them" changed the stray files: ${strays().join(", ")}`);
     await answer("Move and delete copies");
     await openAgain();
-    await until("the stray file moved", () => existsSync(join(checkpoints, "moved.w3x")), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints"));
+    await until("the stray file moved", () => existsSync(join(recovered, oldCheckpoint)), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints/recovered"));
     await sleep(500);
-    if (read(join(checkpoints, "moved.w3x")) !== "stray") fail("the moved checkpoint differs");
-    if (read(join(checkpoints, "copy.w3x")) !== "same" || read(join(checkpoints, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
+    if (read(join(recovered, oldCheckpoint)) !== "stray") fail("the moved checkpoint differs");
+    if (existsSync(join(checkpoints, oldCheckpoint))) fail("the stray checkpoint went among the checkpoints that are pruned");
+    if (read(join(recovered, "copy.w3x")) !== "same" || read(join(recovered, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
     if (JSON.stringify(strays()) !== JSON.stringify([[name, "build", "checkpoints", "clash.w3x"].join(BS)])) fail(`after moving, the stray files left are ${JSON.stringify(strays())}`);
     if (read(stray("clash.w3x")) !== "mine") fail("the stray that differs from what is there was changed");
+    // The next checkpoint with one kept: an old one in build/checkpoints goes (control), the recovered one stays.
+    const oldKept = `${name} 2020-01-02 10-00-00.w3x`;
+    writeFileSync(join(checkpoints, oldKept), "old");
+    // Packing refuses two names that differ only in case (section 3).
+    rmSync(join(root, "map", "notes.txt"), { force: true });
+    await page.evaluate(`w3.workspace.refresh()`);
+    const keep = await page.evaluate(`w3.settings.inspect("checkpoints.keep").user ?? null`);
+    try {
+      await page.evaluate(`w3.settings.set("checkpoints.keep", 1)`);
+      await page.evaluate(`w3.commands.execute("w3.checkpoints.create", { quiet: true })`);
+    } finally {
+      await page.evaluate(`w3.settings.set("checkpoints.keep", ${keep === null ? "undefined" : JSON.stringify(keep)})`);
+    }
+    if (existsSync(join(checkpoints, oldKept))) fail("with checkpoints.keep = 1 the old checkpoint wasn't pruned (control)");
+    if (read(join(recovered, oldCheckpoint)) !== "stray") fail("the next checkpoint pruned the recovered stray checkpoint");
   } finally {
     if (existsSync(locked)) { chmodSync(locked, 0o755); rmSync(locked, { recursive: true, force: true }); }
     await page.evaluate(`(() => { if (window.__dataSafetyWarn) w3.window.showWarning = window.__dataSafetyWarn; window.__dataSafetyWarn = null; })()`);
   }
+}
+
+/** Files the app reads and then writes again, and paths it must never take for others:
+ *  1. A settings.json that is there but isn't JSON (a comment, a trailing comma) is said and never written over; a change
+ *     lasts for the session. Once it reads again, changes are written as before. The same for .w3proj/settings.json.
+ *  2. On Linux a project file with a `\` in its name (an older version's stray) isn't listed, and never as the path its
+ *     name looks like.
+ *  3. On Linux two projects whose folders differ only in case are two entries of the recent list. */
+async function configSafety(page, found) {
+  const fail = (what) => found.push(`config safety: ${what}`);
+  const k = await heightKit(page, "ConfigSafety");
+  const { root } = k;
+  const BS = String.fromCharCode(92);
+  const userFile = await page.evaluate(`w3Workbench.settings.settingsPath()`);
+  const had = existsSync(userFile) ? readFileSync(userFile, "utf8") : null;
+  const projectFile = join(root, ".w3proj", "settings.json");
+  const strayFile = join(root, "map", `sub${BS}x.txt`);
+  const twin = join(dirname(root), basename(root).toLowerCase());
+  const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const openProject = async (p) => {
+    await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(p)})`);
+    await until(`the project ${p}`, () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(p)}`), 20000);
+    await sleep(500);
+  };
+  try {
+    // ---- 1a. The user's settings.json with a comment and a trailing comma ----
+    const broken = `{\n  // a comment\n  "smoke.configSafety": "theirs",\n}\n`;
+    writeFileSync(userFile, broken);
+    await k.clearToasts();
+    await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`);
+    if (!/is there, but it isn't valid JSON/.test(await k.toasts())) fail(`reading a settings.json that isn't JSON said ${JSON.stringify(await k.toasts())}`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", "mine")`);
+    if (read(userFile) !== broken) fail(`a change wrote over the settings.json it couldn't read: ${JSON.stringify(read(userFile))}`);
+    if ((await k.setting("smoke.configSafety")) !== "mine") fail("the change didn't hold for the session");
+    if (!/changed for this session only/.test(await k.toasts())) fail(`a change to an unreadable settings.json said ${JSON.stringify(await k.toasts())}`);
+    // Control: readable again (as a save in the text editor loads it), a change is written.
+    writeFileSync(userFile, had ?? "{}\n");
+    await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", "written")`);
+    if (JSON.parse(read(userFile) ?? "{}")["smoke.configSafety"] !== "written") fail(`a readable settings.json wasn't written: ${JSON.stringify(read(userFile))}`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", undefined)`);
+
+    // ---- 1b. The project's settings file, said when the project opens ----
+    const theirs = `{ "terrain.fog": tru }\n`;
+    mkdirSync(dirname(projectFile), { recursive: true });
+    writeFileSync(projectFile, theirs);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.project.close")`);
+    await k.clearToasts();
+    await openProject(root);
+    if (!/settings\.json .*is there, but it isn't valid JSON/.test(await k.toasts())) fail(`opening a project with a broken .w3proj/settings.json said ${JSON.stringify(await k.toasts())}`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", "mine", "project")`);
+    if (read(projectFile) !== theirs) fail(`a project setting wrote over the .w3proj/settings.json it couldn't read: ${JSON.stringify(read(projectFile))}`);
+    rmSync(projectFile, { force: true });
+    await page.evaluate(`w3Workbench.settings.loadProject(${JSON.stringify(root)})`);
+
+    if (process.platform === "win32") return;
+    // ---- 2. A name with a `\` isn't listed as a path ----
+    writeFileSync(strayFile, "stray");
+    await page.evaluate(`w3.workspace.refresh()`);
+    const listed = await page.evaluate(`w3.workspace.files().map((f) => f.path).filter((p) => p.includes("x.txt"))`);
+    if (listed.length) fail(`a file named sub${BS}x.txt is listed as ${JSON.stringify(listed)}`);
+    const folders = await page.evaluate(`w3.workspace.folders().filter((p) => p.includes("sub"))`);
+    if (folders.length) fail(`a file named sub${BS}x.txt made the folders ${JSON.stringify(folders)}`);
+    rmSync(strayFile, { force: true });
+
+    // ---- 3. Two projects whose folders differ only in case ----
+    rmSync(twin, { recursive: true, force: true });
+    cpSync(root, twin, { recursive: true });
+    await openProject(twin);
+    await openProject(root);
+    await page.evaluate(`w3Workbench.workspace.recentsTidied()`);
+    const recent = await k.setting("recentProjects");
+    if (!recent?.includes(root) || !recent.includes(twin)) fail(`after opening ${basename(twin)} and ${basename(root)} the recent list is ${JSON.stringify(recent)}`);
+  } finally {
+    rmSync(strayFile, { force: true });
+    if (twin !== root) rmSync(twin, { recursive: true, force: true });
+    // The user's file as it was (the smoke test's own settings folder).
+    if (had === null) rmSync(userFile, { force: true }); else writeFileSync(userFile, had);
+    await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`).catch(() => {});
+  }
+}
+
+/** The canvas of the active tab's view (an expression in the page). */
+const SHOWN_CANVAS = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+
+/** Counts frames per canvas from now on (`window.__glFrames`): a frame starts with its clear. */
+async function countFrames(page) {
+  await page.evaluate(`(() => {
+    if (window.__glFrames) return;
+    const P = WebGL2RenderingContext.prototype, clear = P.clear;
+    window.__glFrames = new WeakMap();
+    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
+  })()`);
+}
+
+/** Frames the shown view has drawn since countFrames (-1 without a view). */
+function framesDrawn(page) {
+  return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
+}
+
+/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
+ *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
+async function settledMapPicture(page, still = 100, tries = 8) {
+  let prev = await mapPicture(page);
+  for (let i = 1; i < tries; i++) {
+    const next = await mapPicture(page);
+    if ((await pixelsApart(page, prev, next)) <= still) return next;
+    prev = next;
+  }
+  return prev;
 }
 
 /** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
@@ -3824,7 +4119,8 @@ async function playerStarts(page, found, root) {
   /** Player 1's Start X and Y cells: their text, and whether they hold an input. */
   const cells = () => page.evaluate(`(() => {
     const row = [...document.querySelectorAll(".map-info .form-table tbody tr")].find((r) => r.cells[0]?.textContent === "1");
-    return row ? [5, 6].map((i) => ({ input: !!row.cells[i].querySelector("input"), text: row.cells[i].querySelector("input")?.value ?? row.cells[i].textContent })) : null;
+    const heads = [...(row?.closest("table")?.querySelectorAll("thead th") ?? [])].map((th) => th.textContent);
+    return row ? ["Start X", "Start Y"].map((h) => heads.indexOf(h)).map((i) => ({ input: !!row.cells[i].querySelector("input"), text: row.cells[i].querySelector("input")?.value ?? row.cells[i].textContent })) : null;
   })()`);
   const players = `[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Players")?.click()`;
   try {
@@ -3845,8 +4141,64 @@ async function playerStarts(page, found, root) {
     }, 10000).catch(() => {});
     const followed = await cells();
     if (followed?.some((c) => c.input) || followed?.[0].text !== "128" || followed?.[1].text !== "-256") fail(`with a start location, Start X/Y are still typed, or don't show it: ${JSON.stringify(followed)}`);
+
+    // The player's "fixed start" field holds flags: Fixed start is bit 0, Race selectable bit 1, which follows the race.
+    const cell = (head) => `(() => {
+      const row = [...document.querySelectorAll(".map-info .form-table tbody tr")].find((r) => r.cells[0]?.textContent === "1");
+      const heads = [...row.closest("table").querySelectorAll("thead th")].map((th) => th.textContent);
+      return row.cells[heads.indexOf(${JSON.stringify(head)})];
+    })()`;
+    const boxes = () => page.evaluate(`[${cell("Fixed start")}, ${cell("Race selectable")}].map((c) => c.querySelector("input").checked)`);
+    const race = (value) => page.evaluate(`(() => { const s = ${cell("Race")}.querySelector("select"); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event("change")); })()`);
+    const infoBefore = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+    try {
+      if (JSON.stringify(await boxes()) !== "[false,false]") fail(`the mini map's player 1 has Fixed start or Race selectable on (control): ${JSON.stringify(await boxes())}`);
+      await page.evaluate(`${cell("Fixed start")}.querySelector("input").click()`);
+      await race("0");
+      await until("Race selectable to follow race Selectable", async () => JSON.stringify(await boxes()) === "[true,true]", 3000)
+        .catch(async () => fail(`race Selectable with Fixed start on: boxes ${JSON.stringify(await boxes())}, not both on`));
+      await race("2");
+      await until("Race selectable to follow race Orc", async () => JSON.stringify(await boxes()) === "[true,false]", 3000)
+        .catch(async () => fail(`race Orc after Selectable: boxes ${JSON.stringify(await boxes())}, not Fixed start alone`));
+      await page.evaluate(`w3.editors.saveAll()`);
+      const saved = JSON.parse(await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`)).players.find((p) => p.id === 0);
+      if (saved?.fixedStart !== 1 || saved?.race !== 2) fail(`saved player 1: race ${saved?.race}, fixed start field ${saved?.fixedStart}, not 2 and 1`);
+    } finally {
+      await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoBefore)}); })()`);
+    }
   } finally {
     await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(units)}, ${JSON.stringify(before)}); await w3.editors.closeAll(); })()`);
+  }
+}
+
+/** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
+ *  preview pushed it below itself), every section's Value column in the same place, and the preview over no table. */
+async function objectLayout(page, found, root) {
+  const fail = (what) => found.push(`object editor layout: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  try {
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hfoo")`);
+    await until("the footman's fields and its preview", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20 && !!document.querySelector(".obj-detail .obj-preview")`), 30000);
+    const m = await page.evaluate(`(() => {
+      const r = (e) => e.getBoundingClientRect();
+      const detail = [...document.querySelectorAll(".obj-detail")].find((d) => d.offsetParent !== null);
+      const sections = [...detail.querySelectorAll(".obj-section")].filter((s) => s.querySelector(".obj-table thead"));
+      const first = sections[0];
+      const preview = r(detail.querySelector(".obj-preview"));
+      return {
+        sections: sections.length,
+        gap: first ? r(first.querySelector(".obj-table")).top - r(first.querySelector("h3")).bottom : null,
+        valueLefts: sections.map((s) => Math.round(r(s.querySelector(".obj-table thead th:nth-child(3)")).left)),
+        overlaps: sections.filter((s) => { const t = r(s.querySelector(".obj-table")); return t.right > preview.left + 1 && t.left < preview.right - 1 && t.bottom > preview.top + 1 && t.top < preview.bottom - 1; }).length,
+      };
+    })()`);
+    if (m.sections < 3) { fail(`only ${m.sections} field sections (control)`); return; }
+    if (!(m.gap < 12)) fail(`the first field table starts ${Math.round(m.gap)} px under its heading`);
+    if (Math.max(...m.valueLefts) - Math.min(...m.valueLefts) > 1) fail(`the Value columns of the sections start at ${[...new Set(m.valueLefts)].join(", ")} px`);
+    if (m.overlaps) fail(`the model preview lies over ${m.overlaps} field tables`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
   }
 }
 
@@ -5867,7 +6219,7 @@ async function run() {
     // --only=graphics is graphicsModes after the project checks.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only && only !== "graphics") {
-      const onlyChecks = { newMaps, terrainWiring, placeObjects, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening,
+      const onlyChecks = { newMaps, terrainWiring, placeObjects, mcpStartMove, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening,
         // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
         testMapWithoutGame: async (p, f) => {
           const folder = join(work, "test-map-only");
@@ -5877,7 +6229,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, chapterObjects, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, itemDrops, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, configSafety, shouldHaves, placerAndCampaign, chapterObjects, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, objectLayout, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5955,6 +6307,7 @@ async function run() {
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
+    await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
     await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
@@ -5969,11 +6322,13 @@ async function run() {
     await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
+    await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
     await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
     await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
+    await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
@@ -5988,6 +6343,7 @@ async function run() {
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
+    await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
     await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
     await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));

@@ -7,6 +7,8 @@ import type { MinimapPanel } from "./minimappanel";
 // Also picks a point on the map for other modules (trigger parameters).
 
 import type { TerrainService, TerrainToolGroup } from "../../extensions/services";
+import { Listeners } from "../../lib/listeners";
+import type { DropsSource } from "./dropstab";
 
 /** The View commands of one open terrain editor. Each returns what to tell the person when it can't run, else null. */
 export interface ViewCommands {
@@ -107,6 +109,14 @@ export class TerrainToolRegistry implements TerrainService {
   readonly replaceTypes = new Map<string, ReplaceTypes>();
   /** A point to show once the terrain editor has opened. */
   pendingLook: [number, number, PlacedRef?] | null = null;
+  /** Set by each open terrain editor that can be edited, by its file: its placed objects' drops, for the Item Drops tab. */
+  readonly dropSources = new Map<string, DropsSource>();
+  /** A drops source came or went (an editor opened, closed or reopened). */
+  readonly dropSourcesChanged = new Listeners<void>();
+  /** What the Item Drops tab is asked to edit (the Selection panel's Edit drops…): the objects, in the editor of `path`. */
+  readonly dropsRequests = new Listeners<{ path: string; entries: readonly unknown[] }>();
+  /** The last request, for a tab that opens because of it (taken by it). */
+  pendingDrops: { path: string; entries: readonly unknown[] } | null = null;
 
   /** `open` brings up the terrain editor (for pickPoint). */
   constructor(private open: () => Promise<void>) {}

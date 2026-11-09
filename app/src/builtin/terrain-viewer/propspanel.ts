@@ -6,8 +6,8 @@
 
 import { h } from "../../workbench/dom";
 import {
-  ACQUIRE_CAMP, ACQUIRE_NORMAL, CAMP_RANGE, COLORS, DEFAULT, activeOthers, attributesAt, commonFields, dropsOf, isActive, maxSkillLevel, pointsSpent,
-  heroPools, ownSetsOnly, randomItemLabel, redistribute, sameValue, setTotal, tableChoice, type DropItem, type Drops, type PropChange, type TypeFacts,
+  ACQUIRE_CAMP, ACQUIRE_NORMAL, CAMP_RANGE, COLORS, DEFAULT, activeOthers, attributesAt, commonFields, isActive, maxSkillLevel, pointsSpent,
+  heroPools, randomItemLabel, sameValue, type PropChange, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
 
@@ -15,8 +15,6 @@ export interface PropsPanelHost {
   items: { entry: Placed; facts: TypeFacts }[];
   /** Shown, nothing can be changed (a read-only document). */
   readOnly?: boolean;
-  /** The map's item tables (war3map.w3i); null when it couldn't be read. */
-  tables: { number: number; name: string }[] | null;
   /** The map's regions (war3map.w3r): number and name. */
   regions: { index: number; name: string }[];
   /** Makes the change as one undo step and shows the panel again; the reason when it's refused. */
@@ -29,10 +27,6 @@ export interface PropsPanelHost {
   colorName(n: number): string;
   /** Tells the user why a change was refused. */
   warn(message: string): void;
-  /** Opens Map Properties at its item tables. */
-  openItemTables(): void;
-  /** Makes a new map item table (Map Properties opens on it) and has the objects drop from it. */
-  createItemTable(): Promise<void>;
 }
 
 type Entry = Placed & Record<string, unknown>;
@@ -53,7 +47,7 @@ function select(value: string | undefined, options: [string, string][], prop: st
 /** An id shown with its name once known. */
 function named(host: PropsPanelHost, id: string, kinds?: string[]): HTMLElement {
   const random = randomItemLabel(id);
-  const el = h("span.terrain-prop-name", { title: id }, random ? `${random} (${id})` : id);
+  const el = h("span.terrain-prop-name", { title: id }, random ?? id);
   if (random) return el;
   void host.name(id, kinds).then((n) => { if (n) el.textContent = `${n} (${id})`; }).catch(() => { /* id stays */ });
   return el;
@@ -213,79 +207,12 @@ export function propsPanel(host: PropsPanelHost): HTMLElement | null {
           ofMax(maxShared((f) => f.maxHp))));
         break;
       case "drops":
-        rows.push(...dropRows(host, entries, send));
+        // A block of its own higher up in the panel (dropsedit.ts dropsBlock).
         break;
     }
   }
+  if (!rows.length) return null;
   // A fieldset: read-only, every control in it is off at once.
   return h("fieldset.terrain-props", { disabled: !!host.readOnly },
     h("legend.terrain-sel-sub.muted", {}, items.length > 1 ? `Properties (${items.length} objects)` : "Properties"), ...rows);
-}
-
-/** Items dropped on death: none, a map item table, or the object's own sets with chances. */
-function dropRows(host: PropsPanelHost, entries: Entry[], send: (c: PropChange) => void): HTMLElement[] {
-  const drops = sameValue(entries, (e) => dropsOf(e));
-  const onlyOwn = ownSetsOnly(entries);
-  const mode = drops?.mode;
-  const tables = host.tables ?? [];
-  const setDrops = (d: Drops) => send({ field: "drops", value: d });
-  const modes: [string, string][] = [["none", "Nothing"], ...(onlyOwn ? [] : [["table", "Map item table"] as [string, string]]), ["custom", "Own item sets"]];
-  // The map has no item tables yet: choosing one offers to make one, rather than only saying so.
-  const create = h("button", { "data-prop": "create-table", title: "A new item table in Map Properties (saved with it), opened there to fill in; these objects drop from it",
-    onclick: async () => {
-      create.disabled = true;
-      try { await host.createItemTable(); } finally { create.disabled = false; }
-    } }, "Create an item table");
-  const offer = h("div.terrain-prop-offer",{ "data-prop": "table-offer", hidden: true },
-    h("span.muted", {}, "The map has no item tables yet."), " ", create);
-  const modeSelect = select(mode, modes, "drops-mode", (v) => {
-    offer.hidden = true;
-    if (v === "none") setDrops({ mode: "none" });
-    else if (v === "table") {
-      const choice = tableChoice(host.tables);
-      if ("error" in choice) host.warn(choice.error);
-      else if ("offer" in choice) { modeSelect.value = mode ?? ""; offer.hidden = false; create.focus(); }
-      else setDrops({ mode: "table", table: choice.table });
-    } else setDrops({ mode: "custom", sets: drops?.mode === "custom" ? drops.sets : [[]] });
-  });
-  const out: HTMLElement[] = [row("Drops", modeSelect), offer];
-  if (onlyOwn) out.push(h("div.muted.terrain-prop-hint", { "data-prop": "drops-hint" }, onlyOwn));
-  const editTables = () => h("button", { "data-prop": "edit-tables", title: "Map Properties › Techtree & Tables › Item tables", onclick: () => host.openItemTables() }, "Edit item tables…");
-  if (drops?.mode === "table") {
-    // Tables that couldn't be read (null) aren't taken for missing ones.
-    const known = host.tables === null || tables.some((t) => t.number === drops.table);
-    out.push(row("Item table", select(String(drops.table), [...tables.map((t) => [String(t.number), `${t.name} (#${t.number})`] as [string, string]),
-      ...(known ? [] : [[String(drops.table), `#${drops.table} (not in the map)`] as [string, string]])], "drops-table", (v) => setDrops({ mode: "table", table: Number(v) })),
-      " ", editTables()));
-  }
-  if (drops?.mode === "custom" && !onlyOwn) {
-    out.push(h("div.terrain-prop-link", {}, h("a", { href: "#", "data-prop": "use-map-table", title: "Map Properties › Techtree & Tables › Item tables: tables any object can drop from",
-      onclick: (ev: Event) => { ev.preventDefault(); host.openItemTables(); } }, "or use a map item table…")));
-  }
-  if (drops?.mode === "custom") {
-    const sets = drops.sets;
-    const withSets = (change: (s: DropItem[][]) => void) => { const next = structuredClone(sets); change(next); setDrops({ mode: "custom", sets: next }); };
-    sets.forEach((set, k) => {
-      const total = setTotal(set);
-      out.push(h("div.terrain-prop-set", { "data-set": String(k) },
-        h("div.terrain-prop-sethead", {},
-          h("strong", {}, `Set ${k + 1}`), h("span", { class: total > 100 ? "terrain-prop-over" : "muted" }, ` ${total}%${total < 100 ? ` (${100 - total}% nothing)` : ""}`),
-          h("button", { title: "Spread 100% evenly over the set's items", "data-prop": `redistribute-${k}`, disabled: !set.length, onclick: () => withSets((s) => { s[k] = redistribute(s[k]); }) }, "Redistribute"),
-          h("button.icon-button", { title: "Remove the set", onclick: () => withSets((s) => { s.splice(k, 1); }) }, "×")),
-        ...set.map((it, j) => h("div.terrain-prop-item", {},
-          h("input.terrain-sel-num.terrain-prop-chance", { type: "number", min: 0, max: 100, step: 1, value: String(it.chance), "data-prop": `chance-${k}-${j}`, title: "Chance in percent",
-            onchange: (ev: Event) => {
-              const v = Number((ev.target as HTMLInputElement).value);
-              if (Number.isFinite(v)) withSets((s) => { s[k][j] = { ...s[k][j], chance: v }; });
-            } }), "% ",
-          named(host, it.id, ["w3t"]),
-          h("button.icon-button", { title: "Remove the item", onclick: () => withSets((s) => { s[k].splice(j, 1); }) }, "×"))),
-        h("button", { "data-prop": `add-item-${k}`, onclick: async () => {
-          const id = await host.pick("Add an item to the set", ["w3t"]);
-          if (id !== undefined) withSets((s) => { s[k].push({ id, chance: s[k].length ? Math.max(0, 100 - setTotal(s[k])) : 100 }); });
-        } }, "Add item…")));
-    });
-    out.push(h("div.terrain-sel-actions", {}, h("button", { "data-prop": "add-set", title: "Each set drops one of its items by chance", onclick: () => withSets((s) => { s.push([]); }) }, "Add set")));
-  }
-  return out;
 }
