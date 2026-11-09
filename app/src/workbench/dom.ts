@@ -105,7 +105,10 @@ export function showContextMenu(at: { x: number; y: number }, items: import("../
     else if (keys.side && e.key === "ArrowLeft") { take(); keys.side(-1); }
     else if (keys.side && e.key === "ArrowRight") { take(); keys.side(1); }
   };
-  const menu = h("div.context-menu", {}, ...items.map((it) => {
+  // A menu with an on/off entry has a column for the check mark in every row (as VS Code's): the labels line up,
+  // whether the entry is on or off.
+  const checks = choices.some((it) => it.checked !== undefined);
+  const menu = h(`div.context-menu${checks ? ".has-checks" : ""}`, {}, ...items.map((it) => {
     if (it === "-") return h("div.context-menu-sep");
     const i = rows.length;
     // An on/off entry: the mark is drawn by the stylesheet (::before), so the row's text stays its label.
