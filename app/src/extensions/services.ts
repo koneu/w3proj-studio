@@ -102,6 +102,9 @@ export interface TerrainToolGroupInstance {
   /** The group's object list (regions, cameras: the World Editor's Edit > Select Next / Previous in List, Move Up / Down
    *  in List): null when done, else why not. */
   listCommand?(cmd: "next" | "previous" | "up" | "down"): string | null;
+  /** One of the group's named objects (a region, a camera), for the Object Manager: selects and shows it, renames it to
+   *  `to` or deletes it, as the group's own panel does (one undo step, unsaved). Null when done, else why not. */
+  itemAction?(name: string, action: "select" | "rename" | "delete", to?: string): Promise<string | null>;
   /** After every edit, undo and redo, from any group. */
   changed?(what: { terrain: boolean; objects: boolean }): void;
   /** Adjusts the generated pathing map (flags per 32×32 cell, rows from the south) before it is shown or saved. */

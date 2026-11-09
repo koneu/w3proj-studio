@@ -4,6 +4,7 @@ import { editablePath, EditLog, type EditIO } from "./edits";
 import type { W3Api } from "../../extensions/api";
 import { checkpointIfOn, forgetCheckpointsOffWarning } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
+import { mcpErrorText } from "../../extensions/mcp";
 
 function setup(start: Record<string, string> = {}) {
   const files = new Map(Object.entries(start));
@@ -55,6 +56,16 @@ test("nothing is written while something is unsaved", async () => {
   await assert.rejects(log.edit("Two", put("map/a", "newer")), /war3map\.w3e\.txt has unsaved changes/);
   await assert.rejects(log.undo(), /unsaved changes/);
   assert.equal(files.get("map/a"), "new");
+});
+
+test("the refusal over unsaved changes speaks to the person in the app, and to an AI client through MCP", async () => {
+  const { log, state } = setup({ "map/a": "old" });
+  state.unsaved = ["map/war3map.wtg.json"];
+  const e = await log.edit("Adjust Map String IDs", put("map/a", "new")).then(() => null, (x: unknown) => x);
+  assert.ok(e instanceof Error, "refused");
+  assert.match(e.message, /war3map\.wtg\.json has unsaved changes in the editor\. Save or discard them first/);
+  assert.doesNotMatch(e.message, /Ask the user/, "the app's own command isn't told to ask the user");
+  assert.match(mcpErrorText(e), /war3map\.wtg\.json has unsaved changes in the editor\. Ask the user to save or discard them first\./);
 });
 
 test("only map/ can be written, and only inside the project", async () => {

@@ -108,8 +108,12 @@ export function showContextMenu(at: { x: number; y: number }, items: import("../
   const menu = h("div.context-menu", {}, ...items.map((it) => {
     if (it === "-") return h("div.context-menu-sep");
     const i = rows.length;
-    const row = h(`div.context-menu-item${it.disabled ? ".disabled" : ""}`, {
+    // An on/off entry: the mark is drawn by the stylesheet (::before), so the row's text stays its label.
+    const toggle = it.checked !== undefined;
+    const row = h(`div.context-menu-item${it.disabled ? ".disabled" : ""}${toggle ? ".toggle" : ""}${it.checked ? ".checked" : ""}`, {
       title: it.hint ?? "",
+      role: toggle ? "menuitemcheckbox" : "menuitem",
+      ...(toggle ? { "aria-checked": String(it.checked) } : {}),
       onclick: () => choose(i),
       onmouseenter: () => { if (!it.disabled) setActive(i); },
     }, it.label, ...(it.shortcut ? [h("span.context-menu-shortcut", {}, it.shortcut)] : []));

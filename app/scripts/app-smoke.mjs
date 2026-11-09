@@ -4514,7 +4514,8 @@ async function scriptGuard(page, found) {
     const at = made.indexOf("function main takes nothing returns nothing");
     const end = at < 0 ? -1 : made.indexOf("\nendfunction", at);
     if (end < 0) return fail("no main in the generated script (control)");
-    const hand = `${made.slice(0, end)}\n    call BJDebugMsg("written by hand")${made.slice(end)}`;
+    // Long, so the difference view has to wrap it to show it whole.
+    const hand = `${made.slice(0, end)}\n    call BJDebugMsg("written by hand ${"and long ".repeat(40)}end")${made.slice(end)}`;
     writeFileSync(join(k.root, "map", "war3map.j"), hand);
     await sleep(1500);
     await saveRegion("Second Region");
@@ -4534,6 +4535,11 @@ async function scriptGuard(page, found) {
     // The hand-written line and the regions are the changes (the view draws only what's in sight, so it's counted).
     const head = await page.evaluate(`document.querySelector(".editor-pane:not([hidden]) .diff-head")?.innerText ?? ""`);
     if (!/war3map\.j/.test(head) || !/[1-9]\d* changes?/.test(head)) fail(`the difference's head: ${JSON.stringify(head)}`);
+    // Long lines wrap in both sides: nothing is cut at the right edge.
+    const cut = await page.evaluate(`(() => { const s = [...document.querySelectorAll(".editor-pane:not([hidden]) .diff-view .cm-scroller")];
+      return { sides: s.length, wrapped: s.filter((x) => x.querySelector(".cm-content.cm-lineWrapping")).length, wider: s.filter((x) => x.scrollWidth > x.clientWidth + 1).length,
+        long: [...document.querySelectorAll(".editor-pane:not([hidden]) .diff-view .cm-line")].some((l) => l.textContent.includes("and long and long")) }; })()`);
+    if (cut.sides !== 2 || cut.wrapped !== 2 || cut.wider || !cut.long) fail(`the difference's long lines: ${JSON.stringify(cut)}`);
 
     // ---- Replace (asked for by name: Generate Map Script asks again): a checkpoint, then the script as the data makes it ---
     const checkpoints = () => (existsSync(join(k.root, "build", "checkpoints")) ? readdirSync(join(k.root, "build", "checkpoints")) : []);
@@ -4704,9 +4710,9 @@ async function staleEditors(page, found) {
 /** Parity extras through the app, on a new map and a new campaign: the Trigger Editor's Copy As Text and Copy As Script
  *  (a trigger from the tree's menu and a line from its own menu, onto the clipboard, the text as the editor shows its
  *  lines); Allow negative real values (an unreal field refuses -5 from a tool and typed until the setting is on); the
- *  Import Manager's Replace File (same path and entry, an open editor of the file shows the new content, one undo step);
- *  the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger), Rename (a sound) and Play
- *  Sound, done by the owning editors; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
+ *  Import Manager's Replace File (same path and entry, an open editor of the file shows the new content, one undo step,
+ *  Ctrl+Z and Ctrl+Y there); the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger, a
+ *  region), Rename (a sound) and Play Sound, done by the owning editors, and a group's menu; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
  *  the CLI's pack, replace and remove are one undo step each) and Remove Button asking whether the map goes too. */
 async function editorExtras(page, found) {
   const fail = (what) => found.push(`editor extras: ${what}`);
@@ -4833,6 +4839,17 @@ async function editorExtras(page, found) {
     await page.evaluate(`w3.editors.close(${JSON.stringify(FILE)})`);
     await run("w3.imports.open");
     await sleep(300);
+    // Ctrl+Z and Ctrl+Y in the Import Manager (its Replace button says Ctrl+Z takes it back), keys through the window.
+    const impHands = new Hands(page);
+    const impKey = async (key, code, vk, modifiers) => {
+      await page.evaluate(`document.querySelector(".imp-editor:not([hidden])")?.focus()`);
+      await impHands.key(key, code, vk, modifiers);
+    };
+    await impKey("z", "KeyZ", 90, 2);
+    await until("the old content", () => readFileSync(onDisk, "utf8") === "old words\n", 10000).catch(() => fail(`Ctrl+Z in the Import Manager after Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
+    await impKey("y", "KeyY", 89, 2);
+    await until("the new content again", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail("Ctrl+Y in the Import Manager didn't bring the new content back"));
+    // The title bar's undo and redo do the same.
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await until("the old content", () => readFileSync(onDisk, "utf8") === "old words\n", 10000).catch(() => fail(`one undo of Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
@@ -4912,6 +4929,47 @@ async function editorExtras(page, found) {
       await k.save();
       const s = k.read("war3map.w3s.json").sounds;
       if (s.length !== 1 || s[0].name !== "gg_snd_smoke_boom") fail(`after Rename Object the sounds are ${JSON.stringify(s.map((x) => x.name))}`);
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
+    // A region: renamed and deleted in the terrain editor's Regions tab (one undo step there); the group's menu.
+    await k.tool("add_region", { name: "Om Region", left: 0, bottom: 0, right: 256, top: 256 });
+    const regionNames = () => (k.read("war3map.w3r.json").regions ?? []).map((r) => r.name);
+    await page.evaluate(`w3.views.show("objectManager")`);
+    await omRefresh();
+    await answer("inputBox", "Om Renamed");
+    if (!(await omFind("Om Region"))) fail("the Object Manager has no row for the region");
+    else {
+      await step("Rename Object (region)", () => menu(".om-row", "Om Region", "Rename Object"));
+      await until("the terrain editor", () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`), 20000).catch(() => fail("Rename Object of a region left the terrain editor without the change"));
+      await k.save();
+      if (!regionNames().includes("Om Renamed") || regionNames().includes("Om Region")) fail(`after Rename Object the regions are ${JSON.stringify(regionNames())}`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await k.save();
+      if (!regionNames().includes("Om Region") || regionNames().includes("Om Renamed")) fail(`one undo of Rename Object (region) left ${JSON.stringify(regionNames())}`);
+      await page.evaluate(`w3.views.show("objectManager")`);
+      await omRefresh();
+      await omFind("Om Region");
+      await step("Delete Object (region)", () => menu(".om-row", "Om Region", "Delete Object"));
+      await k.save();
+      if (regionNames().includes("Om Region")) fail(`Delete Object left the region: ${JSON.stringify(regionNames())}`);
+    }
+    // A group row: Expand or Collapse, and the editor of its entries (here the Regions tab).
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.views.show("objectManager")`);
+    await omRefresh();
+    if (!(await omFind("Regions ("))) fail("the Object Manager has no Regions group");
+    else {
+      await step("Open Regions Tab (group)", () => menu(".om-row", "Regions (", "Open Regions Tab"));
+      await until("the Regions tab", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && document.querySelector(".terrain-tab.on")?.textContent === "Regions"`), 20000)
+        .catch(() => fail("Open Regions Tab didn't bring the terrain editor's Regions tab to the front"));
+      // The sounds' group (one sound): the toggle (Collapse, as filtering opens groups by itself) and its editor.
+      await page.evaluate(`w3.views.show("objectManager")`);
+      await omFind("Sounds and music (");
+      await page.evaluate(`[...document.querySelectorAll(".om-row")].find((e) => e.textContent.includes("Sounds and music ("))?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 }))`);
+      await sleep(300);
+      const groupMenu = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
+      await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      if (JSON.stringify(groupMenu) !== JSON.stringify(["Collapse", "Open Sound Editor"])) fail(`the sounds group's menu: ${JSON.stringify(groupMenu)}`);
     }
     await page.evaluate(`w3.editors.closeAll()`);
 
@@ -5001,10 +5059,11 @@ async function editorExtras(page, found) {
 }
 
 /** The World Editor's smaller items, through the app's own commands, keys and menus: a map saved as a folder imported
- *  as a project; Reset Standard Objects to Defaults in the Object Editor (asked, one undo step); Category is Comment
- *  (the trigger stays in war3map.j, as the World Editor's save keeps it), Reset Triggers (asked, one undo step) and
- *  Adjust Map String IDs (war3map.wts and the references, one undo); Select Next in List and Move Down in List on the
- *  Regions tab; the minimap panel (a click moves the camera, the view's outline is drawn); Calculate Shadows (a second
+ *  as a project; Reset Standard Objects to Defaults in the Object Editor (asked, one undo step); the Trigger Editor's
+ *  toolbar inside its column; Category is Comment (checked in the menu while on; the trigger stays in war3map.j, as the
+ *  World Editor's save keeps it), Reset Triggers (asked, one undo step) and Adjust Map String IDs (refused in a person's
+ *  words while the triggers are unsaved; war3map.wts and the references, one undo); Select Next / Previous in List
+ *  (Ctrl+Tab, Ctrl+Shift+Tab) and Move Down in List on the Regions tab; the minimap panel (a click moves the camera, the view's outline is drawn); Calculate Shadows (a second
  *  run changes nothing). */
 async function niceToHaves(page, found) {
   const fail = (what) => found.push(`nice-to-haves: ${what}`);
@@ -5066,10 +5125,33 @@ async function niceToHaves(page, found) {
     const menued = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".trig-row.trig-cat")].find((e) => e.textContent.includes("Initialization"));
       if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
     if (!menued) fail("no Initialization category in the trigger tree");
+    // The left column's toolbar (New…, ↑, ↓, Delete, Export…, Import…) stays inside the column.
+    const spill = await page.evaluate(`(() => { const tree = document.querySelector(".trig-tree")?.getBoundingClientRect(); if (!tree) return "no tree";
+      return [...document.querySelectorAll(".trig-toolbar > *")].filter((b) => b.getBoundingClientRect().right > tree.right + 0.5).map((b) => b.textContent); })()`);
+    if (spill === "no tree" || spill.length) fail(`the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(spill)}`);
+    /** The Category is Comment entry of the open menu: whether it says on (aria-checked) and draws the check mark. */
+    const commentEntry = () => page.evaluate(`(() => { const e = [...document.querySelectorAll(".context-menu-item")].find((x) => x.textContent.startsWith("Category is Comment"));
+      return e ? { checked: e.getAttribute("aria-checked"), mark: getComputedStyle(e, "::before").content } : null; })()`);
     await until("the Category is Comment item", () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith("Category is Comment"))`), 5000)
-      .then(() => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith("Category is Comment")).click()`), () => fail("the category's menu has no Category is Comment"));
+      .then(async () => {
+        const off = await commentEntry();
+        if (off?.checked !== "false" || /✓/.test(off?.mark ?? "")) fail(`Category is Comment on an ordinary category shows ${JSON.stringify(off)}`);
+        await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith("Category is Comment")).click()`);
+      }, () => fail("the category's menu has no Category is Comment"));
     await sleep(300);
     if (!(await page.evaluate(`!!document.querySelector(".trig-row.trig-cat-comment")`))) fail("the comment category isn't shown as one");
+    // Its menu again: the entry is checked now.
+    await page.evaluate(`(() => { const r = [...document.querySelectorAll(".trig-row.trig-cat")].find((e) => e.textContent.includes("Initialization"));
+      r?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); })()`);
+    await sleep(300);
+    const on = await commentEntry();
+    if (on?.checked !== "true" || !/✓/.test(on?.mark ?? "")) fail(`Category is Comment on a comment category shows ${JSON.stringify(on)}`);
+    await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    // Unsaved triggers: Adjust Map String IDs refuses in words for the person; an AI tool hears to ask the user.
+    const refusedForPerson = await run("w3.triggers.adjustStringIds", [[1, 10]]);
+    if (!/unsaved changes/.test(refusedForPerson.e ?? "") || /Ask the user/.test(refusedForPerson.e ?? "")) fail(`Adjust Map String IDs with unsaved triggers: ${JSON.stringify(refusedForPerson)}`);
+    const refusedForAi = await k.tool("create_script_trigger", { name: "Nice Refused", script: "" }).then(() => null, (e) => e.message);
+    if (!/Ask the user to save or discard/.test(refusedForAi ?? "")) fail(`an AI tool with unsaved triggers was told ${JSON.stringify(refusedForAi)}`);
     await k.save();
     await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
     const cat = k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization");
@@ -5118,6 +5200,15 @@ async function niceToHaves(page, found) {
     if ((await regionName()) !== "First") fail(`Ctrl+Tab with nothing selected selected ${await regionName()}`);
     const next = await run("w3.terrain.selectNextInList");
     if (next.e || (await regionName()) !== "Second") fail(`Select Next in List: ${next.e ?? await regionName()}`);
+    // Ctrl+Shift+Tab: WebKitGTK gives Shift+Tab as key "Unidentified", code "Tab".
+    await k.focusMap();
+    await k.hands.key("Tab", "Tab", 9, CTRL | 8);
+    await sleep(300);
+    if ((await regionName()) !== "First") fail(`Ctrl+Shift+Tab after Second selected ${await regionName()}`);
+    await k.focusMap();
+    await k.hands.key("Tab", "Tab", 9, CTRL);
+    await sleep(300);
+    if ((await regionName()) !== "Second") fail(`Ctrl+Tab after First selected ${await regionName()}`);
     await k.focusMap();
     await k.hands.key("PageDown", "PageDown", 34, CTRL);
     await sleep(300);

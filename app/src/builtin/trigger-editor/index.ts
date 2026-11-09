@@ -1083,7 +1083,7 @@ class TriggerView {
       }
       const it = this.find(sel);
       if (it && isGuiTrigger(it)) items.push("-", { label: "Convert to Custom Text…", run: () => this.convertCommand() });
-      if (it && it.type === 4) items.push("-", { label: "Category is Comment", hint: it.isComment ? "✓ on" : "off", run: () => this.toggleCategoryComment(it.id) });
+      if (it && it.type === 4) items.push("-", { label: "Category is Comment", checked: !!it.isComment, run: () => this.toggleCategoryComment(it.id) });
       if (treeClipboard) items.push("-", { label: `Paste ${treeClipboard.items[0].name}`, hint: "Ctrl+V", run: () => this.pasteItems() });
       if (sel.kind === "item") items.push("-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
     }

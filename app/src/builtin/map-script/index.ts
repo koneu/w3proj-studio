@@ -381,7 +381,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (made.path !== path) { el.replaceChildren(head, h("div.view-empty", {}, `This map's script is ${made.path.slice(4)}.`)); return; }
           if (current === undefined) { el.replaceChildren(head, h("div.view-empty", {}, `${file} can't be read as text.`)); return; }
           const box = h("div.diff-view");
-          const ro = [EditorState.readOnly.of(true), EditorView.editable.of(false), lineNumbers(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }), oneDark];
+          // Long lines wrap, as in a diff view: cut at the pane's edge, a change past it couldn't be seen.
+          const ro = [EditorState.readOnly.of(true), EditorView.editable.of(false), EditorView.lineWrapping, lineNumbers(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }), oneDark];
           view = new MergeView({ a: { doc: current ?? "", extensions: ro }, b: { doc: made.text, extensions: ro }, parent: box, collapseUnchanged: { margin: 3, minSize: 6 }, gutter: true });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };

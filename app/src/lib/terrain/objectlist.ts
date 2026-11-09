@@ -3,15 +3,19 @@
 // (Ctrl+Shift+Tab), Move Up in List (Ctrl+Page Up) and Move Down in List (Ctrl+Page Down). Greyed out there with
 // nothing in the list (we-drive, TwistedMeadows, Edit menu with the Region Palette open, 2026-11-09).
 
+import { keyOf } from "../keys";
+
 export type ListCommand = "next" | "previous" | "up" | "down";
 
 /** The list command of a key, or null: Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Page Up, Ctrl+Page Down. */
-export function listKey(e: { key: string; ctrlKey: boolean; metaKey?: boolean; altKey: boolean; shiftKey: boolean }): ListCommand | null {
+export function listKey(e: { key: string; code?: string; ctrlKey: boolean; metaKey?: boolean; altKey: boolean; shiftKey: boolean }): ListCommand | null {
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
-  if (e.key === "Tab") return e.shiftKey ? "previous" : "next";
+  // WebKitGTK gives Shift+Tab as key "Unidentified", code "Tab" (lib/keys.ts).
+  const key = keyOf(e);
+  if (key === "Tab") return e.shiftKey ? "previous" : "next";
   if (e.shiftKey) return null;
-  if (e.key === "PageUp") return "up";
-  if (e.key === "PageDown") return "down";
+  if (key === "PageUp") return "up";
+  if (key === "PageDown") return "down";
   return null;
 }
 

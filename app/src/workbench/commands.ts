@@ -1,5 +1,6 @@
 import type { CommandContribution, Disposable } from "../extensions/api";
 import { commandNotFound } from "../lib/commanderror";
+import { keyOf } from "../lib/keys";
 import { disposable } from "./dom";
 
 export interface CommandInfo extends CommandContribution {
@@ -39,13 +40,14 @@ export class CommandService {
     return [...this.contributed.values()].filter((c) => !c.hidden);
   }
 
-  /** Normalised "ctrl+shift+p" style chord for a keyboard event. */
+  /** Normalised "ctrl+shift+p" style chord for a keyboard event (the physical key where the webview can't tell the
+   *  key: lib/keys.ts). */
   static chord(e: KeyboardEvent): string {
     const parts = [];
     if (e.ctrlKey || e.metaKey) parts.push("ctrl");
     if (e.altKey) parts.push("alt");
     if (e.shiftKey) parts.push("shift");
-    parts.push(e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase());
+    parts.push(keyOf(e).toLowerCase());
     return parts.join("+");
   }
 

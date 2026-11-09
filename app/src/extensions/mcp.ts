@@ -45,6 +45,18 @@ function toContent(value: unknown): McpContent[] {
 
 const failed = (text: string) => ({ content: [{ type: "text", text }] as McpContent[], isError: true });
 
+/** An error that reads differently to an AI client: code shared by the app's own commands and the MCP tools refuses
+ *  with words for the person (`message`), and an MCP call answers with `forAi` (e.g. "ask the user to …"). */
+export class AiWordedError extends Error {
+  constructor(message: string, readonly forAi: string) { super(message); }
+}
+
+/** What an MCP call answers for a failure. */
+export function mcpErrorText(e: unknown): string {
+  if (e instanceof AiWordedError) return e.forAi;
+  return e instanceof Error ? e.message : String(e);
+}
+
 export class McpTools {
   private declared = new Map<string, Declared>();
   private handlers = new Map<string, McpToolHandler>();
@@ -94,7 +106,7 @@ export class McpTools {
       if (!handler) return failed(this.hooks.whyUnavailable(d.extensionId) ?? `${d.extensionId} didn't register the tool ${name}.`);
       return { content: toContent(await handler(args)) };
     } catch (e) {
-      return failed(e instanceof Error ? e.message : String(e));
+      return failed(mcpErrorText(e));
     }
   }
 
