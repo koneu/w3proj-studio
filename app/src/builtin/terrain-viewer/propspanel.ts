@@ -100,7 +100,7 @@ export function propsPanel(host: PropsPanelHost): HTMLElement | null {
         ofMax(pool(0))));
         break;
       case "mana":
-        rows.push(row("Mana", numberBox(same((e) => e.mana as number), { min: 0, empty: DEFAULT, placeholder: "default", prop: "mana",
+        rows.push(row("Mana", numberBox(same((e) => e.mana as number), { min: 1, empty: DEFAULT, placeholder: "default", prop: "mana",
           title: "Mana points the unit starts with. Empty: the default." }, (v) => send({ field: "mana", value: v })),
         ofMax(pool(1))));
         break;

@@ -262,7 +262,9 @@ export function checkChange(entry: Placed, facts: TypeFacts, c: PropChange, ctx:
     case "hp":
       return need("hp") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 1 && c.value <= 100) ? null : "Hit points go from 1 to 100 percent.");
     case "mana":
-      return need("mana") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 0 && c.value <= MAX_MANA) ? null : `Mana is a whole number from 0 to ${MAX_MANA}.`);
+      // 0 isn't offered: the save writes it as the default, as the World Editor's does (lib/terrain/owner.ts savedUnitValues).
+      return need("mana") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 1 && c.value <= MAX_MANA) ? null
+        : `Mana is a whole number from 1 to ${MAX_MANA}, or the default (the World Editor saves 0 as the default).`);
     case "gold":
       return need("gold") ?? (whole(c.value) && c.value >= 0 && c.value <= MAX_GOLD ? null : `Gold is a whole number from 0 to ${MAX_GOLD}.`);
     case "acquire":

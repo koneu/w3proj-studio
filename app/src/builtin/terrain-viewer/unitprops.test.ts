@@ -90,7 +90,9 @@ test("values outside the World Editor's ranges are refused", () => {
   const ok = (c: Parameters<typeof checkChange>[2]) => checkChange(u, f, c) === null;
   assert.ok(ok({ field: "hp", value: -1 }) && ok({ field: "hp", value: 1 }) && ok({ field: "hp", value: 100 }));
   assert.ok(!ok({ field: "hp", value: 0 }) && !ok({ field: "hp", value: 101 }) && !ok({ field: "hp", value: 50.5 }));
-  assert.ok(ok({ field: "mana", value: 0 }) && ok({ field: "mana", value: -1 }) && !ok({ field: "mana", value: -2 }));
+  assert.ok(ok({ field: "mana", value: 1 }) && ok({ field: "mana", value: -1 }) && !ok({ field: "mana", value: -2 }));
+  // 0 is saved as the default, as the World Editor saves it: not offered.
+  assert.match(checkChange(u, f, { field: "mana", value: 0 }) ?? "", /from 1/);
   assert.ok(ok({ field: "acquire", value: -1 }) && ok({ field: "acquire", value: -2 }) && ok({ field: "acquire", value: 750.5 }));
   assert.ok(!ok({ field: "acquire", value: 0 }) && !ok({ field: "acquire", value: -3 }) && !ok({ field: "acquire", value: 5001 }));
   assert.ok(ok({ field: "level", value: 10 }) && !ok({ field: "level", value: 11 }) && !ok({ field: "level", value: 0 }));

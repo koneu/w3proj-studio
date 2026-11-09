@@ -34,6 +34,23 @@ test("a new owner keeps the flag: the Ancient stays uprooted", () => {
   assert.equal(JSON.parse(placedText(doc)).units[0].player, 0x10003);
 });
 
+test("a unit's hit points or mana of 0 are saved as -1, the type's own, as the World Editor saves them", () => {
+  // we-drive saves of World Editor 7003 (2026-11-09): start locations, a footman, a sorceress and an item with 0.
+  const doc = { units: [
+    { id: "sloc", player: 0, hp: 0, mana: 0 },
+    { id: "hsor", player: UPROOTED, hp: 50, mana: 0 },
+    { id: "hsor", player: 0, hp: 0, mana: 5 },
+    { id: "ratc", player: 27, hp: -1, mana: -1 },
+  ], doodads: [{ id: "LTlt", life: 0 }] };
+  splitOwners(doc.units);
+  const saved = JSON.parse(placedText(doc));
+  assert.deepEqual(saved.units.map((u: { hp: number; mana: number }) => [u.hp, u.mana]), [[-1, -1], [50, -1], [-1, 5], [-1, -1]]);
+  assert.equal(saved.units[1].player, UPROOTED, "the owner's flags still go back");
+  assert.deepEqual(Object.keys(saved.units[0]), ["id", "player", "hp", "mana"], "in their places");
+  assert.equal(saved.doodads[0].life, 0, "a dead destructable stays dead");
+  assert.equal(doc.units[0].hp, 0, "what's being edited isn't touched");
+});
+
 test("joining doesn't touch what's being edited", () => {
   const list = [{ id: "eaow", player: UPROOTED }];
   splitOwners(list);
