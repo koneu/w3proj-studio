@@ -89,7 +89,7 @@ export interface TerrainService {
    *  isn't there (then the saved file is what there is). */
   listedObjects(): Promise<{ regions: readonly unknown[] | null; cameras: readonly unknown[] | null } | null>;
   /** After every edit, undo and redo in the open terrain editor (what it changed: the ground, placed objects, or
-   *  neither: a region, a camera, …). */
+   *  neither: a region, a camera, …), and when it closes (told as placed objects changed: the saved files count again). */
   onDidEdit(listener: (what: { terrain: boolean; objects: boolean }) => void): { dispose(): void };
 }
 

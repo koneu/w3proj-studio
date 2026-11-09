@@ -4815,6 +4815,7 @@ async function objectManagerLive(page, found) {
     const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Om Live Unit" })).id;
     await k.tool("create_script_trigger", { name: "Om Live Trigger", script: "" });
     await k.tool("add_trigger_variable", { name: "OmLiveVar", type: "integer" });
+    await k.tool("add_region", { name: "Om Live Region", left: -512, bottom: -512, right: -256, top: -256 });
     const sound = {
       name: "gg_snd_omlive", file: "war3mapImported\\omlive.wav", eaxEffect: "DefaultEAXON", flags: 16, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
       channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
@@ -4825,7 +4826,7 @@ async function objectManagerLive(page, found) {
     await k.save();
     await run("w3.objectManager.refresh");
     for (const [filter, want, what] of [["hkni", { detail: "hkni" }, "the knight"], [`${unit} ←`, "Om Live Unit", "the custom unit"], ["Om Live Trigger", "Om Live Trigger", "the trigger"],
-      ["OmLiveVar", "OmLiveVar", "the variable"], ["omlive", "omlive", "the sound"]]) await rows(filter, want, true, `the Object Manager doesn't list ${what} after saving`);
+      ["OmLiveVar", "OmLiveVar", "the variable"], ["omlive", "omlive", "the sound"], ["Om Live", "Om Live Region", "the region"]]) await rows(filter, want, true, `the Object Manager doesn't list ${what} after saving`);
 
     // ---- A placed unit, deleted in the terrain editor (Delete key), undone, redone; the editor closed unsaved. ----------
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
@@ -4844,6 +4845,36 @@ async function objectManagerLive(page, found) {
     }
     await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
     await rows("hkni", { detail: "hkni" }, true, "after the terrain editor closed unsaved the Object Manager doesn't list the saved knight");
+
+    // ---- A region renamed by typing in the Regions tab's name box (Enter) and deleted with its Delete button: edits by
+    // hand, not through the Object Manager, which nothing but the terrain editor's own edit event tells of. ------------
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await k.tab("Regions");
+    const chosen = await page.evaluate(`(() => {
+      const s = [...document.querySelectorAll("select")].find((e) => e.options[0]?.textContent === "Go to region…" && e.offsetParent !== null);
+      const o = s && [...s.options].find((x) => x.textContent === "Om Live Region");
+      if (!o) return false;
+      s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    if (!chosen) fail("the Regions tab's Go to region list has no Om Live Region");
+    else if (!(await until("the region's name box", () => page.evaluate(`document.querySelector("input.terrain-region-name")?.value === "Om Live Region"`), 10000).then(() => true, () => false))) fail("choosing Om Live Region in the Regions tab shows no name box with its name");
+    else {
+      await k.hands.click("input.terrain-region-name");
+      await k.hands.key("a", "KeyA", 65, 2);
+      await k.hands.type("Om Live Typed");
+      await k.hands.key("Enter", "Enter", 13);
+      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("typing a region's name and Enter left the terrain editor without the change");
+      if (await rows("Om Live", "Om Live Typed", true, "after a region was renamed by typing in the Regions tab (unsaved) the Object Manager doesn't show the new name")) {
+        await rows("Om Live", "Om Live Region", false, "after a region was renamed by typing in the Regions tab (unsaved) the Object Manager still shows the old name");
+      }
+      const removed = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-region-panel button")].find((e) => e.textContent === "Delete"); if (!b) return false; b.click(); return true; })()`);
+      if (!removed) fail("the Regions tab shows no Delete button for the selected region");
+      else await rows("Om Live", "Om Live Typed", false, "after a region was deleted with the Regions tab's Delete button (unsaved) the Object Manager still lists it");
+    }
+    await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+    await rows("Om Live", "Om Live Region", true, "after the terrain editor closed unsaved the Object Manager doesn't list the saved region");
 
     // ---- A custom unit: Rename Object in the Object Manager's menu, deleted in the Object Editor, undone; closed unsaved.
     await answer("Om Live Renamed");

@@ -118,8 +118,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  extension). What they hold, unsaved changes included, is the rows'; their edits, undo, redo and closing rebuild them. */
   const live: LiveSources = { terrain: null, triggers: null, sounds: null, objects: null };
   const hooked = new Set<string>(), stops: Disposable[] = [];
-  /** Whether a terrain editor was open at the last tab change. */
-  let terrainOpen = false, disposed = false;
+  let disposed = false;
   const hook = <T>(service: string, attach: (s: T) => Disposable) => {
     if (hooked.has(service)) return;
     hooked.add(service);
@@ -131,8 +130,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
   const hookTerrain = () => hook<TerrainService>(TERRAIN_SERVICE, (t) => {
     live.terrain = t;
-    terrainOpen = true;
-    // Placed objects, regions, cameras, …: everything but a change of the ground alone.
+    // Placed objects, regions, cameras, …, and closing: everything but a change of the ground alone.
     return t.onDidEdit((what) => { if (what.objects || !what.terrain) reload(); });
   });
   const hooks: Record<string, () => void> = {
@@ -219,16 +217,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.workspace.onDidSave(() => { forgetSaved(); reload(); }),
     // Placed objects, regions, cameras, triggers, variables, sounds and custom objects come from the open editors
     // (unsaved changes included): a Delete Object, Rename Object or undo there changes the rows, and so does closing one
-    // (the saved files are what there is then; the Trigger, Sound and Object Editors tell of that themselves).
-    w3.editors.onDidChangeActive((active) => {
-      if (active) hooks[active.editor]?.();
-      const t = live.terrain;
-      if (!t) return;
-      void t.listedObjects().then((l) => {
-        const has = l !== null;
-        if (has !== terrainOpen && !disposed) { terrainOpen = has; reload(); }
-      }, () => {});
-    }),
+    // (the saved files are what there is then: each editor's service tells of that too).
+    w3.editors.onDidChangeActive((active) => { if (active) hooks[active.editor]?.(); }),
     w3.views.register(VIEW, {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its objects.")); return; }
