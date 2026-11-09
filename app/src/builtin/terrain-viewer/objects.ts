@@ -10,7 +10,7 @@ import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { placeholderImage, placeholderModel } from "../../lib/model/placeholder";
 import { worldSphere } from "../../lib/model/frustum";
-import { bounds, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
+import { bounds, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
@@ -69,6 +69,26 @@ export interface Skin {
   /** Units: a team colour of the type's own (UnitSkin.txt `teamColor`, field `utco`; the tavern and the mercenary
    *  camps), drawn whoever owns it; absent: the owner's. */
   teamColor?: number;
+  /** Doodads: the World Editor draws its click helper by the model (Doodads.slk `useClickHelper`, field `duch`: fires,
+   *  traps, flies, dust, …, whose models are mostly particles; see CLICK_HELPER). */
+  clickHelper?: boolean;
+}
+
+/**
+ * The World Editor's click helper (WorldEditData.txt, [WorldEditArt] ClickHelper, [WorldEditMisc] ClickHelperScale,
+ * [WorldEditColors] ClickHelperColor 96,255,255,255): the checkered cube model InvalidObject (128 a side, its texture
+ * BTNtempW's white squares coloured magenta by its geoset) at 0.4 of the doodad's size, see-through (alpha 96/255),
+ * standing where the doodad stands and turned with it. Only the editor's view shows it, not its game view (we-drive,
+ * branch render-fixes-6: a purple cube about 51 a side on every `useClickHelper` doodad, in SD and HD).
+ */
+export const CLICK_HELPER = { model: "Objects\\InvalidObject\\InvalidObject.mdx", scale: 0.4, tint: [1, 1, 1, 96 / 255] as [number, number, number, number] };
+
+/** Puts Doodads.slk's click helpers on the doodads' skins. */
+export function addClickHelpers(skins: Map<string, Skin>, rows: readonly Record<string, string>[]) {
+  for (const r of rows) {
+    const skin = r.doodID ? skins.get(r.doodID) : undefined;
+    if (skin?.kind === "w3d" && r.useClickHelper?.trim() === "1") skin.clickHelper = true;
+  }
 }
 
 /** The team colour a placed object of this type is drawn in: the type's own (Skin.teamColor), else its owner's. */
@@ -105,7 +125,7 @@ const SKIN_FILES: [string, string][] = [
 ];
 
 /** Every game table the skins are made from, in the order they're read. */
-const SKIN_TABLES = [...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, "Units\\UnitData.slk"];
+const SKIN_TABLES = [...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, "Units\\UnitData.slk", "Doodads\\Doodads.slk"];
 
 /** The skins last made, with what they were made from: reading the tables again is cheap (the game's
  *  files are kept, see workbench/game.ts), parsing them isn't (tens of ms, on each reload of the
@@ -192,6 +212,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   }
   for (const f of UNIT_FUNC) addAnimProps(out, tables.get(f) ?? "");
   addMoveTypes(out, parseSlk(tables.get("Units\\UnitData.slk") ?? ""));
+  addClickHelpers(out, parseSlk(tables.get("Doodads\\Doodads.slk") ?? ""));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
@@ -213,7 +234,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
     unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb", teamColor: "utco",
   },
   w3t: { file: "ifil", modelScale: "isca" },
-  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd" },
+  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch" },
   w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr", buildingShadow: "bshd" },
 };
 
@@ -246,6 +267,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "animProps") skin.animProps = parseAnimProps(String(m.value));
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "bakesShadow") skin.bakesShadow = n !== 0;
+        else if (key === "clickHelper") { if (n === 1) skin.clickHelper = true; else delete skin.clickHelper; }
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
@@ -284,11 +306,24 @@ export function plainModelPath(skin: Skin): string | undefined {
   return skin.numVar > 1 ? `${skin.file.replace(/\.(mdl|mdx)$/i, "")}.mdx` : undefined;
 }
 
+/** The scales a placed object of this type is drawn within, [least, most], or undefined for any: a doodad's or
+ *  destructable's type's minScale and maxScale. The World Editor draws one stored outside them at the nearest end
+ *  (ZZdt, 1 to 1, placed at 4 shows at 1; the armor rack LOam, 0.8 to 2, placed at 3 shows at 2; the hay cart LOch,
+ *  0.8 to 1.2, placed at 2, 1, 1 is longer than one at 0.3; Lordaeron's tree LTlt, 0.8 to 1.2, placed at 0.4 and 3
+ *  about as big as one at 1: we-drive, SD and HD, branch render-fixes-6), each axis on its own; the stored scale
+ *  stays as it is. Units and items have no such range. */
+export function scaleRange(skin: Pick<Skin, "kind" | "minScale" | "maxScale">): readonly [number, number] | undefined {
+  if (skin.kind !== "w3d" && skin.kind !== "w3b") return undefined;
+  const { minScale: lo, maxScale: hi } = skin;
+  return Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi >= lo ? [lo, hi] : undefined;
+}
+
 /** World matrix: translate · rotate about z · scale (column-major). `z`: drawn at another height than
- *  the stored one (a ship on the water, see unitDrawHeight). */
-export function placement(p: Placed, extraScale: number, z = p.position[2]): Mat4 {
+ *  the stored one (a ship on the water, see unitDrawHeight). `range`: the scales it's drawn within (scaleRange). */
+export function placement(p: Placed, extraScale: number, z = p.position[2], range?: readonly [number, number]): Mat4 {
   const c = Math.cos(p.angle), s = Math.sin(p.angle);
-  const [sx, sy, sz] = p.scale.map((v) => v * extraScale);
+  // A mirrored axis (a negative scale) stays mirrored.
+  const [sx, sy, sz] = p.scale.map((v) => (range ? Math.sign(v || 1) * Math.min(range[1], Math.max(range[0], Math.abs(v))) : v) * extraScale);
   const [x, y] = p.position;
   return new Float32Array([c * sx, s * sx, 0, 0, -s * sy, c * sy, 0, 0, 0, 0, sz, 0, x, y, z, 1]);
 }
@@ -539,9 +574,10 @@ export class ObjectLoader {
         byModel.set(key, entry);
       }
       entry.items.push(p);
+      const range = scaleRange(skin);
       entry.req.instances.push({
-        world: placement(p, skin.modelScale, heightOf?.(p, skin)), team: drawnTeam(skin, teamOf(p)),
-        pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path, extraScale: skin.modelScale },
+        world: placement(p, skin.modelScale, heightOf?.(p, skin), range), team: drawnTeam(skin, teamOf(p)),
+        pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path, extraScale: skin.modelScale, ...(range ? { scaleRange: range } : {}) },
       });
     }
     const entries = [...byModel.values()];
@@ -551,6 +587,8 @@ export class ObjectLoader {
       ...failed.map((f) => ({ message: f.error, items: entries[f.index].items })),
       ...[...unknown].map(([id, items]) => ({ message: `${id}: unknown object (no model; not in the game's or the map's object data)`, items })),
     ];
+    const helpers = await this.clickHelpers(group, batches, (inst) => !!inst.pick && !!skinFor(inst.pick.id)?.clickHelper);
+    if (helpers) batches.push(helpers);
     const strays = strayInstances(group, placed, unresolved, skins, teamOf, baseOf, heightOf);
     if (!placeholders || !strays.length) return { batches, unresolved, strays, problems };
     let gpu: ModelGpu;
@@ -560,6 +598,31 @@ export class ObjectLoader {
     const cubes = new Set(instances.map((inst) => inst.pick?.placed));
     return { batches: [...batches, { group, gpu, instances }], unresolved: unresolved.filter((p) => !cubes.has(p)), strays: [], problems };
   }
+
+  /** The click helpers (CLICK_HELPER) of the batches' instances that `wanted` says have one: a batch of their own,
+   *  see-through and only in the editor's view, each following its doodad. Null when there are none, or the cube's
+   *  model doesn't load (then the doodads are drawn without; it isn't one of theirs that failed). */
+  private async clickHelpers(group: string, batches: readonly ObjectBatch[], wanted: (inst: ObjectInstance) => boolean): Promise<ObjectBatch | null> {
+    const owners = batches.flatMap((b) => b.instances.filter(wanted));
+    if (!owners.length) return null;
+    let gpu: ModelGpu;
+    try { gpu = await this.model({ path: CLICK_HELPER.model, replaceable: {}, instances: [] }); } catch { return null; }
+    const b = bounds(gpu.model);
+    const local: [number, number, number, number] = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2,
+      Math.hypot(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]) / 2];
+    const instances = owners.map((owner): ObjectInstance => {
+      const follows = { owner, local: clickHelperLocal(owner) };
+      const world = mat4.mul(owner.world, follows.local);
+      return { world, team: owner.team, bounds: local, sphere: worldSphere(world, local), follows };
+    });
+    return { group, gpu, instances, tint: [...CLICK_HELPER.tint], editorOnly: true };
+  }
+}
+
+/** Where a doodad's click helper stands in the doodad's own space (its world matrix times this): CLICK_HELPER.scale. */
+export function clickHelperLocal(_owner: ObjectInstance): Mat4 {
+  const s = CLICK_HELPER.scale;
+  return new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1]);
 }
 
 /** The strays as instances of the placeholder cube: picked and culled by the cube's bounds (`box`, model space). */

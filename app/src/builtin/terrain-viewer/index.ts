@@ -27,7 +27,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { exportMinimap, type ExportOptions, type ExportSource } from "./minimapexport";
 import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
@@ -1993,7 +1993,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (inst.pick!.model && swims(p) !== b.gpu.props.includes("swim")) { void rebuildObjects(); return; }
               const z = drawnZ(p);
               if (Math.abs(inst.world[14] - z) < 0.01) continue;
-              inst.world = placement(p, inst.pick!.extraScale, z);
+              inst.world = placement(p, inst.pick!.extraScale, z, inst.pick!.scaleRange);
               if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
               moved = true;
             }
@@ -2207,7 +2207,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (inst?.pick) {
             // The drawn height moves, which for a ship on the water isn't the stored one's move.
             const wasZ = inst.world[14];
-            inst.world = placement(entry, inst.pick.extraScale, drawnZ(entry));
+            inst.world = placement(entry, inst.pick.extraScale, drawnZ(entry), inst.pick.scaleRange);
             const dz = inst.world[14] - wasZ;
             // Turning an off-centre model (a wall, a bridge) swings its bounds round too: placed again from the model's own.
             if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
@@ -2563,7 +2563,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Where the pointer last was over the ground. */
         let pasteAt: Vec3 | null = null;
         type Ghost = NonNullable<typeof renderer.ghost>;
-        let pasteModels: ({ gpu: Ghost["gpu"]; modelScale: number } | null)[] = [];
+        let pasteModels: ({ gpu: Ghost["gpu"]; modelScale: number; scaleRange?: readonly [number, number] } | null)[] = [];
         /** More would slow the view down, and the shape shows long before that. */
         const MAX_GHOSTS = 300;
         /** What's copied: start locations belong to their players. */
@@ -2713,7 +2713,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!m || !position) return [];
             const entry = { ...(o.entry as unknown as Placed), position, angle: o.angle };
             const team = entry.player !== undefined && entry.player < TEAM_COLORS.length ? entry.player : NEUTRAL;
-            return [{ gpu: m.gpu, world: placement(entry, m.modelScale, drawnZ(entry)), team, ok: true }];
+            return [{ gpu: m.gpu, world: placement(entry, m.modelScale, drawnZ(entry), m.scaleRange), team, ok: true }];
           });
           redraw();
         };
@@ -2748,7 +2748,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const skin = skinOf(o.entry as unknown as Placed);
             if (!skin) return null;
             const gpu = await loader.modelFor(skin, Number(o.entry.variation) || 0).catch(() => null);
-            return gpu ? { gpu, modelScale: skin.modelScale } : null;
+            return gpu ? { gpu, modelScale: skin.modelScale, scaleRange: scaleRange(skin) } : null;
           })).then((models) => {
             if (!pasting) return;
             pasteModels = models;
@@ -3492,7 +3492,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               const entry = { id: g.id, variation: g.variation ?? 0, position: [g.x, g.y, heightAt(terrain, g.x, g.y)] as [number, number, number], angle: g.angle, scale: [1, 1, 1] as [number, number, number], player: g.player };
               void loader.modelFor(skin, entry.variation).then((gpu) => {
                 if (req !== ghostReq) return;
-                renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType, skin)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
+                renderer.ghost = { gpu, world: placement(entry, skin.modelScale, drawnZ(entry, skin.moveType, skin), scaleRange(skin)), team: g.player !== undefined && g.player < TEAM_COLORS.length ? g.player : NEUTRAL, ok: g.ok };
                 redraw();
               }).catch(() => { renderer.ghost = null; redraw(); });
             },

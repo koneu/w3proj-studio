@@ -5,7 +5,7 @@
 import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
-import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
+import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
 import { compile, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
@@ -325,6 +325,8 @@ export interface PickInfo {
   model: string;
   /** Model scale on top of the placement's own (units' skin scale). */
   extraScale: number;
+  /** The scales it's drawn within (objects.ts scaleRange: a doodad type's minScale to maxScale); none: as stored. */
+  scaleRange?: readonly [number, number];
 }
 
 export interface ObjectInstance {
@@ -335,6 +337,9 @@ export interface ObjectInstance {
   sphere?: [number, number, number, number];
   /** The model's own bounding sphere [x, y, z, r], in model space: `sphere` is it placed by `world`. */
   bounds?: readonly [number, number, number, number];
+  /** Drawn with another instance (a doodad's click helper): `world` is the owner's world times `local`, made again
+   *  each frame, so it moves and turns with the owner. Such an instance has no `pick` of its own. */
+  follows?: { owner: ObjectInstance; local: Mat4 };
 }
 
 /** One model placed any number of times; `group` is a toggle name (e.g. "doodads"). */
@@ -549,6 +554,10 @@ export class TerrainRenderer {
     const byTeam = new Map<number, ObjectInstance[]>();
     let n = 0;
     for (const inst of b.instances) {
+      if (inst.follows) {
+        inst.world = mat4.mul(inst.follows.owner.world, inst.follows.local);
+        if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
+      }
       if (planes && inst.sphere && !sphereInView(planes, inst.sphere)) continue;
       let list = byTeam.get(inst.team);
       if (!list) byTeam.set(inst.team, (list = []));
