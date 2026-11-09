@@ -1809,6 +1809,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Every selectable placed object: those with a model and the strays. */
         const allInstances = (): Stray[] => [...renderer.batches.flatMap((b) => b.instances.map((inst) => ({ group: b.group, inst }))), ...strays];
+        /** Those a box or Select All can take: not the start locations while game view leaves them out. */
+        const shownInstances = (): Stray[] => (renderer.showEditorOnly ? allInstances()
+          : [...renderer.batches.filter((b) => !b.editorOnly).flatMap((b) => b.instances.map((inst) => ({ group: b.group, inst }))), ...strays.filter((s) => s.inst.pick?.id !== "sloc")]);
         const findInstance = (entry: Placed): ObjectInstance | null => {
           for (const b of renderer.batches) for (const inst of b.instances) if (inst.pick?.placed === entry) return inst;
           return strays.find((s) => s.inst.pick?.placed === entry)?.inst ?? null;
@@ -2308,7 +2311,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Every placed object with a model (the groups not hidden). */
         const allPlaced = (): { p: Placed; kind: string; id: string }[] => {
           const out: { p: Placed; kind: string; id: string }[] = [];
-          for (const { group, inst } of allInstances()) {
+          for (const { group, inst } of shownInstances()) {
             if ((group !== "doodads" && group !== "units") || renderer.hiddenGroups.has(group)) continue;
             if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
           }
@@ -3075,7 +3078,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Objects whose position projects into the canvas rectangle (CSS pixels). */
         const objectsInBox = (x0: number, y0: number, x1: number, y1: number): Placed[] =>
-          objectsInRect(allInstances(), (pos) => renderer.project(pos), renderer.hiddenGroups, boxKinds, x0, y0, x1, y1);
+          objectsInRect(shownInstances(), (pos) => renderer.project(pos), renderer.hiddenGroups, boxKinds, x0, y0, x1, y1);
 
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
