@@ -3572,10 +3572,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           frameCost: () => {
             const c = renderer.frameCost, out = { ...c };
-            c.frames = c.frameMs = c.poseMs = c.particleMs = 0;
+            c.frames = c.frameMs = c.poseMs = c.particleMs = c.waterMs = 0;
             return out;
           },
           sunShadows: () => ({ ...renderer.sunShadowState }),
+          waterDepth: () => ({ ...renderer.waterDepthState }),
           drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
             return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14] }] : [];
