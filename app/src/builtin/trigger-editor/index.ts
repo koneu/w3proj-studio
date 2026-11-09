@@ -14,7 +14,7 @@ import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ecaText, type DisplayContext } from "../../lib/triggers/display";
 import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
-import { addScriptTrigger, addVariable, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, exportedTriggers, mapFileName, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
 import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText } from "../../lib/script/triggers";
@@ -246,7 +246,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const view = await theView();
       const path = await w3.window.pickSaveFile({ title: "Export triggers", defaultPath: "triggers.wtg", filters: [{ name: "Triggers (.wtg)", extensions: ["wtg"] }] });
       if (!path) return;
-      await w3.backend.writeBytes(path, writeWtg(view.file));
+      await w3.backend.writeBytes(path, writeWtg(exportedTriggers(view.file, mapFileName(w3.workspace.project()?.default_output))));
       await w3.backend.writeBytes(path.replace(/\.wtg$/i, "") + ".wct", writeWct(view.customFile()));
       void w3.window.showInfo(`Exported ${textTriggers(view.file).length} triggers and ${view.file.variables.length} variables, with their .wct beside them.`);
     }),
@@ -271,7 +271,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await checkpointIfOn(w3, "Reset Triggers");
       // The editor closed or another opened during the question or the checkpoint: nothing happens.
       if (openView !== view) return false;
-      view.resetTriggers();
+      view.resetTriggers(mapFileName(w3.workspace.project()?.default_output));
       return true;
     }),
     // Adjust Map String IDs: a string of war3map.wts gets another number (`ids` [[from, to], …], else asked), or all are
@@ -762,9 +762,9 @@ class TriggerView {
   }
 
   /** Reset Triggers: the default trigger and nothing else (lib/triggers/defaults.ts resetTriggers), as one undo step. */
-  resetTriggers() {
+  resetTriggers(mapFile?: string) {
     this.edit("Reset triggers", () => {
-      const r = resetTriggers(this.file, this.customFile());
+      const r = resetTriggers(this.file, this.customFile(), mapFile);
       this.file = r.file;
       this.custom = r.custom;
       this.header = r.custom.header;

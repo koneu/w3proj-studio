@@ -25,6 +25,20 @@ function lines(ecas: Eca[], ctx: DisplayContext, depth: number): string[] {
 
 export const isScript = (t: TriggerItem) => t.type === 32 || t.isCustom;
 
+/** The project's map file name (its pack output's), which the World Editor gives the trigger tree's root. A chapter
+ *  map's project folder is named after its file ("Chapter.w3x", packed as "Chapter.w3x.w3x"): that name. */
+export function mapFileName(defaultOutput: string | undefined): string | undefined {
+  const name = defaultOutput?.split(/[\\/]/).pop() || undefined;
+  return name?.replace(/(\.w3[mx])\.w3x$/i, "$1");
+}
+
+/** The trigger file as Export Triggers writes it: as World Editor 3.0.1 exports (s.w3m, 2026-11-09), a Reforged file's
+ *  root is named after the map file. `file` stays as it is. */
+export function exportedTriggers(file: TriggerFile, mapFile: string | undefined): TriggerFile {
+  if (!file.reforged || !mapFile) return file;
+  return { ...file, items: file.items.map((i) => (i.type === 1 ? { ...i, name: mapFile } : i)) };
+}
+
 /** A trigger in script, last in its category (the first one by default); its text goes with it. */
 export function addScriptTrigger(file: TriggerFile, scripts: CustomTextFile, name: string, script: string, category?: string) {
   if (file.items.some((i) => i.name.toLowerCase() === name.toLowerCase())) throw new Error(`There's already something named "${name}".`);

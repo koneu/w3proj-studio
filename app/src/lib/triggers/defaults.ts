@@ -70,12 +70,15 @@ export function defaultTriggerFile(root?: string): TriggerFile {
 /**
  * The World Editor's Reset Triggers ("Clear all triggers and reset to default?") on `file`: the default trigger and
  * its category, no variables, and no map header script (`custom`'s comment and version are kept). A Reforged file
- * keeps its root's name and version, its counts start again as a new map's; a classic file (versions 4 and 7 before
- * Reforged) stays in its layout, with the category as index 0 and the trigger in it.
+ * keeps its version, its counts start again as a new map's; as World Editor 3.0.1 does (s.w3m reset and saved,
+ * 2026-11-09), its root is named after the map file (`mapFile`, else the root keeps its name) and the category is
+ * expanded. A classic file (versions 4 and 7 before Reforged) stays in its layout, with the category as index 0 and
+ * the trigger in it.
  */
-export function resetTriggers(file: TriggerFile, custom: CustomTextFile | null): { file: TriggerFile; custom: CustomTextFile } {
-  const root = file.items.find((i) => i.type === 1)?.name;
+export function resetTriggers(file: TriggerFile, custom: CustomTextFile | null, mapFile?: string): { file: TriggerFile; custom: CustomTextFile } {
+  const root = mapFile || file.items.find((i) => i.type === 1)?.name;
   const fresh = defaultTriggerFile(root);
+  for (const it of fresh.items) if (it.type === 4) it.expanded = 1;
   const header = parseWct(defaultWct(), 1);
   const texts = [null];
   const customOut: CustomTextFile = custom ? { ...custom, header: header.header, texts } : { ...header, reforged: file.reforged, texts };
