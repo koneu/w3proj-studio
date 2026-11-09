@@ -87,12 +87,25 @@ export function viewRays(eye: readonly number[], target: readonly number[], fov:
   ]));
 }
 
-/** The points of the ground in view (ViewGround), at most 15: on every ray, where it is at the highest and the lowest
- *  ground (or at its reach, where it doesn't get there), and the eye's own spot when it's above the map. */
+/** The points of the ground in view (ViewGround), 11: on every ray, where it is at the highest and the lowest ground (or
+ *  at its reach, where it doesn't get there), and the eye's own spot, all put inside the map; none when what's in view
+ *  is all off the map. */
 export function groundInView(v: ViewGround): Vec3[] {
   const [x0, y0, x1, y1] = v.rect;
   const clampXY = (p: Vec3): Vec3 => [Math.min(x1, Math.max(x0, p[0])), Math.min(y1, Math.max(y0, p[1])), p[2]];
   const out: Vec3[] = [];
+  // Where the rays meet the ground without the map's edge: a view of nothing but the ground off the map needs none.
+  let ux0 = Infinity, uy0 = Infinity, ux1 = -Infinity, uy1 = -Infinity;
+  for (const d of v.rays) {
+    for (const z of [v.zMin, v.zMax]) {
+      const t = Math.abs(d[2]) < 1e-9 ? v.reach : (z - v.eye[2]) / d[2];
+      const tt = t < 0 || !Number.isFinite(t) ? v.reach : Math.min(t, v.reach);
+      const x = v.eye[0] + d[0] * tt, y = v.eye[1] + d[1] * tt;
+      ux0 = Math.min(ux0, x); uy0 = Math.min(uy0, y); ux1 = Math.max(ux1, x); uy1 = Math.max(uy1, y);
+    }
+  }
+  ux0 = Math.min(ux0, v.eye[0]); uy0 = Math.min(uy0, v.eye[1]); ux1 = Math.max(ux1, v.eye[0]); uy1 = Math.max(uy1, v.eye[1]);
+  if (ux1 < x0 || uy1 < y0 || ux0 > x1 || uy0 > y1) return out;
   for (const d of v.rays) {
     const at = (t: number): Vec3 => [v.eye[0] + d[0] * t, v.eye[1] + d[1] * t, v.eye[2] + d[2] * t];
     // Where the ray is at height z, within [0, reach]; a ray that never gets there ends at its reach.
@@ -287,11 +300,15 @@ export class SunShadowMap {
   }
 }
 
-/** The whole fit for a frame:the sun's matrix for drawing the map, its lookup, and how big a texel is on the ground
+/** The whole fit for a frame (null when no ground of the map is in view): the sun's matrix for drawing the map, its
+ *  lookup, and how big a texel is on the ground
  *  (world units; the shaders' bias against a surface shadowing itself grows with it). */
 export function sunShadowFrame(sunDir: readonly number[], view: ViewGround, casterHeight: number, size: number) {
   const axes = sunAxes(sunDir);
-  const box = fitSunBox(axes, groundInView(view), casterHeight, size);
+  const ground = groundInView(view);
+  // Nothing of the map in view: no shadows to draw.
+  if (!ground.length) return null;
+  const box = fitSunBox(axes, ground, casterHeight, size);
   const viewProj = sunViewProj(axes, box);
   return { axes, box, viewProj, lookup: sunLookup(viewProj), texel: Math.max(box.right - box.left, box.top - box.bottom) / size };
 }

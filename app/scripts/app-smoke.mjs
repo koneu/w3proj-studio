@@ -1826,13 +1826,13 @@ async function viewCommands(page, fail, shots) {
   // HD with the map's lighting: the models' real shadows from the sun (the footman casts into the sun's shadow map).
   const hd = (await page.evaluate(`w3.settings.get("game.graphicsMode")`)) !== "sd";
   const lit = (await page.evaluate(`w3.settings.get("terrain.lighting.enabled")`)) !== false;
-  const sunOn = await page.evaluate(`window.__smokeEd.sunShadows()`);
+  const sunOn = (await state()).sunShadows;
   if (hd && lit && !(sunOn.drawn && sunOn.casters >= 1 && sunOn.texel > 0)) bad(`HD casts no real shadows next to the footman: ${JSON.stringify(sunOn)}`);
   const shadowsErr = await run("w3.terrain.toggleShadows");
   if (shadowsErr) bad(`w3.terrain.toggleShadows: ${shadowsErr}`);
   await sleep(300);
   const unshaded = await differ(close.plain, await picture("shadows-off"));
-  const sunOff = await page.evaluate(`window.__smokeEd.sunShadows()`);
+  const sunOff = (await state()).sunShadows;
   if (sunOff.drawn) bad(`the real shadows stayed after Toggle Shadows: ${JSON.stringify(sunOff)}`);
   if (unshaded < 150 + close.noise) bad(`Toggle Shadows changed only ${unshaded} pixels next to the footman`);
   if ((await shadowBox()) !== false) bad("the Shadows box stayed checked after Toggle Shadows");
@@ -2972,8 +2972,10 @@ async function graphicsModes(page, found) {
  *  when last recorded: backend reads, reads asked of the game service, textures made by the terrain view. One more
  *  each since HD emissive textures are drawn: the gold mine's Neutral_GoldMine_Emissive (branch render-fixes-4). Three
  *  more read and asked and two more textures since the view draws shadows (branch view-shadows): the shadow images
- *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. */
-const GAME_READS_RECORDED = { reads: 105, asked: 128, textures: 138 };
+ *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. Two more
+ *  textures since HD casts real shadows (branch hd-shadows): the sun's shadow map and the depth texture shaders read
+ *  without one. */
+const GAME_READS_RECORDED = { reads: 105, asked: 128, textures: 140 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);

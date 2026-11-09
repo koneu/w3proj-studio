@@ -97,7 +97,19 @@ test("the ground in view: the picture's corners on the ground, inside the map an
   assert.ok(mid[0][1] < 0 && mid[1][1] > 0, `${mid}`);
   // Seen from the sun the box is a few thousand across: at 2048 texels, a texel is a few units on the ground.
   const f = sunShadowFrame(CLIFF_SUN, view, 400, 2048);
-  assert.ok(f.texel > 1 && f.texel < 6, `texel ${f.texel}`);
+  assert.ok(f && f.texel > 1 && f.texel < 6, `texel ${f?.texel}`);
+});
+
+test("a view of nothing but the ground off the map casts no shadows (app-smoke's look at 40000, 40000)", () => {
+  const at = (x: number, y: number) => {
+    const target: Vec3 = [x, y, 0], eye: Vec3 = [x, y - 1500, 2300];
+    return { eye, rays: viewRays(eye, target, Math.PI / 4, 1.4), zMin: 0, zMax: 200, reach: 8000, rect: [-1024, -1024, 1024, 1024] as [number, number, number, number] };
+  };
+  assert.equal(groundInView(at(40000, 40000)).length, 0);
+  assert.equal(sunShadowFrame(CLIFF_SUN, at(40000, 40000), 800, 2048), null);
+  // The control: the same camera over the map, and over its edge, does.
+  assert.equal(groundInView(at(0, 0)).length, 11);
+  assert.ok(sunShadowFrame(CLIFF_SUN, at(1900, 0), 800, 2048), "the map's edge in view");
 });
 
 test("a camera looking along the ground reaches no farther than its reach, nor past the map", () => {
