@@ -909,7 +909,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           };
           return h("section.obj-section", {},
             h("h3", {}, title),
-            h("table.obj-table", {},
+            h("table.obj-table.obj-raw-table", {},
               h("tbody", {},
                 ...mods.map((m) =>
                   h("tr.modified", {},
@@ -1016,8 +1016,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const other = modLists(o).flatMap((l) => l.mods).filter((m) => !known.has(m));
           sections.push(rawTable(o, other, kd ? "Other modifications" : "Modifications"));
 
+          // The model preview stands beside the fields, not floated into them: a float pushed the first table under
+          // it (a gap under its heading) and gave the tables beside it a narrower value column than those below.
+          const fields = h("div.obj-fields", {}, ...sections);
           const parts: (HTMLElement | null)[] = [
-            preview && kd ? (preview.show(modelOf(o), looksOf(o)), preview.el) : null,
             h("div.obj-detail-header", {},
               h("h2", {}, nameOf(o) || "(unnamed)"),
               h("code", {}, o.id ? `${o.id} (based on ${o.base}${baseName(o) ? ` · ${stripColors(baseName(o))}` : ""})` : o.base),
@@ -1029,7 +1031,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               outsideToggle(`Outside limits${overCount ? ` (${overCount})` : ""}`),
               LEVEL_FIELD[kind] ? h("span.muted", {}, `${levelCount(o)} level${levelCount(o) === 1 ? "" : "s"}`) : null,
             ) : null,
-            ...sections,
+            preview && kd ? h("div.obj-detail-body", {}, (preview.show(modelOf(o), looksOf(o)), preview.el), fields) : fields,
           ];
           detailEl.replaceChildren(...parts.filter((p): p is HTMLElement => p !== null));
           detailEl.scrollTop = scroll;
