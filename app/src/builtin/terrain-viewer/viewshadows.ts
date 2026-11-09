@@ -33,8 +33,8 @@ export const SHADOW_LOOK = { baked: 0.35, stamp: 0.41, unit: 0.57, stampShift: [
  * The shadows of a graphics mode (tone.ts: 1 classic, 2 HD). The World Editor's HD view casts real shadows of the
  * models instead (a footman's shape, keeping about 0.66 under map 03's light; lighter than the lit ground under
  * cliff.w3m's shadow intensity 5.85), and draws no war3map.shd at all (cliff.w3m's cells: the same picture with View >
- * Shadows on and off). Until Studio casts those, HD shows the objects' shadows of the classic view in their place
- * (around where the models' fall, to the north-east) and leaves the baked map out.
+ * Shadows on and off). Studio casts those too (the terrain renderer's sun shadow map, lib/model/sunshadow.ts); HD keeps
+ * the classic objects' shadows here only for a GPU that can't draw the shadow map, and leaves the baked map out.
  */
 export function shadowLookFor(tone: number): typeof SHADOW_LOOK {
   return tone === 2 ? { ...SHADOW_LOOK, baked: 0 } : SHADOW_LOOK;

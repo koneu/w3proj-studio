@@ -1,5 +1,5 @@
 import { fogOf } from "../../lib/model/fog";
-import { toneOf } from "../../lib/model/tone";
+import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
@@ -62,7 +62,7 @@ import { loadSplatTable, planSplats, type SplatDef } from "./splats";
 import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
 import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
-import { lightAt } from "../../lib/model/dnclight";
+import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -1323,9 +1323,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           lightSelect.value = String(hour);
           lightSelect.disabled = !on;
           renderer.gameView = on;
-          renderer.terrainLight = on && lighting?.terrain ? lightAt(lighting.terrain, hour) : null;
+          // The game's own lighting models light HD's real shadows more than a map's own do (tone.ts GAME_LIGHT_FILL).
+          const filled = (l: SceneLight | null, own: boolean | undefined): SceneLight | null => (l && !own ? { ...l, fill: GAME_LIGHT_FILL } : l);
+          renderer.terrainLight = on && lighting?.terrain ? filled(lightAt(lighting.terrain, hour), lighting.own.terrain) : null;
           renderer.waterTint = lighting && lighting.flags & WATER_TINTING ? lighting.waterTint : null;
-          renderer.unitLight = on && lighting?.unit ? lightAt(lighting.unit, hour) : null;
+          renderer.unitLight = on && lighting?.unit ? filled(lightAt(lighting.unit, hour), lighting.own.unit) : null;
           redraw();
         };
         const showBoundary = () => w3.settings.get<boolean>("terrain.boundary", true) !== false;
@@ -3518,6 +3520,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             c.frames = c.frameMs = c.poseMs = c.particleMs = 0;
             return out;
           },
+          sunShadows: () => ({ ...renderer.sunShadowState }),
         };
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
         const carried = lastView?.key === viewKey ? lastView : null;

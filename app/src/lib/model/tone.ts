@@ -47,15 +47,77 @@ export function facing(n: readonly number[], l: readonly number[], wrap: number)
   return d + (1 - Math.max(0, l[2] / ln)) * wrap;
 }
 
+/**
+ * The HD view's shading in its real shadows (sunshadow.ts), against the lit shading (facing, shadeWrap): measured
+ * (we-drive, 2026-11-09) on a test map on cliff.w3m's flat ground under its lighting (sun 52° from straight up, at
+ * 06:00) with one value changed at a time, the light in a footman's and a gryphon's shadow over the editor's own light
+ * (the tone curve inverted per pixel, green):
+ * - with shadow intensity 0 the shadow is the ambient alone: black without ambient, 0.31 with ambient 0.2 whether the
+ *   sun's intensity is 1 or 1.95, where Studio's ambient is 0.17: `ambient` 1.87 times it, none of the sun's cosine;
+ * - the shadow intensity lifts the shadow about twice as much as the lit ground (2.05–2.55 times its (1 - z) per unit
+ *   over sun 1 and 1.95, ambient 0 and 0.2, shadow intensity 2; 1.98 at 5.85): `lift` 2.2. So the shadow is as light
+ *   as the lit ground at shadow intensity 1 (the editor's shadows all but vanish there), lighter above it: cliff.w3m's
+ *   5.85 gives shadows 1.64 times the lit ground's light (yellow on orange sand).
+ */
+export const SUN_SHADE = { ambient: 1.87, lift: 2.2 };
+
+/**
+ * The game's own HD lighting models (Environment\DNC\…, _HD.w3mod) give the real shadows a light of their own that a
+ * map's lighting model doesn't: map 03 (Lordaeron's HD models: no ambient, shadow intensity 0.27 and 0.35) keeps 0.51
+ * of the lit ground's light in a footman's shadow (green; red 0.49, blue 0.68), where the light model alone (SUN_SHADE)
+ * leaves 0.06; cliff.w3m's own models with no ambient leave black, also with the HD models' ambient -0.03 (we-drive,
+ * 2026-11-09). Added in shadow as this share of the lit light (sunLight).
+ */
+export const GAME_LIGHT_FILL = 0.45;
+
+/** The light at a point that gets `lit` of the sun, from the light lit (ambient + diffuse × facing) and in full shadow
+ *  (sunAmbient, sunFacing at 0, and the light's fill share of the lit light): between the two by `lit`. The shaders'
+ *  `sunLight` does the same per channel. */
+export function sunLight(ambient: number, diffuse: number, n: readonly number[], l: readonly number[], wrap: number, fill: number, lit: number): number {
+  const full = ambient + diffuse * facing(n, l, wrap);
+  const shade = ambient * sunAmbient(0) + diffuse * sunFacing(n, l, wrap, 0) + fill * full;
+  const v = Math.min(1, Math.max(0, lit));
+  return shade + (full - shade) * v;
+}
+
+/** facing() at a point that gets `lit` of the sun (1 lit, 0 in full shadow, between at the soft edge): no cosine in
+ *  shadow, the shadow intensity's lift SUN_SHADE.lift times stronger. The shaders' `sunFacing` does the same. */
+export function sunFacing(n: readonly number[], l: readonly number[], wrap: number, lit: number): number {
+  const ln = Math.hypot(l[0], l[1], l[2]) || 1, nn = Math.hypot(n[0], n[1], n[2]) || 1;
+  const d = Math.max(0, (n[0] * l[0] + n[1] * l[1] + n[2] * l[2]) / (ln * nn));
+  const v = Math.min(1, Math.max(0, lit));
+  return d * v + (1 - Math.max(0, l[2] / ln)) * wrap * (SUN_SHADE.lift + (1 - SUN_SHADE.lift) * v);
+}
+
+/** What the ambient light counts for at a point that gets `lit` of the sun: SUN_SHADE.ambient in full shadow, 1 lit.
+ *  The shaders' `sunAmbient` does the same. */
+export function sunAmbient(lit: number): number {
+  const v = Math.min(1, Math.max(0, lit));
+  return SUN_SHADE.ambient + (1 - SUN_SHADE.ambient) * v;
+}
+
 const glsl = (v: number) => v.toFixed(3);
 
 /** For fragment shaders: `toned(base, light)`, base an sRGB colour (a texture's), light the scene light on it,
  *  `tonedGlow(base, light, glow)` the same with a colour of its own added unlit (an HD emissive texture), and
- *  `facing(n, l)`, how much a surface of normal n gets of a light from l (as facing above). */
-export const TONE_FS = `uniform float uTone; uniform float uShadeWrap;
+ *  `facing(n, l)`, how much a surface of normal n gets of a light from l (as facing above), and `sunFacing(n, l, lit)`
+ *  and `sunAmbient(lit)` for a point that gets `lit` of the sun (as sunFacing and sunAmbient above), and
+ *  `sunLight(ambient, diffuse, n, l, lit)`, the light there (as sunLight above; uSunFill the light's fill). */
+export const TONE_FS = `uniform float uTone; uniform float uShadeWrap; uniform float uSunFill;
 float facing(vec3 n, vec3 l) {
   vec3 L = normalize(l);
   return max(dot(normalize(n), L), 0.0) + (1.0 - max(L.z, 0.0)) * uShadeWrap;
+}
+float sunFacing(vec3 n, vec3 l, float lit) {
+  vec3 L = normalize(l);
+  float v = clamp(lit, 0.0, 1.0);
+  return max(dot(normalize(n), L), 0.0) * v + (1.0 - max(L.z, 0.0)) * uShadeWrap * mix(${glsl(SUN_SHADE.lift)}, 1.0, v);
+}
+float sunAmbient(float lit) { return mix(${glsl(SUN_SHADE.ambient)}, 1.0, clamp(lit, 0.0, 1.0)); }
+vec3 sunLight(vec3 ambient, vec3 diffuse, vec3 n, vec3 l, float lit) {
+  vec3 full = ambient + diffuse * facing(n, l);
+  vec3 shade = ambient * sunAmbient(0.0) + diffuse * sunFacing(n, l, 0.0) + uSunFill * full;
+  return mix(shade, full, clamp(lit, 0.0, 1.0));
 }
 vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }
 vec3 linearToSrgb(vec3 c) {
@@ -77,6 +139,7 @@ vec3 toned(vec3 base, vec3 light) { return tonedGlow(base, light, vec3(0.0)); }`
 export function setTone(gl: WebGL2RenderingContext, where: (name: string) => WebGLUniformLocation | null, tone: Tone | undefined, light?: SceneLight | null) {
   gl.uniform1f(where("uTone"), tone ?? 0);
   gl.uniform1f(where("uShadeWrap"), shadeWrap(tone, light));
+  gl.uniform1f(where("uSunFill"), tone === 2 ? Math.max(0, light?.fill ?? 0) : 0);
 }
 
 /**
@@ -113,7 +176,7 @@ export function hdLight(l: SceneLight): SceneLight {
   const sun = Math.max(...l.diffuse) > 0;
   const ambient = (v: number) => (sun ? Math.max(0, v) : 1.24 * pow(v, 0.52));
   return {
-    dir: l.dir, shadow: l.shadow,
+    dir: l.dir, shadow: l.shadow, ...(l.fill !== undefined ? { fill: l.fill } : {}),
     diffuse: [pow(l.diffuse[0], 0.42), pow(l.diffuse[1], 0.42), pow(l.diffuse[2], 0.42)],
     ambient: [ambient(l.ambient[0]), ambient(l.ambient[1]), ambient(l.ambient[2])],
   };

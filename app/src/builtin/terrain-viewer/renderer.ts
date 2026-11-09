@@ -6,13 +6,17 @@ import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
 import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
-import { compile, INSTANCE_BYTES, mat4, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
+import { compile, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
-import { facing, hdLight, setTone, shadeWrap, TONE_FS, type Tone } from "../../lib/model/tone";
+import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
+import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunShadow } from "../../lib/model/sunshadow";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
+/** How much of HD water's colour a model's real shadow on it keeps: map 03's ships' shadows on its lake, 0.76, 0.64,
+ *  0.82 by channel (we-drive, 2026-11-09, the World Editor's HD view with View > Shadows on over off). */
+const WATER_SHADE = 0.74;
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
@@ -27,10 +31,10 @@ const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] 
 const GROUND_VS = `#version 300 es
 in vec3 aPos; in vec3 aNormal; in vec2 aLocal; in float aCell; in float aShade;
 uniform mat4 uViewProj; uniform float uExtended;
-out vec2 vUV; out vec3 vNormal; out float vShade; out vec2 vWorld;
+out vec2 vUV; out vec3 vNormal; out float vShade; out highp vec3 vWorld;
 ${FOG_VS}
 void main() {
-  vWorld = aPos.xy;
+  vWorld = aPos;
   int cell = int(aCell);
   bool ext = uExtended > 0.5;
   if (cell < 0) {
@@ -48,7 +52,7 @@ void main() {
 }`;
 const GROUND_FS = `#version 300 es
 precision mediump float;
-in vec2 vUV; in vec3 vNormal; in float vShade; in highp vec2 vWorld;
+in vec2 vUV; in vec3 vNormal; in float vShade; in highp vec3 vWorld;
 uniform sampler2D uTex;
 uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 // The ground's shadow map (one texel per 32 × 32 cell over uShadowRect: x, y, width, height): red the baked
@@ -58,13 +62,16 @@ uniform sampler2D uShadow; uniform highp vec4 uShadowRect; uniform vec2 uStampSh
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
+${SUN_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
-  highp vec2 at = (vWorld - uShadowRect.xy) / uShadowRect.zw;
+  highp vec2 at = (vWorld.xy - uShadowRect.xy) / uShadowRect.zw;
   float baked = texture(uShadow, at).r;
   float stamped = texture(uShadow, at - uStampShift).g;
   float dark = max(baked * uShadowDark.x, stamped * uShadowDark.y);
-  vec3 light = uAmbient + uDiffuse * facing(vNormal, uLightDir);
+  // HD: the models' real shadows from the sun (SUN_FS), which change the shading rather than darken the picture.
+  float lit = sunLit(vWorld, vNormal);
+  vec3 light = sunLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
   outColor = vec4(fogged(toned(c.rgb, light) * vShade * (1.0 - dark)), c.a);
 }`;
 
@@ -83,12 +90,12 @@ void main() { outColor = vColor; }`;
 const WATER_VS = `#version 300 es
 in vec3 aPos; in vec2 aUv; in float aDepth;
 uniform mat4 uViewProj;
-out vec2 vUv; out float vDepth;
+out vec2 vUv; out float vDepth; out highp vec3 vWorld;
 ${FOG_VS}
-void main() { vUv = aUv; vDepth = aDepth; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+void main() { vUv = aUv; vDepth = aDepth; vWorld = aPos; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const WATER_FS = `#version 300 es
 precision mediump float;
-in vec2 vUv; in float vDepth;
+in vec2 vUv; in float vDepth; in highp vec3 vWorld;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
 // The scene light on a flat surface (the map's water tint is in the ramp: waterRamp); uGrey 1: the
 // texture gives only its brightness (tinted water).
@@ -98,6 +105,7 @@ uniform vec3 uHdWater; uniform float uWaterBrightness;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
+${SUN_FS}
 void main() {
   const float minDepth = 10.0 / 128.0, deepLevel = 64.0 / 128.0, maxDepth = 72.0 / 128.0;
   vec4 c = vDepth <= deepLevel
@@ -110,7 +118,9 @@ void main() {
     // 0.75 at 38, 0.85 at 71 (as Studio's old ramp placed those depths), ((depth - 4) / 96)^0.4 within 0.06.
     float a = pow(clamp((vDepth * 128.0 - 4.0) / 96.0, 0.0, 1.0), 0.4) * t.a;
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
-    outColor = vec4(fogged(uHdWater * mix(1.0, ripple, 0.5)), a);
+    // The models' real shadows fall on the water too: map 03's ships' keep about 0.74 of its colour (we-drive).
+    float shade = mix(${WATER_SHADE.toFixed(3)}, 1.0, sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
+    outColor = vec4(fogged(uHdWater * mix(1.0, ripple, 0.5) * shade), a);
     return;
   }
   t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);
@@ -209,17 +219,23 @@ const WATER_DEFAULT: WaterLook = {
 const SPLAT_VS = `#version 300 es
 in vec3 aPos; in vec2 aUv;
 uniform mat4 uViewProj;
-out vec2 vUv;
+out vec2 vUv; out highp vec3 vWorld;
 ${FOG_VS}
-void main() { vUv = aUv; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+void main() { vUv = aUv; vWorld = aPos; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const SPLAT_FS = `#version 300 es
 precision mediump float;
-in vec2 vUv;
-uniform sampler2D uTex; uniform vec4 uColor; uniform vec3 uLight;
+in vec2 vUv; in highp vec3 vWorld;
+// uLight lit, uShadeLight in the sun's full shadow (HD's real shadows, SUN_FS).
+uniform sampler2D uTex; uniform vec4 uColor; uniform vec3 uLight; uniform vec3 uShadeLight;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
-void main() { vec4 c = texture(uTex, vUv) * uColor; outColor = vec4(fogged(toned(c.rgb, uLight)), c.a); }`;
+${SUN_FS}
+void main() {
+  vec4 c = texture(uTex, vUv) * uColor;
+  vec3 light = mix(uShadeLight, uLight, sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
+  outColor = vec4(fogged(toned(c.rgb, light)), c.a);
+}`;
 
 // Ground overlay: a texture spread over the map (one texel per 32×32 pathing
 // cell), e.g. the pathing editor's view.
@@ -332,10 +348,21 @@ export interface ObjectBatch {
   editorOnly?: boolean;
 }
 
+/** Whether a batch's objects cast HD's real shadows: not see-through previews, the shoreline's waves or the cliffs.
+ *  The World Editor's HD view casts nothing from cliffs, nor from the ground itself: cliff.w3m's picture is the same
+ *  with View > Shadows on and off (we-drive, 2026-11-09). */
+export function castsSunShadow(b: Pick<ObjectBatch, "group" | "instances" | "tint" | "followGround">): boolean {
+  return b.instances.length > 0 && !b.tint && !b.followGround && b.group !== "cliffs" && b.group !== "shoreline";
+}
+
 interface Mesh {
   vao: WebGLVertexArrayObject;
   count: number;
 }
+
+/** The sun's shadow map (HD): texels each way, how far above the ground in view a caster can stand and still be in
+ *  it (flying units, tall trees and buildings), and how far from the eye (in camera distances) shadows are drawn. */
+const SUN_MAP_SIZE = 2048, SUN_CASTER_HEIGHT = 800, SUN_REACH = 4;
 
 /** Texture slot of the tileset's blight (beyond any ground tile index). */
 export const BLIGHT_TEXTURE = 100;
@@ -379,6 +406,13 @@ export class TerrainRenderer {
   /** No shadow anywhere: what the ground samples without a shadow map. */
   private noShadow: WebGLTexture;
   private unitShadows: { texture: string; vao: WebGLVertexArrayObject; count: number }[] = [];
+  /** HD: the sun's shadow map of the models (sunshadow.ts), made on first use. */
+  private sunMap: SunShadowMap | null = null;
+  /** The last frame's: whether it cast the models' real shadows (HD, the map's lighting on, View > Shadows), how big a
+   *  texel of the shadow map was on the ground, and how many instances cast into it. For tests and measuring. */
+  readonly sunShadowState = { drawn: false, texel: 0, casters: 0 };
+  /** The ground's lowest and highest point (water included), for fitting the shadow map; null: worked out again. */
+  private heightRange: [number, number] | null = null;
   private overlayProg: WebGLProgram | null = null;
   private overlay: { vao: WebGLVertexArrayObject; count: number; pos: WebGLBuffer; tex: WebGLTexture } | null = null;
   /** The dark over the map's border: its own layer, as tools use the overlay. */
@@ -414,11 +448,12 @@ export class TerrainRenderer {
   }
 
   /** The light on a flat surface (normal straight up: water, building marks), shaded as the ground is
-   *  (shadeWrap); without the map's lighting the even light, 1. `sun` is already drawnLight's. */
-  private flatLight(sun: SceneLight | null): number[] {
+   *  (shadeWrap); without the map's lighting the even light, 1. `sun` is already drawnLight's; `lit` how much of the
+   *  sun gets there (0: in the real shadows' full shadow, see tone.ts sunLight). */
+  private flatLight(sun: SceneLight | null, lit = 1): number[] {
     if (!sun) return [1, 1, 1];
-    const up = facing([0, 0, 1], sun.dir, shadeWrap(this.tone, sun));
-    return [0, 1, 2].map((k) => sun.ambient[k] + sun.diffuse[k] * up);
+    const wrap = shadeWrap(this.tone, sun);
+    return [0, 1, 2].map((k) => sunLight(sun.ambient[k], sun.diffuse[k], [0, 0, 1], sun.dir, wrap, sun.fill ?? 0, lit));
   }
   /** Particle effects (fires, glows, …) of placed objects. */
   showEffects = true;
@@ -471,17 +506,21 @@ export class TerrainRenderer {
     this.batches.push(...next);
     // The instance buffers of batches that are gone go with them.
     const kept = new Set(next);
-    for (const [b, buf] of this.instanceBuffers) if (!kept.has(b)) { this.gl.deleteBuffer(buf.buffer); this.instanceBuffers.delete(b); }
+    for (const store of [this.instanceBuffers, this.sunInstanceBuffers]) {
+      for (const [b, buf] of store) if (!kept.has(b)) { this.gl.deleteBuffer(buf.buffer); store.delete(b); }
+    }
   }
 
   /** Per batch, a GPU buffer of the world matrices of its instances in view, filled at each frame. */
   private instanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
+  /** The same for the instances that cast into the sun's shadow map (in view of the sun, not of the camera). */
+  private sunInstanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
   /** Room to gather a batch's matrices before they're uploaded. */
   private instanceData = new Float32Array(16 * 1024);
 
   /** Fills a batch's instance buffer with its instances in view (all of them without `planes`), in runs
    *  of one player colour, and says what's where. */
-  private gatherInstances(b: ObjectBatch, planes: Float32Array | null): InstanceRuns {
+  private gatherInstances(b: ObjectBatch, planes: Float32Array | null, store = this.instanceBuffers): InstanceRuns {
     const gl = this.gl;
     const byTeam = new Map<number, ObjectInstance[]>();
     let n = 0;
@@ -493,8 +532,8 @@ export class TerrainRenderer {
       n++;
     }
     const runs: InstanceRuns["runs"] = [];
-    let entry = this.instanceBuffers.get(b);
-    if (!entry) this.instanceBuffers.set(b, (entry = { buffer: gl.createBuffer(), bytes: 0 }));
+    let entry = store.get(b);
+    if (!entry) store.set(b, (entry = { buffer: gl.createBuffer(), bytes: 0 }));
     if (!n) return { buffer: entry.buffer, runs };
     if (this.instanceData.length < n * 16) this.instanceData = new Float32Array(Math.max(n * 16, this.instanceData.length * 2));
     const data = this.instanceData;
@@ -581,6 +620,7 @@ export class TerrainRenderer {
   terrainChanged() {
     const gl = this.gl;
     this.setCliffTiles(this.cliffTiles, this.groundOverrides);
+    this.heightRange = null;
     for (const m of [this.water, this.wire]) this.freeVao(m.vao);
     this.water = this.buildWater();
     this.wire = this.buildWire();
@@ -1244,6 +1284,51 @@ export class TerrainRenderer {
     const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    const far = this.distance * 10;
+    const viewProj = mat4.mul(
+      mat4.perspective(this.fov, w / Math.max(1, h), Math.max(10, this.distance / 50), far),
+      mat4.lookAt(this.eye(), this.target, [0, 0, 1]),
+    );
+    const terrainLight = this.drawnLight(this.terrainLight), unitLight = this.drawnLight(this.unitLight);
+
+    // Placed objects in view, and (HD's real shadows) those that cast into it, posed before anything is drawn: the
+    // sun's shadow map is drawn first. Cliffs aren't culled: the ground they follow moves them up in the shader.
+    const planes = frustumPlanes(viewProj);
+    const gathered: [ObjectBatch, InstanceRuns][] = [];
+    for (const b of this.batches) {
+      if (!this.batchShown(b) || !b.instances.length) continue;
+      const list = this.gatherInstances(b, b.followGround ? null : planes);
+      if (list.runs.length) gathered.push([b, list]);
+    }
+    // Shadows fall from the units' sun (map 03's footmen's to the north-east, as its unit light, not to the east as its
+    // terrain light: we-drive), the ground's where the map has no unit light.
+    const sunFit = this.sunFit(w, h, unitLight ?? terrainLight);
+    const casting: [ObjectBatch, InstanceRuns][] = [];
+    if (sunFit) {
+      const sunPlanes = frustumPlanes(sunFit.viewProj);
+      for (const b of this.batches) {
+        if (!this.casts(b)) continue;
+        const list = this.gatherInstances(b, b.followGround ? null : sunPlanes, this.sunInstanceBuffers);
+        if (list.runs.length) casting.push([b, list]);
+      }
+    }
+    if (this.animate) {
+      const started = performance.now();
+      // Only what's in view moves: a model that only casts into it keeps the pose it was last seen in (a model never
+      // posed yet is, so its shadow isn't missing), which saves half a millisecond on GoldRush's trees.
+      this.poseAnimated(new Set([...gathered.map(([b]) => b), ...casting.filter(([b]) => b.gpu.fullPoses === 0).map(([b]) => b)]));
+      this.lastAnimFrame = performance.now();
+      this.frameCost.poseMs += this.lastAnimFrame - started;
+    }
+    const sun = sunFit ? this.drawSunMap(sunFit, casting) : null;
+    this.sunShadowState.drawn = !!sun;
+    this.sunShadowState.texel = sun ? sun.texel : 0;
+    this.sunShadowState.casters = sun ? casting.reduce((n, [, l]) => n + l.runs.reduce((k, r) => k + r.count, 0), 0) : 0;
+    const noSun = noSunTexture(gl);
+    // The classic view's objects' shadows (images and textures): in SD, and in HD only in place of real shadows that
+    // couldn't be drawn (a GPU without the shadow map). HD without the map's lighting has none at all, as the editor.
+    const standIns = this.tone !== 2 || (!sun && !!terrainLight);
+
     gl.viewport(0, 0, w, h);
     // Past the end of the fog there's nothing to see, so the background is the fog too. The fog counts from
     // the eye as in the game, also from further out than the game's camera: zoomed out, a near fog covers
@@ -1257,12 +1342,6 @@ export class TerrainRenderer {
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.CULL_FACE);
-
-    const far = this.distance * 10;
-    const viewProj = mat4.mul(
-      mat4.perspective(this.fov, w / Math.max(1, h), Math.max(10, this.distance / 50), far),
-      mat4.lookAt(this.eye(), this.target, [0, 0, 1]),
-    );
 
     // The sky: behind everything, around the camera, as far as the view reaches.
     if (this.sky && this.showSky) {
@@ -1280,8 +1359,8 @@ export class TerrainRenderer {
     gl.useProgram(this.groundProg);
     setFog(gl, (name) => gl.getUniformLocation(this.groundProg, name), fog);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.groundProg, "uViewProj"), false, viewProj);
-    const terrainLight = this.drawnLight(this.terrainLight), unitLight = this.drawnLight(this.unitLight);
     const groundLight = terrainLight ?? GROUND_DEFAULT;
+    setSunShadow(gl, (name) => gl.getUniformLocation(this.groundProg, name), sun, noSun);
     setTone(gl, (name) => gl.getUniformLocation(this.groundProg, name), this.tone, groundLight);
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uLightDir"), groundLight.dir);
     gl.uniform3fv(gl.getUniformLocation(this.groundProg, "uDiffuse"), groundLight.diffuse);
@@ -1295,7 +1374,8 @@ export class TerrainRenderer {
     gl.uniform4f(gl.getUniformLocation(this.groundProg, "uShadowRect"), tr.offsetX, tr.offsetY, (tr.width - 1) * 128, (tr.height - 1) * 128);
     const look = this.shadowLook;
     gl.uniform2f(gl.getUniformLocation(this.groundProg, "uStampShift"), look.stampShift[0] / ((tr.width - 1) * 128), look.stampShift[1] / ((tr.height - 1) * 128));
-    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uShadowDark"), shadowMap ? look.baked : 0, shadowMap ? look.stamp : 0);
+    // The real shadows take the objects' shadow images' place (they stand in for them without a shadow map).
+    gl.uniform2f(gl.getUniformLocation(this.groundProg, "uShadowDark"), shadowMap ? look.baked : 0, shadowMap && standIns ? look.stamp : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -1337,8 +1417,10 @@ export class TerrainRenderer {
       gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.splatProg, "uTex"), 0);
       setTone(gl, (name) => gl.getUniformLocation(this.splatProg, name), this.tone);
-      const lit = this.flatLight(terrainLight);
+      setSunShadow(gl, (name) => gl.getUniformLocation(this.splatProg, name), sun, noSun);
+      const lit = this.flatLight(terrainLight), shade = this.flatLight(terrainLight, 0);
       gl.uniform3f(gl.getUniformLocation(this.splatProg, "uLight"), lit[0], lit[1], lit[2]);
+      gl.uniform3f(gl.getUniformLocation(this.splatProg, "uShadeLight"), shade[0], shade[1], shade[2]);
       gl.activeTexture(gl.TEXTURE0);
       gl.enable(gl.BLEND);
       gl.depthMask(false);
@@ -1357,9 +1439,11 @@ export class TerrainRenderer {
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
 
-    // The units' shadows: the ground under them darkened by the texture's alpha.
-    if (this.showShadows && this.unitShadows.length && !this.hiddenGroups.has("units")) {
+    // The units' shadows: the ground under them darkened by the texture's alpha. Not with the real shadows (HD), whose
+    // stand-ins they are.
+    if (this.showShadows && standIns && this.unitShadows.length && !this.hiddenGroups.has("units")) {
       gl.useProgram(this.splatProg);
+      setSunShadow(gl, (name) => gl.getUniformLocation(this.splatProg, name), null, noSun);
       setFog(gl, (name) => gl.getUniformLocation(this.splatProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.splatProg, "uTex"), 0);
@@ -1382,27 +1466,14 @@ export class TerrainRenderer {
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
 
-    // Placed objects: every opaque layer, then every blended one; each model once per layer for all
-    // its instances in view. Cliffs aren't culled: the ground they follow moves them up in the shader.
-    const planes = frustumPlanes(viewProj);
-    const gathered: [ObjectBatch, InstanceRuns][] = [];
-    for (const b of this.batches) {
-      if (!this.batchShown(b) || !b.instances.length) continue;
-      const list = this.gatherInstances(b, b.followGround ? null : planes);
-      if (list.runs.length) gathered.push([b, list]);
-    }
-    if (this.animate) {
-      const started = performance.now();
-      this.poseAnimated(new Set(gathered.map(([b]) => b)));
-      this.lastAnimFrame = performance.now();
-      this.frameCost.poseMs += this.lastAnimFrame - started;
-    }
+    // Placed objects (gathered and posed above): every opaque layer, then every blended one; each model once per layer
+    // for all its instances in view.
     for (const pass of ["opaque", "blended"] as const) {
       for (const [b, list] of gathered) {
         const light = (b.group === "units" ? unitLight : terrainLight) ?? undefined;
         // A see-through batch is blended whole, after everything opaque (which then shows through it).
         if (b.tint && pass === "opaque") continue;
-        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone });
+        b.gpu.drawInstances(viewProj, list, { pass: b.tint ? "all" : pass, heightMap: b.followGround ? this.heightMap : undefined, light, fog, tint: b.tint, tone: this.tone, sun });
       }
     }
     if (this.showEffects || this.showWeather) {
@@ -1442,6 +1513,7 @@ export class TerrainRenderer {
       const look = this.waterLook, frame = this.waterFrame();
       this.waterFrameShown = frame;
       gl.useProgram(this.waterProg);
+      setSunShadow(gl, (name) => gl.getUniformLocation(this.waterProg, name), sun, noSun);
       setFog(gl, (name) => gl.getUniformLocation(this.waterProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.waterProg, "uViewProj"), false, viewProj);
       gl.uniform1i(gl.getUniformLocation(this.waterProg, "uTex"), 0);
@@ -1478,6 +1550,53 @@ export class TerrainRenderer {
     gl.bindVertexArray(null);
   }
 
+  /** Whether a batch casts into the sun's shadow map: one that's drawn and castsSunShadow. */
+  private casts(b: ObjectBatch): boolean {
+    return castsSunShadow(b) && this.batchShown(b);
+  }
+
+  /** The ground's lowest and highest point, water included. */
+  private groundRange(): [number, number] {
+    let lo = Infinity, hi = -Infinity;
+    const t = this.terrain;
+    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+      const c = this.corner(x, y), z = c.height + rampLift(t, x, y);
+      lo = Math.min(lo, z); hi = Math.max(hi, z, c.hasWater ? c.water : -Infinity);
+    }
+    return lo <= hi ? [lo, hi] : [0, 0];
+  }
+
+  /**
+   * The sun's shadow map for this frame, fitted to the view (sunshadow.ts), or null where the World Editor casts no
+   * real shadows: they're HD's (its classic view has war3map.shd and the stand-in images instead), need the map's
+   * lighting (with View > Lighting off the editor's HD view has none, we-drive 2026-11-09), View > Shadows, the
+   * textured ground, and something to cast.
+   */
+  private sunFit(w: number, h: number, light: SceneLight | null) {
+    if (this.tone !== 2 || !this.showShadows || !light || this.groundLook !== "textured" || this.gl.isContextLost()) return null;
+    if (!this.batches.some((b) => this.casts(b))) return null;
+    const eye = this.eye(), t = this.terrain;
+    const [zMin, zMax] = (this.heightRange ??= this.groundRange());
+    return sunShadowFrame(light.dir, {
+      eye, rays: viewRays(eye, this.target, this.fov, w / Math.max(1, h)), zMin, zMax, reach: this.distance * SUN_REACH,
+      rect: [t.offsetX, t.offsetY, t.offsetX + (t.width - 1) * 128, t.offsetY + (t.height - 1) * 128],
+    }, SUN_CASTER_HEIGHT, SUN_MAP_SIZE);
+  }
+
+  /** Draws what casts into the sun's shadow map: depth only, pushed back a little against a surface shadowing itself. */
+  private drawSunMap(fit: NonNullable<ReturnType<TerrainRenderer["sunFit"]>>, casting: [ObjectBatch, InstanceRuns][]): SunShadow | null {
+    const gl = this.gl;
+    this.sunMap ??= new SunShadowMap(gl, SUN_MAP_SIZE);
+    if (!this.sunMap.begin()) return null;
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(1.5, 3);
+    for (const [b, list] of casting) b.gpu.drawInstances(fit.viewProj, list, { shadowPass: true, heightMap: b.followGround ? this.heightMap : undefined });
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    return this.sunMap.end(fit.lookup, fit.texel);
+  }
+
   /** Grid lines over the ground; the larger the cell, the stronger the line. */
   private drawGrid(viewProj: Mat4) {
     const gl = this.gl, t = this.terrain;
@@ -1499,6 +1618,8 @@ export class TerrainRenderer {
   }
 
   dispose() {
+    this.sunMap?.dispose();
+    this.sunMap = null;
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

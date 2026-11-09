@@ -1823,10 +1823,17 @@ async function viewCommands(page, fail, shots) {
   // toolbar box follows the command.
   const shadowBox = () => page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Shadows")?.querySelector("input")?.checked ?? null`);
   if ((await shadowBox()) !== true) bad(`the Shadows box isn't checked at first (${await shadowBox()})`);
+  // HD with the map's lighting: the models' real shadows from the sun (the footman casts into the sun's shadow map).
+  const hd = (await page.evaluate(`w3.settings.get("game.graphicsMode")`)) !== "sd";
+  const lit = (await page.evaluate(`w3.settings.get("terrain.lighting.enabled")`)) !== false;
+  const sunOn = await page.evaluate(`window.__smokeEd.sunShadows()`);
+  if (hd && lit && !(sunOn.drawn && sunOn.casters >= 1 && sunOn.texel > 0)) bad(`HD casts no real shadows next to the footman: ${JSON.stringify(sunOn)}`);
   const shadowsErr = await run("w3.terrain.toggleShadows");
   if (shadowsErr) bad(`w3.terrain.toggleShadows: ${shadowsErr}`);
   await sleep(300);
   const unshaded = await differ(close.plain, await picture("shadows-off"));
+  const sunOff = await page.evaluate(`window.__smokeEd.sunShadows()`);
+  if (sunOff.drawn) bad(`the real shadows stayed after Toggle Shadows: ${JSON.stringify(sunOff)}`);
   if (unshaded < 150 + close.noise) bad(`Toggle Shadows changed only ${unshaded} pixels next to the footman`);
   if ((await shadowBox()) !== false) bad("the Shadows box stayed checked after Toggle Shadows");
   await run("w3.terrain.toggleShadows");

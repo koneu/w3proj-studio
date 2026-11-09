@@ -158,6 +158,9 @@ export interface TerrainEditorHandle {
   /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
    *  the placed models in it, and the particles. For measuring (app-drive's --frame-cost). */
   frameCost(): { frames: number; frameMs: number; poseMs: number; particleMs: number };
+  /** The last frame's real shadows (HD): whether they were cast, how big a texel of the sun's shadow map was on the
+   *  ground (world units), and how many objects cast into it. For tests and measuring. */
+  sunShadows(): { drawn: boolean; texel: number; casters: number };
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore

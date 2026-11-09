@@ -271,6 +271,24 @@ How Studio follows that, and the numbers, are in `viewshadows.ts` (SHADOW_LOOK, 
 buildings, units, trees and a barrel on cliff.w3m's flat ground (made with the release CLI, unpack, JSON, pack) was
 what told the parts apart.
 
+**HD's real shadows** (branch hd-shadows, 2026-11-09; we-drive HD, Shadows on over off, `--game-view` on and off give
+the same shadows): the models' own shapes from the sun, on the ground, on water and on the models; none from cliffs
+or the ground (cliff.w3m: the same picture), and none at all with View > Lighting off. They fall from the units' sun
+(map 03's footmen's to the north-east, as its unit light; the terrain light's is east). How light they are depends on
+the lighting model, not a fixed darkness: the test map above (`lab.w3m`) with cliff.w3m's lighting files changed one
+value at a time gave black shadows without ambient and shadow intensity, shadows as light as the lit ground at shadow
+intensity 1, and lighter above (5.85: yellow on orange sand); the game's own HD lighting keeps about half the light
+(map 03's footmen 0.68 of the colour). The fit is in tone.ts (SUN_SHADE, GAME_LIGHT_FILL, sunLight), the shadow map in
+lib/model/sunshadow.ts. Against Studio's HD pictures (`--compare-ready lit`, the same looks, Shadows on over off), the
+shadow's light over the lit ground (green) was 1.56 / 1.32 / 1.30 in the editor on the test map's three looks, 0.71 /
+0.71 / 0.69 with the stand-ins before and 1.35 / 1.29 / 1.32 now; map 03's footmen 0.68, 0.62, 0.64; TwistedMeadows'
+trees 0.73, none, 0.60. The overlap of the shadows (pixels that change with Shadows, both pictures; the editor's
+include its animated models) went from 0.05–0.27 to 0.12–0.63 on the test map, 0.16–0.21 to 0.25 on map 03, 0.01 to
+0.13 on TwistedMeadows; the whole picture's mean difference hardly moves (shadows are a small part of it: 10.9 → 10.5,
+14.5 → 13.8, 13.7 → 11.8 on the test map, map 03 and TwistedMeadows within 0.2). The editor's gryphon flies, and its
+shadow with it: Studio draws flying units on the ground. `app-drive --frame-cost` reports the last frame's real
+shadows (`sunShadows`).
+
 **Fire and particle colours in HD** (branch render-fixes-4, 2026-11-09, a test map with AObr, ZObz, LObr, OOgr, ZZdt,
 AOob and AOnt in a row, the editor in SD and HD): the particle colours are read right (red, green, blue): the
 editor's classic view shows the same yellow-green fire on ZObz and the same faint green-yellow haze over the grate
