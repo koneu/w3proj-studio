@@ -15,6 +15,15 @@ test("listKey: the World Editor's keys for its list items, with their modifiers 
   }
 });
 
+test("listKey: WebKitGTK's Ctrl+Shift+Tab (key Unidentified, code Tab) is Select Previous", () => {
+  const gtk = (mods: Partial<{ ctrlKey: boolean; shiftKey: boolean; altKey: boolean }>) => ({ ...key("Unidentified", mods), code: "Tab" });
+  assert.equal(listKey(gtk({ ctrlKey: true, shiftKey: true })), "previous");
+  assert.equal(listKey({ ...key("Unidentified", { ctrlKey: true }), code: "PageDown" }), "down");
+  // Control: without Ctrl, or with another physical key, it's nothing.
+  assert.equal(listKey(gtk({ shiftKey: true })), null);
+  assert.equal(listKey({ ...key("Unidentified", { ctrlKey: true, shiftKey: true }), code: "KeyQ" }), null);
+});
+
 test("stepInList: next and previous go round; with nothing selected the first or the last", () => {
   const l = ["a", "b", "c"];
   assert.equal(stepInList(l, "a", 1), "b");

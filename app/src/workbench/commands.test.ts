@@ -3,6 +3,15 @@ import { test } from "node:test";
 import { CommandService, ownsChord } from "./commands";
 import { OWN_CHORDS } from "../builtin/terrain-viewer/viewmodes";
 
+test("a chord WebKitGTK gives as key Unidentified is read from the physical key", () => {
+  const ev = (key: string, code: string, shift: boolean) => ({ key, code, ctrlKey: true, metaKey: false, altKey: false, shiftKey: shift }) as KeyboardEvent;
+  assert.equal(CommandService.chord(ev("Unidentified", "Tab", true)), "ctrl+shift+tab");
+  assert.equal(CommandService.chord(ev("Unidentified", "KeyZ", true)), "ctrl+shift+z");
+  // Control: a key the webview names stays its own.
+  assert.equal(CommandService.chord(ev("Tab", "Tab", false)), "ctrl+tab");
+  assert.equal(CommandService.chord(ev("P", "KeyP", true)), "ctrl+shift+p");
+});
+
 test("the terrain view's Ctrl View keys are kept from the workbench while it has the keyboard, as the workbench writes them", () => {
   // Written as the workbench's own chord of the key event, else it wouldn't let them through.
   const ev = (k: string, ctrl: boolean, shift: boolean) => ({ key: k, ctrlKey: ctrl, metaKey: false, altKey: false, shiftKey: shift }) as KeyboardEvent;

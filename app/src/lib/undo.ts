@@ -5,6 +5,8 @@
 // Consecutive commits with the same `group` (typing in one field) stay one step. Dirty is
 // "differs from the saved snapshot", so undoing back to the saved state is clean again.
 
+import { keyOf } from "./keys";
+
 export class History {
   private undoStack: string[] = [];
   private redoStack: string[] = [];
@@ -56,7 +58,7 @@ export function bindUndoKeys(el: HTMLElement, undo: () => void, redo: () => void
   if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
   const onKey = (e: KeyboardEvent) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-    const k = e.key.toLowerCase();
+    const k = keyOf(e).toLowerCase();
     const isUndo = k === "z" && !e.shiftKey, isRedo = k === "y" || (k === "z" && e.shiftKey);
     if (!isUndo && !isRedo) return;
     const t = e.target as HTMLElement;
