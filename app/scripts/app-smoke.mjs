@@ -1415,6 +1415,95 @@ async function flyingHeights(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
+ *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
+ *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
+async function cameraEditing(page, found) {
+  const fail = (what) => found.push(`camera editing: ${what}`);
+  const k = await heightKit(page, "CameraEditing");
+  const TXT = "map/war3map.w3e.txt", SHIFT = 8;
+  const cameras = () => k.read("war3map.w3c.json").cameras ?? [];
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`);
+  const view = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(${JSON.stringify(TXT)})?.state().camera ?? null)()`);
+  const button = (label) => page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-group-tools button")].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return "missing"; b.click(); return "clicked"; })()`);
+  /** A camera field (its label: X, Y, Dist, …): its input, given a value and the event. */
+  const field = (label) => `[...document.querySelectorAll(".terrain-camera-field")].find((l) => l.firstChild?.textContent === ${JSON.stringify(label)})?.querySelector("input")`;
+  const type = (label, value, event) => page.evaluate(`(() => { const i = ${field(label)}; if (!i) return false; i.value = ${JSON.stringify(String(value))}; i.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); return true; })()`);
+  const shown = (label) => page.evaluate(`${field(label)}?.value ?? null`);
+  const clickAt = async (x, y, modifiers = 0) => {
+    await k.look(x, y);
+    await sleep(300);
+    const c = await k.hands.where(".model-stage canvas");
+    await k.hands.mouse("mouseMoved", c.x, c.y, 0, modifiers);
+    await k.hands.click(".model-stage canvas", null, modifiers);
+    await sleep(200);
+  };
+
+  await k.tab("Cameras");
+  await k.look(0, 0);
+  await sleep(300);
+  if ((await button("Create from view")) === "missing") return fail("no Create from view button");
+  await k.look(1024, 0);
+  await sleep(300);
+  await button("Create from view");
+  await k.save();
+  const made = cameras();
+  if (made.length !== 2) return fail(`two cameras made from views gave ${made.length}`);
+  const [a, b] = made;
+  if (Math.abs(a.targetX - b.targetX) < 500) return fail(`the two cameras aren't apart (control): ${a.targetX}, ${b.targetX}`);
+
+  // Several at once: a click, then a Shift+click.
+  await clickAt(a.targetX, a.targetY);
+  await clickAt(b.targetX, b.targetY, SHIFT);
+  const count = await page.evaluate(`document.querySelector(".terrain-camera-count")?.textContent ?? ""`);
+  if (count !== "2 cameras") return fail(`a click and a Shift+click on two cameras selected "${count}"`);
+  if ((await shown("X")) !== "") fail(`the X field shows "${await shown("X")}" for two cameras with different X`);
+  if ((await shown("AoA")) !== String(Math.round(a.angleOfAttack * 100) / 100)) fail(`the shared angle of attack shows "${await shown("AoA")}", not ${a.angleOfAttack}`);
+  await type("Dist", 2222, "change");
+  await k.save();
+  const both = cameras();
+  if (both.some((c) => c.distance !== 2222)) fail(`a distance typed for two cameras gave ${both.map((c) => c.distance).join(", ")}`);
+  if (both[0].targetX !== a.targetX || both[1].targetX !== b.targetX) fail("setting the distance for two cameras changed their X");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await k.save();
+  if (cameras().map((c) => c.distance).join() !== [a.distance, b.distance].join()) fail(`one undo of the shared distance left ${cameras().map((c) => c.distance).join(", ")}`);
+
+  // Duplicate the two (still selected after the undo): two copies with new names, one step.
+  if ((await page.evaluate(`document.querySelector(".terrain-camera-count")?.textContent ?? ""`)) !== "2 cameras") fail("the undo didn't keep the two cameras selected");
+  if ((await button("Duplicate")) === "missing") return fail("no Duplicate button");
+  await k.save();
+  const four = cameras();
+  if (four.length !== 4) fail(`Duplicate of two cameras gave ${four.length} cameras`);
+  else {
+    if (new Set(four.map((c) => c.name)).size !== 4) fail(`the copies' names aren't new: ${four.map((c) => c.name).join(", ")}`);
+    const same = (x, y) => JSON.stringify({ ...x, name: "" }) === JSON.stringify({ ...y, name: "" });
+    if (!same(four[2], four[0]) || !same(four[3], four[1])) fail(`the copies differ from their cameras: ${JSON.stringify(four[2])} / ${JSON.stringify(four[0])}`);
+  }
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await k.save();
+  if (cameras().length !== 2) fail(`one undo of Duplicate left ${cameras().length} cameras`);
+  if (await dirty()) fail("unsaved after saving the undone Duplicate");
+
+  // Live: a value typed for one camera shows through it before it's an edit. Clicking it (which changes the panel above
+  // the map from two cameras' to one's) is no edit either: it once moved the camera by the panel's height.
+  await clickAt(a.targetX, a.targetY);
+  if (await dirty()) fail(`a click selecting a camera made an edit: ${JSON.stringify(cameras().map((c) => [c.targetX, c.targetY]))}`);
+  const before = await view();
+  await type("Dist", 3333, "input");
+  await sleep(300);
+  const live = await view();
+  if (!live || Math.abs(live.distance - 3333) > 1) fail(`typing a distance didn't show it in the view: ${JSON.stringify(live)} (before ${JSON.stringify(before)})`);
+  if (live && Math.abs(live.target[0] - a.targetX) > 1) fail(`the live view isn't through the camera: target ${live.target}`);
+  if (await dirty()) fail("a value being typed is already an edit");
+  await type("Dist", 3333, "change");
+  if (!(await dirty())) fail("the value, entered, isn't an edit");
+  await k.save();
+  if (cameras()[0].distance !== 3333) fail(`the entered distance saved as ${cameras()[0].distance}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
  *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past the levels the map
  *  can have is refused with nothing changed, and undoing gives every file back byte for byte. */
@@ -4122,7 +4211,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, flyingHeights, wholeMapGround, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -4207,6 +4296,7 @@ async function run() {
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
     await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
+    await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));

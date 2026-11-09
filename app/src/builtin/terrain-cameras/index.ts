@@ -2,7 +2,9 @@
 // a tool group of the terrain editor (service "w3.terrain"). Cameras are
 // created from the current view and previewed through it; on the map each
 // shows its target, its eye and the field of view. Drag the target to move a
-// camera, the eye to turn it and change its distance.
+// camera, the eye to turn it and change its distance. Shift+click selects several:
+// the panel then edits what they share; Duplicate copies the selected. A value
+// being typed shows through its camera at once, and is an edit once entered.
 // The file goes through the format engine ("cameras" definition).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
@@ -72,7 +74,10 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let doc: CamerasDoc = { version: 3, cameras: [] };
   /** Kept as map/war3map.w3c.json (else the raw file, through the backend). */
   let asJson = true, unsaved = false, active = false;
+  /** The selected cameras (Shift+click adds or takes one away); the last is the one dragged, viewed and previewed. */
+  let selection: Camera[] = [];
   let selected: Camera | null = null;
+  const select = (cams: Camera[]) => { selection = cams; selected = cams.at(-1) ?? null; };
   /** Looking through a camera: the markers are hidden until the next click on the map. */
   let previewing = false;
 
@@ -119,29 +124,38 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (!active) return;
     count.textContent = `${doc.cameras.length} cameras`;
     if (previewing) { ed.setGroundOverlay(null); ed.setLabels(null); return; }
-    // The selected camera last, so it lies over the others.
-    const order = [...doc.cameras].sort((a, b) => Number(a === selected) - Number(b === selected));
-    const rgba = cameraColors(order, W, H, t.offsetX, t.offsetY, (c) => (c === selected ? SELECTED_LOOK : EDITOR_LOOK));
+    // The selected cameras last, so they lie over the others.
+    const picked = new Set<unknown>(selection);
+    const order = [...doc.cameras].sort((a, b) => Number(picked.has(a)) - Number(picked.has(b)));
+    const rgba = cameraColors(order, W, H, t.offsetX, t.offsetY, (c) => (picked.has(c) ? SELECTED_LOOK : EDITOR_LOOK));
     ed.setGroundOverlay(rgba, W, H);
     ed.setLabels(doc.cameras.map((c) => ({ x: c.targetX, y: c.targetY, text: c.name })));
   };
 
   // ---- undo --------------------------------------------------------------------------
-  const commit = (before: Camera[], after: Camera[], select: Camera | null) => {
-    const set = (v: Camera[], sel: Camera | null) => { doc.cameras = v; selected = sel; unsaved = true; renderPanel(); render(); };
-    set(after, select);
-    const at = select ? after.indexOf(select) : -1;
-    ed.pushEdit({ undo: () => set(before, before[at] ?? null), redo: () => set(after, after[at] ?? null), terrain: false, objects: false });
+  /** Puts a new list of cameras in place as one undo step, with `chosen` (cameras of `after`) selected; undo selects
+   *  the same places in `before`. */
+  const commit = (before: Camera[], after: Camera[], chosen: Camera[]) => {
+    const set = (v: Camera[], sel: Camera[]) => { doc.cameras = v; select(sel); unsaved = true; renderPanel(); render(); };
+    set(after, chosen);
+    const at = chosen.map((c) => after.indexOf(c));
+    const pick = (list: Camera[]) => at.map((i) => list[i]).filter((c): c is Camera => !!c);
+    ed.pushEdit({ undo: () => set(before, pick(before)), redo: () => set(after, pick(after)), terrain: false, objects: false });
   };
-  /** Changes one camera (by copy) as an undo step. */
+  /** Changes cameras (by copy) as one undo step; they stay selected. */
+  const updateAll = (cams: Camera[], change: Partial<Camera> | ((c: Camera) => Partial<Camera>)) => {
+    const copies = new Map(cams.map((c) => [c, names.copy(c, { ...structuredClone(c), ...(typeof change === "function" ? change(c) : change) })]));
+    const after = doc.cameras.map((x) => copies.get(x) ?? x);
+    commit(doc.cameras, after, selection.map((c) => copies.get(c) ?? c).filter((c) => after.includes(c)));
+  };
+  /** Changes one camera (by copy) as an undo step, and selects it alone. */
   const update = (c: Camera, change: Partial<Camera>) => {
     const copy = names.copy(c, { ...structuredClone(c), ...change });
-    commit(doc.cameras, doc.cameras.map((x) => (x === c ? copy : x)), copy);
+    commit(doc.cameras, doc.cameras.map((x) => (x === c ? copy : x)), [copy]);
   };
-  const uniqueName = () => {
-    const names = new Set(doc.cameras.map((c) => c.name));
-    let i = doc.cameras.length + 1;
-    while (names.has(`Camera ${String(i).padStart(3, "0")}`)) i++;
+  const uniqueName = (taken = new Set(doc.cameras.map((c) => c.name))) => {
+    let i = taken.size + 1;
+    while (taken.has(`Camera ${String(i).padStart(3, "0")}`)) i++;
     return `Camera ${String(i).padStart(3, "0")}`;
   };
   const create = () => {
@@ -150,9 +164,23 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       targetX: 0, targetY: 0, zOffset: 0, rotation: 90, angleOfAttack: 304, distance: 1650, roll: 0, fieldOfView: 70, nearZ: 100,
       ...v, farZ: Math.max(5000, Math.round((v.distance ?? 0) + 3000)), name: uniqueName(),
     };
-    commit(doc.cameras, [...doc.cameras, c], c);
+    commit(doc.cameras, [...doc.cameras, c], [c]);
   };
-  const preview = (c: Camera) => { previewing = true; render(); ed.setView(toView(c)); ed.focus(); };
+  /** Duplicate: a copy of each selected camera with every value but its name (a new one, as Create gives), after the
+   *  originals; the copies are selected. One undo step. */
+  const duplicate = () => {
+    if (!selection.length) return;
+    const taken = new Set(doc.cameras.map((c) => c.name));
+    const copies = selection.map((c) => {
+      const name = uniqueName(taken);
+      taken.add(name);
+      return { ...structuredClone(c), name };
+    });
+    commit(doc.cameras, [...doc.cameras, ...copies], copies);
+  };
+  /** Looks through a camera (the markers hidden until the next click on the map); `focus` gives the map the keys, which
+   *  a value being typed keeps. */
+  const preview = (c: Camera, focus = true) => { previewing = true; render(); ed.setView(toView(c)); if (focus) ed.focus(); };
 
   // ---- pointer -----------------------------------------------------------------------
   /** The camera handle under a point: its eye or its target. */
@@ -168,45 +196,64 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     }
     return best;
   };
-  let drag: { part: "eye" | "target"; start: [number, number]; orig: Camera; moved: boolean } | null = null;
+  /** A drag in progress: the target of every selected camera moves along, the eye turns the grabbed one only. */
+  let drag: { part: "eye" | "target"; start: [number, number]; client: [number, number]; orig: Camera; others: Map<Camera, Camera>; moved: boolean } | null = null;
 
   // ---- toolbar -----------------------------------------------------------------------
   const count = h("span.muted");
   const hover = h("span.terrain-place-hint");
   const jump = h("select", { title: "Go to a camera", onchange: () => {
     const c = doc.cameras[Number(jump.value)];
-    if (c) { selected = c; ed.lookAt(c.targetX, c.targetY); renderPanel(); render(); }
+    if (c) { select([c]); ed.lookAt(c.targetX, c.targetY); renderPanel(); render(); }
     jump.value = "";
   } });
   const panel = h("div.terrain-region-panel");
   const renderPanel = () => {
     jump.replaceChildren(h("option", { value: "" }, "Go to camera…"),
       ...doc.cameras.map((c, i) => [c, i] as const).sort(([a], [b]) => a.name.localeCompare(b.name)).map(([c, i]) => h("option", { value: String(i) }, c.name)));
-    const c = selected;
+    const c = selected, many = selection.length > 1;
     if (!c) {
-      panel.replaceChildren(h("span.muted", {}, "Click a camera's target or eye to select it · drag the target to move it, the eye to aim it · Del deletes"));
+      panel.replaceChildren(h("span.muted", {}, "Click a camera's target or eye to select it, Shift+click for several · drag the target to move it, the eye to aim it · Del deletes"));
       return;
     }
-    const name = h("input.terrain-region-name", { type: "text", value: c.name, title: "Name (triggers use gg_cam_<name>)", onchange: () => {
-      const v = name.value.trim();
-      if (v && v !== c.name) update(c, { name: v });
-    } });
-    const fields = FIELDS.map(([key, label, title]) => {
-      const input = h("input.terrain-camera-value", { type: "number", step: "any", value: String(round(c[key] as number)), title, onchange: () => {
-        const v = Number(input.value);
-        if (Number.isFinite(v) && v !== c[key]) update(c, { [key]: v });
+    const name = many ? h("span.terrain-camera-count", { title: selection.map((x) => x.name).join(", ") }, `${selection.length} cameras`)
+      : h("input.terrain-region-name", { type: "text", value: c.name, title: "Name (triggers use gg_cam_<name>)", onchange: () => {
+        const v = (name as HTMLInputElement).value.trim();
+        if (v && v !== c.name) update(c, { name: v });
       } });
+    // Several selected: a field shows the value they share, or stays empty where they differ; a value typed goes to all.
+    const fields = FIELDS.map(([key, label, title]) => {
+      const values = new Set(selection.map((x) => x[key] as number));
+      const shared = values.size === 1 ? round(c[key] as number) : null;
+      const input = h("input.terrain-camera-value", {
+        type: "number", step: "any", value: shared === null ? "" : String(shared), placeholder: shared === null ? "—" : "",
+        title: shared === null ? `${title} (differs between the selected cameras)` : title,
+        // Each value typed shows at once through the camera it's for (the last selected), before it's an edit.
+        oninput: () => {
+          const v = Number(input.value);
+          if (input.value.trim() !== "" && Number.isFinite(v)) preview({ ...c, [key]: v }, false);
+        },
+        onchange: () => {
+          const v = Number(input.value);
+          if (input.value.trim() === "" || !Number.isFinite(v)) { renderPanel(); return; }
+          const changing = selection.filter((x) => x[key] !== v);
+          if (changing.length) updateAll(changing, { [key]: v });
+        },
+      });
       return h("label.terrain-camera-field", { title }, label, input);
     });
     panel.replaceChildren(name,
       h("button", { title: "Look through this camera", onclick: () => preview(c) }, "View"),
-      h("button", { title: "Take target, angles, distance and field of view from the current view", onclick: () => update(c, fromView()) }, "Set from view"),
-      h("button", { title: "Delete this camera (Del)", onclick: () => deleteSelected() }, "Delete"),
+      // Several cameras made one by the view would be nothing but copies: this is for one.
+      ...(many ? [] : [h("button", { title: "Take target, angles, distance and field of view from the current view", onclick: () => update(c, fromView()) }, "Set from view")]),
+      h("button", { title: many ? "A copy of each selected camera, with a new name" : "A copy of this camera, with a new name", onclick: () => { if (ed.editable) duplicate(); } }, "Duplicate"),
+      h("button", { title: many ? "Delete the selected cameras (Del)" : "Delete this camera (Del)", onclick: () => deleteSelected() }, "Delete"),
       ...fields);
   };
   const deleteSelected = () => {
-    const c = selected;
-    if (c) commit(doc.cameras, doc.cameras.filter((x) => x !== c), null);
+    if (!selection.length) return;
+    const gone = new Set(selection);
+    commit(doc.cameras, doc.cameras.filter((x) => !gone.has(x)), []);
   };
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "New camera from the current view", onclick: () => { if (ed.editable) create(); } }, "Create from view"),
@@ -221,8 +268,17 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       previewing = false;
       const [x, y] = p.ground;
       const g = hit(x, y);
-      selected = g?.cam ?? null;
-      drag = g ? { part: g.part, start: [x, y], orig: structuredClone(g.cam), moved: false } : null;
+      if (p.event.shiftKey) {
+        // Shift+click adds a camera to the selection or takes it away; it doesn't drag.
+        if (g) select(selection.includes(g.cam) ? selection.filter((c) => c !== g.cam) : [...selection, g.cam]);
+        drag = null;
+        renderPanel();
+        render();
+        return !!g;
+      }
+      // A click on one of the selected keeps them all (to drag them), the grabbed one last; elsewhere it alone.
+      select(!g ? [] : selection.includes(g.cam) ? [...selection.filter((c) => c !== g.cam), g.cam] : [g.cam]);
+      drag = g ? { part: g.part, start: [x, y], client: [p.event.clientX, p.event.clientY], orig: structuredClone(g.cam), others: new Map(selection.filter((c) => c !== g.cam).map((c) => [c, structuredClone(c)])), moved: false } : null;
       renderPanel();
       render();
       return !!g;
@@ -233,14 +289,24 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!p.down || !drag || !selected) {
         const g = hit(x, y);
         hover.textContent = g ? `${g.cam.name} (${g.part})` : "";
-        ed.host.style.cursor = g ? (g.cam === selected ? "grab" : "pointer") : "";
+        ed.host.style.cursor = g ? (selection.includes(g.cam) ? "grab" : "pointer") : "";
         return;
       }
-      drag.moved = true;
+      // A click (the ground under a still pointer can come out a hair apart) isn't a drag: it starts a few units off.
+      // A click isn't a drag: it starts once the pointer has gone a few pixels. Selecting changes the panel above the
+      // map, which can move the map under a still pointer, so the drag measures from where it starts, not the press.
+      if (!drag.moved) {
+        if (Math.hypot(p.event.clientX - drag.client[0], p.event.clientY - drag.client[1]) < 4) return;
+        drag.moved = true;
+        drag.start = [x, y];
+        return;
+      }
       const o = drag.orig, c = selected;
       if (drag.part === "target") {
-        c.targetX = round(o.targetX + x - drag.start[0]);
-        c.targetY = round(o.targetY + y - drag.start[1]);
+        const dx = x - drag.start[0], dy = y - drag.start[1];
+        c.targetX = round(o.targetX + dx);
+        c.targetY = round(o.targetY + dy);
+        for (const [cam, was] of drag.others) { cam.targetX = round(was.targetX + dx); cam.targetY = round(was.targetY + dy); }
       } else {
         // The eye turns around the target; its ground distance sets the distance.
         const dx = o.targetX - x, dy = o.targetY - y;
@@ -254,16 +320,19 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       drag = null;
       if (!d || !d.moved || !selected) return;
       // The live edit becomes one undo step: restore, then apply as an update.
-      const now = { targetX: selected.targetX, targetY: selected.targetY, rotation: selected.rotation, distance: selected.distance };
-      Object.assign(selected, { targetX: d.orig.targetX, targetY: d.orig.targetY, rotation: d.orig.rotation, distance: d.orig.distance });
-      update(selected, now);
+      const moved = new Map([[selected, d.orig], ...(d.part === "target" ? d.others : [])]);
+      const now = new Map([...moved.keys()].map((c) => [c, { targetX: c.targetX, targetY: c.targetY, rotation: c.rotation, distance: c.distance }]));
+      for (const [c, was] of moved) Object.assign(c, { targetX: was.targetX, targetY: was.targetY, rotation: was.rotation, distance: was.distance });
+      // A click whose pointer didn't take a camera anywhere is no edit.
+      const changed = [...moved.keys()].filter((c) => (["targetX", "targetY", "rotation", "distance"] as const).some((k) => now.get(c)![k] !== c[k]));
+      if (changed.length) updateAll(changed, (c) => now.get(c)!);
     },
     pointerLeave() { hover.textContent = ""; ed.host.style.cursor = ""; },
     // What the Camera Objects layer draws: the cameras as edited here, saved or not.
     async cameraObjects() { await load; return doc.cameras; },
     keyDown(e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selected) { deleteSelected(); return true; }
-      if (e.key === "Escape" && selected) { selected = null; renderPanel(); render(); return true; }
+      if (e.key === "Escape" && selected) { select([]); renderPanel(); render(); return true; }
       return false;
     },
     async save() {
@@ -292,7 +361,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!path.startsWith(FILE)) return false;
       await read();
       unsaved = false;
-      selected = null;
+      select([]);
       if (active) { renderPanel(); render(); }
       return true;
     },
