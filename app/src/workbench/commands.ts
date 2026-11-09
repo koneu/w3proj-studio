@@ -53,3 +53,10 @@ export class CommandService {
     return [...this.contributed.values()].find((c) => c.keybinding?.toLowerCase() === chord);
   }
 }
+
+/** Whether the key's target, or an element around it, keeps this chord for itself (its data-own-keys lists it, space
+ *  separated): then no command bound to the chord runs, and the key goes on to the element. */
+export function ownsChord(target: EventTarget | null, chord: string): boolean {
+  const owner = (target as { closest?: (s: string) => { dataset?: Record<string, string | undefined> } | null } | null)?.closest?.("[data-own-keys]");
+  return !!owner?.dataset?.ownKeys?.split(/\s+/).includes(chord);
+}

@@ -6,7 +6,7 @@ import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
 import { backendInvoke } from "./trackedinvoke";
 import { invoke, listen, NotUtf8Error, readBytes, writeBytes } from "./backend";
-import { CommandService } from "./commands";
+import { CommandService, ownsChord } from "./commands";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
 import { menuTree, whyBlocked } from "./menus";
@@ -407,6 +407,9 @@ export class Workbench {
   private registerKeybindings() {
     window.addEventListener("keydown", (e) => {
       const chord = CommandService.chord(e);
+      // An element that keeps some keys while it has the keyboard (the terrain view's Ctrl+R: Regions, not Reload
+      // Window) names them in data-own-keys; they go on to it.
+      if (ownsChord(e.target, chord)) return;
       const cmd = this.commands.forChord(chord);
       if (cmd) {
         e.preventDefault();

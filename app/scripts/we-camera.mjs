@@ -12,14 +12,18 @@ export const WE_VIEW = Object.freeze({ width: 1184, height: 844 });
 export const WE_FIXED_HOUR = 6;
 
 /**
- * Studio's terrain settings for a comparison with the editor (TESTING.md, "Comparing pictures"): "lit" pairs with
- * we-drive's --compare-ready (game view on, the day fixed at WE_FIXED_HOUR): the map's lighting at that hour; "unlit"
- * with --compare-ready-unlit (game view off, View > Lighting off): Studio's even light.
+ * Studio's terrain settings for a comparison with the editor (TESTING.md, "Comparing pictures"). "game" pairs with
+ * we-drive's --compare-ready (game view on, the day fixed at WE_FIXED_HOUR): Studio's game view (V) at that hour, which
+ * also leaves out the start locations, regions and the rest the editor hides there. "lit" is the map's lighting at that
+ * hour with the editor's marks still drawn (the pair before Studio had a game view). "unlit" pairs with
+ * --compare-ready-unlit (game view off, View > Lighting off): Studio's even light. Each sets game view, so a remembered
+ * one doesn't carry into the comparison.
  */
 export function studioLighting(mode) {
-  if (mode === "lit") return { "terrain.lighting.enabled": true, "terrain.lighting.hour": WE_FIXED_HOUR };
-  if (mode === "unlit") return { "terrain.lighting.enabled": false };
-  throw new Error(`a comparison is lit or unlit, not ${mode}`);
+  if (mode === "game") return { "terrain.gameView": true, "terrain.lighting.enabled": true, "terrain.lighting.hour": WE_FIXED_HOUR };
+  if (mode === "lit") return { "terrain.gameView": false, "terrain.lighting.enabled": true, "terrain.lighting.hour": WE_FIXED_HOUR };
+  if (mode === "unlit") return { "terrain.gameView": false, "terrain.lighting.enabled": false };
+  throw new Error(`a comparison is game, lit or unlit, not ${mode}`);
 }
 
 /** The camera the editor opens a map with, at the terrain's centre (TESTING.md, "The default camera"). */

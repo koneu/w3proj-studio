@@ -107,6 +107,8 @@ export interface TerrainToolGroupInstance {
   reloadFile?(path: string): Promise<boolean>;
   /** The camera objects as the group holds them, unsaved edits included: the Camera Objects layer draws these, not the saved war3map.w3c. */
   cameraObjects?(): Promise<readonly import("../lib/terrain/cameras").CameraObject[]>;
+  /** The regions as the group holds them, unsaved edits included: the Regions layer draws these, not the saved war3map.w3r. */
+  regionObjects?(): Promise<readonly { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }[]>;
   /** Writes the group's own files; called on save after the map files. */
   save?(): Promise<void>;
   dispose?(): void;

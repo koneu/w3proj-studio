@@ -319,6 +319,8 @@ export interface ObjectBatch {
   followGround?: boolean;
   /** Drawn see-through with this colour and alpha, among the blended layers (start buildings). */
   tint?: [number, number, number, number];
+  /** Only the editor shows it (start locations, start buildings): left out in game view (`showEditorOnly`). */
+  editorOnly?: boolean;
 }
 
 interface Mesh {
@@ -413,12 +415,27 @@ export class TerrainRenderer {
   hiddenGroups = new Set<string>();
   /** Lit as the game is (the map's lighting on): the pair of the World Editor's game view. */
   gameView = false;
+  /** The ground textured, as a wireframe (lines on black, no cliff models), or not drawn (View > Terrain). */
+  groundLook: "textured" | "wireframe" | "hidden" = "textured";
+  /** Batches marked `editorOnly` (the start locations and their start buildings) are drawn and picked. */
+  showEditorOnly = true;
+  /** Blighted ground shows the blight; off, its own tile (the ground is built again: see terrainChanged). */
+  showBlight = true;
+  /** Named sets of rings drawn over everything but the selection (the light ranges). */
+  private ringSets = new Map<string, Mesh[]>();
+  /** The wireframe of View > Terrain > Wireframe, made when first drawn and again after the ground changed. */
+  private terrainWire: Mesh | null = null;
 
   /** Whether a group's objects are drawn: not hidden by its toggle, and not the shoreline waves in HD with the
    *  lighting on. The World Editor's HD game view draws no shoreline waves (map 03, we-drive 2026-11-08); its
    *  classic game view, and either mode without game view, does. */
   groupShown(group: string): boolean {
+    if (group === "cliffs" && this.groundLook !== "textured") return false;
     return !this.hiddenGroups.has(group) && !(group === "shoreline" && this.gameView && this.tone === 2);
+  }
+  /** Whether a batch is drawn and can be picked: its group is shown, and it isn't an editor-only one hidden. */
+  batchShown(b: Pick<ObjectBatch, "group" | "editorOnly">): boolean {
+    return this.groupShown(b.group) && (this.showEditorOnly || !b.editorOnly);
   }
   /** A model previewing a placement (drawn see-through; red when `ok` is false). */
   ghost: { gpu: ModelGpu; world: Mat4; team: number; ok: boolean } | null = null;
@@ -545,6 +562,7 @@ export class TerrainRenderer {
     for (const m of [this.water, this.wire]) this.freeVao(m.vao);
     this.water = this.buildWater();
     this.wire = this.buildWire();
+    if (this.terrainWire) { this.freeVao(this.terrainWire.vao); this.terrainWire = null; }
     // Same size, new heights: the overlays' meshes only get new positions.
     for (const layer of [this.overlay, this.border, this.viewLayer, this.held?.viewLayer, this.gridMesh]) if (layer) this.reshapeOverlay(layer.pos);
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
@@ -567,7 +585,7 @@ export class TerrainRenderer {
         if (skip.has(y * (t.width - 1) + x)) continue;
         const bl = this.corner(x, y), br = this.corner(x + 1, y), tl = this.corner(x, y + 1), tr = this.corner(x + 1, y + 1);
         // Blight covers everything, so it gets its own slot drawn last.
-        const tex = (cx: number, cy: number) => (this.corner(cx, cy).blight ? BLIGHT_TEXTURE : overrides.get(cy * t.width + cx) ?? this.corner(cx, cy).texture);
+        const tex = (cx: number, cy: number) => (this.corner(cx, cy).blight && this.showBlight ? BLIGHT_TEXTURE : overrides.get(cy * t.width + cx) ?? this.corner(cx, cy).texture);
         const [tBl, tBr, tTl, tTr] = [tex(x, y), tex(x + 1, y), tex(x, y + 1), tex(x + 1, y + 1)];
         const used = [...new Set([tBl, tBr, tTl, tTr])].sort((a, b) => a - b);
         // Tiles at the camera boundary are shown darkened, like the editor does.
@@ -751,15 +769,30 @@ export class TerrainRenderer {
     return this.colorMesh(out);
   }
 
+  /** View > Terrain > Wireframe: every tile's edges and one diagonal, green, as the World Editor draws it. */
+  private buildTerrainWire(): Mesh {
+    const t = this.terrain, out: number[] = [];
+    const p = (x: number, y: number) => [t.offsetX + x * 128, t.offsetY + y * 128, this.corner(x, y).height + rampLift(t, x, y), 0.15, 0.85, 0.15, 0.9];
+    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+      if (x + 1 < t.width) out.push(...p(x, y), ...p(x + 1, y));
+      if (y + 1 < t.height) out.push(...p(x, y), ...p(x, y + 1));
+      if (x + 1 < t.width && y + 1 < t.height) out.push(...p(x, y), ...p(x + 1, y + 1));
+    }
+    return this.colorMesh(out);
+  }
+
   /** Shows an RGBA texture over the ground (`width` × `height` texels, rows from
    *  the south, covering the whole map); null removes it. Re-calling with the
    *  same size only re-uploads the pixels. */
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep } = this;
+    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep, groundLook, showEditorOnly, ringSets } = this;
     // The view layer is put aside, not dropped: a layer set while this lasts goes there, and is what comes back.
     this.held = { viewLayer };
+    this.groundLook = "textured";
+    this.showEditorOnly = true;
+    this.ringSets = new Map();
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
@@ -775,7 +808,9 @@ export class TerrainRenderer {
       this.setGroundOverlay(null);
       const held = this.held;
       this.held = null;
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer: held?.viewLayer ?? null, gridStep });
+      // Rings set while this lasted (none: the picture is taken in one go) replace the ones put aside.
+      for (const [name, rings] of this.ringSets) { ringSets.get(name)?.forEach((r) => this.freeVao(r.vao)); ringSets.set(name, rings); }
+      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer: held?.viewLayer ?? null, gridStep, groundLook, showEditorOnly, ringSets });
     };
   }
 
@@ -936,11 +971,12 @@ export class TerrainRenderer {
     extra: readonly { group: string; inst: ObjectInstance }[] = []): ObjectInstance | null {
     const { origin: o, dir: d } = ray;
     let best: ObjectInstance | null = null, bestT = Infinity;
-    const sources = [...this.batches.map((b) => ({ group: b.group, instances: b.instances })),
-      ...extra.map((s) => ({ group: s.group, instances: [s.inst] }))];
+    const sources = [...this.batches.map((b) => ({ group: b.group, instances: b.instances, editorOnly: b.editorOnly })),
+      ...extra.map((s) => ({ group: s.group, instances: [s.inst], editorOnly: s.inst.pick?.id === "sloc" }))];
     for (const b of sources) {
-      // By the toggles alone: what's left out otherwise (the shoreline) has nothing to pick.
-      if (this.hiddenGroups.has(b.group)) continue;
+      // By the toggles alone: what's left out otherwise (the shoreline) has nothing to pick. Nor have the start
+      // locations in game view.
+      if (this.hiddenGroups.has(b.group) || (b.editorOnly && !this.showEditorOnly)) continue;
       for (const inst of b.instances) {
         if (!inst.pick || !inst.sphere) continue;
         const [cx, cy, cz, sr] = inst.sphere;
@@ -1000,6 +1036,14 @@ export class TerrainRenderer {
     for (const m of this.selection) this.freeVao(m.vao);
     const rings = sel === null ? [] : Array.isArray(sel) ? sel : [sel];
     this.selection = rings.map((r) => this.ring(r, rings.length > 50 ? 16 : 64));
+  }
+
+  /** A named set of rings (the light ranges), drawn until replaced; [] removes it. A ring with `z` stays at that
+   *  height, the others follow the ground. */
+  setRings(name: string, rings: readonly Ring[]) {
+    this.ringSets.get(name)?.forEach((m) => this.freeVao(m.vao));
+    if (rings.length) this.ringSets.set(name, rings.map((r) => this.ring(r, rings.length > 50 ? 24 : 64)));
+    else this.ringSets.delete(name);
   }
 
   /** Canvas point (CSS pixels) of a world point, or null behind the camera. Inverse of ray(). */
@@ -1146,7 +1190,9 @@ export class TerrainRenderer {
     // the eye as in the game, also from further out than the game's camera: zoomed out, a near fog covers
     // everything, as it does there (the view's Fog box turns it off).
     const fog = this.showFog && this.fog ? this.fog : null;
-    const back = fog?.color ?? [0.11, 0.12, 0.14];
+    // With the terrain as a wireframe or hidden, the World Editor shows black behind it.
+    const textured = this.groundLook === "textured";
+    const back = !textured ? [0, 0, 0] : fog?.color ?? [0.11, 0.12, 0.14];
     gl.clearColor(back[0], back[1], back[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
@@ -1186,14 +1232,16 @@ export class TerrainRenderer {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindVertexArray(this.ground);
-    for (const r of this.ranges) {
+    for (const r of textured ? this.ranges : []) {
       const t = this.textures[r.texture];
       gl.bindTexture(gl.TEXTURE_2D, t?.tex ?? this.placeholder);
       gl.uniform1f(gl.getUniformLocation(this.groundProg, "uExtended"), t?.extended ? 1 : 0);
       gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.offset * 4);
     }
 
-    for (const layer of [this.viewLayer, this.overlay, this.showBorder ? this.border : null]) {
+    // What lies on the ground goes with it when the terrain is hidden.
+    const onGround = this.groundLook !== "hidden";
+    for (const layer of onGround ? [this.viewLayer, this.overlay, textured && this.showBorder ? this.border : null] : []) {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
@@ -1212,10 +1260,10 @@ export class TerrainRenderer {
       gl.depthMask(true);
     }
 
-    if (this.gridStep > 0) this.drawGrid(viewProj);
+    if (this.gridStep > 0 && onGround) this.drawGrid(viewProj);
 
     // Building ground marks, on the ground under the objects.
-    if (this.splats.length && !this.hiddenGroups.has("units")) {
+    if (this.splats.length && !this.hiddenGroups.has("units") && textured) {
       gl.useProgram(this.splatProg);
       setFog(gl, (name) => gl.getUniformLocation(this.splatProg, name), fog);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.splatProg, "uViewProj"), false, viewProj);
@@ -1246,7 +1294,7 @@ export class TerrainRenderer {
     const planes = frustumPlanes(viewProj);
     const gathered: [ObjectBatch, InstanceRuns][] = [];
     for (const b of this.batches) {
-      if (!this.groupShown(b.group) || !b.instances.length) continue;
+      if (!this.batchShown(b) || !b.instances.length) continue;
       const list = this.gatherInstances(b, b.followGround ? null : planes);
       if (list.runs.length) gathered.push([b, list]);
     }
@@ -1281,13 +1329,19 @@ export class TerrainRenderer {
     gl.useProgram(this.colorProg);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.colorProg, "uViewProj"), false, viewProj);
     gl.uniform1f(gl.getUniformLocation(this.colorProg, "uPointSize"), 5000);
-    if (this.wireframe) {
+    if (this.wireframe && onGround) {
       gl.bindVertexArray(this.wire.vao);
       gl.drawArrays(gl.LINES, 0, this.wire.count);
     }
+    if (this.groundLook === "wireframe") {
+      this.terrainWire ??= this.buildTerrainWire();
+      gl.bindVertexArray(this.terrainWire.vao);
+      gl.drawArrays(gl.LINES, 0, this.terrainWire.count);
+    }
     gl.disable(gl.BLEND);
     for (const [name, m] of this.markers) {
-      if (this.hiddenGroups.has(name)) continue;
+      // "starts": start locations without their model, shown and hidden with the units, and left out in game view.
+      if (this.hiddenGroups.has(name) || (name === "starts" && (this.hiddenGroups.has("units") || !this.showEditorOnly))) continue;
       gl.bindVertexArray(m.vao);
       gl.drawArrays(gl.POINTS, 0, m.count);
     }
@@ -1322,7 +1376,7 @@ export class TerrainRenderer {
     }
     // Rings stay visible through trees and water.
     gl.disable(gl.DEPTH_TEST);
-    for (const ring of [...this.selection, this.brush]) {
+    for (const ring of [...[...this.ringSets.values()].flat(), ...this.selection, this.brush]) {
       if (!ring) continue;
       gl.bindVertexArray(ring.vao);
       gl.drawArrays(gl.LINE_LOOP, 0, ring.count);

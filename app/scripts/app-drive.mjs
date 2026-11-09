@@ -25,9 +25,11 @@
 //                       values, fitted at the editor view's 1184:844 (use --view-size 1184x844; we-camera.mjs)
 //   --view-size WxH     give the terrain view's canvas this size in pixels (over the rest of the window), so its
 //                       pictures line up with another's, e.g. 1184x844 for the World Editor's view; "off" undoes it
-//   --compare-ready MODE  the terrain view's lighting for comparing with the World Editor: "lit" (the map's lighting
-//                       at 06:00, the pair of we-drive's --compare-ready) or "unlit" (even light, the pair of
-//                       --compare-ready-unlit); sets terrain.lighting.* and waits for the view (TESTING.md)
+//   --compare-ready MODE  the terrain view for comparing with the World Editor: "game" (game view at 06:00: lit,
+//                       fogged, no start locations, regions or other editor marks; the pair of we-drive's
+//                       --compare-ready), "lit" (the map's lighting at 06:00, editor marks still drawn) or "unlit"
+//                       (even light, the pair of --compare-ready-unlit); sets terrain.gameView and terrain.lighting.*
+//                       and waits for the view (TESTING.md)
 //   --look X,Y          point the terrain camera at a map position (keeps its angle and distance)
 //   --settle            wait until the game's files are read and the terrain view's layers are done
 //   --sleep MS          wait

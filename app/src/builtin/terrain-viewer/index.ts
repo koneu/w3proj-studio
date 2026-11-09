@@ -16,7 +16,8 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./t
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Box, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { anyGroundLayer, cameraKey, keyOf, lightRings, nextTerrainLook, OWN_CHORDS, shownView, TERRAIN_LOOKS, viewKeyCommand, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -192,17 +193,34 @@ const switchedOn = (w3: W3Api, key: string, standard: boolean) => (standard ? w3
 /** What Ctrl+C took: stays over tabs, so it can go into another open map. */
 let clipboard: Fragment | null = null;
 
+const GRIDS = ["none", "small", "medium", "large"];
+/** What a View item's toggle answered, as what to tell the person: nothing when it was done (a state, or one of
+ *  `states`), the reason when it wasn't (game view). */
+const why = (answer: boolean | string, states: readonly string[] = []): string | null =>
+  typeof answer === "string" && !states.includes(answer) ? answer : null;
+
 /** The View commands: id and what each does to an editor; text back is what to tell the person. */
 const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<string | null>][] = [
   ["w3.terrain.viewSelection", (v) => v.viewSelection()],
   ["w3.terrain.viewEntireMap", (v) => { v.viewEntireMap(); return null; }],
   ["w3.terrain.selectInPalette", (v) => v.selectInPalette()],
-  ["w3.terrain.toggleNavalPathing", (v) => { v.toggleLayer("naval"); return null; }],
-  ["w3.terrain.toggleHeightMap", (v) => { v.toggleLayer("heights"); return null; }],
-  ["w3.terrain.toggleCameraObjects", (v) => { v.toggleLayer("cameras"); return null; }],
-  ["w3.terrain.toggleSmallGrid", (v) => { v.toggleGrid("small"); return null; }],
-  ["w3.terrain.toggleMediumGrid", (v) => { v.toggleGrid("medium"); return null; }],
-  ["w3.terrain.toggleLargeGrid", (v) => { v.toggleGrid("large"); return null; }],
+  ["w3.terrain.toggleNavalPathing", (v) => why(v.toggleLayer("naval"))],
+  ["w3.terrain.toggleHeightMap", (v) => why(v.toggleLayer("heights"))],
+  ["w3.terrain.toggleCameraObjects", (v) => why(v.toggleLayer("cameras"))],
+  ["w3.terrain.toggleGroundPathing", (v) => why(v.toggleLayer("pathing"))],
+  ["w3.terrain.toggleRegions", (v) => why(v.toggleLayer("regions"))],
+  ["w3.terrain.toggleLightRanges", (v) => why(v.toggleLayer("lightRanges"))],
+  ["w3.terrain.toggleDoodads", (v) => why(v.toggleLayer("doodads"))],
+  ["w3.terrain.toggleUnits", (v) => why(v.toggleLayer("units"))],
+  ["w3.terrain.toggleWater", (v) => why(v.toggleLayer("water"))],
+  ["w3.terrain.toggleBlight", (v) => why(v.toggleLayer("blight"))],
+  ["w3.terrain.toggleLighting", async (v) => why(await v.toggleSetting("lighting"))],
+  ["w3.terrain.toggleWeather", async (v) => why(await v.toggleSetting("weather"))],
+  ["w3.terrain.cycleTerrainDisplay", (v) => why(v.cycleTerrain(), ["textured", "wireframe", "hidden"])],
+  ["w3.terrain.toggleGameView", async (v) => { await v.toggleGameView(); return null; }],
+  ["w3.terrain.toggleSmallGrid", (v) => why(v.toggleGrid("small"), GRIDS)],
+  ["w3.terrain.toggleMediumGrid", (v) => why(v.toggleGrid("medium"), GRIDS)],
+  ["w3.terrain.toggleLargeGrid", (v) => why(v.toggleGrid("large"), GRIDS)],
   ["w3.terrain.cycleRandomGroupsNext", (v) => v.cycleRandomGroups(1)],
   ["w3.terrain.cycleRandomGroupsPrevious", (v) => v.cycleRandomGroups(-1)],
 ];
@@ -1282,9 +1300,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const lightBox = h("input", { type: "checkbox", checked: lightOn(), onchange: () => { void w3.settings.set("terrain.lighting.enabled", lightBox.checked); keysToMap(); } });
         const lightSelect = h("select", { onchange: () => { void w3.settings.set("terrain.lighting.hour", Number(lightSelect.value)); keysToMap(); } },
           ...Array.from({ length: 24 }, (_, hr) => h("option", { value: String(hr), selected: lightHour() === hr }, `${hr}:00`)));
+        /** Game view (V, View > Lock to Game View Settings): the map as the game shows it (viewmodes.ts shownView).
+         *  A setting, so it holds for every terrain editor and stays for the next session. */
+        const gameViewOn = () => w3.settings.get<boolean>("terrain.gameView", false) === true;
+        /** In the view's upper right while game view is on, as the World Editor's "Game View Settings". */
+        const gameBadge = h("div.terrain-gameview-badge", { hidden: !gameViewOn(), title: "Game view (V): lit and fogged as in the game, without the editor's marks" }, "Game View");
+        /** Set with the View commands (below): draws the view again after a setting it depends on changed. */
+        let viewChanged = () => {};
+        /** Set with the layers (below): after another tab opened, the layers that tab draws itself. */
+        let layersAfterTab = () => {};
         const applyLight = () => {
-          const on = lightOn(), hour = lightHour();
-          lightBox.checked = on;
+          // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
+          const on = lightOn() || gameViewOn(), hour = lightHour();
+          lightBox.checked = lightOn();
+          lightBox.disabled = gameViewOn();
           lightSelect.value = String(hour);
           lightSelect.disabled = !on;
           renderer.gameView = on;
@@ -1354,6 +1383,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === "terrain.sky") void showSkyChoice();
           if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds") viewSyncs.forEach((f) => f());
           if (key.startsWith("terrain.lighting.")) applyLight();
+          if (key === "terrain.gameView" || key === "terrain.fog" || key === "terrain.weather") viewChanged();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
         });
         renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false);
@@ -1653,11 +1683,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return terrain.groundTiles.length - 1;
         };
 
-        const markerToggle = (name: string, label: string, count: number) => {
-          const box = h("input", { type: "checkbox", checked: !renderer.hiddenGroups.has(name), onchange: () => {
-            if (box.checked) renderer.hiddenGroups.delete(name); else renderer.hiddenGroups.add(name);
-            redraw();
+        /** The side panel's Doodads and Units boxes: the same View items as the toolbar's (kept in step by applyView). */
+        const markerBoxes = new Map<"doodads" | "units", HTMLInputElement>();
+        const markerToggle = (name: "doodads" | "units", label: string, count: number) => {
+          const box = h("input", { type: "checkbox", checked: viewState[name], disabled: gameViewOn(), onchange: () => {
+            if (box.checked !== viewState[name]) toggleLayer(name);
           } });
+          markerBoxes.set(name, box);
           return h("label.model-row", {}, box, h("span", {}, ` ${label}`), h("small.muted", {}, ` ${count.toLocaleString()}`));
         };
         const problems = h("div.model-list");
@@ -1771,10 +1803,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let unresolvedDoodads: Placed[] = [], unresolvedUnits: Placed[] = [];
         const drawMarkers = () => {
           renderer.setMarkers("doodads", unresolvedDoodads.map((p) => marker(p, [90, 200, 90])));
-          renderer.setMarkers("units", unresolvedUnits.map((p) => marker(p, p.id === "sloc" ? [255, 255, 255] : TEAM_COLORS[team(p)][1])));
+          renderer.setMarkers("units", unresolvedUnits.filter((p) => p.id !== "sloc").map((p) => marker(p, TEAM_COLORS[team(p)][1])));
+          // Start locations without their model: hidden with the units, and in game view.
+          renderer.setMarkers("starts", unresolvedUnits.filter((p) => p.id === "sloc").map((p) => marker(p, [255, 255, 255])));
         };
         /** Every selectable placed object: those with a model and the strays. */
         const allInstances = (): Stray[] => [...renderer.batches.flatMap((b) => b.instances.map((inst) => ({ group: b.group, inst }))), ...strays];
+        /** Those a box or Select All can take: not the start locations while game view leaves them out. */
+        const shownInstances = (): Stray[] => (renderer.showEditorOnly ? allInstances()
+          : [...renderer.batches.filter((b) => !b.editorOnly).flatMap((b) => b.instances.map((inst) => ({ group: b.group, inst }))), ...strays.filter((s) => s.inst.pick?.id !== "sloc")]);
         const findInstance = (entry: Placed): ObjectInstance | null => {
           for (const b of renderer.batches) for (const inst of b.instances) if (inst.pick?.placed === entry) return inst;
           return strays.find((s) => s.inst.pick?.placed === entry)?.inst ?? null;
@@ -1878,7 +1915,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // (the editor shows no fire on an orc hall's preview), never picked (no pick), shown and hidden with
           // the units; a town hall that doesn't load is just left out.
           for (const b of s.batches) for (const inst of b.instances) delete inst.pick;
-          renderer.setGroup("units", [...u.batches, ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number] }))]);
+          // The start locations' model and the start buildings are the editor's: game view leaves them out.
+          const startsOnly = (b: { instances: ObjectInstance[] }) => b.instances.length > 0 && b.instances.every((i) => i.pick?.id === "sloc");
+          renderer.setGroup("units", [...u.batches.map((b) => (startsOnly(b) ? { ...b, editorOnly: true } : b)),
+            ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number], editorOnly: true }))]);
           void artLoad(showSplats());
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.
@@ -1911,6 +1951,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (pendingSel) trySelect(pendingSel);
           pendingSel = null;
+          // The light ranges of the objects as they are now.
+          showLightRanges();
           redraw();
         }
         // Object data (models, scales, …), the import list or imported files saved elsewhere (the
@@ -2269,7 +2311,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Every placed object with a model (the groups not hidden). */
         const allPlaced = (): { p: Placed; kind: string; id: string }[] => {
           const out: { p: Placed; kind: string; id: string }[] = [];
-          for (const { group, inst } of allInstances()) {
+          for (const { group, inst } of shownInstances()) {
             if ((group !== "doodads" && group !== "units") || renderer.hiddenGroups.has(group)) continue;
             if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
           }
@@ -3036,7 +3078,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Objects whose position projects into the canvas rectangle (CSS pixels). */
         const objectsInBox = (x0: number, y0: number, x1: number, y1: number): Placed[] =>
-          objectsInRect(allInstances(), (pos) => renderer.project(pos), renderer.hiddenGroups, boxKinds, x0, y0, x1, y1);
+          objectsInRect(shownInstances(), (pos) => renderer.project(pos), renderer.hiddenGroups, boxKinds, x0, y0, x1, y1);
 
         const pickAt = (e: MouseEvent) => {
           const rect = canvas.getBoundingClientRect();
@@ -3453,6 +3495,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setBrush(null);
           inst?.activate?.();
           renderTabs();
+          layersAfterTab();
           redraw();
         };
         const renderTabs = () => {
@@ -3611,9 +3654,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (editable) queueMicrotask(syncGroups);
 
         // ---- View commands: View Selection, View Entire Map, Select In Tool Palette, grids and layers -----------
-        const viewState = { grid: "none" as GridSize, naval: false, heights: false, cameras: false };
+        /** The View items as chosen (the toolbar, the side panel's Doodads and Units, the commands and keys). Lighting,
+         *  fog and weather are settings. Game view sets the choice aside without changing it: `shown` is what's drawn. */
+        const viewState = {
+          grid: "none" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
+          terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
+        };
+        const viewSet = (): ViewSet => ({ ...viewState, lighting: lightOn(),
+          fog: w3.settings.get<boolean>("terrain.fog", true) !== false, weather: w3.settings.get<boolean>("terrain.weather", true) !== false });
+        let shown = shownView(viewSet(), gameViewOn());
         /** Redraws the toolbar's boxes after a command changed what they show. */
         const viewSyncs: (() => void)[] = [];
+        const GAME_VIEW_NOTE = "Game view is on (V): the view shows the map as the game does. Turn it off to change what the view shows.";
+        viewSyncs.push(() => markerBoxes.forEach((box, name) => { box.checked = viewState[name]; box.disabled = gameViewOn(); }));
         const maxDistance = () => terrain.width * 300;
         const cornerHeights = (x0: number, y0: number, x1: number, y1: number) => {
           const zs: number[] = [];
@@ -3673,10 +3726,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const latest = () => seq === layerSeq;
           // A layer that throws at once (not by rejecting) still ends with the label hidden and its error shown.
           const failed = await runLayerJobs(() => {
-            if (!viewState.naval && !viewState.heights && !viewState.cameras) { renderer.setViewLayer(null); redraw(); return []; }
+            const on = groundLayersOn();
+            if (!anyGroundLayer(on)) { renderer.setViewLayer(null); redraw(); return []; }
             const W = (terrain.width - 1) * 4, H = (terrain.height - 1) * 4;
-            // Heights are quick; the pathing of a big map and the cameras file take a while, and are added when they arrive.
-            const parts: (Uint8Array | null)[] = [viewState.heights ? heightColors(terrain).rgba : null, null, null];
+            // Heights are quick; the pathing of a big map and the files take a while, and are added when they arrive.
+            // Bottom to top: regions, ground pathing, heights, naval pathing, cameras.
+            const parts: (Uint8Array | null)[] = [null, null, on.heights ? heightColors(terrain).rgba : null, null, null];
             const show = () => {
               if (!latest()) return;
               const rgba = composeLayers(parts);
@@ -3685,8 +3740,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             };
             show();
             const late: Promise<void>[] = [];
-            if (viewState.naval) late.push(handle.pathing().then((p) => { parts[1] = p.width === W && p.height === H ? navalColors(p.cells) : null; show(); }));
-            if (viewState.cameras) late.push(camerasNow().then((cams) => { parts[2] = cameraColors(cams, W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (on.regions) late.push(regionsNow().then((list) => { parts[0] = regionColors(list, W, H, terrain.offsetX, terrain.offsetY); show(); }));
+            if (on.naval || on.pathing) {
+              late.push(handle.pathing().then((p) => {
+                const fits = p.width === W && p.height === H;
+                parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
+                parts[3] = fits && on.naval ? navalColors(p.cells) : null;
+                show();
+              }));
+            }
+            if (on.cameras) late.push(camerasNow().then((cams) => { parts[4] = cameraColors(cams, W, H, terrain.offsetX, terrain.offsetY); show(); }));
             return late;
           }, latest, (busy) => { layerBusy.hidden = !busy; });
           if (failed && latest()) w3.window.showError(`The view layers couldn't be drawn: ${(failed.error as Error)?.message ?? failed.error}`);
@@ -3694,34 +3757,120 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The cameras of the Camera Objects layer: the Camera Editor's, unsaved edits included, else the saved file. */
         const camerasNow = () => layerCameras(groupInsts.values(),
           async () => (await readMapDoc<{ cameras?: CameraObject[] }>(w3, "map/war3map.w3c.json"))?.cameras ?? []);
+        /** The regions of the Regions layer: the Region Editor's, unsaved edits included, else the saved file. */
+        const regionsNow = () => layerRegions(groupInsts.values(),
+          async () => (await readMapDoc<{ regions?: RegionBox[] }>(w3, "map/war3map.w3r.json"))?.regions ?? []);
+        /** The ground layers drawn: those shown, except the one the active tab draws itself (the Regions and Pathing
+         *  tabs lay their own picture over the ground, which would show twice). */
+        const groundLayersOn = () => ({
+          naval: shown.naval, heights: shown.heights, cameras: shown.cameras,
+          pathing: shown.pathing && activeGroup !== "pathing", regions: shown.regions && activeGroup !== "regions",
+        });
+        layersAfterTab = () => { if (shown.pathing || shown.regions) void refreshLayers(); };
         const refreshLayersSoon = () => {
-          if (!viewState.naval && !viewState.heights && !viewState.cameras) return;
+          if (shown.lightRanges) showLightRanges();
+          if (!anyGroundLayer(shown)) return;
           clearTimeout(layerTimer);
           layerTimer = setTimeout(() => void refreshLayers(), 400);
         };
         const applyGrid = () => {
           // The tile grid is the ground's own mesh, so it follows cliffs and ramps; the others are lines per pixel.
-          renderer.wireframe = viewState.grid === "medium";
-          renderer.gridStep = viewState.grid === "small" || viewState.grid === "large" ? GRID_STEP[viewState.grid] : 0;
+          renderer.wireframe = shown.grid === "medium";
+          renderer.gridStep = shown.grid === "small" || shown.grid === "large" ? GRID_STEP[shown.grid] : 0;
           redraw();
         };
-        const setGrid = (g: GridSize) => { viewState.grid = g; applyGrid(); viewSyncs.forEach((f) => f()); };
-        const toggleLayer = (layer: "naval" | "heights" | "cameras") => {
-          viewState[layer] = !viewState[layer];
+        /** Light Ranges: a ring round every light of the placed objects shown, as far as it reaches. Made again when
+         *  the objects or their places change (lightsKey). */
+        let lightsKey = "";
+        const showLightRanges = () => {
+          const rings: { x: number; y: number; r: number; rgb: [number, number, number] }[] = [];
+          if (shown.lightRanges) {
+            for (const b of renderer.batches) {
+              const lights = b.gpu.model.lights;
+              if (!lights?.length || (b.group !== "doodads" && b.group !== "units") || !renderer.batchShown(b)) continue;
+              const pivots = b.gpu.model.pivots;
+              for (const inst of b.instances) {
+                for (const l of lights) {
+                  const id = l.node.objectId;
+                  rings.push(...lightRings(inst.world, [pivots[id * 3] ?? 0, pivots[id * 3 + 1] ?? 0, pivots[id * 3 + 2] ?? 0], l));
+                }
+              }
+            }
+          }
+          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)},${r.r.toFixed(1)}`).join(";");
+          if (key === lightsKey) return;
+          lightsKey = key;
+          renderer.setRings("lights", rings);
+          redraw();
+        };
+        /** Draws what `shown` says, after the choice or game view changed. */
+        const applyView = () => {
+          const was = shown;
+          shown = shownView(viewSet(), gameViewOn());
+          const hide = (g: string, hidden: boolean) => { if (hidden) renderer.hiddenGroups.add(g); else renderer.hiddenGroups.delete(g); };
+          hide("doodads", !shown.doodads);
+          hide("units", !shown.units);
+          hide("cliffs", !shown.cliffs);
+          // The shoreline foam goes with the water.
+          hide("shoreline", !shown.water);
+          renderer.showWater = shown.water;
+          renderer.showEffects = shown.effects;
+          renderer.showFog = shown.fog;
+          renderer.showWeather = shown.weather;
+          renderer.groundLook = shown.terrain;
+          renderer.showEditorOnly = shown.starts;
+          if (renderer.showBlight !== shown.blight) { renderer.showBlight = shown.blight; renderer.terrainChanged(); }
+          gameBadge.hidden = !gameViewOn();
+          applyLight();
+          applyGrid();
+          if (anyGroundLayer(was) || anyGroundLayer(shown)) void refreshLayers();
+          showLightRanges();
+          // A selected start location can't stay selected where it isn't shown.
+          if (!shown.starts && selectedEntries().some((p) => p.id === "sloc")) clearSelection();
           viewSyncs.forEach((f) => f());
-          void refreshLayers();
+          redraw();
+        };
+        viewChanged = applyView;
+        const refusedInGameView = () => (gameViewOn() ? GAME_VIEW_NOTE : null);
+        const setGrid = (g: GridSize) => { viewState.grid = g; applyView(); };
+        const toggleLayer = (layer: ToggleLayer | "water"): boolean | string => {
+          const no = refusedInGameView();
+          if (no) return no;
+          viewState[layer] = !viewState[layer];
+          applyView();
           return viewState[layer];
         };
-        const viewCommands: ViewCommands = {
-          viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups,
-          toggleGrid: (size) => { setGrid(toggleGrid(viewState.grid, size)); return viewState.grid; },
-          state: () => ({ ...viewState, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance } }),
+        const toggleGameView = async () => {
+          const on = !gameViewOn();
+          await w3.settings.set("terrain.gameView", on);
+          // The settings' listener draws it; once more in case the value was already there (another editor set it).
+          // Closed meanwhile, there's nothing to draw.
+          if (!disposed) applyView();
+          return on;
         };
+        const viewCommands: ViewCommands = {
+          viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
+          toggleSetting: async (which) => {
+            const no = refusedInGameView();
+            if (no) return no;
+            const key = which === "lighting" ? "terrain.lighting.enabled" : "terrain.weather";
+            const on = w3.settings.get<boolean>(key, true) === false;
+            await w3.settings.set(key, on);
+            return on;
+          },
+          cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
+          toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
+          state: () => ({ ...viewState, gameView: gameViewOn(), shown: { ...shown }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw } }),
+        };
+        const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
-        const layerToggle = (label: string, title: string, layer: "naval" | "heights" | "cameras") => {
+        /** "Label (key)" for a toolbar box's tooltip. */
+        const withKey = (title: string, command: string) => (keyOf(command) ? `${title} (${keyOf(command)})` : title);
+        /** A toolbar box for a View item: game view greys it out (the World Editor's View menu does so too). */
+        const layerToggle = (label: string, title: string, layer: ToggleLayer | "water", command?: string) => {
           const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); keysToMap(); } });
-          viewSyncs.push(() => { box.checked = viewState[layer]; });
-          return h("label.model-toggle", { title }, box, ` ${label}`);
+          viewSyncs.push(() => { box.checked = viewState[layer]; box.disabled = gameViewOn(); });
+          return h("label.model-toggle", { title: command ? withKey(title, command) : title }, box, ` ${label}`);
         };
         /** A box for one of the Advanced switches; the command and the box are the same setting. */
         const switchBox = (label: string, title: string, key: string, standard: boolean) => {
@@ -3731,27 +3880,38 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
-        viewSyncs.push(() => { gridSelect.value = viewState.grid; });
+        viewSyncs.push(() => { gridSelect.value = viewState.grid; gridSelect.disabled = gameViewOn(); });
+        const terrainSelect = h("select", { title: withKey("Terrain: textured, as a wireframe, or hidden", "w3.terrain.cycleTerrainDisplay"), onchange: () => { if (!gameViewOn()) setTerrain(terrainSelect.value as TerrainLook); keysToMap(); } },
+          ...TERRAIN_LOOKS.map((t) => h("option", { value: t }, t === "textured" ? "Terrain" : t === "wireframe" ? "Wireframe" : "No terrain")));
+        viewSyncs.push(() => { terrainSelect.value = viewState.terrain; terrainSelect.disabled = gameViewOn(); });
+        const gameViewBox = h("input", { type: "checkbox", checked: gameViewOn(), onchange: () => { if (gameViewBox.checked !== gameViewOn()) void toggleGameView(); keysToMap(); } });
+        viewSyncs.push(() => { gameViewBox.checked = gameViewOn(); });
 
-        const toggle = (label: string, get: () => boolean, set: (v: boolean) => void) => {
+        /** A box for a setting of the view's; game view greys it out when `forced`. */
+        const toggle = (label: string, get: () => boolean, set: (v: boolean) => void, forced = false, title?: string) => {
           const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); keysToMap(); } });
-          return h("label.model-toggle", {}, box, ` ${label}`);
+          viewSyncs.push(() => { box.checked = get(); if (forced) box.disabled = gameViewOn(); });
+          return h("label.model-toggle", title ? { title } : {}, box, ` ${label}`);
         };
         el.append(h("div.model-viewer", {},
           h("div.model-main", {},
             h("div.model-toolbar", {},
-              toggle("Water", () => renderer.showWater, (v) => {
-                renderer.showWater = v;
-                // The shoreline foam goes with the water.
-                if (v) renderer.hiddenGroups.delete("shoreline"); else renderer.hiddenGroups.add("shoreline");
-              }),
-              toggle("Effects", () => renderer.showEffects, (v) => { renderer.showEffects = v; }),
+              h("label.model-toggle", { title: withKey("Game view: the map lit and fogged as the game shows it, without regions, cameras, start locations, pathing or grids", "w3.terrain.toggleGameView") }, gameViewBox, " Game view"),
+              terrainSelect,
+              layerToggle("Doodads", "Doodads and destructables", "doodads", "w3.terrain.toggleDoodads"),
+              layerToggle("Units", "Units, items and start locations", "units", "w3.terrain.toggleUnits"),
+              layerToggle("Water", "Water and the shoreline's waves", "water", "w3.terrain.toggleWater"),
+              layerToggle("Blight", "Blighted ground (off: the ground's own tiles)", "blight", "w3.terrain.toggleBlight"),
+              toggle("Effects", () => viewState.effects, (v) => { viewState.effects = v; applyView(); }, true),
               toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
-              h("label.model-toggle", {}, lightBox, " Lighting"), lightSelect,
+              h("label.model-toggle", { title: withKey("The map's day and night lighting; off: an even light", "w3.terrain.toggleLighting") }, lightBox, " Lighting"), lightSelect,
               gridSelect,
               layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights"),
-              layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval"),
-              layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras"),
+              layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
+              layerToggle("Naval pathing", "Where ships can sail: deep water strong blue, shallow water light", "naval", "w3.terrain.toggleNavalPathing"),
+              layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
+              layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras", "w3.terrain.toggleCameraObjects"),
+              layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
               layerBusy,
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               ...(editable ? [
@@ -3759,17 +3919,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
                 switchBox("Camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
               ] : []),
-              toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
-              toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
+              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true),
+              toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, withKey("The map's weather", "w3.terrain.toggleWeather")),
               skySelect,
-              toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
+              toggle("Cliffs", () => viewState.cliffs, (v) => { viewState.cliffs = v; applyView(); }, true),
               h("button", { title: "Reset camera", onclick: () => { resetCamera(); keysToMap(); } }, "⟲"),
               h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); keysToMap(); } }, "⛶"),
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
-              h("span.muted", {}, dragHint, " · Middle-drag or arrow keys: pan · Right-drag: rotate · Wheel: zoom")),
+              h("span.muted", {}, dragHint, " · Middle-drag or arrow keys (Shift: faster): pan · Right-drag or Ctrl+Left/Right: rotate · Wheel or Ctrl+Up/Down: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
-            h("div.model-stage", {}, canvas, labelLayer, glLost)),
+            h("div.model-stage", {}, canvas, labelLayer, gameBadge, glLost)),
           side));
+        // The View keys with Ctrl stay with the map while it has the keyboard (Ctrl+R: Regions, not Reload Window).
+        canvas.dataset.ownKeys = OWN_CHORDS.join(" ");
+        applyView();
 
         // ---- camera ------------------------------------------------------------------
         const initial = { yaw: renderer.yaw, pitch: renderer.pitch, distance: renderer.distance, fov: renderer.fov };
@@ -3925,7 +4088,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
           if (clipboardKey(e)) { e.preventDefault(); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
-          const step = canvas.clientHeight / 6;
           if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
           if (isRecallKey(e) && !activeGroup) {
             e.preventDefault();
@@ -3939,15 +4101,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (pick) openObject(pick.kind, pick.id);
             return;
           }
+          // The World Editor's View keys (V game view, Ctrl+T terrain, Ctrl+D doodads, …: viewmodes.ts). H and V mirror
+          // what's selected or being pasted first (clipboardKey, above).
+          const viewCommand = viewKeyCommand(e);
+          if (viewCommand) {
+            e.preventDefault();
+            if (!e.repeat) void w3.commands.execute(viewCommand).catch((err) => w3.window.showError(String((err as Error)?.message ?? err)));
+            return;
+          }
           if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); byKey(e, () => rotateSelected(e.key === "[" ? 15 : -15)); return; }
           const edit = editable && !activeGroup && selectedEntries().length ? selectionKey(e) : null;
           if (edit) { e.preventDefault(); byKey(e, () => keyEdit(edit)); return; }
-          const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
-          if (!d) return;
+          // The camera keys, as the World Editor's (viewmodes.ts cameraKey): arrows scroll, Shift faster, Ctrl+Up and
+          // Down zoom, Ctrl+Left and Right turn. With a selection Ctrl and the arrows nudge it instead (above).
+          const move = cameraKey(e);
+          if (!move) return;
           e.preventDefault();
-          pan(d[0], d[1]);
+          if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
+          else if ("zoom" in move) { renderer.distance = Math.max(200, Math.min(maxDistance(), renderer.distance * move.zoom)); redraw(); }
+          else { renderer.yaw += move.turn; redraw(); }
         });
         const onMove = (e: MouseEvent) => {
           if (box) {

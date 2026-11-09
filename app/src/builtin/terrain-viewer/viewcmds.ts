@@ -3,7 +3,7 @@
 // (the camera objects' is lib/terrain/cameras).
 // The viewer passes what it read; the tests pass made-up maps.
 
-import { NO_WATER } from "../../lib/terrain/pathing";
+import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import type { CameraObject } from "../../lib/terrain/cameras";
 import type { TerrainToolGroupInstance } from "../../extensions/services";
 
@@ -12,6 +12,14 @@ import type { TerrainToolGroupInstance } from "../../extensions/services";
 export async function layerCameras(groups: Iterable<Pick<TerrainToolGroupInstance, "cameraObjects">>,
   saved: () => Promise<readonly CameraObject[]>): Promise<readonly CameraObject[]> {
   for (const g of groups) if (g.cameraObjects) return g.cameraObjects();
+  return saved();
+}
+
+/** The regions the Regions layer draws: those of a tool group that holds them (the Region Editor, with its unsaved
+ *  edits), else the saved file's. */
+export async function layerRegions(groups: Iterable<Pick<TerrainToolGroupInstance, "regionObjects">>,
+  saved: () => Promise<readonly RegionBox[]>): Promise<readonly RegionBox[]> {
+  for (const g of groups) if (g.regionObjects) return g.regionObjects();
   return saved();
 }
 
@@ -72,6 +80,41 @@ export function navalColors(cells: ArrayLike<number>): Uint8Array {
     const c = cells[i];
     if (c & NO_WATER) continue;
     rgba.set(c & 0x02 ? [20, 70, 255, 200] : [90, 220, 255, 150], i * 4);
+  }
+  return rgba;
+}
+
+/** Pathing - Ground (per pathing cell, rows from the south), in the World Editor's colours: magenta where nothing
+ *  walks, blue where units walk but nothing can be built (we-drive, map 03's lake and its shore, 2026-11-09). */
+export function groundPathingColors(cells: ArrayLike<number>): Uint8Array {
+  const rgba = new Uint8Array(cells.length * 4);
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c & NO_WALK) rgba.set([230, 40, 230, 150], i * 4);
+    else if (c & NO_BUILD) rgba.set([40, 90, 255, 140], i * 4);
+  }
+  return rgba;
+}
+
+export interface RegionBox { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }
+
+/** The Regions layer (per pathing cell of `width` × `height`, rows from the south, the map's corner at `offsetX`,
+ *  `offsetY`): each region filled with its colour and edged darker, larger ones first so that small ones stay on top. */
+export function regionColors(regions: readonly RegionBox[], width: number, height: number, offsetX: number, offsetY: number): Uint8Array {
+  const rgba = new Uint8Array(width * height * 4);
+  const cell = 32;
+  const area = (r: RegionBox) => (r.right - r.left) * (r.top - r.bottom);
+  for (const r of [...regions].sort((a, b) => area(b) - area(a))) {
+    if (![r.left, r.right, r.bottom, r.top].every(Number.isFinite)) continue;
+    const x0 = Math.max(0, Math.round((r.left - offsetX) / cell)), x1 = Math.min(width, Math.round((r.right - offsetX) / cell));
+    const y0 = Math.max(0, Math.round((r.bottom - offsetY) / cell)), y1 = Math.min(height, Math.round((r.top - offsetY) / cell));
+    const c = r.color ?? { red: 255, green: 255, blue: 255 };
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const edge = x === x0 || x === x1 - 1 || y === y0 || y === y1 - 1;
+        rgba.set(edge ? [c.red * 0.3, c.green * 0.3, c.blue * 0.3, 235] : [c.red, c.green, c.blue, 170], (y * width + x) * 4);
+      }
+    }
   }
   return rgba;
 }

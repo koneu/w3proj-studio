@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, GRID_STEP, layerCameras, navalColors, toggleGrid, viewOfBox, type Angle, type Box } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, toggleGrid, viewOfBox, type Angle, type Box } from "./viewcmds";
+import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
 /** The oracle: a real perspective projection of a point, written out here from the camera's position. */
 function project(p: number[], target: number[], distance: number, a: Angle, aspect: number): { x: number; y: number } | null {
@@ -96,4 +97,39 @@ test("layerCameras: the Camera Editor's cameras, unsaved edits and all, before t
   assert.deepEqual(await layerCameras([{}, { cameraObjects: async () => edited }], readSaved), edited);
   assert.equal(reads, 0, "the file isn't read while a group holds the cameras");
   assert.deepEqual(await layerCameras([{}], readSaved), saved, "without the Camera Editor, the saved file");
+});
+
+test("layerRegions: the Region Editor's regions, unsaved edits and all, before the saved file's", async () => {
+  const saved = [{ left: 0, bottom: 0, right: 64, top: 64 }], edited = [{ left: 128, bottom: 0, right: 256, top: 64 }];
+  let reads = 0;
+  const readSaved = async () => { reads++; return saved; };
+  assert.deepEqual(await layerRegions([{}, { regionObjects: async () => edited }], readSaved), edited);
+  assert.equal(reads, 0);
+  assert.deepEqual(await layerRegions([{}], readSaved), saved);
+});
+
+test("groundPathingColors: magenta where nothing walks, blue where nothing is built, clear where both can", () => {
+  const rgba = groundPathingColors([NO_WALK | NO_BUILD, NO_BUILD, 0, NO_WALK | NO_WATER | NO_BUILD, NO_WATER]);
+  const px = (i: number) => [...rgba.slice(i * 4, i * 4 + 4)];
+  assert.ok(px(0)[0] > 200 && px(0)[2] > 200 && px(0)[1] < 100 && px(0)[3] > 0, `${px(0)}`);
+  assert.ok(px(1)[2] > 200 && px(1)[0] < 100 && px(1)[3] > 0, `${px(1)}`);
+  assert.equal(px(2)[3], 0);
+  assert.deepEqual(px(3), px(0), "a cliff and deep water look alike: nothing walks there");
+  assert.equal(px(4)[3], 0);
+});
+
+test("regionColors: each region filled in its colour inside a darker edge, small ones over large ones, nothing outside", () => {
+  // 8 × 4 cells of 32 from (-128, -64): a large red region over all of it, a small blue one at cells 1–2 × 1–2.
+  const big = { left: -128, bottom: -64, right: 128, top: 64, color: { red: 255, green: 0, blue: 0 } };
+  const small = { left: -96, bottom: -32, right: 0, top: 64, color: { red: 0, green: 0, blue: 255 } };
+  const rgba = regionColors([small, big], 8, 4, -128, -64);
+  const px = (x: number, y: number) => [...rgba.slice((y * 8 + x) * 4, (y * 8 + x) * 4 + 4)];
+  assert.deepEqual(px(0, 0).slice(0, 3), [255 * 0.3, 0, 0].map(Math.floor), "the big one's edge");
+  assert.deepEqual(px(5, 1), [255, 0, 0, 170], "the big one's inside");
+  assert.equal(px(2, 2)[2], 255, "the small one's inside, over the big one");
+  assert.equal(px(2, 2)[0], 0);
+  assert.equal(px(1, 1)[3], 235, "the small one's edge");
+  // Outside the map and broken numbers: nothing, no throw.
+  const none = regionColors([{ left: 1000, bottom: 1000, right: 2000, top: 2000 }, { left: NaN, bottom: 0, right: 1, top: 1 }], 8, 4, -128, -64);
+  assert.ok(none.every((v) => v === 0));
 });
