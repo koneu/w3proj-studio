@@ -294,6 +294,21 @@ include its animated models) went from 0.05–0.27 to 0.12–0.63 on the test ma
 shadow with it; Studio draws it so since branch terrain-extras (below). `app-drive --frame-cost` reports the last
 frame's real shadows (`sunShadows`).
 
+**Shadows, water and shore against the editor once more** (branch render-fixes-5, 2026-11-09; light ratios Shadows
+on over off with the tone curve inverted per pixel, green, medians): the models never got the game lighting's fill
+(the model shader's uniform list lacked it), so trees and units were near black in shadow and on their sides away
+from the sun (TwistedMeadows' tree trunks 24, 11, 3 with Shadows off against the editor's 79, 52, 22; now 58, 29, 10).
+Models now take it on every surface (tone.ts objectLight), the ground in shadow only. Ground in shadow: map 03's
+footmen 0.50 (editor) / 0.54 → 0.56 (Studio before → after), TwistedMeadows' trees 0.54 / 0.51 → 0.56 and 0.60 /
+0.52 → 0.59. HD water was the bigger part of TwistedMeadows' difference: its centre is water 38 deep over rock, which
+the editor shows nearly as the rock; five pools of set depths (8–96) on flat grass gave the editor's opacity and a
+lighter shallow colour (renderer.ts HD_WATER). TwistedMeadows' opening view against the editor's game view 16.8 →
+10.4, unlit 19.1 → 11.2; the pools 11.4 → 10.0; a test lake on map 03 with a gryphon and two nagas 13.0 → 12.5 (lit),
+15.6 → 14.0 (unlit); map 03 unchanged (6.9). The same pools put the editor's shore waves where the water is at least
+24.5 deep and only on the shore's −X and −Y sides (shoreline.ts). Still different: the editor shows a swimming
+naga's body through the water (its opacity seems to go by the water in front of what's behind, not by the bed's
+depth), the lake's outline (an oval in the editor), and the trees' lit sides are darker than the editor's.
+
 **Units' heights** (branch terrain-extras, 2026-11-09, HD, copies of map 03 with units added by the release CLI): the
 editor draws every unit at its flying height (UnitData `moveHeight`, object data `umvh`) over the ground under it, and
 ignores the height the placement file holds: footmen stored at 0, 256 and 600 on ground 256 stand on it alike, gryphons
