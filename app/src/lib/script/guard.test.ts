@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { lostFunctions, scriptDecision, scriptHash } from "./guard";
+import { lostFunctions, SCRIPT_INPUTS, scriptDecision, scriptHash } from "./guard";
+
+test("saving what the script is made from regenerates it: the destructables' and the skin files' object data too", () => {
+  // Destructable tints (war3map.w3b, war3mapSkin.w3b) and hero abilities (war3mapSkin.w3a) go into the script.
+  for (const p of ["map/war3map.w3b.json", "map/war3mapSkin.w3b.json", "map/war3mapSkin.w3a.json", "map/war3mapSkin.w3u", "map/war3map.w3u.json", "map/war3map.wtg"]) assert.ok(SCRIPT_INPUTS.test(p), p);
+  for (const p of ["map/war3map.w3q.json", "map/war3mapSkin.w3h.json", "map/war3map.wpm"]) assert.ok(!SCRIPT_INPUTS.test(p), p);
+});
 
 test("code that isn't made from the triggers is noticed, in JASS and Lua", () => {
   const generated = "function main takes nothing returns nothing\nendfunction\n";

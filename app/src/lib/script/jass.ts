@@ -10,7 +10,7 @@ import { jassToLua, RAW } from "./lua";
 import { ident } from "./names";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
-import { customTextGlobals, scriptItems, triggersSection } from "./triggers";
+import { customTextGlobals, runsAtInit, scriptItems, triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
 import { dropSection, itemTablesSection, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
@@ -37,6 +37,7 @@ export interface SoundJson {
   distanceCutoff: number; coneInside: number; coneOutside: number; coneOutsideVolume: number; coneOrientation: number[];
   variableName?: string; assetLabel?: string; assetFile?: string; dialogueTextKey?: number; speakerNameKey?: number;
   facialAnimationLabel?: string; facialAnimationGroupLabel?: string; facialAnimationSetFile?: string;
+  speakerUnitType?: string; unknown2?: number;
 }
 
 /** A placed object (war3mapUnits.doo / war3map.doo JSON entry). */
@@ -64,12 +65,17 @@ export interface ScriptInput {
   waygate?: (id: string) => boolean;
   /** The orders that turn an ability's autocast on and off. */
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
+  /** Whether an ability is a hero ability (lib/script/objects heroAbilities). */
+  heroAbility?: (ability: string) => boolean;
+  /** The tint of a destructable type in the map's object data (lib/script/objects destructableTints). */
+  destructableTint?: (id: string) => [number, number, number];
   /** Day/night models for the map's light environment (WorldEditData [TerrainLights]/[UnitLights]). */
   lights?: { terrain: string; unit: string };
   /** Ground height at a point (for region ambient sounds). */
   groundHeight?: (x: number, y: number) => number;
-  /** Length of a sound file in milliseconds (SetSoundDuration), if known. */
-  soundDuration?: (file: string) => number | undefined;
+  /** Length of a sound file in milliseconds (SetSoundDuration), if known; `name` is the sound's (gg_snd_…): sounds
+   *  whose file can't be read keep their own (three of "---Invalid Sound Filepath---" in Roundabout, each its own). */
+  soundDuration?: (file: string, name: string) => number | undefined;
   /** A sound label's settings (UI\SoundInfo\*.slk), for labelled sounds. */
   soundLabel?: (label: string) => SoundLabel | undefined;
   /** Generate for war3map.lua (set by generateScript for Lua maps). */
@@ -223,17 +229,31 @@ export function initGlobals(i: ScriptInput): string {
   return lines.join(EOL);
 }
 
+/** In Lua maps the map's own code is Lua already: copied line by line (lua.ts RAW). */
+const codeLines = (i: ScriptInput, t: string) => (i.lua ? t.split(/\r?\n/).map((l) => RAW + l + EOL).join("") : t.replace(/\r?\n/g, EOL) + EOL);
+
+/** The first "Custom Script Code" section, after the globals: the script items (Reforged), each under
+ *  its own banner. The map's custom script header isn't here: see mapHeader. */
 export function customScript(i: ScriptInput): string {
-  // Leading line breaks of the stored text are dropped.
-  const text = (i.custom?.header ?? "").replace(/^(\r?\n)+/, "");
-  // In Lua maps the header is Lua already: copied line by line (lua.ts RAW).
-  const lines = (t: string) => (i.lua ? t.split(/\r?\n/).map((l) => RAW + l + EOL).join("") : t.replace(/\r?\n/g, EOL) + EOL);
-  // Then the script items (Reforged): each under its own banner.
   const scripts = i.triggers ? scriptItems({ triggers: i.triggers, custom: i.custom }) : [];
-  if (!scripts.length) return banner("Custom Script Code") + (text ? lines(text) : "");
+  if (!scripts.length) return banner("Custom Script Code");
   // With script items the banner's empty line moves to the end of the section.
-  return banner("Custom Script Code").slice(0, -EOL.length) + (text ? lines(text) : "")
-    + scripts.map((s) => `${STARS}${EOL}//*  ${s.name}${EOL}${s.text ? lines(s.text) : ""}`).join("") + EOL;
+  return banner("Custom Script Code").slice(0, -EOL.length)
+    + scripts.map((s) => `${STARS}${EOL}//*  ${s.name}${EOL}${s.text ? codeLines(i, s.text) : ""}`).join("") + EOL;
+}
+
+/** The key of the second "Custom Script Code" section in generateSections and splitSections. */
+export const HEADER_SECTION = "Custom Script Code (header)";
+
+/** The map's custom script header (war3map.wct), under a second "Custom Script Code" banner after the
+ *  map's objects (Regions, Cameras) and before the triggers, as the World Editor writes it; the first
+ *  banner after the globals stays empty then (all six game maps with a header: War3XBonusCredits,
+ *  Human06, WormWar, BomberCommand, AzerothGrandPrix, and the Lua map SilverpineSprint). The text as it
+ *  is, its leading empty lines too (BomberCommand). Nothing without code. */
+export function mapHeader(i: ScriptInput): string {
+  const text = i.custom?.header ?? "";
+  if (!text.trim()) return "";
+  return banner("Custom Script Code").slice(0, -EOL.length) + codeLines(i, text);
 }
 
 export function sounds(i: ScriptInput): string {
@@ -251,9 +271,15 @@ export function sounds(i: ScriptInput): string {
     if (s.facialAnimationLabel && s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationLabel( ${n}, ${str(s.facialAnimationLabel)} )`);
     if (s.facialAnimationGroupLabel) lines.push(`    call SetSoundFacialAnimationGroupLabel( ${n}, ${str(s.facialAnimationGroupLabel)} )`);
     if (s.facialAnimationSetFile) lines.push(`    call SetSoundFacialAnimationSetFilepath( ${n}, ${str(s.facialAnimationSetFile)} )`);
-    if (s.speakerNameKey !== undefined && s.speakerNameKey >= 0) lines.push(`    call SetDialogueSpeakerNameKey( ${n}, "TRIGSTR_${s.speakerNameKey}" )`);
-    if (s.dialogueTextKey !== undefined && s.dialogueTextKey >= 0) lines.push(`    call SetDialogueTextKey( ${n}, "TRIGSTR_${s.dialogueTextKey}" )`);
-    const duration = i.soundDuration?.(s.file);
+    // The dialogue keys, by the word after the facial animation file ("unknown2"), as counted over the game's maps:
+    // 0 on a dialogue (a speaker unit type or a key set) writes both as they are, -1 too (OrcX02_02); otherwise the
+    // keys set are written from editor 7000 on, none before (Undead04, HumanX04 in their 6127 and 7003 versions).
+    // The game's maps have no 0 on a sound without a dialogue, which is what the Sound Editor gives a new sound.
+    const spoken = s.unknown2 === 0 && (!!s.speakerUnitType || (s.speakerNameKey ?? -1) >= 0 || (s.dialogueTextKey ?? -1) >= 0);
+    const dialogue = (key: number | undefined) => key !== undefined && (spoken || (editorVersion(i) >= 7000 && key >= 0));
+    if (dialogue(s.speakerNameKey)) lines.push(`    call SetDialogueSpeakerNameKey( ${n}, "TRIGSTR_${s.speakerNameKey}" )`);
+    if (dialogue(s.dialogueTextKey)) lines.push(`    call SetDialogueTextKey( ${n}, "TRIGSTR_${s.dialogueTextKey}" )`);
+    const duration = i.soundDuration?.(s.file, n);
     if (duration !== undefined) lines.push(`    call SetSoundDuration( ${n}, ${duration} )`);
     const label = s.assetLabel ? i.soundLabel?.(s.assetLabel) : undefined;
     if (label) {
@@ -276,6 +302,26 @@ export function sounds(i: ScriptInput): string {
 
 /** A sound label's row in UI\SoundInfo (SetSoundParamsFromLabel applies it). */
 export interface SoundLabel { channel: number; pitch: number; minDistance: number; maxDistance: number; distanceCutoff: number }
+
+/** The sound lengths a map script sets (SetSoundDuration), JASS or Lua: for a sound by its name when it still plays
+ *  the same file, else for its file. Sounds sharing a file keep their own: an unreadable file's length can only come
+ *  from here, and Roundabout's three "---Invalid Sound Filepath---" sounds have three. */
+export function scriptSoundDurations(script: string): (file: string, name: string) => number | undefined {
+  const fileOf = new Map<string, string>();
+  // JASS ("set x = CreateSound( "…"") or Lua ("x = CreateSound("…""); the path's escapes undone.
+  for (const m of script.matchAll(/(\w+) = CreateSound\( ?"((?:[^"\\]|\\.)*)"/g)) fileOf.set(m[1], m[2].replace(/\\\\/g, "\\"));
+  const byFile = new Map<string, number>(), byName = new Map<string, { file: string; ms: number }>();
+  for (const m of script.matchAll(/SetSoundDuration\( ?(\w+), (\d+) ?\)/g)) {
+    const file = fileOf.get(m[1]);
+    if (file === undefined) continue;
+    byFile.set(file, Number(m[2]));
+    byName.set(m[1], { file, ms: Number(m[2]) });
+  }
+  return (file, name) => {
+    const own = byName.get(name);
+    return own?.file === file ? own.ms : byFile.get(file);
+  };
+}
 
 /** Sound labels from the UI\SoundInfo tables (first row of a name wins; "_" is NaN, so never equal). */
 /** The tables of UI\\SoundInfo (`${name}.slk`) that define sound labels. */
@@ -368,13 +414,15 @@ export function generateSections(i: ScriptInput): Map<string, string> {
     ["Cameras", cameras(i)],
     ["Items", items],
     ["Unit Creation", units],
+    [HEADER_SECTION, mapHeader(i)],
     ...techs,
     ["Triggers", i.triggers ? banner("Triggers") + triggersSection({ data: i.data, triggers: i.triggers, custom: i.custom, lua: i.lua }) : ""],
     ...setupSections(i, { destructables: !!destructables, items: !!items, randomGroups: !!groups, units: !!units, upgrades: !!techs[0][1], techs: !!techs[1][1] }),
   ]);
   // Sections of functions end with a blank line, the drop tables with two.
+  // The map's header stays as the map has it.
   for (const [k, v] of sections) {
-    if (!v || !/endfunction\s*$/.test(v)) continue;
+    if (!v || k === HEADER_SECTION || !/endfunction\s*$/.test(v)) continue;
     const blanks = k.endsWith("Item Tables") ? 2 : 1;
     sections.set(k, v.replace(/(\r\n)*$/, EOL.repeat(1 + blanks)));
   }
@@ -410,7 +458,7 @@ function destructableDrops(i: ScriptInput): string {
 
 function destructableObjects(i: ScriptInput): string {
   const body = destructablesSection({ itemTables: tableNumbers(i), doodads: (i.doodads ?? []) as unknown as DestructableJson[], globalName: (d) => placedName(d as unknown as PlacedJson, "dest"),
-    referenced: referencedGlobals(i, true), editorVersion: i.info.editorVersion as number | undefined });
+    referenced: referencedGlobals(i, true), editorVersion: i.info.editorVersion as number | undefined, tint: i.destructableTint });
   return body ? banner("Destructable Objects") + body : "";
 }
 
@@ -425,7 +473,7 @@ function unitCreation(i: ScriptInput): string {
   const regions = i.regions ?? [];
   const body = unitsSection({
     itemTables: tableNumbers(i),
-    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate,
+    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, heroAbility: i.heroAbility, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });
   return body ? banner("Unit Creation") + body : "";
@@ -449,7 +497,7 @@ function setupSections(i: ScriptInput, made: { destructables: boolean; items: bo
       sounds: !!i.sounds?.length, regions: !!i.regions?.length, cameras: !!i.cameras?.length,
       ...made,
       triggers: !!i.triggers,
-      initTriggers: items.some((t) => "ecas" in t && t.enabled && !t.isComment && (t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === 0 && e.name === "MapInitializationEvent"))),
+      initTriggers: items.some((t) => "ecas" in t && t.enabled && !t.isComment && runsAtInit(t)),
     },
   };
   return [
@@ -466,7 +514,8 @@ export function splitSections(script: string): Map<string, string> {
   let last = 0, title = "";
   for (const m of script.matchAll(re)) {
     out.set(title, script.slice(last, m.index));
-    title = m[1];
+    // The second "Custom Script Code" holds the map's header (mapHeader).
+    title = m[1] === "Custom Script Code" && out.has(m[1]) ? HEADER_SECTION : m[1];
     last = m.index!;
   }
   out.set(title, script.slice(last));
@@ -475,7 +524,7 @@ export function splitSections(script: string): Map<string, string> {
 
 /** Section order of a World Editor war3map.j. */
 const SECTION_ORDER = ["", "Global Variables", "Custom Script Code", "Random Groups", "Map Item Tables", "Unit Item Tables", "Destructible Item Tables",
-  "Sound Assets", "Destructable Objects", "Items", "Unit Creation", "Regions", "Cameras", "Triggers", "Upgrades", "TechTree",
+  "Sound Assets", "Destructable Objects", "Items", "Unit Creation", "Regions", "Cameras", HEADER_SECTION, "Triggers", "Upgrades", "TechTree",
   "Players", "Main Initialization", "Map Configuration"];
 
 /** The whole map script as the World Editor writes it: war3map.j, or war3map.lua for Lua maps

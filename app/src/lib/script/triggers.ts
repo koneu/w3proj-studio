@@ -156,6 +156,22 @@ class TriggerCompiler {
   }
 
   private action(a: Eca, p: string, ind: string, depth: number): string[] {
+    const out = this.statement(a, p, ind, depth);
+    // Children left on an action that isn't a block (older edits) aren't compiled, but the World Editor
+    // still writes the helpers they would need, after the action's own: on plain calls and on the
+    // special forms alike (a ForGroup under a Set Variable in Skibi's Castle TD).
+    if (!/Multiple$/.test(a.name)) {
+      a.children.forEach((c, k) => {
+        if (!c.enabled) return;
+        const cp = `${p}Func${pad3(k + 1)}`;
+        if (c.kind === CONDITION) this.condExpr(c, cp);
+        else this.action(c, cp, ind + "    ", depth + 1);
+      });
+    }
+    return out;
+  }
+
+  private statement(a: Eca, p: string, ind: string, depth: number): string[] {
     const arg = (k: number) => this.expr(a.params[k], this.argType(ACTION, a.name, k), `${p}${pad3(k + 1)}`);
     const branch = (g: number) => a.children.filter((c) => (c.group ?? 0) === g);
     switch (a.name) {
@@ -230,14 +246,6 @@ class TriggerCompiler {
     }
     const f = this.fn(ACTION, a.name);
     const args = a.params.map((_, k) => arg(k));
-    // Children left on a plain action (older edits) aren't compiled, but the World Editor
-    // still writes the helpers they would need.
-    a.children.forEach((c, k) => {
-      if (!c.enabled) return;
-      const cp = `${p}Func${pad3(k + 1)}`;
-      if (c.kind === CONDITION) this.condExpr(c, cp);
-      else this.action(c, cp, ind + "    ", depth + 1);
-    });
     return [`${ind}call ${f?.scriptName ?? a.name}(${args.length ? ` ${args.join(", ")} ` : "  "})`];
   }
 
@@ -272,8 +280,9 @@ class TriggerCompiler {
 
 function banner(t: TriggerItem): string {
   const lines = [SEP, `// Trigger: ${t.name}`];
-  // One "//" after the title, then the comment's lines; empty lines are dropped.
-  if (t.description) lines.push("//", ...t.description.split(/\r?\n/).filter((l) => l !== "").map((l) => `// ${l}`));
+  // One "//" after the title, then the comment's lines; empty lines are dropped, except the first
+  // (a comment that starts with a line break gets "// ": Skibi's Castle TD, WormWar, Human05).
+  if (t.description) lines.push("//", ...t.description.split(/\r?\n/).filter((l, k) => k === 0 || l !== "").map((l) => `// ${l}`));
   lines.push(SEP);
   return lines.join(EOL) + EOL;
 }
@@ -323,11 +332,19 @@ export function customTextGlobals(i: Pick<TriggerScriptInput, "triggers" | "cust
 
 /** Turns a GUI trigger into a custom text trigger with `text` (from triggerCustomText): its events,
  *  conditions and actions go. A map initialization event becomes Run on Map Initialization, so the map
- *  script still runs it at the start. */
+ *  script still runs it at the start (and an initially off trigger, which it didn't run, isn't run then either). */
 export function convertToCustom(t: TriggerItem) {
-  if (t.ecas.some((e) => e.enabled && e.kind === EVENT && e.name === "MapInitializationEvent")) t.runOnInit = true;
+  if (runsAtInit(t)) t.runOnInit = true;
   t.isCustom = true;
   t.ecas = [];
+}
+
+/** Whether RunInitializationTriggers runs `t` (an enabled trigger): Run on Map Initialization, or a Map
+ *  Initialization event on a trigger that starts on. The World Editor leaves out an initially off trigger
+ *  with the event (NightElf05's "The Dragons", UndeadX08's "Change the Icon": the only two in the game's
+ *  maps). No game map has Run on Map Initialization on an initially off trigger; that still counts. */
+export function runsAtInit(t: TriggerItem): boolean {
+  return t.runOnInit || (!t.initiallyOff && t.ecas.some((e) => e.enabled && e.kind === EVENT && e.name === "MapInitializationEvent"));
 }
 
 /** The trigger part of war3map.j (after the "Triggers" banner). */
@@ -353,7 +370,7 @@ export function triggersSection(i: TriggerScriptInput): string {
   const initialized = included.filter((t) => !t.isCustom || (textOf.get(t) ?? "").includes(`InitTrig_${ident(t.name)}`));
   const init = [SEP, "function InitCustomTriggers takes nothing returns nothing",
     ...initialized.map((t) => `    call InitTrig_${ident(t.name)}(  )`), "endfunction", ""];
-  const onInit = included.filter((t) => t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === EVENT && e.name === "MapInitializationEvent"));
+  const onInit = included.filter(runsAtInit);
   const run = [SEP, "function RunInitializationTriggers takes nothing returns nothing",
     ...onInit.map((t) => `    call ConditionalTriggerExecute( gg_trg_${ident(t.name)} )`), "endfunction", ""];
   return out.join("") + [init.join(EOL), ...(onInit.length ? [run.join(EOL)] : [])].join(EOL);

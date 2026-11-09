@@ -57,10 +57,74 @@ export function teamColors(files: (ObjectFile | null | undefined)[], game: Map<s
       if (v !== undefined) put(o.base, v);
     }
   }
+  // An entry only changes what it sets: war3mapSkin.w3u lists custom types again without utco, and
+  // that keeps war3map.w3u's (HumanX06Finale's N000, BlizzardTD's o01G).
+  const custom = new Map<string, { base: string; colour?: number }>();
   for (const f of files) {
-    for (const o of f?.custom ?? []) if (o.id) put(o.id, own(o) ?? out.get(o.base));
+    for (const o of f?.custom ?? []) if (o.id) custom.set(o.id, { base: o.base, colour: own(o) ?? custom.get(o.id)?.colour });
   }
+  for (const [id, c] of custom) put(id, c.colour ?? out.get(c.base));
   return out;
+}
+
+/** Whether a unit type is a building (its units go to the CreateBuildings… functions): the game's
+ *  (`isbldg` of Units\UnitBalance.slk), changed by the map (object data field ubdg) for the game's
+ *  types and its own. A custom type that doesn't say takes its base's. An entry only changes what it
+ *  sets: war3mapSkin.w3u lists most custom types again without ubdg, and that keeps war3map.w3u's
+ *  (UndeadX01's n003, a Goblin Merchant made a unit, is created as one by the World Editor). */
+export function buildingTypes(files: (ObjectFile | null | undefined)[], game: ReadonlySet<string>): (id: string) => boolean {
+  return flagOf(files, "ubdg", game);
+}
+
+/** Whether an ability is a hero ability: the game's (`hero` of Units\AbilityData.slk), changed by the map
+ *  (object data field aher), as buildingTypes. A hero's unlearned hero ability (level 0) gets no autocast
+ *  order in the script (UndeadX04's Sea Witch with Mana Shield at 0), its other abilities do (NightElf03's
+ *  custom heroes with Inner Fire and Curse on). */
+export function heroAbilities(files: (ObjectFile | null | undefined)[], game: ReadonlySet<string>): (id: string) => boolean {
+  return flagOf(files, "aher", game);
+}
+
+/** Tint of a destructable type (object data fields bvcr, bvcg, bvcb, 0–255) as the map sets it, the rest
+ *  255 (the game's types are all untinted, colorR/G/B of Units\DestructableSkin.txt). The World Editor
+ *  writes it into SetDestructableVertexColor (HumanX03, HumanX06, UndeadX07a–c tint theirs). */
+export function destructableTints(files: (ObjectFile | null | undefined)[]): (id: string) => [number, number, number] {
+  const [r, g, b] = ["bvcr", "bvcg", "bvcb"].map((f) => mapNumbers(files, f));
+  return (id) => [r.value(id) ?? 255, g.value(id) ?? 255, b.value(id) ?? 255];
+}
+
+/** A yes/no field of object data (1 is yes): the game's types in `game`, as the map sets it (mapNumbers). */
+function flagOf(files: (ObjectFile | null | undefined)[], field: string, game: ReadonlySet<string>): (id: string) => boolean {
+  const m = mapNumbers(files, field);
+  return (id) => {
+    const v = m.value(id);
+    return v !== undefined ? v === 1 : game.has(m.base(id));
+  };
+}
+
+/** A number field as the map sets it: a custom type's own value, else its base's as the map changes that;
+ *  undefined when the map doesn't say. An entry only changes what it sets: war3mapSkin.* lists most types
+ *  again without the field, and that keeps war3map.*'s. `base` is a custom type's base (the id itself else). */
+function mapNumbers(files: (ObjectFile | null | undefined)[], field: string): { value: (id: string) => number | undefined; base: (id: string) => string } {
+  const own = (o: ObjectEntry) => {
+    const v = o.mods?.find((m) => m.field === field)?.value;
+    return typeof v === "number" ? v : undefined;
+  };
+  const changed = new Map<string, number>();
+  for (const f of files) {
+    for (const o of f?.original ?? []) {
+      const v = own(o);
+      if (v !== undefined) changed.set(o.base, v);
+    }
+  }
+  const custom = new Map<string, { base: string; value?: number }>();
+  for (const f of files) {
+    for (const o of f?.custom ?? []) {
+      if (!o.id) continue;
+      custom.set(o.id, { base: o.base, value: own(o) ?? custom.get(o.id)?.value });
+    }
+  }
+  const base = (id: string) => custom.get(id)?.base ?? id;
+  return { base, value: (id) => custom.get(id)?.value ?? changed.get(base(id)) };
 }
 
 /** Unit types the map makes gold mines (the Gold Mine ability in their list) and those based on the

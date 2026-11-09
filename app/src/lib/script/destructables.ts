@@ -22,6 +22,8 @@ export interface DestructablesInput {
   referenced: Set<string>;
   /** war3map.w3i editorVersion: newer editors add pitch/roll (6117 seen) and a colour (7000). */
   editorVersion?: number;
+  /** The tint of a destructable type in the map's object data (lib/script/objects destructableTints); 255s without. */
+  tint?: (id: string) => [number, number, number];
 }
 
 /** Flag "fixed Z": the destructable keeps its height instead of following the ground. */
@@ -52,8 +54,8 @@ export function destructablesSection(i: DestructablesInput): string {
       deg(d.angle), ...(pitchRoll ? ["0.000", "0.000"] : []), fixed(d.scale[0], 3), String(d.variation), `'${d.skinId ?? d.id}'`,
       ...(color ? ["ConvertPlayerColor(24)"] : [])];
     lines.push(`    set ${v} = ${fn}( ${args.join(", ")} )`);
-    // Editors from 7000 on also set the tint (where some placements store another one is open).
-    if (color) lines.push(`    call SetDestructableVertexColor( ${v}, 255, 255, 255, 255 )`);
+    // Editors from 7000 on also set the tint: the type's, as the map's object data has it.
+    if (color) lines.push(`    call SetDestructableVertexColor( ${v}, ${(i.tint?.(d.id) ?? [255, 255, 255]).join(", ")}, 255 )`);
     if (!dead && d.life !== 100) lines.push(`    set life = GetDestructableLife( ${v} )`, `    call SetDestructableLife( ${v}, ${(d.life / 100).toFixed(2)} * life )`);
     const drops = dropFunctionOf("Doodad", d, index, i.itemTables);
     if (drops) {
