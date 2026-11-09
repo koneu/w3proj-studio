@@ -552,7 +552,7 @@ class TriggerView {
     const inScript = renames.size ? countRenames(this.file, scriptsOf().map((s) => s.get()), renames).script + countInText(ownText(), own) : 0;
     let withScripts = false;
     if (inScript) {
-      const c = await this.w3.window.showWarning(`${[...renames.keys()][0]}${own.size ? ` and ${[...own.keys()][0]}` : ""} appear ${inScript} time${inScript === 1 ? "" : "s"} in custom script. Rename them there too?`,
+      const c = await this.w3.window.showWarning(`${[...renames.keys()][0]}${own.size ? ` and ${[...own.keys()][0]} appear` : " appears"} ${inScript} time${inScript === 1 ? "" : "s"} in custom script. Rename ${own.size ? "them" : "it"} there too?`,
         "Rename in script too", "Only GUI triggers");
       if (c === undefined) return false;
       withScripts = c === "Rename in script too";

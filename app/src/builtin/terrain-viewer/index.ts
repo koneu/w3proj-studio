@@ -1315,6 +1315,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let viewChanged = () => {};
         /** Set with the layers (below): after another tab opened, the layers that tab draws itself. */
         let layersAfterTab = () => {};
+        /** The toolbar's boxes after the tab changed (the Regions tab holds the Regions box on). */
+        let viewSyncsAfterTab = () => {};
         const applyLight = () => {
           // Game view lights the map whatever the Lighting box says (the box keeps its choice for afterwards).
           const on = lightOn() || gameViewOn(), hour = lightHour();
@@ -3558,6 +3560,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           inst?.activate?.();
           renderTabs();
           layersAfterTab();
+          viewSyncsAfterTab();
           redraw();
         };
         const renderTabs = () => {
@@ -3727,6 +3730,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let shown = shownView(viewSet(), gameViewOn());
         /** Redraws the toolbar's boxes after a command changed what they show. */
         const viewSyncs: (() => void)[] = [];
+        viewSyncsAfterTab = () => viewSyncs.forEach((f) => f());
         const GAME_VIEW_NOTE = "Game view is on (V): the view shows the map as the game does. Turn it off to change what the view shows.";
         viewSyncs.push(() => markerBoxes.forEach((box, name) => { box.checked = viewState[name]; box.disabled = gameViewOn(); }));
         const maxDistance = () => terrain.width * 300;
@@ -3899,9 +3903,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         viewChanged = applyView;
         const refusedInGameView = () => (gameViewOn() ? GAME_VIEW_NOTE : null);
+        /** The Regions tab draws the regions itself while it's open: the Regions layer is on then, and stays so. */
+        const regionsTabOpen = () => activeGroup === "regions";
+        const REGIONS_TAB_NOTE = "The Regions tab shows the regions while it's open.";
         const setGrid = (g: GridSize) => { viewState.grid = g; applyView(); };
         const toggleLayer = (layer: ToggleLayer | "water"): boolean | string => {
-          const no = refusedInGameView();
+          const no = refusedInGameView() ?? (layer === "regions" && regionsTabOpen() ? REGIONS_TAB_NOTE : null);
           if (no) return no;
           viewState[layer] = !viewState[layer];
           applyView();
@@ -3927,7 +3934,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
-          state: () => ({ ...viewState, gameView: gameViewOn(), shown: { ...shown }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount }),
+          state: () => ({ ...viewState, ...(regionsTabOpen() ? { regions: true } : {}), gameView: gameViewOn(), shown: { ...shown, ...(regionsTabOpen() ? { regions: true } : {}) }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -3936,13 +3943,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** A toolbar box for a View item: game view greys it out (the World Editor's View menu does so too). */
         const layerToggle = (label: string, title: string, layer: ToggleLayer | "water", command?: string) => {
           const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); keysToMap(); } });
-          viewSyncs.push(() => { box.checked = viewState[layer]; box.disabled = gameViewOn(); });
+          // The Regions tab's own picture is the Regions layer: on, and not to be turned off, while the tab is open.
+          const byTab = () => layer === "regions" && regionsTabOpen();
+          viewSyncs.push(() => { box.checked = viewState[layer] || byTab(); box.disabled = gameViewOn() || byTab(); });
           return h("label.model-toggle", { title: command ? withKey(title, command) : title }, box, ` ${label}`);
         };
-        /** A box for one of the Advanced switches; the command and the box are the same setting. */
-        const switchBox = (label: string, title: string, key: string, standard: boolean) => {
+        /** A box for one of the Advanced switches; the command and the box are the same setting. Game view greys it
+         *  out when `forced` (View > Shadows in the World Editor). */
+        const switchBox = (label: string, title: string, key: string, standard: boolean, forced = false) => {
           const box = h("input", { type: "checkbox", checked: switchedOn(w3, key, standard), onchange: () => { void setSwitch(w3, key, box.checked); keysToMap(); } });
-          viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); });
+          viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); if (forced) box.disabled = gameViewOn(); });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };
         const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
@@ -3988,7 +3998,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ] : []),
               toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true),
               toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, withKey("The map's weather", "w3.terrain.toggleWeather")),
-              switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true),
+              switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true, true),
               skySelect,
               toggle("Cliffs", () => viewState.cliffs, (v) => { viewState.cliffs = v; applyView(); }, true),
               h("button", { title: "Reset camera", onclick: () => { resetCamera(); keysToMap(); } }, "⟲"),

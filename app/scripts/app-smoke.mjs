@@ -966,6 +966,8 @@ async function viewModes(page, found) {
   if (!(await page.evaluate(`!document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("no Game View badge over the view");
   if ((await changed()) < 300) fail("game view didn't change the picture (the start location should be gone)");
   if (!(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Regions")?.querySelector("input")?.disabled`))) fail("the Regions box can be used in game view");
+  // View > Shadows is greyed in game view, as in the World Editor.
+  if (!(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Shadows")?.querySelector("input")?.disabled`))) fail("the Shadows box can be used in game view");
   const refused = await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("regions"))()`);
   if (typeof refused !== "string" || (await state()).regions) fail(`a layer toggle in game view: ${JSON.stringify(refused)}`);
   // The start location can't be picked where it isn't drawn.
@@ -1004,6 +1006,18 @@ async function viewModes(page, found) {
   if (!(await page.evaluate(`window.__viewModesMark === 1`))) fail("Ctrl+R in the map reloaded the window");
   await key("r", "KeyR", 82, CTRL);
   if ((await changed()) > 150) fail("Ctrl+R twice isn't the plain picture");
+  // The Regions tab draws the regions itself: the box and the state say they're shown, and the layer can't be turned
+  // off under it; back on Select it's the choice again.
+  const regionsBox = `(() => { const i = [...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Regions")?.querySelector("input"); return i ? { checked: i.checked, disabled: i.disabled } : null; })()`;
+  await k.tab("Regions");
+  let rb = await page.evaluate(regionsBox), rs = await state();
+  if (!rb?.checked || !rb.disabled || !rs.regions || !rs.shown.regions) fail(`with the Regions tab open the Regions box is ${JSON.stringify(rb)} and the state ${rs.regions}/${rs.shown.regions}`);
+  const underTab = await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("regions"))()`);
+  if (typeof underTab !== "string") fail(`the Regions layer toggled under the Regions tab: ${JSON.stringify(underTab)}`);
+  await k.tab("Select");
+  rb = await page.evaluate(regionsBox);
+  rs = await state();
+  if (rb?.checked || rb?.disabled || rs.regions || rs.shown.regions) fail(`back on Select the Regions box is ${JSON.stringify(rb)} and the state ${rs.regions}/${rs.shown.regions}`);
   s = await state();
   let t = await trial("Ctrl+T", "terrain", () => key("t", "KeyT", 84, CTRL), 20000);
   if (t.terrain !== "wireframe") fail(`Ctrl+T gave ${t.terrain}`);
@@ -3843,6 +3857,41 @@ async function triggersAndAi(page, found) {
     await k.save();
     const undone = JSON.stringify(wtgFile());
     if (!undone.includes("gg_trg_Gate_Script") || undone.includes("Gate Runner") || !/InitTrig_Gate_Script/.test(wct())) fail("one undo didn't take the rename and its references back");
+    // A GUI trigger has only its gg_trg_ name in the script (the header): the question is about one name.
+    const renamedGui = await page.evaluate(`(async () => {
+      document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === "Gate Watch");
+      if (!row) return "no Gate Watch in the tree";
+      row.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const input = document.querySelector(".trig-name");
+      input.value = "Gate Guard";
+      input.dispatchEvent(new Event("change"));
+      await new Promise((r) => setTimeout(r, 500));
+      await w3.commands.execute("workbench.undo");
+      await new Promise((r) => setTimeout(r, 300));
+      return w3.editors.isDirty("map/war3map.wtg.json") ? "undoing the rename of Gate Watch left unsaved changes" : null;
+    })()`);
+    if (renamedGui) fail(renamedGui);
+    const askedGui = await warned();
+    if (askedGui.length !== 1 || askedGui[0] !== "gg_trg_Gate_Watch appears 1 time in custom script. Rename it there too?") fail(`renaming a GUI trigger asked ${JSON.stringify(askedGui)}`);
+    // A parameter without a value (a variable of no name, as Validate reports "isn't set") shows its argument in red.
+    const keptWtg = readFileSync(join(k.root, "map", "war3map.wtg.json"), "utf8");
+    const noValue = JSON.parse(keptWtg);
+    noValue.items.find((i) => i.name === "Broken Kill").ecas[1].params[0] = { type: 1, value: "" };
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify(noValue, null, 2))})`);
+    await sleep(1500);
+    const unsetShown = await page.evaluate(`(async () => {
+      document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === "Broken Kill");
+      if (!row) return null;
+      row.click();
+      await new Promise((r) => setTimeout(r, 300));
+      return [...document.querySelectorAll(".trig-eca .trig-param.unset")].map((e) => e.textContent);
+    })()`);
+    if (!unsetShown?.length || unsetShown.some((t) => !/^<.+>$/.test(t))) fail(`a parameter without a value shows as ${JSON.stringify(unsetShown)}, not its argument's name`);
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(keptWtg)})`);
+    await sleep(1000);
 
     // ---- Renaming a region with the Trigger Editor closed: the files follow ---------------------------------------------
     await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);

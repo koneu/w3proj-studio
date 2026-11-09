@@ -9,6 +9,15 @@ import type { Eca, Param, TriggerFile, Variable } from "../../lib/triggers/wtg";
 
 export const PRESET = 0, VARIABLE = 1, FUNCTION = 2, VALUE = 3, UNSET = -1;
 
+/** A parameter nothing was chosen for, as Validate Map Triggers counts it (lib/triggers/validate.ts): none, type
+ *  -1, a preset or variable without a name, a call without a function. Shown as its argument's name in red. */
+export function isUnsetParam(p: Param | undefined): boolean {
+  if (!p || p.type < 0) return true;
+  if (p.type === PRESET || p.type === VARIABLE) return !p.value;
+  if (p.type === FUNCTION) return !p.call?.name;
+  return false;
+}
+
 /** Which function list a parameter of `type` takes its calls from. */
 export function callKind(type: string): number {
   if (type === "boolexpr" || type === "boolcall") return CONDITION;

@@ -15,7 +15,7 @@ import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
 import type { Eca, Param, TriggerItem } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
 import { editParam, pickFunction } from "./dialogs";
-import { argType, FUNCTION, newEca } from "./params";
+import { argType, FUNCTION, isUnsetParam, newEca } from "./params";
 
 class ParamEditors implements TriggerGuiService {
   private list: TriggerParamEditor[] = [];
@@ -401,8 +401,8 @@ class GuiView {
     const link = (i: number): HTMLElement => {
       const p = params[i], type = argType(ed.data, ed.file, kind, name, params, i);
       const here = at ? [...at, i] : null, inIndex = here ? [...here, -1] : null;
-      const unset = !p || p.type < 0;
-      const content: (HTMLElement | string)[] = p && p.type === FUNCTION && p.call
+      const unset = isUnsetParam(p);
+      const content: (HTMLElement | string)[] = !unset && p.type === FUNCTION && p.call
         ? ["(", ...this.sentence(p.call.kind, p.call.name, p.call.params, here), ")"]
         : [unset ? `<${f?.args[i] ?? "?"}>` : paramParts(p, ed.display, type).text];
       if (p?.index) {
