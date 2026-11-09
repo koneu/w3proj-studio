@@ -13,6 +13,7 @@ import {
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
 import { generateAiScript } from "../../lib/ai/script";
+import { keyOf } from "../../lib/keys";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { callText, paramText, type DisplayContext } from "../../lib/triggers/display";
@@ -312,7 +313,7 @@ class AiView {
     const t = e.target as HTMLElement;
     if (t instanceof HTMLInputElement && t.type === "text" || t instanceof HTMLTextAreaElement) return;
     if (!(e.ctrlKey || e.metaKey)) return;
-    const k = e.key.toLowerCase();
+    const k = keyOf(e).toLowerCase();
     if (k === "z" && !e.shiftKey) { this.undo(); e.preventDefault(); }
     else if (k === "y" || (k === "z" && e.shiftKey)) { this.redo(); e.preventDefault(); }
   }

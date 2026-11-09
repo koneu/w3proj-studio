@@ -14,6 +14,7 @@ import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardP
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { isFullPath } from "../../lib/paths";
+import { keyOf } from "../../lib/keys";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
@@ -285,7 +286,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const input = h("textarea.scm-message", {
           rows: 2, placeholder: `Message (commit on ${status.branch || "a new branch"})`, value: message, disabled: busy,
           oninput: () => { message = input.value; },
-          onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); commit().catch(failed); } },
+          onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter" && e.ctrlKey) { e.preventDefault(); commit().catch(failed); } },
         }) as HTMLTextAreaElement;
         // A project inside a bigger repository (or one created by accident, e.g. in the home
         // folder): commits go there.

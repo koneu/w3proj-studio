@@ -10,6 +10,7 @@ import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { startColor } from "../../lib/terrain/minimapicons";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { h } from "../../workbench/dom";
+import { keyOf } from "../../lib/keys";
 import { renderMinimap, type MinimapInput, type Rgb } from "./minimap";
 import type { Placed } from "./objects";
 
@@ -115,7 +116,7 @@ export function askExportOptions(last: ExportOptions): Promise<ExportOptions | n
     const overlay = h("div.picker-overlay.newmap-overlay.minimap-export-overlay", {
       tabindex: -1,
       onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(null); },
-      onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(null); if (e.key === "Enter") ok(); },
+      onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(null); if (keyOf(e) === "Enter") ok(); },
     }, h("div.picker.newmap-dialog.minimap-export-dialog", {},
       h("div.picker-header", {}, h("strong", {}, "Export Minimap"), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),
       h("div.minimap-opts", {}, ...boxes.map((b) => b.el)),

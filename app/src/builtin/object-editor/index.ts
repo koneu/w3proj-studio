@@ -1,5 +1,6 @@
 import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { outside, rangeNote } from "../../lib/objects/limits";
+import { keyOf } from "../../lib/keys";
 import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits, type GameplayLimits } from "../../lib/objects/constlimits";
 import { OBJECTS_SERVICE } from "../../extensions/services";
 import { h } from "../../workbench/dom";
@@ -389,16 +390,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
         const isDirty = () => isDirtyNow(serialize(), saved, hasWts && wts.dirty);
         const markDirty = () => { record(); doc.setDirty(isDirty()); };
-        const keyOf = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
+        const objectKey = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
         const restore = (s: string) => {
-          const keys = new Set([...selection].map(keyOf)), anchor = selected ? keyOf(selected) : null;
+          const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
           const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: WtsSnapshot };
           file.custom = d.custom;
           file.original = d.original;
           if (hasWts) wts.restore(d.wts);
           const all = [...file.custom, ...file.original];
-          selection = new Set(all.filter((o) => keys.has(keyOf(o))));
-          selected = all.find((o) => keyOf(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
+          selection = new Set(all.filter((o) => keys.has(objectKey(o))));
+          selected = all.find((o) => objectKey(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
           if (selected) selection.add(selected);
           doc.setDirty(isDirty());
           renderDetail();
@@ -595,10 +596,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         listEl.tabIndex = 0;
         listEl.addEventListener("keydown", (e) => {
-          if (e.key === "Delete") { e.preventDefault(); removeSelection(); }
-          else if (e.key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selection = new Set(visible); renderDetail(); }
-          else if (e.key === "c" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelection(); }
-          else if (e.key === "v" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void paste(); }
+          const key = keyOf(e);
+          if (key === "Delete") { e.preventDefault(); removeSelection(); }
+          else if (key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selection = new Set(visible); renderDetail(); }
+          else if (key === "c" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelection(); }
+          else if (key === "v" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void paste(); }
         });
 
         const hasMods = (o: Obj) => modLists(o).some((l) => l.mods.length > 0);
@@ -832,7 +834,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             markDirty();
             renderDetail();
           };
-          const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(); } },
+          const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(); } },
             h("div.picker.obj-autofill", {},
               h("h3", {}, `Auto Fill Levels: ${f.label}`),
               h("div.terrain-sel-row", {}, h("span.muted", {}, "Start from level"), fromEl),
@@ -1120,7 +1122,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               })));
           }
           const close = () => overlay.remove();
-          const overlay = h("div.picker-overlay", { tabindex: -1, onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(); } },
+          const overlay = h("div.picker-overlay", { tabindex: -1, onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(); } },
             h("div.picker.diff-dialog", {},
               h("div.picker-header", {},
                 h("strong", {}, `Diff — ${objs.length} objects`),
@@ -1232,7 +1234,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const typing = (t instanceof HTMLInputElement && t.type !== "checkbox" && t.value !== t.defaultValue)
             || (t instanceof HTMLTextAreaElement && t.value !== t.defaultValue);
           if (typing) return;
-          const k = e.key.toLowerCase();
+          const k = keyOf(e).toLowerCase();
           if (k === "z" && !e.shiftKey) { e.preventDefault(); step(-1); }
           else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); step(1); }
         });

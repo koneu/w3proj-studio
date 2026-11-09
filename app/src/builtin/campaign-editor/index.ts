@@ -9,6 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { keyOf } from "../../lib/keys";
 import { joinPath } from "../../lib/paths";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
@@ -278,7 +279,7 @@ class CampaignView {
     const t = e.target as HTMLElement;
     if ((t instanceof HTMLInputElement && t.type !== "checkbox") || t instanceof HTMLTextAreaElement) return;
     if (!(e.ctrlKey || e.metaKey)) return;
-    const k = e.key.toLowerCase();
+    const k = keyOf(e).toLowerCase();
     if (k === "z" && !e.shiftKey) { this.undo(); e.preventDefault(); }
     else if (k === "y" || (k === "z" && e.shiftKey)) { this.redo(); e.preventDefault(); }
   }

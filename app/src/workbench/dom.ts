@@ -1,4 +1,5 @@
 import type { Disposable } from "../extensions/api";
+import { keyOf } from "../lib/keys";
 import { nextEnabled } from "./menus";
 
 type Child = Node | string | null | undefined | false;
@@ -98,12 +99,13 @@ export function showContextMenu(at: { x: number; y: number }, items: import("../
   const choose = (i: number) => { const it = choices[i]; if (!it || it.disabled) return; close(); it.run(); };
   const key = (e: KeyboardEvent) => {
     const take = () => { e.preventDefault(); e.stopPropagation(); };
-    if (e.key === "Escape") { take(); close(); keys.escape?.(); }
-    else if (e.key === "ArrowDown") { take(); setActive(nextEnabled(enabled, active, 1)); }
-    else if (e.key === "ArrowUp") { take(); setActive(nextEnabled(enabled, active, -1)); }
-    else if ((e.key === "Enter" || e.key === " ") && active >= 0) { take(); choose(active); }
-    else if (keys.side && e.key === "ArrowLeft") { take(); keys.side(-1); }
-    else if (keys.side && e.key === "ArrowRight") { take(); keys.side(1); }
+    const k = keyOf(e);
+    if (k === "Escape") { take(); close(); keys.escape?.(); }
+    else if (k === "ArrowDown") { take(); setActive(nextEnabled(enabled, active, 1)); }
+    else if (k === "ArrowUp") { take(); setActive(nextEnabled(enabled, active, -1)); }
+    else if ((k === "Enter" || k === " ") && active >= 0) { take(); choose(active); }
+    else if (keys.side && k === "ArrowLeft") { take(); keys.side(-1); }
+    else if (keys.side && k === "ArrowRight") { take(); keys.side(1); }
   };
   // A menu with an on/off entry has a column for the check mark in every row (as VS Code's): the labels line up,
   // whether the entry is on or off.

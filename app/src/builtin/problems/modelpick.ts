@@ -5,6 +5,7 @@
 // it was chosen from, or null.
 
 import type { W3Api } from "../../extensions/api";
+import { keyOf } from "../../lib/keys";
 import { ModelPreview } from "../../lib/model/preview";
 import { h } from "../../workbench/dom";
 
@@ -68,12 +69,13 @@ export function pickClassicModel(w3: W3Api, opts: { title: string; current: stri
     };
     search.addEventListener("input", filter);
     search.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowDown") { highlight(index + 1); e.preventDefault(); }
-      else if (e.key === "ArrowUp") { highlight(index - 1); e.preventDefault(); }
-      else if (e.key === "PageDown") { highlight(index + 10); e.preventDefault(); }
-      else if (e.key === "PageUp") { highlight(index - 10); e.preventDefault(); }
-      else if (e.key === "Enter") { if (shown[index]) close({ path: shown[index].path, mode: mode.mode }); e.preventDefault(); }
-      else if (e.key === "Escape") { close(null); e.preventDefault(); }
+      const key = keyOf(e);
+      if (key === "ArrowDown") { highlight(index + 1); e.preventDefault(); }
+      else if (key === "ArrowUp") { highlight(index - 1); e.preventDefault(); }
+      else if (key === "PageDown") { highlight(index + 10); e.preventDefault(); }
+      else if (key === "PageUp") { highlight(index - 10); e.preventDefault(); }
+      else if (key === "Enter") { if (shown[index]) close({ path: shown[index].path, mode: mode.mode }); e.preventDefault(); }
+      else if (key === "Escape") { close(null); e.preventDefault(); }
     });
 
     const overlay = h("div.model-pick-backdrop", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(null); } },

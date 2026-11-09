@@ -3,6 +3,7 @@
 // value, or an editor another extension registered for the type).
 
 import type { TriggerEditorHandle, TriggerParamEditor } from "../../extensions/services";
+import { keyOf } from "../../lib/keys";
 import { paramText } from "../../lib/triggers/display";
 import type { TriggerFunction } from "../../lib/triggers/triggerdata";
 import type { Param } from "../../lib/triggers/wtg";
@@ -16,7 +17,7 @@ function modal<T>(title: string, body: (done: (v: T | undefined) => void, hide: 
     const overlay = h("div.picker-overlay.newmap-overlay", {
       tabindex: -1,
       onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(undefined); },
-      onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(undefined); } },
+      onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") { e.stopPropagation(); close(undefined); } },
     }, h(`div.picker.trig-dialog${cls}`, {},
       h("div.picker-header", {}, h("strong", {}, title), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(undefined) }, "×")),
       ...body(close, (hidden) => { overlay.hidden = hidden; })));
@@ -67,9 +68,10 @@ function listPicker<T>(items: ListItem<T>[], done: (v: T) => void, opts: {
   };
   search.addEventListener("input", filter);
   search.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown") { active = Math.min(shown.length - 1, active + 1); render(); e.preventDefault(); }
-    else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); render(); e.preventDefault(); }
-    else if (e.key === "Enter" && shown[active]) done(shown[active].value);
+    const key = keyOf(e);
+    if (key === "ArrowDown") { active = Math.min(shown.length - 1, active + 1); render(); e.preventDefault(); }
+    else if (key === "ArrowUp") { active = Math.max(0, active - 1); render(); e.preventDefault(); }
+    else if (key === "Enter" && shown[active]) done(shown[active].value);
   });
   filter();
   return [search, ...(opts.categoryName ? [chips] : []), rows, ...(opts.preview ? [preview] : [])];
@@ -142,7 +144,7 @@ export function editParam(ed: TriggerEditorHandle, type: string, current: Param,
         done({ type: VALUE, value: base === "integer" || base === "real" ? input.value.trim() : input.value });
       };
       const input = h("input.picker-search", { type: "text", value: current.type === VALUE ? current.value : "",
-        onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") take(); },
+        onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Enter") take(); },
         oninput: () => { note.classList.remove("error"); } });
       return [input, note, h("div.newmap-buttons", {}, h("button.primary", { onclick: take }, "OK"))];
     } });

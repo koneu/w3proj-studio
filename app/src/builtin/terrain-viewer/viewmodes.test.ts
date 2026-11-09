@@ -118,3 +118,11 @@ test("lightRings: round where the light is, as far as it reaches, scaled with th
   assert.deepEqual(lightRings(world, [0, 0, 0], { attenuationStart: 0, attenuationEnd: 0 }), []);
   assert.deepEqual(lightRings([NaN, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, NaN, 0, 0, 1], [0, 0, 0], { attenuationStart: 0, attenuationEnd: 5 }), []);
 });
+
+test("View and camera keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {
+  const unnamed = (code: string, mods: Parameters<typeof key>[1] = {}) => ({ ...key("Unidentified", mods), code });
+  assert.equal(viewKeyCommand(unnamed("KeyV")), "w3.terrain.toggleGameView");
+  assert.equal(viewKeyCommand(unnamed("KeyL", { ctrlKey: true, shiftKey: true })), "w3.terrain.toggleLightRanges");
+  assert.deepEqual(cameraKey(unnamed("ArrowLeft")), { pan: [-CAMERA_STEPS.pan, 0] });
+  assert.deepEqual(cameraKey(unnamed("Numpad8")), { pan: [0, CAMERA_STEPS.pan] });
+});

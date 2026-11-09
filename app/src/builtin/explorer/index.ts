@@ -1,4 +1,5 @@
 import type { ExtensionContext, FileInfo, W3Api } from "../../extensions/api";
+import { keyOf } from "../../lib/keys";
 import { joinPath } from "../../lib/paths";
 import { clickSelection } from "../../lib/selection";
 import { formatBytes, h } from "../../workbench/dom";
@@ -211,8 +212,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const keyDown = (e: KeyboardEvent) => {
     if (!selected.size || !w3.workspace.project()) return;
     const one = single();
-    if (e.key === "F2" && one) { e.preventDefault(); rename(one, !w3.workspace.files().some((f) => f.path === one)).catch(fail); }
-    else if (e.key === "Delete") { e.preventDefault(); remove([...selected]).catch(fail); }
+    const key = keyOf(e);
+    if (key === "F2" && one) { e.preventDefault(); rename(one, !w3.workspace.files().some((f) => f.path === one)).catch(fail); }
+    else if (key === "Delete") { e.preventDefault(); remove([...selected]).catch(fail); }
   };
 
   /** The selected folder, or the selected file's; the project's top without a selection. */

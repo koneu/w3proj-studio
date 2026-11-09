@@ -9,6 +9,7 @@ import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
 import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
 import { resetTriggers } from "../../lib/triggers/defaults";
+import { keyOf } from "../../lib/keys";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -561,9 +562,9 @@ class TriggerView {
     // Code editors have their own undo, copy and paste.
     if (e.target instanceof Element && e.target.closest(".cm-editor")) return;
     if (this.area === "detail" && this.body?.keyDown?.(e)) { e.preventDefault(); return; }
-    if (e.key === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
+    if (keyOf(e) === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
-    const k = e.key.toLowerCase();
+    const k = keyOf(e).toLowerCase();
     if (this.area === "tree" && (k === "c" || k === "x" || k === "v")) {
       e.preventDefault();
       if (k === "v") this.pasteItems(); else this.copyItem(k === "x");
@@ -1139,7 +1140,7 @@ class TriggerView {
   private query = "";
   private searchBox = h("input.trig-search", { type: "search", placeholder: "Search triggers (names, actions, script)",
     oninput: () => { clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => { this.query = this.searchBox.value; this.renderTree(); }, 150); },
-    onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") { this.searchBox.value = ""; this.query = ""; this.renderTree(); } } });
+    onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") { this.searchBox.value = ""; this.query = ""; this.renderTree(); } } });
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   /** Items matching `q` in the current mode, with the categories containing them. */
   private searchMatches(q: string, children: Map<number, Item[]>): Set<Item> {

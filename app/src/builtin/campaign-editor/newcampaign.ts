@@ -7,6 +7,7 @@
 import type { W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
 import { h } from "../../workbench/dom";
+import { keyOf } from "../../lib/keys";
 
 export interface NewCampaignOptions { dir: string; name: string; author: string; difficulty: string; description: string; race: number }
 
@@ -48,8 +49,8 @@ export function askNewCampaign(w3: W3Api): Promise<NewCampaignOptions | null> {
       tabindex: -1,
       onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(null); },
       onkeydown: (e: KeyboardEvent) => {
-        if (e.key === "Escape") close(null);
-        if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement)) create();
+        if (keyOf(e) === "Escape") close(null);
+        if (keyOf(e) === "Enter" &&!(e.target instanceof HTMLTextAreaElement)) create();
       },
     }, h("div.picker.newmap-dialog", {},
       h("div.picker-header", {}, h("strong", {}, "New Campaign"), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),

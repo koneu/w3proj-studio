@@ -3,6 +3,7 @@
 // overlay inside the object editor.
 
 import { focusAfterClick, h } from "../../workbench/dom";
+import { keyOf } from "../../lib/keys";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { compare, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, resolveField, type FieldFilter } from "./filters";
 
@@ -100,10 +101,11 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       placeholder: "Search by name, id, race … or filter fields: gold>100  hp>=500  ubdg=1",
       oninput: () => { active = 0; render(); },
       onkeydown: (e: KeyboardEvent) => {
-        if (e.key === "ArrowDown") { active = Math.min(active + 1, shown.length - 1); renderRows(); e.preventDefault(); }
-        else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); renderRows(); e.preventDefault(); }
-        else if (e.key === "Enter") { if (shown[active]) finish(shown[active].id); e.preventDefault(); }
-        else if (e.key === "Escape") { finish(undefined); e.preventDefault(); }
+        const key = keyOf(e);
+        if (key === "ArrowDown") { active = Math.min(active + 1, shown.length - 1); renderRows(); e.preventDefault(); }
+        else if (key === "ArrowUp") { active = Math.max(active - 1, 0); renderRows(); e.preventDefault(); }
+        else if (key === "Enter") { if (shown[active]) finish(shown[active].id); e.preventDefault(); }
+        else if (key === "Escape") { finish(undefined); e.preventDefault(); }
       },
     });
     const filterChips = h("div.picker-filter-chips");
@@ -137,7 +139,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       render();
       search.focus();
     };
-    valueInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { addFilter(); e.preventDefault(); } });
+    valueInput.addEventListener("keydown", (e) => { if (keyOf(e) === "Enter") { addFilter(); e.preventDefault(); } });
     const builder = h("div.picker-builder", { hidden: true },
       fieldInput, fieldList, opSelect, valueInput,
       h("button.primary-inline", { onclick: addFilter }, "Add"),
