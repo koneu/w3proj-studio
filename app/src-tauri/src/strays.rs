@@ -6,7 +6,8 @@
 //!
 //! `scan` finds them (next to the project: only names that start with the project folder's name and
 //! a `\`; inside it: every name with a `\`) and says what can be done with each; `fix` does it for
-//! one, after checking again. Nothing is moved over a file that is there, and a file is deleted only
+//! one, after checking again. A stray checkpoint goes to `build/checkpoints/recovered`, which the number of
+//! checkpoints kept doesn't count or prune. Nothing is moved over a file that is there, and a file is deleted only
 //! when the one where it belongs has the same bytes. On Windows a name can't hold a `\`, so there is
 //! never anything to find.
 
@@ -65,8 +66,21 @@ pub fn belongs(root: &Path, file: &Path) -> Option<Result<PathBuf, String>> {
     if parts.is_empty() || parts.iter().any(|p| *p == "." || *p == ".." || p.contains(':') || p.contains('/')) {
         return Some(Err(format!("{name}: its name doesn't lead to a place in the project")));
     }
-    Some(Ok(parts.iter().fold(base.to_path_buf(), |p, part| p.join(part))))
+    let target = parts.iter().fold(base.to_path_buf(), |p, part| p.join(part));
+    // A checkpoint goes to build/checkpoints/recovered: among the others it would count toward the number kept
+    // (checkpoints.keep) and, being old, be the first deleted with the next checkpoint.
+    let rel: Vec<_> = target.strip_prefix(root).ok()?.components().map(|c| c.as_os_str().to_owned()).collect();
+    if let [build, checkpoints, file] = rel.as_slice() {
+        if build == "build" && checkpoints == "checkpoints" {
+            return Some(Ok(root.join(build).join(checkpoints).join(RECOVERED).join(file)));
+        }
+    }
+    Some(Ok(target))
 }
+
+/// Where stray checkpoints are moved, inside build/checkpoints: the checkpoints extension doesn't count or prune
+/// what is in it (`app/src/builtin/checkpoints/checkpoints.ts`).
+pub const RECOVERED: &str = "recovered";
 
 /// Whether two files have the same bytes.
 fn same_bytes(a: &Path, b: &Path) -> std::io::Result<bool> {
@@ -201,8 +215,16 @@ mod tests {
     fn a_name_with_a_backslash_belongs_below_the_project_and_nowhere_else() {
         let dir = temp("belongs");
         let root = dir.join("proj");
+        // A checkpoint goes to build/checkpoints/recovered, where no number kept prunes it.
+        let checkpoints = root.join("build").join("checkpoints");
         let beside = dir.join(r"proj\build\checkpoints\proj 1.w3x");
-        assert_eq!(belongs(&root, &beside), Some(Ok(root.join("build").join("checkpoints").join("proj 1.w3x"))));
+        assert_eq!(belongs(&root, &beside), Some(Ok(checkpoints.join(RECOVERED).join("proj 1.w3x"))));
+        assert_eq!(belongs(&root, &root.join(r"build\checkpoints\proj 2.w3x")), Some(Ok(checkpoints.join(RECOVERED).join("proj 2.w3x"))));
+        assert_eq!(belongs(&root, &root.join("build").join(r"checkpoints\proj 3.w3x")), Some(Ok(checkpoints.join(RECOVERED).join("proj 3.w3x"))));
+        // Only checkpoints: anything else below build/, or deeper below build/checkpoints, goes where its name says.
+        assert_eq!(belongs(&root, &dir.join(r"proj\build\proj.w3x")), Some(Ok(root.join("build").join("proj.w3x"))));
+        assert_eq!(belongs(&root, &dir.join(r"proj\build\checkpoints\recovered\x.w3x")), Some(Ok(checkpoints.join(RECOVERED).join("x.w3x"))));
+        assert_eq!(belongs(&root, &dir.join(r"proj\map\build\checkpoints\x.w3x")), Some(Ok(root.join("map").join("build").join("checkpoints").join("x.w3x"))));
         let inside = root.join("map").join(r"Scripts\a.lua");
         assert_eq!(belongs(&root, &inside), Some(Ok(root.join("map").join("Scripts").join("a.lua"))));
         // Another project's stray next to this one, a plain name, and a file elsewhere: not this project's.
@@ -218,14 +240,19 @@ mod tests {
     }
 
     /// The strays a project opened on Linux before the fix has, each with what can be done; then fixed one by one:
-    /// moved, a copy deleted, and one that differs from what is there left as it was.
+    /// moved, a copy deleted, and one that differs from what is there left as it was. Checkpoints go to
+    /// build/checkpoints/recovered, never among the checkpoints the number kept counts.
     #[test]
     fn strays_are_found_and_moved_without_writing_over_anything() {
         let dir = temp("scan");
         let root = dir.join("proj");
-        std::fs::create_dir_all(root.join("build").join("checkpoints")).unwrap();
-        std::fs::write(root.join("build").join("checkpoints").join("same.w3x"), b"same").unwrap();
-        std::fs::write(root.join("build").join("checkpoints").join("other.w3x"), b"them").unwrap();
+        let checkpoints = root.join("build").join("checkpoints");
+        let recovered = checkpoints.join(RECOVERED);
+        std::fs::create_dir_all(&recovered).unwrap();
+        std::fs::write(recovered.join("same.w3x"), b"same").unwrap();
+        std::fs::write(recovered.join("other.w3x"), b"them").unwrap();
+        // A checkpoint of this version with a stray's name: neither is touched by moving the stray.
+        std::fs::write(checkpoints.join("new.w3x"), b"current").unwrap();
         let moved = dir.join(r"proj\build\checkpoints\new.w3x");
         let copy = dir.join(r"proj\build\checkpoints\same.w3x");
         let clash = dir.join(r"proj\build\checkpoints\other.w3x");
@@ -239,9 +266,9 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                ("build/checkpoints/new.w3x", StrayKind::Move),
-                ("build/checkpoints/other.w3x", StrayKind::Conflict),
-                ("build/checkpoints/same.w3x", StrayKind::Duplicate),
+                ("build/checkpoints/recovered/new.w3x", StrayKind::Move),
+                ("build/checkpoints/recovered/other.w3x", StrayKind::Conflict),
+                ("build/checkpoints/recovered/same.w3x", StrayKind::Duplicate),
                 ("map/Scripts/a.lua", StrayKind::Move),
             ],
             "{found:?}"
@@ -250,20 +277,21 @@ mod tests {
         assert_eq!(found[3].shown, r"proj/map\Scripts\a.lua");
 
         assert_eq!(fix(&root, &moved), Ok(Fixed::Moved));
-        assert_eq!(std::fs::read(root.join("build").join("checkpoints").join("new.w3x")).unwrap(), b"new");
+        assert_eq!(std::fs::read(recovered.join("new.w3x")).unwrap(), b"new");
+        assert_eq!(std::fs::read(checkpoints.join("new.w3x")).unwrap(), b"current", "the checkpoint of this version stays");
         assert!(!moved.exists());
         assert_eq!(fix(&root, &copy), Ok(Fixed::Deleted));
         assert!(!copy.exists());
-        assert_eq!(std::fs::read(root.join("build").join("checkpoints").join("same.w3x")).unwrap(), b"same");
+        assert_eq!(std::fs::read(recovered.join("same.w3x")).unwrap(), b"same");
         assert!(fix(&root, &clash).is_err());
         assert_eq!(std::fs::read(&clash).unwrap(), b"mine", "the stray that differs stays");
-        assert_eq!(std::fs::read(root.join("build").join("checkpoints").join("other.w3x")).unwrap(), b"them", "and so does the file there");
+        assert_eq!(std::fs::read(recovered.join("other.w3x")).unwrap(), b"them", "and so does the file there");
         assert_eq!(fix(&root, &inside), Ok(Fixed::Moved));
         assert_eq!(std::fs::read(root.join("map").join("Scripts").join("a.lua")).unwrap(), b"lua");
         // Not this project's, or not a stray: refused, untouched.
         assert!(fix(&root, &theirs).is_err());
         assert!(theirs.exists());
-        assert!(fix(&root, &root.join("build").join("checkpoints").join("same.w3x")).is_err());
+        assert!(fix(&root, &recovered.join("same.w3x")).is_err());
         // What is left: only the one that differs.
         let left: Vec<StrayKind> = scan(&root).iter().map(|s| s.kind).collect();
         assert_eq!(left, [StrayKind::Conflict]);

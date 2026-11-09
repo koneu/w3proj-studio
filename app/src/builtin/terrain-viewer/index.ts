@@ -40,7 +40,7 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, meleeFlagsAfter, placedText, splitOwners } from "../../lib/terrain/owner";
+import { isUprooted, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -73,11 +73,14 @@ import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHei
 import { keyOf as eventKey } from "../../lib/keys";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
-import { applyAllyPriorities, firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
-import { changeAll, changeAllOf, notOffered, propChangesOf, propSnapshot, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
+import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
+import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
+import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
+import { bulkDrops } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
@@ -441,18 +444,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const list = (doc[key] ??= []) as Placed[];
       splitOwners(list);
       before = key === "doodads" ? structuredClone(list) : [];
+      const startsBefore = key === "units" ? structuredClone(startLocations(list)) : null;
       await change({ name, key, doc, list, json: true, dirty: false });
       const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
       // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
-      const infoPath = "map/war3map.w3i.json", infoText = key === "units" && isItem ? await read(infoPath).catch(() => null) : null;
-      let info: { flags?: unknown } | null = null;
-      try { info = infoText === null ? null : JSON.parse(infoText) as { flags?: unknown }; } catch { /* left alone */ }
-      if (info && typeof info.flags === "number") {
-        const flags = info.flags, after = meleeFlagsAfter(flags, list, isItem!);
-        if (after !== flags) {
-          info.flags = after;
-          files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
-        }
+      const infoPath = "map/war3map.w3i.json", infoText = key === "units" ? await read(infoPath).catch(() => null) : null;
+      type Info = { flags?: unknown; players?: unknown; forces?: unknown };
+      let info: Info | null = null;
+      try { info = infoText === null ? null : JSON.parse(infoText) as Info; } catch { /* left alone */ }
+      if (info && typeof info.flags === "number" && Array.isArray(info.players) && Array.isArray(info.forces)) {
+        let changed = false;
+        // Placed, moved or removed start locations add, move or remove the map's players, as the terrain editor's
+        // save does, in the same edit (one undo step).
+        if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
+        // Placing can make a player own something: Melee goes off as the save would take it off.
+        const flags = info.flags as number, after = isItem ? meleeFlagsAfter(info as unknown as MeleeInfo, list) : flags;
+        if (after !== flags) { info.flags = after; changed = true; }
+        if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
       }
       return files;
     }, async () => {
@@ -1365,6 +1373,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
     w3.workspace.onDidChange(() => w3.views.refresh("w3.terrain.overview")),
+
+    // The Item Drops tab: the drops of the objects the project's terrain editor holds (dropstab.ts).
+    w3.editors.registerProvider("w3.itemDrops", {
+      resolve: (el) => itemDropsEditor(w3, el, {
+        registry: toolGroups,
+        terrainPath: () => projectTerrain(w3),
+        openTerrain: () => w3.commands.execute("w3.terrain.open").then(() => undefined),
+      }),
+    }),
+    // Opens the Item Drops tab, with the terrain editor its drops are in; "selection": on what that editor has selected.
+    w3.commands.register("w3.terrain.itemDrops", async (what?: unknown) => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      const root = w3.workspace.project()?.root;
+      if (!toolGroups.dropSources.get(projectTerrain(w3) ?? "")) await w3.commands.execute("w3.terrain.open");
+      // Another project meanwhile: its tab shows its own map.
+      if (w3.workspace.project()?.root !== root) return;
+      if (what === "selection") {
+        const path = projectTerrain(w3) ?? "";
+        const src = toolGroups.dropSources.get(path);
+        if (src) {
+          toolGroups.pendingDrops = { path, entries: src.selection() };
+          toolGroups.dropsRequests.fire(toolGroups.pendingDrops);
+        }
+      }
+      await w3.editors.open(ITEM_DROPS_DOC, "w3.itemDrops");
+    }),
 
     w3.editors.registerProvider("w3.terrainViewer", {
       async resolve(el, doc) {
@@ -2417,16 +2451,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The types' facts, read once and again after the object data or gameplay constants are saved. */
         let factsData: Promise<FactsData> | null = null;
         /** The map's item tables and regions, for the drops and the waygate destination; read again after they're saved. */
-        let mapLists: Promise<{ tables: { number: number; name: string }[] | null; regions: { index: number; name: string }[] }> | null = null;
-        const loadMapLists = () => mapLists ??= (async () => {
-          const text = await mapStrings(w3).catch(() => (v: string) => v);
-          // A file that isn't there has no tables or regions; one that can't be read leaves the tables unknown (null):
-          // then nothing is refused for naming a table, and nothing is offered either.
-          const info = await readMapDocStrict<{ itemTables?: { number: number; name: string }[] }>(w3, "map/war3map.w3i.json").then(
-            (i) => (i?.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name) })), () => null);
-          const regions = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
-          return { tables: info, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
-        })();
+        type MapLists = { tables: ItemTableInfo[] | null; regions: { index: number; name: string }[] };
+        let mapLists: Promise<MapLists> | null = null;
+        /** The lists as last read, for a change that can't wait for them (the Item Drops tab reads them before it shows). */
+        let knownLists: MapLists | null = null, listsRead = 0;
+        const loadMapLists = (): Promise<MapLists> => {
+          if (mapLists) return mapLists;
+          const read = ++listsRead;
+          return mapLists = (async (): Promise<MapLists> => {
+            const text = await mapStrings(w3).catch(() => (v: string) => v);
+            // A file that isn't there has no tables or regions; one that can't be read leaves the tables unknown (null):
+            // then nothing is refused for naming a table, and nothing is offered either.
+            const info = await readMapDocStrict<{ itemTables?: ItemTableInfo[] }>(w3, "map/war3map.w3i.json").then(
+              (i) => (i?.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name), sets: Array.isArray(t.sets) ? t.sets : [] })), () => null);
+            const regions = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
+            const lists = { tables: info, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
+            // A read overtaken by a save (the lists dropped and read again) doesn't overwrite the newer lists.
+            if (read === listsRead) knownLists = lists;
+            return lists;
+          })();
+        };
         const kindOfEntry = (p: Placed) => {
           const k = skinOf(p)?.kind;
           return fileOf(p) === dooFile ? (k === "w3d" ? "w3d" : k ?? "w3d") : k === "w3t" ? "w3t" : "w3u";
@@ -2438,12 +2482,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOfEntry(entry), d) }));
         };
         /** A properties change to the objects as one undo step; the reason when it's refused, and then nothing changed. */
-        const changeProps = (items: { entry: Placed; facts: TypeFacts }[], c: PropChange, ctx: PropContext): string | null => {
+        const changeProps = (items: { entry: Placed; facts: TypeFacts }[], c: PropChange, ctx: PropContext): string | null =>
+          changePropsEach(items.map((it) => ({ ...it, change: c })), ctx);
+        /** A change of its own to each object (drops copied, a set added to each) as one undo step; the reason when it's
+         *  refused, and then nothing changed. */
+        const changePropsEach = (items: { entry: Placed; facts: TypeFacts; change: PropChange }[], ctx: PropContext): string | null => {
           if (refuseLost()) return null;
+          if (!editable) return "this terrain is read-only.";
+          // A change that waited (an item picked) while this editor was closed: it would go nowhere.
+          if (disposed) return "the terrain editor was closed meanwhile.";
           // Objects deleted or reloaded since the panel was made aren't changed.
           if (items.some((it) => !fileOf(it.entry)?.list.includes(it.entry))) return "the selection changed meanwhile; select the objects again.";
           const before = items.map((it) => propSnapshot(it.entry));
-          const r = changeAll(items, c, ctx);
+          const r = changeEach(items, ctx);
           if ("error" in r) return r.error;
           if (!r.changed.length) return null;
           const after = items.map((it) => propSnapshot(it.entry));
@@ -2463,7 +2514,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
             const show = () => { const panel = propsPanel(host); slot.replaceChildren(...(panel ? [panel] : [])); };
             const host: Parameters<typeof propsPanel>[0] = {
-              items, tables: lists.tables, regions: lists.regions, readOnly: !editable,
+              items, regions: lists.regions, readOnly: !editable,
               change: (c) => changeProps(items, c, ctx),
               name: (id, kinds) => w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.name(id, kinds)),
               pick: (title, kinds) => w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.pick(el, { title, kinds })).then((o) => o?.id),
@@ -2473,34 +2524,75 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 // The boxes show the values again, not what was typed.
                 if (stillShown()) show();
               },
-              openItemTables: () => void w3.commands.execute("w3.mapInfo.itemTables").catch((e) => w3.window.showError(String((e as Error).message ?? e))),
-              createItemTable: async () => {
-                const root = w3.workspace.project()?.root;
-                let made: { number: number; name: string };
-                try {
-                  // Made in Map Properties, one undo step there, and opened on it for its items.
-                  made = await w3.commands.execute<{ number: number; name: string }>("w3.mapInfo.createItemTable");
-                } catch (e) {
-                  void w3.window.showError(`No item table was made: ${(e as Error).message ?? e}`);
-                  return;
-                }
-                // Another project, or this editor closed meanwhile: the table isn't this one's to use.
-                if (disposed || w3.workspace.project()?.root !== root) return;
-                // Not saved yet, so not in the file the lists come from: known here until war3map.w3i is saved
-                // and the lists are read again (a table discarded unsaved then shows as not in the map).
-                if (lists.tables && !lists.tables.some((t) => t.number === made.number)) lists.tables.push(made);
-                ctx.tables = lists.tables?.map((t) => t.number);
-                if (!stillShown()) {
-                  void w3.window.showInfo(`Made ${made.name} (#${made.number}). The selection changed meanwhile: choose it under Drops › Map item table.`);
-                  return;
-                }
-                const why = changeProps(items, { field: "drops", value: { mode: "table", table: made.number } }, ctx);
-                if (why) host.warn(`Not changed: ${why}`);
-              },
             };
             show();
           }).catch((e) => {
             if (stillShown()) slot.replaceChildren(h("div.muted", {}, `Properties couldn't be read: ${(e as Error).message ?? e}`));
+          });
+          return slot;
+        };
+        // ---- drops: the Selection panel's Drops block and the Item Drops tab (dropsedit.ts, dropstab.ts) ----------
+        /** A new map item table, made in Map Properties (one undo step there, opened on it for its items), and the objects
+         *  drop from it (one undo step here). `still` says whether the objects are still the ones asked about. */
+        const createTableFor = async (items: { entry: Placed; facts: TypeFacts }[], lists: MapLists, ctx: PropContext, still: () => boolean, warn: (m: string) => void) => {
+          const root = w3.workspace.project()?.root;
+          let made: { number: number; name: string };
+          try {
+            made = await w3.commands.execute<{ number: number; name: string }>("w3.mapInfo.createItemTable");
+          } catch (e) {
+            void w3.window.showError(`No item table was made: ${(e as Error).message ?? e}`);
+            return;
+          }
+          // Another project, or this editor closed meanwhile: the table isn't this one's to use.
+          if (disposed || w3.workspace.project()?.root !== root) return;
+          // Not saved yet, so not in the file the lists come from: known here until war3map.w3i is saved and the lists
+          // are read again (a table discarded unsaved then shows as not in the map). Made with one empty set (addItemTable).
+          if (lists.tables && !lists.tables.some((t) => t.number === made.number)) lists.tables.push({ ...made, sets: [[]] });
+          ctx.tables = lists.tables?.map((t) => t.number);
+          if (!still()) {
+            void w3.window.showInfo(`Made ${made.name} (#${made.number}). The objects changed meanwhile: choose it under Drops › Map item table.`);
+            return;
+          }
+          const why = changeProps(items, { field: "drops", value: { mode: "table", table: made.number } }, ctx);
+          if (why) warn(`Not changed: ${why}`);
+        };
+        /** What the drops views are given for `items`: the tables, names and icons, the picker, and bulk edits made one
+         *  undo step here. */
+        const dropsUi = (items: { entry: Placed; facts: TypeFacts }[], lists: MapLists, ctx: PropContext, still: () => boolean, warn: (m: string) => void): DropsUiHost => {
+          const objects = () => w3.services.get<ObjectsService>(OBJECTS_SERVICE);
+          return {
+            readOnly: !editable, tables: lists.tables, tablesUnsaved: w3.editors.isDirty("map/war3map.w3i.json"),
+            itemName: (id) => objects().then((s) => s.name(id, ["w3t"])),
+            itemIcon: (id) => objects().then((s) => s.icon("w3t", id)),
+            pickItem: (title) => objects().then((s) => s.pick(el, { title, kinds: ["w3t"] })).then((o) => o?.id),
+            bulk: (edit) => {
+              const r = bulkDrops(items.map((it) => it.entry), edit);
+              if ("error" in r) return r.error;
+              return changePropsEach(items.map((it, i) => ({ ...it, change: { field: "drops", value: r.drops[i] } })), ctx);
+            },
+            warn,
+            openItemTables: (n) => void w3.commands.execute("w3.mapInfo.open", "techtree", n === undefined ? "item-tables" : `item-table-${n}`)
+              .catch((e) => w3.window.showError(String((e as Error).message ?? e))),
+            createItemTable: () => createTableFor(items, lists, ctx, still, warn),
+          };
+        };
+        /** The Selection panel's Drops block for `entries` (when they all can drop items), filled in once the types' facts
+         *  are read; nothing if the selection has moved on by then. */
+        const dropsSlot = (entries: Placed[]) => {
+          const slot = h("div.terrain-drops-slot");
+          const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
+          void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
+            if (!stillShown() || !commonFields(items).includes("drops")) return;
+            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
+            const show = () => slot.replaceChildren(dropsBlock(ui, entries, () => void w3.commands.execute("w3.terrain.itemDrops", "selection").catch((e) => w3.window.showError(String((e as Error).message ?? e)))));
+            const ui = dropsUi(items, lists, ctx, () => stillShown(), (m) => {
+              void w3.window.showWarning(m);
+              // The boxes show the values again, not what was typed.
+              if (stillShown()) show();
+            });
+            show();
+          }).catch((e) => {
+            if (stillShown()) slot.replaceChildren(h("div.muted", {}, `Drops couldn't be read: ${(e as Error).message ?? e}`));
           });
           return slot;
         };
@@ -3091,6 +3183,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selInfo.replaceChildren(
             h("div.terrain-sel-title", {}, iconEl, nameEl),
             row("Type", `${KIND_LABELS[p.kind] ?? p.kind} · ${p.id}${p.base ? ` ← ${p.base}` : ""}`),
+            // Near the top, where it's found: what it drops (a creep's loot is what one looks for most).
+            dropsSlot([pl]),
             ...(editable ? [
               ...(pl.player !== undefined ? [field("Owner", choice(pl.player, ownerOptions(), (v) => editProps(pl, { player: v })))] : []),
               field("Position", triple(pl.position, "16", (v) => {
@@ -3270,6 +3364,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selInfo.replaceChildren(
             h("div.terrain-sel-name", {}, `${group.length} objects selected`),
             list,
+            dropsSlot(group),
             ...(editable ? [] : [h("div.terrain-sel-actions", {}, quick("Select all of these types", "Select every object of the selected types", selectSameTypes))]),
             ...(editable ? [
               ...(ownerSel ? [h("div.terrain-sel-row", {}, h("span.muted", {}, `Owner (${units.length})`), ownerSel)] : []),
@@ -3809,6 +3904,44 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopPickRing = toolGroups.onChange(() => { if (!toolGroups.picking) showPickTarget(null); });
         toolGroups.livePlacements = live;
         toolGroups.liveLists = liveLists;
+        /** The Item Drops tab's view of this editor: its objects' drops, changed as the Selection panel changes them. */
+        const dropSource: DropsSource = {
+          root: w3.workspace.project()?.root ?? "",
+          droppers: async () => {
+            await objectsPlaced;
+            const entries = [...(unitsFile?.list ?? []), ...(dooFile?.list ?? [])].filter((e) => "itemSets" in e && e.id !== "sloc");
+            const [items] = await Promise.all([factsOf(entries), loadMapLists()]);
+            return items.filter((it) => fieldsFor(it.entry, it.facts).includes("drops")).map((it) => ({ ...it, kind: it.facts.kind }));
+          },
+          tables: () => loadMapLists().then((l) => l.tables),
+          setDrops: (changes) => changePropsEach(changes.map((c) => ({ entry: c.entry, facts: c.facts, change: { field: "drops", value: c.drops as Drops } })),
+            { tables: knownLists?.tables?.map((t) => t.number), regions: knownLists?.regions.map((r) => r.index) }),
+          show: async (entries) => {
+            await w3.editors.open(doc.path, "w3.terrainViewer");
+            if (disposed || !entries.length) return;
+            const [cx, cy] = centreOf(entries.map((p) => p.position));
+            // Close enough to see a camp, and all of what's shown when it's spread out.
+            const span = Math.max(0, ...entries.map((p) => Math.hypot(p.position[0] - cx, p.position[1] - cy)));
+            renderer.distance = Math.max(900, Math.min(renderer.distance, 1600, 900 + span * 2));
+            renderer.target = [cx, cy, heightAt(terrain, cx, cy)];
+            selectEntries(entries.filter((p) => fileOf(p)));
+            redraw();
+            keysToMap();
+          },
+          selection: () => selectedEntries(),
+          undo: () => undo(),
+          redo: () => redo(),
+          createItemTable: async (entries) => {
+            const [items, lists] = await Promise.all([factsOf([...entries]), loadMapLists()]);
+            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
+            await createTableFor(items, lists, ctx, () => entries.every((p) => fileOf(p)), (m) => void w3.window.showWarning(m));
+          },
+          ownerName,
+        };
+        if (editable && projectObjects) {
+          toolGroups.dropSources.set(doc.path, dropSource);
+          toolGroups.dropSourcesChanged.fire();
+        }
         const look = (x: number, y: number, ref?: PlacedRef) => {
           renderer.target = [x, y, heightAt(terrain, x, y)];
           // Normal selection (side panel, keys); no undo step, nothing dirty. Models may still be
@@ -4816,6 +4949,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toolGroups.edited({ terrain: false, objects: true });
             }
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
+            if (toolGroups.dropSources.get(doc.path) === dropSource) { toolGroups.dropSources.delete(doc.path); toolGroups.dropSourcesChanged.fire(); }
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);
             if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);

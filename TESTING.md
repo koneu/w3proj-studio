@@ -181,7 +181,13 @@ It never starts the game itself.
   `savedUnitValues`), and that it never upgrades a subversion-9 unit file (unitprops.ts `ownSetsOnly`). Start locations
   too close to cliffs bring up "This map is no longer considered a melee map … invalid positions", which `--save`
   reports; the flat `empty_map_on_newest_world_editor.w3m` doesn't. The save also turns the Melee flag back on for a map
-  that meets its rules (a copy with the flag off got it), which Studio doesn't yet.
+  that meets its rules (a copy with the flag off got it). Those rules (branch props-ui-fixes: copies of (4)PhantomGrove
+  with the flag cleared and one change each) are in lib/terrain/owner.ts `meleeBlockers`; Studio's save takes the flag
+  off by them but never puts it back, since two of the editor's reasons (custom triggers, start locations in invalid
+  positions) it can't tell. A player's flag bit 1 is SetPlayerRaceSelectable (map-info/priorities.ts RACE_SELECTABLE).
+- **Dialogs that don't draw**: Scenario > Player Properties opened (window "Scenario Properties") but stayed a blank
+  white rectangle in the hidden display, also after moving the pointer over it and clicking; `--close` then can't
+  answer it.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
   `--key Right`, `--key Left` lands on Abilities.

@@ -74,6 +74,15 @@ export function syncPlayers(info: PlayerInfo, now: Map<number, number[]>, before
   return changes;
 }
 
+/** syncPlayers for an edit of the placed units outside the terrain editor (the AI tools): when the start locations
+ *  changed the players, their ally priorities follow as the terrain editor's save works them out. True when the
+ *  players changed. */
+export function syncWithStarts(info: PlayerInfo & { flags: number }, now: Map<number, number[]>, before: Map<number, number[]>): boolean {
+  if (!syncPlayers(info, now, before).length) return false;
+  applyAllyPriorities(info);
+  return true;
+}
+
 // ---- ally priorities ------------------------------------------------------------------------------
 
 /** war3map.w3i flag: "Modify ally priorities" (the map keeps its own). */

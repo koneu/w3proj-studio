@@ -12,19 +12,55 @@ export const NEUTRAL_PASSIVE = 27;
 
 export const ownerOf = <T extends number | undefined>(player: T): T => (player === undefined ? player : ((player & OWNER) as T));
 
-/** Whether a player owns something placed, other than a start location or an item. The World Editor
- *  takes the Melee flag off such a map when saving: of the game's 326 maps, none has both. */
-export function hasPlayerUnits(list: readonly (Owned & { id: string })[], isItem: (id: string) => boolean): boolean {
-  return list.some((u) => u.id !== "sloc" && !isItem(u.id) && (ownerOf(u.player) ?? FIRST_NEUTRAL) < FIRST_NEUTRAL);
+/** Whether a player owns something placed, other than a start location: a unit, or an item (the editor places items
+ *  for Neutral Passive, but one given to a player in the file counts as well: a we-drive save of World Editor 7003,
+ *  2026-11-09, took the Melee flag off for an item of Player 1). */
+export function hasPlayerUnits(list: readonly (Owned & { id: string })[]): boolean {
+  return list.some((u) => u.id !== "sloc" && (ownerOf(u.player) ?? FIRST_NEUTRAL) < FIRST_NEUTRAL);
 }
 
 /** war3map.w3i flag: a melee map. */
 export const MELEE_MAP = 4;
 
-/** The map's flags with `list` placed on it: Melee goes off once a player owns something placed (see
- *  hasPlayerUnits), as the World Editor does when saving. It never comes back on by itself. */
-export function meleeFlagsAfter(flags: number, list: readonly (Owned & { id: string })[], isItem: (id: string) => boolean): number {
-  return flags & MELEE_MAP && hasPlayerUnits(list, isItem) ? flags & ~MELEE_MAP : flags;
+/** What of war3map.w3i the melee rules look at. */
+export interface MeleeInfo {
+  flags: number;
+  players?: readonly { fixedStart?: number }[];
+  gameDataSet?: number;
+  upgrades?: readonly unknown[];
+  techs?: readonly unknown[];
+}
+
+/**
+ * Why the World Editor's save would take the Melee flag off (its WESTRING_NOTMELEE_* reasons), as far as war3map.w3i
+ * and the placed units tell. Found with we-drive saves of World Editor 7003 (2026-11-09): copies of (4)PhantomGrove with
+ * the flag cleared and one thing changed each; the flag came back with none of these and stayed off with each. The game's
+ * 258 melee maps have none of them. Not reasons: custom techtree, abilities or upgrades turned on in the options without
+ * entries, Fixed Player Settings without custom forces, Race selectable, neutral units, computer players, races.
+ * Its other reasons aren't here: custom object data, gameplay constants or interface, triggers other than the default
+ * Melee Initialization (renaming it, dropping an action or disabling it counted; its description and the custom script
+ * header didn't), and start locations "in invalid positions" (trees about 200 from a start made it one; a start 250 from
+ * a tavern also took the flag off).
+ */
+export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: string })[]): string[] {
+  const out: string[] = [];
+  if (hasPlayerUnits(placed)) out.push("Player-owned units have been placed");
+  if (info.flags & 0x0001) out.push("'Hide minimap' option has been turned on");
+  if (!(info.flags & 0x0010)) out.push("'Partially visible masked areas' option has been turned off");
+  if (info.flags & 0x0040) out.push("Custom forces have been specified");
+  if (info.players?.some((p) => ((p.fixedStart ?? 0) & 1) !== 0)) out.push("Fixed starting locations have been specified");
+  if (info.upgrades?.length) out.push("Custom upgrade settings have been specified");
+  if (info.techs?.length) out.push("Custom techtree or ability settings have been specified");
+  // 0 and -1 (0xffffffff, what World Editor 7003 gives its new maps, Melee on) are the default; 1 was a reason.
+  if (info.gameDataSet && (info.gameDataSet >>> 0) !== 0xffffffff) out.push("Non-default game data set has been specified");
+  return out;
+}
+
+/** The map's flags after a save: Melee goes off when one of meleeBlockers applies, as the World Editor's save does.
+ *  Studio never turns it back on: the editor does when none of its reasons applies, but two of those (start locations
+ *  in invalid positions, custom triggers) Studio can't tell (see meleeBlockers); the editor's next save does it. */
+export function meleeFlagsAfter(info: MeleeInfo, placed: readonly (Owned & { id: string })[]): number {
+  return info.flags & MELEE_MAP && meleeBlockers(info, placed).length ? info.flags & ~MELEE_MAP : info.flags;
 }
 
 /** The player field's bit for an Ancient placed uprooted. */

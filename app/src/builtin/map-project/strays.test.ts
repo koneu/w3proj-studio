@@ -7,7 +7,7 @@ import type { W3Api } from "../../extensions/api";
 import { caseClashes, checkOpenedProject, strayQuestion, type Stray } from "./strays";
 
 const ROOT = "/home/u/maps/Turtle";
-const stray = (file: string, kind: Stray["kind"]): Stray => ({ path: `/home/u/maps/Turtle\\build\\checkpoints\\${file}`, shown: `Turtle\\build\\checkpoints\\${file}`, rel: `build/checkpoints/${file}`, kind });
+const stray = (file: string, kind: Stray["kind"]): Stray => ({ path: `/home/u/maps/Turtle\\build\\checkpoints\\${file}`, shown: `Turtle\\build\\checkpoints\\${file}`, rel: `build/checkpoints/recovered/${file}`, kind });
 
 test("the question names what can be moved, what is a copy and what stays; with nothing to do it only offers the list", () => {
   assert.equal(strayQuestion([]), null);
@@ -15,7 +15,9 @@ test("the question names what can be moved, what is a copy and what stays; with 
   assert.match(q.message, /4 files of this project have a "\\" in their name/);
   assert.match(q.message, /2 files can be moved where they belong; 1 file is a copy/);
   assert.match(q.message, /1 file can't be moved/);
-  assert.match(q.message, /count toward the number kept \(checkpoints\.keep\)/, "moved checkpoints may be removed as old ones: said");
+  // Moved checkpoints are kept apart from the ones pruned (strays.rs, checkpoints.ts): said, and not the old warning.
+  assert.match(q.message, /Checkpoints go to build\/checkpoints\/recovered, which doesn't count toward the number kept \(checkpoints\.keep\): nothing removes them/);
+  assert.doesNotMatch(q.message, /oldest beyond it are removed/);
   assert.doesNotMatch(strayQuestion([{ ...stray("a.w3x", "move"), rel: "map/a.w3x" }])!.message, /checkpoints\.keep/);
   assert.deepEqual(q.actions, ["Move and delete copies", "Leave them", "Show list"]);
   assert.deepEqual(strayQuestion([stray("a.w3x", "move")])!.actions[0], "Move them");
