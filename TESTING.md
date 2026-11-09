@@ -85,8 +85,13 @@ and a clock would call that a hang; a parser stuck in a loop still burns the 4 s
 when the worker is ready, so its start-up isn't charged to the first file. A file that takes 2
 minutes on the clock is killed too: that catches a parser blocked without working.
 
+A worker that stops by itself is reported with its exit code and the end of its stderr. Its reports wait
+while the pipe to the test is full: a plain write failed then (EAGAIN) under other gates, and the corpus
+tier reported that as files that crashed it.
+
 **`w3proj verify` over a folder** checks maps on all cores (`W3PROJ_VERIFY_JOBS=1` for one at a
-time), but prints in the order of the files. **A hostile-input failure** names its seed; run it
+time), but prints in the order of the files. Projects in the folder (folders holding `w3proj.toml`) are
+left out with what they packed (`build/`, checkpoints): outputs, not maps of their own. **A hostile-input failure** names its seed; run it
 alone with `W3PROJ_ROBUSTNESS_SEED=<n>`.
 
 Parts of it: `npm test`, `cargo test`, `npm run coverage`, `npm run ui-smoke`. Rounds of the
