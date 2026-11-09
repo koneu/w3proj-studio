@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  applyChange, attributesAt, changeAll, checkChange, commonFields, dropsOf, fieldsFor, fitSkills, heroPools, maxSkillLevel, propSnapshot,
-  ownSetsOnly, randomItemLabel, redistribute, setTotal, tableChoice, type TypeFacts,
+  activeOthers, applyChange, attributesAt, changeAll, changeAllOf, checkChange, commonFields, dropsOf, fieldsFor, fitSkills, heroPools, isActive, maxSkillLevel, propSnapshot,
+  ownSetsOnly, propChangesOf, randomItemLabel, redistribute, setTotal, tableChoice, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
 
 const facts = (more: Partial<TypeFacts> = {}): TypeFacts => ({
-  kind: "w3u", hero: false, building: false, invulnerable: false, attacks: true, acquireRange: 500, maxHp: 420, maxMana: 0, skills: [], slots: 0,
+  kind: "w3u", hero: false, building: false, invulnerable: false, attacks: true, acquireRange: 500, maxHp: 420, maxMana: 0, skills: [], toggles: [], slots: 0,
   goldMine: false, waygate: false, maxLevel: 10, levelSkip: 2, ...more,
 });
 // The Paladin as the game has it: three skills of three levels from hero level 1, an ultimate at 6.
@@ -68,6 +68,42 @@ test("a field the file's layout doesn't have is never offered or added", () => {
   const v7 = destructable() as unknown as Record<string, unknown>;
   delete v7.itemTable; delete v7.itemSets;
   assert.deepEqual(fieldsFor(v7 as unknown as Placed, facts({ kind: "w3b" })), ["life"]);
+});
+
+// The World Editor's Abilities tab for a priest (we-drive, 2026-11-09): Heal and Inner Fire with an Active box, the
+// inventory and Dispel Magic N/A. Ticking Heal saved { Ahea, autocast 1, level 0 } ("healon" in the script); ticking and
+// unticking it saved no entry.
+const PRIEST = facts({ maxMana: 200, toggles: ["Ahea", "Ainf"], slots: 6 });
+test("the Active box: switched on is a level-0 entry with autocast 1, switched off again no entry", () => {
+  const u = unit("hmpr");
+  assert.ok(fieldsFor(u, PRIEST).includes("active"));
+  assert.ok(!fieldsFor(unit("hpea"), facts()).includes("active"), "nothing to switch on");
+  assert.equal(applyChange(u, PRIEST, { field: "active", id: "Ahea", on: true }), true);
+  assert.deepEqual(get(u).abilities, [{ id: "Ahea", autocast: 1, level: 0 }]);
+  assert.equal(isActive(u, "Ahea"), true);
+  assert.equal(applyChange(u, PRIEST, { field: "active", id: "Ahea", on: true }), false, "on again changes nothing");
+  assert.equal(applyChange(u, PRIEST, { field: "active", id: "Ahea", on: false }), true);
+  assert.deepEqual(get(u).abilities, []);
+  // An entry of an older editor (autocast 0, level 0) is switched on in place, and goes when switched off.
+  const old = unit("hmpr", { abilities: [{ id: "Ainf", autocast: 0, level: 0 }] });
+  applyChange(old, PRIEST, { field: "active", id: "Ainf", on: true });
+  assert.deepEqual(get(old).abilities, [{ id: "Ainf", autocast: 1, level: 0 }]);
+  // A hero's learnt skill keeps its level.
+  const hero = unit("Hpal", { abilities: [{ id: "AHhb", autocast: 1, level: 2 }] });
+  applyChange(hero, PALADIN, { field: "active", id: "AHhb", on: false });
+  assert.deepEqual(get(hero).abilities, [{ id: "AHhb", autocast: 0, level: 2 }]);
+  // Only the type's own can be switched on; one switched on that isn't (the type changed since) can be switched off.
+  assert.match(checkChange(u, PRIEST, { field: "active", id: "Adef", on: true }) ?? "", /can be switched on/);
+  const other = unit("hmpr", { abilities: [{ id: "Adef", autocast: 1, level: 0 }] });
+  assert.deepEqual(activeOthers(other, PRIEST), ["Adef"]);
+  assert.ok(fieldsFor(other, facts()).includes("active"));
+  assert.equal(checkChange(other, PRIEST, { field: "active", id: "Adef", on: false }), null);
+  // A file without abilities (no such layout, but refused all the same).
+  const bare = unit("hmpr") as unknown as Record<string, unknown>;
+  delete bare.abilities;
+  assert.match(checkChange(bare as unknown as Placed, PRIEST, { field: "active", id: "Ahea", on: true }) ?? "", /no abilities/);
+  // Several objects: only of one type.
+  assert.ok(!commonFields([{ entry: unit("hmpr"), facts: PRIEST }, { entry: unit("hmpr", { id: "h000" }), facts: PRIEST }]).includes("active"));
 });
 
 test("a change leaves every other value as stored, defaults included", () => {
@@ -240,6 +276,46 @@ test("several objects change all together, or none when one refuses", () => {
   assert.deepEqual([propSnapshot(a), propSnapshot(b)], before);
   // Nothing to change: nothing reported, so no undo step.
   const same = changeAll(items, { field: "hp", value: 40 });
+  assert.ok("changed" in same && same.changed.length === 0);
+});
+
+test("an AI tool's properties become the panel's changes: names, words and numbers from 1 as the tool says", () => {
+  const regions = [{ index: 4, name: "Gate" }];
+  assert.deepEqual(propChangesOf({
+    hp: 40, mana: "default", gold: 9000, acquireRange: "camp", level: 3, attributes: "default", skills: { AHds: 1, AHhb: 0 },
+    active: { Adef: true }, inventory: [{ slot: 1, item: "ankh" }, { slot: 6, item: null }], drops: { table: 2 }, waygate: "Gate", color: 4, life: 30,
+  }, regions), [
+    { field: "hp", value: 40 }, { field: "mana", value: -1 }, { field: "gold", value: 9000 }, { field: "acquire", value: -2 },
+    { field: "level", value: 3 }, { field: "attributes", value: null },
+    { field: "skill", id: "AHhb", level: 0 }, { field: "skill", id: "AHds", level: 1 },
+    { field: "active", id: "Adef", on: true }, { field: "slot", slot: 0, id: "ankh" }, { field: "slot", slot: 5, id: null },
+    { field: "drops", value: { mode: "table", table: 2 } }, { field: "waygate", value: 4 }, { field: "color", value: 3 }, { field: "life", value: 30 },
+  ]);
+  assert.deepEqual(propChangesOf({ drops: "none", waygate: "none", color: "default", acquireRange: "normal" }), [
+    { field: "acquire", value: -1 }, { field: "drops", value: { mode: "none" } }, { field: "waygate", value: -1 }, { field: "color", value: -1 },
+  ]);
+  assert.deepEqual(propChangesOf({ drops: { sets: [[{ id: "ratf", chance: 60, extra: 1 }]] } }), [{ field: "drops", value: { mode: "custom", sets: [[{ id: "ratf", chance: 60 }]] } }]);
+  assert.throws(() => propChangesOf({ hitpoints: 5 }), /Unknown properties: hitpoints/);
+  assert.throws(() => propChangesOf({ hp: "full" }), /hp must be a number or "default"/);
+  assert.throws(() => propChangesOf({ waygate: "Nowhere" }, regions), /no region called "Nowhere"/);
+  assert.throws(() => propChangesOf({ inventory: [{ slot: 1 }] }), /inventory must list/);
+  assert.throws(() => propChangesOf({ active: { Adef: 1 } }), /active must map/);
+});
+
+test("several changes to several objects: all of them, or none when one is refused", () => {
+  const a = unit("Hpal"), b = unit("Hpal");
+  const items = [{ entry: a, facts: PALADIN }, { entry: b, facts: PALADIN }];
+  // The level comes first, so the skill fits.
+  const r = changeAllOf(items, [{ field: "level", value: 3 }, { field: "skill", id: "AHhb", level: 2 }, { field: "hp", value: 40 }]);
+  assert.ok("changed" in r && r.changed.length === 2);
+  assert.deepEqual([get(a).level, get(a).hp, get(b).abilities], [3, 40, [{ id: "AHhb", autocast: 0, level: 2 }]]);
+  // A refused one (hp 0) leaves the others undone too, on every object.
+  const before = [propSnapshot(a), propSnapshot(b)];
+  const refused = changeAllOf(items, [{ field: "level", value: 5 }, { field: "hp", value: 0 }]);
+  assert.ok("error" in refused && /^hp: /.test(refused.error), JSON.stringify(refused));
+  assert.deepEqual([propSnapshot(a), propSnapshot(b)], before);
+  // What's already so changes nothing.
+  const same = changeAllOf(items, [{ field: "hp", value: 40 }]);
   assert.ok("changed" in same && same.changed.length === 0);
 });
 

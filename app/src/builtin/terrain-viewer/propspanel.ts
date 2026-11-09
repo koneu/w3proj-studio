@@ -6,7 +6,7 @@
 
 import { h } from "../../workbench/dom";
 import {
-  ACQUIRE_CAMP, ACQUIRE_NORMAL, CAMP_RANGE, COLORS, DEFAULT, attributesAt, commonFields, dropsOf, maxSkillLevel, pointsSpent,
+  ACQUIRE_CAMP, ACQUIRE_NORMAL, CAMP_RANGE, COLORS, DEFAULT, activeOthers, attributesAt, commonFields, dropsOf, isActive, maxSkillLevel, pointsSpent,
   heroPools, ownSetsOnly, randomItemLabel, redistribute, sameValue, setTotal, tableChoice, type DropItem, type Drops, type PropChange, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
@@ -148,6 +148,23 @@ export function propsPanel(host: PropsPanelHost): HTMLElement | null {
         for (const a of abilities.filter((x) => x.level > 0 && !facts.skills.some((s) => s.id === x.id))) {
           rows.push(row("", named(host, a.id, ["w3a"]), ` level ${a.level} `,
             h("button.icon-button", { title: "Not one of this hero's skills: take it off", onclick: () => send({ field: "skill", id: a.id, level: 0 }) }, "×")));
+        }
+        break;
+      }
+      case "active": {
+        // The World Editor's Abilities tab, its Active boxes: abilities placed switched on (autocast, or a toggle
+        // like Defend). Objects of one type; one that differs shows as mixed until clicked.
+        rows.push(h("div.terrain-sel-sub.muted", {}, "Abilities placed switched on"));
+        const ids = [...new Set([...facts.toggles, ...entries.flatMap((e) => activeOthers(e, facts))])];
+        for (const id of ids) {
+          const now = same((e) => isActive(e, id));
+          const own = facts.toggles.includes(id);
+          const box = h("input", { type: "checkbox", "data-prop": `active-${id}`, checked: now === true,
+            title: own ? "Active: the unit starts with it switched on" : "Not one of this unit type's: it can only be switched off",
+            onchange: () => send({ field: "active", id, on: box.checked }) });
+          box.indeterminate = now === undefined;
+          if (!own && now === false) continue;
+          rows.push(row("", h("label.terrain-prop-check", {}, box, " ", named(host, id, ["w3a"]))));
         }
         break;
       }

@@ -1110,7 +1110,7 @@ async function unitProperties(page, found) {
   const fail = (what) => found.push(`unit properties: ${what}`);
   const k = await heightKit(page, "UnitProps");
   const TXT = "map/war3map.w3e.txt";
-  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }, { id: "hfoo", x: 768, y: 768, player: 1 }], ignoreRoom: true });
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: -768, y: 0 }], ignoreRoom: true });
   await k.save();
   const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json"), regions = k.read("war3map.w3r.json");
@@ -1157,6 +1157,9 @@ async function unitProperties(page, found) {
   await select({ id: "Hpal", x: 0, y: 0 });
   for (const p of ["hp", "mana", "level", "attr-default", "skill-AHhb", "slot-5", "acquire", "drops-mode"]) if (!(await shown(p))) fail(`the Paladin's ${p} isn't shown`);
   for (const p of ["gold", "color", "waygate", "life"]) if (await shown(p)) fail(`the Paladin shows ${p}`);
+  // Its skills in the World Editor's order: Resurrection, the ultimate, last (the game's table has it third).
+  const skillOrder = await page.evaluate(`[...document.querySelectorAll('.terrain-props [data-prop^="skill-"]')].map((e) => e.dataset.prop).join()`);
+  if (skillOrder !== "skill-AHhb,skill-AHds,skill-AHad,skill-AHre") fail(`the Paladin's skills are listed ${skillOrder}, the World Editor lists the ultimate last`);
   if (await dirty()) fail("selecting the Paladin and showing its properties made the map changed");
   await k.save();
   if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== before) fail("saving after only looking changed war3mapUnits.doo");
@@ -1220,6 +1223,23 @@ async function unitProperties(page, found) {
   await k.save();
   const tree = k.doodads().find((d) => d.id === "LTlt");
   if (tree?.life !== 30) fail(`the tree's life: ${tree?.life}`);
+
+  // A footman's Defend placed switched on (the World Editor's Active box): a level-0 entry with autocast 1, and one undo
+  // takes it off again. The Paladin's skills have no box (its inventory can't be switched on).
+  await select({ id: "hfoo", x: 768, y: 768 });
+  if (!(await shown("active-Adef"))) fail("the footman's Defend has no Active box");
+  else {
+    await k.hands.click(at("active-Adef"));
+    await settled();
+    await k.save();
+    if (JSON.stringify(unit("hfoo").abilities) !== JSON.stringify([{ id: "Adef", autocast: 1, level: 0 }])) fail(`the footman's Defend switched on: ${JSON.stringify(unit("hfoo").abilities)}`);
+    if (!(await page.evaluate(`document.querySelector(${JSON.stringify(at("active-Adef"))})?.checked`))) fail("the Active box isn't ticked after the change");
+    await undo();
+    await k.save();
+    if (unit("hfoo").abilities.length) fail(`one undo didn't take Defend's Active off: ${JSON.stringify(unit("hfoo").abilities)}`);
+  }
+  await select({ id: "Hpal", x: 0, y: 0 });
+  if (await page.evaluate(`!!document.querySelector('.terrain-props [data-prop^="active-"]')`)) fail("the Paladin shows an Active box");
 
   // Everything at once (Ctrl+A): only what they all have, the drops; own sets, then the map's table, each one step.
   await k.focusMap();

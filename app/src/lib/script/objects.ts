@@ -8,6 +8,9 @@ export interface AbilityOrders {
   off?: string;
 }
 
+/** The game's ability tables with the orders abilityOrders reads (paths in the game's storage). */
+export const ABILITY_FUNC_FILES = ["Campaign", "Common", "Human", "Item", "Neutral", "NightElf", "Orc", "Undead"].map((r) => `Units\\${r}AbilityFunc.txt`);
+
 /** Orders per ability from the `Units\*AbilityFunc.txt` tables (parseIni: lower-case keys): real
  *  autocast has Orderon and Orderoff, a toggle like Defend has Order and Unorder. */
 export function abilityOrders(tables: Iterable<Map<string, Map<string, string>>>): Map<string, AbilityOrders> {
