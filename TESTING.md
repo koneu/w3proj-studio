@@ -112,7 +112,7 @@ falls short, rather than copying their insides into a scratch file.
 | run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--wheel N`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--wheel N`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
 line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
@@ -174,6 +174,16 @@ It never starts the game itself.
   packed again), one row each, then two parking cameras at the terrain's corners; after View Selected Camera the
   parking camera farther away is selected, which takes the selected camera's green circle out of the picture
   without moving the view. `--look center` on cliff.w3m (SD) gives the opening picture exactly (difference 0).
+- **Saving** (`--save FILE`, branch save-parity, 2026-11-09): variants of a map made with the release CLI (unpack, JSON,
+  pack), saved by the editor and unpacked again, show what its save works out by itself. Found so: the ally priorities
+  (lib/terrain/startlocations.ts `editorAllyPriorities`), hit points and mana of 0 saved as -1 (lib/terrain/owner.ts
+  `savedUnitValues`), and that it never upgrades a subversion-9 unit file (unitprops.ts `ownSetsOnly`). Start locations
+  too close to cliffs bring up "This map is no longer considered a melee map … invalid positions", which `--save`
+  reports; the flat `empty_map_on_newest_world_editor.w3m` doesn't. The save also turns the Melee flag back on for a map
+  that meets its rules (a copy with the flag off got it), which Studio doesn't yet.
+- **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
+  slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
+  `--key Right`, `--key Left` lands on Abilities.
 - **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
   seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and

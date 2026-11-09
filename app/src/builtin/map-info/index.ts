@@ -10,7 +10,9 @@ import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/servic
 import { setMapText } from "./summary";
 import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, renderTechtree, type TechInfo } from "./techtree";
-import { addPlayer, maxPlayers, removePlayer, startLocations, type PlayerInfo } from "../../lib/terrain/startlocations";
+import {
+  addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
+} from "../../lib/terrain/startlocations";
 import { parseW3e } from "../../lib/terrain/w3e";
 import { weatherName } from "../../lib/terrain/weather";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
@@ -500,17 +502,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // HUD Skin: only in files that have it (version 39 with player HUD skins).
             const skins = info.players.some((p) => p.hudSkin !== undefined);
             const nameOf = (p: Player) => `${p.id + 1}. ${StringTable.ref(p.name) !== null && strings?.get(StringTable.ref(p.name)!) || p.name}`;
+            // Without "Modify ally priorities" the save works them out from the start locations, as the World Editor's
+            // does: shown as they will be saved, and greyed.
+            const auto = autoAllyPriorities(info.flags);
+            const worked = editorAllyPriorities(info.players);
             /** Ally or enemy priorities: a row per player, a choice per other player. */
             const priorities = (title: string, kind: "ally" | "enemy") => {
-              const masks = (p: Player): [number, number] => kind === "ally" ? [p.allyLow, p.allyHigh] : [p.enemyLow ?? 0, p.enemyHigh ?? 0];
+              const stored = (p: Player): [number, number] => kind === "ally" ? [p.allyLow, p.allyHigh] : [p.enemyLow ?? 0, p.enemyHigh ?? 0];
+              const masks = (p: Player): [number, number] => !auto || !worked.has(p.id) ? stored(p) : kind === "ally" ? worked.get(p.id)! : [0, 0];
               const set = (p: Player, [low, high]: [number, number]) => {
                 if (kind === "ally") { p.allyLow = low; p.allyHigh = high; } else { p.enemyLow = low; p.enemyHigh = high; }
               };
               return h(`table.form-table.map-priorities.map-priorities-${kind}`, {},
                 h("thead", {}, h("tr", {}, h("th", {}, title), ...info.players.map((q) => h("th", { title: nameOf(q) }, String(q.id + 1))))),
-                h("tbody", {}, ...info.players.map((p) => h("tr", {}, h("td", {}, nameOf(p)), ...info.players.map((q) => q === p ? h("td.muted", {}, "—")
-                  : h("td", {}, select<Priority>([["none", "None"], ["low", "Low"], ["high", "High"]], () => priorityOf(...masks(p), q.id),
-                    (v) => set(p, withPriority(...masks(p), q.id, v)))))))));
+                h("tbody", {}, ...info.players.map((p) => h("tr", {}, h("td", {}, nameOf(p)), ...info.players.map((q) => {
+                  if (q === p) return h("td.muted", {}, "—");
+                  const sel = select<Priority>([["none", "None"], ["low", "Low"], ["high", "High"]], () => priorityOf(...masks(p), q.id),
+                    (v) => set(p, withPriority(...masks(p), q.id, v)));
+                  if (auto && worked.has(p.id)) { sel.disabled = true; sel.title = "Worked out from the start locations when saving: turn on Modify ally/enemy priorities to set them."; }
+                  return h("td", {}, sel);
+                })))));
             };
             const enemies = info.players.some((p) => p.enemyLow !== undefined);
             return [
@@ -543,8 +554,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 + "Players set to None keep their start location but aren't in the map. A player with a start location starts there: "
                 + "Start X and Y show it, and change by moving it in the terrain editor, whose save writes them here. Only a player without one has them to type."),
               ...(info.players.length > 1 ? [section_("Ally/Enemy Priorities",
-                bit(() => info.flags, (n) => { info.flags = n >>> 0; }, 0x0002, "Modify ally/enemy priorities"),
-                h("small.muted", {}, "Which start locations a player's allies (and enemies) get near its own when start locations are random."),
+                bit(() => info.flags, (n) => {
+                  // Turned on, the priorities start as they were shown (and would have been saved).
+                  if (n & MODIFY_ALLY_PRIORITIES) applyAllyPriorities(info as unknown as PlayerInfo & { flags: number });
+                  info.flags = n >>> 0;
+                  queueMicrotask(() => show(section));
+                }, MODIFY_ALLY_PRIORITIES, "Modify ally/enemy priorities"),
+                h("small.muted", {}, "Which start locations a player's allies (and enemies) get near its own when start locations are random. "
+                  + "Unless modified here, saving works them out from the user players' start locations, as the World Editor does: "
+                  + "starts up to 1.25 times as far as the nearest get High, up to 1.5 times Low."),
                 priorities("Allies", "ally"),
                 enemies ? priorities("Enemies", "enemy") : null)] : []),
             ];
@@ -614,7 +632,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
               if (strings!.fixCuts().length) { update(); show(section); }
             }
-            const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(info) });
+            // The ally priorities as the World Editor saves them (shown so above); the editor's own values stay, so an
+            // undo isn't mixed up with the save.
+            const saved = structuredClone(info);
+            applyAllyPriorities(saved as unknown as PlayerInfo & { flags: number });
+            const text = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()!.root, path: doc.path, text: JSON.stringify(saved) });
             await doc.writeText(text);
             if (strings && wtsBase !== null) {
               const base = wtsBase;

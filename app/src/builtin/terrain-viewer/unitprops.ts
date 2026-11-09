@@ -49,6 +49,9 @@ export interface TypeFacts {
   attributes?: { str: number; agi: number; int: number; strPlus: number; agiPlus: number; intPlus: number; hpPerStr: number; manaPerInt: number };
   /** Heroes: the skills they can learn (heroAbilList). */
   skills: SkillInfo[];
+  /** The type's own abilities that can be placed switched on (autocast like Heal, toggles like Defend: the World
+   *  Editor's Abilities tab has an Active box for them, N/A for the rest), in the type's order. */
+  toggles: string[];
   /** Inventory slots (an inventory ability's slot count), 0 for none. */
   slots: number;
   goldMine: boolean;
@@ -63,7 +66,7 @@ export interface DropItem { id: string; chance: number }
 /** Items dropped on death: none, one of the map's item tables (by its number), or the object's own sets. */
 export type Drops = { mode: "none" } | { mode: "table"; table: number } | { mode: "custom"; sets: DropItem[][] };
 
-export type PropField = "hp" | "mana" | "gold" | "acquire" | "level" | "attributes" | "skills" | "inventory" | "drops" | "waygate" | "color" | "life";
+export type PropField = "hp" | "mana" | "gold" | "acquire" | "level" | "attributes" | "skills" | "active" | "inventory" | "drops" | "waygate" | "color" | "life";
 
 /** One edit of the properties panel. */
 export type PropChange =
@@ -74,6 +77,7 @@ export type PropChange =
   | { field: "level"; value: number }
   | { field: "attributes"; value: [number, number, number] | null }
   | { field: "skill"; id: string; level: number }
+  | { field: "active"; id: string; on: boolean }
   | { field: "slot"; slot: number; id: string | null }
   | { field: "drops"; value: Drops }
   | { field: "waygate"; value: number }
@@ -112,6 +116,7 @@ export function fieldsFor(entry: Placed, facts: TypeFacts): PropField[] {
     if (has(e, "level") && facts.hero) out.push("level");
     if (has(e, "strength") && facts.hero) out.push("attributes");
     if (has(e, "abilities") && facts.hero && (facts.skills.length || (e.abilities?.length ?? 0) > 0)) out.push("skills");
+    if (has(e, "abilities") && (facts.toggles.length || activeOthers(e, facts).length)) out.push("active");
     if (has(e, "inventory") && (facts.slots > 0 || (e.inventory?.length ?? 0) > 0)) out.push("inventory");
     if (has(e, "targetAcquisition") && (facts.attacks || e.targetAcquisition !== ACQUIRE_NORMAL)) out.push("acquire");
     if (has(e, "waygate") && facts.waygate) out.push("waygate");
@@ -139,8 +144,17 @@ export function commonFields(items: readonly { entry: Placed; facts: TypeFacts }
   }
   const oneType = items.every((it) => it.entry.id === items[0].entry.id);
   const sameSlots = items.every((it) => it.facts.slots === items[0].facts.slots);
-  return out.filter((f) => (f === "skills" || f === "attributes" ? oneType : f === "inventory" ? sameSlots : true));
+  return out.filter((f) => (f === "skills" || f === "attributes" || f === "active" ? oneType : f === "inventory" ? sameSlots : true));
 }
+
+/** Abilities an object has placed switched on that its type can't switch on (another type's, or the type was changed
+ *  since): shown too, so they can be switched off. */
+export function activeOthers(entry: Placed, facts: TypeFacts): string[] {
+  return ((entry as Entry).abilities ?? []).filter((a) => a.autocast && a.level === 0 && !facts.toggles.includes(a.id)).map((a) => a.id);
+}
+
+/** Whether an object is placed with the ability switched on (the World Editor's Active box). */
+export const isActive = (entry: Placed, id: string): boolean => !!((entry as Entry).abilities ?? []).find((a) => a.id === id)?.autocast;
 
 /** The value all entries share, or undefined when they differ. Compared as JSON (lists too). */
 export function sameValue<T>(entries: readonly Placed[], get: (e: Placed) => T): T | undefined {
@@ -167,7 +181,10 @@ export function tableChoice(tables: readonly { number: number }[] | null): { tab
 }
 
 /** Why the drops offer only the objects' own sets: their file has the older layout (Reign of Chaos, units subversion 9)
- *  without a field for a map item table. Null when a map item table can be chosen. */
+ *  without a field for a map item table. Null when a map item table can be chosen. World Editor 7003 keeps that layout
+ *  (we-drive saves, 2026-11-09): it saves a .w3x of subversion 9 as 9 and every .w3m as 9 (one of 11 loses its tables and
+ *  attributes), and with "Use Item Table From Map" chosen in such a file it writes the table into war3map.j only, not
+ *  into the unit file, so it's gone the next time the map is opened. Studio doesn't offer it there. */
 export function ownSetsOnly(entries: readonly Placed[]): string | null {
   const without = entries.filter((e) => !("itemTable" in e)).length;
   if (!without) return null;
@@ -262,7 +279,9 @@ export function checkChange(entry: Placed, facts: TypeFacts, c: PropChange, ctx:
     case "hp":
       return need("hp") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 1 && c.value <= 100) ? null : "Hit points go from 1 to 100 percent.");
     case "mana":
-      return need("mana") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 0 && c.value <= MAX_MANA) ? null : `Mana is a whole number from 0 to ${MAX_MANA}.`);
+      // 0 isn't offered: the save writes it as the default, as the World Editor's does (lib/terrain/owner.ts savedUnitValues).
+      return need("mana") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 1 && c.value <= MAX_MANA) ? null
+        : `Mana is a whole number from 1 to ${MAX_MANA}, or the default (the World Editor saves 0 as the default).`);
     case "gold":
       return need("gold") ?? (whole(c.value) && c.value >= 0 && c.value <= MAX_GOLD ? null : `Gold is a whole number from 0 to ${MAX_GOLD}.`);
     case "acquire":
@@ -288,6 +307,11 @@ export function checkChange(entry: Placed, facts: TypeFacts, c: PropChange, ctx:
       }
       const others = pointsSpent((e.abilities ?? []).filter((a) => a.id !== c.id));
       return others + c.level > level ? `A level ${level} hero has ${level} skill point${level === 1 ? "" : "s"}; ${others} are spent on other skills.` : null;
+    }
+    case "active": {
+      const no = need("abilities");
+      if (no) return no;
+      return c.on && !facts.toggles.includes(c.id) ? `${c.id} isn't one of this unit's abilities that can be switched on as placed.` : null;
     }
     case "slot":
       if (!has(e, "inventory")) return need("inventory");
@@ -348,6 +372,21 @@ export function applyChange(entry: Placed, facts: TypeFacts, c: PropChange): boo
       e.abilities = list;
       break;
     }
+    case "active": {
+      // As the World Editor saves its Active box (we-drive, 2026-11-09): ticked, a level-0 entry with autocast 1 (a
+      // priest's Heal: "healon" in the script); unticked again, the entry is gone. A hero skill keeps its level.
+      const list = e.abilities ?? [];
+      const at = list.findIndex((a) => a.id === c.id);
+      if (c.on) {
+        if (at < 0) list.push({ id: c.id, autocast: 1, level: 0 });
+        else list[at] = { ...list[at], autocast: 1 };
+      } else if (at >= 0) {
+        if (list[at].level > 0) list[at] = { ...list[at], autocast: 0 };
+        else list.splice(at, 1);
+      }
+      e.abilities = list;
+      break;
+    }
     case "slot": {
       const list = (e.inventory ?? []).filter((it) => it.slot !== c.slot);
       if (c.id !== null) {
@@ -377,6 +416,109 @@ export function changeAll(items: readonly { entry: Placed; facts: TypeFacts }[],
     if (why) return { error: items.length > 1 ? `${it.entry.id}: ${why}` : why };
   }
   return { changed: items.filter((it) => applyChange(it.entry, it.facts, c)).map((it) => it.entry) };
+}
+
+/** The panel's field a change is made in. */
+export const fieldOfChange = (c: PropChange): PropField =>
+  c.field === "skill" ? "skills" : c.field === "slot" ? "inventory" : c.field;
+
+/** Why a change isn't one the panel would offer for one of the objects (a footman's "gold", a start location's hit
+ *  points), or null. What the panel shows is what an AI tool may set. */
+export function notOffered(items: readonly { entry: Placed; facts: TypeFacts }[], changes: readonly PropChange[]): string | null {
+  for (const it of items) {
+    const shown = fieldsFor(it.entry, it.facts);
+    const missing = changes.map(fieldOfChange).find((f) => !shown.includes(f));
+    if (missing) return `${it.entry.id} has no ${missing} in Unit Properties${shown.length ? ` (it has ${shown.join(", ")})` : ""}.`;
+  }
+  return null;
+}
+
+/** Several changes to several objects, in order (a hero's level before its skills): all of them, or with the first
+ *  reason none, and then nothing is changed. The objects that changed. */
+export function changeAllOf(items: readonly { entry: Placed; facts: TypeFacts }[], changes: readonly PropChange[], ctx: PropContext = {}): { error: string } | { changed: Placed[] } {
+  const trial = items.map((it) => ({ entry: structuredClone(it.entry), facts: it.facts }));
+  for (const c of changes) {
+    const r = changeAll(trial, c, ctx);
+    if ("error" in r) return { error: `${c.field}: ${r.error}` };
+  }
+  const changed: Placed[] = [];
+  items.forEach((it, i) => {
+    const before = JSON.stringify(propSnapshot(it.entry)), after = propSnapshot(trial[i].entry);
+    if (JSON.stringify(after) === before) return;
+    Object.assign(it.entry, after);
+    changed.push(it.entry);
+  });
+  return { changed };
+}
+
+/** The properties an AI tool (MCP set_object_properties, place_objects) gives, as the panel's changes, in the order they
+ *  are made. Names and numbers as the tool's description says: hit points in percent, slots and colours from 1, a
+ *  waygate's region by name or number. Only the form is checked here; the ranges are the panel's (checkChange). */
+export function propChangesOf(props: Record<string, unknown>, regions: readonly { index: number; name: string }[] = []): PropChange[] {
+  const out: PropChange[] = [];
+  const known = new Set(["hp", "mana", "gold", "acquireRange", "level", "attributes", "skills", "active", "inventory", "drops", "waygate", "color", "life"]);
+  const unknown = Object.keys(props).filter((k) => !known.has(k));
+  if (unknown.length) throw new Error(`Unknown properties: ${unknown.join(", ")} (known: ${[...known].join(", ")}).`);
+  const number = (k: string, v: unknown, ...words: [string, number][]): number => {
+    for (const [w, n] of words) if (v === w) return n;
+    if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(`${k} must be a number${words.length ? ` or ${words.map(([w]) => `"${w}"`).join(", ")}` : ""}.`);
+    return v;
+  };
+  const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  const p = props;
+  if (p.hp !== undefined) out.push({ field: "hp", value: number("hp", p.hp, ["default", DEFAULT]) });
+  if (p.mana !== undefined) out.push({ field: "mana", value: number("mana", p.mana, ["default", DEFAULT]) });
+  if (p.gold !== undefined) out.push({ field: "gold", value: number("gold", p.gold) });
+  if (p.acquireRange !== undefined) out.push({ field: "acquire", value: number("acquireRange", p.acquireRange, ["normal", ACQUIRE_NORMAL], ["camp", ACQUIRE_CAMP]) });
+  if (p.level !== undefined) out.push({ field: "level", value: number("level", p.level) });
+  if (p.attributes !== undefined) {
+    if (p.attributes === "default") out.push({ field: "attributes", value: null });
+    else if (Array.isArray(p.attributes) && p.attributes.length === 3 && p.attributes.every((v) => typeof v === "number")) out.push({ field: "attributes", value: p.attributes as [number, number, number] });
+    else throw new Error("attributes must be [strength, agility, intelligence] or 'default'.");
+  }
+  if (p.skills !== undefined) {
+    if (!isRecord(p.skills)) throw new Error("skills must map skill ids to levels, like { AHhb: 2 }.");
+    // Lower ones first: a skill taken down frees the points another one is raised with.
+    const list = Object.entries(p.skills).map(([id, level]) => ({ id, level: number(`skills.${id}`, level) }));
+    for (const s of list.sort((a, b) => a.level - b.level)) out.push({ field: "skill", id: s.id, level: s.level });
+  }
+  if (p.active !== undefined) {
+    if (!isRecord(p.active) || !Object.values(p.active).every((v) => typeof v === "boolean")) throw new Error("active must map ability ids to true or false, like { Adef: true }.");
+    for (const [id, on] of Object.entries(p.active)) out.push({ field: "active", id, on: on as boolean });
+  }
+  if (p.inventory !== undefined) {
+    const form = "inventory must list { slot, item } (slot from 1; item null empties it).";
+    if (!Array.isArray(p.inventory)) throw new Error(form);
+    for (const it of p.inventory as unknown[]) {
+      if (!isRecord(it) || !Number.isInteger(it.slot) || !(it.item === null || typeof it.item === "string")) throw new Error(form);
+      out.push({ field: "slot", slot: (it.slot as number) - 1, id: it.item as string | null });
+    }
+  }
+  if (p.drops !== undefined) {
+    const d = p.drops;
+    const item = (it: unknown) => isRecord(it) && typeof it.id === "string" && typeof it.chance === "number";
+    if (d === "none") out.push({ field: "drops", value: { mode: "none" } });
+    else if (isRecord(d) && typeof d.table === "number") out.push({ field: "drops", value: { mode: "table", table: d.table } });
+    else if (isRecord(d) && Array.isArray(d.sets) && d.sets.every((s) => Array.isArray(s) && s.every(item))) {
+      out.push({ field: "drops", value: { mode: "custom", sets: (d.sets as DropItem[][]).map((s) => s.map((it) => ({ id: it.id, chance: it.chance }))) } });
+    } else throw new Error("drops must be 'none', { table: number } or { sets: [[{ id, chance }]] }.");
+  }
+  if (p.waygate !== undefined) {
+    const w = p.waygate;
+    let value: number;
+    if (w === "none") value = DEFAULT;
+    else if (typeof w === "number") value = w;
+    else if (typeof w === "string") {
+      const r = regions.find((x) => x.name === w);
+      if (!r) throw new Error(`waygate: the map has no region called "${w}".`);
+      value = r.index;
+    } else throw new Error("waygate must be a region's name or number, or 'none'.");
+    out.push({ field: "waygate", value });
+  }
+  // Player colours from 1 (Red), as players are counted; "default" is the owner's.
+  if (p.color !== undefined) out.push({ field: "color", value: number("color", p.color, ["default", 0]) - 1 });
+  if (p.life !== undefined) out.push({ field: "life", value: number("life", p.life) });
+  return out;
 }
 
 /** The panel's keys of an entry, copied: what an undo step puts back. Keys the entry doesn't have stay out. */

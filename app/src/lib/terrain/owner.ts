@@ -51,5 +51,22 @@ export function joinOwners<T extends Owned>(e: T): T {
 
 /** The document as JSON, with the flags back in the player field. */
 export function placedText(doc: unknown): string {
-  return JSON.stringify(doc, (_, v: unknown) => (v && typeof v === "object" && "playerFlags" in v ? joinOwners(v as Owned) : v));
+  return JSON.stringify(doc, (_, v: unknown) => {
+    if (!v || typeof v !== "object") return v;
+    const e = "playerFlags" in v ? joinOwners(v as Owned) : v;
+    return savedUnitValues(e as Record<string, unknown>);
+  });
+}
+
+/**
+ * A war3mapUnits.doo entry as the World Editor saves it: hit points or mana of 0 become -1, the type's own. World
+ * Editor 7003 does that to every placed unit, start location and item when it saves (we-drive saves, 2026-11-09:
+ * start locations with 0 and 0, a footman, a sorceress, a Paladin and an item with 0; 50 and 5 stay). Of the game's
+ * 375 maps only a starter map's two start locations have a 0 there. Any other object (a doodad has no `hp`) is given
+ * back as it is.
+ */
+export function savedUnitValues<T extends Record<string, unknown>>(e: T): T {
+  const zero = (k: string) => k in e && e[k] === 0;
+  if (typeof e.id !== "string" || !("hp" in e) || !("mana" in e) || (!zero("hp") && !zero("mana"))) return e;
+  return { ...e, ...(zero("hp") ? { hp: -1 } : {}), ...(zero("mana") ? { mana: -1 } : {}) };
 }

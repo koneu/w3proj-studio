@@ -1112,7 +1112,7 @@ async function unitProperties(page, found) {
   const fail = (what) => found.push(`unit properties: ${what}`);
   const k = await heightKit(page, "UnitProps");
   const TXT = "map/war3map.w3e.txt";
-  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }, { id: "hfoo", x: 768, y: 768, player: 1 }], ignoreRoom: true });
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: -768, y: 0 }], ignoreRoom: true });
   await k.save();
   const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json"), regions = k.read("war3map.w3r.json");
@@ -1159,6 +1159,9 @@ async function unitProperties(page, found) {
   await select({ id: "Hpal", x: 0, y: 0 });
   for (const p of ["hp", "mana", "level", "attr-default", "skill-AHhb", "slot-5", "acquire", "drops-mode"]) if (!(await shown(p))) fail(`the Paladin's ${p} isn't shown`);
   for (const p of ["gold", "color", "waygate", "life"]) if (await shown(p)) fail(`the Paladin shows ${p}`);
+  // Its skills in the World Editor's order: Resurrection, the ultimate, last (the game's table has it third).
+  const skillOrder = await page.evaluate(`[...document.querySelectorAll('.terrain-props [data-prop^="skill-"]')].map((e) => e.dataset.prop).join()`);
+  if (skillOrder !== "skill-AHhb,skill-AHds,skill-AHad,skill-AHre") fail(`the Paladin's skills are listed ${skillOrder}, the World Editor lists the ultimate last`);
   if (await dirty()) fail("selecting the Paladin and showing its properties made the map changed");
   await k.save();
   if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== before) fail("saving after only looking changed war3mapUnits.doo");
@@ -1223,6 +1226,23 @@ async function unitProperties(page, found) {
   const tree = k.doodads().find((d) => d.id === "LTlt");
   if (tree?.life !== 30) fail(`the tree's life: ${tree?.life}`);
 
+  // A footman's Defend placed switched on (the World Editor's Active box): a level-0 entry with autocast 1, and one undo
+  // takes it off again. The Paladin's skills have no box (its inventory can't be switched on).
+  await select({ id: "hfoo", x: 768, y: 768 });
+  if (!(await shown("active-Adef"))) fail("the footman's Defend has no Active box");
+  else {
+    await k.hands.click(at("active-Adef"));
+    await settled();
+    await k.save();
+    if (JSON.stringify(unit("hfoo").abilities) !== JSON.stringify([{ id: "Adef", autocast: 1, level: 0 }])) fail(`the footman's Defend switched on: ${JSON.stringify(unit("hfoo").abilities)}`);
+    if (!(await page.evaluate(`document.querySelector(${JSON.stringify(at("active-Adef"))})?.checked`))) fail("the Active box isn't ticked after the change");
+    await undo();
+    await k.save();
+    if (unit("hfoo").abilities.length) fail(`one undo didn't take Defend's Active off: ${JSON.stringify(unit("hfoo").abilities)}`);
+  }
+  await select({ id: "Hpal", x: 0, y: 0 });
+  if (await page.evaluate(`!!document.querySelector('.terrain-props [data-prop^="active-"]')`)) fail("the Paladin shows an Active box");
+
   // Everything at once (Ctrl+A): only what they all have, the drops; own sets, then the map's table, each one step.
   await k.focusMap();
   await k.hands.key("a", "KeyA", 65, 2);
@@ -1237,6 +1257,28 @@ async function unitProperties(page, found) {
   await k.save();
   if (!dropping().every((o) => o.itemTable === -1 && JSON.stringify(o.itemSets) === "[[]]")) fail(`one undo back to own (empty) sets: ${JSON.stringify(dropping().map((o) => [o.id, o.itemTable, o.itemSets]))}`);
   if (unit("sloc") && JSON.stringify(unit("sloc").itemSets) !== "[]") fail("the start location took drops");
+
+  // The same through the AI tool set_object_properties: what the panel offers, with its checks, all or nothing.
+  const indexOf = (id) => k.units().findIndex((u) => u.id === id);
+  const paladin = { index: indexOf("Hpal"), id: "Hpal" }, footman = { index: indexOf("hfoo"), id: "hfoo" };
+  await k.tool("set_object_properties", { kind: "units", items: [paladin], properties: { level: 4, skills: { AHhb: 2, AHds: 1 }, hp: 60, inventory: [{ slot: 3, item: "ankh" }], active: {} } })
+    .catch((e) => fail(`set_object_properties on the Paladin: ${e.message}`));
+  h = unit("Hpal");
+  if (h.level !== 4 || h.hp !== 60 || JSON.stringify(h.abilities) !== JSON.stringify([{ id: "AHhb", autocast: 0, level: 2 }, { id: "AHds", autocast: 0, level: 1 }]) || JSON.stringify(h.inventory) !== JSON.stringify([{ slot: 2, id: "ankh" }])) {
+    fail(`set_object_properties on the Paladin wrote ${JSON.stringify([h.level, h.hp, h.abilities, h.inventory])}`);
+  }
+  const unitsBefore = hash(join(k.root, "map", "war3mapUnits.doo.json"));
+  const refusals = [
+    [[footman], { gold: 5 }, /hfoo has no gold/],
+    [[paladin, footman], { level: 2 }, /Nothing was changed.*hfoo has no level/],
+    [[paladin], { level: 5, hp: 0 }, /hp: Hit points go from 1 to 100/],
+    [[footman], { active: { Ahea: true } }, /isn't one of this unit's abilities/],
+  ];
+  for (const [items, properties, why] of refusals) {
+    const r = await k.tool("set_object_properties", { kind: "units", items, properties }).then(() => "accepted", (e) => e.message);
+    if (!why.test(r)) fail(`set_object_properties ${JSON.stringify(properties)}: ${r}`);
+  }
+  if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== unitsBefore) fail("a refused set_object_properties changed war3mapUnits.doo");
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
   // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
@@ -3382,17 +3424,91 @@ async function gameReadsOnce(page, found) {
  *  start-location object (-1280, 1472) instead of the w3i's (-1306.0195, 1475.8408), and the w3i's start the same way.
  *  It kept SetDayNightModels with the map's own two lighting models (war3map.w3l) and MAP_PLACEMENT_USE_MAP_SETTINGS
  *  (a one-player melee map). Skipped without the map (W3PROJ_CORPUS, else smoketest_maps of the main checkout). */
+/** The second round: a two-player copy of cliff.w3m (player 2 and its start location at 1280, -1472 added to the
+ *  w3i and the units, masks 0), saved by World Editor 7003 (we-drive, 2026-11-09). Its save worked out the ally
+ *  priorities (each player the other's High: allyHigh 2 and 1, InitAllyPriorities in the script), wrote hit points and
+ *  mana -1 for both start locations, and changed war3map.j by these lines only (the rest of the file as the map's own). */
+const TWO_PLAYERS_ADDED = [
+  "    // Player 1", "    call SetPlayerStartLocation( Player(1), 1 )", "    call SetPlayerColor( Player(1), ConvertPlayerColor(1) )",
+  "    call SetPlayerRacePreference( Player(1), RACE_PREF_HUMAN )", "    call SetPlayerRaceSkin( Player(1), RACE_PREF_RANDOM )",
+  "    call SetPlayerRaceSelectable( Player(1), true )", "    call SetPlayerController( Player(1), MAP_CONTROL_USER )",
+  "    call SetPlayerTeam( Player(1), 0 )",
+  "function InitAllyPriorities takes nothing returns nothing", "    call SetStartLocPrioCount( 0, 1 )",
+  "    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )", "    call SetStartLocPrioCount( 1, 1 )",
+  "    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )",
+  "    call SetPlayers( 2 )", "    call SetTeams( 2 )", "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )", "",
+  "    call DefineStartLocation( 0, -1280.0, 1472.0 )", "    call DefineStartLocation( 1, 1280.0, -1472.0 )", "",
+  "    call SetPlayerSlotAvailable( Player(1), MAP_CONTROL_USER )", "    call InitAllyPriorities(  )", "endfunction", "", "",
+];
+const TWO_PLAYERS_REMOVED = [
+  "    call SetPlayers( 1 )", "    call SetTeams( 1 )", "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )",
+  "    call DefineStartLocation( 0, -1306.0, 1475.8 )",
+];
+
+/** Map Properties › Players of the two-player map after the save: without Modify ally priorities the choices show what
+ *  the save works out (player 1's for player 2 High) and are greyed; turned on, they can be chosen and start from
+ *  those, and the save keeps a changed one (Low) with the flag. */
+async function mapPropertiesPriorities(page, fail, file) {
+  const W3I = "map/war3map.w3i.json";
+  const cells = () => page.evaluate(`[...document.querySelectorAll(".map-info table.map-priorities-ally select")].map((s) => ({ value: s.value, disabled: s.disabled }))`);
+  await page.evaluate(`w3.editors.open(${JSON.stringify(W3I)})`);
+  await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
+  await page.evaluate(`[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Players")?.click()`);
+  await until("the ally priorities", async () => (await cells()).length === 2, 10000).catch(() => {});
+  const shown = await cells();
+  if (JSON.stringify(shown) !== JSON.stringify([{ value: "high", disabled: true }, { value: "high", disabled: true }])) return fail(`Map Properties shows the worked-out priorities as ${JSON.stringify(shown)}, not High and greyed`);
+  const modify = `[...document.querySelectorAll(".map-info label.form-check")].find((l) => l.textContent.includes("Modify ally"))?.querySelector("input")`;
+  await page.evaluate(`(() => { const b = ${modify}; b.checked = true; b.dispatchEvent(new Event("change")); })()`);
+  await until("the choices to open", async () => (await cells()).every((c) => !c.disabled), 5000).catch(() => {});
+  const open = await cells();
+  if (JSON.stringify(open) !== JSON.stringify([{ value: "high", disabled: false }, { value: "high", disabled: false }])) return fail(`with Modify on the priorities are ${JSON.stringify(open)}`);
+  await page.evaluate(`(() => { const s = document.querySelector(".map-info table.map-priorities-ally select"); s.value = "low"; s.dispatchEvent(new Event("change")); })()`);
+  await page.evaluate(`w3.editors.saveAll()`);
+  const saved = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+  if (!(saved.flags & 2) || saved.players[0].allyLow !== 2 || saved.players[0].allyHigh !== 0 || saved.players[1].allyHigh !== 1) {
+    fail(`Map Properties saved Modify and a Low as ${JSON.stringify([saved.flags & 2, saved.players.map((p) => [p.allyLow, p.allyHigh])])}`);
+  }
+}
+
+/** Lines of `a` that `b` doesn't have, counted (a multiset difference). */
+function linesNotIn(a, b) {
+  const left = new Map();
+  for (const l of b) left.set(l, (left.get(l) ?? 0) + 1);
+  return a.filter((l) => { const n = left.get(l) ?? 0; if (n) { left.set(l, n - 1); return false; } return true; });
+}
+
 async function realMapSave(page, found) {
-  const fail = (what) => found.push(`real map save: ${what}`);
   const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
   if (!existsSync(map)) { console.log(`real map save: skipped, ${map} isn't there`); return; }
-  const dir = join(work, "real-map", "cliff");
+  await realMapSaveRound(page, found, map, "cliff", null);
+  await realMapSaveRound(page, found, map, "cliff-two", (dir) => {
+    // Player 2 and its start location, as the World Editor's reference save had them.
+    const at = [1280, -1472];
+    const infoFile = join(dir, "map", "war3map.w3i.json"), unitsFile = join(dir, "map", "war3mapUnits.doo.json");
+    const i = JSON.parse(readFileSync(infoFile, "utf8")), u = JSON.parse(readFileSync(unitsFile, "utf8"));
+    i.players.push({ ...i.players[0], id: 1, start: at, allyLow: 0, allyHigh: 0, enemyLow: 0, enemyHigh: 0 });
+    u.units.push({ ...u.units[0], player: 1, position: [...at, 0], editorId: 1 });
+    writeFileSync(infoFile, JSON.stringify(i, null, 2));
+    writeFileSync(unitsFile, JSON.stringify(u, null, 2));
+  });
+}
+
+/** One round of realMapSave: `prepare` changes the unpacked project before it's opened (null: the map as it is). */
+async function realMapSaveRound(page, found, map, name, prepare) {
+  const two = prepare !== null;
+  const fail = (what) => found.push(`real map save${two ? " (two players)" : ""}: ${what}`);
+  const dir = join(work, "real-map", name);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dirname(dir), { recursive: true });
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
   const file = (f) => join(dir, "map", f);
+  prepare?.(dir);
   const script = readFileSync(file("war3map.j"), "utf8"), info = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
   const terrain = readFileSync(file("war3map.w3e.txt"), "utf8");
+  // The control: the start locations as the World Editor's save found them, at 0 hit points and mana, the masks empty.
+  const startsBefore = JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
+  if (startsBefore.length !== (two ? 2 : 1) || startsBefore.some((u) => u.hp !== 0 || u.mana !== 0)) return fail(`the map's start locations aren't as the World Editor's save found them (control): ${JSON.stringify(startsBefore.map((u) => [u.player, u.hp, u.mana]))}`);
+  if (info.players.some((p) => p.allyLow || p.allyHigh)) return fail("the map has ally priorities before the save (control)");
   const TXT = "map/war3map.w3e.txt";
   await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
@@ -3418,20 +3534,37 @@ async function realMapSave(page, found) {
     const scriptLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
     await until("the map script after the save", async () => /war3map\.j (written|up to date|not written)/.test(await scriptLog()), 30000).catch(() => {});
     await page.evaluate(`w3.commands.execute("w3.script.settle")`);
-    // war3map.j: the same lines but the start location, which must be the World Editor's.
-    const want = "    call DefineStartLocation( 0, -1280.0, 1472.0 )";
-    const before = script.split("\r\n"), after = readFileSync(file("war3map.j"), "utf8").split("\r\n");
-    const differs = [];
-    for (let i = 0; i < Math.max(before.length, after.length); i++) if (before[i] !== after[i]) differs.push(`${i + 1}: ${JSON.stringify(before[i])} → ${JSON.stringify(after[i])}`);
     const log = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(-3).join(" | ")`);
-    if (!after.includes(want)) fail(`war3map.j wasn't written with the start location as the World Editor writes it (${want.trim()}): ${differs.slice(0, 4).join(" | ") || "unchanged"}; Map Script: ${await log()}`);
-    const unexpected = differs.filter((d) => !d.endsWith(JSON.stringify(want)));
-    if (unexpected.length) fail(`war3map.j differs from the map's own where the World Editor's save doesn't: ${unexpected.slice(0, 4).join(" | ")}`);
-    // war3map.w3i: only the start, from the start-location object.
+    const before = script.split("\r\n"), after = readFileSync(file("war3map.j"), "utf8").split("\r\n");
+    if (!two) {
+      // war3map.j: the same lines but the start location, which must be the World Editor's.
+      const want = "    call DefineStartLocation( 0, -1280.0, 1472.0 )";
+      const differs = [];
+      for (let i = 0; i < Math.max(before.length, after.length); i++) if (before[i] !== after[i]) differs.push(`${i + 1}: ${JSON.stringify(before[i])} → ${JSON.stringify(after[i])}`);
+      if (!after.includes(want)) fail(`war3map.j wasn't written with the start location as the World Editor writes it (${want.trim()}): ${differs.slice(0, 4).join(" | ") || "unchanged"}; Map Script: ${await log()}`);
+      const unexpected = differs.filter((d) => !d.endsWith(JSON.stringify(want)));
+      if (unexpected.length) fail(`war3map.j differs from the map's own where the World Editor's save doesn't: ${unexpected.slice(0, 4).join(" | ")}`);
+    } else {
+      // war3map.j: the lines the World Editor's save added and took away, and no others.
+      const added = linesNotIn(after, before), removed = linesNotIn(before, after);
+      const missing = linesNotIn(TWO_PLAYERS_ADDED, added), extra = linesNotIn(added, TWO_PLAYERS_ADDED);
+      const kept = linesNotIn(TWO_PLAYERS_REMOVED, removed), lost = linesNotIn(removed, TWO_PLAYERS_REMOVED);
+      if (missing.length || kept.length) fail(`war3map.j lacks what the World Editor's save writes: ${JSON.stringify([...missing, ...kept.map((l) => `(still) ${l}`)].slice(0, 6))}; Map Script: ${await log()}`);
+      if (extra.length || lost.length) fail(`war3map.j differs from the map's own where the World Editor's save doesn't: ${JSON.stringify([...extra, ...lost.map((l) => `(gone) ${l}`)].slice(0, 6))}`);
+    }
+    // war3map.w3i: only the start, from the start-location object, and with two players the ally priorities.
     const nowInfo = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
     if (JSON.stringify(nowInfo.players[0].start) !== JSON.stringify([-1280, 1472])) fail(`the w3i's start location is ${JSON.stringify(nowInfo.players[0].start)}, the World Editor writes [-1280, 1472]`);
+    const masks = nowInfo.players.map((p) => [p.allyLow, p.allyHigh, p.enemyLow, p.enemyHigh]);
+    const wantMasks = two ? [[0, 2, 0, 0], [0, 1, 0, 0]] : [[0, 0, 0, 0]];
+    if (JSON.stringify(masks) !== JSON.stringify(wantMasks)) fail(`the w3i's ally priorities are ${JSON.stringify(masks)}, the World Editor's save has ${JSON.stringify(wantMasks)}`);
     nowInfo.players[0].start = info.players[0].start;
-    if (JSON.stringify(nowInfo) !== JSON.stringify(info)) fail("war3map.w3i changed beyond the start location");
+    nowInfo.players.forEach((p, k) => { p.allyHigh = info.players[k]?.allyHigh; });
+    if (JSON.stringify(nowInfo) !== JSON.stringify(info)) fail("war3map.w3i changed beyond the start location and the ally priorities");
+    // war3mapUnits.doo: the start locations' hit points and mana -1, as the World Editor saves 0.
+    const startsAfter = JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
+    if (startsAfter.some((u) => u.hp !== -1 || u.mana !== -1)) fail(`the start locations' hit points and mana are ${JSON.stringify(startsAfter.map((u) => [u.hp, u.mana]))}, the World Editor saves -1`);
+    if (two) await mapPropertiesPriorities(page, fail, file);
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }

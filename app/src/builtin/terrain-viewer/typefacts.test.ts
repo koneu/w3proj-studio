@@ -27,6 +27,7 @@ const data: FactsData = {
   abilityCode: (id) => ABILITIES[id]?.code ?? id,
   goldMines: new Set(["ngol", "ugol", "egol"]),
   waygates: new Set(["nwgt"]),
+  toggleable: new Set(["Adef", "Ahea", "Ainf"]),
   maxHeroLevel: 10, levelSkip: 2, hpPerStr: 25, manaPerInt: 15,
 };
 
@@ -35,7 +36,8 @@ test("a hero: its attributes, skills and six slots", () => {
   assert.equal(f.hero, true);
   assert.equal(f.slots, 6);
   assert.deepEqual(f.attributes, { str: 22, agi: 13, int: 17, strPlus: 2.7, agiPlus: 1.5, intPlus: 1.8, hpPerStr: 25, manaPerInt: 15 });
-  assert.deepEqual(f.skills.map((s) => [s.id, s.levels, s.req]), [["AHhb", 3, 1], ["AHds", 3, 1], ["AHre", 1, 6], ["AHad", 3, 1]]);
+  // The ultimate last, as the World Editor lists them (the table has Resurrection third).
+  assert.deepEqual(f.skills.map((s) => [s.id, s.levels, s.req]), [["AHhb", 3, 1], ["AHds", 3, 1], ["AHad", 3, 1], ["AHre", 1, 6]]);
   assert.equal(f.maxLevel, 10);
 });
 
@@ -45,6 +47,14 @@ test("an inventory ability, by its code, gives the World Editor's six slots: a f
   assert.equal(typeFacts("hpea", "w3u", data).slots, 0);
   assert.equal(typeFacts("hfoo", "w3u", data).hero, false);
   assert.equal(typeFacts("hfoo", "w3u", data).maxHp, 420);
+});
+
+test("the abilities a type can be placed with switched on: those the script has orders for, in the type's order", () => {
+  // As the World Editor's Abilities tab: a footman's Defend, nothing of a peasant's; a hero's inventory has no box.
+  assert.deepEqual(typeFacts("hfoo", "w3u", data).toggles, ["Adef"]);
+  assert.deepEqual(typeFacts("hpea", "w3u", data).toggles, []);
+  assert.deepEqual(typeFacts("Hpal", "w3u", data).toggles, []);
+  assert.deepEqual(typeFacts("sloc", "w3u", data).toggles, []);
 });
 
 test("gold mines and waygates by the map's lists or by their abilities; invulnerable and attacking by the data", () => {

@@ -6,7 +6,7 @@
 import type { W3Api } from "../../extensions/api";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
-import { specialUnits, type ObjectFile } from "../../lib/script/objects";
+import { ABILITY_FUNC_FILES, abilityOrders, specialUnits, type ObjectFile } from "../../lib/script/objects";
 import { objectMods, readMapJson } from "./pathmap";
 import type { SkillInfo, TypeFacts } from "./unitprops";
 
@@ -19,6 +19,9 @@ export interface FactsData extends HeroConstants {
   /** The game ability an ability works as (AbilityData code: Apak is an AInv), through a custom one's base. */
   abilityCode(id: string): string;
   goldMines: ReadonlySet<string>;
+  /** Abilities that can be placed switched on: those the map script has an order for (lib/script/objects.ts
+   *  abilityOrders: autocast with Orderon and Orderoff, toggles with Order and Unorder). */
+  toggleable: ReadonlySet<string>;
   waygates: ReadonlySet<string>;
 }
 
@@ -33,7 +36,7 @@ const list = (v: string) => v.split(",").map((s) => s.trim()).filter((s) => s &&
 /** The facts of a type of `kind` (w3u, w3t, w3b, w3d). */
 export function typeFacts(id: string, kind: string, d: FactsData): TypeFacts {
   const facts: TypeFacts = {
-    kind, hero: false, building: false, invulnerable: false, attacks: false, acquireRange: 0, maxHp: 0, maxMana: 0, skills: [], slots: 0,
+    kind, hero: false, building: false, invulnerable: false, attacks: false, acquireRange: 0, maxHp: 0, maxMana: 0, skills: [], toggles: [], slots: 0,
     goldMine: false, waygate: false, maxLevel: d.maxHeroLevel, levelSkip: d.levelSkip,
   };
   if (kind === "w3b") facts.maxHp = num(d.destructable(id, "bhps"));
@@ -51,15 +54,19 @@ export function typeFacts(id: string, kind: string, d: FactsData): TypeFacts {
   facts.attacks = num(d.unit(id, "uaen")) > 0;
   facts.acquireRange = num(d.unit(id, "uacq"));
   if (codes.some((a) => a.code === INVENTORY_CODE)) facts.slots = INVENTORY_SLOTS;
+  // By the ability's own id, as the map script looks up its orders (a map's own ability based on Heal has none there).
+  facts.toggles = [...new Set(codes.map((a) => a.id).filter((a) => d.toggleable.has(a)))];
   if (facts.hero) {
     facts.attributes = {
       str: num(d.unit(id, "ustr")), agi: num(d.unit(id, "uagi")), int: num(d.unit(id, "uint")),
       strPlus: num(d.unit(id, "ustp")), agiPlus: num(d.unit(id, "uagp")), intPlus: num(d.unit(id, "uinp")),
       hpPerStr: d.hpPerStr, manaPerInt: d.manaPerInt,
     };
+    // In the World Editor's order: the ultimate (a later first level, 6 for the game's heroes) after the others, which
+    // keep the list's order (a Paladin's heroAbilList has Resurrection third, the editor shows it last).
     facts.skills = list(d.unit(id, "uhab")).map((s): SkillInfo => ({
       id: s, levels: Math.max(1, num(d.ability(s, "alev", 0), 1)), req: num(d.ability(s, "arlv", 0)), skip: num(d.ability(s, "alsk", 0)),
-    }));
+    })).map((s, i) => ({ s, i })).sort((a, b) => Math.max(1, a.s.req) - Math.max(1, b.s.req) || a.i - b.i).map(({ s }) => s);
   }
   return facts;
 }
@@ -85,6 +92,8 @@ export async function loadFactsData(w3: W3Api): Promise<FactsData> {
     w3.game.readText("Units\\AbilityData.slk").then(parseSlk).catch(() => []),
     w3.game.readText("Units\\MiscGame.txt").catch(() => ""),
   ]);
+  // A table that can't be read only leaves its abilities without an Active box.
+  const orders = abilityOrders(await Promise.all(ABILITY_FUNC_FILES.map((f) => w3.game.readText(f).then(parseIni).catch(() => new Map()))));
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   const mapMisc = files.has("map/war3mapmisc.txt") ? await w3.workspace.readText("map/war3mapMisc.txt").catch(() => null) : null;
   const codes = new Map(abilityRows.map((r) => [r.alias, r.code || r.alias]));
@@ -101,7 +110,7 @@ export async function loadFactsData(w3: W3Api): Promise<FactsData> {
     destructable: (id, field) => value(destructables, destructableMods, id, field, 0),
     ability: (id, field, level) => value(abilities, abilityMods, id, field, level),
     abilityCode: (id) => { const base = abilityMods.get(id)?.base ?? id; return codes.get(base) ?? base; },
-    goldMines: special.goldMines, waygates: special.waygates,
+    goldMines: special.goldMines, waygates: special.waygates, toggleable: new Set(orders.keys()),
     ...heroConstants(gameMisc, mapMisc),
   };
 }
