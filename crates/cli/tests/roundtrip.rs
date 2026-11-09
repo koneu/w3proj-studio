@@ -415,7 +415,9 @@ fn verify_on_a_folder_leaves_out_the_projects_outputs() {
     let (code, out) = verify(&maps);
     assert_eq!(code, Some(1), "{out}");
     assert!(outputs.iter().all(|o| out.contains(&*o.to_string_lossy())), "{out}");
-    assert!(!cfg!(unix) || out.contains("07-11-21"), "{out}");
+    if cfg!(unix) {
+        assert!(out.contains("07-11-21"), "{out}");
+    }
     fs::write(project.join("w3proj.toml"), "").unwrap();
     let (code, out) = verify(&maps);
     assert_eq!(code, Some(0), "{out}");
