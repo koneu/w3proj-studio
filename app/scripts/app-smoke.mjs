@@ -1448,7 +1448,9 @@ async function itemTablesAccess(page, found) {
 
 /** Units are drawn by their type, as the World Editor draws them: a gryphon at its flying height (UnitData moveHeight
  *  240) over the ground, a footman on it, whatever height the placement file holds; ground raised under the gryphon
- *  takes it along at once. Drawing them so writes nothing: saving after only looking leaves the units file as it was. */
+ *  takes it along at once. Drawing them so writes nothing: saving after only looking leaves the units file as it was.
+ *  In HD a naga swimming in a lake goes into the water's depth picture of the models (it shows through), a gryphon
+ *  over the lake doesn't. */
 async function flyingHeights(page, found) {
   const fail = (what) => found.push(`flying heights: ${what}`);
   const k = await heightKit(page, "Flying");
@@ -1492,6 +1494,26 @@ async function flyingHeights(page, found) {
     if (!raised) return fail("the raise was refused");
     const after = await drawn("hgry");
     if (Math.abs(after.z - (ground + 128 + 240)) > 1) fail(`with the ground raised by 128 the gryphon is drawn at ${after.z}, not ${ground + 128 + 240}`);
+    // HD water shows what's under its surface by the water in front of it: a naga swimming in a lake goes into the
+    // water's depth picture of the models, the gryphon flying over the lake doesn't; with the water hidden there's none.
+    if ((await page.evaluate(`w3.settings.get("game.graphicsMode")`)) !== "sd") {
+      // (The tool doesn't change a terrain with unsaved edits: the raise above.)
+      await k.save();
+      await k.tool("set_water", { mode: "lake", left: 1024, bottom: -1024, right: 2048, top: 1024 });
+      await k.tool("place_objects", { objects: [{ id: "nmyr", x: 1536, y: 0, player: 1 }, { id: "hgry", x: 1536, y: 256, player: 1 }], ignoreRoom: true });
+      const depth = () => page.evaluate(`window.__flyEd?.waterDepth?.() ?? null`);
+      await k.look(1536, 0);
+      await until("the naga in the water's depth picture", async () => (await depth())?.models === 1, 20000)
+        .catch(async () => fail(`looking at a naga and a gryphon over a lake, the water's depth picture is ${JSON.stringify(await depth())}, not one model`));
+      const water = `[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Water")?.querySelector("input")`;
+      if (await page.evaluate(`${water}?.checked`) !== true) fail("the Water box isn't there, or not on");
+      else {
+        await page.evaluate(`${water}.click()`);
+        await until("no depth picture with the water hidden", async () => (await depth())?.drawn === false, 20000)
+          .catch(async () => fail(`with the water hidden, the water's depth picture is ${JSON.stringify(await depth())}`));
+        await page.evaluate(`${water}.click()`);
+      }
+    }
   } finally {
     await page.evaluate(`window.__flyGroup?.dispose(); window.__flyGroup = null; window.__flyEd = null;`);
   }

@@ -107,7 +107,7 @@ falls short, rather than copying their insides into a scratch file.
 |---|---|
 | run one TypeScript test file | `npm test -- src/lib/undo.test.ts` (in `app/`; other arguments go to node, e.g. `--test-name-pattern=…`) |
 | show a test fails without the fix | `node scripts/fails-without.mjs <test> <changed source files…>` (in `app/`): passes as is, fails with those files as on `dev` (`--base`), files put back. Exit 3 means the old code merely didn't build: weak evidence. Rust: `--run "cargo test -p <crate> <name>"` |
-| look at the app, ask it something | `node scripts/app-drive.mjs <steps>` (in `app/`): the hidden smoke app (Xvfb on Linux), `--map`/`--project` (a copy), `--terrain`, `--camera game`, `--camera we[:x,y,…]` (the World Editor's view), `--view-size 1184x844`, `--compare-ready lit\|unlit`, `--look x,y`, `--shot file.png`, `--mcp tool={…}`, `--command id`, `--eval "…"` (an expression, statements, or statements that `return`), `--frame-cost ms` (CPU time per terrain frame: all, poses, particles). Steps run in order; the list is at the top of the file |
+| look at the app, ask it something | `node scripts/app-drive.mjs <steps>` (in `app/`): the hidden smoke app (Xvfb on Linux), `--map`/`--project` (a copy), `--terrain`, `--camera game`, `--camera we[:x,y,…]` (the World Editor's view), `--view-size 1184x844`, `--compare-ready lit\|unlit`, `--look x,y`, `--shot file.png`, `--mcp tool={…}`, `--command id`, `--eval "…"` (an expression, statements, or statements that `return`), `--frame-cost ms` (CPU time per terrain frame: all, poses, particles, HD water's depth picture). Steps run in order; the list is at the top of the file |
 | compare two pictures | `node scripts/pic-compare.mjs a.png b.png` (in `app/`): mean colour per region in both, their difference, the mean absolute difference of the pixels; `--region [name=]x,y,w,h`, `--sample` (whole and a 3x3 grid), `--diff d.png`, `--tolerance T` (exit 1 when a region's difference is above it, 2 when the pictures can't be compared). Plain JavaScript, no Pillow |
 | run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
@@ -337,6 +337,34 @@ turns cyan. Particles don't go through the HD tone curve. What was wrong and is 
 slot 3: AOob's red runes were black, AOnt's lamp unlit), Reforged models whose classic emitters are empty
 placeholders (LObr: no fire at all), the HD City cliffs' placeholder textures (`ReplaceableTextures\Cliff\Cliff1_…`,
 drawn white on OrcX02_03) and Cityscape's HD water colour (blue).
+
+**Click helpers, scale ranges, ZZdt, submerged models and trees** (branch render-fixes-6, 2026-11-09, copies of map 03
+with doodads, custom doodad types and units added by the release CLI, the editor in SD and HD):
+- Every `useClickHelper` doodad (Doodads.slk) gets the editor's click helper beside its model, outside game view only:
+  WorldEditData.txt's `ClickHelper` (InvalidObject.mdx, a 128 cube whose white squares its geoset colours magenta) at
+  `ClickHelperScale` 0.4 of the doodad as drawn, `ClickHelperColor`'s alpha 96 (objects.ts CLICK_HELPER). A dust type
+  given scales 0.5–3 and placed at 1, 2 and 3 showed cubes 46, 80 and 126 px wide; turned doodads turn it. Studio's cube
+  lands on the editor's to the pixel; its colour is the classic view's (the HD view blends it in linear light: brighter
+  magenta, lighter black squares).
+- A doodad or destructable stored outside its type's minScale..maxScale is drawn at the nearest end, per axis (ZZdt 1–1
+  at 4, the armor rack LOam 0.8–2 at 3, the hay cart LOch 0.8–1.2 at 2, 1, 1, Lordaeron's tree LTlt 0.8–1.2 at 0.4 and
+  3); the stored scale stays (objects.ts scaleRange).
+- ZZdt (DemonFootPrint): the classic view does draw the footprint and its flame, small and under its click helper
+  (seen through the cube at distance 900; a custom hay-cart type with the same model shows them plainly at 1000–2200).
+  The HD view draws the Reforged model, which has no geometry and only a PopcornFX effect (CORN, visibility 1 in its
+  Stand) that shows nothing; Studio stands in the classic model's emitters for PopcornFX models (the fires need them),
+  so it draws a flame there. No table field or model value tells ZZdt from the fires (scanned: the 62 doodads whose HD
+  model is PopcornFX and whose classic model has emitters).
+- HD water over a model under its surface goes by the water in front of the point seen, not the bed's depth (the
+  editor shows a swimming naga's tail): renderer.ts drawWaterDepth, viewdepth.ts. On the copy of map 03 with two naga
+  myrmidons and a siren in its round lake the tails now show; the region's mean difference hardly moves (lit 14.2 →
+  14.3, unlit 13.1 → 12.8: the swimming poses differ). The editor's tails look clearer still.
+- TwistedMeadows' trees are darker than the editor's also with View > Lighting off (green 61 against 85), so not by the
+  sun or the fill: the alpha test at 0.5 or 0.3 instead of 0.75 gives 63 and 64, an even light on the models of 1.0,
+  1.2 and 1.43 gives 68, 75 and 82, where 1.2 matches the rocks there (87 against 87) but makes map 03's racks too red
+  (38 against 28). Other HD models are darker too (TwistedMeadows' rocks 75 against 87, the roof 79 against 89, unlit),
+  each by its own amount: the editor's HD shading of the materials (normal and ORM maps, which Studio's model shader
+  doesn't use for light) is the likelier cause.
 
 ## Process
 

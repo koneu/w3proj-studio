@@ -159,11 +159,15 @@ export interface TerrainEditorHandle {
   /** Changes the given parts of the view camera. */
   setView(v: Partial<TerrainView>): void;
   /** CPU time of the frames drawn since the last call (ms, by performance.now): the whole frame, posing
-   *  the placed models in it, and the particles. For measuring (app-drive's --frame-cost). */
-  frameCost(): { frames: number; frameMs: number; poseMs: number; particleMs: number };
+   *  the placed models in it, the particles, and HD water's depth picture of the models in it. For measuring
+   *  (app-drive's --frame-cost). */
+  frameCost(): { frames: number; frameMs: number; poseMs: number; particleMs: number; waterMs: number };
   /** The last frame's real shadows (HD): whether they were cast, how big a texel of the sun's shadow map was on the
    *  ground (world units), and how many objects cast into it. For tests and measuring. */
   sunShadows(): { drawn: boolean; texel: number; casters: number };
+  /** The last frame's depth picture of the models under HD water (they show through it): whether it was drawn, and
+   *  how many models were in it. For tests and measuring. */
+  waterDepth(): { drawn: boolean; models: number };
   /** Where the placed units' models are drawn now (a flyer at its flying height, a ship on the water), by their
    *  placement's id and position. For tests and measuring. */
   drawnUnits(): { id: string; x: number; y: number; z: number }[];

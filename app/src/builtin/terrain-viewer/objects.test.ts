@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -128,6 +128,24 @@ test("units get their movement type from the unit table, and a map's own movemen
   assert.equal(out.get("hfoo")?.moveType, "amph", "a changed standard unit");
   assert.equal(out.get("h000")?.moveType, "float", "a custom unit keeps its base's");
   assert.equal(out.get("h001")?.moveType, "foot");
+});
+
+test("doodads get their click helper from Doodads.slk, and a map's own useClickHelper (duch) wins", () => {
+  const doodad = (file: string): Skin => ({ ...skin(file), kind: "w3d" });
+  const skins = new Map([["YOtf", doodad("fire")], ["LRrk", doodad("rock")], ["ZZdt", doodad("prints")], ["hfoo", skin("footman")]]);
+  addClickHelpers(skins, [{ doodID: "YOtf", useClickHelper: "1" }, { doodID: "LRrk", useClickHelper: "0" }, { doodID: "ZZdt", useClickHelper: " 1 " },
+    { doodID: "hfoo", useClickHelper: "1" }, { doodID: "nope", useClickHelper: "1" }]);
+  assert.equal(skins.get("YOtf")?.clickHelper, true);
+  assert.equal(skins.get("ZZdt")?.clickHelper, true);
+  assert.equal(skins.get("LRrk")?.clickHelper, undefined);
+  assert.equal(skins.get("hfoo")?.clickHelper, undefined, "a unit has none, whatever a row of that id says");
+  assert.equal(skins.has("nope"), false);
+  const out = withObjectArt(skins, [{ kind: "w3d", original: [{ base: "YOtf", mods: [{ field: "duch", value: 0 }] }],
+    custom: [{ base: "ZZdt", id: "D000", mods: [] }, { base: "LRrk", id: "D001", mods: [{ field: "duch", value: 1 }] }] }]);
+  assert.equal(out.get("YOtf")?.clickHelper, undefined, "a standard doodad the map changed");
+  assert.equal(out.get("D000")?.clickHelper, true, "a custom doodad keeps its base's");
+  assert.equal(out.get("D001")?.clickHelper, true);
+  assert.equal(skins.get("YOtf")?.clickHelper, true, "the game's skins stay as they were");
 });
 
 test("units get their flying height from the unit table, and a map's own wins", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { castsSunShadow, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, withGroup } from "./renderer";
+import { castsSunShadow, HD_WATER, hdWaterAt, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, wetLevels, withGroup } from "./renderer";
 
 test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
   const one = [{ world: new Float32Array(16), team: 0 }];
@@ -69,6 +69,28 @@ test("game view leaves out the editor-only batches; a wireframe or hidden terrai
   assert.equal(shown(view({ groundLook: "hidden" }), cliffs), false);
   assert.equal(shown(view({ groundLook: "hidden" }), units), true);
   assert.equal(shown(view({}), cliffs), true);
+});
+
+test("models count as standing in the water on and next to its tiles, up to a little above its surface", () => {
+  // A 5 × 4 tile map with one pool tile at (2, 1), its surface at 100, and a higher pool tile at (4, 3), at 300.
+  const wet = wetLevels(5, 4, (x, y) => (x === 2 && y === 1 ? 100 : x === 4 && y === 3 ? 300 : null), 1);
+  const at = (x: number, y: number) => wet[y * 5 + x];
+  assert.equal(at(2, 1), 100);
+  assert.equal(at(1, 0), 100, "a tile next to it (across a corner too)");
+  assert.equal(at(3, 2), 300, "next to both: the higher surface");
+  assert.equal(at(0, 3), -Infinity, "two tiles away: dry");
+  assert.equal(at(4, 0), -Infinity);
+  // The renderer's test of a model's origin, with that map at offset (0, 0).
+  const view = { terrain: { offsetX: 0, offsetY: 0, width: 6, height: 5 }, wet } as unknown as TerrainRenderer;
+  const standsIn = (x: number, y: number, z: number) => TerrainRenderer.prototype["underWater"].call(view, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]));
+  assert.equal(standsIn(320, 200, 100), true, "a swimming naga on the surface");
+  assert.equal(standsIn(320, 200, -200), true, "a unit wading on the bed");
+  assert.equal(standsIn(320, 200, 110), true, "a little above the surface");
+  assert.equal(standsIn(320, 200, 300), false, "a flying unit over the water");
+  assert.equal(standsIn(200, 64, 100), true, "on the shore tile next to it, at the water's height");
+  assert.equal(standsIn(200, 64, 180), false, "a tree on the bank above it");
+  assert.equal(standsIn(64, 450, 0), false, "away from the water");
+  assert.equal(standsIn(-50, 200, 0), false, "off the map");
 });
 
 // Lordaeron Summer's ramp from TerrainArt\Water.slk (Smin/Smax/Dmin/Dmax: r, g, b, a in 0–1).

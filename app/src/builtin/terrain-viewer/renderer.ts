@@ -5,12 +5,13 @@
 import type { DecodedImage } from "../../lib/image/index";
 import { FOG_FS, FOG_VS, setFog, type Fog } from "../../lib/model/fog";
 import { createTexture } from "../../lib/model/gltexture";
-import { frustumPlanes, sphereInView } from "../../lib/model/frustum";
+import { frustumPlanes, sphereInView, worldSphere } from "../../lib/model/frustum";
 import { compile, INSTANCE_BYTES, mat4, noSunTexture, poseNodes, standClock, type Clock, type HeightMap, type InstanceRuns, type Mat4, type ModelGpu, type Vec3 } from "../../lib/model/renderer";
 import type { Model } from "../../lib/model/mdx";
 import type { SceneLight } from "../../lib/model/dnclight";
 import { hdLight, setTone, shadeWrap, sunLight, TONE_FS, type Tone } from "../../lib/model/tone";
 import { setSunShadow, SUN_FS, sunShadowFrame, SunShadowMap, viewRays, type SunShadow } from "../../lib/model/sunshadow";
+import { ViewDepth } from "../../lib/model/viewdepth";
 
 /** Ground light without the map's lighting: soft ambient plus a light from the south-west. */
 const GROUND_DEFAULT: SceneLight = { dir: [-0.3, -0.4, 0.85], diffuse: [0.65, 0.65, 0.65], ambient: [0.45, 0.45, 0.45] };
@@ -125,10 +126,27 @@ uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; unif
 uniform vec3 uLight; uniform float uGrey;
 // HD (uTone 2): the colour the editor shows (hdWaterColor), the texture only rippling it.
 uniform vec3 uHdWater; uniform float uWaterBrightness;
+// HD: the depth picture of the models under the water (uSceneOn 1; drawWaterDepth), at the view's size (uViewSize), from
+// the eye uEye looking along uForward with the projection's near and far planes (uNearFar).
+uniform highp sampler2D uScene; uniform float uSceneOn; uniform highp vec2 uViewSize;
+uniform highp vec3 uEye; uniform highp vec3 uForward; uniform highp vec2 uNearFar;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
 ${SUN_FS}
+// The water a pixel shows (world units): the bed's depth, or less where a model under the surface is nearer than the bed,
+// by how far below the surface its point seen lies (viewdepth.ts waterSeenDepth, eyeDistance).
+float seenDepth(float bed) {
+  if (uSceneOn < 0.5) return bed;
+  highp float d = texture(uScene, gl_FragCoord.xy / uViewSize).r;
+  // Nothing drawn there, or a model in front of the water (above it): the bed.
+  if (d >= 1.0 || d <= gl_FragCoord.z) return bed;
+  highp float n = uNearFar.x, f = uNearFar.y;
+  highp float behind = 2.0 * n * f / (f + n - (2.0 * d - 1.0) * (f - n));
+  highp float here = dot(vWorld - uEye, uForward);
+  highp float seenZ = uEye.z + (vWorld.z - uEye.z) * behind / max(here, 1.0);
+  return min(bed, max(vWorld.z - seenZ, 0.0));
+}
 void main() {
   const float minDepth = 10.0 / 128.0, deepLevel = 64.0 / 128.0, maxDepth = 72.0 / 128.0;
   vec4 c = vDepth <= deepLevel
@@ -136,8 +154,9 @@ void main() {
     : mix(uDeepMin, uDeepMax, clamp((vDepth - deepLevel) / (maxDepth - deepLevel), 0.0, 1.0));
   vec4 t = texture(uTex, vUv);
   if (uTone > 1.5) {
-    // How opaque and which colour by the depth: hdWaterAt (the editor's pools of set depths).
-    float depth = vDepth * 128.0;
+    // How opaque and which colour by the depth: hdWaterAt (the editor's pools of set depths), the depth being that of
+    // the water in front of what's behind (seenDepth).
+    float depth = seenDepth(vDepth * 128.0);
     float a = pow(clamp(depth / ${HD_WATER.full.toFixed(1)}, 0.0, 1.0), ${HD_WATER.power.toFixed(3)}) * t.a;
     float deep = clamp((depth - ${HD_WATER.ramp[0].toFixed(1)}) / ${(HD_WATER.ramp[1] - HD_WATER.ramp[0]).toFixed(1)}, 0.0, 1.0);
     vec3 colour = mix(vec3(${HD_WATER.shallow.map((v) => (v / 255).toFixed(4)).join(", ")}), uHdWater, deep);
@@ -151,6 +170,37 @@ void main() {
   vec4 w = t * c;
   outColor = vec4(fogged(toned(w.rgb, uLight)), w.a);
 }`;
+
+/** Texture unit of HD water's depth picture of the models (drawWaterDepth): beside SUN_UNIT (5). */
+const WATER_DEPTH_UNIT = 6;
+
+/** Tiles around a water tile whose models count as possibly under its surface (wetLevels), and how far above the
+ *  surface a model's origin may be and still count (underWater). */
+const WET_REACH = 1, WET_MARGIN = 16;
+
+/**
+ * Per tile (row by row, `tilesX` × `tilesY`), the highest water surface within `reach` tiles of it, -Infinity where
+ * there's none: a model standing on such a tile no higher than about that level may show through HD water (the water
+ * pass's depth picture of the models takes only those: underWater). `surface(x, y)`: a tile's highest surface, null
+ * without water.
+ */
+export function wetLevels(tilesX: number, tilesY: number, surface: (x: number, y: number) => number | null, reach = WET_REACH): Float32Array {
+  const own = new Float32Array(tilesX * tilesY).fill(-Infinity);
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) own[y * tilesX + x] = surface(x, y) ?? -Infinity;
+  // Spread along the rows, then along the columns: the highest within the square around each tile.
+  const rows = new Float32Array(own.length).fill(-Infinity), out = new Float32Array(own.length).fill(-Infinity);
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    let m = -Infinity;
+    for (let k = Math.max(0, x - reach); k <= Math.min(tilesX - 1, x + reach); k++) m = Math.max(m, own[y * tilesX + k]);
+    rows[y * tilesX + x] = m;
+  }
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    let m = -Infinity;
+    for (let k = Math.max(0, y - reach); k <= Math.min(tilesY - 1, y + reach); k++) m = Math.max(m, rows[k * tilesX + x]);
+    out[y * tilesX + x] = m;
+  }
+  return out;
+}
 
 /** What of a corner the water reads. */
 type WaterCorner = Pick<Corner, "height" | "water" | "hasWater" | "layer">;
@@ -325,6 +375,8 @@ export interface PickInfo {
   model: string;
   /** Model scale on top of the placement's own (units' skin scale). */
   extraScale: number;
+  /** The scales it's drawn within (objects.ts scaleRange: a doodad type's minScale to maxScale); none: as stored. */
+  scaleRange?: readonly [number, number];
 }
 
 export interface ObjectInstance {
@@ -335,6 +387,9 @@ export interface ObjectInstance {
   sphere?: [number, number, number, number];
   /** The model's own bounding sphere [x, y, z, r], in model space: `sphere` is it placed by `world`. */
   bounds?: readonly [number, number, number, number];
+  /** Drawn with another instance (a doodad's click helper): `world` is the owner's world times `local`, made again
+   *  each frame, so it moves and turns with the owner. Such an instance has no `pick` of its own. */
+  follows?: { owner: ObjectInstance; local: Mat4 };
 }
 
 /** One model placed any number of times; `group` is a toggle name (e.g. "doodads"). */
@@ -530,7 +585,7 @@ export class TerrainRenderer {
     this.batches.push(...next);
     // The instance buffers of batches that are gone go with them.
     const kept = new Set(next);
-    for (const store of [this.instanceBuffers, this.sunInstanceBuffers]) {
+    for (const store of [this.instanceBuffers, this.sunInstanceBuffers, this.wetInstanceBuffers]) {
       for (const [b, buf] of store) if (!kept.has(b)) { this.gl.deleteBuffer(buf.buffer); store.delete(b); }
     }
   }
@@ -539,17 +594,31 @@ export class TerrainRenderer {
   private instanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
   /** The same for the instances that cast into the sun's shadow map (in view of the sun, not of the camera). */
   private sunInstanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
+  /** The same for the instances in view that may show through HD water (underWater), drawn into `waterDepth`. */
+  private wetInstanceBuffers = new Map<ObjectBatch, { buffer: WebGLBuffer | null; bytes: number }>();
+  /** HD: the depth picture of the models under water (viewdepth.ts), made on first use. */
+  private waterDepth: ViewDepth | null = null;
+  /** The last frame's: whether HD water read the depth picture of models under it, and how many were in it. */
+  readonly waterDepthState = { drawn: false, models: 0 };
   /** Room to gather a batch's matrices before they're uploaded. */
   private instanceData = new Float32Array(16 * 1024);
 
   /** Fills a batch's instance buffer with its instances in view (all of them without `planes`), in runs
    *  of one player colour, and says what's where. */
-  private gatherInstances(b: ObjectBatch, planes: Float32Array | null, store = this.instanceBuffers): InstanceRuns {
+  private gatherInstances(b: ObjectBatch, planes: Float32Array | null, store = this.instanceBuffers,
+    opts: { from?: readonly ObjectInstance[]; wet?: ObjectInstance[] } = {}): InstanceRuns {
     const gl = this.gl;
     const byTeam = new Map<number, ObjectInstance[]>();
     let n = 0;
-    for (const inst of b.instances) {
+    // `from`: these instead of the batch's; `wet`: collects those in view that stand in the water (underWater).
+    const { from = b.instances, wet } = opts;
+    for (const inst of from) {
+      if (inst.follows) {
+        inst.world = mat4.mul(inst.follows.owner.world, inst.follows.local);
+        if (inst.bounds) inst.sphere = worldSphere(inst.world, inst.bounds);
+      }
       if (planes && inst.sphere && !sphereInView(planes, inst.sphere)) continue;
+      if (wet && this.underWater(inst.world)) wet.push(inst);
       let list = byTeam.get(inst.team);
       if (!list) byTeam.set(inst.team, (list = []));
       list.push(inst);
@@ -757,11 +826,13 @@ export class TerrainRenderer {
   /** Water tiles: position, texture coordinate (one copy per tile), depth in cliff layers. */
   private buildWater(): Mesh {
     const t = this.terrain, gl = this.gl, out: number[] = [];
+    const surfaces = new Float32Array((t.width - 1) * (t.height - 1)).fill(NaN);
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
         const tile = waterTile(cs);
         if (!tile) continue;
+        surfaces[y * (t.width - 1) + x] = Math.max(...tile.z);
         const v = cs.map((_, i) => {
           const dx = i === 1 || i === 2 ? 1 : 0, dy = i >= 2 ? 1 : 0;
           return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, tile.z[i], dx, 1 - dy, tile.depth[i] / 128];
@@ -782,7 +853,23 @@ export class TerrainRenderer {
     };
     attr("aPos", 3, 0); attr("aUv", 2, 3); attr("aDepth", 1, 5);
     gl.bindVertexArray(null);
+    this.wet = wetLevels(t.width - 1, t.height - 1, (x, y) => {
+      const s = surfaces[y * (t.width - 1) + x];
+      return Number.isNaN(s) ? null : s;
+    });
     return { vao, count: out.length / 6 };
+  }
+
+  /** Per tile, the highest water surface near it (wetLevels), made with the water. */
+  private wet = new Float32Array(0);
+
+  /** Whether a placed model stands in the water near it, so that parts of it may show through: its origin (where it's
+   *  drawn: a swimming unit's or a ship's on the surface, a unit wading through a ford on the bed) at most a little
+   *  above the surface. Trees and buildings on the shore stand above it; flying units fly above it. */
+  private underWater(world: Mat4): boolean {
+    const t = this.terrain, tx = Math.floor((world[12] - t.offsetX) / 128), ty = Math.floor((world[13] - t.offsetY) / 128);
+    if (tx < 0 || ty < 0 || tx >= t.width - 1 || ty >= t.height - 1) return false;
+    return world[14] < this.wet[ty * (t.width - 1) + tx] + WET_MARGIN;
   }
 
   /** Building ground marks: squares (half-size `scale`) draped over the ground in 32-unit
@@ -1101,9 +1188,11 @@ export class TerrainRenderer {
       // locations in game view.
       if (this.hiddenGroups.has(b.group) || (b.editorOnly && !this.showEditorOnly)) continue;
       for (const inst of b.instances) {
-        if (!inst.pick || !inst.sphere) continue;
+        // A doodad's click helper picks its doodad, by the helper's own sphere.
+        const target = inst.follows?.owner ?? inst, pick = target.pick;
+        if (!pick || !inst.sphere) continue;
         const [cx, cy, cz, sr] = inst.sphere;
-        const r = radiusOf?.(inst);
+        const r = inst.follows ? undefined : radiusOf?.(inst);
         let t = Infinity;
         if (r === undefined) {
           const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
@@ -1111,7 +1200,7 @@ export class TerrainRenderer {
           const disc = p * p - q;
           if (disc >= 0) t = -p - Math.sqrt(disc);
         } else {
-          const [px, py, pz] = inst.pick.placed.position;
+          const [px, py, pz] = pick.placed.position;
           const bottom = pz - 16, top = Math.max(pz + 32, cz + sr * 0.8);
           // Side of the cylinder (the xy circle), then its top cap.
           const ox = o[0] - px, oy = o[1] - py;
@@ -1130,7 +1219,7 @@ export class TerrainRenderer {
             if (tc > 0 && hx * hx + hy * hy <= r * r) t = Math.min(t, tc);
           }
         }
-        if (t > 0 && t < bestT) { bestT = t; best = inst; }
+        if (t > 0 && t < bestT) { bestT = t; best = target; }
       }
     }
     return best;
@@ -1291,8 +1380,9 @@ export class TerrainRenderer {
   }
 
   /** CPU time of the frames drawn (ms, by performance.now): all of render, posing the placed models
-   *  in it, and the particles. For measuring (see TerrainEditorHandle.frameCost). */
-  readonly frameCost = { frames: 0, frameMs: 0, poseMs: 0, particleMs: 0 };
+   *  in it, the particles, and HD water's depth picture of the models in it (drawWaterDepth). For measuring (see
+   *  TerrainEditorHandle.frameCost). */
+  readonly frameCost = { frames: 0, frameMs: 0, poseMs: 0, particleMs: 0, waterMs: 0 };
 
   render() {
     const started = performance.now();
@@ -1308,9 +1398,9 @@ export class TerrainRenderer {
     const gl = this.gl;
     const w = this.canvas.clientWidth * devicePixelRatio, h = this.canvas.clientHeight * devicePixelRatio;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
-    const far = this.distance * 10;
+    const far = this.distance * 10, near = Math.max(10, this.distance / 50);
     const viewProj = mat4.mul(
-      mat4.perspective(this.fov, w / Math.max(1, h), Math.max(10, this.distance / 50), far),
+      mat4.perspective(this.fov, w / Math.max(1, h), near, far),
       mat4.lookAt(this.eye(), this.target, [0, 0, 1]),
     );
     const terrainLight = this.drawnLight(this.terrainLight), unitLight = this.drawnLight(this.unitLight);
@@ -1319,10 +1409,16 @@ export class TerrainRenderer {
     // sun's shadow map is drawn first. Cliffs aren't culled: the ground they follow moves them up in the shader.
     const planes = frustumPlanes(viewProj);
     const gathered: [ObjectBatch, InstanceRuns][] = [];
+    // HD water reads a depth picture of the models in view that stand in it (drawWaterDepth), found on the way.
+    const wetWanted = this.tone === 2 && this.showWater && this.water.count > 0;
+    const wet = new Map<ObjectBatch, ObjectInstance[]>();
     for (const b of this.batches) {
       if (!this.batchShown(b) || !b.instances.length) continue;
-      const list = this.gatherInstances(b, b.followGround ? null : planes);
+      // See-through previews and the editor's helpers don't hide the water behind them; cliffs and waves aren't models.
+      const found: ObjectInstance[] | undefined = wetWanted && !b.tint && !b.followGround && b.group !== "shoreline" ? [] : undefined;
+      const list = this.gatherInstances(b, b.followGround ? null : planes, this.instanceBuffers, { wet: found });
       if (list.runs.length) gathered.push([b, list]);
+      if (found?.length) wet.set(b, found);
     }
     // Shadows fall from the units' sun (map 03's footmen's to the north-east, as its unit light, not to the east as its
     // terrain light: we-drive), the ground's where the map has no unit light.
@@ -1349,6 +1445,9 @@ export class TerrainRenderer {
     this.sunShadowState.texel = sun ? sun.texel : 0;
     this.sunShadowState.casters = sun ? casting.reduce((n, [, l]) => n + l.runs.reduce((k, r) => k + r.count, 0), 0) : 0;
     const noSun = noSunTexture(gl);
+    const waterStarted = performance.now();
+    const seen = this.drawWaterDepth(viewProj, wet, w, h);
+    this.frameCost.waterMs += performance.now() - waterStarted;
     // The classic view's objects' shadows (images and textures): in SD, and in HD only in place of real shadows that
     // couldn't be drawn (a GPU without the shadow map). HD without the map's lighting has none at all, as the editor.
     const standIns = this.tone !== 2 || (!sun && !!terrainLight);
@@ -1551,6 +1650,16 @@ export class TerrainRenderer {
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);
       const lit = this.flatLight(terrainLight);
       gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
+      // The models' depth picture (a texture of its own is always bound to the sampler, as for the shadow map).
+      const eye = this.eye(), forward = norm([this.target[0] - eye[0], this.target[1] - eye[1], this.target[2] - eye[2]]);
+      gl.activeTexture(gl.TEXTURE0 + WATER_DEPTH_UNIT);
+      gl.bindTexture(gl.TEXTURE_2D, seen ?? this.waterWhite);
+      gl.uniform1i(gl.getUniformLocation(this.waterProg, "uScene"), WATER_DEPTH_UNIT);
+      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uSceneOn"), seen ? 1 : 0);
+      gl.uniform2f(gl.getUniformLocation(this.waterProg, "uViewSize"), w, h);
+      gl.uniform3f(gl.getUniformLocation(this.waterProg, "uEye"), eye[0], eye[1], eye[2]);
+      gl.uniform3f(gl.getUniformLocation(this.waterProg, "uForward"), forward[0], forward[1], forward[2]);
+      gl.uniform2f(gl.getUniformLocation(this.waterProg, "uNearFar"), near, far);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, look.frames[frame] ?? look.frames.find((f) => f) ?? this.waterWhite);
       gl.enable(gl.BLEND);
@@ -1621,6 +1730,35 @@ export class TerrainRenderer {
     return this.sunMap.end(fit.lookup, fit.texel);
   }
 
+  /**
+   * HD water's depth picture: the models in view that stand in the water (underWater), drawn from
+   * the camera into a depth texture of the view's size, opaque layers only (as into the sun's map). The water shader
+   * reads it to see how much water lies in front of a model under the surface (the World Editor shows a swimming naga's
+   * body through the water: we-drive, branch render-fixes-6). Null when there's nothing to draw or no texture.
+   */
+  private drawWaterDepth(viewProj: Mat4, found: ReadonlyMap<ObjectBatch, readonly ObjectInstance[]>, w: number, h: number): WebGLTexture | null {
+    this.waterDepthState.drawn = false;
+    this.waterDepthState.models = 0;
+    if (!found.size) return null;
+    const wet: [ObjectBatch, InstanceRuns][] = [];
+    let models = 0;
+    for (const [b, from] of found) {
+      wet.push([b, this.gatherInstances(b, null, this.wetInstanceBuffers, { from })]);
+      models += from.length;
+    }
+    const gl = this.gl;
+    this.waterDepth ??= new ViewDepth(gl);
+    if (!this.waterDepth.begin(w, h)) return null;
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.CULL_FACE);
+    for (const [b, list] of wet) b.gpu.drawInstances(viewProj, list, { shadowPass: true });
+    const tex = this.waterDepth.end();
+    this.waterDepthState.drawn = !!tex;
+    this.waterDepthState.models = tex ? models : 0;
+    return tex;
+  }
+
   /** Grid lines over the ground; the larger the cell, the stronger the line. */
   private drawGrid(viewProj: Mat4) {
     const gl = this.gl, t = this.terrain;
@@ -1644,6 +1782,8 @@ export class TerrainRenderer {
   dispose() {
     this.sunMap?.dispose();
     this.sunMap = null;
+    this.waterDepth?.dispose();
+    this.waterDepth = null;
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }
