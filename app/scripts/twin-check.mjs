@@ -11,24 +11,20 @@
 // (`cargo build --release`, or W3PROJ_BIN) and the installed game for TriggerData.txt
 // (W3PROJ_GAME, default C:\Program Files (x86)\Warcraft III).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { chosenGamePath } from "../../tests/gamepath.mjs";
+import { findMaps } from "./find-maps.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = process.env.W3PROJ_BIN ?? join(app, "..", "target", "release", process.platform === "win32" ? "w3proj.exe" : "w3proj");
 const game = chosenGamePath() ?? "C:\\Program Files (x86)\\Warcraft III";
 if (!existsSync(bin)) throw new Error(`${bin} not found: run cargo build --release first`);
 
-const maps = [];
-const walk = (p) => {
-  if (statSync(p).isDirectory()) for (const n of readdirSync(p).sort()) walk(join(p, n));
-  else if (/\.w3[xm]$/i.test(p)) maps.push(p);
-};
-process.argv.slice(2).forEach((p) => (statSync(p).isDirectory() ? walk(p) : maps.push(p)));
+const maps = findMaps(process.argv.slice(2));
 if (!maps.length) throw new Error("usage: node scripts/twin-check.mjs <map or folder>...");
 
 const tmp = mkdtempSync(join(tmpdir(), "w3proj-twin-"));
