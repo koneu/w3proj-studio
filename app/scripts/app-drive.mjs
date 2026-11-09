@@ -46,6 +46,9 @@
 //   --eval EXPR         evaluate in the page (statements or an expression; a promise is awaited); prints the value:
 //                       an expression's, else the last statement's, or what statements `return` (with or without
 //                       a top-level `await`)
+//   --key CHORD         press a chord into the page, to whatever has the focus: "Ctrl+Shift+Z", "Shift+F2", "Delete",
+//                       "Numpad7", "Ctrl+Plus" (cdp.mjs parseChord); over WebDriver on Linux, so WebKitGTK's own key
+//                       events come out (where it says key "Unidentified", see lib/keys.ts)
 //
 // Examples:
 //   node scripts/app-drive.mjs --map ../openpoints/example-maps/02c_Fog_Linear_Near.w3x --terrain --camera game --shot /tmp/02c.png
@@ -59,12 +62,12 @@
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { Script } from "node:vm";
-import { problems, sleep, until } from "./cdp.mjs";
+import { Hands, problems, sleep, until } from "./cdp.mjs";
 import { buildApp, mcpCall, repo, smokeId, startApp } from "./appctl.mjs";
 import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
 import { parseLook, resolveLook, studioCamera, studioLighting } from "./we-camera.mjs";
 
-const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval"]);
+const VALUE_STEPS = new Set(["--map", "--project", "--open", "--camera", "--view-size", "--compare-ready", "--look", "--sleep", "--frame-cost", "--shot", "--shot-window", "--mcp", "--command", "--eval", "--key"]);
 const FLAG_STEPS = new Set(["--terrain", "--settle"]);
 
 function parseArgs(argv) {
@@ -304,6 +307,10 @@ async function main() {
           out({ step, command: arg, error: r });
         } else if (step === "--eval") {
           out({ step, value: await page.evaluate(evalSource(arg)) });
+        } else if (step === "--key") {
+          await new Hands(page).chord(arg);
+          await sleep(200);
+          out({ step, chord: arg });
         }
       } catch (e) {
         failed = true;

@@ -5,6 +5,7 @@
 import type { Terrain } from "../../lib/terrain/w3e";
 import type { CornerLog } from "../../lib/terrain/cliffs";
 import { h } from "../../workbench/dom";
+import { keyOf } from "../../lib/keys";
 
 export type ReplaceKind = "cliffs" | "tiles" | "doodads" | "units";
 
@@ -99,8 +100,8 @@ export function askReplace(kind: ReplaceKind, choices: { from: ReplaceChoice[]; 
       tabindex: -1,
       onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(null); },
       onkeydown: (e: KeyboardEvent) => {
-        if (e.key === "Escape") close(null);
-        if (e.key === "Enter") ok();
+        if (keyOf(e) === "Escape") close(null);
+        if (keyOf(e) === "Enter") ok();
       },
     }, h("div.picker.newmap-dialog.replace-dialog", {},
       h("div.picker-header", {}, h("strong", {}, w.title), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),

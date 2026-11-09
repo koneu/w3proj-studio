@@ -81,6 +81,16 @@ test("H, V and R mirror and turn, but Ctrl+V is still paste", () => {
   assert.equal(turnKey({ ...keys, key: "a" }), null);
 });
 
+test("keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {
+  assert.deepEqual(press("Unidentified", { code: "NumpadAdd" }), { scale: [0.05, 0.05, 0.05] });
+  assert.deepEqual(press("Unidentified", { code: "NumpadDivide" }), { rotate: 15 });
+  assert.deepEqual(press("Unidentified", { code: "PageUp", ctrlKey: true }), { raise: 16 });
+  const plain = { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.equal(isRecallKey({ key: "Unidentified", code: "Space", ...plain }), true);
+  assert.equal(isObjectEditorKey({ key: "Unidentified", code: "F1", ...plain, ctrlKey: true }), true);
+  assert.equal(turnKey({ key: "Unidentified", code: "KeyR", ...plain, shiftKey: true }), "ccw");
+});
+
 test("a size has a floor, and no drift from adding fractions", () => {
   assert.deepEqual(scaled([1, 1, 1], [0.05, 0.05, 0]), [1.05, 1.05, 1]);
   assert.deepEqual(scaled([0.05, 0.05, 0.05], [-0.05, -0.05, -0.05]), [0.05, 0.05, 0.05]);

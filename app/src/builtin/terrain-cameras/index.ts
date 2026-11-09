@@ -10,6 +10,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
+import { keyOf } from "../../lib/keys";
 import { listKey, moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { CAMERA_CELL, cameraColors, cameraEye, type CameraLook } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
@@ -368,8 +369,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     // What the Camera Objects layer draws: the cameras as edited here, saved or not.
     async cameraObjects() { await load; return doc.cameras; },
     keyDown(e) {
-      if ((e.key === "Delete" || e.key === "Backspace") && selected) { deleteSelected(); return true; }
-      if (e.key === "Escape" && selected) { select([]); renderPanel(); render(); return true; }
+      const key = keyOf(e);
+      if ((key === "Delete" || key === "Backspace") && selected) { deleteSelected(); return true; }
+      if (key === "Escape" && selected) { select([]); renderPanel(); render(); return true; }
       const cmd = listKey(e);
       if (cmd) { const why = listCommand(cmd); if (why) void w3.window.showInfo(why); return true; }
       return false;

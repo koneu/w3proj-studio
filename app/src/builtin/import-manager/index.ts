@@ -110,7 +110,7 @@ class ImportView {
         e.preventDefault();
         this.selected = new Set(this.shown.map(entryKey));
         this.render();
-      } else if (e.key === "Delete" && this.editable && this.selected.size) {
+      } else if (key === "delete" && this.editable && this.selected.size) {
         this.remove(this.shown.filter((s) => this.selected.has(entryKey(s))));
       }
     });

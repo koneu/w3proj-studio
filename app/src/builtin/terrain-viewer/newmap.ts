@@ -16,6 +16,7 @@ import { w3eToText } from "../../lib/terrain/w3etext";
 import { SCRIPT_STAMP, scriptHash } from "../../lib/script/guard";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
 import { h } from "../../workbench/dom";
+import { keyOf } from "../../lib/keys";
 import { buildMinimap, minimapSettings } from "./minimapgen";
 import { minimapIcons } from "../../lib/terrain/minimapicons";
 import { buildPathingMap } from "./pathmap";
@@ -239,8 +240,8 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       tabindex: -1,
       onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(null); },
       onkeydown: (e: KeyboardEvent) => {
-        if (e.key === "Escape") close(null);
-        if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement)) create();
+        if (keyOf(e) === "Escape") close(null);
+        if (keyOf(e) === "Enter" &&!(e.target instanceof HTMLTextAreaElement)) create();
       },
     }, h("div.picker.newmap-dialog", {},
       h("div.picker-header", {}, h("strong", {}, preset.title ?? "New Map"), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),

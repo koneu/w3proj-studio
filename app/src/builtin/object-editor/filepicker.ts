@@ -5,6 +5,7 @@
 import type { W3Api } from "../../extensions/api";
 import { toArchiveName } from "../../lib/formats/archivepath";
 import { parseSlk } from "../../lib/formats/text";
+import { keyOf } from "../../lib/keys";
 import { ModelPreview } from "../../lib/model/preview";
 import { SOUND_INFO } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
@@ -182,10 +183,11 @@ function pick(host: HTMLElement, opts: PickOptions): Promise<string | null> {
       value: start === "_" ? "" : start,
       oninput: () => { active = 0; filter(); },
       onkeydown: (e: KeyboardEvent) => {
-        if (e.key === "ArrowDown") { active = Math.min(active + 1, Math.min(shown.length, MAX_ROWS) - 1); mark(); e.preventDefault(); }
-        else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); mark(); e.preventDefault(); }
-        else if (e.key === "Enter") { if (shown[active]) finish(shown[active].path); e.preventDefault(); }
-        else if (e.key === "Escape") { finish(null); e.preventDefault(); }
+        const key = keyOf(e);
+        if (key === "ArrowDown") { active = Math.min(active + 1, Math.min(shown.length, MAX_ROWS) - 1); mark(); e.preventDefault(); }
+        else if (key === "ArrowUp") { active = Math.max(active - 1, 0); mark(); e.preventDefault(); }
+        else if (key === "Enter") { if (shown[active]) finish(shown[active].path); e.preventDefault(); }
+        else if (key === "Escape") { finish(null); e.preventDefault(); }
       },
     });
     // Thumbnails load when their row scrolls into view.

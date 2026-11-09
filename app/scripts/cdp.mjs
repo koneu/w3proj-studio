@@ -96,6 +96,63 @@ export class Hands {
     await this.page.send("Input.dispatchKeyEvent", { type: "keyUp", ...e });
     await sleep(50);
   }
+  /** A chord written as a person names it ("Ctrl+Shift+Z", "Shift+F2", "Numpad7"): see parseChord. */
+  chord(spec) {
+    const c = parseChord(spec);
+    return this.key(c.key, c.code, c.windowsVirtualKeyCode, c.modifiers);
+  }
+}
+
+// Named keys: their code is their name, and their Windows key code.
+const NAMED_KEYS = {
+  Backspace: 8, Tab: 9, Enter: 13, Escape: 27, " ": 32, PageUp: 33, PageDown: 34, End: 35, Home: 36,
+  ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Insert: 45, Delete: 46,
+  ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, 112 + i])),
+};
+// The number pad by its code: the key it gives (Num Lock on) and its Windows key code.
+const NUMPAD = {
+  ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`Numpad${i}`, [String(i), 96 + i]])),
+  NumpadMultiply: ["*", 106], NumpadAdd: ["+", 107], NumpadSubtract: ["-", 109], NumpadDecimal: [".", 110], NumpadDivide: ["/", 111],
+  NumpadEnter: ["Enter", 13],
+};
+// Punctuation on a US layout: its code and Windows key code.
+const PUNCTUATION = { "[": ["BracketLeft", 219], "]": ["BracketRight", 221], "-": ["Minus", 189], "=": ["Equal", 187], "/": ["Slash", 191], ",": ["Comma", 188], ".": ["Period", 190] };
+const MODIFIER_BITS = { ctrl: 2, control: 2, shift: 8, alt: 1, meta: 4 };
+// A modifier pressed alone ("Alt"): its key, and its Windows key code.
+const MODIFIER_KEYS = { Shift: 16, Control: 17, Alt: 18, Meta: 91 };
+
+/**
+ * A chord as DevTools' Input.dispatchKeyEvent takes it: "Ctrl+Shift+Z" is key "Z" (a letter with Shift is its capital,
+ * as a keyboard gives it), code "KeyZ", modifiers Ctrl|Shift. The last part is the key: a letter, a digit, a named key
+ * (Tab, Enter, Escape, Space, the arrows, PageUp, Home, Delete, F1…F12), US punctuation ([ ] - = / , .) or a number
+ * pad key by its code (Numpad7, NumpadAdd, NumpadEnter), or a modifier alone (Alt, Control, Shift, Meta: the left one).
+ * "Plus" names "+" ("Ctrl+Plus").
+ */
+export function parseChord(spec) {
+  const parts = String(spec).split("+");
+  // "Ctrl++" ends in an empty part: the key is "+".
+  if (parts.length > 1 && parts.at(-1) === "" && parts.at(-2) === "") parts.splice(-2, 2, "+");
+  const name = parts.pop();
+  let modifiers = 0;
+  for (const m of parts) {
+    const bit = MODIFIER_BITS[m.toLowerCase()];
+    if (!bit) throw new Error(`"${spec}": "${m}" isn't a modifier (Ctrl, Shift, Alt, Meta)`);
+    modifiers |= bit;
+  }
+  const shift = (modifiers & 8) !== 0;
+  if (/^[a-z]$/i.test(name)) {
+    const upper = name.toUpperCase();
+    return { key: shift ? upper : upper.toLowerCase(), code: `Key${upper}`, windowsVirtualKeyCode: upper.charCodeAt(0), modifiers };
+  }
+  if (/^[0-9]$/.test(name)) return { key: name, code: `Digit${name}`, windowsVirtualKeyCode: name.charCodeAt(0), modifiers };
+  if (name === "Space") return { key: " ", code: "Space", windowsVirtualKeyCode: 32, modifiers };
+  if (MODIFIER_KEYS[name]) return { key: name, code: `${name}Left`, windowsVirtualKeyCode: MODIFIER_KEYS[name], modifiers };
+  if (NAMED_KEYS[name]) return { key: name, code: name, windowsVirtualKeyCode: NAMED_KEYS[name], modifiers };
+  if (NUMPAD[name]) return { key: NUMPAD[name][0], code: name, windowsVirtualKeyCode: NUMPAD[name][1], modifiers };
+  if (name === "+" || name === "Plus") return { key: "+", code: "NumpadAdd", windowsVirtualKeyCode: 107, modifiers };
+  if (name === "*") return { key: "*", code: "NumpadMultiply", windowsVirtualKeyCode: 106, modifiers };
+  if (PUNCTUATION[name]) return { key: name, code: PUNCTUATION[name][0], windowsVirtualKeyCode: PUNCTUATION[name][1], modifiers };
+  throw new Error(`"${spec}": no key named "${name}" (a letter, digit, Tab, Enter, F1, ArrowUp, Numpad7, …)`);
 }
 
 /** The page with this DevTools port, connected, with its events on. */

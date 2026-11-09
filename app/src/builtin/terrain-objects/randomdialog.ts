@@ -3,6 +3,7 @@
 // World Editor's Random / Group choices, WESTRING_RNDDLG_RANDOM and _RANDGROUP).
 
 import { h } from "../../workbench/dom";
+import { keyOf } from "../../lib/keys";
 import { ITEM_CLASSES, positionsFor, type RandomGroup, type RandomSpec, type RandomWhat } from "../../lib/terrain/randomplace";
 
 const WHATS: [RandomWhat, string][] = [["unit", "Random Unit"], ["building", "Random Building"], ["item", "Random Item"]];
@@ -72,7 +73,7 @@ export function askRandom(host: HTMLElement, groups: readonly RandomGroup[], las
     const overlay = h("div.picker-overlay.newmap-overlay.random-overlay", {
       tabindex: -1,
       onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(null); },
-      onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(null); if (e.key === "Enter") ok(); },
+      onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(null); if (keyOf(e) === "Enter") ok(); },
     }, h("div.picker.newmap-dialog.random-dialog", {},
       h("div.picker-header", {}, h("strong", {}, "Place a random object"), h("button.icon-button", { title: "Close (Esc)", onclick: () => close(null) }, "×")),
       h("p.muted", {}, "Chosen when the game starts. Placed as the question mark; Cycle Random Groups shows what a group's lines put there."),

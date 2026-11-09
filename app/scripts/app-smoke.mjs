@@ -3316,6 +3316,41 @@ async function graphicsModes(page, found) {
   if (!copy) fail("an error toast has no Copy button");
 }
 
+/** Chords the webview can't name reach their command: on Linux WebKitGTK gives Ctrl+Alt with the number pad's + - * /
+ *  key "Unidentified" (and Shift+Tab with any modifiers, and Ctrl+Alt+F1…F12; lib/keys.ts lists what was found), and
+ *  the workbench's key bindings read the physical key then. Ctrl+Alt+Numpad + matched nothing before keyOf read the
+ *  number pad's operators; Ctrl+Shift+Tab and Ctrl+Alt+F5 are there so no Unidentified chord the list names goes
+ *  unchecked. A command for each is put in for the check and taken out after; on Windows all of them come named. */
+async function keyChords(page, found) {
+  const fail = (what) => found.push(`key chords: ${what}`);
+  const hands = new Hands(page);
+  const chords = [["Ctrl+Alt+NumpadAdd", "ctrl+alt++"], ["Ctrl+Alt+NumpadSubtract", "ctrl+alt+-"], ["Ctrl+Shift+Tab", "ctrl+shift+tab"], ["Ctrl+Alt+F5", "ctrl+alt+f5"]];
+  await page.evaluate(`(() => {
+    window.__smokeChords = [];
+    window.__smokeChordOff = ${JSON.stringify(chords)}.map(([, binding], i) => {
+      const id = "smoke.keyChord" + i;
+      w3Workbench.commands.contribute("smoke", { id, title: "Smoke chord " + binding, keybinding: binding, hidden: true });
+      const off = w3Workbench.commands.register(id, () => { window.__smokeChords.push(binding); });
+      return () => { off.dispose(); w3Workbench.commands.contributed.delete(id); };
+    });
+    // What the webview gave, for the message: the last key that isn't a modifier.
+    const seen = (e) => { if (!/^(Control|Shift|Alt|Meta)/.test(e.code)) window.__smokeKey = { key: e.key, code: e.code }; };
+    window.addEventListener("keydown", seen, true);
+    window.__smokeChordOff.push(() => window.removeEventListener("keydown", seen, true));
+  })()`);
+  try {
+    for (const [chord, binding] of chords) {
+      await page.evaluate(`(() => { window.__smokeChords = []; window.__smokeKey = null; document.activeElement?.blur?.(); })()`);
+      await hands.chord(chord);
+      await sleep(200);
+      const ran = await page.evaluate(`window.__smokeChords`);
+      if (!ran.includes(binding)) fail(`${chord} didn't run the command bound to ${binding} (the webview gave ${JSON.stringify(await page.evaluate(`window.__smokeKey`))})`);
+    }
+  } finally {
+    await page.evaluate(`(() => { for (const off of window.__smokeChordOff ?? []) off(); window.__smokeChordOff = null; })()`);
+  }
+}
+
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
  *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
 /** What the first opening of gameReadsOnce's scene (the mini map with a tree, a goldmine and a footman) took
@@ -5371,7 +5406,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5475,6 +5510,7 @@ async function run() {
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
+    await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));

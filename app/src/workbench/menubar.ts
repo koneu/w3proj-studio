@@ -3,6 +3,7 @@
 // a menu, and the arrow keys, Enter and Esc do the rest.
 
 import type { MenuItem } from "../extensions/api";
+import { keyOf } from "../lib/keys";
 import { closeContextMenu, h, showContextMenu } from "./dom";
 import { menuFor, type Menu, type MenuEntry } from "./menus";
 
@@ -19,7 +20,7 @@ export class MenuBar {
     this.root.addEventListener("keydown", (e) => this.barKey(e));
     window.addEventListener("keydown", (e) => this.globalKey(e), true);
     window.addEventListener("keyup", (e) => {
-      if (e.key !== "Alt" || !this.altAlone) return;
+      if (keyOf(e) !== "Alt" || !this.altAlone) return;
       this.altAlone = false;
       e.preventDefault();
       this.toggleBar();
@@ -73,14 +74,15 @@ export class MenuBar {
   }
 
   private globalKey(e: KeyboardEvent) {
-    if (e.key === "Alt") {
+    const key = keyOf(e);
+    if (key === "Alt") {
       if (!e.repeat) this.altAlone = !e.ctrlKey && !e.shiftKey && !e.metaKey;
       return;
     }
     this.altAlone = false;
     // Ctrl with Alt is AltGr, which types characters on many keyboards.
-    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.key.length !== 1) return;
-    const name = menuFor(this.menus().map((m) => m.name), e.key);
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || key.length !== 1) return;
+    const name = menuFor(this.menus().map((m) => m.name), key);
     const button = this.buttons().find((b) => b.textContent === name);
     if (!name || !button) return;
     e.preventDefault();
@@ -93,10 +95,11 @@ export class MenuBar {
   private barKey(e: KeyboardEvent) {
     const button = e.target as HTMLElement;
     const take = () => { e.preventDefault(); e.stopPropagation(); };
-    if (e.key === "ArrowRight") { take(); this.neighbour(button, 1).focus(); }
-    else if (e.key === "ArrowLeft") { take(); this.neighbour(button, -1).focus(); }
-    else if (e.key === "Escape") { take(); this.leave(); }
-    else if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") { take(); this.show(button.textContent ?? "", button, true); }
+    const key = keyOf(e);
+    if (key === "ArrowRight") { take(); this.neighbour(button, 1).focus(); }
+    else if (key === "ArrowLeft") { take(); this.neighbour(button, -1).focus(); }
+    else if (key === "Escape") { take(); this.leave(); }
+    else if (key === "ArrowDown" || key === "Enter" || key === " ") { take(); this.show(button.textContent ?? "", button, true); }
   }
 
   private show(name: string, button: HTMLElement, keyboard = false) {
