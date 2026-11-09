@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { facing, GAME_LIGHT_FILL, hdLight, hdTone, shadeWrap, SUN_SHADE, sunAmbient, sunFacing, sunLight, toneOf } from "./tone";
+import { facing, GAME_LIGHT_FILL, hdLight, hdTone, objectLight, shadeWrap, SUN_SHADE, sunAmbient, sunFacing, sunLight, toneOf } from "./tone";
 import type { SceneLight } from "./dnclight";
 
 const near = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} not within ${tol} of ${b}`);
@@ -110,14 +110,35 @@ test("HD's real shadows: the light in a shadow as the World Editor's pictures me
 });
 
 test("HD's real shadows under the game's own lighting keep about half the light (map 03's footmen, we-drive)", () => {
-  // Lordaeron's HD terrain model at 06:00 (no ambient, shadow intensity 0.265): 0.51 of the lit ground's light in green.
+  // Lordaeron's HD terrain model at 06:00 (no ambient, shadow intensity 0.265): 0.50 of the lit ground's light in green
+  // under map 03's footmen, 0.54 and 0.60 under TwistedMeadows' trees (medians, branch render-fixes-5).
   const l = hdLight({ dir: [-0.392, -0.169, 0.904], diffuse: [1.026, 1.026, 1.199], ambient: [-0.03, -0.03, -0.03], shadow: 0.265, fill: GAME_LIGHT_FILL });
   const at = (lit: number) => sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, shadeWrap(2, l), l.fill ?? 0, lit);
-  near(at(0) / at(1), 0.51, 0.04, "with the game's fill");
+  near(at(0) / at(1), 0.55, 0.05, "with the game's fill");
   near(at(1), facing([0, 0, 1], l.dir, shadeWrap(2, l)) * l.diffuse[1], 1e-12, "lit: the fill changes nothing");
   // A map's own lighting model has none: the same light without it is nearly black in shadow.
   assert.ok(sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, shadeWrap(2, l), 0, 0) / at(1) < 0.1);
   assert.equal(hdLight({ dir: [0, 0, 1], diffuse: [1, 1, 1], ambient: [0, 0, 0] }).fill, undefined);
+});
+
+test("under the game's own lighting the fill lights every surface of a model alike, also those turned from the sun", () => {
+  // TwistedMeadows (Lordaeron's HD terrain model, 06:00): the editor's tree trunks on their side away from the sun and
+  // the trees in shadow keep about half the light of lit ground, where the light model alone leaves them nearly black.
+  const l = hdLight({ dir: [-0.392, -0.169, 0.904], diffuse: [1.026, 1.026, 1.199], ambient: [-0.03, -0.03, -0.03], shadow: 0.265, fill: GAME_LIGHT_FILL });
+  const wrap = shadeWrap(2, l);
+  const at = (n: number[], lit: number, k = 1, fill = l.fill ?? 0) => objectLight(l.ambient[k], l.diffuse[k], n, l.dir, wrap, fill, lit);
+  const flat = at([0, 0, 1], 1);
+  const away = [0.392, 0.169, -0.2];
+  assert.ok(at(away, 1) >= GAME_LIGHT_FILL * flat, `turned away, lit: ${at(away, 1)} under ${GAME_LIGHT_FILL * flat}`);
+  assert.ok(at(away, 0) >= GAME_LIGHT_FILL * flat, "turned away, in shadow");
+  near(flat, sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, wrap, l.fill ?? 0, 1), 1e-12, "facing up and lit: as the ground");
+  near(at([0, 0, 1], 0) / flat, 0.55, 0.05, "facing up in shadow: about the ground's share");
+  // Blue's light is bluer (the model's diffuse colour), and so is the fill.
+  assert.ok(at(away, 0, 2) > at(away, 0, 1));
+  // The ground keeps its slopes: lit, the fill changes nothing there (TwistedMeadows' slopes away from the sun).
+  near(sunLight(l.ambient[1], l.diffuse[1], away, l.dir, wrap, l.fill ?? 0, 1), sunLight(l.ambient[1], l.diffuse[1], away, l.dir, wrap, 0, 1), 1e-12, "ground");
+  // A map's own lighting model has no fill: turned away from the sun is nearly black.
+  assert.ok(at(away, 1, 1, 0) < 0.1 * flat);
 });
 
 test("the classic picture (and the model viewer) shade by the cosine alone", () => {

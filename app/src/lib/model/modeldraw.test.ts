@@ -81,6 +81,13 @@ test("a model is drawn in the tone it's asked for (tone.ts), with its light's HD
   assert.deepEqual(both({ tone: 1, light }), [[1], [0]], "classic: the cosine alone");
 });
 
+test("a model under the game's own lighting gets its fill (tone.ts GAME_LIGHT_FILL), as the ground does", () => {
+  // Without it, trees and units in the real shadows, and their sides away from the sun, were nearly black.
+  const light = { dir: [-0.392, -0.169, 0.904] as [number, number, number], diffuse: [1, 1, 1] as [number, number, number], ambient: [0, 0, 0] as [number, number, number], shadow: 0.265, fill: 0.45 };
+  assert.deepEqual(drawnWith(0, "uSunFill", { tone: 2, light }), [0.45]);
+  assert.deepEqual(drawnWith(0, "uSunFill", { tone: 1, light }), [0], "classic: none");
+});
+
 /** What a draw of a one-layer model did: draw calls, its uniform1f values by name, the textures bound on unit 5. */
 function drawRecord(filterMode: number, opts: DrawOpts) {
   const { gl, floats } = recordingGl();

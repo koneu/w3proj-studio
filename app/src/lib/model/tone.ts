@@ -66,18 +66,35 @@ export const SUN_SHADE = { ambient: 1.87, lift: 2.2 };
  * map's lighting model doesn't: map 03 (Lordaeron's HD models: no ambient, shadow intensity 0.27 and 0.35) keeps 0.51
  * of the lit ground's light in a footman's shadow (green; red 0.49, blue 0.68), where the light model alone (SUN_SHADE)
  * leaves 0.06; cliff.w3m's own models with no ambient leave black, also with the HD models' ambient -0.03 (we-drive,
- * 2026-11-09). Added in shadow as this share of the lit light (sunLight).
+ * 2026-11-09). On the ground it is added in shadow as this share of the lit light (sunLight).
+ *
+ * On the models it lights every surface alike, lit or not (branch render-fixes-5, TwistedMeadows under the same
+ * models, we-drive HD, Shadows on over off, the tone curve inverted per pixel): the editor's tree trunks on their side
+ * away from the sun were 79, 52, 22 (sRGB) with Shadows off, where Studio's light model alone gave 24, 11, 3 (objectLight).
+ * Not so on the ground: lit there the same way, TwistedMeadows' slopes turned from the sun came out 16 levels brighter
+ * than the editor's. The ground in the trees' shadows kept 0.52–0.60 of its light (median, green; map 03's footmen's
+ * 0.50).
  */
-export const GAME_LIGHT_FILL = 0.45;
+export const GAME_LIGHT_FILL = 0.5;
 
-/** The light at a point that gets `lit` of the sun, from the light lit (ambient + diffuse × facing) and in full shadow
- *  (sunAmbient, sunFacing at 0, and the light's fill share of the lit light): between the two by `lit`. The shaders'
- *  `sunLight` does the same per channel. */
+/** The light at a point of normal `n` that gets `lit` of the sun, from the light lit (ambient + diffuse × facing) and in
+ *  full shadow (sunAmbient, sunFacing at 0, and the light's fill share of the lit light): between the two by `lit`. The
+ *  ground's (objectLight is the models'). The shaders' `sunLight` does the same per channel. */
 export function sunLight(ambient: number, diffuse: number, n: readonly number[], l: readonly number[], wrap: number, fill: number, lit: number): number {
   const full = ambient + diffuse * facing(n, l, wrap);
   const shade = ambient * sunAmbient(0) + diffuse * sunFacing(n, l, wrap, 0) + fill * full;
   const v = Math.min(1, Math.max(0, lit));
   return shade + (full - shade) * v;
+}
+
+/** The light on a model at a point of normal `n` that gets `lit` of the sun: the fill share (`fill`, the game's own
+ *  lighting: GAME_LIGHT_FILL) of the light on flat ground (normal straight up) on every surface, lit or in shadow, and
+ *  the light model's own (sunLight without a fill) the rest, so a surface facing up keeps its light. The shaders'
+ *  `objectLight` does the same per channel. */
+export function objectLight(ambient: number, diffuse: number, n: readonly number[], l: readonly number[], wrap: number, fill: number, lit: number): number {
+  const f = Math.min(1, Math.max(0, fill));
+  const level = ambient + diffuse * facing([0, 0, 1], l, wrap);
+  return f * level + (1 - f) * sunLight(ambient, diffuse, n, l, wrap, 0, lit);
 }
 
 /** facing() at a point that gets `lit` of the sun (1 lit, 0 in full shadow, between at the soft edge): no cosine in
@@ -102,7 +119,8 @@ const glsl = (v: number) => v.toFixed(3);
  *  `tonedGlow(base, light, glow)` the same with a colour of its own added unlit (an HD emissive texture), and
  *  `facing(n, l)`, how much a surface of normal n gets of a light from l (as facing above), and `sunFacing(n, l, lit)`
  *  and `sunAmbient(lit)` for a point that gets `lit` of the sun (as sunFacing and sunAmbient above), and
- *  `sunLight(ambient, diffuse, n, l, lit)`, the light there (as sunLight above; uSunFill the light's fill). */
+ *  `sunLight(ambient, diffuse, n, l, lit)`, the light there on the ground, `objectLight(…)` on a model (as sunLight and
+ *  objectLight above; uSunFill the light's fill). */
 export const TONE_FS = `uniform float uTone; uniform float uShadeWrap; uniform float uSunFill;
 float facing(vec3 n, vec3 l) {
   vec3 L = normalize(l);
@@ -118,6 +136,13 @@ vec3 sunLight(vec3 ambient, vec3 diffuse, vec3 n, vec3 l, float lit) {
   vec3 full = ambient + diffuse * facing(n, l);
   vec3 shade = ambient * sunAmbient(0.0) + diffuse * sunFacing(n, l, 0.0) + uSunFill * full;
   return mix(shade, full, clamp(lit, 0.0, 1.0));
+}
+vec3 objectLight(vec3 ambient, vec3 diffuse, vec3 n, vec3 l, float lit) {
+  float f = clamp(uSunFill, 0.0, 1.0);
+  vec3 level = ambient + diffuse * facing(vec3(0.0, 0.0, 1.0), l);
+  vec3 full = ambient + diffuse * facing(n, l);
+  vec3 shade = ambient * sunAmbient(0.0) + diffuse * sunFacing(n, l, 0.0);
+  return f * level + (1.0 - f) * mix(shade, full, clamp(lit, 0.0, 1.0));
 }
 vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }
 vec3 linearToSrgb(vec3 c) {
