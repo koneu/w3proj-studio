@@ -14,7 +14,7 @@
   "unknown": 0,
   "variables": [
     {"name":"fooCount","type":"integer","unknown":1,"isArray":false,"arraySize":1,"initialized":true,"initialValue":"3","id":1,"parent":-1},
-    {"name":"fooList","type":"string","unknown":1,"isArray":true,"arraySize":4,"initialized":false,"initialValue":"","id":2,"parent":-1}
+    {"name":"fooList","type":"string","unknown":1,"isArray":true,"arraySize":4,"initialized":false,"initialValue":"","id":5,"parent":1}
   ],
   "items": [
     {"type":4,"id":1,"name":"Foo Setup","isComment":0,"expanded":1,"parent":-1},
@@ -82,7 +82,7 @@
         },
         {
           "kind": 2,
-          "name": "FooIfThenElse",
+          "name": "IfThenElseMultiple",
           "enabled": true,
           "params": [],
           "children": [
