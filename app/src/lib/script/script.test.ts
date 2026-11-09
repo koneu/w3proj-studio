@@ -12,7 +12,7 @@ import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors } from "./objects";
 import { AMBIENCE, configSection, dayNightModels, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
-import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText, triggersSection } from "./triggers";
+import { convertToCustom, triggerCustomText, triggersSection } from "./triggers";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
 
 const EOL = "\r\n";
@@ -196,6 +196,10 @@ test("placed changes are written, defaults aren't", () => {
   has(u, "    call UnitAddItemToSlotById( u, 'ratc', 1 )");
   // -2 is "camp": a fixed range.
   has(units([unit({ targetAcquisition: -2 })]), "    call SetUnitAcquireRange( u, 200.0 )");
+  // A stored 0 is a range of its own (World Editor 2.0, we-drive 2026-11-09), -1 the default.
+  has(units([unit({ targetAcquisition: 0 })]), "    call SetUnitAcquireRange( u, 0.0 )");
+  has(units([unit({ targetAcquisition: 0.5 })]), "    call SetUnitAcquireRange( u, 0.5 )");
+  hasNot(units([unit({ targetAcquisition: -1 })]), "SetUnitAcquireRange");
 });
 
 test("a hero's own attributes follow its level, before its life; 0 is its default ones", () => {
@@ -381,14 +385,39 @@ test("a placed random item picks its type when the map starts, and is no unit", 
   const list = items([unit({ id: "iDNR", randomType: 2, randomUnits: [{ id: "ratc", chance: 60 }] })]);
   has(list, "    call RandomDistAddItem( 'ratc', 60 )");
   has(list, "    set itemID = RandomDistChoose(  )");
-  // Coloured (newer editors) inside the if.
-  has(items([unit({ id: "iDNR", randomType: 1, randomGroup: 0, randomPosition: 0 })], 7003), "        call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  // Newer editors create it into the local, but give it no colour.
+  const grouped = items([unit({ id: "iDNR", randomType: 1, randomGroup: 0, randomPosition: 0, color: 3 })], 7003);
+  has(grouped, "        set i = BlzCreateItemWithSkin( itemID, 100.0, 200.0, itemID )");
+  hasNot(grouped, "ItemColor");
 });
 
-test("newer editors colour every item", () => {
+test("World Editor 2.0 picks random items with ChooseRandomItemExWithFilter, any class and level too", () => {
+  // As it saved them (we-drive, 2026-11-09).
+  const random = (randomLevel: string, randomClass: number) => items([unit({ id: "iDNR", randomType: 0, randomLevel, randomClass })], 7003);
+  has(random("ffffff", 0), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("010000", 0), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, 1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("020000", 1), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("ffffff", 4), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ARTIFACT, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("060000", 7), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_MISCELLANEOUS, 6, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  // Its item drops the same.
+  const drops = dropFunction("Unit000001_DropItems", [[{ id: "YYI2", chance: 50 }, { id: "YiI/", chance: 30 }], [{ id: "YYI/", chance: 100 }]], 7003);
+  has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, 2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 50 )");
+  has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 30 )");
+  has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 100 )");
+  // The game's older maps keep theirs.
+  has(dropFunction("Unit000001_DropItems", [[{ id: "YYI2", chance: 50 }]], 6113), "        call RandomDistAddItem( ChooseRandomItemEx( ITEM_TYPE_ANY, 2 ), 50 )");
+});
+
+test("newer editors colour every item, whatever its stored colour; World Editor 2.0 of build 24371 with 24", () => {
   hasNot(items([unit()]), "ItemColor");
   has(items([unit()], 7000), "    call SetItemColor( i, ConvertPlayerColor(0) )");
   has(items([unit()], 7003), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  const build = (gameBuild: number, color: number, player = 0) => itemsSection({ units: [unit({ color, player })], kindOf: () => "item", referenced: new Set(), editorVersion: 7003, gameBuild });
+  for (const [color, player] of [[-1, 0], [0, 0], [3, 0], [24, 0], [-1, 27], [5, 27], [7, 3]]) {
+    has(build(24371, color, player), "    call BlzSetItemColor( i, ConvertPlayerColor(24) )");
+    // The game's maps of builds up to 24356 have 0 (their items store -1).
+    has(build(24356, color, player), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  }
 });
 
 const dest = (extra: Partial<DestructableJson> = {}): DestructableJson => ({ id: "LTlt", variation: 2, position: [1, 2, 3], angle: 0, scale: [1, 1, 1], flags: 0, life: 100, editorId: 1, ...extra });
@@ -556,6 +585,9 @@ test("main: camera bounds, tileset sound and the calls in their order", () => {
   assert.ok(s.indexOf("CreateRegions") < s.indexOf("CreateAllUnits"));
   assert.ok(s.indexOf("CreateAllUnits") < s.indexOf("InitBlizzard"));
   assert.ok(s.indexOf("InitCustomTriggers") < s.indexOf("RunInitializationTriggers"));
+  // The random groups before anything placed, as World Editor 2.0 saved a map with all four (we-drive, 2026-11-09).
+  const placing = mainSection(setup({}, { techs: true, destructables: true, items: true, randomGroups: true, units: true })).split(EOL).filter((l) => /^ {4}call (Init|Create)/.test(l));
+  assert.deepEqual(placing.slice(0, 5), ["InitTechTree", "InitRandomGroups", "CreateAllDestructables", "CreateAllItems", "CreateAllUnits"].map((f) => `    call ${f}(  )`));
   assert.equal(AMBIENCE.A, "Ashenvale");
   hasNot(mainSection(setup({ tileset: "?" })), "SetAmbientDaySound");
 });
@@ -736,15 +768,26 @@ test("Convert to Custom Text: the trigger's functions as the World Editor writes
   assert.equal(plain.runOnInit, false, "without the event it isn't run at the start");
 });
 
-test("the placed objects whose globals only a trigger keeps", () => {
-  const kill = (g: string, extra: Partial<Eca> = {}) => eca(2, "KillUnit", [{ type: 1, value: g }], extra);
-  const a = trigger("A", [kill("gg_unit_hfoo_0001"), kill("gg_unit_hfoo_0002"), kill("gg_unit_hfoo_0003"), kill("udg_x")]);
-  const b = trigger("B", [kill("gg_unit_hfoo_0002")]);
-  const off = trigger("Off", [kill("gg_unit_hfoo_0003")], { enabled: false });
-  // 0002 stays (B uses it); 0003 stays declared (Off mentions it) but is no longer created into it.
-  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), a), ["gg_unit_hfoo_0001", "gg_unit_hfoo_0003"]);
-  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), b), []);
-  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), off), []);
+test("placed objects that custom text names keep their globals, as the World Editor reads custom text for them", () => {
+  // As World Editor 2.0 saved a converted trigger that still kills footman 0003 (we-drive, 2026-11-09).
+  const units = [unit({ editorId: 3 }), unit({ editorId: 4, position: [400, 0, 0] }), unit({ editorId: 5, position: [800, 0, 0] }), unit({ editorId: 6, position: [900, 0, 0] })];
+  const custom = (header: string, on: string, off: string) => ({ reforged: false, version: 1, comment: "", header, texts: [on, off] });
+  const sections = (c: ReturnType<typeof custom>, triggers = wtg([trigger("Use", [], { isCustom: true }), trigger("Off", [], { isCustom: true, enabled: false, id: 1 })])) =>
+    generateSections(input({ triggers, custom: c, units: units as unknown as PlacedJson[], kindOf: () => "unit" }));
+  const s = sections(custom("// gg_unit_hfoo_0005 in the header", "call KillUnit( gg_unit_hfoo_0003 )", "call KillUnit( gg_unit_hfoo_0004 )"));
+  const g = s.get("Global Variables")!, made = s.get("Unit Creation")!;
+  for (const n of ["0003", "0004", "0005"]) assert.ok(g.includes(`gg_unit_hfoo_${n} `), `gg_unit_hfoo_${n} declared`);
+  hasNot(g, "gg_unit_hfoo_0006");
+  has(made, "    set gg_unit_hfoo_0003 = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hfoo' )");
+  has(made, "    set gg_unit_hfoo_0005 = BlzCreateUnitWithSkin( p, 'hfoo', 800.0, 0.0, 0.000, 'hfoo' )");
+  // A disabled trigger's text declares, but isn't compiled: nothing is created into it (as for GUI triggers).
+  has(made, "    set u = BlzCreateUnitWithSkin( p, 'hfoo', 400.0, 0.0, 0.000, 'hfoo' )");
+  // Without the names, no globals: the text of a GUI trigger's slot isn't read either.
+  const none = sections(custom("", "call KillUnit( u )", "gg_unit_hfoo_0004"), wtg([trigger("Use", [], { isCustom: true }), trigger("Gui", [], { id: 1 })]));
+  hasNot(none.get("Global Variables")!, "gg_unit_hfoo");
+  hasNot(none.get("Unit Creation")!, "gg_unit_hfoo");
+  // The whole name: a longer identifier isn't the global.
+  hasNot(sections(custom("", "call KillUnit( xgg_unit_hfoo_0003 )", "")).get("Global Variables")!, "gg_unit_hfoo_0003");
 });
 
 // ---- Lua ----------------------------------------------------------------------------------

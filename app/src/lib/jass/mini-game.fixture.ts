@@ -36,6 +36,8 @@ type unitstate extends handle
 type playerstate extends handle
 type alliancetype extends handle
 type itemtype extends handle
+type equipmentType extends handle
+type itemTag extends handle
 type unitevent extends handle
 type eventid extends handle
 type playerunitevent extends eventid
@@ -74,6 +76,8 @@ globals
     constant itemtype ITEM_TYPE_PURCHASABLE = null
     constant itemtype ITEM_TYPE_CAMPAIGN = null
     constant itemtype ITEM_TYPE_MISCELLANEOUS = null
+    constant equipmentType EQUIPMENT_TYPE_ANY = null
+    constant itemTag ITEMTAG_TYPE_ANY = null
     constant camerafield CAMERA_FIELD_ZOFFSET = null
     constant camerafield CAMERA_FIELD_ROTATION = null
     constant camerafield CAMERA_FIELD_ANGLE_OF_ATTACK = null
@@ -171,6 +175,7 @@ native ChooseRandomItem takes integer level returns integer
 native ChooseRandomCreep takes integer level returns integer
 native ChooseRandomNPBuilding takes nothing returns integer
 native ChooseRandomItemEx takes itemtype whichType, integer level returns integer
+native ChooseRandomItemExWithFilter takes itemtype whichType, integer level, equipmentType whichEquipmentType, itemTag whichTag returns integer
 native GetDestructableLife takes destructable d returns real
 native SetDestructableLife takes destructable d, real life returns nothing
 native SetDestructableVertexColor takes destructable d, integer r, integer g, integer b, integer a returns nothing

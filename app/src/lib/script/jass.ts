@@ -10,7 +10,7 @@ import { jassToLua, RAW } from "./lua";
 import { ident } from "./names";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
-import { scriptItems, triggersSection } from "./triggers";
+import { customTextGlobals, scriptItems, triggersSection } from "./triggers";
 import { configSection, mainSection, playersSection, type SetupInput } from "./setup";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
 import { dropSection, itemTablesSection, randomGroupsSection, type DropItem, type Dropper, type RandomGroupJson } from "./drops";
@@ -170,10 +170,10 @@ export const placedName = (p: PlacedJson, kind: string) => {
   return `gg_${kind}_${p.id}_${String(n).padStart(4, "0")}`;
 };
 
-/** Generated globals the triggers refer to (gg_unit_…, gg_item_…, gg_dest_…). Disabled code
+/** Generated globals the triggers refer to (gg_unit_…, gg_item_…, gg_dest_…), GUI and custom text. Disabled code
  *  declares them too, but with `compiled` only what runs counts: that decides what gets assigned. */
 function referencedGlobals(i: ScriptInput, compiled = false): Set<string> {
-  const out = new Set<string>();
+  const out = i.triggers ? customTextGlobals({ triggers: i.triggers, custom: i.custom }, compiled) : new Set<string>();
   type P = { type: number; value: string; call?: { params: P[] }; index?: P };
   type E = { enabled: boolean; params: P[]; children: E[] };
   const visitP = (p: P) => { if (p.type === 1 && p.value.startsWith("gg_")) out.add(p.value); p.call?.params.forEach(visitP); if (p.index) visitP(p.index); };
@@ -382,6 +382,8 @@ export function generateSections(i: ScriptInput): Map<string, string> {
 }
 
 const editorVersion = (i: ScriptInput) => (i.info.editorVersion as number | undefined) ?? 0;
+/** The build of war3map.w3i's gameVersion [major, minor, patch, build], if it has one. */
+const gameBuild = (i: ScriptInput) => { const v = i.info.gameVersion; return Array.isArray(v) && typeof v[3] === "number" ? v[3] : undefined; };
 
 function randomGroups(i: ScriptInput): string {
   const body = randomGroupsSection((i.info.unitTables as RandomGroupJson[] | undefined) ?? []);
@@ -414,7 +416,7 @@ function destructableObjects(i: ScriptInput): string {
 
 function placedItems(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
-  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
   return body ? banner("Items") + body : "";
 }
 

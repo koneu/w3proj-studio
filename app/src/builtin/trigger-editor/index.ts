@@ -17,7 +17,7 @@ import { mapStrings, requireProject } from "../../lib/formats/mapdoc";
 import { addScriptTrigger, addVariable, removeVariable, findTrigger, isScript, removeTrigger, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { ident } from "../../lib/script/jass";
-import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText } from "../../lib/script/triggers";
+import { convertToCustom, triggerCustomText } from "../../lib/script/triggers";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
   allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_RAW, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
@@ -625,11 +625,9 @@ class TriggerView {
     if (!it || !isGuiTrigger(it)) throw new Error("Select a GUI trigger to convert to custom text.");
     if (!this.handle.editable) throw new Error("This trigger file can't be changed here.");
     const lua = this.handle.language === "lua", was = JSON.stringify(it);
-    const lost = placedGlobalsOnlyIn(this.file, it);
-    const listed = lost.length > 4 ? `${lost.slice(0, 4).join(", ")} and ${lost.length - 4} more` : lost.join(", ");
+    // Placed objects the trigger names keep their globals: the map script reads custom text for them too.
     const ok = await this.w3.window.confirm(`Convert ${it.name} to custom text? Its events, conditions and actions become the ${lua ? "Lua" : "JASS"} the map script has for them. `
-      + "It can't be turned back into a GUI trigger; Ctrl+Z takes the conversion back."
-      + (lost.length ? ` The map script keeps placed objects in globals only for what GUI triggers use, so ${listed} won't be set up for this script any more, as in the World Editor.` : ""), "Convert", 60_000);
+      + "It can't be turned back into a GUI trigger; Ctrl+Z takes the conversion back.", "Convert", 60_000);
     if (!ok || this.disposed) return false;
     // While the question was open the trigger may have been edited, undone or deleted: then nothing happens.
     const now = this.file.items.find((i) => i.type === 8 && i.id === it.id);

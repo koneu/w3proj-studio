@@ -14,14 +14,22 @@ const RANDOM_TYPES: Record<string, string> = {
   Y: "ANY", i: "PERMANENT", j: "CHARGED", k: "POWERUP", l: "ARTIFACT", m: "PURCHASABLE", n: "CAMPAIGN", o: "MISCELLANEOUS",
 };
 
+/** A random item of a class (ITEM_TYPE_<type>) and level (-1 any) picked when the script runs. World Editor 2.0
+ *  (7003) writes ChooseRandomItemExWithFilter with any equipment and tag for every class and level, any class too
+ *  (we-drive saves, 2026-11-09; the 7003 maps in smoketest_maps the same); the game's maps up to 6127 have
+ *  ChooseRandomItemEx, any class included. None of 7000 to 7002 has a random item: the plain ChooseRandomItem
+ *  for any class there is an older guess, kept. */
+export function randomItem(type: string, level: number | string, editorVersion: number): string {
+  if (editorVersion >= 7003) return `ChooseRandomItemExWithFilter( ITEM_TYPE_${type}, ${level}, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )`;
+  return type === "ANY" && editorVersion >= 7000 ? `ChooseRandomItem( ${level} )` : `ChooseRandomItemEx( ITEM_TYPE_${type}, ${level} )`;
+}
+
 function itemExpr(id: string, editorVersion: number): string {
   // An empty slot drops nothing.
   if (!id || id === "0x00000000") return "-1";
   const m = /^Y(.)I(.)$/.exec(id);
   if (!m || !RANDOM_TYPES[m[1]]) return `'${id}'`;
-  const level = m[2] === "/" ? -1 : m[2];
-  // Any class: editors from 7000 on write the plain ChooseRandomItem.
-  return m[1] === "Y" && editorVersion >= 7000 ? `ChooseRandomItem( ${level} )` : `ChooseRandomItemEx( ITEM_TYPE_${RANDOM_TYPES[m[1]]}, ${level} )`;
+  return randomItem(RANDOM_TYPES[m[1]], m[2] === "/" ? -1 : m[2], editorVersion);
 }
 
 /** Name of the function that drops a map item table's items. */

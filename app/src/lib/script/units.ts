@@ -5,7 +5,7 @@
 // (resources, acquisition range, life and mana, colour, hero data, items,
 // waygates, item drops).
 
-import { dropFunctionOf } from "./drops";
+import { dropFunctionOf, randomItem } from "./drops";
 
 const EOL = "\r\n";
 const SEP = "//===========================================================================";
@@ -29,6 +29,8 @@ export interface UnitsInput {
   kindOf: (id: string) => "building" | "unit" | "item" | "sloc" | undefined;
   /** war3map.w3i editorVersion: newer editors write more (item colours). */
   editorVersion?: number;
+  /** The game build of war3map.w3i's gameVersion (its last number): the item colour changed within editor 7003. */
+  gameBuild?: number;
   /** Generated globals the triggers use (gg_unit_…). */
   referenced: Set<string>;
   /** Region global for a waygate target (region creation number). */
@@ -66,8 +68,9 @@ const isItem = (i: UnitsInput, u: UnitJson) => u.id === RANDOM_ITEM || i.kindOf(
 /** Item classes of a random item by level (randomClass 0 any, then as the World Editor lists them). */
 const ITEM_TYPES = ["ANY", "PERMANENT", "CHARGED", "POWERUP", "ARTIFACT", "PURCHASABLE", "CAMPAIGN", "MISCELLANEOUS"];
 
-/** The expression or lines that put a random item's type into itemID. The World Editor's form isn't known (no map
- *  of the game's places one): this follows its random units and its item drops (ChooseRandomItemEx). */
+/** The expression or lines that put a random item's type into itemID. No map of the game's places one; World Editor
+ *  2.0 (7003) writes ChooseRandomItemExWithFilter as in its item drops (drops.ts randomItem), older editors are
+ *  taken to write their drops' form. */
 function pickRandomItem(it: UnitJson, editorVersion: number): string[] {
   if (it.randomType === 1) return [`    set itemID = gg_rg_${String(it.randomGroup ?? 0).padStart(3, "0")}[${it.randomPosition ?? 0}]`];
   if (it.randomType === 2) {
@@ -75,9 +78,7 @@ function pickRandomItem(it: UnitJson, editorVersion: number): string[] {
   }
   const raw = parseInt((it.randomLevel ?? "").slice(0, 2), 16);
   const level = Number.isNaN(raw) || raw === 255 ? -1 : raw;
-  const type = ITEM_TYPES[it.randomClass ?? 0] ?? "ANY";
-  // As in the drops: any class from editor 7000 on is the plain ChooseRandomItem.
-  return [type === "ANY" && editorVersion >= 7000 ? `    set itemID = ChooseRandomItem( ${level} )` : `    set itemID = ChooseRandomItemEx( ITEM_TYPE_${type}, ${level} )`];
+  return [`    set itemID = ${randomItem(ITEM_TYPES[it.randomClass ?? 0] ?? "ANY", level, editorVersion)}`];
 }
 
 /** Lines that put a random unit's type into unitID. */
@@ -109,9 +110,10 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     : `    set ${v} = BlzCreateUnitWithSkin( p, '${u.id}', ${pos}, '${u.skinId ?? u.id}' )`];
   if (uprooted(u)) lines.push(`    call IssueImmediateOrder( ${v}, "unroot" )`);
   if (isGoldMine(i, u.id)) lines.push(`    call SetResourceAmount( ${v}, ${u.gold} )`);
-  // -2: "camp" (guard position), written as an acquisition range of 200.
+  // -1 is the type's default. -2: "camp" (guard position), written as an acquisition range of 200. A stored 0 is
+  // written as it is (World Editor 2.0, we-drive 2026-11-09: 0.0, 0.5 and 500 each with their own call).
   if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
-  else if (u.targetAcquisition > 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
+  else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
   if (u.level > 1) lines.push(`    call SetHeroLevel( ${v}, ${u.level}, false )`);
   // A hero's own attributes (0: its default ones), as the World Editor writes them (seen in the game's campaign map
   // WC2Orc12 and in a map it saved with a Paladin of 30/20/25).
@@ -153,16 +155,20 @@ export function itemsSection(i: UnitsInput): string {
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.editorId - b.editorId));
   if (!items.length) return "";
   const global = (it: UnitJson) => `gg_item_${it.id}_${String(it.editorId).padStart(4, "0")}`;
-  // Editors from 7000 on colour every item (unset: 0), from 7003 with BlzSetItemColor.
+  // Editors from 7000 on colour every placed item, from 7003 with BlzSetItemColor, whatever colour and owner the
+  // placement stores: the game's maps (7000 and 7003 up to build 24356) with 0, World Editor 2.0 of build 24371 with
+  // 24 (we-drive saves, 2026-11-09: stored colours -1, 0, 3, 5, 7, 12 and 24, owners 0, 3, 5, 24 and 27, all 24).
+  // Random items get none from it, but are still created into the local.
   const ev = i.editorVersion ?? 0;
   const colorFn = ev >= 7003 ? "BlzSetItemColor" : ev >= 7000 ? "SetItemColor" : null;
-  const colorOf = (it: UnitJson) => (colorFn ? Math.max(0, it.color) : it.color);
+  const colorOf = (it: UnitJson) => (it.id === RANDOM_ITEM && colorFn ? -1 : !colorFn ? it.color : (i.gameBuild ?? 0) >= 24371 ? 24 : 0);
+  const local = (it: UnitJson) => (colorFn || colorOf(it) !== -1 ? "i" : null);
   // An item needs a variable when a trigger refers to it or it gets a colour; else it's a plain call.
-  const usesLocal = items.some((it) => !i.referenced.has(global(it)) && colorOf(it) !== -1);
+  const usesLocal = items.some((it) => !i.referenced.has(global(it)) && local(it));
   const lines = ["function CreateAllItems takes nothing returns nothing", "    local integer itemID", ...(usesLocal ? ["    local item i"] : []), ""];
   for (const it of items) {
     const g = global(it);
-    const v = i.referenced.has(g) ? g : colorOf(it) !== -1 ? "i" : null;
+    const v = i.referenced.has(g) ? g : local(it);
     const random = it.id === RANDOM_ITEM;
     const create = random ? `BlzCreateItemWithSkin( itemID, ${r1(it.position[0])}, ${r1(it.position[1])}, itemID )`
       : `BlzCreateItemWithSkin( '${it.id}', ${r1(it.position[0])}, ${r1(it.position[1])}, '${it.skinId ?? it.id}' )`;

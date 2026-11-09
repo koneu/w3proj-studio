@@ -7,7 +7,7 @@
 // appended (Func002Func001001), "C" for conditions and "A" for action bodies.
 
 import { ACTION, CALL, CONDITION, EVENT, type TriggerData } from "../triggers/triggerdata";
-import type { Call, CustomTextFile, Eca, Param, TriggerFile, TriggerItem } from "../triggers/wtg";
+import { textTriggers, type Call, type CustomTextFile, type Eca, type Param, type TriggerFile, type TriggerItem } from "../triggers/wtg";
 
 import { CONCAT, INT_DIV, jassToLua, RAW } from "./lua";
 import { ident } from "./names";
@@ -303,23 +303,22 @@ export function linesCustomText(i: TriggerScriptInput, t: TriggerItem, lines: re
   return triggerCustomText(i, { ...t, ecas });
 }
 
-/** Globals of placed units, items and destructibles (gg_unit_…, gg_item_…, gg_dest_…) that `t` uses and the
- *  map script has only for it. The map script declares such a global for what GUI triggers mention (disabled
- *  ones too) and creates the object into it for what compiled triggers use; the World Editor doesn't read
- *  custom text for them, so converting `t` changes these in war3map.j. */
-export function placedGlobalsOnlyIn(file: TriggerFile, t: TriggerItem): string[] {
-  const triggers = file.items.filter((i): i is TriggerItem => "ecas" in i && i.type !== 16 && i.type !== 32);
-  const used = (item: TriggerItem, compiled: boolean) => {
-    const out = new Set<string>();
-    if (compiled && (!item.enabled || item.isComment)) return out;
-    const visitP = (p: Param) => { if (p.type === 1 && /^gg_(?:unit|item|dest)_/.test(p.value)) out.add(p.value); p.call?.params.forEach(visitP); if (p.index) visitP(p.index); };
-    const visit = (e: Eca) => { if (compiled && !e.enabled) return; e.params.forEach(visitP); e.children.forEach(visit); };
-    item.ecas.forEach(visit);
-    return out;
-  };
-  const others = (compiled: boolean) => new Set(triggers.filter((o) => o !== t).flatMap((o) => [...used(o, compiled)]));
-  const declared = others(false), created = others(true), mineCompiled = used(t, true);
-  return [...used(t, false)].filter((g) => !declared.has(g) || (mineCompiled.has(g) && !created.has(g))).sort();
+/** Globals of placed units, items and destructibles (gg_unit_…, gg_item_…, gg_dest_…) that the map's own code
+ *  names: the header and custom text triggers and script items. The World Editor reads custom text for them
+ *  (we-drive, 2026-11-09: a footman's global stayed declared and created while a converted trigger's text still
+ *  killed it, and went once the text no longer did), as it reads GUI triggers. As there, any text declares the
+ *  global; with `compiled` only what goes into the script counts (the header, enabled triggers and items), which
+ *  decides what gets created into it. */
+export function customTextGlobals(i: Pick<TriggerScriptInput, "triggers" | "custom">, compiled = false): Set<string> {
+  const out = new Set<string>();
+  const scan = (text: string | null | undefined) => { for (const m of (text ?? "").matchAll(/\bgg_(?:unit|item|dest)_\w+/g)) out.add(m[0]); };
+  scan(i.custom?.header);
+  textTriggers(i.triggers).forEach((t, k) => {
+    if (t.type === 8 && !t.isCustom) return;
+    if (compiled && (!t.enabled || t.isComment)) return;
+    scan(i.custom?.texts[k]);
+  });
+  return out;
 }
 
 /** Turns a GUI trigger into a custom text trigger with `text` (from triggerCustomText): its events,
