@@ -16,7 +16,7 @@ import {
 import { parseW3e } from "../../lib/terrain/w3e";
 import { weatherName } from "../../lib/terrain/weather";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
-import { HUD_SKINS, priorityOf, withPriority, type Priority } from "./priorities";
+import { FIXED_START, fixedStartForRace, HUD_SKINS, priorityOf, RACE_SELECTABLE, withPriority, type Priority } from "./priorities";
 
 // Mirrors w3proj::mapinfo (format "w3proj.mapinfo/1"); fields are optional
 // where the file version decides whether they exist.
@@ -527,7 +527,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return [
               section_(`Players (${info.players.length})`,
                 h("table.form-table", {},
-                  h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Name"), h("th", {}, "Controller"), h("th", {}, "Race"), h("th", {}, "Fixed start"), h("th", {}, "Start X"), h("th", {}, "Start Y"), skins ? h("th", {}, "HUD Skin") : null)),
+                  h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Name"), h("th", {}, "Controller"), h("th", {}, "Race"), h("th", {}, "Fixed start"), h("th", {}, "Race selectable"), h("th", {}, "Start X"), h("th", {}, "Start Y"), skins ? h("th", {}, "HUD Skin") : null)),
                   h("tbody", {}, ...ids.map((id) => {
                     const p = info.players.find((x) => x.id === id);
                     // A player with a start location starts there: the terrain editor's next save writes its
@@ -539,14 +539,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     if (!p) {
                       const at = starts.get(id)!;
                       return h("tr.muted", {}, h("td", {}, String(id + 1)), h("td", {}, `Player ${id + 1}`), h("td", {}, controller(id)),
-                        h("td", {}), h("td", {}), h("td", {}, String(at[0])), h("td", {}, String(at[1])));
+                        h("td", {}), h("td", {}), h("td", {}), h("td", {}, String(at[0])), h("td", {}, String(at[1])));
                     }
                     return h("tr", {},
                       h("td.muted", {}, String(p.id + 1)),
                       h("td", {}, text(() => p.name, (s) => { p.name = s; })),
                       h("td", {}, controller(id)),
-                      h("td", {}, select(RACES, () => p.race as 0 | 1 | 2 | 3 | 4, (n) => { p.race = n; })),
-                      h("td", {}, bit(() => p.fixedStart, (n) => { p.fixedStart = n; }, 1, "")),
+                      h("td", {}, select(RACES, () => p.race as 0 | 1 | 2 | 3 | 4, (n) => {
+                        p.race = n;
+                        // Race selectable follows the race, as the World Editor pairs them; shown again below.
+                        const was = p.fixedStart;
+                        p.fixedStart = fixedStartForRace(p.fixedStart, n);
+                        if (p.fixedStart !== was) queueMicrotask(() => show(section));
+                      })),
+                      h("td", {}, bit(() => p.fixedStart, (n) => { p.fixedStart = n >>> 0; }, FIXED_START, "")),
+                      h("td", { title: "Whether the race can be chosen in the lobby when Fixed Player Settings is on (Forces)" },
+                        bit(() => p.fixedStart, (n) => { p.fixedStart = n >>> 0; }, RACE_SELECTABLE, "")),
                       startCell(0), startCell(1),
                       skins && p.hudSkin !== undefined ? h("td", {}, select<number>(HUD_SKINS, () => p.hudSkin!, (n) => { p.hudSkin = n; })) : skins ? h("td") : null);
                   })))),
