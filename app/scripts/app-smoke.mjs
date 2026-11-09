@@ -2249,6 +2249,70 @@ async function dataSafety(page, found) {
   }
 }
 
+/** What a sync from a map (Sync Project from .w3x, a World Editor save) must not cost (sync-safety), through the command:
+ *  1. Files of the project the map doesn't have are removed only after the user said so: Cancel writes nothing.
+ *  2. The user's comments and own keys in w3proj.toml stay, byte for byte when nothing Studio owns changed.
+ *  3. On Linux a file with a `\` in its name (left by an older version) is never deleted by the sync, isn't among what
+ *     the question says goes, and the stray question is asked after the sync. */
+async function syncSafety(page, found) {
+  const fail = (what) => found.push(`sync safety: ${what}`);
+  const { root } = await heightKit(page, "SyncSafety");
+  const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  await page.evaluate(`w3.editors.saveAll()`);
+  await sleep(500);
+  const manifestPath = join(root, "w3proj.toml");
+  const manifest = `# mine: kept by every sync\n${read(manifestPath)}\n# ours\n[ci]\nupload = true\n`;
+  writeFileSync(manifestPath, manifest);
+  const built = join(work, "sync-safety.w3x");
+  await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(root)}, output: ${JSON.stringify(built)} })`);
+  const added = join(root, "map", "Imports", "added.txt");
+  mkdirSync(dirname(added), { recursive: true });
+  writeFileSync(added, "added in Studio");
+  const BS = String.fromCharCode(92);
+  const unix = process.platform !== "win32";
+  const stray = join(root, "map", ["Scripts", "old.lua"].join(BS));
+  if (unix) writeFileSync(stray, "an older version's");
+  await page.evaluate(`w3.workspace.refresh()`);
+  await page.evaluate(`(() => { window.__warned = []; window.__answer = undefined; window.__syncSafetyWarn = w3.window.showWarning; w3.window.showWarning = async (m, ...a) => { window.__warned.push(m); return window.__answer; }; })()`);
+  const warned = () => page.evaluate(`window.__warned.splice(0)`);
+  const sync = () => page.evaluate(`w3.commands.execute("w3.project.syncFromMap", ${JSON.stringify(built)}).then(() => null, (e) => String(e))`);
+  try {
+    // ---- 1. Cancel: nothing written ----
+    await page.evaluate(`window.__answer = "Cancel"`);
+    let err = await sync();
+    if (err) fail(`the sync failed: ${err}`);
+    let said = await warned();
+    const question = said.find((m) => m.includes("removes"));
+    if (!question) fail(`a sync that removes a file asked ${JSON.stringify(said)}`);
+    else if (!question.includes("removes 1 file") || !question.includes("map/Imports/added.txt")) fail(`the question before removing: ${question}`);
+    if (read(added) !== "added in Studio") fail("Cancel removed the added file");
+    if (read(manifestPath) !== manifest) fail("Cancel changed w3proj.toml");
+    // ---- 2. Remove and sync: the added file goes; the manifest and the stray stay ----
+    await page.evaluate(`window.__answer = "Remove and sync"`);
+    err = await sync();
+    if (err) fail(`the sync failed: ${err}`);
+    if (existsSync(added)) fail("the sync the user agreed to didn't remove the added file");
+    if (read(manifestPath) !== manifest) fail(`the sync changed w3proj.toml: ${JSON.stringify(read(manifestPath))}`);
+    if (unix) {
+      if (read(stray) !== "an older version's") fail("the sync deleted a file with a backslash in its name");
+      await until("the stray question after the sync", async () => (await page.evaluate(`window.__warned.some((m) => m.includes("left by an older version on Linux"))`)), 20000)
+        .catch(() => fail("no stray question after a sync that kept a stray"));
+      said = await warned();
+      if (!said.some((m) => m.includes("Scripts/old.lua"))) fail(`the stray question doesn't say where the file belongs: ${JSON.stringify(said)}`);
+    }
+    // Control: a sync with nothing to remove asks nothing.
+    await warned();
+    await page.evaluate(`window.__answer = "Cancel"`);
+    if (unix) rmSync(stray);
+    err = await sync();
+    if (err) fail(`the sync failed: ${err}`);
+    said = await warned();
+    if (said.length) fail(`a sync with nothing to remove asked ${JSON.stringify(said)}`);
+  } finally {
+    await page.evaluate(`(() => { if (window.__syncSafetyWarn) w3.window.showWarning = window.__syncSafetyWarn; window.__syncSafetyWarn = null; })()`);
+  }
+}
+
 /** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
 async function mapPicture(page) {
   await sleep(700);
@@ -5740,7 +5804,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, syncSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5837,6 +5901,7 @@ async function run() {
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
+    await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));

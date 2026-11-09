@@ -55,13 +55,19 @@ export function caseClashes(paths: string[], root: string): string[][] {
 /** Looks at a project just opened (`root`): says what it found, and moves stray files only when asked to.
  *  Stops saying anything once another project is open. */
 export async function checkOpenedProject(w3: W3Api, root: string, out: OutputChannel): Promise<void> {
-  const current = () => w3.workspace.project()?.root === root;
   const clashes = caseClashes(w3.workspace.files().map((f) => f.path), root);
   if (clashes.length) {
     for (const g of clashes) out.append(`same name but for case: ${g.join(", ")}`);
     void w3.window.showWarning(`${clashes.map((g) => g.join(" and ")).slice(0, 3).join("; ")}${clashes.length > 3 ? ` and ${clashes.length - 3} more` : ""}`
       + ` differ only in case. The app keeps them apart, but the map archive (like the game) holds only one name, so Build refuses until one is renamed.`);
   }
+  await offerStrayMoves(w3, root, out);
+}
+
+/** Looks for stray files of the project at `root` (also after a sync, which leaves them alone), says what it found,
+ *  and moves them only when asked to. Stops saying anything once another project is open. */
+export async function offerStrayMoves(w3: W3Api, root: string, out: OutputChannel): Promise<void> {
+  const current = () => w3.workspace.project()?.root === root;
   let strays: Stray[];
   try {
     strays = await w3.backend.invoke<Stray[]>("project_strays", { root });

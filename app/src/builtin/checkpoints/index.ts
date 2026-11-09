@@ -106,7 +106,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await create(project, false);
       still();
       if (!(await list(project.root)).includes(name)) throw new Error(`Not restored: the checkpoint ${name} is gone.`);
-      await w3.commands.execute("w3.project.syncFromMap", inFolder(project.root, name));
+      // Asked already ("its files are replaced"), and what goes is in the checkpoint just made.
+      await w3.commands.execute("w3.project.syncFromMap", inFolder(project.root, name), { replace: true });
     } finally {
       const n = (restoring.get(key) ?? 1) - 1;
       if (n > 0) restoring.set(key, n); else restoring.delete(key);
