@@ -923,6 +923,143 @@ async function terrainSelectCameras(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** The World Editor's View items in the terrain view (viewmodes.ts), by their keys in the map: game view (V) hides the
+ *  start location, the regions and the other editor marks and shows its badge, refuses the layer toggles while on,
+ *  stays for the next editor (a setting) and brings the choice back when off; Ctrl+R shows the regions instead of
+ *  reloading the window; Ctrl+T goes round the terrain's looks; Ctrl+D, Ctrl+U, P and Ctrl+Shift+L show and hide
+ *  doodads, units, ground pathing and light ranges, the toolbar's and the side panel's boxes follow, and none of it is
+ *  an edit. Judged on pictures of the view against the plain one (the same view twice is the noise). */
+async function viewModes(page, found) {
+  const fail = (what) => found.push(`view modes: ${what}`);
+  const k = await heightKit(page, "ViewModes");
+  const TXT = "map/war3map.w3e.txt";
+  const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await sleep(400); };
+  const CTRL = 2, SHIFT = 8;
+  // A tree and a lit brazier (LObz: a light reaching 200) west of the start location, a footman east of it, a region north.
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: -384, y: 0 }, { id: "LObz", x: -384, y: -384 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 384, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  const start = k.units().find((u) => u.id === "sloc");
+  if (!start) return fail("the new map has no start location");
+  const regions = k.read("war3map.w3r.json");
+  regions.regions = [{ left: -256, bottom: 256, right: 256, top: 640, name: "Smoke Region", index: 0, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) }];
+  await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${JSON.stringify(JSON.stringify(regions))})`);
+  await page.evaluate(`w3.settings.set("terrain.animate", false)`);
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
+  await k.tab("Select");
+  await k.look(start.position[0], start.position[1] + 128);
+  await k.clearToasts();
+  await sleep(1500);
+  await mapPicture(page);
+  const plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
+  if (noise > 200) return fail(`the same view gave two pictures ${noise} pixels apart`);
+  const changed = async () => (await pixelsApart(page, plain, await mapPicture(page))) - noise;
+  // The window isn't reloaded by Ctrl+R in the map: this stays.
+  await page.evaluate(`window.__viewModesMark = 1`);
+
+  // Game view by its key: the start location and its town hall go, the badge shows, the boxes grey out.
+  await key("v", "KeyV", 86);
+  let s = await state();
+  if (!s?.gameView || s.shown.starts || !s.shown.lighting || !s.shown.fog) fail(`V didn't turn game view on: ${JSON.stringify(s && { gameView: s.gameView, shown: s.shown })}`);
+  if ((await k.setting("terrain.gameView")) !== true) fail("game view isn't kept as the setting terrain.gameView");
+  if (!(await page.evaluate(`!document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("no Game View badge over the view");
+  if ((await changed()) < 300) fail("game view didn't change the picture (the start location should be gone)");
+  if (!(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Regions")?.querySelector("input")?.disabled`))) fail("the Regions box can be used in game view");
+  const refused = await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("regions"))()`);
+  if (typeof refused !== "string" || (await state()).regions) fail(`a layer toggle in game view: ${JSON.stringify(refused)}`);
+  // The start location can't be picked where it isn't drawn.
+  await k.look(start.position[0], start.position[1]);
+  await k.clickMiddle();
+  await sleep(300);
+  if (await page.evaluate(`document.querySelector(".terrain-sel-name")?.textContent === "Start location"`)) fail("the hidden start location was selected by a click");
+  // Remembered: the next editor opens in game view.
+  await page.evaluate(`w3.editors.closeAll()`);
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 20000);
+  await sleep(500);
+  s = await state();
+  if (!s?.gameView || s.shown.starts) fail("a terrain editor opened again isn't in game view");
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
+  await k.tab("Select");
+  await k.look(start.position[0], start.position[1] + 128);
+  await key("v", "KeyV", 86);
+  s = await state();
+  if (s.gameView || !s.shown.starts || (await k.setting("terrain.gameView")) !== false) fail("V again didn't turn game view off");
+  if (!(await page.evaluate(`document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("the badge stays after game view");
+  await k.clearToasts();
+  if ((await changed()) > 150) fail("after game view the picture isn't the plain one again");
+
+  /** A View key: the state (against `s`, taken before) changes and the picture by at least `least` pixels. */
+  const trial = async (label, field, press, least) => {
+    await press();
+    const on = await state();
+    if (on[field] === s[field]) fail(`${label} didn't change ${field} (${JSON.stringify(on[field])})`);
+    const diff = await changed();
+    if (diff < least) fail(`${label} changed ${diff} pixels`);
+    return on;
+  };
+  s = await state();
+  await trial("Ctrl+R", "regions", () => key("r", "KeyR", 82, CTRL), 500);
+  if (!(await page.evaluate(`window.__viewModesMark === 1`))) fail("Ctrl+R in the map reloaded the window");
+  await key("r", "KeyR", 82, CTRL);
+  if ((await changed()) > 150) fail("Ctrl+R twice isn't the plain picture");
+  s = await state();
+  let t = await trial("Ctrl+T", "terrain", () => key("t", "KeyT", 84, CTRL), 20000);
+  if (t.terrain !== "wireframe") fail(`Ctrl+T gave ${t.terrain}`);
+  await key("t", "KeyT", 84, CTRL);
+  if ((await state()).terrain !== "hidden") fail("Ctrl+T twice isn't hidden terrain");
+  await key("t", "KeyT", 84, CTRL);
+  if ((await state()).terrain !== "textured" || (await changed()) > 150) fail("Ctrl+T three times isn't the textured picture again");
+  for (const [label, field, press, least] of [
+    ["Ctrl+U", "units", () => key("u", "KeyU", 85, CTRL), 300],
+    ["Ctrl+D", "doodads", () => key("d", "KeyD", 68, CTRL), 100],
+    ["P", "pathing", () => key("p", "KeyP", 80), 300],
+    ["Ctrl+Shift+L", "lightRanges", () => key("L", "KeyL", 76, CTRL | SHIFT), 100],
+  ]) {
+    s = await state();
+    await trial(label, field, press, least);
+    if (field === "units" && await page.evaluate(`[...document.querySelectorAll(".model-side label.model-row")].find((l) => /Units/.test(l.textContent))?.querySelector("input")?.checked`)) fail("the side panel's Units box didn't follow Ctrl+U");
+    await press();
+    if ((await changed()) > 150) fail(`${label} twice isn't the plain picture`);
+  }
+  // The camera keys, with nothing selected (viewmodes.ts cameraKey): Up scrolls north, Shift+Up further, Ctrl+Up and
+  // Ctrl+Down zoom in and back, Ctrl+Left turns; Page Up moves nothing.
+  await key("Escape", "Escape", 27);
+  const cam = async () => (await state()).camera;
+  let c0 = await cam();
+  await key("ArrowUp", "ArrowUp", 38);
+  let c1 = await cam();
+  const step = c1.target[1] - c0.target[1];
+  if (!(step > 0) || Math.abs(c1.target[0] - c0.target[0]) > 1) fail(`Up moved the camera by ${c1.target[0] - c0.target[0]}, ${step}`);
+  await key("ArrowUp", "ArrowUp", 38, SHIFT);
+  const c2 = await cam();
+  if (!(c2.target[1] - c1.target[1] > 3 * step)) fail(`Shift+Up moved ${c2.target[1] - c1.target[1]}, Up ${step}`);
+  c0 = await cam();
+  await key("ArrowUp", "ArrowUp", 38, CTRL);
+  c1 = await cam();
+  if (!(c1.distance < c0.distance) || Math.hypot(c1.target[0] - c0.target[0], c1.target[1] - c0.target[1]) > 1) fail(`Ctrl+Up: distance ${c0.distance} → ${c1.distance}`);
+  await key("ArrowDown", "ArrowDown", 40, CTRL);
+  if (Math.abs((await cam()).distance - c0.distance) > 1e-6 * c0.distance) fail("Ctrl+Down didn't undo Ctrl+Up's zoom");
+  await key("ArrowLeft", "ArrowLeft", 37, CTRL);
+  if (!((await cam()).yaw > c0.yaw)) fail("Ctrl+Left didn't turn the view");
+  await key("ArrowRight", "ArrowRight", 39, CTRL);
+  c1 = await cam();
+  await key("PageUp", "PageUp", 33);
+  const c3 = await cam();
+  if (c3.distance !== c1.distance || c3.target.join() !== c1.target.join() || c3.yaw !== c1.yaw) fail("Page Up moved the camera with nothing selected");
+
+  // The toolbar's box is the same item as the key.
+  await k.hands.click(".model-toggle", "Light ranges");
+  if (!(await state()).lightRanges) fail("the Light ranges box didn't turn them on");
+  await k.hands.click(".model-toggle", "Light ranges");
+  // Looking isn't editing.
+  await sleep(300);
+  if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the View keys left unsaved changes");
+  await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Unit Properties in the Selection panel (propspanel.ts), typed and chosen in the hidden window: a hero's hit points,
  *  level, a skill, its attributes and an item picked into its inventory; a gold mine's gold; a waygate's destination and
  *  colour; a destructable's life; drops for everything at once after Ctrl+A. Showing the panel changes nothing, values
@@ -3632,7 +3769,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, itemTablesAccess, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -3716,6 +3853,7 @@ async function run() {
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
+    await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
