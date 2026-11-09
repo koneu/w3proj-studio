@@ -202,8 +202,10 @@ node scripts/pic-compare.mjs we.png st.png --sample --diff d.png
 doodads, and Regions, Camera Objects, Pathing - Ground, Camera Bounds, Light Ranges and a grid all on, 2026-11-09):
 all of those, and the start location with its start building; units, doodads, water and the lighting stay. Every View
 item is greyed while it's on, and comes back as it was after. Studio's game view (viewmodes.ts `shownView`) does the
-same, and its badge "Game View" stands where the editor's "Game View Settings" note would. Studio's toggles and keys
-are checked by app-smoke (`viewModes`).
+same, and its badge "Game View" stands where the editor's "Game View Settings" note would. With those items on in
+both and the same camera (`--look center,2200`), the editor's game view against Studio's `--compare-ready game` was a
+mean absolute difference of 6.7, against `--compare-ready lit` (the regions, pathing, grid and start location drawn)
+24.1. Studio's toggles and keys are checked by app-smoke (`viewModes`).
 | `--look x,y[,distance[,aoa[,fov[,rotation]]]]` | `--camera "we:x,y[,distance…]"` (only angle 304 and field of view 70 are fitted) |
 
 Studio's defaults are lighting on at hour 12 (`terrain.lighting.*` in the terrain viewer's extension.json). On map
