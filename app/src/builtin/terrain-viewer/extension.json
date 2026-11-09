@@ -81,7 +81,8 @@
       { "id": "w3.terrain.setUniformDoodadHeights", "when": "project", "title": "Set Uniform Doodad Heights", "category": "Terrain" },
       { "id": "w3.terrain.resetFixedObjectHeights", "when": "project", "title": "Reset Fixed Object Heights", "category": "Terrain" },
       { "id": "w3.terrain.toggleEnforceWaterLimits", "when": "project", "title": "Toggle Enforce Water Height Limits", "category": "Terrain" },
-      { "id": "w3.terrain.toggleEnforceCameraBounds", "when": "project", "title": "Toggle Enforce Camera Bounds", "category": "Terrain" }
+      { "id": "w3.terrain.toggleEnforceCameraBounds", "when": "project", "title": "Toggle Enforce Camera Bounds", "category": "Terrain" },
+      { "id": "w3.terrain.toggleShadows", "title": "Toggle Shadows", "category": "Terrain" }
     ],
     "services": [{ "id": "w3.terrain", "description": "Tool groups (tabs) in the terrain editor: registerToolGroup." }],
     "configuration": {
@@ -99,6 +100,7 @@
         "terrain.lighting.hour": { "type": "number", "default": 12, "minimum": 0, "maximum": 23, "description": "Hour of the game day the terrain view is lit at." },
         "terrain.pathing.regenerate": { "type": "boolean", "default": true, "description": "Rewrite the pathing map (war3map.wpm) from terrain and doodads on every save." },
         "terrain.pathing.deepWater": { "type": "number", "default": 52, "minimum": 0, "maximum": 1000, "description": "Water deeper than this (world units, at a cell's nearest corner) can't be walked. 52 matches the World Editor." },
+        "terrain.shadows.visible": { "type": "boolean", "default": true, "description": "Show shadows in the terrain view (View > Shadows): the map's shadow map (war3map.shd, with the cells unsaved edits change predicted), buildings' and trees' shadow images and units' shadows. A view setting: it isn't part of the map." },
         "terrain.shadows.update": { "type": "boolean", "default": true, "description": "Update the shadow map (war3map.shd) on save. Only cells whose predicted shadow changed since the last save are rewritten." },
         "terrain.shadows.sunAzimuth": { "type": "number", "default": 225, "minimum": 0, "maximum": 360, "description": "Direction toward the sun in degrees, counter-clockwise from east (225 = south-west, as the World Editor)." },
         "terrain.shadows.sunElevation": { "type": "number", "default": 30, "minimum": 1, "maximum": 89, "description": "Sun height above the horizon in degrees (30 as the World Editor). Lower casts longer shadows." },

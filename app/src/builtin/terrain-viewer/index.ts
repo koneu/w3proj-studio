@@ -10,7 +10,7 @@ import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
-import { errorText } from "../../lib/oserror";
+import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
@@ -58,6 +58,8 @@ import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainOccupancy, type Te
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, type SplatDef } from "./splats";
+import { shadowLookFor, ViewShadows, type Baked } from "./viewshadows";
+import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
 import { lightAt } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
@@ -93,6 +95,8 @@ const LOADING_FRAME_MS = 250;
 /** How long a picture waits for models and textures at most: a backend call that never answers
  *  mustn't hang the screenshot tool. What isn't in by then is left out. */
 const PICTURE_WAIT_MS = 120_000;
+/** How long the shadow map waits for edits to pause before predicting the cells they change (ms). */
+const SHADOW_EDIT_DELAY = 700;
 
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
@@ -1108,7 +1112,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (why) void w3.window.showInfo(why);
     }),
     // The Advanced switches are settings, so they hold for every terrain editor and stay for the next session.
-    ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", true], ["w3.terrain.toggleEnforceWaterLimits", "terrain.enforceWaterLimits", false], ["w3.terrain.toggleEnforceCameraBounds", "terrain.enforceCameraBounds", false]] as const)
+    ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", true], ["w3.terrain.toggleEnforceWaterLimits", "terrain.enforceWaterLimits", false], ["w3.terrain.toggleEnforceCameraBounds", "terrain.enforceCameraBounds", false],
+      // View > Shadows: a view setting, also for every terrain editor.
+      ["w3.terrain.toggleShadows", "terrain.shadows.visible", true]] as const)
       .map(([id, key, standard]) => w3.commands.register(id, () => setSwitch(w3, key, !switchedOn(w3, key, standard)))),
     w3.commands.register("w3.terrain.resetVariations", async () => {
       const path = w3.editors.activePath();
@@ -1398,6 +1404,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (e.terrain && areaPanel) void showAreaPanel();
           if (e.terrain) { replanCliffs(); renderer.terrainChanged(); if (!e.objects) refloat(); }
           if (e.objects) { objectsTouched = true; void rebuildObjects(); }
+          shadowEditsSoon();
           refreshLayersSoon();
           doc.setDirty(mark.isDirty(at));
           redraw();
@@ -1416,6 +1423,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A stroke commits here, not through changed(): the view layers follow every edit.
           refreshLayersSoon();
           notifyGroups(e);
+          shadowEditsSoon();
           minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           if (keyPress === "repeat" && keyStep && history[at - 1] === keyStep && at === history.length && mark.isDirty(at) && !mark.pending(at)) {
@@ -1802,8 +1810,52 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const moveSplats = () => {
           if (splatsDue) return;
           splatsDue = true;
-          requestAnimationFrame(() => { splatsDue = false; void showSplats(); });
+          requestAnimationFrame(() => { splatsDue = false; void showSplats(); showShadowObjects(); });
         };
+        // ---- shadows (View > Shadows) ---------------------------------------------------
+        // The project's terrain shows its war3map.shd (classic graphics), with the cells unsaved edits change
+        // predicted; a game map's view only the objects' own shadows (see viewshadows.ts).
+        renderer.shadowLook = shadowLookFor(renderer.tone);
+        renderer.showShadows = switchedOn(w3, "terrain.shadows.visible", true);
+        const viewShadows = new ViewShadows({
+          terrain, target: renderer, redraw: loadRedraw,
+          readBaked: async (): Promise<Baked> => {
+            if (doc.path.startsWith("game:") || !w3.workspace.project()) return "absent";
+            // A file that isn't there is no shadows; one that's there but can't be read isn't predicted over.
+            return w3.workspace.readBytes("map/war3map.shd").then((bytes) => ({ bytes }), (e): Baked => (isNotFoundError(e) ? "absent" : "unreadable"));
+          },
+          readImage: async (path) => {
+            const read = (p: string) => readFile(w3, doc, p, terrain.tileset).then((buf) => decodeImage(buf, p));
+            return read(path).catch(() => read(path.replace(/\.blp$/i, ".dds")));
+          },
+          predict: editable ? (t, doodads, pause) => {
+            const sun = { azimuth: w3.settings.get<number>("terrain.shadows.sunAzimuth") ?? 225, elevation: w3.settings.get<number>("terrain.shadows.sunElevation") ?? 30 };
+            return predictShadows(t, doodads, objCtx?.skins ?? new Map(), (id) => objCtx?.bases.get(id), (p) => readFile(w3, doc, p), sun, pause);
+          } : null,
+        });
+        void artLoad(viewShadows.reloadBaked());
+        const showShadowObjects = () => { if (objCtx) void viewShadows.objectsChanged(unitsFile?.list ?? [], dooFile?.list ?? [], skinOf); };
+        /** Set while a new prediction of the shadow map is due: it waits for the edits to pause. */
+        let shadowTimer: ReturnType<typeof setTimeout> | undefined;
+        const NO_DOODADS: Placed[] = [];
+        const shadowEditsSoon = () => {
+          viewShadows.editing();
+          clearTimeout(shadowTimer);
+          shadowTimer = setTimeout(() => {
+            if (disposed || !objCtx) return;
+            const key = savedW3e, saved = savedDoodads ?? NO_DOODADS;
+            void viewShadows.editsChanged({ key, terrain: () => parseW3e(key), doodads: saved }, structuredClone(dooFile?.list ?? []));
+          }, SHADOW_EDIT_DELAY);
+        };
+        // Saving (or a rebuild after a tool's edit) wrote the shadow map: it's what's stored now.
+        const stopShadowSaves = w3.workspace.onDidSave((path) => { if (path.toLowerCase() === "map/war3map.shd") void viewShadows.reloadBaked(); });
+        const stopShadowSetting = w3.settings.onDidChange((key) => {
+          if (key !== "terrain.shadows.visible") return;
+          renderer.showShadows = switchedOn(w3, "terrain.shadows.visible", true);
+          viewSyncs.forEach((f) => f());
+          redraw();
+        });
+        const stopShadows = () => { clearTimeout(shadowTimer); viewShadows.dispose(); stopShadowSaves.dispose(); stopShadowSetting.dispose(); };
         /** Pathing texture size of each unit type met so far, null for those without: buildings have one. */
         const buildingCells = new Map<string, [number, number] | null>();
         const loadCells = async (id: string) => {
@@ -1880,6 +1932,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const b of s.batches) for (const inst of b.instances) delete inst.pick;
           renderer.setGroup("units", [...u.batches, ...s.batches.map((b) => ({ ...b, effects: undefined, tint: [1, 1, 1, START_PREVIEW_ALPHA] as [number, number, number, number] }))]);
           void artLoad(showSplats());
+          showShadowObjects();
           for (const id of new Set(units.map((p) => p.id))) void loadCells(id).catch(() => { /* stays free */ });
           // Objects without a model (start locations, unknown ids) stay markers.
           unresolvedDoodads = d.unresolved;
@@ -2048,7 +2101,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const dx = position[0] - entry.position[0], dy = position[1] - entry.position[1];
           if (dx || dy) {
             repositioned.add(entry);
-            if (skinOf(entry)?.uberSplat) moveSplats();
+            const skin = skinOf(entry);
+            // Ground marks and shadows go with the object.
+            if (skin?.uberSplat || skin?.unitShadow || skin?.buildingShadow) moveSplats();
           }
           entry.position = position;
           entry.angle = angle;
@@ -3761,6 +3816,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ] : []),
               toggle("Fog", () => renderer.showFog, (v) => { renderer.showFog = v; void w3.settings.set("terrain.fog", v); }),
               toggle("Weather", () => renderer.showWeather, (v) => { renderer.showWeather = v; void w3.settings.set("terrain.weather", v); }),
+              switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true),
               skySelect,
               toggle("Cliffs", () => !renderer.hiddenGroups.has("cliffs"), (v) => { if (v) renderer.hiddenGroups.delete("cliffs"); else renderer.hiddenGroups.add("cliffs"); }),
               h("button", { title: "Reset camera", onclick: () => { resetCamera(); keysToMap(); } }, "⟲"),
@@ -4157,6 +4213,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (tilesetChanged) { loadTilesetArt(); reloadLighting(); }
             if (tilesChanged || tilesetChanged) void syncTileList();
             savedW3e = bytes;
+            // The edits the shadows were predicted for are gone with the undo steps.
+            void viewShadows.reloadBaked();
             notifyGroups({ terrain: true, objects: false } as Edit);
             void replanCliffs();
             renderer.terrainChanged();
@@ -4169,7 +4227,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!f) return reopenInstead();
             // The selection is of the entries as they were: it goes to the same objects in the file's (a resize writes them too).
             const kept = selectionRefs();
-            if (key === "doodads") { dooFile = f; savedDoodads = structuredClone(f.list); } else { unitsFile = f; savedStarts = startLocations(f.list); }
+            if (key === "doodads") { dooFile = f; savedDoodads = structuredClone(f.list); void viewShadows.reloadBaked(); } else { unitsFile = f; savedStarts = startLocations(f.list); }
             objectsTouched = false;
             if (selected || group.length) clearSelection();
             await rebuildObjects();
@@ -4282,6 +4340,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopLightSettings.dispose();
             stopWeatherWatch.dispose();
             stopWeatherSaves.dispose();
+            stopShadows();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
             window.removeEventListener("keyup", areaKeyUp);

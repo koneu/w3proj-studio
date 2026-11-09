@@ -50,6 +50,16 @@ export interface Skin {
   /** Units: movement type (UnitData.slk movetp: foot, horse, fly, hover, float, amph), which decides
    *  how high the game puts them (see unitDrawHeight). */
   moveType?: string;
+  /** Units: the shadow texture under them (ReplaceableTextures\Shadows\<name>, UnitSkin.txt `unitShadow`, field
+   *  `ushu`), and its rectangle: `shadowX`/`shadowY` from its south-west corner to the unit, `shadowW` × `shadowH`. */
+  unitShadow?: string;
+  shadowX?: number;
+  shadowY?: number;
+  shadowW?: number;
+  shadowH?: number;
+  /** Buildings (`buildingShadow`, `ushb`) and destructables (`shadow`, `bshd`): a shadow image of one texel per
+   *  32 × 32 cell, put into the ground's shadow map (viewshadows.ts). */
+  buildingShadow?: string;
 }
 
 /** Random unit, building and item (war3mapUnits.doo) and the object kind each is placed as. */
@@ -108,6 +118,33 @@ export async function loadSkins(w3: W3Api): Promise<Map<string, Skin>> {
   return new Map(skins);
 }
 
+/** A shadow image's name as the tables give it: "", "_" and "none" are none. */
+export function shadowName(v: string | undefined): string | undefined {
+  const s = v?.trim();
+  return s && s !== "_" && s.toLowerCase() !== "none" ? s : undefined;
+}
+
+/** The shadow fields of a skin table entry (units and destructables; doodads' `shadow` is whether the World
+ *  Editor bakes them into war3map.shd). */
+function shadowFields(get: (k: string) => string | undefined, kind: string): Partial<Skin> {
+  if (kind === "w3b") {
+    const building = shadowName(get("shadow"));
+    return building ? { buildingShadow: building } : {};
+  }
+  if (kind !== "w3u") return {};
+  const out: Partial<Skin> = {};
+  const unit = shadowName(get("unitshadow")), building = shadowName(get("buildingshadow"));
+  if (unit) {
+    out.unitShadow = unit;
+    for (const [k, f] of [["shadowX", "shadowx"], ["shadowY", "shadowy"], ["shadowW", "shadoww"], ["shadowH", "shadowh"]] as const) {
+      const n = Number(get(f));
+      if (Number.isFinite(n)) out[k] = n;
+    }
+  }
+  if (building) out.buildingShadow = building;
+  return out;
+}
+
 /** The skins from the tables' texts, in SKIN_TABLES' order. */
 function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   skinParses.count++;
@@ -131,6 +168,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
         randScale: get("canplacerandscale") === "1",
         fixedRot: Number(get("fixedrot") ?? -1) >= 0 ? Number(get("fixedrot")) : null,
         uberSplat: get("ubersplat") ?? "",
+        ...shadowFields(get, kind),
       });
     }
   }
@@ -152,10 +190,13 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
 /** Object data fields that change a skin entry, per kind (UnitMetaData & co., "Profile" fields;
  *  units' alternate models umd1/umd2 and selection scale aren't drawn). */
 const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
-  w3u: { file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt" },
+  w3u: {
+    file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt",
+    unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb",
+  },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr" },
-  w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr" },
+  w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr", buildingShadow: "bshd" },
 };
 
 interface ArtMod { field: string; value: number | string }
@@ -183,10 +224,12 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         if (!m) continue;
         const n = Number(m.value);
         if (key === "file" || key === "texFile" || key === "uberSplat" || key === "moveType") skin[key] = String(m.value);
+        else if (key === "unitShadow" || key === "buildingShadow") skin[key] = shadowName(String(m.value));
         else if (key === "animProps") skin.animProps = parseAnimProps(String(m.value));
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
-        else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale") && Number.isFinite(n)) skin[key] = n;
+        else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
+          || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH") && Number.isFinite(n)) skin[key] = n;
       }
       if (skin.file) out.set(id, skin);
     }
