@@ -3551,6 +3551,8 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     if (err) return fail(`Adjust Cliff Levels: ${err}`);
     // The second player was added to the project before it opened, so its script isn't what its data makes and the save
     // keeps it, asking: answered with Replace, as the World Editor's save writes the script anew.
+    // (Lines of the Map Script output before this save: an earlier check's "replaced on request" doesn't count.)
+    const logBefore = await page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).length`);
     if (two) await page.evaluate(`(() => { const warn = w3.window.showWarning; window.__rmsWarn = warn; w3.window.showWarning = (m, ...a) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Replace the script") : warn(m, ...a)); })()`);
     await page.evaluate(`w3.editors.saveAll()`);
     if (readFileSync(file("war3map.w3e.txt"), "utf8") === terrain) return fail("the terrain edit wasn't saved (control)");
@@ -3558,7 +3560,8 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     // The save then writes the w3i's start from the start-location object, and that save the script.
     const scriptLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
     await until("the map script after the save", async () => /war3map\.j (written|up to date|not written)/.test(await scriptLog()), 30000).catch(() => {});
-    if (two) await until("the script replaced", async () => /replaced on request: war3map\.j written/.test(await scriptLog()), 60000).catch(() => fail("the kept script wasn't replaced on request"));
+    const newLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(${logBefore}).join("\\n")`);
+    if (two) await until("the script replaced", async () => /replaced on request: war3map\.j written/.test(await newLog()), 60000).catch(() => fail("the kept script wasn't replaced on request"));
     await page.evaluate(`w3.commands.execute("w3.script.settle")`);
     const log = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(-3).join(" | ")`);
     const before = script.split("\r\n"), after = readFileSync(file("war3map.j"), "utf8").split("\r\n");
@@ -4663,7 +4666,9 @@ async function staleEditors(page, found) {
     const sameSize = wtgText().replace('"Text Probe"', '"Text Prxbe"');
     if (sameSize === wtgText() || sameSize.length !== wtgText().length) fail("no Text Probe in the file for a same-size change");
     writeFileSync(wtgFile, sameSize);
-    utimesSync(wtgFile, was.atime, was.mtime);
+    // The middle of its millisecond: a time given at the millisecond's start can land a hair before it (seconds as a
+    // double), which reads as the millisecond before.
+    utimesSync(wtgFile, was.atime, (Math.floor(was.mtimeMs) + 0.5) / 1000);
     if (statSync(wtgFile).size !== was.size || Math.floor(statSync(wtgFile).mtimeMs) !== Math.floor(was.mtimeMs)) fail("the same-size change didn't keep the size and time");
     await page.evaluate(`window.__answer = "Cancel"`);
     await page.evaluate(`w3.editors.saveAll()`);
