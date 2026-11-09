@@ -1037,6 +1037,8 @@ async function viewModes(page, found) {
     // near the noise as the threshold was (round 4). Close up the tree and its shadow image make about 670.
     ["Ctrl+D", "doodads", () => key("d", "KeyD", 68, CTRL), 300, [-384, 0]],
     ["P", "pathing", () => key("p", "KeyP", 80), 300],
+    // Info Display: the start location and its town hall go (the World Editor's I).
+    ["I", "info", () => key("i", "KeyI", 73), 300],
     ["Ctrl+Shift+L", "lightRanges", () => key("L", "KeyL", 76, CTRL | SHIFT), 100],
   ]) {
     if (at) {
@@ -4727,6 +4729,175 @@ async function editorExtras(page, found) {
   }
 }
 
+/** The World Editor's smaller items, through the app's own commands, keys and menus: a map saved as a folder imported
+ *  as a project; Reset Standard Objects to Defaults in the Object Editor (asked, one undo step); Category is Comment
+ *  (the trigger stays in war3map.j, as the World Editor's save keeps it), Reset Triggers (asked, one undo step) and
+ *  Adjust Map String IDs (war3map.wts and the references, one undo); Select Next in List and Move Down in List on the
+ *  Regions tab; the minimap panel (a click moves the camera, the view's outline is drawn); Calculate Shadows (a second
+ *  run changes nothing). */
+async function niceToHaves(page, found) {
+  const fail = (what) => found.push(`nice-to-haves: ${what}`);
+  const dir = join(work, "nice");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const run = (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then((r) => ({ r }), (e) => ({ e: String(e) }))`);
+  await page.evaluate(`(() => {
+    window.__niceKept = { confirm: w3.window.confirm, folder: w3.window.pickFolder, input: w3.window.inputBox };
+    window.__asked = [];
+    w3.window.confirm = async (m) => { window.__asked.push(m); return true; };
+  })()`);
+  const asked = () => page.evaluate(`window.__asked.splice(0)`);
+  try {
+    // ---- Import Map Folder: the fixture's map, its files loose in a folder, becomes the fixture's project -----------------
+    const packed = join(dir, "mini.w3x"), folder = join(dir, "Mini Folder.w3x");
+    if (spawnSync(cli, ["pack", FIXTURE, "-o", packed]).status !== 0) throw new Error("the CLI can't pack the fixture");
+    const names = spawnSync(cli, ["ls", packed], { encoding: "utf8" }).stdout.split(/\r?\n/).slice(1).filter((l) => l && !l.startsWith("file data")).map((l) => l.trim().split(/\s+/)[3]);
+    for (const name of names) {
+      const file = join(folder, ...name.split("\\"));
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, spawnSync(cli, ["cat", packed, name]).stdout);
+    }
+    await page.evaluate(`(() => { w3.window.pickFolder = async () => ${JSON.stringify(dir)}; w3.window.inputBox = async () => "from-folder"; })()`);
+    const imported = await run("w3.project.importMapFolder", folder);
+    if (imported.e) fail(`Import Map Folder: ${imported.e}`);
+    await until("the folder's project", () => page.evaluate(`w3.workspace.project()?.root?.endsWith("from-folder") ?? false`), 20000).catch(() => fail("Import Map Folder didn't open the project"));
+    const fromFolder = snapshot(join(dir, "from-folder", "map"));
+    for (const [f, h] of snapshot(join(FIXTURE, "map"))) if (fromFolder.get(f) !== h) fail(`the folder's project has ${f} ${fromFolder.has(f) ? "different" : "missing"}`);
+    if (fromFolder.size !== snapshot(join(FIXTURE, "map")).size) fail(`the folder's project has ${fromFolder.size} files, the fixture ${snapshot(join(FIXTURE, "map")).size}`);
+    await page.evaluate(`(() => { const k = window.__niceKept; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`);
+
+    const k = await heightKit(page, "Nice");
+    // heightKit answers questions itself: here they're recorded too.
+    await page.evaluate(`w3.window.confirm = async (m) => { window.__asked.push(m); return true; }`);
+    // ---- Object Editor: Reset Standard Units to Defaults ---------------------------------------------------------------------
+    // A changed footman and a custom knight-to-be: the reset takes the first, the second stays.
+    const w3uText = JSON.stringify({ format: "w3proj.objects/1", version: 3,
+      original: [{ base: "hfoo", end: "hfoo", mods: [{ field: "ua1p", type: "string", value: "ground,enemies" }] }],
+      custom: [{ base: "hfoo", id: "h000", end: "h000", mods: [{ field: "unam", type: "string", value: "Nice Footman" }] }] }, null, 2);
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.w3u.json", ${JSON.stringify(w3uText)}); await w3.workspace.refresh(); })()`);
+    const reset = await run("w3.objectEditor.resetAllStandard", "w3u");
+    if (reset.e || reset.r !== true) fail(`Reset Standard Units: ${reset.e ?? JSON.stringify(reset.r)}`);
+    if (!(await asked()).some((m) => /reset all standard units to the default settings/.test(m))) fail("Reset Standard Units didn't ask first");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("after Reset Standard Units the Object Editor isn't unsaved");
+    await k.save();
+    let units = k.read("war3map.w3u.json");
+    if (units.original.length !== 0 || units.custom.length !== JSON.parse(w3uText).custom.length) fail(`after Reset Standard Units the file has ${units.original.length} standard and ${units.custom.length} custom objects`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    units = k.read("war3map.w3u.json");
+    if (units.original.length !== 1 || units.original[0].base !== "hfoo") fail(`one undo of Reset Standard Units left ${JSON.stringify(units.original)}`);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Trigger Editor: Category is Comment, Reset Triggers --------------------------------------------------------------
+    await k.tool("create_script_trigger", { name: "Nice Extra", script: "" });
+    await run("w3.triggers.open");
+    await until("the trigger tree", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
+    const menued = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".trig-row.trig-cat")].find((e) => e.textContent.includes("Initialization"));
+      if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
+    if (!menued) fail("no Initialization category in the trigger tree");
+    await until("the Category is Comment item", () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith("Category is Comment"))`), 5000)
+      .then(() => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith("Category is Comment")).click()`), () => fail("the category's menu has no Category is Comment"));
+    await sleep(300);
+    if (!(await page.evaluate(`!!document.querySelector(".trig-row.trig-cat-comment")`))) fail("the comment category isn't shown as one");
+    await k.save();
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    const cat = k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization");
+    if (cat?.isComment !== 1) fail(`Category is Comment saved ${JSON.stringify(cat)}`);
+    if (!/InitTrig_Melee_Initialization/.test(readFileSync(join(k.root, "map", "war3map.j"), "utf8"))) fail("a trigger in a comment category left war3map.j (the World Editor keeps it)");
+    const before = k.read("war3map.wtg.json");
+    const resetT = await run("w3.triggers.reset");
+    if (resetT.e || resetT.r !== true) fail(`Reset Triggers: ${resetT.e ?? JSON.stringify(resetT.r)}`);
+    if (!(await asked()).some((m) => /Clear all triggers and reset to default/.test(m))) fail("Reset Triggers didn't ask first");
+    await k.save();
+    const after = k.read("war3map.wtg.json");
+    const names2 = (f) => f.items.filter((i) => i.type === 8 || i.type === 32).map((i) => i.name);
+    if (JSON.stringify(names2(after)) !== JSON.stringify(["Melee Initialization"])) fail(`after Reset Triggers: ${names2(after).join(", ")}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
+    if (JSON.stringify(names2(k.read("war3map.wtg.json"))) !== JSON.stringify(names2(before))) fail(`one undo of Reset Triggers gave ${names2(k.read("war3map.wtg.json")).join(", ")}`);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Adjust Map String IDs: string 1 becomes 10, its references follow; undo puts every file back ---------------------
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    const mapDir = join(k.root, "map"), files0 = snapshot(mapDir);
+    const adjusted = await run("w3.triggers.adjustStringIds", [[1, 10]]);
+    if (adjusted.e || adjusted.r !== 1) fail(`Adjust Map String IDs: ${adjusted.e ?? JSON.stringify(adjusted.r)}`);
+    const wts = readFileSync(join(mapDir, "war3map.wts"), "utf8"), w3iText = readFileSync(join(mapDir, "war3map.w3i.json"), "utf8");
+    if (!/STRING 10\r?\n/.test(wts) || /STRING 1\r?\n/.test(wts)) fail(`after Adjust the string table is ${JSON.stringify(wts.slice(0, 120))}`);
+    if (!w3iText.includes("TRIGSTR_010") || w3iText.includes("TRIGSTR_001")) fail("after Adjust war3map.w3i still names TRIGSTR_001");
+    await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
+    await sleep(300);
+    const files1 = snapshot(mapDir);
+    for (const [f, h] of files0) if (files1.get(f) !== h) fail(`the undo of Adjust Map String IDs left ${f} changed`);
+
+    // ---- Regions tab: Select Next in List (Ctrl+Tab), Move Down in List (Ctrl+Page Down) -------------------------------
+    const regions = k.read("war3map.w3r.json");
+    const box = (name, index, x) => ({ left: x, bottom: 0, right: x + 256, top: 256, name, index, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) });
+    regions.regions = [box("First", 0, -512), box("Second", 1, 0), box("Third", 2, 512)];
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${JSON.stringify(JSON.stringify(regions))})`);
+    await run("w3.terrain.open");
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await k.tab("Regions");
+    await sleep(500);
+    const CTRL = 2;
+    const regionName = () => page.evaluate(`document.querySelector(".terrain-region-name")?.value ?? null`);
+    await k.focusMap();
+    await k.hands.key("Tab", "Tab", 9, CTRL);
+    await sleep(300);
+    if ((await regionName()) !== "First") fail(`Ctrl+Tab with nothing selected selected ${await regionName()}`);
+    const next = await run("w3.terrain.selectNextInList");
+    if (next.e || (await regionName()) !== "Second") fail(`Select Next in List: ${next.e ?? await regionName()}`);
+    await k.focusMap();
+    await k.hands.key("PageDown", "PageDown", 34, CTRL);
+    await sleep(300);
+    await k.save();
+    const order = k.read("war3map.w3r.json").regions.map((r) => r.name).join(",");
+    if (order !== "First,Third,Second") fail(`Move Down in List (Ctrl+Page Down) saved the order ${order}`);
+    const last = await run("w3.terrain.moveDownInList");
+    if (last.e) fail(`Move Down in List at the end: ${last.e}`);
+    await k.tab("Select");
+
+    // ---- The minimap panel: on, a picture, the view's outline; a click moves the camera there -----------------------------
+    const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+    await run("w3.terrain.toggleMinimap");
+    await until("the minimap's picture", async () => (await state())?.minimap?.picture === true, 30000).catch(() => {});
+    let s = await state();
+    if (!s?.minimap?.shown || !s.minimap.picture || s.minimap.outline.length !== 4) fail(`the minimap panel: ${JSON.stringify(s?.minimap)}`);
+    if (!(await page.evaluate(`!!document.querySelector(".terrain-minimap:not([hidden]) canvas")`))) fail("the minimap panel isn't in the view");
+    const target0 = s.camera.target;
+    const spot = await k.hands.where(".terrain-minimap canvas");
+    await k.hands.mouse("mouseMoved", spot.x - spot.width * 0.3, spot.y - spot.height * 0.3);
+    await k.hands.mouse("mousePressed", spot.x - spot.width * 0.3, spot.y - spot.height * 0.3, 1);
+    await k.hands.mouse("mouseReleased", spot.x - spot.width * 0.3, spot.y - spot.height * 0.3, 0);
+    await sleep(500);
+    s = await state();
+    // Up and to the left on the minimap: north-west of where the camera was.
+    if (!(s.camera.target[0] < target0[0] - 200 && s.camera.target[1] > target0[1] + 200)) fail(`a click on the minimap moved the camera from ${target0} to ${s.camera.target}`);
+    await run("w3.terrain.toggleMinimap");
+    await sleep(300);
+    if ((await state()).minimap.shown) fail("Toggle Minimap Panel didn't hide it again");
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
+
+    // ---- Calculate Shadows: the whole shadow map; a second run finds nothing to change ------------------------------------
+    await k.tool("place_objects", { objects: [{ id: "LTlt", x: 640, y: 640 }, { id: "LTlt", x: 768, y: 640 }], ignoreRoom: true });
+    await page.evaluate(`w3.commands.execute("w3.terrain.settle")`);
+    // A shadow map dark everywhere, as if made elsewhere: the whole of it is made again (and a checkpoint first).
+    const cells = readFileSync(join(mapDir, "war3map.shd")).length;
+    await page.evaluate(`w3.workspace.writeBytes("map/war3map.shd", new Uint8Array(${cells}).fill(255))`);
+    const first = await run("w3.terrain.calculateShadows");
+    if (first.e || !(first.r > 0)) fail(`Calculate Shadows: ${first.e ?? JSON.stringify(first.r)} cells changed`);
+    const shd = hash(join(mapDir, "war3map.shd"));
+    const second = await run("w3.terrain.calculateShadows");
+    if (second.e || second.r !== 0 || hash(join(mapDir, "war3map.shd")) !== shd) fail(`Calculate Shadows again: ${second.e ?? JSON.stringify(second.r)}`);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length > 0`)) fail(`unsaved after Calculate Shadows: ${await page.evaluate(`w3.editors.unsavedPaths().join(", ")`)}`);
+    await k.verify(fail);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__niceKept; if (!k) return; w3.window.confirm = k.confirm; w3.window.pickFolder = k.folder; w3.window.inputBox = k.input; })()`).catch(() => {});
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -4802,7 +4973,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -4900,6 +5071,7 @@ async function run() {
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
+    await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
