@@ -12,7 +12,9 @@ import { dirname, join } from "node:path";
 /** The main checkout (not a worktree's folder): `.game-path` lives only there, like `openpoints/`. */
 export function mainCheckout(from = process.cwd()) {
   try {
-    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: from, encoding: "utf8" }).trim();
+    // git's own message stays out of the output: outside a repository (a scratch folder) "fatal: not a git
+    // repository" was printed at every start of a tool, though the folder itself is the answer then.
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: from, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     return dirname(common);
   } catch {
     return from;
