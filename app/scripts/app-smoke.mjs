@@ -1402,7 +1402,8 @@ async function itemTablesAccess(page, found) {
     await toTerrain();
     await settled();
     await k.hands.click(at("edit-tables"));
-    await atItemTables("Edit item tables…");
+    // At the table the footman drops from.
+    await atItemTables("Edit item tables…", "item-table-0");
   }
 
   // The command (palette and Scenario menu), from anywhere.
@@ -1443,6 +1444,164 @@ async function itemTablesAccess(page, found) {
   await settled();
   await k.save();
   if (footman().itemTable !== -1 || footman().itemSets.length) fail(`the undo of the table's choice: ${JSON.stringify([footman().itemTable, footman().itemSets])}`);
+  await k.verify(fail);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
+/** Item drops (dropsedit.ts, dropstab.ts), by mouse and keyboard in the hidden window: the Selection panel shows a creep's
+ *  drops near the top, in words ("Random item, charged, level 2", never "YjI2"), and Edit drops… opens the Item Drops tab
+ *  on it. The tab groups the creeps into camps, shows the map's item table with its contents and who uses it, and edits:
+ *  an item added from the item browser and its chance typed (one undo step each, Ctrl+Z in the tab takes one back), one
+ *  creep's drops copied to its whole camp (one step), a set added to each refused for a camp that uses a table (nothing
+ *  changes), the table given to a whole camp. Show selects the creep in the terrain editor. Everything stays unsaved until
+ *  saved; the saved units file has the drops, the regenerated war3map.j their drop functions, and the packed map verifies. */
+async function itemDrops(page, found) {
+  const fail = (what) => found.push(`item drops: ${what}`);
+  const k = await heightKit(page, "ItemDrops");
+  const TXT = "map/war3map.w3e.txt", TAB = "w3:item-drops";
+  // Camp A (three forest trolls, the first dropping a random charged item of level 2) and camp B (two ogres) far apart.
+  await k.tool("place_objects", { objects: [
+    { id: "nftt", x: 0, y: 0, player: 25, drops: [{ level: 2, kind: "charged" }] }, { id: "nftt", x: 192, y: 0, player: 25 }, { id: "nftt", x: 0, y: 192, player: 25 },
+    { id: "nogr", x: 1280, y: 1280, player: 25 }, { id: "nogr", x: 1472, y: 1280, player: 25 },
+  ], ignoreRoom: true });
+  await k.save();
+  // The newer unit layout (map item tables), a table the first ogre drops from.
+  const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json");
+  if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
+  if (units.units.filter((u) => u.player === 24).length !== 5) return fail(`the creeps aren't Neutral Hostile: ${JSON.stringify(units.units.map((u) => [u.id, u.player]))}`);
+  units.subversion = 11;
+  units.units = units.units.map((u) => {
+    const out = {};
+    for (const [key, v] of Object.entries(u)) {
+      out[key] = v;
+      if (key === "mana" && !("itemTable" in u)) out.itemTable = u.id === "nogr" && u.position[0] === 1280 ? 3 : -1;
+      if (key === "level" && !("strength" in u)) Object.assign(out, { strength: 0, agility: 0, intelligence: 0 });
+    }
+    return out;
+  });
+  info.itemTables = [{ number: 3, name: "Smoke Loot", sets: [[{ chance: 60, id: "ratf" }, { chance: 40, id: "YjI2" }]] }];
+  await page.evaluate(`w3.editors.closeAll()`);
+  for (const [file, doc] of [["war3mapUnits.doo.json", units], ["war3map.w3i.json", info]]) {
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(`map/${file}`)}, ${JSON.stringify(JSON.stringify(doc, null, 2))})`);
+  }
+  await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
+  await until("the terrain editor", async () => (await page.evaluate(`w3.editors.activePath()`)) === TXT, 20000);
+  await k.tab("Select");
+  const active = () => page.evaluate(`w3.editors.activePath()`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`);
+  const troll = (x, y) => k.units().find((u) => u.id === "nftt" && u.position[0] === x && u.position[1] === y);
+  const ogre = (x) => k.units().find((u) => u.id === "nogr" && u.position[0] === x);
+  const T = (sel) => `.drops-tab ${sel}`;
+  const text = (sel) => page.evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
+  const has = (sel) => page.evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
+  const settled = () => sleep(600);
+  const unitsHash = () => hash(join(k.root, "map", "war3mapUnits.doo.json"));
+
+  // ---- The Selection panel: the drops block near the top, in words -------------------------------------------------
+  await k.look(0, 0, { id: "nftt", x: 0, y: 0 });
+  await until("the drops block", () => has(".terrain-drops"), 20000);
+  const block = await page.evaluate(`(() => {
+    const b = document.querySelector(".terrain-drops"), owner = [...document.querySelectorAll(".terrain-selection .terrain-sel-row")].find((r) => r.textContent.startsWith("Owner"));
+    return { text: b.textContent, aboveOwner: !!owner && !!(b.compareDocumentPosition(owner) & Node.DOCUMENT_POSITION_FOLLOWING), mode: b.querySelector('[data-prop="drops-mode"]').value };
+  })()`);
+  if (!/Random item, charged, level 2/.test(block.text) || /YjI2/.test(block.text)) fail(`the drops block doesn't name the random item in words: ${block.text}`);
+  if (!block.aboveOwner) fail("the drops block isn't above the owner and position (it should be found near the top)");
+  if (block.mode !== "custom") fail(`the troll's drops show as ${block.mode}`);
+  if (!/Set 1 · drops this · 100%/.test(block.text)) fail(`the set's head: ${block.text}`);
+  if (await dirty()) fail("showing the drops made the map changed");
+
+  // ---- Edit drops… opens the tab on the troll ---------------------------------------------------------------------------
+  await k.hands.click(".terrain-drops [data-prop=\"edit-drops\"]");
+  await until("the Item Drops tab", async () => (await active()) === TAB, 20000).catch(() => fail("Edit drops… didn't open the Item Drops tab"));
+  await until("the tab's drops", () => has(T(".drops-pane .drops-editor")), 20000).catch(() => fail("the tab doesn't show the troll's drops"));
+  if (!/Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`the tab edits ${await text(T("[data-prop=\"pane-title\"]"))}, not the troll`);
+  if (!(await has(T(".drops-obj.on[data-entry=\"nftt@0,0\"]")))) fail("the troll isn't marked in the tab's list");
+  const camps = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-group")].map((g) => [g.querySelector("strong").textContent, g.querySelectorAll(".drops-obj").length])`);
+  if (JSON.stringify(camps) !== JSON.stringify([["Camp 1", 2], ["Camp 2", 3]])) fail(`the camps: ${JSON.stringify(camps)} (the ogres are north of the trolls)`);
+  if (!/2 objects drop items · 1 map item table/.test(await text(T("[data-prop=\"drops-count\"]")) ?? "")) fail(`the count: ${await text(T("[data-prop=\"drops-count\"]"))}`);
+  const card = await text(T("[data-table-card=\"3\"]")) ?? "";
+  if (!/Smoke Loot/.test(card) || !/used by 1/.test(card) || !/Claws of Attack/.test(card) || !/Random item, charged, level 2/.test(card) || !/60%/.test(card)) fail(`the table's card: ${card}`);
+
+  // An item from the item browser, then its chance typed: each one undo step.
+  await k.hands.click(T("[data-prop=\"add-item-0\"]"));
+  await until("the item browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
+  await k.hands.click("input.picker-search");
+  await k.hands.type("ankh");
+  await sleep(300);
+  await k.hands.key("Enter", "Enter", 13);
+  await settled();
+  if (!(await dirty())) fail("adding an item in the tab didn't mark the terrain changed");
+  await retype(k.hands, T("[data-prop=\"chance-0-0\"]"), "70");
+  await settled();
+  await retype(k.hands, T("[data-prop=\"chance-0-1\"]"), "30");
+  await settled();
+  if (!/100%/.test(await text(T("[data-prop=\"total-0\"]")) ?? "")) fail(`the set's total after typing: ${await text(T("[data-prop=\"total-0\"]"))}`);
+  // Ctrl+Z in the tab: the last chance only.
+  await k.hands.click(T(".drops-pane h3"));
+  await k.hands.chord("Ctrl+Z");
+  await settled();
+  await k.save();
+  let sets = troll(0, 0)?.itemSets;
+  if (JSON.stringify(sets) !== JSON.stringify([[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 0 }]])) fail(`after the item, two chances and one Ctrl+Z: ${JSON.stringify(sets)}`);
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await settled();
+
+  // Copy the troll's drops, paste them to its whole camp: one step.
+  await k.hands.click(T("[data-prop=\"copy-drops\"]"));
+  await settled();
+  await k.hands.click(T(".drops-group:nth-child(2) [data-prop=\"edit-group\"]"));
+  await settled();
+  if (!/3 objects/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`Edit together on the trolls' camp: ${await text(T("[data-prop=\"pane-title\"]"))}`);
+  if (!(await has(T("[data-prop=\"drops-mixed\"]")))) fail("the camp's different drops aren't shown as such");
+  await k.hands.click(T("[data-prop=\"paste-drops\"]"));
+  await settled();
+  await k.save();
+  const pasted = [[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 30 }]];
+  for (const [x, y] of [[0, 0], [192, 0], [0, 192]]) if (JSON.stringify(troll(x, y)?.itemSets) !== JSON.stringify(pasted)) fail(`the troll at ${x}, ${y} after the paste: ${JSON.stringify(troll(x, y)?.itemSets)}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled();
+  await k.save();
+  if (troll(192, 0)?.itemSets.length || troll(0, 192)?.itemSets.length || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the paste: ${JSON.stringify([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets, troll(0, 192)?.itemSets])}`);
+
+  // The ogres' camp: one drops from the table, so a set added to each is refused whole; then all get the table.
+  await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
+  await settled();
+  const before = unitsHash();
+  await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
+  await page.evaluate(`window.__picked`);
+  await k.hands.click(T("[data-prop=\"add-set-each\"]"));
+  await settled();
+  if (!/drop from a map item table/.test(await k.toasts())) fail(`adding a set to a camp with a table wasn't refused with the reason: ${await k.toasts()}`);
+  await k.clearToasts();
+  await k.save();
+  if (unitsHash() !== before) fail("the refused set changed the units file");
+  const variant = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-variant")].findIndex((v) => /Smoke Loot/.test(v.textContent))`);
+  if (variant < 0) fail("the ogres' variants don't name the table");
+  else {
+    await k.hands.click(T(`[data-prop="use-variant-${variant}"]`));
+    await settled();
+    await k.save();
+    if (ogre(1280)?.itemTable !== 3 || ogre(1472)?.itemTable !== 3 || ogre(1472)?.itemSets.length) fail(`the ogres after Give this to all: ${JSON.stringify([ogre(1280), ogre(1472)].map((o) => [o?.itemTable, o?.itemSets]))}`);
+    if (!/used by 2/.test(await text(T("[data-table-card=\"3\"]")) ?? "")) fail(`the table's card after: ${await text(T("[data-table-card=\"3\"]"))}`);
+  }
+
+  // Show: the terrain editor in front with that ogre selected.
+  await k.hands.click(T("[data-entry=\"nogr@1472,1280\"] [data-prop=\"show-one\"]"));
+  await until("the terrain editor in front", async () => (await active()) === TXT, 20000).catch(() => fail("Show didn't bring the terrain editor to the front"));
+  await until("the ogre selected", async () => {
+    const p = await page.evaluate(`(() => { const i = document.querySelectorAll(".terrain-sel-triple input"); return i.length >= 2 ? [Number(i[0].value), Number(i[1].value)] : null; })()`);
+    return p && Math.abs(p[0] - 1472) <= 32 && Math.abs(p[1] - 1280) <= 32;
+  }, 20000).catch(() => fail("Show didn't select the ogre"));
+  // The panel shows the table by name and what it drops, not only its name.
+  const ogreBlock = await text(".terrain-drops") ?? "";
+  if (!/Smoke Loot \(#3\)/.test(ogreBlock) || !/Claws of Attack/.test(ogreBlock) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
+
+  // The script: the trolls' own drop function with both items, the table's function.
+  await k.save();
+  await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+  const script = readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+  if (!/function ItemTable000003_DropItems/.test(script)) fail("war3map.j has no function for the map's item table");
+  if (!/RandomDistAddItem\( 'ankh', 30 \)/.test(script)) fail("war3map.j doesn't drop the ankh the troll was given");
   await k.verify(fail);
   await page.evaluate(`w3.editors.closeAll()`);
 }
@@ -5591,7 +5750,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, itemDrops, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5683,6 +5842,7 @@ async function run() {
     await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
+    await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
     await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
     await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
