@@ -188,6 +188,20 @@ export function mainSection(i: SetupInput): string {
 const oldPlacement = (i: SetupInput) => ((i.info.editorVersion as number | undefined) ?? 6116) < 6116;
 const teamsTogether = (i: SetupInput) => oldPlacement(i) || ((i.info.flags & MELEE) !== 0 && i.info.players.length > 1);
 
+/** The arguments of SetDayNightModels (terrain, unit) as the World Editor writes them from
+ *  war3map.w3l: the format's first model (`terrainModel`), when switched on, goes into the unit
+ *  argument and the second (`unitModel`) into the terrain argument; a slot that's off or empty
+ *  writes the light environment's own model (`fallback`). Found with we-drive saves of
+ *  smoketest_maps/cliff.w3m with each slot on and off alone (2026-11-09); that the game then
+ *  lights by these arguments is only known from the script. */
+export function dayNightModels(
+  w3l: { terrainModel?: string; unitModel?: string; terrainEnabled?: number; unitEnabled?: number } | null | undefined,
+  fallback: { terrain: string; unit: string },
+): { terrain: string; unit: string } {
+  const own = (model: string | undefined, enabled: number | undefined) => (enabled && model ? model : null);
+  return { terrain: own(w3l?.unitModel, w3l?.unitEnabled) ?? fallback.terrain, unit: own(w3l?.terrainModel, w3l?.terrainEnabled) ?? fallback.unit };
+}
+
 export function configSection(i: SetupInput): string {
   const players = i.info.players;
   const lines = ["function config takes nothing returns nothing", `    call SetMapName( ${str(i.info.name)} )`, `    call SetMapDescription( ${str(i.info.description)} )`,
