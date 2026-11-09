@@ -50,6 +50,9 @@ export interface Skin {
   /** Units: movement type (UnitData.slk movetp: foot, horse, fly, hover, float, amph), which decides
    *  how high the game puts them (see unitDrawHeight). */
   moveType?: string;
+  /** Units: flying height (UnitData.slk moveHeight, field `umvh`), at which a flying or hovering unit is drawn over the
+   *  ground (see unitDrawHeight). */
+  moveHeight?: number;
   /** Units: the shadow texture under them (ReplaceableTextures\Shadows\<name>, UnitSkin.txt `unitShadow`, field
    *  `ushu`), and its rectangle: `shadowX`/`shadowY` from its south-west corner to the unit, `shadowW` × `shadowH`. */
   unitShadow?: string;
@@ -80,11 +83,14 @@ export function addAnimProps(skins: Map<string, Skin>, text: string) {
   }
 }
 
-/** Puts the unit table's movement types on the skins. */
+/** Puts the unit table's movement types and flying heights on the skins. */
 export function addMoveTypes(skins: Map<string, Skin>, rows: readonly Record<string, string>[]) {
   for (const r of rows) {
     const skin = r.unitID ? skins.get(r.unitID) : undefined;
-    if (skin && r.movetp) skin.moveType = r.movetp;
+    if (!skin) continue;
+    if (r.movetp) skin.moveType = r.movetp;
+    const height = Number(r.moveHeight);
+    if (r.moveHeight?.trim() && Number.isFinite(height)) skin.moveHeight = height;
   }
 }
 
@@ -195,7 +201,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
  *  units' alternate models umd1/umd2 and selection scale aren't drawn). */
 const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
   w3u: {
-    file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt",
+    file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt", moveHeight: "umvh",
     unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb",
   },
   w3t: { file: "ifil", modelScale: "isca" },
@@ -234,7 +240,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "bakesShadow") skin.bakesShadow = n !== 0;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
-          || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH") && Number.isFinite(n)) skin[key] = n;
+          || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH" || key === "moveHeight") && Number.isFinite(n)) skin[key] = n;
       }
       if (skin.file) out.set(id, skin);
     }

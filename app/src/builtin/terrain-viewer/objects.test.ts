@@ -130,6 +130,20 @@ test("units get their movement type from the unit table, and a map's own movemen
   assert.equal(out.get("h001")?.moveType, "foot");
 });
 
+test("units get their flying height from the unit table, and a map's own wins", () => {
+  const skins = new Map([["hgry", skin("gryphon")], ["hfoo", skin("footman")], ["hbad", skin("bad")]]);
+  addMoveTypes(skins, [{ unitID: "hgry", movetp: "fly", moveHeight: "240" }, { unitID: "hfoo", movetp: "foot", moveHeight: "0" },
+    { unitID: "hbad", movetp: "fly", moveHeight: "high" }]);
+  assert.equal(skins.get("hgry")?.moveHeight, 240);
+  assert.equal(skins.get("hfoo")?.moveHeight, 0);
+  assert.equal(skins.get("hbad")?.moveHeight, undefined, "a value that isn't a number is left out");
+  const out = withObjectArt(skins, [{ kind: "w3u", original: [{ base: "hfoo", mods: [{ field: "umvh", value: 300 }] }],
+    custom: [{ base: "hgry", id: "h000", mods: [] }, { base: "hgry", id: "h001", mods: [{ field: "umvh", value: 600 }] }] }]);
+  assert.equal(out.get("hfoo")?.moveHeight, 300, "a changed standard unit");
+  assert.equal(out.get("h000")?.moveHeight, 240, "a custom unit keeps its base's");
+  assert.equal(out.get("h001")?.moveHeight, 600);
+});
+
 test("a selection box goes by where an object is drawn: a ship on the water above its stored height", () => {
   const ship = placed("hbot", 100, 100, { player: 0 });
   const [stray] = strayInstances("units", [ship], [ship], new Map(), () => 0);

@@ -291,8 +291,17 @@ trees 0.73, none, 0.60. The overlap of the shadows (pixels that change with Shad
 include its animated models) went from 0.05–0.27 to 0.12–0.63 on the test map, 0.16–0.21 to 0.25 on map 03, 0.01 to
 0.13 on TwistedMeadows; the whole picture's mean difference hardly moves (shadows are a small part of it: 10.9 → 10.5,
 14.5 → 13.8, 13.7 → 11.8 on the test map, map 03 and TwistedMeadows within 0.2). The editor's gryphon flies, and its
-shadow with it: Studio draws flying units on the ground. `app-drive --frame-cost` reports the last frame's real
-shadows (`sunShadows`).
+shadow with it; Studio draws it so since branch terrain-extras (below). `app-drive --frame-cost` reports the last
+frame's real shadows (`sunShadows`).
+
+**Units' heights** (branch terrain-extras, 2026-11-09, HD, copies of map 03 with units added by the release CLI): the
+editor draws every unit at its flying height (UnitData `moveHeight`, object data `umvh`) over the ground under it, and
+ignores the height the placement file holds: footmen stored at 0, 256 and 600 on ground 256 stand on it alike, gryphons
+(240) stored at those heights fly at the same height, a footman and a banshee given 300 and a gryphon given 600 in the
+map's object data fly that high. Over the lake a flyer is over the bed (heightAt), not the surface; at the lake's cliff
+edge it follows the ground as drawn (within the camera's few pixels). Ships stay on the surface. The selection circle of
+a flyer lies on the ground under it. Studio's pictures at the same looks put the units within 5–15 px of the editor's
+(their stand animations differ); app-smoke `flyingHeights` reads the drawn heights (`drawnUnits` of the view's handle).
 
 **Fire and particle colours in HD** (branch render-fixes-4, 2026-11-09, a test map with AObr, ZObz, LObr, OOgr, ZZdt,
 AOob and AOnt in a row, the editor in SD and HD): the particle colours are read right (red, green, blue): the

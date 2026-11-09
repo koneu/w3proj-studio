@@ -1362,6 +1362,59 @@ async function itemTablesAccess(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Units are drawn by their type, as the World Editor draws them: a gryphon at its flying height (UnitData moveHeight
+ *  240) over the ground, a footman on it, whatever height the placement file holds; ground raised under the gryphon
+ *  takes it along at once. Drawing them so writes nothing: saving after only looking leaves the units file as it was. */
+async function flyingHeights(page, found) {
+  const fail = (what) => found.push(`flying heights: ${what}`);
+  const k = await heightKit(page, "Flying");
+  await k.tool("place_objects", { objects: [{ id: "hgry", x: 0, y: 0, player: 1 }, { id: "hfoo", x: 512, y: 0, player: 1 }], ignoreRoom: true });
+  await k.save();
+  // The footman stored far above the ground, as another tool might write it: drawn on the ground all the same.
+  const units = k.read("war3mapUnits.doo.json");
+  const foot = units.units.find((u) => u.id === "hfoo"), gry = units.units.find((u) => u.id === "hgry");
+  if (!foot || !gry) return fail(`placed: ${units.units.map((u) => u.id).join(", ")}`);
+  const ground = gry.position[2];
+  foot.position[2] = ground + 600;
+  await page.evaluate(`w3.workspace.writeText("map/war3mapUnits.doo.json", ${JSON.stringify(JSON.stringify(units, null, 2))})`);
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__flyGroup?.dispose();
+    window.__flyGroup = s.registerToolGroup({ id: "smoke-fly", title: "smoke-fly", order: 998, create: (ed) => { window.__flyEd = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const drawn = (id) => page.evaluate(`window.__flyEd?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)}) ?? null`);
+  try {
+    const reloaded = `(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units.some((u) => u.id === "hfoo" && u.position[2] === ${ground + 600}) ?? false)()`;
+    await until("the gryphon and the footman drawn", async () => (await page.evaluate(reloaded)) && (await drawn("hgry")) && (await drawn("hfoo")), 20000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify([await drawn("hgry"), await drawn("hfoo")])}`); });
+    // Drawn after the reload: a moment later.
+    await sleep(500);
+    const f = await drawn("hfoo"), g = await drawn("hgry");
+    if (Math.abs(f.z - ground) > 1) fail(`the footman stored at ${ground + 600} is drawn at ${f.z}, not on the ground ${ground}`);
+    if (Math.abs(g.z - (ground + 240)) > 1) fail(`the gryphon (stored at ${gry.position[2]}) is drawn at ${g.z}, not at its flying height 240 over the ground ${ground}`);
+    const before = hash(join(k.root, "map", "war3mapUnits.doo.json"));
+    await k.save();
+    if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== before) fail("saving after only looking changed the units file");
+    // The ground under the gryphon raised by 128 (the corners round (0, 0)), as a finished stroke: it flies along.
+    const raised = await page.evaluate(`(() => {
+      const ed = window.__flyEd, t = ed.terrain, cx = Math.round((0 - t.offsetX) / 128), cy = Math.round((0 - t.offsetY) / 128);
+      const corners = [];
+      for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) corners.push(y * t.width + x);
+      const was = corners.map((i) => t.corners[i].height);
+      const set = (d) => corners.forEach((i, n) => { t.corners[i].height = was[n] + d; });
+      set(128);
+      return ed.commitTerrain({ corners, undo: () => set(0), redo: () => set(128) });
+    })()`);
+    if (!raised) return fail("the raise was refused");
+    const after = await drawn("hgry");
+    if (Math.abs(after.z - (ground + 128 + 240)) > 1) fail(`with the ground raised by 128 the gryphon is drawn at ${after.z}, not ${ground + 128 + 240}`);
+  } finally {
+    await page.evaluate(`window.__flyGroup?.dispose(); window.__flyGroup = null; window.__flyEd = null;`);
+  }
+  await k.save();
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
@@ -3988,7 +4041,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, flyingHeights, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -4071,6 +4124,7 @@ async function run() {
     await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+    await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
