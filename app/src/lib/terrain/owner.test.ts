@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hasPlayerUnits, joinOwners, meleeFlagsAfter, ownerOf, placedText, splitOwners } from "./owner";
+import { hasPlayerUnits, joinOwners, meleeBlockers, meleeFlagsAfter, ownerOf, placedText, splitOwners } from "./owner";
 
 const UPROOTED = 0x10001;
 
@@ -58,19 +58,44 @@ test("joining doesn't touch what's being edited", () => {
   assert.equal(list[0].player, 1);
 });
 
-test("a unit of a player counts; start locations, items and neutrals don't", () => {
-  const item = (id: string) => id === "ratf";
-  assert.equal(hasPlayerUnits([{ id: "hfoo", player: 0 }], item), true);
-  assert.equal(hasPlayerUnits([{ id: "hfoo", player: 23 }], item), true);
-  assert.equal(hasPlayerUnits([{ id: "etol", player: 0x10002 }], item), true, "an uprooted Ancient is its player's");
-  assert.equal(hasPlayerUnits([{ id: "sloc", player: 0 }, { id: "ratf", player: 0 }], item), false);
-  assert.equal(hasPlayerUnits([{ id: "nogr", player: 24 }, { id: "ngol", player: 27 }], item), false);
-  assert.equal(hasPlayerUnits([], item), false);
+test("a unit or item of a player counts; start locations and neutrals don't", () => {
+  assert.equal(hasPlayerUnits([{ id: "hfoo", player: 0 }]), true);
+  assert.equal(hasPlayerUnits([{ id: "hfoo", player: 23 }]), true);
+  assert.equal(hasPlayerUnits([{ id: "etol", player: 0x10002 }]), true, "an uprooted Ancient is its player's");
+  assert.equal(hasPlayerUnits([{ id: "ratf", player: 0 }]), true, "an item of Player 1 (we-drive save: the editor took the flag off)");
+  assert.equal(hasPlayerUnits([{ id: "sloc", player: 0 }, { id: "ratf", player: 27 }]), false);
+  assert.equal(hasPlayerUnits([{ id: "nogr", player: 24 }, { id: "ngol", player: 27 }]), false);
+  assert.equal(hasPlayerUnits([]), false);
 });
 
 test("a player's unit takes Melee off the map's flags, and only that flag; nothing puts it back", () => {
-  const item = (id: string) => id === "ratf";
-  assert.equal(meleeFlagsAfter(0x9c14, [{ id: "hfoo", player: 0 }], item), 0x9c10);
-  assert.equal(meleeFlagsAfter(0x9c14, [{ id: "sloc", player: 0 }, { id: "ratf", player: 27 }], item), 0x9c14);
-  assert.equal(meleeFlagsAfter(0x9c10, [], item), 0x9c10);
+  assert.equal(meleeFlagsAfter({ flags: 0x9c14 }, [{ id: "hfoo", player: 0 }]), 0x9c10);
+  assert.equal(meleeFlagsAfter({ flags: 0x9c14 }, [{ id: "sloc", player: 0 }, { id: "ratf", player: 27 }]), 0x9c14);
+  assert.equal(meleeFlagsAfter({ flags: 0x9c10 }, []), 0x9c10);
+});
+
+// we-drive saves of World Editor 7003 (2026-11-09): (4)PhantomGrove (flags 0x2fc14) with the Melee flag cleared and one
+// change each; the editor's save put the flag back exactly when the change isn't a reason.
+test("the World Editor's melee rules, as far as war3map.w3i and the units tell", () => {
+  const base = { flags: 0x2fc10, players: [0, 1, 2, 3].map(() => ({ fixedStart: 0 })), gameDataSet: 0, upgrades: [], techs: [] };
+  const sloc = [{ id: "sloc", player: 0 }, { id: "ngol", player: 27 }, { id: "nskf", player: 24 }];
+  const blocked = (change: Partial<typeof base> & { flags?: number }, placed = sloc) => meleeBlockers({ ...base, ...change }, placed);
+  assert.deepEqual(blocked({}), [], "plain: the flag came back");
+  // Reasons (the flag stayed off).
+  assert.equal(blocked({ flags: base.flags | 0x1 }).length, 1, "hide minimap");
+  assert.equal(blocked({ flags: base.flags & ~0x10 }).length, 1, "masked areas not partially visible");
+  assert.equal(blocked({ flags: base.flags | 0x40 }).length, 1, "custom forces");
+  assert.equal(blocked({ players: [{ fixedStart: 1 }, { fixedStart: 0 }] }).length, 1, "a fixed start location");
+  assert.equal(blocked({ gameDataSet: 1 }).length, 1, "game data set");
+  assert.equal(blocked({ upgrades: [{ players: 1, id: "Rhme", level: 0, availability: 0 }] as never[] }).length, 1, "an upgrade entry");
+  assert.equal(blocked({ techs: [{ players: 1, id: "hfoo" }] as never[] }).length, 1, "a techtree entry");
+  assert.equal(blocked({}, [...sloc, { id: "hfoo", player: 0 }]).length, 1, "a unit of Player 1");
+  assert.equal(blocked({}, [...sloc, { id: "ratf", player: 0 }]).length, 1, "an item of Player 1");
+  // Not reasons (the flag came back).
+  for (const f of [0x80, 0x100, 0x200, 0x20]) assert.deepEqual(blocked({ flags: base.flags | f }), [], `flag ${f.toString(16)} alone`);
+  assert.deepEqual(blocked({ players: [{ fixedStart: 2 }] }), [], "Race selectable");
+  assert.deepEqual(blocked({}, [...sloc, { id: "hfoo", player: 24 }]), [], "a neutral unit");
+  // The flag goes off for each, and only it.
+  assert.equal(meleeFlagsAfter({ ...base, flags: 0x2fc14 | 0x40 }, sloc), 0x2fc10 | 0x40);
+  assert.equal(meleeFlagsAfter({ ...base, flags: 0x2fc14 }, sloc), 0x2fc14);
 });

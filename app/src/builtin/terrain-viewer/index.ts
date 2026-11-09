@@ -40,7 +40,7 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, meleeFlagsAfter, placedText, splitOwners } from "../../lib/terrain/owner";
+import { isUprooted, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -73,7 +73,7 @@ import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHei
 import { keyOf as eventKey } from "../../lib/keys";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
-import { applyAllyPriorities, firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
 import { changeAll, changeAllOf, notOffered, propChangesOf, propSnapshot, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
@@ -441,18 +441,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const list = (doc[key] ??= []) as Placed[];
       splitOwners(list);
       before = key === "doodads" ? structuredClone(list) : [];
+      const startsBefore = key === "units" ? structuredClone(startLocations(list)) : null;
       await change({ name, key, doc, list, json: true, dirty: false });
       const files = [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: placedText(doc) }) }];
       // A w3i kept raw, missing or unreadable is left as it is: the placing doesn't depend on it.
-      const infoPath = "map/war3map.w3i.json", infoText = key === "units" && isItem ? await read(infoPath).catch(() => null) : null;
-      let info: { flags?: unknown } | null = null;
-      try { info = infoText === null ? null : JSON.parse(infoText) as { flags?: unknown }; } catch { /* left alone */ }
-      if (info && typeof info.flags === "number") {
-        const flags = info.flags, after = meleeFlagsAfter(flags, list, isItem!);
-        if (after !== flags) {
-          info.flags = after;
-          files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
-        }
+      const infoPath = "map/war3map.w3i.json", infoText = key === "units" ? await read(infoPath).catch(() => null) : null;
+      type Info = { flags?: unknown; players?: unknown; forces?: unknown };
+      let info: Info | null = null;
+      try { info = infoText === null ? null : JSON.parse(infoText) as Info; } catch { /* left alone */ }
+      if (info && typeof info.flags === "number" && Array.isArray(info.players) && Array.isArray(info.forces)) {
+        let changed = false;
+        // Placed, moved or removed start locations add, move or remove the map's players, as the terrain editor's
+        // save does, in the same edit (one undo step).
+        if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
+        // Placing can make a player own something: Melee goes off as the save would take it off.
+        const flags = info.flags as number, after = isItem ? meleeFlagsAfter(info as unknown as MeleeInfo, list) : flags;
+        if (after !== flags) { info.flags = after; changed = true; }
+        if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
       }
       return files;
     }, async () => {

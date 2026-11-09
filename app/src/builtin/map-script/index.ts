@@ -21,7 +21,7 @@ import { dayNightModels } from "../../lib/script/setup";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
-import { meleeFlagsAfter } from "../../lib/terrain/owner";
+import { meleeBlockers, meleeFlagsAfter, type MeleeInfo } from "../../lib/terrain/owner";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
@@ -159,16 +159,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return g.buildings.has(id) ? "building" : "unit";
     };
 
-    // As the World Editor does when saving. Only ever off: the game's maps don't say when it comes
-    // back. An open, changed Map Properties gets its turn when that's saved.
+    // As the World Editor does when saving. Only ever off (see meleeFlagsAfter). An open, changed Map Properties gets
+    // its turn when that's saved.
     const placed = (await json<{ units?: { id: string; player?: number }[] }>("map/war3mapUnits.doo"))?.units ?? [];
-    const flags = Number(info.flags), unmelee = meleeFlagsAfter(flags, placed, (id) => kindOf(id) === "item");
+    const meleeInfo = { ...info, flags: Number(info.flags) } as MeleeInfo;
+    const flags = meleeInfo.flags, unmelee = meleeFlagsAfter(meleeInfo, placed);
     if (unmelee !== flags && !w3.editors.isDirty(INFO_JSON)) {
       info.flags = unmelee;
       if (!look) {
         const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()?.root, path: INFO_JSON, text: JSON.stringify(info) });
         await w3.workspace.writeText(INFO_JSON, canonical);
-        out.append("war3map.w3i: not a melee map any more, players own units on it");
+        out.append(`war3map.w3i: not a melee map any more (as the World Editor's save makes it): ${meleeBlockers(meleeInfo, placed).join("; ")}`);
       }
     }
 
