@@ -4476,7 +4476,8 @@ async function triggersAndAi(page, found) {
 /** A map script changed by hand inside the functions the generator writes (main) isn't overwritten by the next save: it
  *  stays, a warning says so once per project, Show Difference shows it against what the map's data makes, and Replace
  *  makes a checkpoint first and then regenerates it. A project without the stamp (a fresh import) whose script is what
- *  the data makes gets the stamp when it opens, so its saves regenerate the script without a question. */
+ *  the data makes gets the stamp when it opens, so its saves regenerate the script without a question; also one that
+ *  differs only in the order of its placed units (the World Editor's order), when that first save changes the data. */
 async function scriptGuard(page, found) {
   const fail = (what) => found.push(`script guard: ${what}`);
   const k = await heightKit(page, "ScriptGuard");
@@ -4559,6 +4560,30 @@ async function scriptGuard(page, found) {
       await saveRegion("Fourth Region");
       if (!/gg_rct_Fourth_Region/.test(script()) || (await warnings()).length) fail(`after Replace a save didn't regenerate quietly: ${JSON.stringify(await warnings())}`);
     }
+
+    // ---- An unstamped script that differs only in the order of its placed objects (the World Editor's order) is stamped
+    //      on opening too: the first save that also changes the data (a region) regenerates it without a question --------
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: -512, y: -512, player: 1 }, { id: "hpea", x: 512, y: 512, player: 1 }], ignoreRoom: true });
+    await k.save();
+    await settle();
+    const placed = script();
+    const fn = placed.indexOf("function CreateUnitsForPlayer0 takes");
+    const fnEnd = fn < 0 ? -1 : placed.indexOf("\nendfunction", fn);
+    const body = fnEnd < 0 ? [] : placed.slice(fn, fnEnd).split("\n");
+    const creates = body.map((l, i) => (/^\s*set u = (?:Blz)?CreateUnit/.test(l) ? i : -1)).filter((i) => i >= 0);
+    if (creates.length !== 2) return fail(`the script places ${creates.length} units for player 1, not the 2 placed (control)`);
+    // The two blocks swapped: each runs from its CreateUnit line to the next one (or the function's end).
+    const first = body.slice(creates[0], creates[1]), second = body.slice(creates[1]);
+    const swapped = `${placed.slice(0, fn)}${[...body.slice(0, creates[0]), ...second, ...first].join("\n")}${placed.slice(fnEnd)}`;
+    if (swapped === placed || swapped.length !== placed.length) return fail("swapping the placed units changed nothing or the length (control)");
+    writeFileSync(join(k.root, "map", "war3map.j"), swapped);
+    rmSync(stampFile);
+    await page.evaluate(`window.__warns.length = 0`);
+    await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(k.root)})`);
+    await until("the stamp of the reopened project", () => existsSync(stampFile), 60000).catch(() => fail("a project whose script differs only in the order of its placed units got no stamp on opening"));
+    await settle();
+    await saveRegion("Fifth Region");
+    if (!/gg_rct_Fifth_Region/.test(script()) || (await warnings()).length) fail(`the first save of a script in another placing order didn't regenerate quietly: ${JSON.stringify(await warnings())}`);
   } finally {
     await page.evaluate(`(() => { for (const w of window.__warns ?? []) w.r(undefined); w3.window.showWarning = window.__sg.warn; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
@@ -4950,6 +4975,14 @@ async function editorExtras(page, found) {
       await omRefresh();
       await omFind("Om Region");
       await step("Delete Object (region)", () => menu(".om-row", "Om Region", "Delete Object"));
+      // The rows follow the terrain editor (the delete is unsaved there), also through undo and redo.
+      const omHas = (text) => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.textContent.includes(${JSON.stringify(text)}))`);
+      await page.evaluate(`w3.views.show("objectManager")`);
+      await until("the deleted region's row to go", async () => !(await omHas("Om Region")), 10000).catch(() => fail("after Delete Object (region) the Object Manager still lists the region"));
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await until("the region's row back", () => omHas("Om Region"), 10000).catch(() => fail("after undoing Delete Object (region) the Object Manager doesn't list the region"));
+      await page.evaluate(`w3.commands.execute("workbench.redo")`);
+      await until("the region's row gone again", async () => !(await omHas("Om Region")), 10000).catch(() => fail("after redoing Delete Object (region) the Object Manager still lists the region"));
       await k.save();
       if (regionNames().includes("Om Region")) fail(`Delete Object left the region: ${JSON.stringify(regionNames())}`);
     }
@@ -4962,14 +4995,14 @@ async function editorExtras(page, found) {
       await step("Open Regions Tab (group)", () => menu(".om-row", "Regions (", "Open Regions Tab"));
       await until("the Regions tab", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && document.querySelector(".terrain-tab.on")?.textContent === "Regions"`), 20000)
         .catch(() => fail("Open Regions Tab didn't bring the terrain editor's Regions tab to the front"));
-      // The sounds' group (one sound): the toggle (Collapse, as filtering opens groups by itself) and its editor.
+      // The sounds' group (one sound) while filtered: only its editor (filtering opens the groups, so no Expand or Collapse).
       await page.evaluate(`w3.views.show("objectManager")`);
       await omFind("Sounds and music (");
       await page.evaluate(`[...document.querySelectorAll(".om-row")].find((e) => e.textContent.includes("Sounds and music ("))?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 }))`);
       await sleep(300);
       const groupMenu = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
       await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
-      if (JSON.stringify(groupMenu) !== JSON.stringify(["Collapse", "Open Sound Editor"])) fail(`the sounds group's menu: ${JSON.stringify(groupMenu)}`);
+      if (JSON.stringify(groupMenu) !== JSON.stringify(["Open Sound Editor"])) fail(`the filtered sounds group's menu: ${JSON.stringify(groupMenu)}`);
     }
     await page.evaluate(`w3.editors.closeAll()`);
 
@@ -5131,11 +5164,14 @@ async function niceToHaves(page, found) {
     if (spill === "no tree" || spill.length) fail(`the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(spill)}`);
     /** The Category is Comment entry of the open menu: whether it says on (aria-checked) and draws the check mark. */
     const commentEntry = () => page.evaluate(`(() => { const e = [...document.querySelectorAll(".context-menu-item")].find((x) => x.textContent.startsWith("Category is Comment"));
-      return e ? { checked: e.getAttribute("aria-checked"), mark: getComputedStyle(e, "::before").content } : null; })()`);
+      if (!e) return null;
+      // Where each row's label begins: the same in every row, the on/off entry's whether on or off.
+      const starts = [...document.querySelectorAll(".context-menu-item")].map((x) => { const r = document.createRange(); r.selectNodeContents(x.firstChild); return Math.round(r.getBoundingClientRect().left); });
+      return { checked: e.getAttribute("aria-checked"), mark: getComputedStyle(e, "::before").content, aligned: new Set(starts).size === 1 }; })()`);
     await until("the Category is Comment item", () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith("Category is Comment"))`), 5000)
       .then(async () => {
         const off = await commentEntry();
-        if (off?.checked !== "false" || /✓/.test(off?.mark ?? "")) fail(`Category is Comment on an ordinary category shows ${JSON.stringify(off)}`);
+        if (off?.checked !== "false" || /✓/.test(off?.mark ?? "") || !off.aligned) fail(`Category is Comment on an ordinary category shows ${JSON.stringify(off)}`);
         await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith("Category is Comment")).click()`);
       }, () => fail("the category's menu has no Category is Comment"));
     await sleep(300);
@@ -5145,7 +5181,7 @@ async function niceToHaves(page, found) {
       r?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); })()`);
     await sleep(300);
     const on = await commentEntry();
-    if (on?.checked !== "true" || !/✓/.test(on?.mark ?? "")) fail(`Category is Comment on a comment category shows ${JSON.stringify(on)}`);
+    if (on?.checked !== "true" || !/✓/.test(on?.mark ?? "") || !on.aligned) fail(`Category is Comment on a comment category shows ${JSON.stringify(on)}`);
     await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
     // Unsaved triggers: Adjust Map String IDs refuses in words for the person; an AI tool hears to ask the user.
     const refusedForPerson = await run("w3.triggers.adjustStringIds", [[1, 10]]);
