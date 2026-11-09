@@ -182,7 +182,7 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
 function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
   const el = section(`Item tables (${info.itemTables.length})`,
     "Items dropped by units that use the table: one item is chosen from each set by its chance. A placed unit, building or item "
-      + "uses one in the terrain editor: Selection › Properties › Drops › Map item table.",
+      + "uses one in the terrain editor (Selection › Drops › Map item table) or in Scenario › Item Drops, which also shows where each table is used.",
     ...info.itemTables.map((t) => h("div.techtree-table", { "data-anchor": itemTableAnchor(t.number) },
       h("div.techtree-table-head", {},
         h("input.form-input", { value: t.name, onchange: (e: Event) => { t.name = (e.target as HTMLInputElement).value; ctx.changed(); } }),

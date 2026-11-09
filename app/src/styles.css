@@ -517,13 +517,73 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-prop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
 .terrain-props button { margin-top: 0; }
 .terrain-prop-check { display: inline-flex; align-items: center; gap: 4px; }
-.terrain-prop-set { border-left: 2px solid var(--border); padding-left: 6px; display: flex; flex-direction: column; gap: 2px; }
-.terrain-prop-sethead { display: flex; align-items: center; gap: 6px; }
-.terrain-prop-item { display: flex; align-items: center; gap: 4px; }
-.terrain-prop-chance { width: 52px; flex: 0 0 auto; }
 .terrain-prop-over { color: var(--error); }
-.terrain-prop-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 90px; }
-.terrain-prop-hint, .terrain-prop-link { padding-left: 90px; font-size: 11px; }
+/* Drops (dropsedit.ts): the Selection panel's block and the Item Drops tab's editor */
+.drops-line { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px; align-items: center; }
+.drops-line > select { min-width: 0; width: 100%; font-size: 12px; }
+.drops-line.single { grid-template-columns: minmax(0, 1fr); }
+.drops-label { font-size: 12px; }
+.drops-hint { font-size: 11px; }
+.drops-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.drops-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.drops-actions button { margin-top: 0; }
+.drops-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.drops-icon { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 3px; background: var(--bg-3); color: var(--fg-muted); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.drops-icon img { width: 100%; height: 100%; }
+.drops-name { overflow-wrap: anywhere; }
+.drops-set { display: flex; flex-direction: column; gap: 3px; border-left: 2px solid var(--border); padding: 2px 0 2px 8px; margin: 2px 0; }
+.drops-sethead { font-size: 12px; color: var(--fg-muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drops-sethead.over, .drops-total.over { color: var(--error); }
+.drops-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px 48px; gap: 6px; align-items: center; font-size: 12px; }
+.drops-row.nothing { color: var(--fg-muted); }
+.drops-chance { text-align: right; font-variant-numeric: tabular-nums; }
+.drops-bar { height: 6px; border-radius: 3px; background: var(--bg-3); overflow: hidden; display: block; }
+.drops-bar > span { display: block; height: 100%; background: var(--accent-2); }
+.drops-bar.nothing > span { background: var(--fg-muted); opacity: 0.5; }
+.drops-table { display: flex; flex-direction: column; gap: 2px; }
+.drops-table-head { font-size: 11px; }
+.drops-variant { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.drops-count { color: var(--fg-muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.drops-spacer { flex: 1 1 auto; }
+.terrain-drops { margin-bottom: 2px; }
+/* The wide editor of the Item Drops tab */
+.drops-editor { border: none; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.drops-editor .drops-line { grid-template-columns: 90px minmax(0, 360px); }
+.drops-editor .drops-row { grid-template-columns: minmax(0, 1fr) 64px 14px 120px 24px; font-size: 13px; }
+.drops-editor .drops-icon { width: 28px; height: 28px; }
+.drops-set.wide { border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; gap: 5px; background: var(--bg-2); }
+.drops-set.wide .drops-sethead { color: var(--fg); font-size: 13px; }
+.drops-set.wide .drops-bar { height: 8px; }
+.drops-chance-input { width: 100%; box-sizing: border-box; text-align: right; }
+.drops-total { font-variant-numeric: tabular-nums; color: var(--fg-muted); }
+.drops-variant-text { flex: 1 1 auto; min-width: 0; }
+/* The Item Drops tab (dropstab.ts) */
+.drops-tab { height: 100%; display: flex; flex-direction: column; min-height: 0; outline: none; }
+.drops-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.drops-head h2 { margin: 0; font-size: 16px; }
+.drops-search { width: 220px; }
+.drops-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(380px, 1fr) minmax(420px, 1.1fr); }
+.drops-list, .drops-pane { overflow: auto; padding: 8px 12px; min-height: 0; }
+.drops-list { border-right: 1px solid var(--border); }
+.drops-pane h3 { margin: 0; }
+.drops-pane-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.drops-pane-head .drops-icon { width: 40px; height: 40px; }
+.drops-group, .drops-table-card { border: 1px solid var(--border); border-radius: 4px; margin: 0 0 8px; background: var(--bg-2); }
+.drops-group.on { border-color: var(--accent-2); }
+.drops-group-head { display: flex; align-items: center; gap: 8px; padding: 5px 8px; flex-wrap: wrap; }
+.drops-group-head button { margin-top: 0; }
+.drops-obj { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.2fr) 24px; gap: 8px; align-items: center; padding: 3px 8px; cursor: pointer; font-size: 12px; border-top: 1px solid var(--border); }
+.drops-obj:hover { background: var(--bg-hover); }
+.drops-obj.on { background: color-mix(in srgb, var(--accent-2) 25%, transparent); }
+.drops-obj .drops-icon { width: 24px; height: 24px; }
+.drops-obj-name, .drops-obj-owner, .drops-obj-drops { overflow-wrap: anywhere; }
+.drops-obj button { margin-top: 0; }
+.drops-tables h3 { margin: 12px 0 6px; font-size: 14px; }
+.drops-table-card { padding-bottom: 6px; }
+.drops-table-card > .drops-table, .drops-table-card > .drops-users { padding: 0 10px; }
+.drops-users { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-bottom: 4px; }
+.drops-foot { padding: 4px 12px; border-top: 1px solid var(--border); font-size: 11px; }
+.drops-empty { padding: 16px; }
 .terrain-filter { width: 260px; font-family: var(--mono); font-size: 12px; }
 .terrain-tilemgr { flex-basis: 100%; display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; max-width: 640px; }
 .terrain-tilemgr-row { display: flex; gap: 8px; align-items: center; }
