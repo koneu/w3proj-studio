@@ -222,6 +222,18 @@ test("an old checkpoint that can't be deleted doesn't fail the new one; it's sai
   app.dispose();
 });
 
+test("checkpoints recovered from an older version's stray files (build/checkpoints/recovered) are never pruned", async () => {
+  const RECOVERED = "recovered\\Map 2019-01-01 10-00-00.w3x";
+  const app = fakeApp({ existing: [OLDEST, NEWER, RECOVERED], keep: 1 });
+  await app.commands.get("w3.checkpoints.create")!({ quiet: true });
+  assert.ok(app.disk.has(`${FOLDER}\\${RECOVERED}`), `the recovered checkpoint was deleted: ${app.log.join("\n")}`);
+  // Control: the checkpoints beyond the one kept go.
+  assert.ok(!app.disk.has(`${FOLDER}\\${OLDEST}`) && !app.disk.has(`${FOLDER}\\${NEWER}`), app.log.join("\n"));
+  // Nor are they offered as checkpoints to restore.
+  assert.deepEqual(((await app.tools.get("list_checkpoints")!({})) as { name: string }[]).map((c) => c.name).filter((n) => n.includes("2019")), []);
+  app.dispose();
+});
+
 test("a timer that fires early can't give two checkpoints the same name", async () => {
   const app = fakeApp();
   const real = globalThis.setTimeout;

@@ -5,6 +5,9 @@
 import type { OutputChannel, W3Api } from "../../extensions/api";
 import { isWindowsPath } from "../../lib/paths";
 
+/** Where stray checkpoints are moved (strays.rs RECOVERED; the checkpoints extension leaves what is in it alone). */
+const RECOVERED = "recovered";
+
 /** A stray file as the backend finds it (`project_strays`, app/src-tauri/src/strays.rs). */
 export interface Stray {
   path: string;
@@ -31,9 +34,10 @@ export function strayQuestion(strays: Stray[]): { message: string; actions: stri
   const rest = left ? ` ${plural(left, "file")} can't be moved (something else is there, or the name leads nowhere) and ${left === 1 ? "is" : "are"} left alone.` : "";
   const list = " The Project output lists them all.";
   if (!moves && !copies) return { message: `${what}${rest}${list}`, actions: ["Show list"] };
-  // Moved checkpoints are checkpoints like any other: the oldest beyond the number kept go with the next one.
-  const checkpoints = strays.some((s) => s.kind === "move" && s.rel.startsWith("build/checkpoints/"))
-    ? " Checkpoints moved into build/checkpoints count toward the number kept (checkpoints.keep): the oldest beyond it are removed with the next checkpoint." : "";
+  // Moved checkpoints go to a folder of their own (strays.rs), which pruning leaves alone (checkpoints.ts newestFirst).
+  const folder = `build/checkpoints/${RECOVERED}/`;
+  const checkpoints = strays.some((s) => s.kind === "move" && s.rel.startsWith(folder))
+    ? ` Checkpoints go to ${folder.slice(0, -1)}, which doesn't count toward the number kept (checkpoints.keep): nothing removes them, delete them yourself once you don't need them.` : "";
   const fix = moves && copies ? "Move and delete copies" : moves ? "Move them" : "Delete copies";
   return { message: `${what} ${can[0].toUpperCase()}${can.slice(1)}.${rest}${checkpoints}${list}`, actions: [fix, "Leave them", "Show list"] };
 }

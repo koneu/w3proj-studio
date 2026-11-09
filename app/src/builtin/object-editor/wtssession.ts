@@ -199,6 +199,21 @@ export function mapFolderGone(x: { folderExists: boolean; isNew: boolean; hasWts
   return !x.folderExists && (!x.isNew || x.hasWts);
 }
 
+/** Why a save must stop before anything is written, or null to go on: the map folder is gone (see `mapFolderGone`),
+ *  or whether it is there couldn't be checked. A folder that can't be checked is never taken for present: the
+ *  save would write into a place it knows nothing about. */
+export async function mapFolderStop(folderExists: () => Promise<boolean>, x: { isNew: boolean; hasWts: boolean }): Promise<string | null> {
+  let there: boolean;
+  try {
+    there = await folderExists();
+  } catch (e) {
+    return `Whether the map folder is there couldn't be checked (${e instanceof Error ? e.message : String(e)}), so nothing was saved. Save again once it can be.`;
+  }
+  return mapFolderGone({ folderExists: there, ...x })
+    ? "The map folder is missing, so nothing was saved. Restore it (a checkpoint or the packed map has the files) and save again."
+    : null;
+}
+
 /** Whether the editor has unsaved changes: the object text differs from the text last written,
  *  or strings are waiting for war3map.wts. */
 export function isDirtyNow(current: string, saved: string, wtsDirty: boolean): boolean {

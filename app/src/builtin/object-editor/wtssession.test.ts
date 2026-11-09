@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StringTable } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, mapFolderGone, findPackedMap, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave } from "./wtssession";
+import { WtsSession, fileIsMissing, mapFolderGone, mapFolderStop, findPackedMap, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave } from "./wtssession";
 
 // The editor only changes strings that are already in the file (it needs the number to be in the
 // table), so it never adds a string and numbers can't collide: neither is covered here.
@@ -403,6 +403,17 @@ test("saving stops when the map folder is gone, unless the file is new in a proj
   assert.equal(mapFolderGone({ folderExists: false, isNew: true, hasWts: false }), false);
   assert.equal(mapFolderGone({ folderExists: true, isNew: true, hasWts: true }), false);
   assert.equal(mapFolderGone({ folderExists: true, isNew: false, hasWts: true }), false);
+});
+
+test("saving stops when whether the map folder is there can't be checked: never taken for present", async () => {
+  const cant = () => Promise.reject("map can't be checked: Permission denied (os error 13)");
+  for (const x of [{ isNew: false, hasWts: true }, { isNew: true, hasWts: false }]) {
+    assert.match((await mapFolderStop(cant, x)) ?? "", /couldn't be checked \(map can't be checked: Permission denied/, JSON.stringify(x));
+  }
+  assert.match((await mapFolderStop(async () => false, { isNew: false, hasWts: false })) ?? "", /map folder is missing/);
+  // Control: a folder that is there, or a new file in a project that never had one, saves.
+  assert.equal(await mapFolderStop(async () => true, { isNew: false, hasWts: true }), null);
+  assert.equal(await mapFolderStop(async () => false, { isNew: true, hasWts: false }), null);
 });
 
 test("runSave: an edit typed during the awaits stays dirty; saved is the text taken up front", async () => {

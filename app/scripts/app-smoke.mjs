@@ -2070,36 +2070,6 @@ async function resizeUndo(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
-/** The canvas of the active tab's view (an expression in the page). */
-const SHOWN_CANVAS = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
-
-/** Counts frames per canvas from now on (`window.__glFrames`): a frame starts with its clear. */
-async function countFrames(page) {
-  await page.evaluate(`(() => {
-    if (window.__glFrames) return;
-    const P = WebGL2RenderingContext.prototype, clear = P.clear;
-    window.__glFrames = new WeakMap();
-    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
-  })()`);
-}
-
-/** Frames the shown view has drawn since countFrames (-1 without a view). */
-function framesDrawn(page) {
-  return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
-}
-
-/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
- *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
-async function settledMapPicture(page, still = 100, tries = 8) {
-  let prev = await mapPicture(page);
-  for (let i = 1; i < tries; i++) {
-    const next = await mapPicture(page);
-    if ((await pixelsApart(page, prev, next)) <= still) return next;
-    prev = next;
-  }
-  return prev;
-}
-
 /** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
  *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
  *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
@@ -2108,7 +2078,8 @@ async function settledMapPicture(page, still = 100, tries = 8) {
  *     hides the other's outside change, and opening the project says they can't both go into the map archive.
  *  4. On Linux files an older version left with a `\` in their name (next to the project) are found when it opens, left
  *     alone when the user says so, and otherwise moved where they belong (a copy of what is there is deleted, a file that
- *     differs from what is there stays). */
+ *     differs from what is there stays). Checkpoints go to build/checkpoints/recovered, which the next checkpoint's
+ *     pruning leaves alone. */
 async function dataSafety(page, found) {
   const fail = (what) => found.push(`data safety: ${what}`);
   const k = await heightKit(page, "DataSafety");
@@ -2212,10 +2183,13 @@ async function dataSafety(page, found) {
     const name = basename(root), parent = dirname(root);
     const stray = (file) => join(parent, [name, "build", "checkpoints", file].join(BS));
     const checkpoints = join(root, "build", "checkpoints");
-    mkdirSync(checkpoints, { recursive: true });
-    writeFileSync(join(checkpoints, "copy.w3x"), "same");
-    writeFileSync(join(checkpoints, "clash.w3x"), "them");
-    writeFileSync(stray("moved.w3x"), "stray");
+    // Stray checkpoints go to build/checkpoints/recovered, where the number kept doesn't prune them.
+    const recovered = join(checkpoints, "recovered");
+    const oldCheckpoint = `${name} 2020-01-01 10-00-00.w3x`;
+    mkdirSync(recovered, { recursive: true });
+    writeFileSync(join(recovered, "copy.w3x"), "same");
+    writeFileSync(join(recovered, "clash.w3x"), "them");
+    writeFileSync(stray(oldCheckpoint), "stray");
     writeFileSync(stray("copy.w3x"), "same");
     writeFileSync(stray("clash.w3x"), "mine");
     const strays = () => readdirSync(parent).filter((f) => f.includes(BS)).sort();
@@ -2233,20 +2207,148 @@ async function dataSafety(page, found) {
     const question = said.find((m) => m.includes("left by an older version on Linux"));
     if (!question) fail(`opening a project with stray files said ${JSON.stringify(said)}`);
     else if (!/3 files/.test(question) || !/1 file can be moved/.test(question) || !/1 file is a copy/.test(question) || !/1 file can't be moved/.test(question)) fail(`the question about stray files: ${question}`);
+    else if (!/Checkpoints go to build\/checkpoints\/recovered, which doesn't count toward the number kept/.test(question)) fail(`the question doesn't say where checkpoints go: ${question}`);
     await sleep(500);
     if (strays().length !== 3) fail(`"Leave them" changed the stray files: ${strays().join(", ")}`);
     await answer("Move and delete copies");
     await openAgain();
-    await until("the stray file moved", () => existsSync(join(checkpoints, "moved.w3x")), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints"));
+    await until("the stray file moved", () => existsSync(join(recovered, oldCheckpoint)), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints/recovered"));
     await sleep(500);
-    if (read(join(checkpoints, "moved.w3x")) !== "stray") fail("the moved checkpoint differs");
-    if (read(join(checkpoints, "copy.w3x")) !== "same" || read(join(checkpoints, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
+    if (read(join(recovered, oldCheckpoint)) !== "stray") fail("the moved checkpoint differs");
+    if (existsSync(join(checkpoints, oldCheckpoint))) fail("the stray checkpoint went among the checkpoints that are pruned");
+    if (read(join(recovered, "copy.w3x")) !== "same" || read(join(recovered, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
     if (JSON.stringify(strays()) !== JSON.stringify([[name, "build", "checkpoints", "clash.w3x"].join(BS)])) fail(`after moving, the stray files left are ${JSON.stringify(strays())}`);
     if (read(stray("clash.w3x")) !== "mine") fail("the stray that differs from what is there was changed");
+    // The next checkpoint with one kept: an old one in build/checkpoints goes (control), the recovered one stays.
+    const oldKept = `${name} 2020-01-02 10-00-00.w3x`;
+    writeFileSync(join(checkpoints, oldKept), "old");
+    // Packing refuses two names that differ only in case (section 3).
+    rmSync(join(root, "map", "notes.txt"), { force: true });
+    await page.evaluate(`w3.workspace.refresh()`);
+    const keep = await page.evaluate(`w3.settings.inspect("checkpoints.keep").user ?? null`);
+    try {
+      await page.evaluate(`w3.settings.set("checkpoints.keep", 1)`);
+      await page.evaluate(`w3.commands.execute("w3.checkpoints.create", { quiet: true })`);
+    } finally {
+      await page.evaluate(`w3.settings.set("checkpoints.keep", ${keep === null ? "undefined" : JSON.stringify(keep)})`);
+    }
+    if (existsSync(join(checkpoints, oldKept))) fail("with checkpoints.keep = 1 the old checkpoint wasn't pruned (control)");
+    if (read(join(recovered, oldCheckpoint)) !== "stray") fail("the next checkpoint pruned the recovered stray checkpoint");
   } finally {
     if (existsSync(locked)) { chmodSync(locked, 0o755); rmSync(locked, { recursive: true, force: true }); }
     await page.evaluate(`(() => { if (window.__dataSafetyWarn) w3.window.showWarning = window.__dataSafetyWarn; window.__dataSafetyWarn = null; })()`);
   }
+}
+
+/** Files the app reads and then writes again, and paths it must never take for others:
+ *  1. A settings.json that is there but isn't JSON (a comment, a trailing comma) is said and never written over; a change
+ *     lasts for the session. Once it reads again, changes are written as before. The same for .w3proj/settings.json.
+ *  2. On Linux a project file with a `\` in its name (an older version's stray) isn't listed, and never as the path its
+ *     name looks like.
+ *  3. On Linux two projects whose folders differ only in case are two entries of the recent list. */
+async function configSafety(page, found) {
+  const fail = (what) => found.push(`config safety: ${what}`);
+  const k = await heightKit(page, "ConfigSafety");
+  const { root } = k;
+  const BS = String.fromCharCode(92);
+  const userFile = await page.evaluate(`w3Workbench.settings.settingsPath()`);
+  const had = existsSync(userFile) ? readFileSync(userFile, "utf8") : null;
+  const projectFile = join(root, ".w3proj", "settings.json");
+  const strayFile = join(root, "map", `sub${BS}x.txt`);
+  const twin = join(dirname(root), basename(root).toLowerCase());
+  const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const openProject = async (p) => {
+    await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(p)})`);
+    await until(`the project ${p}`, () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(p)}`), 20000);
+    await sleep(500);
+  };
+  try {
+    // ---- 1a. The user's settings.json with a comment and a trailing comma ----
+    const broken = `{\n  // a comment\n  "smoke.configSafety": "theirs",\n}\n`;
+    writeFileSync(userFile, broken);
+    await k.clearToasts();
+    await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`);
+    if (!/is there, but it isn't valid JSON/.test(await k.toasts())) fail(`reading a settings.json that isn't JSON said ${JSON.stringify(await k.toasts())}`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", "mine")`);
+    if (read(userFile) !== broken) fail(`a change wrote over the settings.json it couldn't read: ${JSON.stringify(read(userFile))}`);
+    if ((await k.setting("smoke.configSafety")) !== "mine") fail("the change didn't hold for the session");
+    if (!/changed for this session only/.test(await k.toasts())) fail(`a change to an unreadable settings.json said ${JSON.stringify(await k.toasts())}`);
+    // Control: readable again (as a save in the text editor loads it), a change is written.
+    writeFileSync(userFile, had ?? "{}\n");
+    await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", "written")`);
+    if (JSON.parse(read(userFile) ?? "{}")["smoke.configSafety"] !== "written") fail(`a readable settings.json wasn't written: ${JSON.stringify(read(userFile))}`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", undefined)`);
+
+    // ---- 1b. The project's settings file, said when the project opens ----
+    const theirs = `{ "terrain.fog": tru }\n`;
+    mkdirSync(dirname(projectFile), { recursive: true });
+    writeFileSync(projectFile, theirs);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.project.close")`);
+    await k.clearToasts();
+    await openProject(root);
+    if (!/settings\.json .*is there, but it isn't valid JSON/.test(await k.toasts())) fail(`opening a project with a broken .w3proj/settings.json said ${JSON.stringify(await k.toasts())}`);
+    await page.evaluate(`w3.settings.set("smoke.configSafety", "mine", "project")`);
+    if (read(projectFile) !== theirs) fail(`a project setting wrote over the .w3proj/settings.json it couldn't read: ${JSON.stringify(read(projectFile))}`);
+    rmSync(projectFile, { force: true });
+    await page.evaluate(`w3Workbench.settings.loadProject(${JSON.stringify(root)})`);
+
+    if (process.platform === "win32") return;
+    // ---- 2. A name with a `\` isn't listed as a path ----
+    writeFileSync(strayFile, "stray");
+    await page.evaluate(`w3.workspace.refresh()`);
+    const listed = await page.evaluate(`w3.workspace.files().map((f) => f.path).filter((p) => p.includes("x.txt"))`);
+    if (listed.length) fail(`a file named sub${BS}x.txt is listed as ${JSON.stringify(listed)}`);
+    const folders = await page.evaluate(`w3.workspace.folders().filter((p) => p.includes("sub"))`);
+    if (folders.length) fail(`a file named sub${BS}x.txt made the folders ${JSON.stringify(folders)}`);
+    rmSync(strayFile, { force: true });
+
+    // ---- 3. Two projects whose folders differ only in case ----
+    rmSync(twin, { recursive: true, force: true });
+    cpSync(root, twin, { recursive: true });
+    await openProject(twin);
+    await openProject(root);
+    await page.evaluate(`w3Workbench.workspace.recentsTidied()`);
+    const recent = await k.setting("recentProjects");
+    if (!recent?.includes(root) || !recent.includes(twin)) fail(`after opening ${basename(twin)} and ${basename(root)} the recent list is ${JSON.stringify(recent)}`);
+  } finally {
+    rmSync(strayFile, { force: true });
+    if (twin !== root) rmSync(twin, { recursive: true, force: true });
+    // The user's file as it was (the smoke test's own settings folder).
+    if (had === null) rmSync(userFile, { force: true }); else writeFileSync(userFile, had);
+    await page.evaluate(`w3Workbench.settings.load(${JSON.stringify(userFile)})`).catch(() => {});
+  }
+}
+
+/** The canvas of the active tab's view (an expression in the page). */
+const SHOWN_CANVAS = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+
+/** Counts frames per canvas from now on (`window.__glFrames`): a frame starts with its clear. */
+async function countFrames(page) {
+  await page.evaluate(`(() => {
+    if (window.__glFrames) return;
+    const P = WebGL2RenderingContext.prototype, clear = P.clear;
+    window.__glFrames = new WeakMap();
+    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
+  })()`);
+}
+
+/** Frames the shown view has drawn since countFrames (-1 without a view). */
+function framesDrawn(page) {
+  return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
+}
+
+/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
+ *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
+async function settledMapPicture(page, still = 100, tries = 8) {
+  let prev = await mapPicture(page);
+  for (let i = 1; i < tries; i++) {
+    const next = await mapPicture(page);
+    if ((await pixelsApart(page, prev, next)) <= still) return next;
+    prev = next;
+  }
+  return prev;
 }
 
 /** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
@@ -5740,7 +5842,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, configSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5837,6 +5939,7 @@ async function run() {
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
+    await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
