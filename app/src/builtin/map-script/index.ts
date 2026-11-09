@@ -3,7 +3,7 @@ import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesServ
 import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
-import { KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP, scriptDecision, scriptHash } from "../../lib/script/guard";
+import { KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash } from "../../lib/script/guard";
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -325,8 +325,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   });
 
   /** A project whose script isn't stamped as this app's (a fresh import, a sync from the World Editor, a project from
-   *  before the stamp): if the script is exactly what the map's data makes, it gets the stamp, so the next save
-   *  regenerates it without a question. Writes nothing else; a failure only leaves the stamp out. */
+   *  before the stamp): if the script is what the map's data makes, but perhaps for the order of its placed objects,
+   *  it gets the stamp, so the next save regenerates it without a question (also when that save changes the data, which
+   *  the order check alone wouldn't see through). Writes nothing else; a failure only leaves the stamp out. */
   const adopt = (why: string): Promise<void> => {
     running = running.catch(() => true).then(async () => {
       try {
@@ -339,10 +340,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         }
         const { path, text, vjass } = await generate(true);
         if (vjass || w3.workspace.project()?.root !== root) return true;
-        if ((await readScript(path)) !== text) return true;
-        await w3.workspace.writeText(STAMP, `${scriptHash(text)}
+        const current = await readScript(path);
+        if (typeof current !== "string" || !sameButPlacingOrder(current, text) || w3.workspace.project()?.root !== root) return true;
+        // The stamp is the hash of the script as it is on disk: one that differs only in the order of its placed objects
+        // (the World Editor's order) is replaced by the next save without a question too.
+        await w3.workspace.writeText(STAMP, `${scriptHash(current)}
 `);
-        out.append(`${why}: ${path.slice(4)} is what the map's data makes, so saves regenerate it`);
+        out.append(`${why}: ${path.slice(4)} is what the map's data makes${current === text ? "" : " (but for the order of its placed objects)"}, so saves regenerate it`);
       } catch (e) {
         out.append(`${why}: couldn't compare the map script with what the map's data makes: ${e instanceof Error ? e.message : String(e)}`);
       }

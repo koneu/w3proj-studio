@@ -4,7 +4,7 @@
 // trigger editor, sound editor, import manager).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainService } from "../../extensions/services";
 import { loadKind } from "../../lib/objects/metadata";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
@@ -15,6 +15,8 @@ import { h } from "../../workbench/dom";
 import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
 
 const VIEW = "w3.objectManager.tree";
+/** The Terrain Viewer's editor id. */
+const TERRAIN_EDITOR = "w3.terrainViewer";
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -53,7 +55,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       error = "";
       let failed = "", result: { tree: TreeNode[]; refs: Map<string, Set<string>>; users: typeof users; unusedCount: number; summary: [string, string][] } | null = null;
       try {
-        const c = await contents(w3);
+        const c = await contents(w3, terrain);
         const tree = buildTree(c);
         const refs = c.triggers ? triggerRefs(c.triggers) : new Map();
         const customIds = new Set(c.custom.flatMap((k) => k.ids.map((o) => o.id)));
@@ -85,6 +87,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     timer = setTimeout(() => void load(), 1000);
   };
 
+  /** The terrain editor's service, once one of its editors was in front (asked for only then: getting it starts the
+   *  Terrain Viewer). Its regions and cameras, unsaved ones included, are the rows'; its edits rebuild them. */
+  let terrain: TerrainService | null = null, stopEdits: { dispose(): void } | null = null;
+  /** Whether a terrain editor was open at the last tab change. */
+  let terrainOpen = false, disposed = false;
+  const hookTerrain = () => {
+    if (terrain) return;
+    void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((t) => {
+      if (disposed || terrain) return;
+      terrain = t;
+      // An edit, undo or redo that is neither ground nor placed objects: a region, a camera.
+      stopEdits = t.onDidEdit((what) => { if (!what.terrain && !what.objects) reload(); });
+      terrainOpen = true;
+      reload();
+    }, () => {});
+  };
+
   const go = async (t: Target) => {
     switch (t.kind) {
       case "object": return w3.commands.execute("w3.objectEditor.open", t.ext, t.id);
@@ -109,6 +128,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!to || to === n.label || !guard.owns(rowsRoot, rootNow())) return;
       }
       await w3.commands.execute("w3.terrain.groupItemAction", n.item.group, n.item.name, action, to);
+      // The rows follow the terrain editor's lists, which hold the change (unsaved).
+      hookTerrain();
+      reload();
       return;
     }
     if (!t) return;
@@ -127,12 +149,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
   };
   /** The entry's menu: the World Editor's Object Manager commands that fit it; a group's Expand or Collapse and the
-   *  editor of its entries. `toggle` opens or closes the row. */
-  const menuFor = (n: TreeNode, rowsRoot: string | null, isOpen: boolean, toggle: () => void): MenuItem[] => {
+   *  editor of its entries. `toggle` opens or closes the row; `filtering`: a filter opened the groups (no toggle then). */
+  const menuFor = (n: TreeNode, rowsRoot: string | null, isOpen: boolean, filtering: boolean, toggle: () => void): MenuItem[] => {
     const a = nodeActions(n);
     const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String((e as Error).message ?? e))); };
     const items: MenuItem[] = [];
-    for (const g of groupActions(n, isOpen)) {
+    for (const g of groupActions(n, isOpen, filtering)) {
       if ("toggle" in g) items.push({ label: g.label, run: toggle });
       else items.push({ label: g.label, run: run(async () => { if (guard.owns(rowsRoot, rootNow())) await w3.commands.execute(g.opens.command, ...g.opens.args); }) });
     }
@@ -153,6 +175,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.workspace.onDidChange(reload),
     w3.workspace.onDidSave(reload),
+    // Regions and cameras come from the open terrain editor (unsaved changes included): a Delete Object, Rename Object
+    // or undo there changes the rows, and so does closing it (the saved files are what there is then).
+    w3.editors.onDidChangeActive((active) => {
+      if (active?.editor === TERRAIN_EDITOR) hookTerrain();
+      const t = terrain;
+      if (!t) return;
+      void t.listedObjects().then((l) => {
+        const has = l !== null;
+        if (has !== terrainOpen && !disposed) { terrainOpen = has; reload(); }
+      }, () => {});
+    }),
     w3.views.register(VIEW, {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its objects.")); return; }
@@ -189,7 +222,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   selected = key;
                   showInfo(n);
                   draw();
-                  const items = menuFor(n, rowsRoot, isOpen, () => { if (open.has(key)) open.delete(key); else open.add(key); draw(); });
+                  const items = menuFor(n, rowsRoot, isOpen, filtering(), () => { if (open.has(key)) open.delete(key); else open.add(key); draw(); });
                   if (items.length) w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
                 },
               },
@@ -233,12 +266,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },
     }),
-    { dispose: () => clearTimeout(timer) },
+    { dispose: () => { disposed = true; clearTimeout(timer); stopEdits?.dispose(); } },
   );
 }
 
 /** Reads the map's files (JSON forms) and the game's object data for names and kinds. */
-async function contents(w3: W3Api): Promise<MapContents> {
+async function contents(w3: W3Api, terrain: TerrainService | null): Promise<MapContents> {
   const root = w3.workspace.project()!.root;
   const json = async <T>(name: string): Promise<T | null> => {
     const text = await w3.workspace.readText(`map/${name}.json`).catch(() => null)
@@ -274,11 +307,13 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const script = await w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => "");
   const w3i = await json<{ name?: string; playableWidth?: number; playableHeight?: number; tileset?: string }>("war3map.w3i");
   const strings = new StringTable(await w3.workspace.readText("map/war3map.wts").catch(() => ""));
+  // Regions and cameras as the open terrain editor holds them (a Delete Object there is unsaved); else as saved.
+  const live = await terrain?.listedObjects().catch(() => null);
   return {
     info: w3i ? { name: strings.resolve(String(w3i.name ?? "")), playableWidth: Number(w3i.playableWidth ?? 0), playableHeight: Number(w3i.playableHeight ?? 0), tileset: String(w3i.tileset ?? "") } : null,
     units, doodads, kindOf, nameOf: (id) => names.get(id) ?? id, custom,
-    regions: (await json<{ regions: MapContents["regions"] }>("war3map.w3r"))?.regions ?? [],
-    cameras: (await json<{ cameras: MapContents["cameras"] }>("war3map.w3c"))?.cameras ?? [],
+    regions: (live?.regions as MapContents["regions"] | null | undefined) ?? (await json<{ regions: MapContents["regions"] }>("war3map.w3r"))?.regions ?? [],
+    cameras: (live?.cameras as MapContents["cameras"] | null | undefined) ?? (await json<{ cameras: MapContents["cameras"] }>("war3map.w3c"))?.cameras ?? [],
     sounds: (await json<{ sounds: MapContents["sounds"] }>("war3map.w3s"))?.sounds ?? [],
     triggers, imports: (imp?.files ?? []).map((f) => f.path), objects: objectData,
     // Item drops of placed objects and the map's item tables and techtree name ids too.

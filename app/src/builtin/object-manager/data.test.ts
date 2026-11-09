@@ -144,6 +144,9 @@ test("Object Manager groups: Expand or Collapse, and the editor of their entries
   const labels = (n: Node, open = false) => groupActions(n, open).map((a) => a.label);
   assert.deepEqual(labels(group("Units")), ["Expand", "Open Object Editor"]);
   assert.deepEqual(labels(group("Units"), true), ["Collapse", "Open Object Editor"]);
+  // While a filter is on the groups open by themselves: no toggle that would do nothing, open or not.
+  assert.deepEqual(groupActions(group("Units"), true, true).map((a) => a.label), ["Open Object Editor"]);
+  assert.deepEqual(groupActions(group("Units"), false, true).map((a) => a.label), ["Open Object Editor"]);
   assert.deepEqual(group("Units").opens, { label: "Open Object Editor", command: "w3.objectEditor.open", args: ["w3u"] });
   assert.deepEqual(group("Regions").opens, { label: "Open Regions Tab", command: "w3.terrain.groupItemAction", args: ["regions", null, "select"] });
   assert.deepEqual(group("Cameras").opens?.args, ["cameras", null, "select"]);

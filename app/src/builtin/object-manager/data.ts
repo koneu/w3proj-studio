@@ -55,10 +55,11 @@ export interface ListItem { group: "regions" | "cameras"; name: string }
 /** A group row's "Open …" entry: the editor its entries belong to, by command. */
 export interface GroupOpen { label: string; command: string; args: unknown[] }
 
-/** A group row's menu (a row with entries under it): Expand or Collapse, and Open … where its entries have an editor. */
-export function groupActions(n: Node, isOpen: boolean): ({ label: string; toggle: true } | { label: string; opens: GroupOpen })[] {
+/** A group row's menu (a row with entries under it): Expand or Collapse, and Open … where its entries have an editor.
+ *  `filtering`: a filter is on, which opens the groups by itself, so there is nothing to expand or collapse. */
+export function groupActions(n: Node, isOpen: boolean, filtering = false): ({ label: string; toggle: true } | { label: string; opens: GroupOpen })[] {
   if (!n.children?.length && !n.opens) return [];
-  return [...(n.children?.length ? [{ label: isOpen ? "Collapse" : "Expand", toggle: true as const }] : []), ...(n.opens ? [{ label: n.opens.label, opens: n.opens }] : [])];
+  return [...(n.children?.length && !filtering ? [{ label: isOpen ? "Collapse" : "Expand", toggle: true as const }] : []), ...(n.opens ? [{ label: n.opens.label, opens: n.opens }] : [])];
 }
 
 export interface Node {
