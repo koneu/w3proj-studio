@@ -68,6 +68,13 @@ export interface TerrainService {
   /** The open terrain editor's placements as they are now (unsaved ones included), as in
    *  war3mapUnits.doo / war3map.doo JSON; null when no terrain editor is open. */
   placedObjects(): { units: unknown[]; doodads: unknown[] } | null;
+  /** The open terrain editor's regions and cameras as its Regions and Cameras tabs hold them now (unsaved ones
+   *  included), as in war3map.w3r / war3map.w3c JSON; null when no terrain editor is open, a list null when its tab
+   *  isn't there (then the saved file is what there is). */
+  listedObjects(): Promise<{ regions: readonly unknown[] | null; cameras: readonly unknown[] | null } | null>;
+  /** After every edit, undo and redo in the open terrain editor (what it changed: the ground, placed objects, or
+   *  neither: a region, a camera, …). */
+  onDidEdit(listener: (what: { terrain: boolean; objects: boolean }) => void): { dispose(): void };
 }
 
 export const TERRAIN_SERVICE = "w3.terrain";

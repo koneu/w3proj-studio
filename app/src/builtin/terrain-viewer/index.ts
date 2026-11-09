@@ -1582,8 +1582,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Tool groups of other extensions, by group id. */
         const groupInsts = new Map<string, TerrainToolGroupInstance>();
         const notifyGroups = (e: Edit) => { for (const g of groupInsts.values()) g.changed?.({ terrain: e.terrain, objects: e.objects }); };
+        /** The regions and cameras as the Regions and Cameras tabs hold them (unsaved ones included), for other modules
+         *  (TerrainService.listedObjects): a list is null when its tab isn't there. */
+        const liveLists = async () => {
+          const r = groupInsts.get("regions"), c = groupInsts.get("cameras");
+          return { regions: r?.regionObjects ? [...await r.regionObjects()] : null, cameras: c?.cameraObjects ? [...await c.cameraObjects()] : null };
+        };
         const changed = (e: Edit) => {
           notifyGroups(e);
+          if (toolGroups.liveLists === liveLists) toolGroups.edited({ terrain: e.terrain, objects: e.objects });
           minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
           if (e.terrain && areaPanel) void showAreaPanel();
@@ -3796,6 +3803,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // However the pick ends (click, Esc, Cancel, another pick), the ring goes.
         const stopPickRing = toolGroups.onChange(() => { if (!toolGroups.picking) showPickTarget(null); });
         toolGroups.livePlacements = live;
+        toolGroups.liveLists = liveLists;
         const look = (x: number, y: number, ref?: PlacedRef) => {
           renderer.target = [x, y, heightAt(terrain, x, y)];
           // Normal selection (side panel, keys); no undo step, nothing dirty. Models may still be
@@ -4795,6 +4803,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPick();
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
+            if (toolGroups.liveLists === liveLists) toolGroups.liveLists = null;
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);

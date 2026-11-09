@@ -73,6 +73,26 @@ export class TerrainToolRegistry implements TerrainService {
 
   placedObjects() { return this.livePlacements?.() ?? null; }
 
+  /** Set by the open terrain editor: its regions and cameras as its tabs hold them. */
+  liveLists: (() => Promise<{ regions: readonly unknown[] | null; cameras: readonly unknown[] | null }>) | null = null;
+
+  listedObjects() { return this.liveLists?.() ?? Promise.resolve(null); }
+
+  private editListeners = new Set<(what: { terrain: boolean; objects: boolean }) => void>();
+
+  onDidEdit(listener: (what: { terrain: boolean; objects: boolean }) => void) {
+    this.editListeners.add(listener);
+    return { dispose: () => { this.editListeners.delete(listener); } };
+  }
+
+  /** Called by the open terrain editor after each edit, undo and redo: tells the onDidEdit listeners (one that throws
+   *  doesn't stop the others or the edit). */
+  edited(what: { terrain: boolean; objects: boolean }) {
+    for (const l of [...this.editListeners]) {
+      try { l(what); } catch (e) { console.error(e); }
+    }
+  }
+
   /** Set by the open terrain editor: moves its camera to a point. */
   readonly look = new Map<string, (x: number, y: number, ref?: PlacedRef) => void>();
   /** Set by each open terrain editor, by its file: Reset Texture Variations, as one undo step; false when nothing changed. */
