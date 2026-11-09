@@ -10,6 +10,7 @@ import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type Te
 import { heightAt } from "../../lib/terrain/w3e";
 import { CAMERA_CELL, cameraColors, cameraEye, type CameraLook } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
+import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
 
 const FILE = "map/war3map.w3c";
@@ -75,12 +76,15 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Looking through a camera: the markers are hidden until the next click on the map. */
   let previewing = false;
 
+  /** The names as saved, for the gg_cam_ references in the triggers of cameras renamed since. */
+  const names = new SavedNames<Camera>();
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.cameras ??= [];
+    names.saved(doc.cameras);
   };
   const load = read().catch((e) => w3.window.showError(`Cameras: ${(e as Error).message ?? e}`));
 
@@ -131,7 +135,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   };
   /** Changes one camera (by copy) as an undo step. */
   const update = (c: Camera, change: Partial<Camera>) => {
-    const copy = { ...structuredClone(c), ...change };
+    const copy = names.copy(c, { ...structuredClone(c), ...change });
     commit(doc.cameras, doc.cameras.map((x) => (x === c ? copy : x)), copy);
   };
   const uniqueName = () => {
@@ -271,13 +275,18 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       }
       const root = w3.workspace.project()!.root;
       const text = JSON.stringify({ format: "w3proj.cameras/1", ...doc });
+      // The renames this save makes, taken with the text it writes.
+      const saved = doc.cameras, renamed = names.renamed(saved);
       if (asJson) {
         const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${FILE}.json`, text });
         await w3.workspace.writeText(`${FILE}.json`, canonical);
       } else {
         await w3.backend.invoke("codec_write", { root, path: FILE, text });
       }
-      unsaved = false;
+      if (doc.cameras === saved) unsaved = false;
+      names.saved(saved);
+      // The triggers follow the saved names (GUI parameters; script text after a question).
+      if (renamed.length) await renameInTriggers(w3, "cam", renamed, "cameras");
     },
     async reloadFile(path) {
       if (!path.startsWith(FILE)) return false;

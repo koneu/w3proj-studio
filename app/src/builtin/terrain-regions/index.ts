@@ -7,6 +7,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { weatherName } from "../../lib/terrain/weather";
+import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
@@ -109,12 +110,15 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Every selected region, the one clicked last first. */
   const selection = (): Region[] => selected ? [selected, ...doc.regions.filter((r) => r !== selected && extra.has(r.index))] : [];
 
+  /** The names as saved, for the gg_rct_ references in the triggers of regions renamed since. */
+  const names = new SavedNames<Region>();
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.regions ??= [];
+    names.saved(doc.regions);
   };
   const load = read().catch((e) => w3.window.showError(`Regions: ${(e as Error).message ?? e}`));
   /** The map's sounds (war3map.w3s), offered for the ambient sound. */
@@ -180,7 +184,7 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Changes several regions (by copy) as one undo step; the selection stays on them. */
   const updateAll = (list: Region[], change: (r: Region) => Partial<Region>) => {
     const before = doc.regions;
-    const copies = new Map(list.map((r) => [r, { ...structuredClone(r), ...change(r) }]));
+    const copies = new Map(list.map((r) => [r, names.copy(r, { ...structuredClone(r), ...change(r) })]));
     const after = before.map((x) => copies.get(x) ?? x);
     const primary = selected && copies.get(selected) ? copies.get(selected)! : copies.get(list[0]) ?? null;
     commit(before, after, primary, list.map((r) => r.index));
@@ -369,13 +373,18 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!unsaved) return;
       const root = w3.workspace.project()!.root;
       const text = JSON.stringify({ format: "w3proj.regions/1", ...doc });
+      // The renames this save makes, taken with the text it writes.
+      const saved = doc.regions, renamed = names.renamed(saved);
       if (asJson) {
         const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: `${FILE}.json`, text });
         await w3.workspace.writeText(`${FILE}.json`, canonical);
       } else {
         await w3.backend.invoke("codec_write", { root, path: FILE, text });
       }
-      unsaved = false;
+      if (doc.regions === saved) unsaved = false;
+      names.saved(saved);
+      // The triggers follow the saved names (GUI parameters; script text after a question).
+      if (renamed.length) await renameInTriggers(w3, "rct", renamed, "regions");
     },
     async reloadFile(path) {
       if (!path.startsWith(FILE)) return false;

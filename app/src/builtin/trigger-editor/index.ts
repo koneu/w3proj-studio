@@ -6,7 +6,7 @@
 // custom script, …). The files round-trip byte-exactly through lib/triggers.
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
-import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggersService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
 import { StringTable } from "../../lib/formats/wts";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -27,6 +27,7 @@ import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
+import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
 
 /** A trigger of events, conditions and actions (not custom text, a script item or a comment). */
 const isGuiTrigger = (it: Item): it is TriggerItem => "ecas" in it && it.type === 8 && !it.isCustom && !it.isComment;
@@ -54,7 +55,15 @@ let openView: TriggerView | null = null;
 /** "Variables" asked before the editor was open: the new view starts there. */
 let startWithVariables = false;
 /** A trigger to select once the editor has opened (w3.triggers.reveal before it existed). */
-let startWithTrigger: string | null = null;
+let startWithTrigger: { name: string; at?: RevealAt } | null = null;
+
+/** Where w3.triggers.reveal goes in a trigger: its id (names may repeat), a line and a parameter. */
+type RevealAt = Partial<TriggerLocation> & { id?: number };
+/** The trigger `name` (the one with id `at.id`, if there is one of that name). */
+function findRevealed(file: TriggerFile, name: string, at?: RevealAt): Item | undefined {
+  const named = file.items.filter((i) => "ecas" in i && i.name === name);
+  return named.find((i) => "ecas" in i && i.id === at?.id) ?? named[0];
+}
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The open Trigger Editor, opened if it isn't. */
@@ -160,13 +169,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.editors.open(path, "w3.triggerEditor");
       openView?.setMode("triggers");
     }),
-    // Selects a trigger by name (opening the editor first); used by the Object Manager.
-    w3.commands.register("w3.triggers.reveal", async (name: string) => {
+    // Selects a trigger by name (opening the editor first); used by the Object Manager. `at` (Problems):
+    // the trigger's id, where names repeat, and the line and parameter to show in it.
+    w3.commands.register("w3.triggers.reveal", async (name: string, at?: RevealAt) => {
       startWithVariables = false;
-      startWithTrigger = openView ? null : name;
+      startWithTrigger = openView ? null : { name, at };
       await w3.commands.execute("w3.triggers.open");
-      const it = openView?.file.items.find((i) => "ecas" in i && i.name === name);
-      if (it) openView!.revealItem(it);
+      const it = openView ? findRevealed(openView.file, name, at) : undefined;
+      if (it) openView!.revealItem(it, at);
+    }),
+    // Renamed regions, cameras and the like (`kind` "rct", "cam"; `pairs` [old name, new name]) in the
+    // triggers: GUI parameters always, script text after a question. In the open Trigger Editor as one undo
+    // step (saved at once if it had nothing unsaved), else in the files. What changed; null without triggers.
+    w3.commands.register("w3.triggers.renameGlobals", async (kind: unknown, pairs: unknown, what?: unknown) => {
+      if (typeof kind !== "string" || !Array.isArray(pairs)) throw new Error("w3.triggers.renameGlobals takes a kind and [old, new] name pairs.");
+      return renameGlobals(w3, kind, pairs as [string, string][], typeof what === "string" ? what : "objects");
     }),
     w3.commands.register("w3.triggers.convertToCustomText", async () => {
       if (!openView) throw new Error("Open the Trigger Editor and select a GUI trigger first.");
@@ -261,23 +278,85 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (!doc.readOnly) openView = view;
         if (startWithVariables) { startWithVariables = false; view.showVariables(); }
         if (startWithTrigger) {
-          const it = view.file.items.find((i) => "ecas" in i && i.name === startWithTrigger);
+          const { name, at } = startWithTrigger;
+          const it = findRevealed(view.file, name, at);
           startWithTrigger = null;
-          if (it) view.revealItem(it);
+          if (it) view.revealItem(it, at);
         }
+        const save = async () => {
+          // What is saved is the state at the start; an edit made meanwhile stays unsaved.
+          const at = view.mark();
+          await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, at.file);
+          await writeWctFile(w3.workspace, at.custom, textTriggers(at.file).map((t) => t.name));
+          view.markSaved(at.step);
+        };
+        view.persist = save;
         return {
           undo: () => view.step(-1),
           redo: () => view.step(1),
-          save: async () => {
-            await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, view.file);
-            await writeWctFile(w3.workspace, view.customFile(), textTriggers(view.file).map((t) => t.name));
-            view.markSaved();
-          },
+          save,
           dispose: () => { view.dispose(); if (openView === view) openView = null; },
         };
       },
     }),
   );
+}
+
+/** Asks whether script text changes too; dismissing it keeps the scripts as they are. */
+async function askScripts(w3: W3Api, renames: ReadonlyMap<string, string>, uses: number): Promise<boolean> {
+  if (!uses) return false;
+  const names = [...renames.keys()];
+  const listed = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
+  const c = await w3.window.showWarning(`${listed} appear${names.length === 1 ? "s" : ""} ${uses} time${uses === 1 ? "" : "s"} in custom script. Rename ${names.length === 1 ? "it" : "them"} there too?`,
+    "Rename in script too", "Only GUI triggers");
+  return c === "Rename in script too";
+}
+
+/** See w3.triggers.renameGlobals. */
+async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][], what: string, tries = 0): Promise<(RenameCount & { inEditor: boolean }) | null> {
+  const renames = globalRenames(kind, pairs);
+  const root = w3.workspace.project()?.root;
+  if (!root || !renames.size) return null;
+  const label = `Rename ${what} in triggers`;
+  const same = () => w3.workspace.project()?.root === root;
+  const view = openView;
+  if (view && view.editable) {
+    const withScripts = await askScripts(w3, renames, view.countGlobals(renames).script);
+    // The editor closed or another project opened during the question: start again with what is there now.
+    if (!same()) return null;
+    if (openView !== view) return tries < 2 ? renameGlobals(w3, kind, pairs, what, tries + 1) : null;
+    const wasDirty = view.dirty;
+    const n = view.renameGlobals(label, renames, withScripts);
+    if (n.gui || n.script) {
+      if (!wasDirty) await view.persist();
+      else void w3.window.showInfo(`${label}: changed in the Trigger Editor, which has other unsaved changes too; save it to keep them.`);
+    }
+    return { ...n, inEditor: true };
+  }
+  const path = wtgPath(w3.workspace.files());
+  if (!path) return null;
+  // A file that is there and can't be read stops here: it isn't written over.
+  const read = async () => {
+    const file = await readWtgFile(w3.workspace, path, () => triggerData(w3));
+    const custom = await readWctFile(w3.workspace, textTriggers(file).length);
+    return { file, custom };
+  };
+  const first = await read();
+  const scriptsOf = (c: CustomTextFile | null) => (c ? [c.header, ...c.texts] : []);
+  const would = countRenames(first.file, scriptsOf(first.custom), renames);
+  if (!would.gui && !would.script) return { gui: 0, script: 0, inEditor: false };
+  const withScripts = await askScripts(w3, renames, would.script);
+  if (!same()) return null;
+  // The Trigger Editor opened during the question: it holds the triggers now.
+  if (openView) return tries < 2 ? renameGlobals(w3, kind, pairs, what, tries + 1) : null;
+  // Read again: the files may have changed during the question.
+  const { file, custom } = await read();
+  const texts = custom ? [{ get: () => custom.header, set: (t: string) => { custom.header = t; } }, ...custom.texts.map((_, k) => ({ get: () => custom.texts[k], set: (t: string) => { custom.texts[k] = t; } }))] : [];
+  const n = applyRenames(file, texts, renames, withScripts);
+  // Custom Script actions are in the trigger file too.
+  if (n.gui || n.script) await writeWtgFile(w3.workspace, path, file);
+  if (custom && n.script) await writeWctFile(w3.workspace, custom, textTriggers(file).map((t) => t.name));
+  return { ...n, inEditor: false };
 }
 
 /** TriggerData with WESTRING_ names resolved, loaded once. */
@@ -348,8 +427,13 @@ class TriggerView {
   /** Custom text per trigger (war3map.wct is stored in trigger order). */
   private texts = new Map<TriggerItem, string | null>();
   private header: string | null;
-  private undo: { label: string; before: Snapshot; after: Snapshot }[] = [];
+  /** `id`: the state after the step, unique, so a saved state is known again after undo and redo. */
+  private undo: { label: string; before: Snapshot; after: Snapshot; id: number }[] = [];
+  private nextId = 1;
+  /** The state now: the id of the last step done, 0 for the state the editor opened with. */
+  private get state() { return this.at ? this.undo[this.at - 1].id : 0; }
   private at = 0;
+  /** The state last saved (see `state`). */
   private savedAt = 0;
   private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean } | void = undefined;
   private handle: TriggerEditorHandle;
@@ -446,6 +530,65 @@ class TriggerView {
     return true;
   }
 
+  /** Renames a tree item, as one undo step. A trigger's gg_trg_ global changes with its name: the GUI
+   *  parameters naming it follow, and after a question the script text too (the map header, custom
+   *  text, Custom Script actions; the trigger's own InitTrig_ function with it). A name whose global
+   *  another trigger has is refused. False if nothing was renamed. */
+  async rename(it: Item, to: string): Promise<boolean> {
+    const from = it.name;
+    const isTrigger = "ecas" in it && it.type === 8 && !it.isComment;
+    const renames = isTrigger ? globalRenames("trg", [[from, to]]) : new Map<string, string>();
+    if (renames.size) {
+      const clash = this.file.items.find((x) => x !== it && "ecas" in x && x.type === 8 && !x.isComment && ident(x.name) === ident(to));
+      if (clash) { void this.w3.window.showError(`${clash.name} already is gg_trg_${ident(to)} in the script; choose another name.`); return false; }
+    }
+    // The trigger's own text defines InitTrig_<name> (the map script calls it by the trigger's name).
+    const own = isTrigger && "ecas" in it && it.isCustom ? new Map([[`InitTrig_${ident(from)}`, `InitTrig_${ident(to)}`]]) : new Map<string, string>();
+    const scriptsOf = () => this.vars.scripts();
+    const ownText = () => ("ecas" in it ? this.texts.get(it) ?? null : null);
+    const inScript = renames.size ? countRenames(this.file, scriptsOf().map((s) => s.get()), renames).script + countInText(ownText(), own) : 0;
+    let withScripts = false;
+    if (inScript) {
+      const c = await this.w3.window.showWarning(`${[...renames.keys()][0]}${own.size ? ` and ${[...own.keys()][0]}` : ""} appear ${inScript} time${inScript === 1 ? "" : "s"} in custom script. Rename them there too?`,
+        "Rename in script too", "Only GUI triggers");
+      if (c === undefined) return false;
+      withScripts = c === "Rename in script too";
+      // While the question was open the item may have been renamed, deleted or undone, or the editor closed.
+      const now = this.file.items.find((x) => x.type === it.type && x.id === it.id);
+      if (this.disposed || !now || now.name !== from) { void this.w3.window.showWarning(`Not renamed: ${from} changed while the question was open.`); return false; }
+      it = now;
+    }
+    const target = it;
+    this.edit(`Rename ${from}`, () => {
+      target.name = to;
+      if (!renames.size) return;
+      applyRenames(this.file, scriptsOf(), renames, withScripts);
+      const text = "ecas" in target ? this.texts.get(target) ?? null : null;
+      if (withScripts && own.size && text !== null && "ecas" in target) this.texts.set(target, renameInText(text, own));
+    });
+    return true;
+  }
+
+  /** Renamed objects' globals (regions, cameras: `kind` "rct", "cam") in the triggers as they are here,
+   *  as one undo step; `withScripts`: in script text too. What changed. */
+  renameGlobals(label: string, renames: ReadonlyMap<string, string>, withScripts: boolean): RenameCount {
+    let n: RenameCount = { gui: 0, script: 0 };
+    const would = this.countGlobals(renames);
+    // Nothing to change: no undo step.
+    if (!would.gui && !(withScripts && would.script)) return n;
+    this.edit(label, () => { n = applyRenames(this.file, this.vars.scripts(), renames, withScripts); });
+    return n;
+  }
+  /** What renameGlobals would change. */
+  countGlobals(renames: ReadonlyMap<string, string>): RenameCount {
+    return countRenames(this.file, this.vars.scripts().map((s) => s.get()), renames);
+  }
+  get editable() { return this.handle.editable; }
+  /** Whether there are unsaved changes. */
+  get dirty() { return this.state !== this.savedAt; }
+  /** Saves the editor (set by its provider). */
+  persist: () => Promise<void> = async () => {};
+
   /** Every trigger and variable from elsewhere, as one undo step. */
   replaceAll(file: TriggerFile, custom: CustomTextFile | null) {
     this.edit("Import triggers", () => {
@@ -464,7 +607,12 @@ class TriggerView {
       : { reforged: this.file.reforged, version: 1, comment: "", header: this.header, texts };
   }
 
-  markSaved() { this.savedAt = this.at; this.setDirty(false); }
+  /** What a save writes, taken at once: the triggers, the custom texts and the undo step they're at. */
+  mark(): { file: TriggerFile; custom: CustomTextFile; step: number } {
+    return { file: structuredClone(this.file), custom: this.customFile(), step: this.state };
+  }
+  /** The state `step` (from mark) was saved; edits after it stay unsaved. */
+  markSaved(step = this.state) { this.savedAt = step; this.setDirty(this.dirty); }
 
   /** Selects the variables table. */
   showVariables() { this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
@@ -500,9 +648,9 @@ class TriggerView {
   private edit(label: string, change: () => void, opts: { keepView?: boolean } = {}) {
     const before = this.snapshot();
     change();
-    this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot() });
+    this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot(), id: this.nextId++ });
     this.at = this.undo.length;
-    this.setDirty(this.at !== this.savedAt);
+    this.setDirty(this.dirty);
     this.renderTree();
     if (!opts.keepView) this.renderDetail();
   }
@@ -510,7 +658,7 @@ class TriggerView {
     if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
     else if (dir > 0 && this.at < this.undo.length) this.restore(this.undo[this.at++].after);
     else return;
-    this.setDirty(this.at !== this.savedAt);
+    this.setDirty(this.dirty);
   }
 
   // ---- items ------------------------------------------------------------------------
@@ -827,8 +975,10 @@ class TriggerView {
     for (const it of children.get(root ? root.id : -1) ?? []) visit(it);
     return shown;
   }
-  /** Selects a trigger (from a gg_trg_ reference elsewhere). */
-  revealItem(it: Item) {
+  /** Selects a trigger (from a gg_trg_ reference elsewhere); `at.path`: also the line in it, and the
+   *  parameter `at.param` there (a found problem), through the trigger's kind. */
+  revealItem(it: Item, at?: Partial<TriggerLocation>) {
+    if (at?.path && "ecas" in it) this.kinds.all().find((k) => k.matches(it, this.handle))?.reveal?.(it, { path: at.path, ...(at.param ? { param: at.param } : {}) });
     if (this.query) { this.query = ""; this.searchBox.value = ""; }
     if ("ecas" in it && this.mode === "variables") this.mode = "triggers";
     for (let p = it.parent; ;) {
@@ -842,6 +992,7 @@ class TriggerView {
     this.renderTree();
     this.renderDetail();
     this.tree.querySelector(".trig-row.active")?.scrollIntoView({ block: "nearest" });
+    if (at?.path) this.detail.querySelector(".trig-flagged, .trig-eca.active")?.scrollIntoView({ block: "nearest" });
   }
 
   // ---- detail -----------------------------------------------------------------------
@@ -881,7 +1032,7 @@ class TriggerView {
     if (!it) { this.detail.replaceChildren(h("p.muted", {}, "Nothing selected.")); return; }
     const name = h("input.trig-name", { type: "text", value: it.name, readOnly: !editable, onchange: () => {
       const v = name.value.trim();
-      if (v && v !== it.name) this.edit("Rename", () => { it.name = v; });
+      if (v && v !== it.name) void this.rename(it, v).then((done) => { if (!done && name.isConnected) name.value = it.name; });
       else name.value = it.name;
     } });
     if (it.type === 64) {
