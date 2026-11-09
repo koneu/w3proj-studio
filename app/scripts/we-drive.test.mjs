@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addCamerasToMap, classify, editorPrefs, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
+import { addCamerasToMap, classify, editorPrefs, isReopenedModule, parseArgs, questionDialogs, setPrefs, VIEW_ITEMS, viewChecks, winePath } from "./we-drive.mjs";
 import { lookName, PARK_NAMES } from "./we-camera.mjs";
 import { compare, isCopied, takeLock, userCompatData } from "./we-setup.mjs";
 
@@ -60,6 +60,15 @@ test("questionDialogs: the loading windows (untitled, \"Progress\") aren't quest
   assert.deepEqual(questionDialogs([d(""), d("Progress")]), [], "a big map's \"Loading Units n/300\" window is waited for");
   assert.deepEqual(questionDialogs([d("Progress"), d("Warning"), d("Warcraft III World Editor")]).map((x) => x.title), ["Warning", "Warcraft III World Editor"]);
   assert.deepEqual(questionDialogs([d("Progress report")]).map((x) => x.title), ["Progress report"], "only the loading window's own title");
+});
+
+test("isReopenedModule: the modules the editor opens again, the Campaign Editor by the start of its title", () => {
+  for (const t of ["Trigger Editor", "Object Editor", "Campaign Editor", "Campaign Editor - [Untitled]", "Campaign Editor - [Z:/c/a.w3n]"]) {
+    assert.equal(isReopenedModule(t), true, t);
+  }
+  for (const t of ["", "Warning", "Progress", "Warcraft III World Editor", "Trigger Editor - x", "Campaign Editors", undefined]) {
+    assert.equal(isReopenedModule(t), false, String(t));
+  }
 });
 
 test("viewChecks reads the View menu's check marks from a picture of its check column", () => {
