@@ -252,6 +252,15 @@ variants and an unlit picture; walls told apart by their brown in the unlit pict
   editor's grass (106 against 125); under the terrain light it's within 0.1. The render-fixes-3 finding came from
   cliff.w3m, whose two files both name their model `DNCLordaeronTerrain`.
 
+**Shadows** (branch view-shadows, 2026-11-09; we-drive `--game-view off` then `--view Shadows=off`, the luminance
+ratio of the two pictures shows what View > Shadows draws): the classic (SD) view draws war3map.shd on the ground
+(0.65 of the colour in a full cell, filtered between cells), the shadow images of buildings and destructables
+(`ReplaceableTextures\Shadows`, a texel per 32-unit cell, the red texel on the object) and the units' Shadow.blp
+textures; the HD view instead casts the models' own shadows (a footman's shape) and draws no war3map.shd at all.
+How Studio follows that, and the numbers, are in `viewshadows.ts` (SHADOW_LOOK, shadowLookFor). A test map with
+buildings, units, trees and a barrel on cliff.w3m's flat ground (made with the release CLI, unpack, JSON, pack) was
+what told the parts apart.
+
 **Fire and particle colours in HD** (branch render-fixes-4, 2026-11-09, a test map with AObr, ZObz, LObr, OOgr, ZZdt,
 AOob and AOnt in a row, the editor in SD and HD): the particle colours are read right (red, green, blue): the
 editor's classic view shows the same yellow-green fire on ZObz and the same faint green-yellow haze over the grate

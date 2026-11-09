@@ -1682,6 +1682,20 @@ async function viewCommands(page, fail, shots) {
   const shown = await page.evaluate(`document.querySelector('select[title^="Grid"] option:checked')?.textContent`);
   await run("w3.terrain.toggleSmallGrid");
   if (!/^Small grid/.test(shown ?? "")) bad(`the grid box said "${shown}" after Toggle Small Grid`);
+  // View > Shadows, on by default: off takes the footman's shadow away, on brings the same picture back, and the
+  // toolbar box follows the command.
+  const shadowBox = () => page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Shadows")?.querySelector("input")?.checked ?? null`);
+  if ((await shadowBox()) !== true) bad(`the Shadows box isn't checked at first (${await shadowBox()})`);
+  const shadowsErr = await run("w3.terrain.toggleShadows");
+  if (shadowsErr) bad(`w3.terrain.toggleShadows: ${shadowsErr}`);
+  await sleep(300);
+  const unshaded = await differ(close.plain, await picture("shadows-off"));
+  if (unshaded < 150 + close.noise) bad(`Toggle Shadows changed only ${unshaded} pixels next to the footman`);
+  if ((await shadowBox()) !== false) bad("the Shadows box stayed checked after Toggle Shadows");
+  await run("w3.terrain.toggleShadows");
+  await sleep(300);
+  const shadedAgain = await differ(close.plain, await picture("shadows-on"));
+  if (shadedAgain > close.noise + 100) bad(`shadows on again isn't the first picture (${shadedAgain} pixels differ)`);
 
   const hands = new Hands(page);
   const canvasFocused = () => page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`);
@@ -2812,8 +2826,10 @@ async function graphicsModes(page, found) {
  *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
 /** What the first opening of gameReadsOnce's scene (the mini map with a tree, a goldmine and a footman) took
  *  when last recorded: backend reads, reads asked of the game service, textures made by the terrain view. One more
- *  each since HD emissive textures are drawn: the gold mine's Neutral_GoldMine_Emissive (branch render-fixes-4). */
-const GAME_READS_RECORDED = { reads: 102, asked: 125, textures: 136 };
+ *  each since HD emissive textures are drawn: the gold mine's Neutral_GoldMine_Emissive (branch render-fixes-4). Three
+ *  more read and asked and two more textures since the view draws shadows (branch view-shadows): the shadow images
+ *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. */
+const GAME_READS_RECORDED = { reads: 105, asked: 128, textures: 138 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
