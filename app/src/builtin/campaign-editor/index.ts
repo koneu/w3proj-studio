@@ -141,7 +141,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("div.tree-row.obj-kind", { onclick, title }, h("span.tree-icon", {}, "›"), h("span.tree-label", {}, label), extra ?? null);
         el.append(h("div.tree", {}, ...SECTIONS.map(([id, label]) => row(label, run(() => open(id)))),
           row("Gameplay Constants", run(() => w3.commands.execute("w3.gameplayConstants.open")), undefined, "The campaign's war3campaignMisc.txt"),
-          row("Game Interface", run(() => w3.commands.execute("w3.gameInterface.open")), undefined, "The campaign's war3campaignSkin.txt")));
+          row("Game Interface", run(() => w3.commands.execute("w3.gameInterface.open")), undefined, "The campaign's war3campaignSkin.txt"),
+          row("Object Editor", run(() => w3.commands.execute("w3.objectEditor.open")), undefined, "The campaign's custom objects (war3campaign.w3u, …), which every chapter map has")));
         const list = h("div.tree.camp-side-chapters", {}, h("div.view-empty", {}, "Loading chapters…"));
         el.append(h("div.camp-side-head", {}, "Chapters"), list,
           h("div.camp-side-actions", {},
@@ -522,7 +523,8 @@ class CampaignView {
       h("div.form-section", {}, h("h3", {}, "Advanced"),
         h("div.camp-advanced", {},
           h("button.camp-gameplay", { title: "war3campaignMisc.txt: max hero level, experience, damage tables, … for every chapter", onclick: run(() => this.w3.commands.execute("w3.gameplayConstants.open")) }, "Gameplay Constants…"), " ",
-          h("button.camp-interface", { title: "war3campaignSkin.txt: icons, models, sounds and texts of the interface for every chapter", onclick: run(() => this.w3.commands.execute("w3.gameInterface.open")) }, "Game Interface…"))),
+          h("button.camp-interface", { title: "war3campaignSkin.txt: icons, models, sounds and texts of the interface for every chapter", onclick: run(() => this.w3.commands.execute("w3.gameInterface.open")) }, "Game Interface…"), " ",
+          h("button.camp-objects", { title: "war3campaign.w3u, .w3t, …: custom units, items, abilities and the rest for every chapter", onclick: run(() => this.w3.commands.execute("w3.objectEditor.open")) }, "Object Editor…"))),
       h("div.form-section", {}, h("h3", {}, "File"),
         h("p.muted", {}, `Format version ${c.version} · saved ${c.campaignVersion} times · editor ${c.editorVersion}`)),
     ];

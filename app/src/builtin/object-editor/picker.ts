@@ -13,6 +13,8 @@ interface Entry {
   id: string;
   /** Custom objects: the game object field values come from. */
   base?: string;
+  /** A custom object of the map's campaign (a chapter map's), not of the map itself. */
+  campaign?: boolean;
   name: string;
   facets: Record<string, string>;
   haystack: string;
@@ -30,8 +32,8 @@ export interface PickOptions {
   title: string;
   /** Listed first, marked "base of selected". */
   pinned?: string;
-  /** The map's custom objects, listed with the game objects. */
-  custom?: { id: string; base: string; name: string }[];
+  /** The map's custom objects, listed with the game objects (`campaign`: its campaign's, for a chapter map). */
+  custom?: { id: string; base: string; name: string; campaign?: boolean }[];
   /** Kind tabs (e.g. Unit / Item / …): choosing another one closes the
    *  picker with `{ tab, query }` so the caller can reopen it for that kind. */
   tabs?: { labels: string[]; active: number };
@@ -47,12 +49,12 @@ export type PickResult = { id: string } | { tab: number; query: string } | undef
  *  undefined when cancelled. */
 export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): Promise<PickResult> {
   const strip = (s: string) => s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
-  const entry = (id: string, name: string, base?: string): Entry => {
+  const entry = (id: string, name: string, base?: string, campaign?: boolean): Entry => {
     const facets = kd.facets(base ?? id);
-    return { id, base, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
+    return { id, base, campaign, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
   };
   const entries: Entry[] = [
-    ...(opts.custom ?? []).map((c) => entry(c.id, strip(c.name), c.base)),
+    ...(opts.custom ?? []).map((c) => entry(c.id, strip(c.name), c.base, c.campaign)),
     ...kd.baseIds.map((id) => entry(id, strip(kd.names.get(id) ?? id))),
   ];
   entries.sort((a, b) => (a.id === opts.pinned ? -1 : b.id === opts.pinned ? 1 : a.name.localeCompare(b.name)));
@@ -208,7 +210,8 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
           h("span.picker-name", {}, e.name),
           h("code", {}, e.id),
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,
-          e.base ? h("span.badge", { title: "Custom object of this map" }, `custom · ${e.base}`) : null,
+          e.base ? (e.campaign ? h("span.badge.picker-campaign", { title: "Custom object of the campaign (war3campaign.*): edited in the campaign" }, `campaign · ${e.base}`)
+            : h("span.badge", { title: "Custom object of this map" }, `custom · ${e.base}`)) : null,
           ...shownFields.map((f) => h("span.picker-value", { title: f.label }, `${f.label}: ${strip(fieldValue(f, e.base ?? e.id) ?? "—")}`)),
           h("span.picker-tags", {}, Object.values(e.facets).join(" · ")),
         )));

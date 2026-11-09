@@ -11,6 +11,11 @@ import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
 import { StringTable } from "../../lib/formats/wts";
 import { toProjectPath } from "../../lib/formats/archivepath";
+import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
+import { isNotFoundError } from "../../lib/oserror";
+import { joinPath } from "../../lib/paths";
+import { mergeSkin } from "./w3o";
+import type { EditFile } from "./objectedit";
 
 const KIND_LABELS: Record<string, string> = {
   w3u: "Units", w3t: "Items", w3a: "Abilities", w3h: "Buffs/Effects", w3b: "Destructables", w3d: "Doodads", w3q: "Upgrades",
@@ -25,29 +30,61 @@ export function stripColors(s: string) {
   return s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
 }
 
-interface RawObject {
+export interface RawObject {
   base: string;
   id?: string;
   mods?: { field: string; type?: string; value: unknown }[];
   sets?: { mods: { field: string; type?: string; value: unknown }[] }[];
 }
 
-/** The map's custom objects of one kind with their display names (the
- *  object's own name field, resolved through war3map.wts). */
-async function customObjects(w3: W3Api, kind: string, kd: KindData): Promise<{ id: string; base: string; name: string; icon?: string }[]> {
-  const path = w3.workspace.files().find((f) => f.path.toLowerCase() === `map/war3map.${kind}.json`)?.path;
-  if (!path) return [];
-  const file = JSON.parse(await w3.workspace.readText(path)) as { custom?: RawObject[] };
+/** A custom object as the browser lists it. `campaign`: one of a chapter map's campaign. */
+interface CustomEntry { id: string; base: string; name: string; icon?: string; campaign?: boolean }
+
+/** Custom objects of one object file with their display names (the object's own name field, resolved through the
+ *  string table `wts`). */
+function entriesOf(kind: string, kd: KindData, objects: RawObject[], wts: string | null, campaign: boolean): CustomEntry[] {
   let strings = new Map<string, string>();
-  try { strings = parseWts(await w3.workspace.readText("map/war3map.wts")); } catch { /* no string table */ }
+  if (wts !== null) strings = parseWts(wts);
   const resolve = (v: string) => strings.get(v.replace(/^(TRIGSTR_)0*(\d{3,})$/, "$1$2")) ?? v;
-  return (file.custom ?? []).filter((o) => o.id).map((o) => {
+  return objects.filter((o) => o.id).map((o) => {
     const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)];
     const nameMod = mods.find((m) => /nam$/.test(m.field) && typeof m.value === "string");
     const name = nameMod ? resolve(nameMod.value as string) : kd.names.get(o.base) ?? o.base;
     const icon = mods.find((m) => m.field === ICON_FIELDS[kind] && typeof m.value === "string")?.value as string | undefined;
-    return { id: o.id!, base: o.base, name: stripColors(name), icon };
+    return { id: o.id!, base: o.base, name: stripColors(name), icon, ...(campaign ? { campaign: true } : {}) };
   });
+}
+
+/** The map's custom objects of one kind with their display names (the object's own name field, resolved through
+ *  war3map.wts), then, for a chapter map, its campaign's that the map doesn't have itself (war3campaign.<kind> with its
+ *  Skin file, names through war3campaign.wts): the chapter can use those as its own. */
+async function customObjects(w3: W3Api, kind: string, kd: KindData): Promise<CustomEntry[]> {
+  const path = w3.workspace.files().find((f) => f.path.toLowerCase() === `map/war3map.${kind}.json`)?.path;
+  const own = path ? entriesOf(kind, kd, (JSON.parse(await w3.workspace.readText(path)) as { custom?: RawObject[] }).custom ?? [],
+    await w3.workspace.readText("map/war3map.wts").catch(() => null), false) : [];
+  // The campaign's are only offered: one that can't be read leaves them out, not the map's own.
+  const campaign = await campaignObjects(w3, kind).catch(() => null);
+  if (!campaign) return own;
+  const ids = new Set(own.map((o) => o.id));
+  return [...own, ...entriesOf(kind, kd, campaign.custom, campaign.wts, true).filter((o) => !ids.has(o.id))];
+}
+
+/** A chapter map's campaign's object data of one kind (war3campaign.<kind> with its Skin file's fields) and the
+ *  campaign's string table; null when the map isn't a chapter or its campaign has none of that kind. Throws when it
+ *  can't be told or read. `root`: that project's (the open one's by default). */
+export async function campaignObjects(w3: W3Api, kind: string, root?: string): Promise<{ campaign: string; custom: RawObject[]; original: RawObject[]; wts: string | null } | null> {
+  const campaign = await findCampaign(w3, root ?? w3.workspace.project()?.root);
+  if (!campaign) return null;
+  const [main, skin] = await Promise.all([readCampaignObjects<EditFile>(w3, campaign, kind), readCampaignObjects<EditFile>(w3, campaign, kind, true)]);
+  if (!main && !skin) return null;
+  const base = { format: "w3proj.objects/1", version: main?.version ?? skin?.version ?? 3, original: main?.original ?? [], custom: main?.custom ?? [] } as EditFile;
+  const merged = mergeSkin(base, skin && { ...skin, original: skin.original ?? [], custom: skin.custom ?? [] }, { addSkinOnly: true });
+  const wtsPath = joinPath(campaign, "map", "war3campaign.wts");
+  const wts = await w3.workspace.readText(wtsPath).then((t) => t, (e) => {
+    if (isNotFoundError(e)) return null;
+    throw new Error(`${wtsPath} is there but can't be read (${e instanceof Error ? e.message : String(e)}).`);
+  });
+  return { campaign, custom: (merged.custom ?? []) as RawObject[], original: (merged.original ?? []) as RawObject[], wts };
 }
 
 /** Icon (command button art) field per object kind; destructables and doodads have none. */

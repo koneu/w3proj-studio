@@ -4453,6 +4453,143 @@ async function placerAndCampaign(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** A chapter map's campaign objects (war3campaign.w3u in the campaign project two folders up) outside the terrain view:
+ *  the generated war3map.j has the colour only the campaign gives a unit; the chapter's Object Editor lists the campaign's
+ *  objects with their names from war3campaign.wts, shows one to look at only (Delete leaves the files alone), and the
+ *  object browser of other modules (triggers) has it with a "campaign" badge; "Edit in the Campaign…" opens the campaign
+ *  project's Object Editor at it, where a rename goes into war3campaign.wts on save; a campaign colour changed meanwhile
+ *  reaches the chapter's script when the chapter opens again. W3_SMOKE_CHAPTER ("campaign|maps/Chapter.w3x") also
+ *  checks a real chapter's generated script for its campaign units' SetUnitColor lines against the script it has. */
+async function chapterObjects(page, found) {
+  const fail = (what) => found.push(`chapter objects: ${what}`);
+  const dir = join(work, "chapter-objects");
+  rmSync(dir, { recursive: true, force: true });
+  const json = (p) => JSON.parse(readFileSync(p, "utf8"));
+  const put = (p, o) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, typeof o === "string" ? o : JSON.stringify(o, null, 2)); };
+  const openProject = async (root) => {
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+    await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  };
+  const run = (id, ...args) => page.evaluate(`w3.commands.execute(${[id, ...args].map((a) => JSON.stringify(a)).join(", ")}).then(() => null, (e) => String(e))`);
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; w3.window.askDelete = async () => true; })()`);
+  await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
+
+  const camp = join(dir, "camp");
+  const chapter = join(camp, "maps", "Chapter 1.w3x");
+  cpSync(FIXTURE, chapter, { recursive: true });
+  // The script is Studio's from the start (none there): saves and openings make it again.
+  rmSync(join(chapter, "map", "war3map.j"), { force: true });
+  put(join(camp, "w3proj.toml"), readFileSync(join(FIXTURE, "w3proj.toml"), "utf8"));
+  put(join(camp, "map", "war3campaign.w3f.json"), {});
+  const units = (colour) => ({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: "c001", mods: [{ field: "unam", type: "string", value: "TRIGSTR_001" }, { field: "utco", type: "int", value: colour }] }] });
+  put(join(camp, "map", "war3campaign.w3u.json"), units(24));
+  put(join(camp, "map", "war3campaign.wts"), "STRING 1\r\n{\r\nCampaign Grunt\r\n}\r\n\r\n");
+  const placed = json(join(chapter, "map", "war3mapUnits.doo.json"));
+  placed.units.push({ ...placed.units[0], id: "c001", skinId: "c001", editorId: 7, position: [256, 256, 0] });
+  put(join(chapter, "map", "war3mapUnits.doo.json"), placed);
+  const script = () => (existsSync(join(chapter, "map", "war3map.j")) ? readFileSync(join(chapter, "map", "war3map.j"), "utf8") : "");
+  const colourOf = (text, id) => new RegExp(`'${id}'[^\\n]*\\n\\s*call SetUnitColor\\( \\w+, ConvertPlayerColor\\((\\d+)\\) \\)`).exec(text)?.[1];
+  try {
+    await openProject(chapter);
+    // ---- the map script ----
+    const err = await run("w3.script.generate", { quiet: true });
+    if (err) return fail(`Generate Map Script: ${err}`);
+    if (colourOf(script(), "c001") !== "24") fail(`the chapter's script colours the campaign's c001 ${colourOf(script(), "c001") ?? "not at all"}, not 24`);
+
+    // ---- the object browser (triggers' pickers, names) ----
+    const name = await page.evaluate(`w3.services.get("w3.objects").then((s) => s.name("c001", ["w3u"]))`);
+    if (name !== "Campaign Grunt") fail(`the object service names c001 ${JSON.stringify(name)}`);
+    await page.evaluate(`(() => { window.__pick = w3.services.get("w3.objects").then((s) => s.pick(document.body, { title: "Unit", kinds: ["w3u"] })); return null; })()`);
+    await until("the object browser", () => page.evaluate(`!!document.querySelector(".picker-campaign")`), 20000)
+      .catch(() => fail("the object browser has no campaign object"));
+    await page.evaluate(`(() => { const e = [...document.querySelectorAll(".picker-campaign")].map((b) => b.parentElement).find((r) => r?.textContent.includes("c001")); e?.click(); })()`);
+    const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")]);
+    if (picked !== "c001") fail(`choosing the campaign object in the browser gave ${JSON.stringify(picked)}`);
+
+    // ---- the chapter's Object Editor ----
+    const before = readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8");
+    const openErr = await run("w3.objectEditor.open", "w3u", "c001");
+    if (openErr) return fail(`opening the Object Editor at c001: ${openErr}`);
+    await until("the campaign object", () => page.evaluate(`!!document.querySelector(".obj-edit-in-campaign")`), 30000)
+      .catch(async () => fail(`the chapter's Object Editor doesn't show c001 as the campaign's (status: ${JSON.stringify(await page.evaluate(`document.querySelector(".obj-status")?.textContent`))})`));
+    const view = await page.evaluate(`(() => ({
+      listed: [...document.querySelectorAll(".obj-item.obj-campaign")].map((e) => e.textContent),
+      heading: document.querySelector(".obj-detail h2")?.textContent,
+      inputs: document.querySelectorAll(".obj-detail .obj-table input, .obj-detail .obj-table select").length,
+      colour: [...document.querySelectorAll(".obj-detail tr")].find((r) => r.textContent.includes("utco"))?.querySelector(".obj-campaign-value")?.textContent,
+    }))()`);
+    if (!view.listed.some((t) => t.includes("c001") && t.includes("Campaign Grunt"))) fail(`the campaign group lists ${JSON.stringify(view.listed)}`);
+    if (view.heading !== "Campaign Grunt") fail(`the campaign object is headed ${JSON.stringify(view.heading)}`);
+    if (view.inputs) fail(`the campaign object has ${view.inputs} fields to edit in the chapter`);
+    if (view.colour !== "24") fail(`the campaign object's team colour shows ${JSON.stringify(view.colour)}`);
+    // Delete with the campaign object shown: nothing is removed, nothing changes.
+    await page.evaluate(`document.querySelector(".obj-list")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }))`);
+    await sleep(300);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)) fail("Delete on a campaign object changed the chapter's unit data");
+    await page.evaluate(`w3.editors.saveAll()`);
+    if (readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8") !== before) fail("the chapter's Object Editor changed war3campaign.w3u");
+
+    // ---- Edit in the Campaign ----
+    await page.evaluate(`document.querySelector(".obj-edit-in-campaign").click()`);
+    await until("the campaign project", () => page.evaluate(`w3.workspace.project()?.root.replaceAll("\\\\", "/").toLowerCase() === ${JSON.stringify(camp.replaceAll("\\", "/").toLowerCase())}`), 30000)
+      .catch(() => fail("Edit in the Campaign didn't open the campaign project"));
+    await until("the campaign's Object Editor", () => page.evaluate(`w3.editors.activePath() === "map/war3campaign.w3u.json" && [...document.querySelectorAll(".obj-item.selected")].some((e) => e.textContent.includes("c001"))`), 30000)
+      .catch(async () => fail(`the campaign's Object Editor isn't open at c001 (active: ${await page.evaluate("w3.editors.activePath()")})`));
+    const renamed = await run("w3.objectEditor.objectAction", "w3u", "c001", "rename", "Campaign Warrior");
+    if (renamed) fail(`renaming in the campaign's Object Editor: ${renamed}`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(500);
+    const wts = readFileSync(join(camp, "map", "war3campaign.wts"), "utf8");
+    if (!wts.includes("Campaign Warrior")) fail(`the rename isn't in war3campaign.wts: ${JSON.stringify(wts.slice(0, 120))}`);
+    if (existsSync(join(camp, "map", "war3map.wts"))) fail("the campaign's Object Editor wrote a war3map.wts");
+    if (json(join(camp, "map", "war3campaign.w3u.json")).custom[0]?.mods?.find((m) => m.field === "unam")?.value !== "TRIGSTR_001") fail("the rename changed the name's string reference");
+
+    // ---- the campaign changed meanwhile: the chapter's script follows when it opens ----
+    await page.evaluate(`w3.workspace.writeText("map/war3campaign.w3u.json", ${JSON.stringify(JSON.stringify(units(3)))})`);
+    await openProject(chapter);
+    await until("the chapter's script made again", () => colourOf(script(), "c001") === "3", 30000)
+      .catch(() => fail(`after the campaign changed, the chapter's script colours c001 ${colourOf(script(), "c001") ?? "not at all"}, not 3`));
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+
+  // ---- a real chapter: its campaign units' colours as its own (the World Editor's) script has them ----
+  if (process.env.W3_SMOKE_CHAPTER) {
+    const [campSrc, chapterRel] = process.env.W3_SMOKE_CHAPTER.split("|");
+    const real = join(dir, "real-camp");
+    mkdirSync(join(real, "map"), { recursive: true });
+    for (const f of readdirSync(join(campSrc, "map")).filter((n) => /^war3campaign/i.test(n))) cpSync(join(campSrc, "map", f), join(real, "map", f));
+    cpSync(join(campSrc, chapterRel), join(real, chapterRel), { recursive: true });
+    const realChapter = join(real, chapterRel);
+    const theirs = readFileSync(join(realChapter, "map", "war3map.j"), "utf8");
+    rmSync(join(realChapter, "map", "war3map.j"));
+    await openProject(realChapter);
+    const err = await run("w3.script.generate", { quiet: true });
+    const ours = existsSync(join(realChapter, "map", "war3map.j")) ? readFileSync(join(realChapter, "map", "war3map.j"), "utf8") : "";
+    // Each placed unit's type and colour: a SetUnitColor up to the next unit created belongs to the unit created last
+    // (where among its lines it comes isn't compared here).
+    const colours = (t) => {
+      const out = [];
+      let type = null;
+      for (const line of t.split(/\r?\n/)) {
+        const made = /^\s*set \w+ ?= ?BlzCreateUnitWithSkin\( ?p, ?'(\w{4})'/.exec(line);
+        if (made) { type = made[1]; continue; }
+        if (/^endfunction/.test(line)) type = null;
+        const c = /^\s*call SetUnitColor\( ?\w+, ?ConvertPlayerColor\((\d+)\) ?\)/.exec(line);
+        if (c && type) out.push(`${type}=${c[1]}`);
+      }
+      return out.sort();
+    };
+    const a = colours(theirs), b = colours(ours);
+    const less = (x, y) => { const rest = [...y]; return x.filter((v) => { const i = rest.indexOf(v); if (i < 0) return true; rest.splice(i, 1); return false; }); };
+    const missing = less(a, b), extra = less(b, a);
+    console.log(`real chapter: ${a.length} SetUnitColor lines in its script, ${b.length} in Studio's, ${missing.length} missing, ${extra.length} extra`);
+    if (err) fail(`real chapter: ${err}`);
+    else if (missing.length || extra.length) fail(`real chapter's SetUnitColor lines differ: missing ${missing.slice(0, 5).join(", ")}; extra ${extra.slice(0, 5).join(", ")}`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** Validate Map Triggers, renaming what triggers refer to, the AI Editor's Add To Map and custom data, and the Problems'
  *  Map Properties links, through the app on a new map (the game's TriggerData): a broken parameter is reported and a
  *  click on it opens the trigger with the parameter marked, while the valid triggers report nothing; renaming a trigger
@@ -5740,7 +5877,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, chapterObjects, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5839,6 +5976,7 @@ async function run() {
     await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
+    await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
     await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
     await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
