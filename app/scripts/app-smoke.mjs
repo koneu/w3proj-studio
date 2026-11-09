@@ -3549,12 +3549,16 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     const units = readFileSync(file("war3mapUnits.doo.json"), "utf8");
     const err = await page.evaluate(`w3.commands.execute("w3.terrain.adjustCliffLevels", 1).then(() => null, (e) => String(e))`);
     if (err) return fail(`Adjust Cliff Levels: ${err}`);
+    // The second player was added to the project before it opened, so its script isn't what its data makes and the save
+    // keeps it, asking: answered with Replace, as the World Editor's save writes the script anew.
+    if (two) await page.evaluate(`(() => { const warn = w3.window.showWarning; window.__rmsWarn = warn; w3.window.showWarning = (m, ...a) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Replace the script") : warn(m, ...a)); })()`);
     await page.evaluate(`w3.editors.saveAll()`);
     if (readFileSync(file("war3map.w3e.txt"), "utf8") === terrain) return fail("the terrain edit wasn't saved (control)");
     if (readFileSync(file("war3mapUnits.doo.json"), "utf8") === units) return fail("the start location didn't go up with the ground (control)");
     // The save then writes the w3i's start from the start-location object, and that save the script.
     const scriptLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
     await until("the map script after the save", async () => /war3map\.j (written|up to date|not written)/.test(await scriptLog()), 30000).catch(() => {});
+    if (two) await until("the script replaced", async () => /replaced on request: war3map\.j written/.test(await scriptLog()), 60000).catch(() => fail("the kept script wasn't replaced on request"));
     await page.evaluate(`w3.commands.execute("w3.script.settle")`);
     const log = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(-3).join(" | ")`);
     const before = script.split("\r\n"), after = readFileSync(file("war3map.j"), "utf8").split("\r\n");
@@ -3588,6 +3592,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     if (startsAfter.some((u) => u.hp !== -1 || u.mana !== -1)) fail(`the start locations' hit points and mana are ${JSON.stringify(startsAfter.map((u) => [u.hp, u.mana]))}, the World Editor saves -1`);
     if (two) await mapPropertiesPriorities(page, fail, file);
   } finally {
+    await page.evaluate(`if (window.__rmsWarn) { w3.window.showWarning = window.__rmsWarn; delete window.__rmsWarn; }`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
 }
