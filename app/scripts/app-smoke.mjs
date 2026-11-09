@@ -2667,8 +2667,8 @@ async function graphicsModes(page, found) {
   const check = () => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
     await svc.run();
-    // The mini map's script has problems of its own; this is about the objects.
-    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "")).map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
+    // The mini map's script, and its triggers made of made-up functions, have problems of their own; this is about the objects.
+    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "") && p.reveal?.command !== "w3.triggers.reveal").map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
   })()`);
   const fix = (match, label) => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
@@ -3569,6 +3569,200 @@ async function placerAndCampaign(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Validate Map Triggers, renaming what triggers refer to, the AI Editor's Add To Map and custom data, and the Problems'
+ *  Map Properties links, through the app on a new map (the game's TriggerData): a broken parameter is reported and a
+ *  click on it opens the trigger with the parameter marked, while the valid triggers report nothing; renaming a trigger
+ *  rewrites its gg_trg_ references and, after the question, its InitTrig_ in its text, as one undo step; renaming a region
+ *  rewrites gg_rct_ in GUI parameters and script, once with the Trigger Editor closed (the files) and once with it open
+ *  (its state, saved at once), and References in triggers stays empty; Add To Map writes Scripts\<name>.ai and its one
+ *  import entry, the map packs and verifies; custom data goes in from a unit file, comes out as a .w3o, and undo takes it
+ *  out again; a missing loading screen model opens Map Properties at Loading Screen. */
+async function triggersAndAi(page, found) {
+  const fail = (what) => found.push(`triggers and AI: ${what}`);
+  const k = await heightKit(page, "TriggersAi");
+  const dir = join(work, "triggers-ai");
+  mkdirSync(dir, { recursive: true });
+  // The answers a user gives: rename in script too; files chosen here.
+  await page.evaluate(`(() => {
+    window.__kept = { warn: w3.window.showWarning, pick: w3.window.pickFile, save: w3.window.pickSaveFile };
+    window.__warned = [];
+    w3.window.showWarning = async (m) => { window.__warned.push(m); return "Rename in script too"; };
+  })()`);
+  const warned = () => page.evaluate(`window.__warned.splice(0)`);
+  const listProblems = () => page.evaluate(`(async () => { const s = await w3.services.get("w3.problems"); await s.run();
+    return s.problems().map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", reveal: p.reveal ?? null })); })()`);
+  const refsProblems = (list) => list.filter((p) => /doesn't exist in this map/.test(p.message));
+  const wtgFile = () => k.read("war3map.wtg.json");
+  const wct = () => readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8");
+  /** Clicks the Problems row whose text has `text`. */
+  const clickProblem = (text) => page.evaluate(`(async () => {
+    await w3.views.show("problems");
+    await new Promise((r) => setTimeout(r, 300));
+    const row = [...document.querySelectorAll(".problem-row.clickable")].find((r) => r.textContent.includes(${JSON.stringify(text)}));
+    if (!row) return false;
+    row.click();
+    await new Promise((r) => setTimeout(r, 800));
+    return true;
+  })()`);
+  try {
+    // ---- A region, triggers naming it, script naming both ---------------------------------------------------------
+    await k.tool("add_region", { name: "Smoke Gate", left: -256, bottom: -256, right: 256, top: 256 });
+    await k.tool("create_script_trigger", { name: "Gate Script", script: "function InitTrig_Gate_Script takes nothing returns nothing\n    call RemoveRect(gg_rct_Smoke_Gate)\nendfunction\n" });
+    await k.tool("create_script_trigger", { name: "Gate Watch", script: "" });
+    await k.tool("create_script_trigger", { name: "Broken Kill", script: "" });
+    await k.tool("set_script_header", { script: "// gg_rct_Smoke_Gate and gg_trg_Gate_Watch\n" });
+    const wtg = wtgFile();
+    const p1 = (value) => ({ type: 1, value });
+    const line = (kind, name, params) => ({ kind, name, enabled: true, params, children: [] });
+    const gui = (name, ecas) => { const t = wtg.items.find((i) => i.name === name); t.isCustom = false; t.ecas = ecas; };
+    gui("Gate Watch", [line(0, "TriggerRegisterEnterRectSimple", [p1("gg_rct_Smoke_Gate")]), line(2, "TriggerExecute", [p1("gg_trg_Gate_Script")]), line(2, "RemoveRect", [p1("gg_rct_Smoke_Gate")])]);
+    gui("Broken Kill", [line(0, "MapInitializationEvent", []), line(2, "KillUnit", [{ type: 0, value: "PlayerNA" }])]);
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify(wtg, null, 2))})`);
+
+    // ---- Validate Map Triggers ---------------------------------------------------------------------------------------
+    let list = await listProblems();
+    const flagged = list.filter((p) => p.reveal?.command === "w3.triggers.reveal");
+    const broken = flagged.filter((p) => p.location === "Broken Kill");
+    if (broken.length !== 1 || !/^Action 1: .*parameter 1 \(Unit\): .* is Player, not Unit$/.test(broken[0].message)) fail(`Broken Kill is reported as ${JSON.stringify(broken.map((p) => p.message))}`);
+    // Control: the map's own trigger, Gate Watch and the script triggers are valid, and their references exist.
+    const others = flagged.filter((p) => p.location !== "Broken Kill");
+    if (others.length) fail(`valid triggers are reported: ${others.map((p) => `${p.location}: ${p.message}`).join(" | ").slice(0, 400)}`);
+    if (!(await clickProblem("is Player, not Unit"))) fail("the Problems view has no row to click for Broken Kill");
+    else {
+      const shown = await page.evaluate(`({ active: w3.editors.activePath(), tree: document.querySelector(".trig-row.active")?.textContent ?? null,
+        marked: !!document.querySelector(".trig-eca.active .trig-param.trig-flagged"), text: document.querySelector(".trig-eca.active .trig-flagged")?.textContent ?? null })`);
+      if (shown.active !== "map/war3map.wtg.json" || !/Broken Kill/.test(shown.tree ?? "") || !shown.marked) fail(`a click on the problem shows ${JSON.stringify(shown)}, not Broken Kill with its parameter marked`);
+    }
+
+    // ---- Renaming a trigger: its references, its InitTrig_ after the question, one undo step ---------------------------
+    const renamed = await page.evaluate(`(async () => {
+      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === "Gate Script");
+      if (!row) return "no Gate Script in the tree";
+      row.click();
+      await new Promise((r) => setTimeout(r, 300));
+      const input = document.querySelector(".trig-name");
+      input.value = "Gate Runner";
+      input.dispatchEvent(new Event("change"));
+      await new Promise((r) => setTimeout(r, 500));
+      return null;
+    })()`);
+    if (renamed) fail(renamed);
+    const askedTrigger = await warned();
+    if (askedTrigger.length !== 1 || !/gg_trg_Gate_Script and InitTrig_Gate_Script appear 1 time in custom script/.test(askedTrigger[0] ?? "")) fail(`renaming the trigger asked ${JSON.stringify(askedTrigger)}`);
+    await k.save();
+    const afterRename = JSON.stringify(wtgFile());
+    if (!afterRename.includes("gg_trg_Gate_Runner") || afterRename.includes("gg_trg_Gate_Script") || !afterRename.includes("\"Gate Runner\"")) fail("the trigger's gg_trg_ parameter didn't follow its new name");
+    if (!/InitTrig_Gate_Runner/.test(wct()) || /InitTrig_Gate_Script/.test(wct())) fail("the trigger's own InitTrig_ didn't follow its new name");
+    list = await listProblems();
+    if (refsProblems(list).length) fail(`after renaming the trigger, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
+    await page.evaluate(`w3.editors.open("map/war3map.wtg.json")`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await sleep(300);
+    await k.save();
+    const undone = JSON.stringify(wtgFile());
+    if (!undone.includes("gg_trg_Gate_Script") || undone.includes("Gate Runner") || !/InitTrig_Gate_Script/.test(wct())) fail("one undo didn't take the rename and its references back");
+
+    // ---- Renaming a region with the Trigger Editor closed: the files follow ---------------------------------------------
+    await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);
+    const renameRegion = async (from, to) => {
+      await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+      await sleep(300);
+      await k.tab("Regions");
+      const index = k.read("war3map.w3r.json").regions.find((r) => r.name === from)?.index;
+      return page.evaluate(`(async () => {
+        const s = document.querySelector('select[title="Go to a region"]');
+        if (!s) return "no region list";
+        s.value = ${JSON.stringify(String(index))}; s.dispatchEvent(new Event("change"));
+        await new Promise((r) => setTimeout(r, 300));
+        const i = document.querySelector(".terrain-region-name");
+        if (!i) return "no name box for ${from}";
+        i.value = ${JSON.stringify(to)}; i.dispatchEvent(new Event("change"));
+        await w3.commands.execute("workbench.save");
+        await new Promise((r) => setTimeout(r, 800));
+        return null;
+      })()`);
+    };
+    const r1 = await renameRegion("Smoke Gate", "Smoke Door");
+    if (r1) fail(r1);
+    const askedRegion = await warned();
+    if (askedRegion.length !== 1 || !/gg_rct_Smoke_Gate appears 2 times in custom script/.test(askedRegion[0] ?? "")) fail(`renaming the region asked ${JSON.stringify(askedRegion)}`);
+    const doorWtg = JSON.stringify(wtgFile());
+    if ((doorWtg.match(/gg_rct_Smoke_Door/g) ?? []).length !== 2 || doorWtg.includes("gg_rct_Smoke_Gate")) fail("the region's GUI parameters didn't follow its new name (Trigger Editor closed)");
+    if (!/RemoveRect\(gg_rct_Smoke_Door\)/.test(wct()) || !/\/\/ gg_rct_Smoke_Door and/.test(wct())) fail("the region's script uses didn't follow its new name (Trigger Editor closed)");
+    list = await listProblems();
+    if (refsProblems(list).length) fail(`after renaming the region, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
+
+    // ---- The same with the Trigger Editor open and nothing unsaved in it: its state follows and is saved ------------------
+    await page.evaluate(`w3.commands.execute("w3.triggers.open")`);
+    await sleep(500);
+    const r2 = await renameRegion("Smoke Door", "Smoke Arch");
+    if (r2) fail(r2);
+    await warned();
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("the open Trigger Editor wasn't saved after taking the region's new name");
+    const archWtg = JSON.stringify(wtgFile());
+    if ((archWtg.match(/gg_rct_Smoke_Arch/g) ?? []).length !== 2 || /RemoveRect\(gg_rct_Smoke_Door\)/.test(wct())) fail("the region's references didn't follow its new name through the open Trigger Editor");
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Problems' Map Properties link: the loading screen's section ---------------------------------------------------
+    const infoText = readFileSync(join(k.root, "map", "war3map.w3i.json"), "utf8");
+    const info = JSON.parse(infoText);
+    info.loadingScreen = { ...(info.loadingScreen ?? {}), model: "UI\\Smoke\\Missing.mdx" };
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))})`);
+    list = await listProblems();
+    if (!list.some((p) => p.location === "Map Properties › Loading screen")) fail("the missing loading screen model isn't reported");
+    else if (!(await clickProblem("UI\\Smoke\\Missing.mdx"))) fail("no row to click for the loading screen model");
+    else {
+      const section = await page.evaluate(`document.querySelector(".form-nav-item.active")?.textContent ?? null`);
+      if (section !== "Loading Screen") fail(`the loading screen's problem opens Map Properties at ${JSON.stringify(section)}`);
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
+    // As it was, for packing below.
+    await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoText)})`);
+
+    // ---- AI Editor: Add To Map -------------------------------------------------------------------------------------------
+    const wai = join(dir, "Smoke Raider.wai");
+    rmSync(wai, { force: true });
+    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); await new Promise((r) => setTimeout(r, 800)); })()`);
+    const addErr = await k.run("w3.ai.addToMap");
+    if (addErr) fail(`Add To Map: ${addErr}`);
+    const script = join(k.root, "map", "Scripts", "Smoke Raider.ai");
+    if (!existsSync(script) || !/function main takes nothing returns nothing/.test(readFileSync(script, "utf8"))) fail("Add To Map didn't write Scripts/Smoke Raider.ai with the AI script");
+    await k.run("w3.ai.addToMap");
+    const entries = k.read("war3map.imp.json").files.filter((f) => f.path === "Scripts\\Smoke Raider.ai");
+    if (entries.length !== 1 || entries[0].flags !== 21) fail(`the import list has ${JSON.stringify(entries)} for the AI script after two Add To Map`);
+    await k.verify(fail);
+
+    // ---- AI Editor: custom data in from a unit file, out as a .w3o, undo -------------------------------------------------
+    const w3u = join(dir, "units.w3u");
+    const unitFile = Buffer.alloc(24);
+    unitFile.writeUInt32LE(2, 0); unitFile.writeUInt32LE(0, 4); unitFile.writeUInt32LE(1, 8); unitFile.write("hfooh000", 12, "latin1"); unitFile.writeUInt32LE(0, 20);
+    writeFileSync(w3u, unitFile);
+    await page.evaluate(`w3.window.pickFile = async () => ${JSON.stringify(w3u)}`);
+    const inErr = await k.run("w3.ai.importCustomData");
+    if (inErr) fail(`Import Custom Data: ${inErr}`);
+    const shows = () => page.evaluate(`document.querySelector(".ai-custom-data")?.textContent ?? null`);
+    if (!/Object data from .*units\.w3u/.test((await shows()) ?? "")) fail(`after Import Custom Data the General tab shows ${JSON.stringify(await shows())}`);
+    const out = join(dir, "out.w3o");
+    rmSync(out, { force: true });
+    await page.evaluate(`w3.window.pickSaveFile = async () => ${JSON.stringify(out)}`);
+    const outErr = await k.run("w3.ai.exportCustomData");
+    if (outErr) fail(`Export Custom Data: ${outErr}`);
+    const w3o = existsSync(out) ? readFileSync(out) : Buffer.alloc(0);
+    const want = Buffer.concat([Buffer.from([1, 0, 0, 0, 1, 0, 0, 0]), unitFile, Buffer.alloc(24)]);
+    if (!w3o.equals(want)) fail(`the exported .w3o is ${w3o.length} bytes, not the unit file in a .w3o (${want.length})`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await sleep(300);
+    if (!/^None/.test((await shows()) ?? "")) fail(`one undo of Import Custom Data shows ${JSON.stringify(await shows())}`);
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if (!readFileSync(wai).includes(Buffer.from("units.w3u"))) fail("the saved AI doesn't carry the custom data");
+  } finally {
+    await page.evaluate(`(() => { const k = window.__kept; if (k) { w3.window.showWarning = k.warn; w3.window.pickFile = k.pick; w3.window.pickSaveFile = k.save; } })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -3632,7 +3826,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, itemTablesAccess, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -3718,6 +3912,7 @@ async function run() {
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
+    await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
