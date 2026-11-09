@@ -157,7 +157,8 @@ export interface EditorProvider {
 }
 
 /** An entry of a context menu; "-" is a separator. */
-export type MenuItem = "-" | { label: string; run: () => void; disabled?: boolean; hint?: string; shortcut?: string };
+/** `checked`: an on/off entry, drawn with a check mark while on (false: off, room for the mark kept). */
+export type MenuItem = "-" | { label: string; run: () => void; disabled?: boolean; hint?: string; shortcut?: string; checked?: boolean };
 
 export interface QuickPickItem<T = unknown> {
   label: string;
