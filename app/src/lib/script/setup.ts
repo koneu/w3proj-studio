@@ -181,14 +181,18 @@ export function mainSection(i: SetupInput): string {
 
 /** Editors before 6116 always wrote TEAMS_TOGETHER (bit 0 of the flags fits the game's maps as well;
  *  nothing separates the two, and this way maps from today's editors can't be affected). After that
- *  a melee map gets it and others USE_MAP_SETTINGS, with custom forces or without. */
+ *  a melee map of more than one player gets it and others USE_MAP_SETTINGS, with custom forces or
+ *  without: World Editor 2.0 (7003) saved a one-player melee copy of smoketest_maps/cliff.w3m with
+ *  USE_MAP_SETTINGS (with "modify ally priorities" set too), the same copy with a second player
+ *  with TEAMS_TOGETHER (we-drive saves, 2026-11-09). */
 const oldPlacement = (i: SetupInput) => ((i.info.editorVersion as number | undefined) ?? 6116) < 6116;
+const teamsTogether = (i: SetupInput) => oldPlacement(i) || ((i.info.flags & MELEE) !== 0 && i.info.players.length > 1);
 
 export function configSection(i: SetupInput): string {
   const players = i.info.players;
   const lines = ["function config takes nothing returns nothing", `    call SetMapName( ${str(i.info.name)} )`, `    call SetMapDescription( ${str(i.info.description)} )`,
     `    call SetPlayers( ${players.length} )`, `    call SetTeams( ${players.length} )`,
-    `    call SetGamePlacement( MAP_PLACEMENT_${i.info.flags & MELEE || oldPlacement(i) ? "TEAMS_TOGETHER" : "USE_MAP_SETTINGS"} )`, ""];
+    `    call SetGamePlacement( MAP_PLACEMENT_${teamsTogether(i) ? "TEAMS_TOGETHER" : "USE_MAP_SETTINGS"} )`, ""];
   players.forEach((p, index) => lines.push(`    call DefineStartLocation( ${index}, ${r1(p.start[0])}, ${r1(p.start[1])} )`));
   lines.push("", "    // Player setup", "    call InitCustomPlayerSlots(  )");
   // Without custom forces the lobby sets up teams: every slot is offered, then the generic setup.

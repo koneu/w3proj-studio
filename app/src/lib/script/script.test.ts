@@ -553,7 +553,13 @@ test("weather, fog and water tint are written only when the map switches them on
 test("placement: custom forces use the map's settings, except from old editors", () => {
   has(configSection(setup({ flags: 0x40, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
   has(configSection(setup({ flags: 0x40, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
-  has(configSection(setup({ flags: 4, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  // A melee map: teams together with more than one player; World Editor 7003 wrote USE_MAP_SETTINGS
+  // for cliff.w3m (melee, one player, editorVersion 7003, flags 0x9c14), with ally priorities on too.
+  has(configSection(setup({ flags: 4, editorVersion: 7003, players: [player(0), player(1)] })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  has(configSection(setup({ flags: 0x9c14, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  has(configSection(setup({ flags: 0x9c16, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  // Old editors: always together, one player or not.
+  has(configSection(setup({ flags: 4, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
   // A World Editor save: no custom forces, not melee.
   has(configSection(setup({ flags: 0xdc10, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
   has(configSection(setup({ flags: 0, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
