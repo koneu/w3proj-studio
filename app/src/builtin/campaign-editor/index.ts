@@ -14,7 +14,7 @@ import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
-import { askNewCampaign, createCampaign } from "./newcampaign";
+import { FOG_UNSET_DENSITY, FOG_UNSET_Z, askNewCampaign, createCampaign } from "./newcampaign";
 
 const FILE = "map/war3campaign.w3f.json", WTS = "map/war3campaign.wts";
 const FORMAT = "w3proj.campaign/1";
@@ -47,6 +47,8 @@ interface CampaignInfo {
 }
 
 const RACES: [number, string][] = [[0, "Human"], [1, "Orc"], [2, "Undead"], [3, "Night Elf"]];
+/** A fog value the World Editor stores as "not set" (its new campaign's -1.8e38 and -1.7e38). */
+const isUnsetFog = (v: number) => v <= -1e38;
 const SECTIONS = [["general", "General"], ["screen", "Campaign Screen"], ["chapters", "Chapters"]] as const;
 type SectionId = (typeof SECTIONS)[number][0];
 
@@ -311,11 +313,19 @@ class CampaignView {
     input.addEventListener("blur", () => { first = true; });
     return viaTable ? h("div.form-stack", {}, input, h("small.muted", { title: "Stored in war3campaign.wts" }, `string table · ${get()}`)) : input;
   }
-  private num(value: number, set: (n: number) => void, opts: { int?: boolean } = {}) {
-    const input = h("input.form-input.form-num", { type: "number", value: String(value), step: opts.int ? "1" : "any", readOnly: !this.editable });
+  /** `unset`: the value the World Editor stores for "not set" (shown empty; emptying the field stores it). */
+  private num(value: number, set: (n: number) => void, opts: { int?: boolean; unset?: number } = {}) {
+    const isUnset = opts.unset !== undefined && isUnsetFog(value);
+    const input = h("input.form-input.form-num", { type: "number", value: isUnset ? "" : String(value), step: opts.int ? "1" : "any", readOnly: !this.editable,
+      placeholder: opts.unset !== undefined ? "not set" : "" });
     input.addEventListener("change", () => {
+      if (input.value === "" && opts.unset !== undefined && !input.validity.badInput) {
+        input.classList.remove("invalid");
+        if (!isUnset) this.change(() => set(opts.unset!));
+        return;
+      }
       const n = Number(input.value);
-      if (input.value === "" || Number.isNaN(n) || (opts.int && !Number.isInteger(n))) { input.classList.add("invalid"); return; }
+      if (input.value === "" || !Number.isFinite(n) || (opts.int && !Number.isInteger(n))) { input.classList.add("invalid"); return; }
       if (n !== value) this.change(() => set(n));
     });
     return input;
@@ -521,16 +531,18 @@ class CampaignView {
     const c = this.info;
     return [
       h("div.form-section", {}, h("h3", {}, "Background"),
-        this.row("Background", this.num(c.background, (v) => { c.background = v; }, { int: true }), "Preset number; -1: the model or movie below"),
+        this.row("Background", this.num(c.background, (v) => { c.background = v; }, { int: true }), "Preset number; -1: the model or movie below, none when that is empty"),
         this.row("Custom background", this.text(() => c.backgroundPath, (v) => { c.backgroundPath = v; }), "Model (.mdx) or movie in the campaign or the game"),
         this.row("Campaign picture", this.text(() => c.minimapPath, (v) => { c.minimapPath = v; }), "Shown in the campaign list")),
       h("div.form-section", {}, h("h3", {}, "Ambient Sound"),
-        this.row("Sound", this.num(c.ambientSound, (v) => { c.ambientSound = v; }, { int: true }), "Preset number; -1: the file below; 0: none"),
+        this.row("Sound", this.num(c.ambientSound, (v) => { c.ambientSound = v; }, { int: true }), "Preset number; -1: the file below, none when that is empty"),
         this.row("Custom sound", this.text(() => c.ambientSoundPath, (v) => { c.ambientSoundPath = v; }))),
       h("div.form-section", {}, h("h3", {}, "Fog"),
         this.row("Fog style", this.num(c.fogStyle, (v) => { c.fogStyle = v; }, { int: true }), "-1 or 0: no fog"),
-        this.row("Start / end height", h("div.form-inline", {}, this.num(c.fogStartZ, (v) => { c.fogStartZ = v; }), this.num(c.fogEndZ, (v) => { c.fogEndZ = v; }))),
-        this.row("Density", this.num(c.fogDensity, (v) => { c.fogDensity = v; })),
+        this.row("Start / end height", h("div.form-inline", {},
+          this.num(c.fogStartZ, (v) => { c.fogStartZ = v; }, { unset: FOG_UNSET_Z }), this.num(c.fogEndZ, (v) => { c.fogEndZ = v; }, { unset: FOG_UNSET_Z })),
+          "Empty: not set (a new campaign's)"),
+        this.row("Density", this.num(c.fogDensity, (v) => { c.fogDensity = v; }, { unset: FOG_UNSET_DENSITY })),
         this.row("Color", this.color(c.fogColor, (v) => { c.fogColor = v; }))),
       h("div.form-section", {}, h("h3", {}, "Interface"),
         this.row("Race", this.select(RACES, c.race, (v) => { c.race = v; }), "Cursor and interface of the campaign screen")),
