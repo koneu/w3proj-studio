@@ -10,6 +10,7 @@ import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env
 import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
+import { dayNightModels } from "../../lib/script/setup";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
@@ -23,12 +24,13 @@ import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } 
 const STAMP = ".w3proj/generated-script";
 
 const INFO_JSON = "map/war3map.w3i.json";
+const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
 const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
 
 /** Files war3map.j is made from (also as their .json documents). */
-const INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|doo|w3e|w3u|w3t|w3a)|war3mapUnits\.doo|war3mapSkin\.w3u)(\.json)?$/i;
+const INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a)|war3mapUnits\.doo|war3mapSkin\.w3u)(\.json)?$/i;
 
 /** vJASS in trigger texts (libraries, scopes, structs, block comments, //! directives), or a
  *  script JassHelper compiled ("//globals from <library>:", LIBRARY_<name> constants). Such
@@ -160,13 +162,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const lightEnv = ((info.lightEnvironment as string) || (info.tileset as string)).toLowerCase();
     const light = (sec: string, kind: string) =>
       g.worldEdit.get(sec)?.get(lightEnv) ?? `Environment\\DNC\\DNCLordaeron\\DNCLordaeron${kind}\\DNCLordaeron${kind}.mdl`;
+    // The map's own lighting models (lighting editor). Only a missing war3map.w3l means the light
+    // environment's: a broken one fails the generation rather than losing the map's lighting.
+    const w3lJson = await w3.workspace.readText(W3L_JSON).catch(() => null);
+    const w3lRaw = w3lJson === null && (await bytes(W3L_RAW)) !== null
+      ? await w3.backend.invoke<string>("codec_decode", { root: w3.workspace.project()?.root, path: W3L_RAW }) : null;
+    const w3lText = w3lJson ?? w3lRaw;
+    const lights = dayNightModels(w3lText === null ? null : JSON.parse(w3lText), { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") });
 
     const sounds = (await json<{ sounds: NonNullable<ScriptInput["sounds"]> }>("map/war3map.w3s"))?.sounds ?? [];
     const durations = await soundDurations(sounds.map((s) => s.file), path);
 
     const script = generateScript({
       info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
-      lights: { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") },
+      lights,
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
       units: (await json<{ units: ScriptInput["units"] }>("map/war3mapUnits.doo"))?.units,
       doodads: (await json<{ doodads: ScriptInput["doodads"] }>("map/war3map.doo"))?.doodads,

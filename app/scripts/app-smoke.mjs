@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
 import { ensureCli, smokeId } from "./appctl.mjs";
-import { chosenGamePath, gamePath } from "../../tests/gamepath.mjs";
+import { chosenGamePath, gamePath, mainCheckout } from "../../tests/gamepath.mjs";
 
 const LINUX = process.platform === "linux";
 
@@ -1539,8 +1539,29 @@ async function cameraEditing(page, found) {
   if (await dirty()) fail("a value being typed is already an edit");
   await type("Dist", 3333, "change");
   if (!(await dirty())) fail("the value, entered, isn't an edit");
+  // The preview of a value ends with it: the view is the user's again once it's entered, the field left, or the panel
+  // made again by an undo (which takes the field away without a blur); it once stayed at the previewed camera.
+  const userView = async (when) => {
+    await sleep(300);
+    const now = await view();
+    if (!now || Math.abs(now.distance - before.distance) > 1 || Math.abs(now.target[0] - before.target[0]) > 1 || Math.abs(now.target[1] - before.target[1]) > 1) {
+      fail(`${when}, the view stays at the previewed camera: ${JSON.stringify(now)} (the user's: ${JSON.stringify(before)})`);
+    }
+  };
+  await userView("after a value is entered");
   await k.save();
   if (cameras()[0].distance !== 3333) fail(`the entered distance saved as ${cameras()[0].distance}`);
+  await type("Dist", 4444, "input");
+  await sleep(300);
+  if (Math.abs(((await view())?.distance ?? 0) - 4444) > 1) fail("typing a second distance didn't show it in the view (control)");
+  await type("Dist", 4444, "blur");
+  await userView("after the field is left");
+  await type("Dist", 5555, "input");
+  await k.save();
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await userView("after a save and an undo while a value was being typed");
+  await k.save();
+  if (cameras()[0].distance !== a.distance) fail(`the undo gave the distance ${cameras()[0].distance}, not ${a.distance}`);
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
@@ -3353,6 +3374,67 @@ async function gameReadsOnce(page, found) {
 
 /** Map Properties ▸ Players: Start X and Y can be typed for a player without a start location, and only
  *  shown for one with it, which the terrain editor's save writes there (players follow start locations). */
+/** A real map saved after a terrain edit: the save rewrites war3map.j and war3map.w3i from the map's files, and they may
+ *  differ from the map's own only where the World Editor's own save differs. smoketest_maps/cliff.w3m saved by World
+ *  Editor 7003 (we-drive: open, Ctrl+S, 2026-11-09) changed one line of war3map.j, the start location written from the
+ *  start-location object (-1280, 1472) instead of the w3i's (-1306.0195, 1475.8408), and the w3i's start the same way.
+ *  It kept SetDayNightModels with the map's own two lighting models (war3map.w3l) and MAP_PLACEMENT_USE_MAP_SETTINGS
+ *  (a one-player melee map). Skipped without the map (W3PROJ_CORPUS, else smoketest_maps of the main checkout). */
+async function realMapSave(page, found) {
+  const fail = (what) => found.push(`real map save: ${what}`);
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
+  if (!existsSync(map)) { console.log(`real map save: skipped, ${map} isn't there`); return; }
+  const dir = join(work, "real-map", "cliff");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dirname(dir), { recursive: true });
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
+  const file = (f) => join(dir, "map", f);
+  const script = readFileSync(file("war3map.j"), "utf8"), info = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+  const terrain = readFileSync(file("war3map.w3e.txt"), "utf8");
+  const TXT = "map/war3map.w3e.txt";
+  await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+  try {
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 60000);
+    // The game's files read and the view's layers done (as app-drive's --settle): the placed objects are there, and the
+    // command moves the start location with the ground.
+    let quietSince = 0;
+    await until("the terrain editor's files", async () => {
+      const busy = await page.evaluate(`w3Workbench.game.readsPending > 0 || [...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`);
+      if (busy) { quietSince = 0; return false; }
+      quietSince ||= Date.now();
+      return Date.now() - quietSince > 1000;
+    }, 120000);
+    const units = readFileSync(file("war3mapUnits.doo.json"), "utf8");
+    const err = await page.evaluate(`w3.commands.execute("w3.terrain.adjustCliffLevels", 1).then(() => null, (e) => String(e))`);
+    if (err) return fail(`Adjust Cliff Levels: ${err}`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    if (readFileSync(file("war3map.w3e.txt"), "utf8") === terrain) return fail("the terrain edit wasn't saved (control)");
+    if (readFileSync(file("war3mapUnits.doo.json"), "utf8") === units) return fail("the start location didn't go up with the ground (control)");
+    // The save then writes the w3i's start from the start-location object, and that save the script.
+    const scriptLog = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).join("\\n")`);
+    await until("the map script after the save", async () => /war3map\.j (written|up to date|not written)/.test(await scriptLog()), 30000).catch(() => {});
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+    // war3map.j: the same lines but the start location, which must be the World Editor's.
+    const want = "    call DefineStartLocation( 0, -1280.0, 1472.0 )";
+    const before = script.split("\r\n"), after = readFileSync(file("war3map.j"), "utf8").split("\r\n");
+    const differs = [];
+    for (let i = 0; i < Math.max(before.length, after.length); i++) if (before[i] !== after[i]) differs.push(`${i + 1}: ${JSON.stringify(before[i])} → ${JSON.stringify(after[i])}`);
+    const log = () => page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(-3).join(" | ")`);
+    if (!after.includes(want)) fail(`war3map.j wasn't written with the start location as the World Editor writes it (${want.trim()}): ${differs.slice(0, 4).join(" | ") || "unchanged"}; Map Script: ${await log()}`);
+    const unexpected = differs.filter((d) => !d.endsWith(JSON.stringify(want)));
+    if (unexpected.length) fail(`war3map.j differs from the map's own where the World Editor's save doesn't: ${unexpected.slice(0, 4).join(" | ")}`);
+    // war3map.w3i: only the start, from the start-location object.
+    const nowInfo = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+    if (JSON.stringify(nowInfo.players[0].start) !== JSON.stringify([-1280, 1472])) fail(`the w3i's start location is ${JSON.stringify(nowInfo.players[0].start)}, the World Editor writes [-1280, 1472]`);
+    nowInfo.players[0].start = info.players[0].start;
+    if (JSON.stringify(nowInfo) !== JSON.stringify(info)) fail("war3map.w3i changed beyond the start location");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function playerStarts(page, found, root) {
   const fail = (what) => found.push(`player starts: ${what}`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
@@ -4720,7 +4802,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, byHand, moduleFunctions, objectCopy, graphicsModes, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -4825,6 +4907,7 @@ async function run() {
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
+    await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
     await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
     found.push(...problems(page.events));

@@ -10,7 +10,7 @@ import { dropFunction, dropFunctionOf, dropSection, itemTableFunction, randomGro
 import { banner, generateScript, generateSections, header, ident, literal, parseSoundLabels, placedName, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
 import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors } from "./objects";
-import { AMBIENCE, configSection, mainSection, playersSection, type SetupInput } from "./setup";
+import { AMBIENCE, configSection, dayNightModels, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
 import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText, triggersSection } from "./triggers";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
@@ -553,10 +553,31 @@ test("weather, fog and water tint are written only when the map switches them on
 test("placement: custom forces use the map's settings, except from old editors", () => {
   has(configSection(setup({ flags: 0x40, editorVersion: 6127 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
   has(configSection(setup({ flags: 0x40, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
-  has(configSection(setup({ flags: 4, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  // A melee map: teams together with more than one player; World Editor 7003 wrote USE_MAP_SETTINGS
+  // for cliff.w3m (melee, one player, editorVersion 7003, flags 0x9c14), with ally priorities on too.
+  has(configSection(setup({ flags: 4, editorVersion: 7003, players: [player(0), player(1)] })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+  has(configSection(setup({ flags: 0x9c14, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  has(configSection(setup({ flags: 0x9c16, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
+  // Old editors: always together, one player or not.
+  has(configSection(setup({ flags: 4, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
   // A World Editor save: no custom forces, not melee.
   has(configSection(setup({ flags: 0xdc10, editorVersion: 7003 })), "    call SetGamePlacement( MAP_PLACEMENT_USE_MAP_SETTINGS )");
   has(configSection(setup({ flags: 0, editorVersion: 6110 })), "    call SetGamePlacement( MAP_PLACEMENT_TEAMS_TOGETHER )");
+});
+
+test("day/night models: war3map.w3l's slots as the World Editor writes them, else the light environment's", () => {
+  const env = { terrain: "Env\\T.mdl", unit: "Env\\U.mdl" };
+  const w3l = (terrainModel: string, unitModel: string, terrainEnabled: number, unitEnabled: number) => ({ terrainModel, unitModel, terrainEnabled, unitEnabled });
+  // cliff.w3m: both on; its script has SetDayNightModels( "2556…", "0009…" ).
+  assert.deepEqual(dayNightModels(w3l("0009.mdl", "2556.mdl", 1, 1), env), { terrain: "2556.mdl", unit: "0009.mdl" });
+  // we-drive saves of cliff.w3m with one slot on: the first slot goes into the unit argument.
+  assert.deepEqual(dayNightModels(w3l("0009.mdl", "", 1, 0), env), { terrain: env.terrain, unit: "0009.mdl" });
+  assert.deepEqual(dayNightModels(w3l("", "2556.mdl", 0, 1), env), { terrain: "2556.mdl", unit: env.unit });
+  // A model that's switched off isn't written.
+  assert.deepEqual(dayNightModels(w3l("0009.mdl", "2556.mdl", 1, 0), env), { terrain: env.terrain, unit: "0009.mdl" });
+  assert.deepEqual(dayNightModels(w3l("0009.mdl", "2556.mdl", 0, 1), env), { terrain: "2556.mdl", unit: env.unit });
+  assert.deepEqual(dayNightModels(w3l("", "", 0, 0), env), env);
+  assert.deepEqual(dayNightModels(null, env), env);
 });
 
 test("config: players, teams and how the lobby sets them up", () => {
