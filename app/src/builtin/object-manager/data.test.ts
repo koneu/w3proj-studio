@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node } from "./data";
+import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, type MapContents, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -171,4 +171,35 @@ test("project guard: a project that is open but not yet announced is stale until
   assert.equal(g.stale("B"), true, "open() already set B, onDidChange has not fired");
   g.switched("B");
   assert.equal(g.stale("B"), false);
+});
+
+test("object kinds: an open editor's data wins over the saved file, kind by kind, with its names", () => {
+  const kinds: [string, string][] = [["w3u", "Units"], ["w3a", "Abilities"], ["w3q", "Upgrades"]];
+  const saved = new Map([
+    ["w3u", { custom: [{ id: "h000", base: "hfoo" }, { id: "h001", base: "hkni" }], original: [{ base: "hpea", mods: [{ value: 1 }] }] }],
+    ["w3a", { custom: [{ id: "A000", base: "AHbz" }] }],
+    ["w3q", null],
+  ]);
+  // The unit editor deleted h001 (unsaved) and renamed h000; abilities have no open editor.
+  const live = new Map([["w3u", { custom: [{ id: "h000", base: "hfoo" }], original: [], names: new Map([["h000", "Captain"]]) }]]);
+  const k = objectKinds(kinds, saved, live);
+  assert.deepEqual(k.custom.map((c) => [c.ext, c.label, c.ids.map((o) => o.id)]), [["w3u", "Units", ["h000"]], ["w3a", "Abilities", ["A000"]], ["w3q", "Upgrades", []]]);
+  assert.deepEqual(k.objects.map((o) => [o.label, o.objects.length]), [["Unit", 1], ["Abilitie", 1], ["Upgrade", 0]]);
+  assert.deepEqual([...k.names], [["h000", "Captain"]]);
+  // Without an open editor: the saved file, standard objects' changes included.
+  const s = objectKinds(kinds, saved, new Map());
+  assert.deepEqual(s.custom[0].ids, [{ id: "h000", base: "hfoo" }, { id: "h001", base: "hkni" }]);
+  assert.equal(s.objects[0].objects.length, 3);
+});
+
+test("placed objects: thousands of one type are grouped without copying the list per object", () => {
+  const many = Array.from({ length: 40000 }, (_, i) => ({ id: "LTlt", position: [i, 0], editorId: i }));
+  const t0 = performance.now();
+  const tree = buildTree(contents({ units: [], doodads: many }));
+  const ms = performance.now() - t0;
+  const dest = tree.find((n) => n.label.startsWith("Destructables"))!;
+  assert.equal(dest.label, "Destructables (40000)");
+  assert.equal(dest.children![0].children!.length, 40000);
+  // Copying the list for each object took seconds here; grouping by pushing takes milliseconds.
+  assert.ok(ms < 1000, `buildTree took ${ms.toFixed(0)} ms`);
 });

@@ -7,9 +7,9 @@ import { parseTriggerData } from "../triggers/triggerdata";
 import type { Eca, TriggerFile, TriggerItem } from "../triggers/wtg";
 import { destructablesSection, type DestructableJson } from "./destructables";
 import { dropFunction, dropFunctionOf, dropSection, itemTableFunction, randomGroupsSection } from "./drops";
-import { banner, generateScript, generateSections, header, ident, literal, parseSoundLabels, placedName, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
+import { banner, generateScript, generateSections, HEADER_SECTION, header, ident, literal, parseSoundLabels, placedName, scriptSoundDurations, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
 import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
-import { abilityOrders, gameTeamColors, specialUnits, teamColors } from "./objects";
+import { abilityOrders, buildingTypes, destructableTints, gameTeamColors, heroAbilities, specialUnits, teamColors } from "./objects";
 import { AMBIENCE, configSection, dayNightModels, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
 import { convertToCustom, triggerCustomText, triggersSection } from "./triggers";
@@ -102,6 +102,26 @@ test("splitting a script gives back the sections it was made of", () => {
   const script = [...sections.values()].join("");
   const again = splitSections(script);
   for (const [k, v] of sections) if (v) assert.equal(again.get(k), v, k || "(header)");
+});
+
+test("the map's custom script header goes under a second banner after the objects, the first stays empty", () => {
+  // As WormWar and BomberCommand have it: globals, an empty "Custom Script Code", the objects, the header, the triggers.
+  const custom = { reforged: false, version: 1, comment: "", header: "\r\nfunction H takes nothing returns nothing\r\nendfunction\r\n", texts: [] };
+  const regions = [{ name: "R", index: 0, left: 0, bottom: 0, right: 1, top: 1, weather: "", sound: "" }];
+  const script = generateScript(input({ triggers: wtg([]), custom, regions }));
+  const first = script.indexOf("//*  Custom Script Code"), second = script.indexOf("//*  Custom Script Code", first + 1);
+  assert.ok(first > 0 && second > script.indexOf("function CreateRegions") && second < script.indexOf("//*  Triggers"), script);
+  // The first banner, then the next section's straight away.
+  assert.ok(script.slice(first).startsWith(["//*  Custom Script Code", "//*", "//" + "*".repeat(75), "", "//" + "*".repeat(75)].join(EOL)), script);
+  // The header as the map has it, its leading empty line too, right after its banner, and one line break after it.
+  assert.ok(script.includes(["//*  Custom Script Code", "//*", "//" + "*".repeat(75), "", "function H takes nothing returns nothing", "endfunction", "", "//" + "*".repeat(75)].join(EOL)), script);
+  // Split again under its own key.
+  const again = splitSections(script);
+  assert.equal(again.get(HEADER_SECTION), generateSections(input({ triggers: wtg([]), custom, regions })).get(HEADER_SECTION));
+  assert.ok(!again.get("Custom Script Code")!.includes("function H"));
+  // Without code no second banner.
+  const empty = generateScript(input({ triggers: wtg([]), custom: { ...custom, header: "\r\n" } }));
+  assert.equal(empty.split("//*  Custom Script Code").length, 2);
 });
 
 test("banners read as the World Editor writes them", () => {
@@ -221,6 +241,29 @@ test("autocast is set as placed; a toggle like Defend is only ever switched on",
   hasNot(placed("Adef", 0), "IssueImmediateOrder");
 });
 
+test("the acquisition range comes after the hero level and the mana", () => {
+  // As the game's maps have it (RuinsofAzshara: mana, then range; OrcX02_03: level, then range).
+  const u = units([unit({ id: "Hpal", targetAcquisition: -2, level: 14, mana: 200 })]);
+  assert.ok(u.includes(["    call SetHeroLevel( u, 14, false )", "    call SetUnitState( u, UNIT_STATE_MANA, 200 )", "    call SetUnitAcquireRange( u, 200.0 )"].join(EOL)), u);
+});
+
+test("an unlearned hero ability gets no autocast order, other abilities of heroes do", () => {
+  const orders = (a: string) => (a === "ANms" ? { on: "manashieldon", off: "manashieldoff" } : a === "Ainf" ? { on: "innerfireon", off: "innerfireoff" } : undefined);
+  const hero = (a: string) => a === "ANms";
+  const placed = (id: string, level: number, autocast = 0) => units([unit({ id: "Hvsh", abilities: [{ id, autocast, level }] })], { autocastOrders: orders, heroAbility: hero });
+  // UndeadX04's Sea Witch has Mana Shield at 0, NightElfX04's at 1; NightElf03's custom heroes have Inner Fire on at 0.
+  hasNot(placed("ANms", 0), "IssueImmediateOrder");
+  has(placed("ANms", 1), '    call IssueImmediateOrder( u, "manashieldoff" )');
+  has(placed("Ainf", 0, 1), '    call IssueImmediateOrder( u, "innerfireon" )');
+});
+
+test("hero abilities: the game's, changed by the map, inherited by custom ones", () => {
+  const aher = (value: number) => [{ field: "aher", value }];
+  const isHero = heroAbilities([{ original: [{ base: "AHhb", mods: aher(0) }], custom: [{ id: "A000", base: "ANms" }, { id: "A001", base: "Ainf", mods: aher(1) }] },
+    { custom: [{ id: "A001", base: "Ainf", mods: [] }] }], new Set(["ANms", "AHhb"]));
+  assert.deepEqual(["ANms", "AHhb", "A000", "A001", "Ainf"].map(isHero), [true, false, true, true, false]);
+});
+
 test("orders come from the game's ability tables", () => {
   const t = new Map([["AHhb", new Map([["orderon", "healon"], ["orderoff", "healoff"]])], ["Adef", new Map([["order", "defend"], ["unorder", "undefend"]])], ["Ablo", new Map([["order", "bloodlust"]])]]);
   const o = abilityOrders([t, new Map([["AHhb", new Map([["orderon", "other"], ["orderoff", "other"]])]])]);
@@ -265,12 +308,41 @@ test("team colours: the game's, changed by the map, inherited by custom units", 
   assert.equal(game.get("ntav"), 0, "the game's table stays as it was");
 });
 
+test("team colours: the skin file's entries keep the colour war3map.w3u gives", () => {
+  // HumanX06Finale's N000 (colour 12), HumanX03Secret's n00A (none, its base has 5): war3mapSkin.w3u lists them without utco.
+  const c = teamColors([
+    { custom: [{ id: "N000", base: "Nklj", mods: [{ field: "utco", value: 12 }] }, { id: "n00A", base: "nmr0", mods: [{ field: "utco", value: -1 }] }] },
+    { custom: [{ id: "N000", base: "Nklj", mods: [{ field: "unam", value: "TRIGSTR_083" }] }, { id: "n00A", base: "nmr0", mods: [] }, { id: "n00B", base: "nmr0" }] },
+  ], new Map([["nmr0", 5]]));
+  assert.equal(c.get("N000"), 12);
+  assert.equal(c.has("n00A"), false);
+  assert.equal(c.get("n00B"), 5, "a type only the skin file lists takes its base's");
+});
+
 test("a map can take a type's team colour away", () => {
   const c = teamColors([{ original: [{ base: "ntav", mods: [{ field: "utco", value: -1 }] }], custom: [{ id: "n000", base: "nmr2", mods: [{ field: "utco", value: -1 }] }, { id: "n001", base: "ntav" }] }], new Map([["ntav", 0], ["nmr2", 12]]));
   assert.equal(c.has("ntav"), false);
   assert.equal(c.has("n000"), false);
   assert.equal(c.has("n001"), false);
   assert.equal(c.get("nmr2"), 12);
+});
+
+test("buildings: the game's, changed by the map, inherited by custom types; the skin file keeps what it doesn't set", () => {
+  const ubdg = (value: number) => [{ field: "ubdg", value }];
+  const isBuilding = buildingTypes([
+    { original: [{ base: "hwtw", mods: ubdg(0) }, { base: "nbzk", mods: ubdg(1) }],
+      custom: [{ id: "n003", base: "ngme", mods: ubdg(0) }, { id: "n004", base: "ngme" }, { id: "n005", base: "hwtw" }, { id: "n006", base: "hfoo", mods: ubdg(1) }] },
+    // war3mapSkin.w3u: the same custom types again, with their looks only (UndeadX01).
+    { custom: [{ id: "n003", base: "ngme", mods: [{ field: "umdl", value: "x.mdl" }] }, { id: "n006", base: "hfoo" }] },
+  ], new Set(["ngme", "hwtw"]));
+  assert.equal(isBuilding("n003"), false, "made a unit in war3map.w3u, not in the skin file");
+  assert.equal(isBuilding("n004"), true, "its base's");
+  assert.equal(isBuilding("n005"), false, "its base, changed by the map");
+  assert.equal(isBuilding("n006"), true);
+  assert.equal(isBuilding("hwtw"), false);
+  assert.equal(isBuilding("nbzk"), true);
+  assert.equal(isBuilding("ngme"), true);
+  assert.equal(isBuilding("hfoo"), false);
 });
 
 test("custom gold mines and waygates are found in the object data", () => {
@@ -420,6 +492,13 @@ test("newer editors colour every item, whatever its stored colour; World Editor 
   }
 });
 
+test("newer editors declare the item local even when every item has its global", () => {
+  // OrcX01_05 (editor 7003): all ten items named by triggers, "local item i" all the same.
+  const named = (editorVersion: number) => itemsSection({ units: [unit({ id: "shwd" })], kindOf: () => "item", referenced: new Set(["gg_item_shwd_0001"]), editorVersion });
+  has(named(7003), "    local item i");
+  hasNot(named(6127), "local item i");
+});
+
 const dest = (extra: Partial<DestructableJson> = {}): DestructableJson => ({ id: "LTlt", variation: 2, position: [1, 2, 3], angle: 0, scale: [1, 1, 1], flags: 0, life: 100, editorId: 1, ...extra });
 const dests = (list: DestructableJson[], extra: object = {}) => destructablesSection({ doodads: list, globalName: () => "gg_dest_x", referenced: new Set(["gg_dest_x"]), ...extra });
 
@@ -437,6 +516,18 @@ test("destructables by version, height and state", () => {
   assert.ok(v7.includes("WithSkinPitchRollColor(") && v7.includes("ConvertPlayerColor(24)"));
   has(v7, "    call SetDestructableVertexColor( gg_dest_x, 255, 255, 255, 255 )");
   has(dests([dest({ life: 50 })]), "    call SetDestructableLife( gg_dest_x, 0.50 * life )");
+});
+
+test("a destructable's tint is its type's, as the map's object data sets it", () => {
+  // HumanX03: LTg1 tinted 80 in war3mapSkin.w3b, DTes 100 in war3map.w3b; the rest untinted.
+  const tint = destructableTints([
+    { original: [{ base: "DTes", mods: [{ field: "bvcr", value: 100 }, { field: "bvcg", value: 100 }, { field: "bvcb", value: 100 }] }, { base: "LTg1", mods: [] }],
+      custom: [{ id: "B001", base: "LTlt", mods: [{ field: "bvcr", value: 10 }] }] },
+    { original: [{ base: "LTg1", mods: [{ field: "bvcr", value: 80 }, { field: "bvcg", value: 80 }, { field: "bvcb", value: 80 }] }],
+      custom: [{ id: "B000", base: "DTes", mods: [{ field: "bvcg", value: 150 }] }, { id: "B001", base: "LTlt", mods: [] }] },
+  ]);
+  assert.deepEqual([tint("DTes"), tint("LTg1"), tint("B000"), tint("B001"), tint("LTlt")], [[100, 100, 100], [80, 80, 80], [100, 150, 100], [10, 255, 255], [255, 255, 255]]);
+  has(dests([dest({ id: "LTg1" })], { editorVersion: 7003, tint }), "    call SetDestructableVertexColor( gg_dest_x, 80, 80, 80, 255 )");
 });
 
 test("a destructable with item sets gets a death trigger", () => {
@@ -494,6 +585,8 @@ test("upgrades: researched levels start done, unavailable ones cap them", () => 
   ]);
   has(s, "    call SetPlayerTechResearched( Player(0), 'Rhme', 2 )");
   has(s, "    call SetPlayerTechMaxAllowed( Player(0), 'Rhme', 2 )");
+  // The World Editor caps an upgrade before it marks levels researched (NightElfX01, OrcX03a).
+  assert.ok(s.includes("    call SetPlayerTechMaxAllowed( Player(0), 'Rhme', 2 )" + EOL + "    call SetPlayerTechResearched( Player(0), 'Rhme', 2 )"), s);
   hasNot(s, "Player(1)");
   has(s, "    call InitUpgrades_Player0(  )");
 });
@@ -691,6 +784,46 @@ test("a sound's length comes from outside, if known", () => {
   hasNot(soundSection({}), "SetSoundDuration");
 });
 
+test("dialogue keys: all of a spoken dialogue, else those set from editor 7000 on", () => {
+  const keys = (extra: object, editorVersion = 6127) => soundSection({ dialogueTextKey: 60, speakerNameKey: -1, speakerUnitType: "", unknown2: 1, ...extra }, { info: info({ editorVersion }) });
+  // Undead04 / HumanX04 of editor 6127: nothing; the same sounds in the 7003 versions: the key set.
+  hasNot(keys({}), "SetDialogue");
+  has(keys({}, 7003), '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_60" )');
+  hasNot(keys({}, 7003), "SetDialogueSpeakerNameKey");
+  // OrcX02_02: a speaker unit type with the word at 0 writes both keys, -1 too.
+  const spoken = keys({ dialogueTextKey: -1, speakerNameKey: 370, speakerUnitType: "Hjai", unknown2: 0 });
+  has(spoken, '    call SetDialogueSpeakerNameKey( gg_snd_S, "TRIGSTR_370" )');
+  has(spoken, '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_-1" )');
+  // A plain sound the Sound Editor makes (0, no dialogue): nothing.
+  hasNot(keys({ dialogueTextKey: -1, unknown2: 0 }, 7003), "SetDialogue");
+});
+
+test("the script's sound lengths: per sound, so sounds of one unreadable file keep their own (Roundabout)", () => {
+  const jass = [
+    '    set gg_snd_A = CreateSound( "---Invalid Sound Filepath---", false, false, false, 12700, 12700, "DefaultEAXON" )',
+    "    call SetSoundDuration( gg_snd_A, 6630 )",
+    '    set gg_snd_B = CreateSound( "---Invalid Sound Filepath---", false, false, false, 12700, 12700, "DefaultEAXON" )',
+    "    call SetSoundDuration( gg_snd_B, 5678 )",
+    '    set gg_snd_C = CreateSound( "Sound\\\\Dialogue\\\\C.wav", false, false, false, 10, 10, "DefaultEAXON" )',
+    "    call SetSoundDuration( gg_snd_C, 4319 )",
+  ].join("\r\n");
+  const d = scriptSoundDurations(jass);
+  assert.equal(d("---Invalid Sound Filepath---", "gg_snd_A"), 6630);
+  assert.equal(d("---Invalid Sound Filepath---", "gg_snd_B"), 5678);
+  assert.equal(d("Sound\\Dialogue\\C.wav", "gg_snd_C"), 4319, "the path's escapes undone");
+  // A new sound, or one that plays another file now: the length its file had.
+  assert.equal(d("---Invalid Sound Filepath---", "gg_snd_New"), 5678);
+  assert.equal(d("Sound\\Dialogue\\C.wav", "gg_snd_A"), 4319);
+  assert.equal(d("Other.wav", "gg_snd_C"), undefined);
+  // Lua.
+  const lua = scriptSoundDurations('gg_snd_A = CreateSound("x.flac", false, false, false, 10, 10, "")\r\nSetSoundDuration(gg_snd_A, 99)');
+  assert.equal(lua("x.flac", "gg_snd_A"), 99);
+  // Into the script, per sound.
+  const two = generateSections(input({ sounds: [sound({ name: "gg_snd_A", file: "f" }), sound({ name: "gg_snd_B", file: "f" })] as never, soundDuration: (_f: string, n: string) => (n === "gg_snd_A" ? 1 : 2) })).get("Sound Assets")!;
+  has(two, "    call SetSoundDuration( gg_snd_A, 1 )");
+  has(two, "    call SetSoundDuration( gg_snd_B, 2 )");
+});
+
 test("sound labels come from the tables, first row wins", () => {
   const slk = (pitch: number) => `ID;PWXL;N;E\nC;Y1;X1;K"SoundName"\nC;X2;K"Channel"\nC;X3;K"Pitch"\nC;X4;K"MinDistance"\nC;X5;K"MaxDistance"\nC;X6;K"DistanceCutoff"\nC;Y2;X1;K"Rain"\nC;X2;K1\nC;X3;K${pitch}\nC;X4;K0\nC;X5;K100\nC;X6;K50\nE\n`;
   const l = parseSoundLabels([slk(1), slk(2)]);
@@ -739,6 +872,37 @@ test("a trigger becomes conditions, actions and its init function", () => {
   has(s, "    set gg_trg_Spawn_Wave = CreateTrigger(  )");
   has(s, "    call InitTrig_Spawn_Wave(  )");
   has(s, "    call ConditionalTriggerExecute( gg_trg_Spawn_Wave )");
+});
+
+test("a trigger's comment: the first line even when empty, later empty lines dropped", () => {
+  // Human05's "Corruption03 QUE", Skibi's Castle TD's "ARC Detect Mana Constant".
+  const c = compile([trigger("Q", [], { description: "\r\nCreate 4 Zombies\r\n\r\nRun Trigger Orange Town\r\n" }), trigger("Blank", [], { description: "\r\n\r\n\r\n\r\n", id: 1 })]);
+  assert.ok(c.includes(["// Trigger: Q", "//", "// ", "// Create 4 Zombies", "// Run Trigger Orange Town", "//" + "=".repeat(75)].join(EOL)), c);
+  assert.ok(c.includes(["// Trigger: Blank", "//", "// ", "//" + "=".repeat(75)].join(EOL)), c);
+  const plain = compile([trigger("M", [], { description: "MAP INTIALIZATION\r\n\r\n" })]);
+  assert.ok(plain.includes(["// Trigger: M", "//", "// MAP INTIALIZATION", "//" + "=".repeat(75)].join(EOL)), plain);
+});
+
+test("an initially off trigger with a map initialization event isn't run at the start", () => {
+  // NightElf05's "The Dragons", UndeadX08's "Change the Icon".
+  const s = compile([trigger("On", [eca(0, "MapInitializationEvent")]), trigger("Off", [eca(0, "MapInitializationEvent")], { initiallyOff: true, id: 1 })]);
+  has(s, "    call ConditionalTriggerExecute( gg_trg_On )");
+  hasNot(s, "ConditionalTriggerExecute( gg_trg_Off )");
+  // Alone, there is nothing to run: main doesn't call it either.
+  const only = generateScript(input({ triggers: wtg([trigger("Off", [eca(0, "MapInitializationEvent")], { initiallyOff: true })]) }));
+  hasNot(only, "RunInitializationTriggers");
+  const off = trigger("Off", [eca(0, "MapInitializationEvent"), eca(2, "DoNothing")], { initiallyOff: true });
+  convertToCustom(off);
+  assert.equal(off.runOnInit, false, "converted, it isn't run either");
+});
+
+test("children left on a Set Variable still get their helper functions", () => {
+  // Skibi's Castle TD: a ForGroup under a Set Variable; the World Editor writes its callback, never calls it.
+  const pick = eca(2, "ForGroup", [{ type: 3, value: "1" }, { type: 2, value: "DoNothing", call: { kind: 2, name: "KillUnit", hasParams: true, params: [{ type: 3, value: "2" }], trailer: 0 } } as never], { group: 0 });
+  const t = trigger("Run", [eca(2, "SetVariable", [{ type: 1, value: "x" }, { type: 3, value: "1" }], { children: [pick] })]);
+  const s = compile([t]);
+  has(s, "function Trig_Run_Func001Func001002 takes nothing returns nothing");
+  hasNot(s, "call Trig_Run_Func001Func001002");
 });
 
 test("disabled triggers and comments aren't compiled", () => {

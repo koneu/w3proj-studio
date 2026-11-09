@@ -69,7 +69,7 @@ export class TerrainToolRegistry implements TerrainService {
   picking: { prompt: string; objects?: PickObjects; finish(p: Point | undefined): void } | null = null;
 
   /** Set by the open terrain editor: its live placements. */
-  livePlacements: (() => { units: unknown[]; doodads: unknown[] }) | null = null;
+  livePlacements: (() => { units: unknown[] | null; doodads: unknown[] | null }) | null = null;
 
   placedObjects() { return this.livePlacements?.() ?? null; }
 

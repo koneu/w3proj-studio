@@ -14,7 +14,7 @@ export const KEPT_SCRIPT_WORDS = "so it isn't regenerated";
 export const SCRIPT_FILES = ["map/war3map.j", "map/war3map.lua"];
 
 /** Files the map script is made from (also as their .json documents): saving one regenerates it. */
-export const SCRIPT_INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a)|war3mapUnits\.doo|war3mapSkin\.w3u)(\.json)?$/i;
+export const SCRIPT_INPUTS = /^map\/(war3map\.(wtg|wct|wts|w3i|w3r|w3c|w3s|w3l|doo|w3e|w3u|w3t|w3a|w3b)|war3mapUnits\.doo|war3mapSkin\.(w3u|w3a|w3b))(\.json)?$/i;
 
 /** Top-level functions of a JASS or Lua script ("function f", also Lua's "f = function"). */
 function functionsOf(script: string): Set<string> {
@@ -43,7 +43,7 @@ const CREATES = /^\s*(?:set \w+ = |call )(?:Blz)?Create(?:Dead)?(?:Destructable|
 /** A line that begins a random pick of the next object's type (its lines up to that object belong to it). */
 const PICKS = /^\s*(?:call RandomDistReset\b|set (?:unitID|itemID) = )/;
 /** A unit's acquisition range: nothing else placing it reads that, and the World Editor sets it after the hero level
- *  and the mana where Studio sets it before. */
+ *  and the mana, where Studio set it before until 2026-11 (scripts of that Studio still count as the same). */
 const ACQUIRE = /^\s*call SetUnitAcquireRange\s*\(\s*(\w+)\s*,/;
 
 /** The script with the object blocks of every placing function in one fixed order; everything else, the lines before

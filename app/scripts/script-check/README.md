@@ -23,8 +23,10 @@ It also reports what must stay silent on maps the World Editor made: `lib/script
 (`problems:`, dead references in the game's own maps; the count may only fall).
 
 `sections.mts` also counts whole files that come out identical, `(whole file)`; pass that as the
-section to see where a file whose sections all match still differs. Sound durations are compared
-as 0 (they come from the sound files).
+section to see where a file whose sections all match still differs. Sound durations come from the
+World Editor's script (`scriptSoundDurations`), as the app takes them when it can't read the sound files.
+The map's custom script header is the section `Custom Script Code (header)`: the World Editor writes
+it under a second banner after the objects.
 
 ## JASS checker (`lib/jass/check.ts`)
 

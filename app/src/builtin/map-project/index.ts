@@ -2,6 +2,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
 import { gameProgram, joinPath, onWindows } from "../../lib/paths";
 import { testMapArgs, testMapOptions } from "./testmap";
+import { checkOpenedProject } from "./strays";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -49,6 +50,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     testItem.tooltip = p ? "Pack and start Warcraft III with the map (Ctrl+F5)" : "";
   };
   ctx.subscriptions.push(w3.workspace.onDidChange(updateStatus));
+
+  // A project just opened is looked at once: stray files of an older version, map files that differ only in case.
+  let checkedRoot: string | null = null;
+  const checkOpened = () => {
+    const root = w3.workspace.project()?.root ?? null;
+    if (root === checkedRoot) return;
+    checkedRoot = root;
+    if (root) void checkOpenedProject(w3, root, out).catch((e) => out.append(`could not look at ${root}: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  ctx.subscriptions.push(w3.workspace.onDidChange(checkOpened));
+  checkOpened();
 
   const logReport = (title: string, r: UnpackReport) => {
     out.append(`${title}: ${r.files.length} files (${r.files.filter((f) => f.codec).length} via codecs) — ${r.written} written, ${r.unchanged} unchanged, ${r.deleted} deleted`);

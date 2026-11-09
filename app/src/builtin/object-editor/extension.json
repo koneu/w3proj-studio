@@ -78,7 +78,7 @@
     "services": [
       {
         "id": "w3.objects",
-        "description": "Object browser over game and custom objects (pick)."
+        "description": "Object browser over game and custom objects (pick); the open editors' object data (unsaved changes included): liveObjects, onDidEdit."
       }
     ],
     "configuration": {

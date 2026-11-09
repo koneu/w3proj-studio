@@ -100,7 +100,7 @@ export function soundLabels(w3: W3Api): Promise<string[]> {
   return labels;
 }
 
-export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFor" | "bringTypes">): ObjectsService {
+export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFor" | "bringTypes" | "liveObjects" | "onDidEdit">): ObjectsService {
   const icons = iconLoader(w3);
   const images = imageLoader(w3);
   // Callers ask for names one by one, a whole map's worth at once: the files are read once per

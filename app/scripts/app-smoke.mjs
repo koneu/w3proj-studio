@@ -16,10 +16,10 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { inflateSync } from "node:zlib";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
@@ -985,10 +985,12 @@ async function viewModes(page, found) {
   await k.look(start.position[0], start.position[1] + 128);
   await k.clearToasts();
   await sleep(1500);
-  await mapPicture(page);
-  let plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
+  await countFrames(page);
+  // The pictures compared are taken once the view stands still: on a busy machine a redraw after a key, or the end of a
+  // camera move, can come later than a fixed wait (Ctrl+D measured a handful of pixels in a full run now and then).
+  let plain = await settledMapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
   if (noise > 200) return fail(`the same view gave two pictures ${noise} pixels apart`);
-  const changed = async () => (await pixelsApart(page, plain, await mapPicture(page))) - noise;
+  const changed = async () => (await pixelsApart(page, plain, await settledMapPicture(page))) - noise;
   // The window isn't reloaded by Ctrl+R in the map: this stays.
   await page.evaluate(`window.__viewModesMark = 1`);
 
@@ -1028,7 +1030,10 @@ async function viewModes(page, found) {
 
   /** A View key: the state (against `s`, taken before) changes and the picture by at least `least` pixels. */
   const trial = async (label, field, press, least) => {
+    const before = await framesDrawn(page);
     await press();
+    // The view draws what the key changed before the picture is judged.
+    await until(`a frame after ${label}`, async () => (await framesDrawn(page)) > before, 5000).catch(() => {});
     const on = await state();
     if (on[field] === s[field]) fail(`${label} didn't change ${field} (${JSON.stringify(on[field])})`);
     const diff = await changed();
@@ -1078,9 +1083,7 @@ async function viewModes(page, found) {
     if (at) {
       await k.look(at[0], at[1]);
       for (let i = 0; i < 3; i++) await key("ArrowUp", "ArrowUp", 38, CTRL);
-      await sleep(800);
-      await mapPicture(page);
-      plain = await mapPicture(page);
+      plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
     }
     s = await state();
@@ -1093,9 +1096,7 @@ async function viewModes(page, found) {
     if (at) {
       for (let i = 0; i < 3; i++) await key("ArrowDown", "ArrowDown", 40, CTRL);
       await k.look(start.position[0], start.position[1] + 128);
-      await sleep(800);
-      await mapPicture(page);
-      plain = await mapPicture(page);
+      plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
     }
   }
@@ -1504,7 +1505,7 @@ async function flyingHeights(page, found) {
   })()`);
   const drawn = (id) => page.evaluate(`window.__flyEd?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)}) ?? null`);
   try {
-    const reloaded = `(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units.some((u) => u.id === "hfoo" && u.position[2] === ${ground + 600}) ?? false)()`;
+    const reloaded = `(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.some((u) => u.id === "hfoo" && u.position[2] === ${ground + 600}) ?? false)()`;
     await until("the gryphon and the footman drawn", async () => (await page.evaluate(reloaded)) && (await drawn("hgry")) && (await drawn("hfoo")), 20000)
       .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify([await drawn("hgry"), await drawn("hfoo")])}`); });
     // Drawn after the reload: a moment later.
@@ -2101,6 +2102,185 @@ async function resizeUndo(page, found) {
   const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
   if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
   await page.evaluate(`w3.editors.closeAll()`);
+}
+
+/** The canvas of the active tab's view (an expression in the page). */
+const SHOWN_CANVAS = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+
+/** Counts frames per canvas from now on (`window.__glFrames`): a frame starts with its clear. */
+async function countFrames(page) {
+  await page.evaluate(`(() => {
+    if (window.__glFrames) return;
+    const P = WebGL2RenderingContext.prototype, clear = P.clear;
+    window.__glFrames = new WeakMap();
+    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
+  })()`);
+}
+
+/** Frames the shown view has drawn since countFrames (-1 without a view). */
+function framesDrawn(page) {
+  return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
+}
+
+/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
+ *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
+async function settledMapPicture(page, still = 100, tries = 8) {
+  let prev = await mapPicture(page);
+  for (let i = 1; i < tries; i++) {
+    const next = await mapPicture(page);
+    if ((await pixelsApart(page, prev, next)) <= still) return next;
+    prev = next;
+  }
+  return prev;
+}
+
+/** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
+ *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
+ *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
+ *  2. fs_exists answers a path in a folder it may not look into with an error, not "not there" (not on Windows).
+ *  3. On Linux two project files that differ only in case are two files: a write to one is neither the other's entry nor
+ *     hides the other's outside change, and opening the project says they can't both go into the map archive.
+ *  4. On Linux files an older version left with a `\` in their name (next to the project) are found when it opens, left
+ *     alone when the user says so, and otherwise moved where they belong (a copy of what is there is deleted, a file that
+ *     differs from what is there stays). */
+async function dataSafety(page, found) {
+  const fail = (what) => found.push(`data safety: ${what}`);
+  const k = await heightKit(page, "DataSafety");
+  const { hands, root } = k;
+  const pathing = join(root, ".w3proj", "pathing.json");
+  const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+  /** The terrain editor opened again: the Pathing Editor reads its file when the editor is made. */
+  const reopen = async () => {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await sleep(300);
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await editorUp();
+    await sleep(1000);
+    await k.tab("Pathing");
+    await sleep(500);
+  };
+  const warned = () => page.evaluate(`window.__warned.splice(0)`);
+  const answer = (a) => page.evaluate(`window.__answer = ${JSON.stringify(a)}`);
+  /** A drag across the middle of the map with the Pathing tab's brush, then a save. */
+  const stroke = async () => {
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y });
+    await sleep(400);
+    await k.save();
+  };
+  const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
+  await page.evaluate(`(() => { window.__warned = []; window.__answer = undefined; window.__dataSafetyWarn = w3.window.showWarning; w3.window.showWarning = async (m, ...a) => { window.__warned.push(m); return window.__answer; }; })()`);
+  const locked = join(work, "data-safety-locked");
+  try {
+    // ---- 1a. A pathing.json that isn't JSON: said on opening, painting asks, Cancel writes nothing and leaves no undo step ----
+    mkdirSync(dirname(pathing), { recursive: true });
+    const broken = `{ "format": "w3proj.pathing/1", "width": 256, oops`;
+    writeFileSync(pathing, broken);
+    await reopen();
+    let said = await warned();
+    if (!said.some((m) => m.includes("pathing.json is there, but it isn't valid JSON"))) fail(`opening with a broken pathing.json said ${JSON.stringify(said)}`);
+    const notice = await page.evaluate(`document.querySelector(".pathing-notice")?.textContent ?? null`);
+    if (!/can't be read: painting is off/.test(notice ?? "")) fail(`the Pathing tab doesn't say painting is off: ${JSON.stringify(notice)}`);
+    await answer("Cancel");
+    await stroke();
+    said = await warned();
+    if (!said.some((m) => m.includes("Start a new file") || m.includes("start a new overrides file"))) fail(`painting over a broken pathing.json asked ${JSON.stringify(said)}`);
+    if (read(pathing) !== broken) fail("a stroke after Cancel wrote over the broken pathing.json");
+    if (await dirty()) fail("a refused stroke left the terrain editor with unsaved changes");
+    // ---- 1b. Choosing a new file: the next stroke paints, the save keeps the old file as pathing.json.bak ----
+    await answer("Start a new file");
+    await stroke();
+    if (read(pathing) !== broken) fail("the stroke that asked painted too");
+    await stroke();
+    const fresh = JSON.parse(read(pathing) ?? "null");
+    if (!fresh || fresh.width !== 256 || !(fresh.cells?.length > 0)) fail(`after choosing a new file the save wrote ${JSON.stringify(read(pathing))?.slice(0, 120)}`);
+    if (read(`${pathing}.bak`) !== broken) fail(`the broken pathing.json wasn't kept as pathing.json.bak (${JSON.stringify(read(`${pathing}.bak`))})`);
+    // ---- 1c. A file for another map size: Cancel writes nothing; Replace backs it up under a name not yet taken ----
+    const otherSize = JSON.stringify({ format: "w3proj.pathing/1", width: 128, height: 128, note: "mine", cells: [[1, 1, 2, 0]] });
+    writeFileSync(pathing, otherSize);
+    await reopen();
+    said = await warned();
+    if (!said.some((m) => m.includes("is for a 128×128 pathing map"))) fail(`opening with another size's pathing.json said ${JSON.stringify(said)}`);
+    await answer("Cancel");
+    await stroke();
+    if (!(await warned()).some((m) => m.includes("Painting replaces them"))) fail("painting over another size's overrides asked nothing");
+    if (read(pathing) !== otherSize) fail("a stroke after Cancel wrote over another size's pathing.json");
+    await answer("Replace");
+    await stroke();
+    await stroke();
+    const replaced = JSON.parse(read(pathing) ?? "null");
+    if (replaced?.width !== 256 || !(replaced.cells?.length > 0)) fail(`Replace wrote ${JSON.stringify(read(pathing))?.slice(0, 120)}`);
+    if (read(`${pathing}.bak2`) !== otherSize) fail("another size's pathing.json wasn't kept as pathing.json.bak2");
+    if (read(`${pathing}.bak`) !== broken) fail("the second backup wrote over the first");
+
+    if (process.platform === "win32") return;
+    // ---- 2. A file in a folder that can't be looked into: an error, not "not there" ----
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, "war3campaign.w3f"), "c");
+    chmodSync(locked, 0o000);
+    let lookable = true;
+    try { readdirSync(locked); } catch { lookable = false; }
+    if (!lookable) {
+      const r = await page.evaluate(`w3.backend.invoke("fs_exists", { path: ${JSON.stringify(join(locked, "war3campaign.w3f"))} }).then((v) => ({ v }), (e) => ({ e: String(e) }))`);
+      if (!/can't be checked/.test(r.e ?? "")) fail(`fs_exists in a folder that can't be looked into answered ${JSON.stringify(r)}`);
+    }
+    chmodSync(locked, 0o755);
+    const r = await page.evaluate(`w3.backend.invoke("fs_exists", { path: ${JSON.stringify(join(locked, "war3campaign.w3f"))} })`);
+    if (r !== true) fail(`fs_exists of a file that is there answered ${r} (control)`);
+
+    // ---- 3. Two files that differ only in case ----
+    writeFileSync(join(root, "map", "Notes.txt"), "theirs");
+    writeFileSync(join(root, "map", "notes.txt"), "x");
+    await page.evaluate(`w3.workspace.refresh()`);
+    await page.evaluate(`w3.workspace.writeText("map/notes.txt", "mine, longer")`);
+    if (read(join(root, "map", "Notes.txt")) !== "theirs") fail("a write to map/notes.txt changed map/Notes.txt");
+    const sizes = await page.evaluate(`Object.fromEntries(w3.workspace.files().filter((f) => /^map\\/notes\\.txt$/i.test(f.path)).map((f) => [f.path, f.size]))`);
+    if (sizes["map/Notes.txt"] !== 6 || sizes["map/notes.txt"] !== 12) fail(`the file list after writing one of two names that differ in case: ${JSON.stringify(sizes)}`);
+    writeFileSync(join(root, "map", "Notes.txt"), "theirs, changed");
+    const changed = await page.evaluate(`w3Workbench.workspace.externalChanges().then((s) => [...s])`);
+    if (JSON.stringify(changed) !== JSON.stringify(["map/Notes.txt"])) fail(`an outside change to map/Notes.txt next to our map/notes.txt was reported as ${JSON.stringify(changed)}`);
+
+    // ---- 4. Stray files of an older version next to the project ----
+    const BS = String.fromCharCode(92);
+    const name = basename(root), parent = dirname(root);
+    const stray = (file) => join(parent, [name, "build", "checkpoints", file].join(BS));
+    const checkpoints = join(root, "build", "checkpoints");
+    mkdirSync(checkpoints, { recursive: true });
+    writeFileSync(join(checkpoints, "copy.w3x"), "same");
+    writeFileSync(join(checkpoints, "clash.w3x"), "them");
+    writeFileSync(stray("moved.w3x"), "stray");
+    writeFileSync(stray("copy.w3x"), "same");
+    writeFileSync(stray("clash.w3x"), "mine");
+    const strays = () => readdirSync(parent).filter((f) => f.includes(BS)).sort();
+    const openAgain = async () => {
+      await page.evaluate(`w3.commands.execute("w3.project.close")`);
+      await sleep(300);
+      await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(root)})`);
+      await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`), 20000);
+    };
+    await answer("Leave them");
+    await openAgain();
+    await until("the question about stray files", async () => (await page.evaluate(`window.__warned.length`)) >= 2, 20000).catch(() => {});
+    said = await warned();
+    if (!said.some((m) => m.includes("map/Notes.txt") && m.includes("map/notes.txt") && m.includes("differ only in case"))) fail(`opening a project with map/Notes.txt and map/notes.txt said ${JSON.stringify(said)}`);
+    const question = said.find((m) => m.includes("left by an older version on Linux"));
+    if (!question) fail(`opening a project with stray files said ${JSON.stringify(said)}`);
+    else if (!/3 files/.test(question) || !/1 file can be moved/.test(question) || !/1 file is a copy/.test(question) || !/1 file can't be moved/.test(question)) fail(`the question about stray files: ${question}`);
+    await sleep(500);
+    if (strays().length !== 3) fail(`"Leave them" changed the stray files: ${strays().join(", ")}`);
+    await answer("Move and delete copies");
+    await openAgain();
+    await until("the stray file moved", () => existsSync(join(checkpoints, "moved.w3x")), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints"));
+    await sleep(500);
+    if (read(join(checkpoints, "moved.w3x")) !== "stray") fail("the moved checkpoint differs");
+    if (read(join(checkpoints, "copy.w3x")) !== "same" || read(join(checkpoints, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
+    if (JSON.stringify(strays()) !== JSON.stringify([[name, "build", "checkpoints", "clash.w3x"].join(BS)])) fail(`after moving, the stray files left are ${JSON.stringify(strays())}`);
+    if (read(stray("clash.w3x")) !== "mine") fail("the stray that differs from what is there was changed");
+  } finally {
+    if (existsSync(locked)) { chmodSync(locked, 0o755); rmSync(locked, { recursive: true, force: true }); }
+    await page.evaluate(`(() => { if (window.__dataSafetyWarn) w3.window.showWarning = window.__dataSafetyWarn; window.__dataSafetyWarn = null; })()`);
+  }
 }
 
 /** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
@@ -3929,14 +4109,8 @@ async function contextLoss(page, found) {
   const ground = "map/war3map.w3e.txt";
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
-  // Frames per canvas: a frame starts with its clear. The canvas shown is the one of the active tab.
-  await page.evaluate(`(() => {
-    if (window.__glFrames) return;
-    const P = WebGL2RenderingContext.prototype, clear = P.clear;
-    window.__glFrames = new WeakMap();
-    P.clear = function (m) { window.__glFrames.set(this.canvas, (window.__glFrames.get(this.canvas) ?? 0) + 1); return clear.call(this, m); };
-  })()`);
-  const canvasNow = `[...document.querySelectorAll(".model-stage canvas")].find((c) => c.offsetParent !== null)`;
+  await countFrames(page);
+  const canvasNow = SHOWN_CANVAS;
   const frames = () => page.evaluate(`(() => { const c = ${canvasNow}; return c ? window.__glFrames.get(c) ?? 0 : -1; })()`);
   const lostShown = () => page.evaluate(`(() => { const c = ${canvasNow}; const m = c?.parentElement.querySelector(".gl-lost"); return !!m && !m.hidden; })()`);
   /** Loses or restores the shown canvas's context; the canvas is kept as __lostCanvas. */
@@ -4865,27 +5039,190 @@ async function staleEditors(page, found) {
  *  Ctrl+Z and Ctrl+Y there); the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger, a
  *  region), Rename (a sound) and Play Sound, done by the owning editors, and a group's menu; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
  *  the CLI's pack, replace and remove are one undo step each) and Remove Button asking whether the map goes too. */
+/** Right-clicks the first element of `selector` whose text has `text`, then the menu item starting with `item`. Null when
+ *  done, else what went wrong. */
+async function contextMenuItem(page, selector, text, item) {
+  const ok = await page.evaluate(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.includes(${JSON.stringify(text)}));
+    if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
+  if (!ok) return `nothing with "${text}" in ${selector}`;
+  const shown = await until(`the menu item ${item}`, () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith(${JSON.stringify(item)}))`), 5000).then(() => true, () => false);
+  if (!shown) {
+    const items = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
+    await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    return `the menu of "${text}" has no ${item} (${items.join(" | ")})`;
+  }
+  await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith(${JSON.stringify(item)})).click()`);
+  await sleep(500);
+  return null;
+}
+
+/** The Object Manager follows the open editors, unsaved changes included: a placed unit deleted in the terrain editor, a
+ *  custom object, a trigger, a variable and a sound renamed or deleted (through the Object Manager's own menu and through
+ *  the editors' commands), with undo and redo, and back to the saved files when the editor closes without saving. While
+ *  a filter is on, a click on a group row doesn't open or close it behind the filter. */
+async function objectManagerLive(page, found) {
+  const fail = (what) => found.push(`object manager live: ${what}`);
+  const k = await heightKit(page, "OmLive");
+  const run = (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then((r) => ({ r }), (e) => ({ e: String(e) }))`);
+  await page.evaluate(`(() => { window.__omLiveKept = { input: w3.window.inputBox, ask: w3.window.askDelete }; w3.window.askDelete = async () => true; })()`);
+  const answer = (value) => page.evaluate(`w3.window.inputBox = async () => ${JSON.stringify(value)}`);
+  /** Filters the Object Manager to `filter`; whether a row then has the label (or the detail, `{ detail }`). */
+  const omHas = async (filter, want) => {
+    await page.evaluate(`(async () => {
+      await w3.views.show("objectManager");
+      const s = document.querySelector(".om-search");
+      if (s && s.value !== ${JSON.stringify(filter)}) { s.value = ${JSON.stringify(filter)}; s.dispatchEvent(new Event("input")); }
+    })()`);
+    const label = typeof want === "string" ? want : null, detail = typeof want === "string" ? null : want.detail;
+    return page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => ${label !== null
+      ? `r.querySelector(".tree-label")?.textContent === ${JSON.stringify(label)}`
+      : `r.querySelector(".om-detail")?.textContent === ${JSON.stringify(detail)}`})`);
+  };
+  /** Waits for the rows to have (or not have) an entry; else the failure says `why`. */
+  const rows = async (filter, want, present, why) => {
+    const ok = await until(why, async () => (await omHas(filter, want)) === present, 10000).then(() => true, () => false);
+    if (!ok) fail(why);
+    return ok;
+  };
+  try {
+    // Saved first: a knight, a custom unit, a trigger, a variable and a sound.
+    await k.tool("place_objects", { objects: [{ id: "hkni", x: 512, y: 0 }], ignoreRoom: true });
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Om Live Unit" })).id;
+    await k.tool("create_script_trigger", { name: "Om Live Trigger", script: "" });
+    await k.tool("add_trigger_variable", { name: "OmLiveVar", type: "integer" });
+    await k.tool("add_region", { name: "Om Live Region", left: -512, bottom: -512, right: -256, top: -256 });
+    const sound = {
+      name: "gg_snd_omlive", file: "war3mapImported\\omlive.wav", eaxEffect: "DefaultEAXON", flags: 16, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_omlive", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.w3s.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [sound] }))}); await w3.workspace.refresh(); })()`);
+    await k.save();
+    await run("w3.objectManager.refresh");
+    for (const [filter, want, what] of [["hkni", { detail: "hkni" }, "the knight"], [`${unit} ←`, "Om Live Unit", "the custom unit"], ["Om Live Trigger", "Om Live Trigger", "the trigger"],
+      ["OmLiveVar", "OmLiveVar", "the variable"], ["omlive", "omlive", "the sound"], ["Om Live", "Om Live Region", "the region"]]) await rows(filter, want, true, `the Object Manager doesn't list ${what} after saving`);
+
+    // ---- A placed unit, deleted in the terrain editor (Delete key), undone, redone; the editor closed unsaved. ----------
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await k.tab("Select");
+    await k.look(512, 0, { id: "hkni", x: 512, y: 0 });
+    await k.focusMap();
+    await k.hands.key("Delete", "Delete", 46);
+    await until("the knight deleted", async () => !(await page.evaluate(`(async () => ((await w3.services.get("w3.terrain")).placedObjects()?.units ?? []).some((u) => u.id === "hkni"))()`)), 10000)
+      .catch(() => fail("the Delete key didn't delete the selected knight"));
+    if (await rows("hkni", { detail: "hkni" }, false, "after the knight was deleted in the terrain editor (unsaved) the Object Manager still lists it")) {
+      await run("workbench.undo");
+      await rows("hkni", { detail: "hkni" }, true, "after undoing the knight's deletion the Object Manager doesn't list it");
+      await run("workbench.redo");
+      await rows("hkni", { detail: "hkni" }, false, "after redoing the knight's deletion the Object Manager still lists it");
+    }
+    await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+    await rows("hkni", { detail: "hkni" }, true, "after the terrain editor closed unsaved the Object Manager doesn't list the saved knight");
+
+    // ---- A region renamed by typing in the Regions tab's name box (Enter) and deleted with its Delete button: edits by
+    // hand, not through the Object Manager, which nothing but the terrain editor's own edit event tells of. ------------
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    await k.tab("Regions");
+    const chosen = await page.evaluate(`(() => {
+      const s = [...document.querySelectorAll("select")].find((e) => e.options[0]?.textContent === "Go to region…" && e.offsetParent !== null);
+      const o = s && [...s.options].find((x) => x.textContent === "Om Live Region");
+      if (!o) return false;
+      s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    if (!chosen) fail("the Regions tab's Go to region list has no Om Live Region");
+    else if (!(await until("the region's name box", () => page.evaluate(`document.querySelector("input.terrain-region-name")?.value === "Om Live Region"`), 10000).then(() => true, () => false))) fail("choosing Om Live Region in the Regions tab shows no name box with its name");
+    else {
+      await k.hands.click("input.terrain-region-name");
+      await k.hands.key("a", "KeyA", 65, 2);
+      await k.hands.type("Om Live Typed");
+      await k.hands.key("Enter", "Enter", 13);
+      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("typing a region's name and Enter left the terrain editor without the change");
+      if (await rows("Om Live", "Om Live Typed", true, "after a region was renamed by typing in the Regions tab (unsaved) the Object Manager doesn't show the new name")) {
+        await rows("Om Live", "Om Live Region", false, "after a region was renamed by typing in the Regions tab (unsaved) the Object Manager still shows the old name");
+      }
+      const removed = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".terrain-region-panel button")].find((e) => e.textContent === "Delete"); if (!b) return false; b.click(); return true; })()`);
+      if (!removed) fail("the Regions tab shows no Delete button for the selected region");
+      else await rows("Om Live", "Om Live Typed", false, "after a region was deleted with the Regions tab's Delete button (unsaved) the Object Manager still lists it");
+    }
+    await page.evaluate(`w3.editors.close("map/war3map.w3e.txt")`);
+    await rows("Om Live", "Om Live Region", true, "after the terrain editor closed unsaved the Object Manager doesn't list the saved region");
+
+    // ---- A custom unit: Rename Object in the Object Manager's menu, deleted in the Object Editor, undone; closed unsaved.
+    await answer("Om Live Renamed");
+    if (await omHas(`${unit} ←`, "Om Live Unit")) {
+      const why = await contextMenuItem(page, ".om-row", "Om Live Unit", "Rename Object");
+      if (why) fail(`Rename Object (custom unit): ${why}`);
+      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("Rename Object (custom unit) left the Object Editor without the change");
+      await rows(`${unit} ←`, "Om Live Renamed", true, "after Rename Object (custom unit, unsaved) the Object Manager doesn't show the new name");
+      const del = await run("w3.objectEditor.objectAction", "w3u", unit, "delete");
+      if (del.e || del.r !== true) fail(`deleting the custom unit in the Object Editor: ${JSON.stringify(del)}`);
+      await rows(`${unit} ←`, "Om Live Renamed", false, "after the custom unit was deleted in the Object Editor (unsaved) the Object Manager still lists it");
+      await run("workbench.undo");
+      await rows(`${unit} ←`, "Om Live Renamed", true, "after undoing the custom unit's deletion the Object Manager doesn't list it");
+      await page.evaluate(`w3.editors.close("map/war3map.w3u.json")`);
+      await rows(`${unit} ←`, "Om Live Unit", true, "after the Object Editor closed unsaved the Object Manager doesn't show the saved name");
+    }
+
+    // ---- A trigger and a variable: Rename Object in the menu, deleted in the Trigger Editor, undone; closed unsaved. ----
+    await answer("Om Live Moved");
+    if (await omHas("Om Live Trigger", "Om Live Trigger")) {
+      const why = await contextMenuItem(page, ".om-row", "Om Live Trigger", "Rename Object");
+      if (why) fail(`Rename Object (trigger): ${why}`);
+      await rows("Om Live", "Om Live Moved", true, "after Rename Object (trigger, unsaved) the Object Manager doesn't show the new name");
+      await rows("Om Live", "Om Live Trigger", false, "after Rename Object (trigger, unsaved) the Object Manager still shows the old name");
+      const del = await run("w3.triggers.itemAction", "trigger", "Om Live Moved", "delete");
+      if (del.e || del.r !== true) fail(`deleting the trigger in the Trigger Editor: ${JSON.stringify(del)}`);
+      await rows("Om Live", "Om Live Moved", false, "after the trigger was deleted in the Trigger Editor (unsaved) the Object Manager still lists it");
+      await run("workbench.undo");
+      await rows("Om Live", "Om Live Moved", true, "after undoing the trigger's deletion the Object Manager doesn't list it");
+      const delVar = await run("w3.triggers.itemAction", "variable", "OmLiveVar", "delete");
+      if (delVar.e || delVar.r !== true) fail(`deleting the variable in the Trigger Editor: ${JSON.stringify(delVar)}`);
+      await rows("OmLiveVar", "OmLiveVar", false, "after the variable was deleted in the Trigger Editor (unsaved) the Object Manager still lists it");
+      await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);
+      await rows("Om Live", "Om Live Trigger", true, "after the Trigger Editor closed unsaved the Object Manager doesn't show the saved trigger");
+      await rows("OmLiveVar", "OmLiveVar", true, "after the Trigger Editor closed unsaved the Object Manager doesn't list the saved variable");
+    }
+
+    // ---- A sound: renamed in the Sound Editor, undone, redone; closed unsaved. ------------------------------------------
+    const ren = await run("w3.sounds.soundAction", "gg_snd_omlive", "rename", "omlive_two");
+    if (ren.e || ren.r !== true) fail(`renaming the sound in the Sound Editor: ${JSON.stringify(ren)}`);
+    if (await rows("omlive", "omlive_two", true, "after the sound was renamed in the Sound Editor (unsaved) the Object Manager doesn't show the new name")) {
+      await rows("omlive", "omlive", false, "after the sound was renamed in the Sound Editor (unsaved) the Object Manager still shows the old name");
+      await run("workbench.undo");
+      await rows("omlive", "omlive", true, "after undoing the sound's rename the Object Manager doesn't show the old name");
+      await run("workbench.redo");
+      await rows("omlive", "omlive_two", true, "after redoing the sound's rename the Object Manager doesn't show the new name");
+    }
+    await page.evaluate(`w3.editors.close("map/war3map.w3s.json")`);
+    await rows("omlive", "omlive", true, "after the Sound Editor closed unsaved the Object Manager doesn't show the saved sound");
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail(`closing the editors left unsaved files: ${await page.evaluate(`w3.editors.unsavedPaths().join(", ")`)}`);
+
+    // ---- While filtering, a click on a group row leaves it as it was: closed once the filter is cleared. -----------------
+    await omHas("Om Live", "Om Live Trigger");
+    const clicked = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".om-row")].find((e) => e.querySelector(".tree-label")?.textContent.startsWith("Triggers (")); if (!r) return false; r.click(); return true; })()`);
+    if (!clicked) fail("filtered to Om Live, the Object Manager has no Triggers group");
+    await omHas("", "Om Live Trigger");
+    const groupRow = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".om-row")].find((e) => e.querySelector(".tree-label")?.textContent.startsWith("Triggers (")); return r ? r.querySelector(".tree-icon").textContent : null; })()`);
+    const triggerShown = await omHas("", "Om Live Trigger");
+    if (groupRow !== "▸" || triggerShown) fail(`a click on the Triggers group while filtering opened it behind the filter (its icon ${JSON.stringify(groupRow)}, its trigger ${triggerShown ? "shown" : "hidden"} without the filter)`);
+  } finally {
+    await page.evaluate(`(() => { const s = document.querySelector(".om-search"); if (s) { s.value = ""; s.dispatchEvent(new Event("input")); } })()`).catch(() => {});
+    await page.evaluate(`(() => { const k = window.__omLiveKept; if (k) { w3.window.inputBox = k.input; w3.window.askDelete = k.ask; } })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 async function editorExtras(page, found) {
   const fail = (what) => found.push(`editor extras: ${what}`);
   const k = await heightKit(page, "Extras");
   const dir = join(work, "extras");
   mkdirSync(dir, { recursive: true });
   const run = (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then((r) => ({ r }), (e) => ({ e: String(e) }))`);
-  /** Right-clicks the first element of `selector` whose text has `text`, then the menu item starting with `item`. */
-  const menu = async (selector, text, item) => {
-    const ok = await page.evaluate(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.includes(${JSON.stringify(text)}));
-      if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
-    if (!ok) return `nothing with "${text}" in ${selector}`;
-    const shown = await until(`the menu item ${item}`, () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith(${JSON.stringify(item)}))`), 5000).then(() => true, () => false);
-    if (!shown) {
-      const items = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
-      await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
-      return `the menu of "${text}" has no ${item} (${items.join(" | ")})`;
-    }
-    await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith(${JSON.stringify(item)})).click()`);
-    await sleep(500);
-    return null;
-  };
+  const menu = (selector, text, item) => contextMenuItem(page, selector, text, item);
   const step = async (what, f) => { const why = await f(); if (why) fail(`${what}: ${why}`); };
   // The answers a user gives, and the clipboard and the speaker, recorded.
   await page.evaluate(`(() => {
@@ -5156,9 +5493,13 @@ async function editorExtras(page, found) {
     const added = await run("w3.campaign.addMap");
     if (added.e) fail(`Add map: ${added.e}`);
     await until("the chapter project", () => existsSync(chapterInfo), 30000).catch(() => fail("Add map didn't unpack One.w3x under maps/"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length !== 1) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
+    /** Saves until the campaign file says what `ok` wants (the editor's change can land after a first save on a busy
+     *  machine): waited for, not a fixed pause. */
+    const savedCampaign = (what, ok) => until(what, async () => {
+      await page.evaluate(`w3.editors.saveAll()`);
+      try { return ok(w3f()); } catch { return false; }
+    }, 10000).then(() => true, () => false);
+    if (!(await savedCampaign("one button saved", (f) => f.chapters.length === 1))) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
     // Export: the chapter's project packed, as the CLI packs it.
     const exported = join(dir, "exported.w3x"), byCli = join(dir, "by-cli-chapter.w3x");
     await answer("pickSaveFile", exported);
@@ -5185,25 +5526,18 @@ async function editorExtras(page, found) {
     await sleep(200);
     await page.evaluate(`document.querySelector(".camp-remove-button")?.click()`);
     await until("the map to go", () => !existsSync(join(camp, "maps", "One.w3x")), 10000).catch(() => fail("Remove button, answered with the map, left maps/One.w3x"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length || w3f().mapOrder.length) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
+    if (!(await savedCampaign("no button and no map saved", (f) => !f.chapters.length && !f.mapOrder.length))) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await until("the map back", () => existsSync(chapterInfo), 10000).catch(() => fail("one undo of Remove button and map didn't bring the map back"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length !== 1 || w3f().mapOrder.length !== 1) fail(`after the undo the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
+    if (!(await savedCampaign("the button and the map back", (f) => f.chapters.length === 1 && f.mapOrder.length === 1))) fail(`after the undo the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     // Remove map while a button opens it: asked, the map goes, the button stays; undo brings it back.
     const rm = await run("w3.campaign.removeMap", "One.w3x");
     if (rm.e) fail(`Remove map: ${rm.e}`);
     if (existsSync(join(camp, "maps", "One.w3x"))) fail("Remove map left maps/One.w3x");
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
-    if (w3f().chapters.length !== 1 || w3f().mapOrder.length !== 0) fail(`after Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
+    if (!(await savedCampaign("the button without its map saved", (f) => f.chapters.length === 1 && f.mapOrder.length === 0))) fail(`after Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await until("the map back again", () => existsSync(chapterInfo), 10000).catch(() => fail("one undo of Remove map didn't bring the map back"));
-    await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
+    if (!(await savedCampaign("the map back in order", (f) => f.chapters.length === 1 && f.mapOrder.length === 1))) fail(`after undoing Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
     // The campaign builds, with its chapter.
     const w3n = join(dir, "campaign-maps.w3n");
     const packed = spawnSync(cli, ["pack", camp, "-o", w3n], { encoding: "utf8" });
@@ -5497,7 +5831,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), objectLayout: (p, f) => objectLayout(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), objectLayout: (p, f) => objectLayout(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5594,9 +5928,11 @@ async function run() {
     await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
+    await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
+    await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
     await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));

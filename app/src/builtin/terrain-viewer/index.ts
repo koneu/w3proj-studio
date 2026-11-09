@@ -1622,6 +1622,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A stroke commits here, not through changed(): the view layers follow every edit.
           refreshLayersSoon();
           notifyGroups(e);
+          // Other modules (TerrainService.onDidEdit) hear of every edit, not only of undo and redo.
+          if (toolGroups.liveLists === liveLists) toolGroups.edited({ terrain: e.terrain, objects: e.objects });
           shadowEditsSoon();
           minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
@@ -3787,7 +3789,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         syncPick();
         const stopPick = toolGroups.onChange(syncPick);
-        const live = () => ({ units: unitsFile?.list ?? [], doodads: dooFile?.list ?? [] });
+        /** TerrainService.placedObjects: a list not loaded yet (or unreadable) is null, so its user reads the saved file. */
+        const live = () => ({ units: unitsFile?.list ?? null, doodads: dooFile?.list ?? null });
         /** While picking objects: the accepted placement nearest to a ground point, if close enough. */
         const pickTarget = (g: [number, number, number] | null): Placed | null => {
           const o = toolGroups.picking?.objects;
@@ -4812,7 +4815,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPick();
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
-            if (toolGroups.liveLists === liveLists) toolGroups.liveLists = null;
+            if (toolGroups.liveLists === liveLists) {
+              toolGroups.liveLists = null;
+              // Closed (unsaved changes gone with it): the saved files are what there is again (TerrainService.onDidEdit).
+              toolGroups.edited({ terrain: false, objects: true });
+            }
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);

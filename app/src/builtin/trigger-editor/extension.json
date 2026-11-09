@@ -43,6 +43,6 @@
       { "id": "w3.triggers.itemAction", "title": "Trigger Editor: Rename or Delete a Trigger or Variable", "category": "Module", "hidden": true },
       { "id": "w3.triggers.renameGlobals", "title": "Trigger Editor: Rename References", "category": "Module", "hidden": true }
     ],
-    "services": [{ "id": "w3.triggers", "description": "Trigger kinds (GUI, custom script, …) shown in the trigger editor: registerKind." }]
+    "services": [{ "id": "w3.triggers", "description": "Trigger kinds (GUI, custom script, …) shown in the trigger editor: registerKind; the open editor's triggers (unsaved changes included): liveTriggers, onDidEdit." }]
   }
 }
