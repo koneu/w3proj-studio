@@ -4,7 +4,8 @@ import { onWindows } from "../lib/paths";
 import { Emitter } from "./dom";
 
 /** A file's size and last write (ms) as the backend reports them. */
-export interface Stamp { size: number; modified: number }
+/** A file's size and last write (ms); `hash`: of its contents, where asked for (`statHashed`). */
+export interface Stamp { size: number; modified: number; hash?: string }
 import { timeLimit } from "./timelimit";
 
 export class WorkspaceService {
@@ -170,6 +171,10 @@ export class WorkspaceService {
   /** The file's size and time as the disk has them now; null when it doesn't exist. */
   stat(p: string) {
     return invoke<Stamp | null>("fs_stat", { path: this.resolve(p) });
+  }
+  /** As `stat`, with a hash of the contents: what tells a same-size write in the same millisecond. */
+  statHashed(p: string) {
+    return invoke<Stamp | null>("fs_stat_hashed", { path: this.resolve(p) });
   }
   async writeText(p: string, text: string) {
     await this.tracked(p, new TextEncoder().encode(text).length, (target) => writeText(target, text));

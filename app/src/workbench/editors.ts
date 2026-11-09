@@ -23,12 +23,15 @@ interface Tab {
   missed?: Set<string>;
   /** Its editor couldn't be created: opening the file again, or the file being saved, tries again. */
   failed?: boolean;
-  /** The file's size and time when the editor read it or last wrote it; a save over anything else
-   *  asks first. Undefined: not a file on disk, or not known. */
+  /** The file's size, time and contents' hash when the editor read it or last wrote it; a save over anything
+   *  else asks first. Undefined: not a file on disk, or not known. */
   stamp?: Stamp | null;
 }
 
-const sameStamp = (a: Stamp | null, b: Stamp | null) => a === b || (!!a && !!b && a.size === b.size && a.modified === b.modified);
+/** Size and time alike, and, where both have one, the contents' hash: a same-size write in the same millisecond
+ *  leaves the first two as they were. */
+const sameStamp =(a: Stamp | null, b: Stamp | null) => a === b
+  || (!!a && !!b && a.size === b.size && a.modified === b.modified && (a.hash === undefined || b.hash === undefined || a.hash === b.hash));
 
 /** Open tabs as remembered per project (see EditorService.memory). */
 export interface OpenEditors {
@@ -43,7 +46,8 @@ export interface DocumentIO {
   readBytes(path: string): Promise<Uint8Array>;
   writeText(path: string, text: string): Promise<void>;
   writeBytes(path: string, bytes: Uint8Array): Promise<void>;
-  /** The file's size and time on disk now (null: it doesn't exist; undefined: not a file on disk). */
+  /** The file's size and time on disk now, and a hash of its contents where it can (null: it doesn't exist;
+   *  undefined: not a file on disk). */
   stat?(path: string): Promise<Stamp | null | undefined>;
 }
 

@@ -124,6 +124,38 @@ fn fs_stat(path: String) -> Option<Stamp> {
     stamp_of(Path::new(&path)).ok()
 }
 
+/// Size, last write and a hash of the contents: what an editor read or wrote. A write of the same size within
+/// the same millisecond leaves size and time alike; the hash still tells it. None when there is no such file;
+/// no hash when it is there but can't be read (it isn't taken for missing).
+#[tauri::command]
+fn fs_stat_hashed(path: String) -> Option<HashedStamp> {
+    let path = Path::new(&path);
+    // Time first: a write between the two gives a hash of the newer bytes with the older time, which differs
+    // from the next look at the time anyway.
+    let stamp = stamp_of(path).ok()?;
+    let hash = std::fs::read(path).ok().map(|b| content_hash(&b));
+    Some(HashedStamp { size: stamp.size, modified: stamp.modified, hash })
+}
+
+#[derive(Serialize)]
+struct HashedStamp {
+    size: u64,
+    modified: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hash: Option<String>,
+}
+
+/// FNV-1a, 64 bits, as hex: tells two contents of the same size apart (not a guard against someone making
+/// them collide on purpose).
+fn content_hash(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
 /// The file's size and time right after we wrote it: what the workspace compares later to tell our
 /// own save from a change by another program.
 fn stamp_of(path: &Path) -> CmdResult<Stamp> {
@@ -1273,6 +1305,7 @@ pub fn run() {
             project_open,
             path_normalize,
             fs_stat,
+            fs_stat_hashed,
             project_files,
             project_files_partial,
             project_folders,
@@ -1403,6 +1436,27 @@ mod fs_tests {
         let Err(err) = open(dir.join("map").to_string_lossy().into_owned()) else { panic!("a folder without a manifest opened") };
         assert!(err.contains("cannot read w3proj.toml"), "{err}");
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A same-size write that keeps the time (as one in the same millisecond does) changes the hash, not the stamp.
+    #[test]
+    fn fs_stat_hashed_tells_a_same_size_write_in_the_same_millisecond() {
+        let (dir, _) = project();
+        let file = dir.join("map/sub/a.txt");
+        let p = file.to_string_lossy().into_owned();
+        std::fs::write(&file, "abcd").unwrap();
+        let first = fs_stat_hashed(p.clone()).unwrap();
+        let same = fs_stat_hashed(p.clone()).unwrap();
+        assert!(first.hash.is_some());
+        assert_eq!(first.hash, same.hash, "the same bytes, the same hash");
+        let time = std::fs::metadata(&file).unwrap().modified().unwrap();
+        std::fs::write(&file, "abce").unwrap();
+        std::fs::File::options().write(true).open(&file).unwrap().set_modified(time).unwrap();
+        let after = fs_stat_hashed(p.clone()).unwrap();
+        assert_eq!((after.size, after.modified), (first.size, first.modified), "size and time alike");
+        assert_ne!(after.hash, first.hash);
+        assert!(fs_stat_hashed(dir.join("nope").to_string_lossy().into_owned()).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// fs_write_bytes takes its path from a header the app escapes with encodeURIComponent: a name that starts

@@ -16,7 +16,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { inflateSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
@@ -4563,6 +4563,26 @@ async function staleEditors(page, found) {
     await page.evaluate(`w3.editors.saveAll()`);
     asked = await page.evaluate(`window.__asked.splice(0)`);
     if (asked.length || !/"Melee Again"/.test(wtgText())) fail(`a save of a file nothing else changed asked ${JSON.stringify(asked)}`);
+    // A change of the same size in the same millisecond: size and time are as the editor left them, the contents
+    // aren't. (The time is put back by hand, as such a write leaves it.)
+    const r5 = await rename("Melee Again", "Melee Once More");
+    if (r5) fail(r5);
+    const wtgFile = join(k.root, "map", "war3map.wtg.json");
+    const was = statSync(wtgFile);
+    const sameSize = wtgText().replace('"Text Probe"', '"Text Prxbe"');
+    if (sameSize === wtgText() || sameSize.length !== wtgText().length) fail("no Text Probe in the file for a same-size change");
+    writeFileSync(wtgFile, sameSize);
+    utimesSync(wtgFile, was.atime, was.mtime);
+    if (statSync(wtgFile).size !== was.size || Math.floor(statSync(wtgFile).mtimeMs) !== Math.floor(was.mtimeMs)) fail("the same-size change didn't keep the size and time");
+    await page.evaluate(`window.__answer = "Cancel"`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    asked = await page.evaluate(`window.__asked.splice(0)`);
+    if (asked.length !== 1 || !/changed on disk/.test(asked[0])) fail(`saving over a same-size change in the same millisecond asked ${JSON.stringify(asked)}`);
+    if (wtgText() !== sameSize) fail("Cancel still wrote over the same-size change");
+    await page.evaluate(`window.__answer = "Overwrite"`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    asked = await page.evaluate(`window.__asked.splice(0)`);
+    if (asked.length !== 1 || !/"Melee Once More"/.test(wtgText())) fail(`Overwrite of the same-size change didn't save (asked ${asked.length} times)`);
     await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; ed.confirm = kept.confirm; delete ed.resolveTab; })()`);
     await page.evaluate(`w3.editors.closeAll()`);
 
