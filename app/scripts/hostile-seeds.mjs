@@ -36,9 +36,11 @@ for (const [name, path, size] of FILES) {
   writeFileSync(join(dir, name), size ? bytes.subarray(0, size) : bytes);
 }
 
-const run = spawnSync(process.execPath, ["scripts/test.mjs", "--test-name-pattern=damaged files"], {
+// Only the hostile test's file, bundled into a folder of its own: the whole suite would load every test file for
+// one test, and its default folder is emptied by any other `npm test` in this checkout (the gate's unit tests).
+const run = spawnSync(process.execPath, ["scripts/test.mjs", "src/lib/hostile.test.ts", "--test-name-pattern=damaged files"], {
   cwd: app,
   stdio: "inherit",
-  env: { ...process.env, W3_HOSTILE_SEEDS: dir, W3_HOSTILE_ROUNDS: "1000" },
+  env: { ...process.env, W3_HOSTILE_SEEDS: dir, W3_HOSTILE_ROUNDS: "1000", W3_TEST_OUT: join(app, "..", "target", "hostile-seeds-tests") },
 });
 process.exit(run.status ?? 1);

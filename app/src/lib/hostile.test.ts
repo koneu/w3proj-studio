@@ -47,6 +47,8 @@ const BEAT_MS = 50;
 const HEAP_MB = 512;
 /** Enough to see what's wrong; a parser that fails on everything shouldn't take hours. */
 const MAX_FAILURES = 40;
+/** How much of a stopped child's stderr goes into its failure. */
+const ERR_TAIL = 1500;
 
 const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
 const triggers = parseTriggerData("[TriggerEvents]\nMapInitializationEvent=0,nothing\n[TriggerActions]\nSetVariable=0,AnyGlobal,Null\n");
@@ -289,6 +291,27 @@ function allSeeds(): Seed[] {
 const ROUNDS = Number(process.env.W3_HOSTILE_ROUNDS ?? 60);
 
 /**
+ * Writes a line to the child's stdout, waiting while the pipe is full. Node makes the child's pipes
+ * non-blocking, so when the parent reads slowly (other gates on the machine) a plain writeSync
+ * fails with EAGAIN, and the child ended as if a parser had crashed it. Waiting costs no processor
+ * time, so the watchdog doesn't count it. `write` is fs.writeSync: this function is also put into
+ * the beat thread's code (BEAT_THREAD), so it uses nothing but its arguments and globals, and no
+ * backslashes.
+ */
+function writeLine(write: (fd: number, b: Uint8Array) => number, fd: number, line: string) {
+  const bytes = new TextEncoder().encode(line + String.fromCharCode(10));
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  for (let at = 0; at < bytes.length;) {
+    try {
+      at += write(fd, bytes.subarray(at));
+    } catch (e) {
+      if ((e as { code?: string }).code !== "EAGAIN") throw e;
+      Atomics.wait(nap, 0, 0, 2);
+    }
+  }
+}
+
+/**
  * The child's second thread. A parser stuck in a loop can't report anything itself, so this thread
  * says every BEAT_MS how much processor time the process has used: "cpu <ms>". When the parser is
  * done it is told (cell 0 is -1), says "done", and ends, and with it the process.
@@ -297,14 +320,15 @@ const ROUNDS = Number(process.env.W3_HOSTILE_ROUNDS ?? 60);
 const BEAT_THREAD = `
 const { workerData } = require("node:worker_threads");
 const { writeSync } = require("node:fs");
+const writeLine = (${writeLine.toString()});
 const cell = new Int32Array(workerData);
 for (;;) {
   Atomics.wait(cell, 1, 0, ${BEAT_MS});
   if (Atomics.load(cell, 0) < 0) break;
   const u = process.cpuUsage();
-  writeSync(1, "cpu " + Math.round((u.user + u.system) / 1000) + String.fromCharCode(10));
+  writeLine(writeSync, 1, "cpu " + Math.round((u.user + u.system) / 1000));
 }
-writeSync(1, "done" + String.fromCharCode(10));
+writeLine(writeSync, 1, "done");
 `;
 
 const cpuMs = () => {
@@ -320,9 +344,9 @@ function work(start: number) {
   const seeds = allSeeds(), total = seeds.length * ROUNDS;
   const cell = new Int32Array(new SharedArrayBuffer(8));
   new Worker(BEAT_THREAD, { eval: true, workerData: cell.buffer });
-  writeSync(1, `ready ${cpuMs()}\n`);
+  writeLine(writeSync, 1, `ready ${cpuMs()}`);
   for (let c = start; c < total; c++) {
-    writeSync(1, `${c} ${cpuMs()}\n`);
+    writeLine(writeSync, 1, `${c} ${cpuMs()}`);
     const seed = seeds[Math.floor(c / ROUNDS)], round = c % ROUNDS;
     try {
       TARGETS[seed.target](bytesOf(seed, round));
@@ -338,8 +362,12 @@ function runFrom(start: number): Promise<{ at: number; what: string } | null> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [`--max-old-space-size=${HEAP_MB}`, fileURLToPath(import.meta.url)], {
       env: { ...process.env, W3_HOSTILE_START: String(start), NODE_TEST_CONTEXT: undefined },
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    // The end of what the child said on stderr: the reason when it stops by itself (out of memory, a crash, a
+    // thread that couldn't start), which the exit code alone doesn't tell.
+    let errTail = "";
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { errTail = (errTail + chunk).slice(-ERR_TAIL); });
     // `since`: the process's processor time when the current case began, null until the child is
     // ready (its start-up has only the clock limit); `begun`: the clock then.
     let at = start, finished = false, begun = Date.now(), tail = "", killed = "", since: number | null = null;
@@ -365,10 +393,13 @@ function runFrom(start: number): Promise<{ at: number; what: string } | null> {
     const watch = setInterval(() => {
       if (Date.now() - begun > CASE_WALL_MS) kill(`over ${CASE_WALL_MS} ms on the clock`);
     }, 500);
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearInterval(watch);
       if (finished) resolve(null);
-      else resolve({ at, what: killed || `stopped with code ${code}: out of memory, or a crash` });
+      else {
+        const said = errTail.trim() ? `; its stderr ended with: ${errTail.trim()}` : "";
+        resolve({ at, what: (killed || `stopped with code ${code}${signal ? ` (${signal})` : ""}: out of memory, or a crash`) + said });
+      }
     });
   });
 }
@@ -387,7 +418,13 @@ async function run(seeds: Seed[]): Promise<Failure[]> {
   return failures;
 }
 
-if (process.env.W3_HOSTILE_CASE) {
+/** Lines the child's reports may pile up to while the parent doesn't read: far more than a pipe holds. */
+const FLOOD_LINES = 100000;
+
+if (process.env.W3_HOSTILE_FLOOD) {
+  // The child's reports while the parent isn't reading (see writeLine).
+  for (let i = 0; i < FLOOD_LINES; i++) writeLine(writeSync, 1, `${i} flood`);
+} else if (process.env.W3_HOSTILE_CASE) {
   // To look at one failure: W3_HOSTILE_CASE="mdx: tree.mdx#2975", as the failure names it.
   const [name, round] = process.env.W3_HOSTILE_CASE.split("#");
   const seed = allSeeds().find((s) => `${s.target}: ${s.name}` === name)!;
@@ -396,6 +433,23 @@ if (process.env.W3_HOSTILE_CASE) {
   work(Number(process.env.W3_HOSTILE_START));
 } else {
   const seeds = allSeeds();
+  test("the child's reports wait for a parent that is slow to read, rather than ending the child", async () => {
+    // Under other gates the parent read too slowly; the child's writes then failed (EAGAIN) and it stopped, which
+    // the rounds reported as files that crashed it.
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+      env: { ...process.env, W3_HOSTILE_FLOOD: "1", NODE_TEST_CONTEXT: undefined },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let lines = 0, err = "";
+    const closed = new Promise((done) => child.on("close", done));
+    child.stderr.setEncoding("utf8").on("data", (c: string) => { err = (err + c).slice(-ERR_TAIL); });
+    child.stdout.setEncoding("utf8").on("data", (c: string) => { for (const ch of c) if (ch === "\n") lines++; });
+    child.stdout.pause();
+    await new Promise((done) => setTimeout(done, 1500));
+    child.stdout.resume();
+    const code = await closed;
+    assert.deepEqual({ code, lines, err }, { code: 0, lines: FLOOD_LINES, err: "" });
+  });
   test(`damaged files can't hang the app (${seeds.length} seeds, ${ROUNDS} rounds each)`, async () => {
     assert.deepEqual(await run(seeds), []);
   });
