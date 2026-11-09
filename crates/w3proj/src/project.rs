@@ -92,10 +92,26 @@ impl Manifest {
         toml::from_str(&text).map_err(|e| Error::Project(format!("{MANIFEST}: {e}")))
     }
 
+    /// Writes the manifest. One that is there is edited in place: only the keys Studio owns change,
+    /// the user's comments and other keys stay, and nothing is written when the values are the same.
+    /// One that is there but can't be read as TOML is an error and stays as it is.
     pub fn save(&self, project: &Path) -> Result<()> {
         let body = toml::to_string_pretty(self).map_err(|e| Error::Project(e.to_string()))?;
-        let text = format!("# w3proj project manifest. Pack with `w3proj pack`.\n{body}");
-        write_if_changed(&project.join(MANIFEST), text.as_bytes())?;
+        let fresh = format!("# w3proj project manifest. Pack with `w3proj pack`.\n{body}");
+        let path = project.join(MANIFEST);
+        let kept = |why: String| Error::Project(format!("{}: {why}; it is kept as it is", path.display()));
+        let text = match fs::read(&path) {
+            Ok(bytes) => {
+                let old = String::from_utf8(bytes).map_err(|_| kept("not UTF-8 text".into()))?;
+                match crate::manifest_text::merge(&old, &fresh).map_err(kept)? {
+                    Some(text) => text,
+                    None => return Ok(()),
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => fresh,
+            Err(e) => return Err(kept(e.to_string())),
+        };
+        write_if_changed(&path, text.as_bytes())?;
         Ok(())
     }
 
@@ -139,6 +155,10 @@ pub struct UnpackReport {
     pub written: usize,
     pub deleted: usize,
     pub unchanged: usize,
+    /// Files with a `\` in their name (left by an older version on Linux) that a sync would have
+    /// deleted and left alone instead, from the project root with `/` between folders (the app offers
+    /// to move them where they belong). A folder kept for one ends in `/`.
+    pub strays: Vec<String>,
 }
 
 impl UnpackReport {
@@ -495,15 +515,76 @@ fn remove_empty_dirs(dir: &Path) {
     }
 }
 
-/// Replaces the contents of `dir` with `files`, writing only what changed.
-fn sync_dir(dir: &Path, files: &BTreeMap<String, Vec<u8>>, report: &mut UnpackReport) -> Result<()> {
+/// A file (or folder) with a `\` in its name: on Linux, left by an older version that joined paths
+/// with a hand-written `\` (on Windows a name can't hold one). Never deleted by a sync: the app
+/// offers to move it where it belongs (`app/src-tauri/src/strays.rs`).
+fn is_stray(rel: &str) -> bool {
+    rel.contains('\\')
+}
+
+/// The files in `dir` that aren't in `files` (paths relative to `dir`, `/` between folders): the
+/// ones a sync deletes, and the strays it leaves alone.
+fn extra_files(dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<(Vec<String>, Vec<String>)> {
     let wanted: BTreeSet<String> = files.keys().map(|k| k.to_ascii_lowercase()).collect();
-    for existing in walk(dir)? {
-        if !wanted.contains(&existing.to_ascii_lowercase()) {
-            fs::remove_file(dir.join(&existing))?;
-            report.deleted += 1;
+    let (strays, gone) = walk(dir)?
+        .into_iter()
+        .filter(|existing| !wanted.contains(&existing.to_ascii_lowercase()))
+        .partition(|existing| is_stray(existing));
+    Ok((gone, strays))
+}
+
+/// The archive file a project path packs into, lowercased (as `encode_files` names it).
+fn archive_key(path: &str, raw: &[String], codecs: &Registry) -> String {
+    let name = match codecs.for_project_path(path) {
+        Some((stem, _)) if !raw.iter().any(|r| r == path) => paths::to_archive_name(&stem),
+        _ => paths::to_archive_name(path),
+    };
+    name.to_ascii_lowercase()
+}
+
+/// What syncing `ex` into `project` would delete under `map/` and `maps/`: the files the user may
+/// have added there whose archive file the map doesn't have, from the project root with `/`. A file
+/// only written in another form (e.g. `war3map.wtg` raw instead of `war3map.wtg.json`) isn't lost
+/// and isn't in it. A chapter map's whole project folder ends in `/`. Strays aren't in it: they are
+/// never deleted.
+pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    let kept: BTreeSet<String> = ex.files.keys().map(|p| archive_key(p, &ex.manifest.pack.raw, codecs)).collect();
+    // Raw files as the project on disk has them; a manifest that can't be read stops the sync anyway.
+    let old_raw = Manifest::load(project).map(|m| m.pack.raw).unwrap_or_default();
+    let (gone, _) = extra_files(&project.join(MAP_DIR), &ex.files)?;
+    out.extend(
+        gone.into_iter()
+            .filter(|p| !kept.contains(&archive_key(p, &old_raw, codecs)))
+            .map(|p| format!("{MAP_DIR}/{p}")),
+    );
+    let maps_dir = project.join(MAPS_DIR);
+    for old in nested_projects(&maps_dir)? {
+        match ex.nested.iter().find(|(k, _)| k.eq_ignore_ascii_case(&old)) {
+            Some((_, inner)) => out.extend(
+                would_delete(&maps_dir.join(&old), inner, codecs)?.into_iter().map(|p| format!("{MAPS_DIR}/{old}/{p}")),
+            ),
+            None if !holds_strays(&maps_dir.join(&old))? => out.push(format!("{MAPS_DIR}/{old}/")),
+            None => {}
         }
     }
+    Ok(out)
+}
+
+/// Whether a folder holds a stray anywhere below it.
+fn holds_strays(dir: &Path) -> Result<bool> {
+    Ok(walk(dir)?.iter().any(|p| is_stray(p)))
+}
+
+/// Replaces the contents of `dir` with `files`, writing only what changed. Strays are left alone and
+/// reported, prefixed with `shown` (`dir` from the project root).
+fn sync_dir(dir: &Path, shown: &str, files: &BTreeMap<String, Vec<u8>>, report: &mut UnpackReport) -> Result<()> {
+    let (gone, strays) = extra_files(dir, files)?;
+    for existing in gone {
+        fs::remove_file(dir.join(&existing))?;
+        report.deleted += 1;
+    }
+    report.strays.extend(strays.into_iter().map(|p| format!("{shown}/{p}")));
     for (rel, bytes) in files {
         if write_if_changed(&dir.join(rel), bytes)? {
             report.written += 1;
@@ -615,13 +696,18 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         }
     }
     let mut report = ex.report;
-    sync_dir(&project.join(MAP_DIR), &ex.files, &mut report)?;
-    // Chapter maps: one project each; ones no longer in the campaign are removed.
+    sync_dir(&project.join(MAP_DIR), MAP_DIR, &ex.files, &mut report)?;
+    // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
+    // in one: then it stays as it is).
     let maps_dir = project.join(MAPS_DIR);
     for old in nested_projects(&maps_dir)? {
         if !ex.nested.keys().any(|k| k.eq_ignore_ascii_case(&old)) {
-            fs::remove_dir_all(maps_dir.join(&old))?;
-            report.deleted += 1;
+            if holds_strays(&maps_dir.join(&old))? {
+                report.strays.push(format!("{MAPS_DIR}/{old}/"));
+            } else {
+                fs::remove_dir_all(maps_dir.join(&old))?;
+                report.deleted += 1;
+            }
         }
     }
     for (dir, inner) in std::mem::take(&mut ex.nested) {
@@ -629,15 +715,17 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         report.written += r.written;
         report.unchanged += r.unchanged;
         report.deleted += r.deleted;
+        report.strays.extend(r.strays.into_iter().map(|p| format!("{MAPS_DIR}/{dir}/{p}")));
     }
     remove_empty_dirs(&maps_dir);
+    // What couldn't be named: replaced as a whole (not counted), strays aside.
     let unnamed_dir = project.join(UNNAMED_DIR);
+    let mut scratch = UnpackReport::default();
+    sync_dir(&unnamed_dir, UNNAMED_DIR, &ex.unnamed, &mut scratch)?;
     if ex.unnamed.is_empty() {
-        let _ = fs::remove_dir_all(&unnamed_dir);
-    } else {
-        let mut scratch = UnpackReport::default();
-        sync_dir(&unnamed_dir, &ex.unnamed, &mut scratch)?;
+        let _ = fs::remove_dir(&unnamed_dir);
     }
+    report.strays.extend(scratch.strays);
     Ok(report)
 }
 
@@ -650,6 +738,9 @@ pub struct UnpackOptions {
     pub allow_incomplete: bool,
     /// Tried when names are missing (protected maps and campaigns): e.g. the game's file paths.
     pub more_names: Option<NameSource>,
+    /// Write nothing and return `Error::WouldDelete` when the sync would delete files under `map/`
+    /// or `maps/` (`would_delete`), so the caller can ask first.
+    pub refuse_deletes: bool,
 }
 
 /// Extracts, asking `more_names` for candidates if files are left unnamed.
@@ -679,6 +770,12 @@ pub fn unpack(map: &Path, project: &Path, codecs: &Registry, opts: &UnpackOption
     };
     if !ex.report.is_complete() && !opts.allow_incomplete {
         return Err(Error::Incomplete(Box::new(ex.report)));
+    }
+    if opts.refuse_deletes {
+        let gone = would_delete(project, &ex, codecs)?;
+        if !gone.is_empty() {
+            return Err(Error::WouldDelete(gone));
+        }
     }
     write_files(project, ex)
 }

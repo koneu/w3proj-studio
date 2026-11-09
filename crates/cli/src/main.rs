@@ -439,6 +439,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let opts = UnpackOptions {
                 allow_incomplete,
                 more_names: game_names(&game),
+                refuse_deletes: false,
             };
             let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &game, &trigger_data);
             let report = match w3proj::unpack(&map, &project, &codecs, &opts) {
@@ -478,6 +479,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     report.unnamed.len(),
                     report.errors.len()
                 );
+            }
+            for s in &report.strays {
+                println!("  kept {s} (a \"\\\" in the name, left by an older version: move it where it belongs)");
             }
         }
         Cmd::Pack { project, output } => {

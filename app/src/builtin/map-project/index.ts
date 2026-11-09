@@ -2,7 +2,8 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/services";
 import { gameProgram, joinPath, onWindows } from "../../lib/paths";
 import { testMapArgs, testMapOptions } from "./testmap";
-import { checkOpenedProject } from "./strays";
+import { checkOpenedProject, offerStrayMoves } from "./strays";
+import { deleteQuestion, wouldDelete } from "./syncdeletes";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];
@@ -11,6 +12,8 @@ interface UnpackReport {
   written: number;
   deleted: number;
   unchanged: number;
+  /** Files with a "\" in their name that the sync left alone (from the project root). */
+  strays?: string[];
 }
 
 interface PackReport {
@@ -67,23 +70,39 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     for (const f of r.files.filter((f) => f.note)) out.append(`  stored raw: ${f.archive_name} (${f.note})`);
     for (const f of r.unnamed) out.append(`  unnamed (not packed): ${f}`);
     for (const [f, e] of r.errors) out.append(`  unreadable: ${f}: ${e}`);
+    for (const f of r.strays ?? []) out.append(`  kept (a "\\" in the name, not deleted): ${f}`);
   };
 
-  /** Unpacks, asking before writing an incomplete (protected) map. */
-  const unpack = async (map: string, dir: string, title: string): Promise<UnpackReport | null> => {
-    const run = (allowIncomplete: boolean) =>
-      w3.window.withProgress(title, () => w3.backend.invoke<UnpackReport>("project_unpack", { map, dir, allowIncomplete, install: w3.settings.get<string>("game.installDir") }));
-    try {
-      return await run(false);
-    } catch (e) {
-      const msg = String(e);
-      if (!msg.startsWith("INCOMPLETE")) throw e;
-      const choice = await w3.window.showWarning(
-        `${msg.replace("INCOMPLETE: ", "")}. Those files can't be packed back. Continue anyway?`,
-        "Continue",
-        "Cancel",
-      );
-      return choice === "Continue" ? run(true) : null;
+  /** Unpacks, asking before writing an incomplete (protected) map, and with `askDeletes` before deleting files of the
+   *  project the map doesn't have (the backend then writes nothing until the answer). */
+  const unpack = async (map: string, dir: string, title: string, askDeletes = false): Promise<UnpackReport | null> => {
+    let allowIncomplete = false, refuseDeletes = askDeletes;
+    for (;;) {
+      try {
+        return await w3.window.withProgress(title, () => w3.backend.invoke<UnpackReport>("project_unpack", {
+          map, dir, allowIncomplete, refuseDeletes, install: w3.settings.get<string>("game.installDir"),
+        }));
+      } catch (e) {
+        const msg = String(e);
+        const gone = wouldDelete(e);
+        if (gone && refuseDeletes) {
+          out.append(`syncing from ${map} would remove ${gone.length} files:`);
+          for (const g of gone) out.append(`  ${g}`);
+          const q = deleteQuestion(gone, baseName(map));
+          const choice = await w3.window.showWarning(q.message, ...q.actions);
+          if (choice === "Show list") out.show();
+          if (choice !== q.actions[0]) return null;
+          refuseDeletes = false;
+        } else if (msg.startsWith("INCOMPLETE") && !allowIncomplete) {
+          const choice = await w3.window.showWarning(
+            `${msg.replace("INCOMPLETE: ", "")}. Those files can't be packed back. Continue anyway?`,
+            "Continue",
+            "Cancel",
+          );
+          if (choice !== "Continue") return null;
+          allowIncomplete = true;
+        } else throw e;
+      }
     }
   };
 
@@ -112,8 +131,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return r;
   };
 
-  const sync = async (map: string) => {
-    const r = await unpack(map, root(), "Syncing from map");
+  /** `askDeletes`: ask before removing files the map doesn't have (not when the user agreed to replace them already,
+   *  as for restoring a checkpoint). */
+  const sync = async (map: string, askDeletes = true) => {
+    const dir = root();
+    const r = await unpack(map, dir, "Syncing from map", askDeletes);
     if (!r) return;
     logReport(`synced from ${map}`, r);
     if (r.written + r.deleted > 0) await w3.editors.closeAll();
@@ -122,6 +144,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // extension can be off.)
     await w3.commands.execute("w3.script.adopt").catch(() => {});
     w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
+    // Files with a "\" in their name the sync left alone: offered to be moved where they belong.
+    if (r.strays?.length) await offerStrayMoves(w3, dir, out);
   };
 
   const installDir = () => w3.settings.get<string>("game.installDir") ?? "C:\\Program Files (x86)\\Warcraft III";
@@ -166,7 +190,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!name) return;
     const dir = joinPath(parent, name);
     if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "w3proj.toml") })) {
-      const c = await w3.window.showWarning(`${dir} already is a project. Overwrite its map files with ${baseName(map)}?`, "Overwrite", "Cancel");
+      const c = await w3.window.showWarning(`${dir} already is a project. Overwrite its map files with ${baseName(map)}?`
+        + ` Files under map/ that ${baseName(map)} doesn't have are removed.`, "Overwrite", "Cancel");
       if (c !== "Overwrite") return;
     }
     // The new project replaces the open one: unsaved changes are settled first.
@@ -174,7 +199,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const r = await unpack(map, dir, "Importing map");
     if (!r) return;
     logReport(`imported ${map} → ${dir}`, r);
+    // Opening another project looks for its stray files anyway; the open one is looked at again here.
+    const wasOpen = w3.workspace.project()?.root === dir;
     await w3.workspace.open(dir);
+    if (wasOpen && r.strays?.length) void offerStrayMoves(w3, dir, out);
     const unnamed = r.unnamed.length ? ` ${r.unnamed.length} unnamed files were saved to unnamed/ but won't be packed.` : "";
     w3.window.showInfo(`Imported ${r.files.length} files into ${dir}.${unnamed}`);
   };
@@ -202,11 +230,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   );
 
   ctx.subscriptions.push(
-    // `file`: the map to sync from (else asked for).
-    w3.commands.register("w3.project.syncFromMap", async (file?: string) => {
+    // `file`: the map to sync from (else asked for). `opts.replace`: the user agreed already that the project's map
+    // files are replaced (restoring a checkpoint), so files the map doesn't have are removed without asking.
+    w3.commands.register("w3.project.syncFromMap", async (file?: string, opts?: { replace?: boolean }) => {
       root();
       const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Sync project from map", filters: MAP_FILTERS });
-      if (map) await sync(map);
+      if (map) await sync(map, opts?.replace !== true);
     }),
 
     w3.commands.register("w3.project.pack", async () => {

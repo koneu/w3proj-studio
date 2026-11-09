@@ -5,6 +5,7 @@ pub mod codec;
 pub mod format;
 pub mod header;
 pub mod lossless;
+mod manifest_text;
 pub mod names;
 pub mod objdata;
 pub mod paths;
@@ -90,6 +91,10 @@ pub enum Error {
     Project(String),
     #[error("map could not be fully unpacked ({} unreadable, {} unnamed files)", .0.errors.len(), .0.unnamed.len())]
     Incomplete(Box<UnpackReport>),
+    /// A sync asked not to delete would have (`UnpackOptions::refuse_deletes`): what it would
+    /// delete, from the project root. Nothing was written.
+    #[error("the sync would delete {} files the map doesn't have", .0.len())]
+    WouldDelete(Vec<String>),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
