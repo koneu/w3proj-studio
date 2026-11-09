@@ -51,7 +51,8 @@ export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: s
   if (info.players?.some((p) => ((p.fixedStart ?? 0) & 1) !== 0)) out.push("Fixed starting locations have been specified");
   if (info.upgrades?.length) out.push("Custom upgrade settings have been specified");
   if (info.techs?.length) out.push("Custom techtree or ability settings have been specified");
-  if (info.gameDataSet) out.push("Non-default game data set has been specified");
+  // 0 and -1 (0xffffffff, what World Editor 7003 gives its new maps, Melee on) are the default; 1 was a reason.
+  if (info.gameDataSet && (info.gameDataSet >>> 0) !== 0xffffffff) out.push("Non-default game data set has been specified");
   return out;
 }
 

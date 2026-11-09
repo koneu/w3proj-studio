@@ -87,6 +87,8 @@ test("the World Editor's melee rules, as far as war3map.w3i and the units tell",
   assert.equal(blocked({ flags: base.flags | 0x40 }).length, 1, "custom forces");
   assert.equal(blocked({ players: [{ fixedStart: 1 }, { fixedStart: 0 }] }).length, 1, "a fixed start location");
   assert.equal(blocked({ gameDataSet: 1 }).length, 1, "game data set");
+  assert.deepEqual(blocked({ gameDataSet: 0xffffffff }), [], "-1: the World Editor's own new maps have it, Melee on");
+  assert.deepEqual(blocked({ gameDataSet: -1 }), [], "-1 read signed");
   assert.equal(blocked({ upgrades: [{ players: 1, id: "Rhme", level: 0, availability: 0 }] as never[] }).length, 1, "an upgrade entry");
   assert.equal(blocked({ techs: [{ players: 1, id: "hfoo" }] as never[] }).length, 1, "a techtree entry");
   assert.equal(blocked({}, [...sloc, { id: "hfoo", player: 0 }]).length, 1, "a unit of Player 1");
