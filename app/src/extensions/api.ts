@@ -143,7 +143,8 @@ export interface EditorInstance {
   undo?(): void;
   redo?(): void;
   /** Its own file or a watched one was saved by something else, and it has no unsaved changes:
-   *  takes the change in place, keeping what it has loaded. False: opened again, which is slow. */
+   *  takes the change in place, keeping what it has loaded. False: opened again, which is slow.
+   *  `path`: the project path in lower case (on any system), to compare with lower-cased names. */
   reloadFile?(path: string): Promise<boolean>;
   /** Other project files the editor shows (e.g. "map/war3map.wts" for TRIGSTR texts): when
    *  something else saves one, the editor is opened again if it has no unsaved changes. (Its own

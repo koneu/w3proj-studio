@@ -1,6 +1,6 @@
 import type { ConfigurationProperty, FileInfo, ProjectInfo, SettingInfo, Settings, SettingsTarget, Disposable } from "../extensions/api";
 import { invoke, isAbsolutePath, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
-import { onWindows } from "../lib/paths";
+import { fileKey, isWindowsPath, onWindows } from "../lib/paths";
 import { Emitter } from "./dom";
 
 /** A file's size and last write (ms) as the backend reports them. */
@@ -11,11 +11,16 @@ import { timeLimit } from "./timelimit";
 export class WorkspaceService {
   private info: ProjectInfo | null = null;
   private fileList: FileInfo[] = [];
-  /** The file list's paths, lower case with forward slashes: the lookup for a written file. */
+  /** The file list's keys (see `key`): the lookup for a written file. */
   private listed = new Set<string>();
   private setList(list: FileInfo[]) {
     this.fileList = list;
-    this.listed = new Set(list.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+    this.listed = new Set(list.map((f) => this.key(f.path)));
+  }
+  /** The key a project file is known by in the list, `ownWrites` and `externalChanges`: forward slashes, and lower
+   *  case only on a case-insensitive file system (see `fileKey`). Editors match their tabs by it too. */
+  key(path: string, root = this.info?.root): string {
+    return root ? fileKey(path, root) : fileKey(path, onWindows() ? "C:\\" : "/");
   }
   private folderList: string[] = [];
   readonly onDidChange = new Emitter<void>();
@@ -93,7 +98,7 @@ export class WorkspaceService {
     if (fire) this.onDidChange.fire();
   }
 
-  /** Files written through the workspace since the last check (lower case), with their size and time as
+  /** Files written through the workspace since the last check (by key), with their size and time as
    *  the disk had them right after the write (null: not known yet). The write counts as ours only while
    *  the disk still matches: another program changing the file afterwards is an external change. */
   private ownWrites = new Map<string, { stamp: Stamp | null; seq: number }>();
@@ -101,21 +106,21 @@ export class WorkspaceService {
   /** `list`, just read from the disk, plus the files our own writes added to the list since
    *  `listedBefore` (the read may have started before they existed). */
   private keepNoticed(list: FileInfo[], listedBefore: ReadonlySet<string>, ownBefore: { has(k: string): boolean }): FileInfo[] {
-    const have = new Set(list.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+    const have = new Set(list.map((f) => this.key(f.path)));
     const extra = this.fileList.filter((f) => {
-      const k = f.path.replace(/\\/g, "/").toLowerCase();
+      const k = this.key(f.path);
       return !listedBefore.has(k) && this.ownWrites.has(k) && !ownBefore.has(k) && !have.has(k);
     });
     return extra.length ? [...list, ...extra].sort((x, y) => x.path.toLowerCase().localeCompare(y.path.toLowerCase())) : list;
   }
 
   /** Re-reads the file list and returns the files changed, added or removed by something else
-   *  (git, another program) since the last refresh, lower case; fires onDidChange if any. */
+   *  (git, another program) since the last refresh, by key (see `key`); fires onDidChange if any. */
   async externalChanges(): Promise<Set<string>> {
     if (!this.info) return new Set();
-    const before = new Map(this.fileList.map((f) => [f.path.toLowerCase(), f]));
-    const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
     const root = this.info.root;
+    const before = new Map(this.fileList.map((f) => [this.key(f.path, root), f]));
+    const ownBefore = new Map(this.ownWrites), listedBefore = this.listed;
     const after = await invoke<FileInfo[]>("project_files", { root });
     if (this.info?.root !== root) return new Set();
     // Whether a difference is our own write: one that finished during the read always is (the read may
@@ -131,7 +136,7 @@ export class WorkspaceService {
     // directory entry): where an own write seems changed, the file itself is asked, and if it still has
     // what the write left, the listing is the one that lags and its entry is corrected.
     for (const [k, own] of ownBefore) {
-      const i = own.stamp ? after.findIndex((f) => f.path.toLowerCase() === k) : -1;
+      const i = own.stamp ? after.findIndex((f) => this.key(f.path, root) === k) : -1;
       if (i < 0 || (after[i].size === own.stamp!.size && after[i].modified === own.stamp!.modified)) continue;
       const truth = await invoke<Stamp | null>("fs_stat", { path: this.resolve(after[i].path) }).catch(() => null);
       if (truth && truth.size === own.stamp!.size && truth.modified === own.stamp!.modified) after[i] = { ...after[i], ...truth };
@@ -139,7 +144,7 @@ export class WorkspaceService {
     if (this.info?.root !== root) return new Set();
     const changed = new Set<string>();
     for (const f of after) {
-      const k = f.path.toLowerCase(), b = before.get(k);
+      const k = this.key(f.path, root), b = before.get(k);
       before.delete(k);
       if ((!b || b.size !== f.size || b.modified !== f.modified) && !isOwn(k, f)) changed.add(k);
     }
@@ -180,13 +185,14 @@ export class WorkspaceService {
     await this.tracked(p, new TextEncoder().encode(text).length, (target) => writeText(target, text));
     this.onDidSave.fire(p.replace(/\\/g, "/"));
   }
-  /** The key a file is known by in `ownWrites` and the list: project-relative, `/`, lower case. Null for a
+  /** The key a file is known by in `ownWrites` and the list: project-relative, `/` (see `key`). Null for a
    *  file outside the project or in a folder the list never has (build, .git, node_modules at the top). */
   private keyOf(target: string, root: string | undefined): { rel: string; key: string } | null {
     if (!root) return null;
     const abs = target.replace(/\\/g, "/"), base = root.replace(/\\/g, "/").replace(/\/+$/, "");
-    if (!abs.toLowerCase().startsWith(base.toLowerCase() + "/")) return null;
-    const rel = abs.slice(base.length + 1), key = rel.toLowerCase();
+    const within = isWindowsPath(root) ? abs.toLowerCase().startsWith(base.toLowerCase() + "/") : abs.startsWith(base + "/");
+    if (!within) return null;
+    const rel = abs.slice(base.length + 1), key = this.key(rel, root);
     return /^(build|\.git|node_modules)\//.test(key) ? null : { rel, key };
   }
   /** Runs a write of project file `p` that answers with the size and time it left (every backend write
@@ -213,7 +219,7 @@ export class WorkspaceService {
     if (known && known.seq > seq) return;
     this.ownWrites.set(at.key, { stamp: stamp ?? null, seq });
     const entry: FileInfo = { path: at.rel, size: stamp ? stamp.size : size, modified: stamp ? stamp.modified : Date.now() };
-    const i = this.listed.has(at.key) ? this.fileList.findIndex((f) => f.path.replace(/\\/g, "/").toLowerCase() === at.key) : -1;
+    const i = this.listed.has(at.key) ? this.fileList.findIndex((f) => this.key(f.path, root) === at.key) : -1;
     if (i >= 0) {
       if (stamp) this.fileList[i] = { ...this.fileList[i], size: entry.size, modified: entry.modified };
     } else {

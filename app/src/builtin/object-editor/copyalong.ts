@@ -107,7 +107,12 @@ export async function viewMap(w3: W3Api, live?: Live, root = w3.workspace.projec
     }
     if (campaign) {
       const path = joinPath(campaign, "map", `war3campaign.${ext}.json`);
-      if (await w3.backend.invoke<boolean>("fs_exists", { path }).catch(() => false)) {
+      // Can't be checked: its ids aren't known to be free, so nothing is pasted.
+      let there: boolean;
+      try { there = await w3.backend.invoke<boolean>("fs_exists", { path }); } catch (e) {
+        throw new Error(`The campaign's ${LABELS[ext].toLowerCase()} data (${path}) can't be checked (${(e as Error).message ?? e}), so it can't be told which ids it has.`);
+      }
+      if (there) {
         let c: EditFile;
         try { c = JSON.parse(await w3.workspace.readText(path)) as EditFile; } catch { throw new Error(`${path} is there but can't be read.`); }
         for (const o of Array.isArray(c.custom) ? c.custom : []) if (typeof o?.id === "string") { game.add(o.id); idKinds.set(o.id, ext); }
