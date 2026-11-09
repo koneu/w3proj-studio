@@ -7,7 +7,8 @@
 //
 //   node scripts/twin-check.mjs <map or folder>...
 //
-// Folders are searched for .w3x/.w3m files (campaigns are skipped). Needs the release CLI
+// Folders are searched for .w3x/.w3m files (campaigns are skipped; projects in them are left out with
+// their build/ and checkpoints, as `w3proj verify` does: find-maps.mjs). Needs the release CLI
 // (`cargo build --release`, or W3PROJ_BIN) and the installed game for TriggerData.txt
 // (W3PROJ_GAME, default C:\Program Files (x86)\Warcraft III).
 import { execFileSync } from "node:child_process";
