@@ -68,7 +68,7 @@ import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } fro
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
-import { firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
+import { applyAllyPriorities, firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
 import { changeAll, propSnapshot, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
@@ -4569,7 +4569,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   let changes: string[] = [];
                   await editDoc("war3map.w3i", (info) => {
                     changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
-                    return changes.length > 0;
+                    // The players' ally priorities follow their starts, as the World Editor's save works them out.
+                    const priorities = applyAllyPriorities(info as unknown as PlayerInfo & { flags: number });
+                    return changes.length > 0 || priorities;
                   });
                   savedStarts = starts;
                   if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);

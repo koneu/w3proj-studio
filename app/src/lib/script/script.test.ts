@@ -514,16 +514,38 @@ test("forces: empty ones are left out, alliances go both ways", () => {
   has(s, "    call SetPlayerAllianceStateAllyBJ( Player(1), Player(0), true )");
 });
 
-test("start location priorities exist only when set, and config calls them then", () => {
-  const none = setup({ players: [player(0), player(1)] });
+test("start location priorities the map sets itself (Modify ally priorities) exist only when set, and config calls them then", () => {
+  const MODIFY = 0x2;
+  const none = setup({ flags: MODIFY, players: [player(0), player(1)] });
   hasNot(playersSection(none), "InitAllyPriorities");
   hasNot(configSection(none), "InitAllyPriorities");
-  const some = setup({ players: [player(0, { allyLow: 2 }), player(1, { allyHigh: 1 })] });
+  const some = setup({ flags: MODIFY, players: [player(0, { allyLow: 2 }), player(1, { allyHigh: 1 })] });
   const s = playersSection(some);
   has(s, "    call SetStartLocPrioCount( 0, 1 )");
   has(s, "    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_LOW )");
   has(s, "    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )");
   has(configSection(some), "    call InitAllyPriorities(  )");
+});
+
+test("without Modify ally priorities the script has the World Editor's, worked out from the user players' starts", () => {
+  // A two-player copy of cliff.w3m saved by World Editor 7003 (we-drive, 2026-11-09): masks of 0 in the file, the saved
+  // script gives each player the other as High.
+  const two = setup({ flags: 0x9c14, players: [player(0, { start: [-1280, 1472] }), player(1, { start: [1280, -1472] })] });
+  const s = playersSection(two);
+  has(s, "function InitAllyPriorities takes nothing returns nothing");
+  has(s, "    call SetStartLocPrioCount( 0, 1 )");
+  has(s, "    call SetStartLocPrio( 0, 0, 1, MAP_LOC_PRIO_HIGH )");
+  has(s, "    call SetStartLocPrioCount( 1, 1 )");
+  has(s, "    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_HIGH )");
+  has(configSection(two), "    call InitAllyPriorities(  )");
+  // Stale masks and enemy priorities in the file don't reach it; a computer player gets none (we-drive save v6).
+  const stale = setup({ flags: 0x9c14, players: [player(0, { enemyHigh: 2, enemyLow: 0 }), player(1, { controller: 2, allyLow: 1 }), player(2, { start: [-150, 0] })] });
+  const t = playersSection(stale);
+  hasNot(t, "EnemyStartLocPrio");
+  has(t, "    call SetStartLocPrio( 0, 0, 2, MAP_LOC_PRIO_HIGH )");
+  has(t, "    call SetStartLocPrio( 1, 0, 0, MAP_LOC_PRIO_LOW )");
+  // One player: none.
+  hasNot(playersSection(setup({ flags: 0x9c14 })), "InitAllyPriorities");
 });
 
 test("main: camera bounds, tileset sound and the calls in their order", () => {

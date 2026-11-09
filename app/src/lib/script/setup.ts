@@ -2,6 +2,7 @@
 // priorities ("Players"), main ("Main Initialization") and config ("Map
 // Configuration"), from war3map.w3i as the World Editor writes them.
 
+import { applyAllyPriorities } from "../terrain/startlocations";
 import { fixed } from "./units";
 
 const EOL = "\r\n";
@@ -110,9 +111,12 @@ export function playersSection(i: SetupInput): string {
     });
     blocks.push(block);
   };
+  // As the World Editor's save works them out (unless the map keeps its own).
+  const masks = savedPriorities(i.info);
   players.forEach((p, index) => {
-    priorities(index, p, p.allyLow, p.allyHigh, "StartLocPrio");
-    priorities(index, p, p.enemyLow ?? 0, p.enemyHigh ?? 0, "EnemyStartLocPrio");
+    const m = masks[index];
+    priorities(index, p, m.allyLow, m.allyHigh, "StartLocPrio");
+    priorities(index, p, m.enemyLow ?? 0, m.enemyHigh ?? 0, "EnemyStartLocPrio");
   });
   // Without any priorities the function is left out (config doesn't call it either).
   if (!blocks.length) return [slots.join(EOL), teams.join(EOL)].join(EOL);
@@ -120,10 +124,19 @@ export function playersSection(i: SetupInput): string {
   return [slots.join(EOL), teams.join(EOL), prio.join(EOL)].join(EOL);
 }
 
+/** The players' priority masks as the World Editor saves them: worked out from the start locations unless the map
+ *  has "Modify ally priorities" on (lib/terrain/startlocations.ts applyAllyPriorities), else as stored. In the order
+ *  of the players. */
+function savedPriorities(info: SetupInput["info"]): Pick<PlayerJson, "allyLow" | "allyHigh" | "enemyLow" | "enemyHigh">[] {
+  const copy = info.players.map((p) => ({ ...p, start: [...p.start] }));
+  applyAllyPriorities({ flags: info.flags, players: copy });
+  return copy;
+}
+
 /** Whether any player has start location priorities (InitAllyPriorities exists). */
 function hasPriorities(i: SetupInput): boolean {
-  const players = i.info.players;
-  return players.some((p) => players.some((q) => ((p.allyLow | p.allyHigh | (p.enemyLow ?? 0) | (p.enemyHigh ?? 0)) >>> q.id) & 1));
+  const players = i.info.players, masks = savedPriorities(i.info);
+  return masks.some((p) => players.some((q) => ((p.allyLow | p.allyHigh | (p.enemyLow ?? 0) | (p.enemyHigh ?? 0)) >>> q.id) & 1));
 }
 
 export function mainSection(i: SetupInput): string {
