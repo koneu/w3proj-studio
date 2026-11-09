@@ -338,3 +338,31 @@ test("a listing that lags behind the file doesn't make our own save look like an
   outside("war3map.j", 3, 3); // but when the file itself is not what we left, it is reported
   assert.deepEqual([...(await ws.externalChanges())], ["war3map.j"]);
 });
+
+/** A Linux project (its file system tells case apart) with two files that differ only in case. */
+const LINUX_ROOT = "/home/u/maps/p";
+
+test("on a case-sensitive file system two files that differ only in case are two files: a write to one isn't the other's", async () => {
+  reset();
+  backend.set(LINUX_ROOT, [{ path: "map/A.txt", size: 1, modified: 1 }, { path: "map/a.txt", size: 2, modified: 2 }]);
+  const { ws } = make();
+  await ws.open(LINUX_ROOT);
+  await ws.writeText("map/a.txt", "hello");
+  const entry = (p: string) => ws.files().find((f) => f.path === p);
+  assert.deepEqual([entry("map/A.txt")?.size, entry("map/a.txt")?.size], [1, 5], "the written file's entry has the write, the other keeps its own");
+  assert.equal((await ws.externalChanges()).size, 0, "our own write (control)");
+  // Someone else changes the other one: that is reported, under its own name.
+  Object.assign(backend.get(LINUX_ROOT)!.find((f) => f.path === "map/A.txt")!, { size: 9, modified: 900 });
+  assert.deepEqual([...(await ws.externalChanges())], ["map/A.txt"]);
+  assert.equal(ws.key("map/A.txt"), "map/A.txt", "the key editors match tabs by keeps the case");
+  backend.delete(LINUX_ROOT);
+});
+
+test("on Windows a file's key ignores case, as its file system does", async () => {
+  reset();
+  const { ws } = make();
+  await ws.open(A);
+  assert.equal(ws.key("Map\\War3Map.J"), "map/war3map.j");
+  await ws.writeText("WAR3MAP.J", "12345");
+  assert.deepEqual(ws.files().map((f) => [f.path, f.size]), [["war3map.j", 5]], "the one file, by another spelling");
+});

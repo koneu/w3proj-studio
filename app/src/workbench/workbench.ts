@@ -88,6 +88,7 @@ export class Workbench {
         const project = this.workspace.project();
         if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
       },
+      key: (p) => this.workspace.key(p),
     });
     this.statusBar = new StatusBar((c) => this.run(c));
     this.progress = new Progress(this.statusBar.progress);

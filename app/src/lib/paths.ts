@@ -21,6 +21,16 @@ export function joinPath(root: string, ...parts: string[]): string {
   return base.endsWith(sep) ? base + rest.join(sep) : `${base}${sep}${rest.join(sep)}`;
 }
 
+/** The key a project file is known by (the file list, own writes, open tabs): its project path with `/`, lower
+ *  case only where the file system doesn't tell case apart. That follows the project's root: a Windows root
+ *  (`C:\…`, `\\server\…`) is case-insensitive, a POSIX one is not, so on Linux `map/A.txt` and `map/a.txt` are
+ *  two files with two keys, and a write to one is never taken for the other. (Names inside a map archive stay
+ *  case-insensitive, as the game has them; packing refuses two that differ only in case.) */
+export function fileKey(path: string, root: string): string {
+  const p = path.replace(/\\/g, "/");
+  return isWindowsPath(root) ? p.toLowerCase() : p;
+}
+
 /** Whether the app runs on Windows (the webview says so in its user agent). */
 export const onWindows = () => typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent ?? "");
 
