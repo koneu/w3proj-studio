@@ -87,6 +87,73 @@ fn pack_unpack_pack_changes_nothing() {
     }
 }
 
+/// The map's files loose in a folder, as the World Editor saves a "Warcraft III Scenario Folder"
+/// (names from `ls`, bytes from `cat`; an archive name's `\` becomes a subfolder).
+fn map_folder(map: &Path, folder: &Path) -> usize {
+    let listing = ok(&["ls", s(map)]);
+    let names: Vec<&str> = listing
+        .lines()
+        .skip(1)
+        .filter(|l| !l.starts_with("file data"))
+        .filter_map(|l| l.split_whitespace().nth(3))
+        .collect();
+    for name in &names {
+        let o = w3proj(&["cat", s(map), name]);
+        assert!(o.status.success(), "cat {name}: {}", text(&o));
+        let path = name.split('\\').fold(folder.to_path_buf(), |p, c| p.join(c));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, o.stdout).unwrap();
+    }
+    names.len()
+}
+
+#[test]
+fn a_map_folder_unpacks_like_the_packed_map() {
+    let dir = workdir("folder");
+    let (first, folder, project, second) = (dir.join("first.w3x"), dir.join("Mini.w3x"), dir.join("project"), dir.join("second.w3x"));
+    pack(&fixture(), &first);
+    assert!(map_folder(&first, &folder) >= 13);
+    assert!(folder.join("war3mapImported").join("readme.txt").is_file());
+
+    unpack(&folder, &project);
+    let (want, got) = (files(&fixture().join("map")), files(&project.join("map")));
+    assert_eq!(want.keys().collect::<Vec<_>>(), got.keys().collect::<Vec<_>>());
+    for (name, bytes) in &want {
+        assert!(*bytes == got[name], "{name} came back different");
+    }
+    // The fixture has no map header, like a folder: the same map, byte for byte.
+    pack(&project, &second);
+    assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap(), "the map changed");
+}
+
+#[test]
+fn a_folder_that_is_no_map_or_holds_the_project_is_refused() {
+    let dir = workdir("folder-refused");
+    let first = dir.join("first.w3x");
+    pack(&fixture(), &first);
+
+    // No war3map.w3i: not a map folder.
+    let empty = dir.join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    fs::write(empty.join("notes.txt"), "hello").unwrap();
+    let o = w3proj(&["unpack", s(&empty), s(&dir.join("p1")), "--game", "none"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("no map folder"), "{}", text(&o));
+    assert!(!dir.join("p1").exists());
+
+    // A project inside the map folder would be read as part of the map, then sync away its files.
+    let folder = dir.join("Mini.w3x");
+    map_folder(&first, &folder);
+    let before = files(&folder);
+    let o = w3proj(&["unpack", s(&folder), s(&folder.join("project")), "--game", "none"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("can't be inside"), "{}", text(&o));
+    assert_eq!(before, files(&folder), "the map folder changed");
+    // Control: next to it, it works.
+    ok(&["unpack", s(&folder), s(&dir.join("next")), "--game", "none"]);
+    assert!(dir.join("next/map/war3map.j").is_file());
+}
+
 #[test]
 fn packing_twice_gives_the_same_bytes() {
     let dir = workdir("deterministic");

@@ -249,40 +249,61 @@ pub fn extract_with(archive: &Archive, codecs: &Registry, extra: &[String]) -> E
                 continue;
             }
         };
-        let base_path = paths::to_project_path(name);
-        if files.contains_key(&base_path) {
-            continue; // same file under another locale
-        }
-        let mut entry = FileEntry {
-            archive_name: name.clone(),
-            project_path: base_path.clone(),
-            size: bytes.len(),
-            codec: None,
-            note: None,
-            info: Vec::new(),
-        };
-        let mut stored = None;
-        for codec in codecs.for_archive_name(name) {
-            match codec.decode_with_notes(name, &bytes) {
-                Ok((decoded, info)) => match codec.encode(name, &decoded) {
-                    Ok(re) if re == bytes => {
-                        entry.project_path = format!("{base_path}{}", codec.suffix());
-                        entry.codec = Some(codec.id().to_string());
-                        entry.note = None;
-                        entry.info = info;
-                        stored = Some(decoded);
-                        break;
-                    }
-                    Ok(_) => entry.note = Some(format!("{}: round trip differs", codec.id())),
-                    Err(e) => entry.note = Some(format!("{}: {e}", codec.id())),
-                },
-                Err(e) => entry.note = Some(format!("{}: {e}", codec.id())),
-            }
-        }
-        files.insert(entry.project_path.clone(), stored.unwrap_or(bytes));
-        report.files.push(entry);
+        add_file(name, bytes, codecs, &mut files, &mut report);
     }
 
+    let prefix = archive.prefix();
+    finish(files, unnamed, report, prefix, archive.header().sector_size_shift, codecs, extra)
+}
+
+/// One named file of a map into the project's files, through the first codec that reads it back
+/// to the same bytes (else raw).
+fn add_file(name: &str, bytes: Vec<u8>, codecs: &Registry, files: &mut BTreeMap<String, Vec<u8>>, report: &mut UnpackReport) {
+    let base_path = paths::to_project_path(name);
+    if files.contains_key(&base_path) {
+        return; // same file under another locale
+    }
+    let mut entry = FileEntry {
+        archive_name: name.to_string(),
+        project_path: base_path.clone(),
+        size: bytes.len(),
+        codec: None,
+        note: None,
+        info: Vec::new(),
+    };
+    let mut stored = None;
+    for codec in codecs.for_archive_name(name) {
+        match codec.decode_with_notes(name, &bytes) {
+            Ok((decoded, info)) => match codec.encode(name, &decoded) {
+                Ok(re) if re == bytes => {
+                    entry.project_path = format!("{base_path}{}", codec.suffix());
+                    entry.codec = Some(codec.id().to_string());
+                    entry.note = None;
+                    entry.info = info;
+                    stored = Some(decoded);
+                    break;
+                }
+                Ok(_) => entry.note = Some(format!("{}: round trip differs", codec.id())),
+                Err(e) => entry.note = Some(format!("{}: {e}", codec.id())),
+            },
+            Err(e) => entry.note = Some(format!("{}: {e}", codec.id())),
+        }
+    }
+    files.insert(entry.project_path.clone(), stored.unwrap_or(bytes));
+    report.files.push(entry);
+}
+
+/// What follows reading a map's files: trigger names in the custom script, chapter maps as
+/// projects, raw marks, the header and the manifest. `prefix`: the bytes before the archive.
+fn finish(
+    mut files: BTreeMap<String, Vec<u8>>,
+    unnamed: BTreeMap<String, Vec<u8>>,
+    mut report: UnpackReport,
+    prefix: &[u8],
+    sector_size_shift: u16,
+    codecs: &Registry,
+    extra: &[String],
+) -> Extracted {
     // Custom script sections get their triggers' names (comments; only when the wtg was decoded).
     let names = files.get("war3map.wtg.json").and_then(|j| crate::wtg::text_trigger_names(j));
     if let (Some(names), Some(text)) = (names, files.get("war3map.wct.txt")) {
@@ -318,7 +339,6 @@ pub fn extract_with(archive: &Archive, codecs: &Registry, extra: &[String]) -> E
         }
     }
 
-    let prefix = archive.prefix();
     let header = MapHeader::parse(prefix);
     let exact = header.as_ref().is_some_and(|h| h.to_bytes() == prefix);
     let raw_header = (!prefix.is_empty() && !exact).then(|| prefix.to_vec());
@@ -326,9 +346,7 @@ pub fn extract_with(archive: &Archive, codecs: &Registry, extra: &[String]) -> E
     let manifest = Manifest {
         format: FORMAT_VERSION,
         map: header,
-        archive: ArchiveSettings {
-            sector_size_shift: archive.header().sector_size_shift,
-        },
+        archive: ArchiveSettings { sector_size_shift },
         pack: PackSettings { output: None, raw },
     };
     Extracted {
@@ -339,6 +357,54 @@ pub fn extract_with(archive: &Archive, codecs: &Registry, extra: &[String]) -> E
         nested,
         report,
     }
+}
+
+/// A map saved as a folder (the World Editor's "Warcraft III Scenario Folder": loose `war3map.*`
+/// files, imports in subfolders) in project form, like `extract` of the packed map. The folder has
+/// no map header (as maps of World Editor 3.0.1 and Studio's new maps) and no archive settings
+/// (the default sector size). Symbolic links aren't followed; chapter maps saved as folders inside
+/// a campaign folder are reported unreadable.
+pub fn extract_dir(dir: &Path, codecs: &Registry) -> Result<Extracted> {
+    let has = |name: &str| dir.join(name).is_file();
+    if !has("war3map.w3i") && !has("war3campaign.w3f") {
+        return Err(Error::Project(format!(
+            "{} is no map folder (it has no war3map.w3i or war3campaign.w3f)",
+            dir.display()
+        )));
+    }
+    if dir.join(MANIFEST).exists() {
+        return Err(Error::Project(format!("{} is a project, not a map folder", dir.display())));
+    }
+    let mut report = UnpackReport::default();
+    let mut files = BTreeMap::new();
+    let mut stack = vec![(dir.to_path_buf(), String::new())];
+    let mut found: Vec<(String, PathBuf)> = Vec::new();
+    while let Some((at, prefix)) = stack.pop() {
+        for entry in fs::read_dir(&at)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let file = entry.file_name().to_string_lossy().into_owned();
+            let name = format!("{prefix}{file}");
+            if kind.is_symlink() {
+                report.errors.push((name, "a symbolic link (not followed)".into()));
+            } else if kind.is_dir() && is_map_name(&file) {
+                report.errors.push((name, "a chapter map saved as a folder (not read)".into()));
+            } else if kind.is_dir() {
+                stack.push((entry.path(), format!("{name}\\")));
+            } else if !names::is_meta(&name) {
+                found.push((name, entry.path()));
+            }
+        }
+    }
+    found.sort();
+    for (name, path) in found {
+        match fs::read(&path) {
+            Ok(bytes) => add_file(&name, bytes, codecs, &mut files, &mut report),
+            Err(e) => report.errors.push((name, e.to_string())),
+        }
+    }
+    let shift = ArchiveSettings::default().sector_size_shift;
+    Ok(finish(files, BTreeMap::new(), report, &[], shift, codecs, &[]))
 }
 
 fn is_map_name(name: &str) -> bool {
@@ -565,13 +631,45 @@ fn extract_named(archive: &Archive, codecs: &Registry, more_names: Option<&NameS
 }
 
 /// Imports a map into a (new or existing) project directory.
+/// `map` may be a map folder (`extract_dir`); the project can't be in it or around it.
 pub fn unpack(map: &Path, project: &Path, codecs: &Registry, opts: &UnpackOptions) -> Result<UnpackReport> {
-    let archive = Archive::open(map)?;
-    let ex = extract_named(&archive, codecs, opts.more_names.as_ref());
+    let ex = if map.is_dir() {
+        let (a, b) = (absolute(map), absolute(project));
+        if a.starts_with(&b) || b.starts_with(&a) {
+            return Err(Error::Project(format!(
+                "the project folder {} can't be inside the map folder {} or hold it",
+                project.display(),
+                map.display()
+            )));
+        }
+        extract_dir(map, codecs)?
+    } else {
+        extract_named(&Archive::open(map)?, codecs, opts.more_names.as_ref())
+    };
     if !ex.report.is_complete() && !opts.allow_incomplete {
         return Err(Error::Incomplete(Box::new(ex.report)));
     }
     write_files(project, ex)
+}
+
+/// The path made absolute and canonical where it exists (a project folder may not exist yet: then
+/// its nearest existing parent is canonical and the rest is appended).
+fn absolute(p: &Path) -> PathBuf {
+    let p = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut rest = Vec::new();
+    let mut at = p.as_path();
+    loop {
+        if let Ok(c) = at.canonicalize() {
+            return rest.iter().rev().fold(c, |acc: PathBuf, part| acc.join(part));
+        }
+        match (at.parent(), at.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                at = parent;
+            }
+            _ => return p,
+        }
+    }
 }
 
 /// Starts an empty project for a new map: manifest (with the map header),

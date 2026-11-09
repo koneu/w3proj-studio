@@ -21,7 +21,7 @@ interface PackReport {
 const MAP_FILTERS = [{ name: "Warcraft III map or campaign", extensions: ["w3x", "w3m", "w3n"] }];
 
 function baseName(p: string) {
-  return p.split(/[\\/]/).pop()!.replace(/\.(w3x|w3m|w3n)$/i, "");
+  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop()!.replace(/\.(w3x|w3m|w3n)$/i, "");
 }
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -143,6 +143,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return joinPath(p.root, "build", `${baseName(p.root)}.edit.w3x`);
   };
 
+  /** A map, campaign or map folder into a new project folder (the backend tells a folder by itself). */
+  const importMap = async (map: string) => {
+    const parent = await w3.window.pickFolder({ title: "Choose where to create the project folder" });
+    if (!parent) return;
+    const name = await w3.window.inputBox({ prompt: "Project folder name", value: baseName(map).replace(/[^\w\- .()]/g, "_") });
+    if (!name) return;
+    const dir = joinPath(parent, name);
+    if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "w3proj.toml") })) {
+      const c = await w3.window.showWarning(`${dir} already is a project. Overwrite its map files with ${baseName(map)}?`, "Overwrite", "Cancel");
+      if (c !== "Overwrite") return;
+    }
+    // The new project replaces the open one: unsaved changes are settled first.
+    if (!(await w3.editors.closeAllAsking())) return;
+    const r = await unpack(map, dir, "Importing map");
+    if (!r) return;
+    logReport(`imported ${map} → ${dir}`, r);
+    await w3.workspace.open(dir);
+    const unnamed = r.unnamed.length ? ` ${r.unnamed.length} unnamed files were saved to unnamed/ but won't be packed.` : "";
+    w3.window.showInfo(`Imported ${r.files.length} files into ${dir}.${unnamed}`);
+  };
+
   ctx.subscriptions.push(
     w3.commands.register("w3.project.open", async (path?: string) => {
       path ??= (await w3.window.pickFolder({ title: "Open map project folder" })) ?? undefined;
@@ -152,29 +173,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       out.append(`opened ${path}`);
     }),
 
-    // `file`: the map or campaign to import (else asked for).
+    // `file`: the map or campaign to import (else asked for); a map folder works too.
     w3.commands.register("w3.project.importMap", async (file?: string) => {
       const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Choose a map to import", filters: MAP_FILTERS });
-      if (!map) return;
-      const parent = await w3.window.pickFolder({ title: "Choose where to create the project folder" });
-      if (!parent) return;
-      const name = await w3.window.inputBox({ prompt: "Project folder name", value: baseName(map).replace(/[^\w\- .()]/g, "_") });
-      if (!name) return;
-      const dir = joinPath(parent, name);
-      if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "w3proj.toml") })) {
-        const c = await w3.window.showWarning(`${dir} already is a project. Overwrite its map files with ${baseName(map)}?`, "Overwrite", "Cancel");
-        if (c !== "Overwrite") return;
-      }
-      // The new project replaces the open one: unsaved changes are settled first.
-      if (!(await w3.editors.closeAllAsking())) return;
-      const r = await unpack(map, dir, "Importing map");
-      if (!r) return;
-      logReport(`imported ${map} → ${dir}`, r);
-      await w3.workspace.open(dir);
-      const unnamed = r.unnamed.length ? ` ${r.unnamed.length} unnamed files were saved to unnamed/ but won't be packed.` : "";
-      w3.window.showInfo(`Imported ${r.files.length} files into ${dir}.${unnamed}`);
+      if (map) await importMap(map);
     }),
 
+    // `folder`: a map saved as a folder (the World Editor's "Warcraft III Scenario Folder"), else asked for.
+    w3.commands.register("w3.project.importMapFolder", async (folder?: string) => {
+      const map = typeof folder === "string" && folder ? folder : await w3.window.pickFolder({ title: "Choose a map folder (loose war3map.* files) to import" });
+      if (map) await importMap(map);
+    }),
+  );
+
+  ctx.subscriptions.push(
     // `file`: the map to sync from (else asked for).
     w3.commands.register("w3.project.syncFromMap", async (file?: string) => {
       root();
