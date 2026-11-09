@@ -367,6 +367,40 @@ async function placeObjects(page, found) {
   }
 }
 
+/** move_object on a start location moves the player's start in war3map.w3i too, in the same edit: one undo takes both
+ *  back. (The terrain editor's own save does this for its moves; a tool's edit reloads the editor, so its save never did.) */
+async function mcpStartMove(page, found) {
+  const fail = (what) => found.push(`start location moved by a tool: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "start-move");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "StartMove", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const read = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+  const sloc = () => { const units = read("war3mapUnits.doo.json").units; const i = units.findIndex((u) => u.id === "sloc" && u.player === 0); return { i, at: units[i]?.position.slice(0, 2) }; };
+  const start = () => read("war3map.w3i.json").players.find((p) => p.id === 0)?.start;
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    const was = sloc(), startWas = start();
+    if (was.i < 0 || JSON.stringify(startWas) !== JSON.stringify(was.at)) { fail(`a new map's player 1 doesn't start at its start location (control): ${JSON.stringify({ was, startWas })}`); return; }
+    const to = [was.at[0] + 512, was.at[1] - 256];
+    const edits = JSON.parse(await tool("list_edits")).length;
+    await tool("move_object", { kind: "units", index: was.i, id: "sloc", x: to[0], y: to[1] });
+    if (JSON.stringify(sloc().at) !== JSON.stringify(to)) fail(`the start location isn't at ${to} after the move (control): ${JSON.stringify(sloc())}`);
+    if (JSON.stringify(start()) !== JSON.stringify(to)) fail(`war3map.w3i still has player 1's start at ${JSON.stringify(start())}, the start location is at ${to}`);
+    const list = JSON.parse(await tool("list_edits"));
+    if (list.length !== edits + 1) fail(`the move made ${list.length - edits} edits, not one`);
+    const files = list.at(-1)?.files ?? [];
+    if (!files.includes("map/war3map.w3i.json") || !files.includes("map/war3mapUnits.doo.json")) fail(`the move's edit has ${files.join(", ")}, not the units and war3map.w3i`);
+    await tool("undo_last_edit");
+    if (JSON.stringify(sloc().at) !== JSON.stringify(was.at) || JSON.stringify(start()) !== JSON.stringify(startWas)) fail(`one undo left the start location at ${sloc().at} and war3map.w3i's start at ${start()}, not both at ${was.at}`);
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
+  }
+}
+
 /** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
  *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
  *  right when the project is saved and packed straight after. */
@@ -3644,7 +3678,8 @@ async function playerStarts(page, found, root) {
   /** Player 1's Start X and Y cells: their text, and whether they hold an input. */
   const cells = () => page.evaluate(`(() => {
     const row = [...document.querySelectorAll(".map-info .form-table tbody tr")].find((r) => r.cells[0]?.textContent === "1");
-    return row ? [5, 6].map((i) => ({ input: !!row.cells[i].querySelector("input"), text: row.cells[i].querySelector("input")?.value ?? row.cells[i].textContent })) : null;
+    const heads = [...(row?.closest("table")?.querySelectorAll("thead th") ?? [])].map((th) => th.textContent);
+    return row ? ["Start X", "Start Y"].map((h) => heads.indexOf(h)).map((i) => ({ input: !!row.cells[i].querySelector("input"), text: row.cells[i].querySelector("input")?.value ?? row.cells[i].textContent })) : null;
   })()`);
   const players = `[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Players")?.click()`;
   try {
@@ -3665,8 +3700,64 @@ async function playerStarts(page, found, root) {
     }, 10000).catch(() => {});
     const followed = await cells();
     if (followed?.some((c) => c.input) || followed?.[0].text !== "128" || followed?.[1].text !== "-256") fail(`with a start location, Start X/Y are still typed, or don't show it: ${JSON.stringify(followed)}`);
+
+    // The player's "fixed start" field holds flags: Fixed start is bit 0, Race selectable bit 1, which follows the race.
+    const cell = (head) => `(() => {
+      const row = [...document.querySelectorAll(".map-info .form-table tbody tr")].find((r) => r.cells[0]?.textContent === "1");
+      const heads = [...row.closest("table").querySelectorAll("thead th")].map((th) => th.textContent);
+      return row.cells[heads.indexOf(${JSON.stringify(head)})];
+    })()`;
+    const boxes = () => page.evaluate(`[${cell("Fixed start")}, ${cell("Race selectable")}].map((c) => c.querySelector("input").checked)`);
+    const race = (value) => page.evaluate(`(() => { const s = ${cell("Race")}.querySelector("select"); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event("change")); })()`);
+    const infoBefore = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+    try {
+      if (JSON.stringify(await boxes()) !== "[false,false]") fail(`the mini map's player 1 has Fixed start or Race selectable on (control): ${JSON.stringify(await boxes())}`);
+      await page.evaluate(`${cell("Fixed start")}.querySelector("input").click()`);
+      await race("0");
+      await until("Race selectable to follow race Selectable", async () => JSON.stringify(await boxes()) === "[true,true]", 3000)
+        .catch(async () => fail(`race Selectable with Fixed start on: boxes ${JSON.stringify(await boxes())}, not both on`));
+      await race("2");
+      await until("Race selectable to follow race Orc", async () => JSON.stringify(await boxes()) === "[true,false]", 3000)
+        .catch(async () => fail(`race Orc after Selectable: boxes ${JSON.stringify(await boxes())}, not Fixed start alone`));
+      await page.evaluate(`w3.editors.saveAll()`);
+      const saved = JSON.parse(await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`)).players.find((p) => p.id === 0);
+      if (saved?.fixedStart !== 1 || saved?.race !== 2) fail(`saved player 1: race ${saved?.race}, fixed start field ${saved?.fixedStart}, not 2 and 1`);
+    } finally {
+      await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoBefore)}); })()`);
+    }
   } finally {
     await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(units)}, ${JSON.stringify(before)}); await w3.editors.closeAll(); })()`);
+  }
+}
+
+/** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
+ *  preview pushed it below itself), every section's Value column in the same place, and the preview over no table. */
+async function objectLayout(page, found, root) {
+  const fail = (what) => found.push(`object editor layout: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  try {
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3u", "hfoo")`);
+    await until("the footman's fields and its preview", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20 && !!document.querySelector(".obj-detail .obj-preview")`), 30000);
+    const m = await page.evaluate(`(() => {
+      const r = (e) => e.getBoundingClientRect();
+      const detail = [...document.querySelectorAll(".obj-detail")].find((d) => d.offsetParent !== null);
+      const sections = [...detail.querySelectorAll(".obj-section")].filter((s) => s.querySelector(".obj-table thead"));
+      const first = sections[0];
+      const preview = r(detail.querySelector(".obj-preview"));
+      return {
+        sections: sections.length,
+        gap: first ? r(first.querySelector(".obj-table")).top - r(first.querySelector("h3")).bottom : null,
+        valueLefts: sections.map((s) => Math.round(r(s.querySelector(".obj-table thead th:nth-child(3)")).left)),
+        overlaps: sections.filter((s) => { const t = r(s.querySelector(".obj-table")); return t.right > preview.left + 1 && t.left < preview.right - 1 && t.bottom > preview.top + 1 && t.top < preview.bottom - 1; }).length,
+      };
+    })()`);
+    if (m.sections < 3) { fail(`only ${m.sections} field sections (control)`); return; }
+    if (!(m.gap < 12)) fail(`the first field table starts ${Math.round(m.gap)} px under its heading`);
+    if (Math.max(...m.valueLefts) - Math.min(...m.valueLefts) > 1) fail(`the Value columns of the sections start at ${[...new Set(m.valueLefts)].join(", ")} px`);
+    if (m.overlaps) fail(`the model preview lies over ${m.overlaps} field tables`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
   }
 }
 
@@ -5396,7 +5487,7 @@ async function run() {
     // --only=graphics is graphicsModes after the project checks.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only && only !== "graphics") {
-      const onlyChecks = { newMaps, terrainWiring, placeObjects, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening,
+      const onlyChecks = { newMaps, terrainWiring, placeObjects, mcpStartMove, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening,
         // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
         testMapWithoutGame: async (p, f) => {
           const folder = join(work, "test-map-only");
@@ -5406,7 +5497,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), objectLayout: (p, f) => objectLayout(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5484,6 +5575,7 @@ async function run() {
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
+    await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
     await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
@@ -5514,6 +5606,7 @@ async function run() {
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
+    await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
     await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
     await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
