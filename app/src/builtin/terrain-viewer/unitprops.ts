@@ -205,11 +205,11 @@ export function redistribute(set: readonly DropItem[]): DropItem[] {
 const RANDOM_CLASSES: Record<string, string> = {
   Y: "any class", i: "permanent", j: "charged", k: "power-up", l: "artifact", m: "purchasable", n: "campaign", o: "miscellaneous",
 };
-/** "Random item (permanent, level 2)" for a random item id ("YiI2"), else undefined. Level "/" is any level. */
+/** "Random item, permanent, level 2" for a random item id ("YiI2"), else undefined. Level "/" is any level. */
 export function randomItemLabel(id: string): string | undefined {
   const m = /^Y(.)I(.)$/.exec(id);
   if (!m || !RANDOM_CLASSES[m[1]]) return undefined;
-  return `Random item (${RANDOM_CLASSES[m[1]]}, ${m[2] === "/" ? "any level" : `level ${m[2]}`})`;
+  return `Random item, ${RANDOM_CLASSES[m[1]]}, ${m[2] === "/" ? "any level" : `level ${m[2]}`}`;
 }
 
 /** The chances of a set added up. */
@@ -411,11 +411,17 @@ export function applyChange(entry: Placed, facts: TypeFacts, c: PropChange): boo
 
 /** A change to several objects: all of it or, with the first object's reason, none. The objects that changed. */
 export function changeAll(items: readonly { entry: Placed; facts: TypeFacts }[], c: PropChange, ctx: PropContext = {}): { error: string } | { changed: Placed[] } {
+  return changeEach(items.map((it) => ({ ...it, change: c })), ctx);
+}
+
+/** A change of its own to each object (drops copied, a set added to each one's own): all of them or, with the first
+ *  object's reason, none. The objects that changed. */
+export function changeEach(items: readonly { entry: Placed; facts: TypeFacts; change: PropChange }[], ctx: PropContext = {}): { error: string } | { changed: Placed[] } {
   for (const it of items) {
-    const why = checkChange(it.entry, it.facts, c, ctx);
+    const why = checkChange(it.entry, it.facts, it.change, ctx);
     if (why) return { error: items.length > 1 ? `${it.entry.id}: ${why}` : why };
   }
-  return { changed: items.filter((it) => applyChange(it.entry, it.facts, c)).map((it) => it.entry) };
+  return { changed: items.filter((it) => applyChange(it.entry, it.facts, it.change)).map((it) => it.entry) };
 }
 
 /** The panel's field a change is made in. */

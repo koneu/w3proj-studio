@@ -199,8 +199,9 @@ test("a hero's hit points and mana grow with its attributes, as the World Editor
 });
 
 test("random item ids read as what they drop", () => {
-  assert.equal(randomItemLabel("YiI2"), "Random item (permanent, level 2)");
-  assert.equal(randomItemLabel("YYI/"), "Random item (any class, any level)");
+  assert.equal(randomItemLabel("YiI2"), "Random item, permanent, level 2");
+  assert.equal(randomItemLabel("YYI/"), "Random item, any class, any level");
+  assert.equal(randomItemLabel("YjI2"), "Random item, charged, level 2");
   assert.equal(randomItemLabel("ratf"), undefined);
   assert.equal(randomItemLabel("YzI2"), undefined);
 });
