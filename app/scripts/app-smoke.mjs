@@ -3517,10 +3517,13 @@ async function drawCalls(page, found) {
   /** The counts of one whole frame, drawn with the camera looking at (x, y). */
   const frame = async (x, y) => {
     const path = await page.evaluate(`w3.editors.activePath()`);
+    const look = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(${JSON.stringify(path)})(${x}, ${y}))()`);
+    // Counted once the camera has moved: a frame begun before that (an animation's) would be the old view.
+    await look();
     const before = await page.evaluate(`window.__drawCount.frames`);
-    // Each look asks for a frame. Once the second has begun, the first is complete, with the new view.
+    // Each look asks for a frame. Both begin after the move; once the second has begun, the first is complete.
     for (const n of [1, 2]) {
-      await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(${JSON.stringify(path)})(${x}, ${y}))()`);
+      await look();
       await until("a frame", () => page.evaluate(`window.__drawCount.frames >= ${before + n}`), 20000);
     }
     return page.evaluate(`window.__drawCount.last`);
@@ -4465,7 +4468,9 @@ async function editorExtras(page, found) {
     if (!clicked) fail("the Import Manager shows no Replace button for a selected file");
     await until("the new content", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail(`after Replace File the file holds ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
     if (readFileSync(impFile, "utf8") !== impBefore) fail("Replace File changed the import list");
-    if (existsSync(`${onDisk}.replacing`)) fail("Replace File left its copy beside the file");
+    // The copy goes once the file holds the new content (replace.ts removes it last): given a moment, not checked in
+    // the same instant the content showed.
+    await until("the copy to go", () => !existsSync(`${onDisk}.replacing`), 5000).catch(() => fail("Replace File left its copy beside the file"));
     await page.evaluate(`w3.editors.open(${JSON.stringify(FILE)})`);
     await until("the text editor with the new content", () => page.evaluate(`document.querySelector(".cm-content")?.textContent.includes("new words") ?? false`), 10000)
       .catch(() => fail("the open text editor of the file doesn't show the replaced content"));
