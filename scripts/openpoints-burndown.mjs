@@ -23,6 +23,8 @@ import { fileURLToPath } from "node:url";
 export const FILES = [
   { file: "bugs.md", label: "Bugs", active: true },
   { file: "features.md", label: "Features", active: true },
+  { file: "lowprio-bugs.md", label: "Bugs (display, low)", active: true },
+  { file: "lowprio-features.md", label: "Features (display, low)", active: true },
   { file: "engineering.md", label: "Engineering", active: true },
   { file: "test.md", label: "To test", active: true },
   { file: "user.md", label: "For the user", active: true },
@@ -130,7 +132,7 @@ summary .n { color: var(--muted); font-weight: 400; } ul { margin: 6px 0 4px; pa
   border-radius: 6px; padding: 6px 8px; font-size: 12px; display: none; white-space: nowrap; }
 </style></head><body><main>
 <h1>Open points burndown</h1>
-<p class="sub">From <code>openpoints/*.md</code>. Latest snapshot: ${escapeHtml(latest ? latest.time : "none")}. "Active" counts bugs, features, engineering, tests and the user's items; blocked and on hold are shown but not counted.</p>
+<p class="sub">From <code>openpoints/*.md</code>. Latest snapshot: ${escapeHtml(latest ? latest.time : "none")}. "Active" counts bugs, features (both also as low-priority display items), engineering, tests and the user's items; blocked and on hold are shown but not counted.</p>
 <div class="tiles" id="tiles"></div>
 <div class="card"><svg id="chart" viewBox="0 0 1000 420" role="img" aria-label="Open points over time"></svg><div class="legend" id="legend"></div></div>
 <div class="card"><b>Open now</b>${rows}</div>
@@ -138,7 +140,7 @@ summary .n { color: var(--muted); font-weight: 400; } ul { margin: 6px 0 4px; pa
 </main>
 <script>
 const DATA = ${data};
-const COLORS = { "bugs.md": "#d1242f", "features.md": "#0969da", "engineering.md": "#8250df", "test.md": "#bf8700", "user.md": "#1a7f37", "blocked.md": "#6e7781", "onhold.md": "#afb8c1" };
+const COLORS = { "bugs.md": "#d1242f", "features.md": "#0969da", "lowprio-bugs.md": "#ff8182", "lowprio-features.md": "#80ccff", "engineering.md": "#8250df", "test.md": "#bf8700", "user.md": "#1a7f37", "blocked.md": "#6e7781", "onhold.md": "#afb8c1" };
 const entries = DATA.entries, files = DATA.files;
 const svg = document.getElementById("chart"), tip = document.getElementById("tip");
 const W = 1000, H = 420, L = 48, R = 16, T = 16, B = 40;
