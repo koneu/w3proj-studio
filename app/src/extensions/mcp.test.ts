@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { McpTools, projectPath, type McpHostHooks } from "./mcp";
+import { AiWordedError, McpTools, projectPath, type McpHostHooks } from "./mcp";
 
 function tools(over: Partial<McpHostHooks> = {}) {
   const logged: string[] = [];
@@ -38,6 +38,14 @@ test("a failing tool, or one that can't start, is an error of that call only", a
   assert.deepEqual(await t.call("boom", {}), { content: [{ type: "text", text: "no terrain" }], isError: true });
   assert.deepEqual(await t.call("look", {}), { content: [{ type: "text", text: "ext.a failed to activate" }], isError: true });
   assert.equal((await t.call("nothing", {})).isError, true);
+});
+
+test("an error worded for people and for an AI: the MCP call answers with the AI's words", async () => {
+  const { t } = tools();
+  t.declare("ext.a", "builtin", [{ name: "refuse", description: "Refuses" }]);
+  t.registerTool("refuse", () => { throw new AiWordedError("Save it first.", "Ask the user to save it first."); });
+  assert.deepEqual(await t.call("refuse", {}), { content: [{ type: "text", text: "Ask the user to save it first." }], isError: true });
+  assert.equal(new AiWordedError("Save it first.", "Ask the user.").message, "Save it first.", "the app shows the message");
 });
 
 test("an activation that throws is an error too", async () => {

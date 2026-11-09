@@ -6,7 +6,7 @@
 // - One edit at a time, reading and writing together: parallel calls can't overwrite each other.
 // - The first edit of a project is preceded by a checkpoint, and each can be undone.
 
-import { projectPath } from "../../extensions/mcp";
+import { AiWordedError, projectPath } from "../../extensions/mcp";
 
 export interface EditFile { path: string; text: string }
 /** A file an edit changed by way of what it wrote (the map script, regenerated from the triggers, and its stamp). */
@@ -92,7 +92,10 @@ export class EditLog {
 
   private refuseUnsaved() {
     const open = this.io.unsaved();
-    if (open.length) throw new Error(`Not changed: ${open.join(", ")} ${open.length === 1 ? "has" : "have"} unsaved changes in the editor. Ask the user to save or discard them first.`);
+    if (!open.length) return;
+    // The app's own commands (Adjust Map String IDs, …) come here too: a person reads the first, an AI client the second.
+    const what = `Not changed: ${open.join(", ")} ${open.length === 1 ? "has" : "have"} unsaved changes in the editor.`;
+    throw new AiWordedError(`${what} Save or discard them first, then try again.`, `${what} Ask the user to save or discard them first.`);
   }
 
   /** Puts files back; a failure here is reported along with what caused it. */
