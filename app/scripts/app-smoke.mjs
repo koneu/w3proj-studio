@@ -1006,18 +1006,24 @@ async function viewModes(page, found) {
   if (!(await page.evaluate(`window.__viewModesMark === 1`))) fail("Ctrl+R in the map reloaded the window");
   await key("r", "KeyR", 82, CTRL);
   if ((await changed()) > 150) fail("Ctrl+R twice isn't the plain picture");
-  // The Regions tab draws the regions itself: the box and the state say they're shown, and the layer can't be turned
-  // off under it; back on Select it's the choice again.
-  const regionsBox = `(() => { const i = [...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Regions")?.querySelector("input"); return i ? { checked: i.checked, disabled: i.disabled } : null; })()`;
-  await k.tab("Regions");
-  let rb = await page.evaluate(regionsBox), rs = await state();
-  if (!rb?.checked || !rb.disabled || !rs.regions || !rs.shown.regions) fail(`with the Regions tab open the Regions box is ${JSON.stringify(rb)} and the state ${rs.regions}/${rs.shown.regions}`);
-  const underTab = await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer("regions"))()`);
-  if (typeof underTab !== "string") fail(`the Regions layer toggled under the Regions tab: ${JSON.stringify(underTab)}`);
-  await k.tab("Select");
-  rb = await page.evaluate(regionsBox);
-  rs = await state();
-  if (rb?.checked || rb?.disabled || rs.regions || rs.shown.regions) fail(`back on Select the Regions box is ${JSON.stringify(rb)} and the state ${rs.regions}/${rs.shown.regions}`);
+  // The Regions tab draws the regions itself, and the Pathing tab the ground pathing: the box and the state say they're
+  // shown, and the layer can't be turned off under the tab; back on Select it's the choice again, off or on as it was.
+  const toggleUnder = (layer) => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath()).toggleLayer(${JSON.stringify(layer)}))()`);
+  for (const [tab, label, layer, before] of [["Regions", "Regions", "regions", false], ["Pathing", "Ground pathing", "pathing", false], ["Pathing", "Ground pathing", "pathing", true]]) {
+    const what = `the ${tab} tab (${label} ${before ? "on" : "off"} before)`;
+    const layerBox = `(() => { const i = [...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === ${JSON.stringify(label)})?.querySelector("input"); return i ? { checked: i.checked, disabled: i.disabled } : null; })()`;
+    if (before && (await toggleUnder(layer)) !== true) { fail(`${label} couldn't be turned on before ${what}`); continue; }
+    await k.tab(tab);
+    let rb = await page.evaluate(layerBox), rs = await state();
+    if (!rb?.checked || !rb.disabled || !rs[layer] || !rs.shown[layer]) fail(`with ${what} open the ${label} box is ${JSON.stringify(rb)} and the state ${rs[layer]}/${rs.shown[layer]}`);
+    const underTab = await toggleUnder(layer);
+    if (typeof underTab !== "string") fail(`the ${label} layer toggled under ${what}: ${JSON.stringify(underTab)}`);
+    await k.tab("Select");
+    rb = await page.evaluate(layerBox);
+    rs = await state();
+    if (rb?.checked !== before || rb?.disabled || rs[layer] !== before || rs.shown[layer] !== before) fail(`back on Select after ${what} the ${label} box is ${JSON.stringify(rb)} and the state ${rs[layer]}/${rs.shown[layer]}`);
+    if (before) await toggleUnder(layer);
+  }
   s = await state();
   let t = await trial("Ctrl+T", "terrain", () => key("t", "KeyT", 84, CTRL), 20000);
   if (t.terrain !== "wireframe") fail(`Ctrl+T gave ${t.terrain}`);

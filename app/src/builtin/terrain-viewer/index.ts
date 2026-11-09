@@ -3964,12 +3964,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         viewChanged = applyView;
         const refusedInGameView = () => (gameViewOn() ? GAME_VIEW_NOTE : null);
-        /** The Regions tab draws the regions itself while it's open: the Regions layer is on then, and stays so. */
-        const regionsTabOpen = () => activeGroup === "regions";
-        const REGIONS_TAB_NOTE = "The Regions tab shows the regions while it's open.";
+        /** The Regions tab draws the regions itself while it's open, and the Pathing tab the ground pathing: that layer
+         *  is on then, and stays so. */
+        const TAB_LAYERS: Partial<Record<ToggleLayer | "water", { tab: string; note: string }>> = {
+          regions: { tab: "regions", note: "The Regions tab shows the regions while it's open." },
+          pathing: { tab: "pathing", note: "The Pathing tab shows the ground pathing while it's open." },
+        };
+        const shownByTab = (layer: ToggleLayer | "water") => TAB_LAYERS[layer]?.tab === activeGroup;
+        /** The layers the open tab shows, as the view's state reports them. */
+        const byTabNow = () => Object.fromEntries((["regions", "pathing"] as const).filter(shownByTab).map((l) => [l, true]));
         const setGrid = (g: GridSize) => { viewState.grid = g; applyView(); };
         const toggleLayer = (layer: ToggleLayer | "water"): boolean | string => {
-          const no = refusedInGameView() ?? (layer === "regions" && regionsTabOpen() ? REGIONS_TAB_NOTE : null);
+          const no = refusedInGameView() ?? (shownByTab(layer) ? TAB_LAYERS[layer]!.note : null);
           if (no) return no;
           viewState[layer] = !viewState[layer];
           applyView();
@@ -3995,7 +4001,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
-          state: () => ({ ...viewState, ...(regionsTabOpen() ? { regions: true } : {}), gameView: gameViewOn(), shown: { ...shown, ...(regionsTabOpen() ? { regions: true } : {}) }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -4004,8 +4010,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** A toolbar box for a View item: game view greys it out (the World Editor's View menu does so too). */
         const layerToggle = (label: string, title: string, layer: ToggleLayer | "water", command?: string) => {
           const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); keysToMap(); } });
-          // The Regions tab's own picture is the Regions layer: on, and not to be turned off, while the tab is open.
-          const byTab = () => layer === "regions" && regionsTabOpen();
+          // The Regions and Pathing tabs' own pictures are those layers: on, and not to be turned off, while the tab is open.
+          const byTab = () => shownByTab(layer);
           viewSyncs.push(() => { box.checked = viewState[layer] || byTab(); box.disabled = gameViewOn() || byTab(); });
           return h("label.model-toggle", { title: command ? withKey(title, command) : title }, box, ` ${label}`);
         };
