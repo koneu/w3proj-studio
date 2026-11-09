@@ -20,10 +20,29 @@ function worked(): { file: TriggerFile; custom: CustomTextFile } {
   return { file, custom };
 }
 
-test("Reset Triggers on a Reforged file: the new map's trigger file, under the map's root name", () => {
+/** war3map.wtg World Editor 3.0.1 saved after Reset Triggers on s.w3m (we-drive, 2026-11-09): the root named after
+ *  the map file, the category expanded. */
+const EDITOR_RESET_S_W3M = "V1RHIQQAAIAHAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAwAAAAEAAAAAAAAAcy53M20AAAAAAAAAAAD/////BAAAAAAAAAJJbml0aWFsaXphdGlvbgAAAAAAAQAAAAAAAAAIAAAATWVsZWUgSW5pdGlhbGl6YXRpb24ARGVmYXVsdCBtZWxlZSBnYW1lIGluaXRpYWxpemF0aW9uIGZvciBhbGwgcGxheWVycwAAAAAAAAAAAwEAAAAAAAAAAAAAAAAAAAAAAAACCQAAAAAAAABNYXBJbml0aWFsaXphdGlvbkV2ZW50AAEAAAAAAAAAAgAAAE1lbGVlU3RhcnRpbmdWaXNpYmlsaXR5AAEAAAAAAAAAAgAAAE1lbGVlU3RhcnRpbmdIZXJvTGltaXQAAQAAAAAAAAACAAAATWVsZWVHcmFudEhlcm9JdGVtcwABAAAAAAAAAAIAAABNZWxlZVN0YXJ0aW5nUmVzb3VyY2VzAAEAAAAAAAAAAgAAAE1lbGVlQ2xlYXJFeGNlc3NVbml0cwABAAAAAAAAAAIAAABNZWxlZVN0YXJ0aW5nVW5pdHMAAQAAAAAAAAACAAAATWVsZWVTdGFydGluZ0FJAAEAAAAAAAAAAgAAAE1lbGVlSW5pdFZpY3RvcnlEZWZlYXQAAQAAAAAAAAA=";
+
+test("Reset Triggers on a Reforged file is the World Editor's: root named after the map file, the category expanded", () => {
+  const { file, custom } = worked();
+  const r = resetTriggers(file, custom, "s.w3m");
+  assert.deepEqual(writeWtg(r.file), new Uint8Array(Buffer.from(EDITOR_RESET_S_W3M, "base64")), "the editor's file, byte for byte");
+});
+
+test("Reset Triggers without a map file name keeps the root's name", () => {
   const { file, custom } = worked();
   const r = resetTriggers(file, custom);
-  assert.deepEqual(writeWtg(r.file), defaultWtg("My Map"), "the default file, byte for byte");
+  assert.equal(r.file.items.find((i) => i.type === 1)?.name, "My Map");
+  assert.equal(r.file.items.find((i) => i.type === 4 && "expanded" in i && i.expanded === 1)?.name, "Initialization");
+});
+
+test("Reset Triggers on a Reforged file: the new map's trigger file otherwise", () => {
+  const { file, custom } = worked();
+  const r = resetTriggers(file, custom);
+  const expanded = parseWtg(defaultWtg("My Map"), noArgs);
+  for (const it of expanded.items) if (it.type === 4) it.expanded = 1;
+  assert.deepEqual(writeWtg(r.file), writeWtg(expanded), "the default file with its category expanded, byte for byte");
   assert.equal(r.file.variables.length, 0);
   assert.deepEqual(textTriggers(r.file).map((t) => t.name), ["Melee Initialization"]);
   // Custom script: no header, one (empty) text for the one trigger, the comment kept.

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { DisplayContext } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT, type TriggerData } from "../../lib/triggers/triggerdata";
 import { textTriggers, type Eca, type TriggerFile, type TriggerItem } from "../../lib/triggers/wtg";
-import { addScriptTrigger, addVariable, findTrigger, removeTrigger, removeVariable, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
+import { addScriptTrigger, addVariable, exportedTriggers, findTrigger, mapFileName, removeTrigger, removeVariable, scriptWarning, triggerDetail, triggerList } from "./triggerinfo";
 
 // No TriggerData here: functions show as name(arguments).
 const ctx = { data: { find: () => undefined, categories: new Map() } as unknown as TriggerData } as DisplayContext;
@@ -150,4 +150,25 @@ test("a trigger in script gives its text", () => {
   const got = triggerDetail(trigger("Script", 1, { isCustom: true }), "function x takes nothing returns nothing", ctx, (v) => v);
   assert.equal(got.script, "function x takes nothing returns nothing");
   assert.equal("actions" in got, false);
+});
+
+test("the map file name is the pack output's file name", () => {
+  assert.equal(mapFileName("/p/s/build/s.w3x"), "s.w3x");
+  assert.equal(mapFileName("C:\\p\\s\\build\\My Map.w3m"), "My Map.w3m");
+  assert.equal(mapFileName("/c/maps/Chapter01.w3m/build/Chapter01.w3m.w3x"), "Chapter01.w3m");
+  assert.equal(mapFileName(undefined), undefined);
+  assert.equal(mapFileName(""), undefined);
+});
+
+test("Export Triggers names a Reforged file's root after the map file and leaves the trigger file as it is", () => {
+  const reforged = {
+    reforged: true, version: 7, counts: [], unknown: 2, variables: [],
+    items: [{ type: 1, id: 0, name: "Untitled", isComment: 0, expanded: 0, parent: -1 }, { type: 4, id: 0x02000000, name: "Initialization", isComment: 0, expanded: 0, parent: 0 }],
+  } as TriggerFile;
+  const out = exportedTriggers(reforged, "s.w3m");
+  assert.deepEqual(out.items.map((i) => i.name), ["s.w3m", "Initialization"]);
+  assert.equal(reforged.items[0].name, "Untitled", "the editor's file keeps its root");
+  assert.equal(exportedTriggers(reforged, undefined), reforged);
+  // A classic file has no root.
+  assert.equal(exportedTriggers(file, "s.w3m"), file);
 });
