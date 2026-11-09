@@ -219,3 +219,81 @@ test("with the Checkpoints extension off, AI edits go on and the user is told on
   assert.match(warned[0], /AI edit of this project went on without a checkpoint/);
   forgetCheckpointsOffWarning();
 });
+
+/** A project with a map script made from the triggers (map/war3map.wtg.json), as the Map Script extension does it: a
+ *  save of the triggers makes a run due (`pending`), which replaces the script when it's the one written last (the
+ *  stamp holds its hash) or when `force` (the user chose Replace). `flush`: the due run, as the save's timer would. */
+function scripted(start: Record<string, string>) {
+  const files = new Map(Object.entries(start));
+  const state = { pending: false, force: false, settles: 0, logged: [] as string[] };
+  const J = "map/war3map.j", STAMP = ".w3proj/generated-script", WTG = "map/war3map.wtg.json";
+  const made = (wtg: string | undefined) => `script of ${wtg}`;
+  const hash = (t: string | undefined) => `#${t}`;
+  const flush = () => {
+    if (!state.pending) return;
+    state.pending = false;
+    if (!state.force && files.get(STAMP) !== hash(files.get(J))) return;
+    files.set(J, made(files.get(WTG)));
+    files.set(STAMP, hash(files.get(J)));
+  };
+  const io: EditIO = {
+    read: async (p) => files.get(p) ?? null,
+    write: async (p, t) => {
+      if (t === null) files.delete(p); else files.set(p, t);
+      if (p === WTG) state.pending = true;
+    },
+    unsaved: () => [],
+    checkpoint: async () => {},
+    log: (l) => state.logged.push(l),
+    derived: (changed) => (changed.includes(WTG) ? [J, "map/war3map.lua", STAMP] : []),
+    settle: async () => { state.settles++; flush(); },
+  };
+  return { log: new EditLog(io), files, state, flush, made, hash, J, STAMP, WTG };
+}
+
+test("undo puts back the map script the edit's regeneration replaced, and its stamp", async () => {
+  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "written by hand", ".w3proj/generated-script": "#other" });
+  // The edit's regeneration replaces it (as after "Replace the script").
+  s.state.force = true;
+  await s.log.edit("Triggers", put(s.WTG, "b"));
+  s.flush();
+  assert.equal(s.files.get(s.J), s.made("b"), "control: the edit replaced the script");
+  s.state.force = false;
+  assert.equal(await s.log.undo(), "Triggers");
+  s.flush();
+  assert.equal(s.files.get(s.WTG), "a");
+  assert.equal(s.files.get(s.J), "written by hand");
+  assert.equal(s.files.get(s.STAMP), "#other");
+});
+
+test("a script changed after the edit isn't put back over; the rest of the edit is undone", async () => {
+  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "script of a", ".w3proj/generated-script": "#script of a" });
+  await s.log.edit("Triggers", put(s.WTG, "b"));
+  s.flush();
+  assert.equal(s.files.get(s.J), s.made("b"));
+  assert.deepEqual(s.log.list()[0].files.map((f) => f.path), [s.WTG], "the script isn't listed as the edit's file");
+  s.files.set(s.J, "changed by hand later");
+  assert.equal(await s.log.undo(), "Triggers");
+  s.flush();
+  assert.equal(s.files.get(s.WTG), "a");
+  assert.equal(s.files.get(s.J), "changed by hand later");
+  assert.ok(s.state.logged.some((l) => l.includes("map/war3map.j") && l.includes("changed")), s.state.logged.join(" | "));
+});
+
+test("a group puts back the script as it was before its first edit; edits of other files don't wait for the script", async () => {
+  const s = scripted({ "map/war3map.wtg.json": "a", "map/war3map.j": "mine", ".w3proj/generated-script": "#x", "map/other.txt": "1" });
+  await s.log.edit("Other", put("map/other.txt", "2"));
+  assert.equal(s.state.settles, 0, "nothing the script is made from changed");
+  s.state.force = true;
+  await s.log.beginGroup("G");
+  await s.log.edit("One", put(s.WTG, "b"));
+  s.flush();
+  await s.log.edit("Two", put(s.WTG, "c"));
+  s.flush();
+  await s.log.endGroup();
+  s.state.force = false;
+  assert.equal(s.files.get(s.J), s.made("c"));
+  await s.log.undo();
+  s.flush();
+  assert.deepEqual([s.files.get(s.WTG), s.files.get(s.J), s.files.get(s.STAMP)], ["a", "mine", "#x"]);
+});

@@ -9,7 +9,13 @@
 import { projectPath } from "../../extensions/mcp";
 
 export interface EditFile { path: string; text: string }
-export interface EditRecord { id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[]; follows: EditFollow[] }
+/** A file an edit changed by way of what it wrote (the map script, regenerated from the triggers, and its stamp). */
+export interface DerivedChange { path: string; before: string | null; after: string | null }
+export interface EditRecord {
+  id: number; title: string; at: number; files: { path: string; before: string | null; after: string }[]; follows: EditFollow[];
+  /** Derived files as they were before the edit and after it: undo puts them back where nothing changed them since. */
+  derived: DerivedChange[];
+}
 /** Work derived from the files, after an edit and after its undo: their change is done by then. */
 export type EditFollow = (undoing: boolean) => Promise<void>;
 
@@ -22,6 +28,11 @@ export interface EditIO {
   unsaved(): string[];
   checkpoint(): Promise<void>;
   log(line: string): void;
+  /** Files made from the changed ones by work that follows a save (the map script and its stamp, from the triggers and
+   *  the rest): kept as they were before the edit, so undo can put back a script that regenerating can't make again. */
+  derived?(changed: string[]): string[];
+  /** Waits until that work is done (the map script due after a save is written). */
+  settle?(): Promise<void>;
 }
 
 /** A file an edit may touch, normalized; throws for any other. */
@@ -89,6 +100,20 @@ export class EditLog {
     for (const f of [...files].reverse()) await this.io.write(f.path, f.before);
   }
 
+  /** The derived files' texts (null: missing); one that can't be read is left out, so it's never written back. */
+  private async readDerived(paths: string[]): Promise<Map<string, string | null>> {
+    const out = new Map<string, string | null>();
+    for (const p of paths) {
+      try { out.set(p, await this.io.read(p)); } catch (e) { this.io.log(`${p} can't be read, so undo won't put it back: ${String(e)}`); }
+    }
+    return out;
+  }
+
+  /** Waits for the work that follows a save; its failure is only logged. */
+  private async settle() {
+    await this.io.settle?.().catch((e) => this.io.log(`waiting for the map script: ${String(e)}`));
+  }
+
   /** A failure here doesn't take the edit back: files derived from it are only out of date. */
   private async followUp(title: string, follow: EditFollow | undefined, undoing: boolean) {
     await follow?.(undoing).catch((e) => this.io.log(`after "${title}": ${String(e)}`));
@@ -97,7 +122,7 @@ export class EditLog {
   /** The edits from here until endGroup are one: one entry, one undo. Ends any group still open. */
   beginGroup(title: string): Promise<void> {
     return this.inTurn(async () => {
-      this.group = { id: this.next++, title, at: Date.now(), files: [], follows: [] };
+      this.group = { id: this.next++, title, at: Date.now(), files: [], follows: [], derived: [] };
     });
   }
 
@@ -121,6 +146,10 @@ export class EditLog {
         if (before !== f.text) files.push({ path: f.path, before, after: f.text });
       }
       if (!files.length) return false;
+      const derivedPaths = this.io.derived?.(files.map((f) => f.path)) ?? [];
+      // Work due from an earlier save belongs to the files as they are now, not to this edit.
+      if (derivedPaths.length) await this.settle();
+      const derivedBefore = await this.readDerived(derivedPaths);
       if (!this.checkpointed) {
         // A checkpoint is the second safety net, after undo: not reason enough to refuse.
         await this.io.checkpoint().catch((e) => this.io.log(`no checkpoint before the first AI edit: ${String(e)}`));
@@ -134,6 +163,7 @@ export class EditLog {
         throw e;
       }
       const g = this.group;
+      let record: EditRecord;
       if (g) {
         // First in the group: it joins the list only now, so an empty group leaves no trace.
         if (!this.records.includes(g)) { this.records.push(g); this.remember(g); }
@@ -142,14 +172,28 @@ export class EditLog {
           if (known) known.after = f.after; else g.files.push({ ...f });
         }
         if (follow) g.follows.push(follow);
+        record = g;
       } else {
-        const record: EditRecord = { id: this.next++, title, at: Date.now(), files, follows: follow ? [follow] : [] };
+        record = { id: this.next++, title, at: Date.now(), files, follows: follow ? [follow] : [], derived: [] };
         this.records.push(record);
         this.remember(record);
       }
       if (this.records.length > this.keep) this.records.shift();
       this.io.log(`AI edit: ${title} (${files.map((f) => f.path).join(", ")})`);
       await this.followUp(title, follow, false);
+      // The map script follows the save a moment later: what it is then is this edit's "after" (in a group, the first
+      // edit's "before" stays).
+      if (derivedPaths.length) {
+        await this.settle();
+        const after = await this.readDerived([...derivedBefore.keys()]);
+        for (const [path, before] of derivedBefore) {
+          if (!after.has(path)) continue;
+          const now = after.get(path)!;
+          const known = record.derived.find((x) => x.path === path);
+          if (known) known.after = now;
+          else if (now !== before) record.derived.push({ path, before, after: now });
+        }
+      }
       this.onChange();
       return true;
     });
@@ -166,12 +210,29 @@ export class EditLog {
       for (const f of last.files) {
         if ((await this.io.read(f.path)) !== f.after) throw new Error(`Not undone: ${f.path} changed after "${last.title}".`);
       }
+      // A derived file is put back only as the edit left it: one changed since (the script edited by hand, or made
+      // again from a later save) is left to the work that follows the restored files.
+      if (last.derived.length) await this.settle();
+      const now = await this.readDerived(last.derived.map((d) => d.path));
+      const putBack = last.derived.filter((d) => {
+        if (now.has(d.path) && now.get(d.path) === d.after) return true;
+        this.io.log(`${d.path} changed after "${last.title}", so undo doesn't put it back; it follows the restored files instead.`);
+        return false;
+      });
       await this.restore(last.files);
       this.records.pop();
       const shown = this.past.find((p) => p.id === last.id);
       if (shown) shown.undone = true;
       this.io.log(`AI edit undone: ${last.title}`);
       for (const follow of [...last.follows].reverse()) await this.followUp(last.title, follow, true);
+      if (last.derived.length) {
+        // The restored files' own regeneration first, then the script as it was before the edit over it (a script
+        // written by hand, which no regeneration makes again), with its stamp.
+        await this.settle();
+        for (const d of putBack) {
+          if ((await this.io.read(d.path).catch(() => undefined)) !== d.before) await this.io.write(d.path, d.before);
+        }
+      }
       this.onChange();
       return last.title;
     });

@@ -12,6 +12,7 @@ import { isTerrainText, w3eFromText } from "../../lib/terrain/w3etext";
 import { wtsStrayLines } from "../../lib/formats/wts";
 import { joinPath } from "../../lib/paths";
 import { checkpointIfOn } from "../../lib/checkpoint";
+import { SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP } from "../../lib/script/guard";
 
 /** One read_file answer; `offset` gets the rest. */
 const READ_LIMIT = 200_000;
@@ -55,6 +56,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     unsaved: () => w3.editors.unsavedPaths(),
     checkpoint: () => checkpointIfOn(w3, "The first AI edit of this project").then(() => undefined),
     log: (line) => out.append(line),
+    // The map script is regenerated after a save of what it's made from: undo puts back the script it replaced.
+    derived: (changed) => (changed.some((p) => SCRIPT_INPUTS.test(p)) ? [...SCRIPT_FILES, SCRIPT_STAMP] : []),
+    // (The Map Script extension can be off.)
+    settle: () => w3.commands.execute("w3.script.settle").then(() => {}, () => {}),
   });
   // Only this part changes with an edit: redrawing the view would flash everything else in it.
   /** Where a user's rules for a guide are, whether or not they exist yet. */
