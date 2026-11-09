@@ -12,13 +12,24 @@ const OPT_INTS = new Set(["w3a", "w3d", "w3q"]);
 
 const lists = (o: EditObject): EditMod[][] => (o.sets ? o.sets.map((s) => s.mods) : [(o.mods ??= [])]);
 
-/** What's typed as a value of a field; throws if it can't be one. */
-export function fieldValue(f: Pick<FieldMeta, "id" | "label" | "valueType">, value: unknown): number | string {
+/** The setting "Allow negative real values" (the World Editor's preference): unreal fields take values below 0. */
+export const NEGATIVE_REALS_SETTING = "objectEditor.allowNegativeReals";
+
+/** Why `n` can't be a value of a field of `valueType`, or null if it can: an unreal below 0 unless negative
+ *  reals are allowed (the World Editor's preference). */
+export function negativeRefused(valueType: string, n: number, allowNegative: boolean): string | null {
+  return valueType === "unreal" && n < 0 && !allowNegative ? "can't be negative (the setting Allow negative real values lets it)" : null;
+}
+
+/** What's typed as a value of a field; throws if it can't be one. `allowNegative`: the setting Allow negative
+ *  real values (unreal fields take values below 0). */
+export function fieldValue(f: Pick<FieldMeta, "id" | "label" | "valueType">, value: unknown, opts: { allowNegative?: boolean } = {}): number | string {
   if (f.valueType === "string") return String(value);
   const n = Number(value);
   if (value === "" || value === null || typeof value === "boolean" || !Number.isFinite(n)) throw new Error(`${f.label} (${f.id}) takes a number.`);
   if (f.valueType === "int" && !Number.isInteger(n)) throw new Error(`${f.label} (${f.id}) takes a whole number.`);
-  if (f.valueType === "unreal" && n < 0) throw new Error(`${f.label} (${f.id}) can't be negative.`);
+  const refused = negativeRefused(f.valueType, n, opts.allowNegative === true);
+  if (refused) throw new Error(`${f.label} (${f.id}) ${refused}.`);
   return n;
 }
 
