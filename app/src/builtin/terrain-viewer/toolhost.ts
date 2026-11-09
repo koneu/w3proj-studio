@@ -30,6 +30,9 @@ export interface ViewCommands {
   /** Edit > Select Next / Previous in List, Move Up / Down in List: on the open tab's object list (Regions, Cameras).
    *  Null when done, else why not. */
   listCommand(cmd: "next" | "previous" | "up" | "down"): string | null;
+  /** A named object of a tab's list (the Regions or Cameras tab, by its group id): the tab comes to the front and does
+   *  the action (TerrainToolGroupInstance.itemAction); no name: only the tab. Null when done, else why not. */
+  groupItemAction(group: string, name: string | null, action: "select" | "rename" | "delete", to?: string): Promise<string | null>;
   /** What is chosen and what is shown (game view sets the choice aside), for the status line and tests; `sunShadows`
    *  the last frame's real shadows (HD: cast or not, the shadow map's texel on the ground, how many objects cast). */
   state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;

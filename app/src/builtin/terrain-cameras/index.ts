@@ -375,6 +375,22 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return false;
     },
     listCommand,
+    // The Object Manager's entries: the camera selected and shown, then renamed or deleted as with the panel's name
+    // field and Delete button.
+    async itemAction(name, action, to) {
+      await load;
+      const c = doc.cameras.find((x) => x.name === name) ?? doc.cameras.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (!c) return `There's no camera "${name}" (it may have been renamed or deleted since).`;
+      select([c]);
+      ed.lookAt(c.targetX, c.targetY);
+      renderPanel();
+      render();
+      if (action === "select") return null;
+      if (!ed.editable) return "This map can't be changed here.";
+      if (action === "delete") deleteSelected();
+      else if (to && to !== c.name) update(c, { name: to });
+      return null;
+    },
     async save() {
       if (!unsaved) return;
       // Version 0 files (classic, or written empty) take the Reforged layout once they have cameras.

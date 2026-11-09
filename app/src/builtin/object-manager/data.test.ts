@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ProjectGuard, buildTree, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node } from "./data";
+import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -126,15 +126,40 @@ test("Object Manager actions: rename and delete where the owning editor can, pla
   };
   const custom = find(/^h000$/), placedType = find(/^hfoo \(2\)$/), trigger = find(/^Init$/), sound = find(/^Boom$/), variable = find(/^Count$/), region = find(/^Gate$/);
   assert.deepEqual(nodeActions(custom), { edit: true, rename: true, remove: true, play: false });
-  // A standard object's type and a region: only going to them.
+  // A standard object's type: only going to it. A region: renamed and deleted in the terrain editor's Regions tab.
   assert.deepEqual(nodeActions(placedType), { edit: true, rename: false, remove: false, play: false });
-  assert.deepEqual(nodeActions(region), { edit: true, rename: false, remove: false, play: false });
+  assert.deepEqual(nodeActions(region), { edit: true, rename: true, remove: true, play: false });
+  assert.deepEqual(region.item, { group: "regions", name: "Gate" });
   assert.deepEqual(nodeActions(trigger), { edit: true, rename: true, remove: true, play: false });
   assert.deepEqual(nodeActions(sound), { edit: true, rename: true, remove: true, play: true });
   assert.deepEqual(sound.target, { kind: "sounds", name: "gg_snd_Boom", file: "Boom.wav" });
   assert.deepEqual(nodeActions(variable), { edit: true, rename: true, remove: true, play: false });
   // A group has nothing to go to.
   assert.deepEqual(nodeActions(tree[0]), { edit: false, rename: false, remove: false, play: false });
+});
+
+test("Object Manager groups: Expand or Collapse, and the editor of their entries; cameras are renamed in their tab", () => {
+  const tree = buildTree(contents({ cameras: [{ name: "Intro", targetX: 0, targetY: 0 }] }));
+  const group = (start: string) => tree.find((n) => n.label.startsWith(start))!;
+  const labels = (n: Node, open = false) => groupActions(n, open).map((a) => a.label);
+  assert.deepEqual(labels(group("Units")), ["Expand", "Open Object Editor"]);
+  assert.deepEqual(labels(group("Units"), true), ["Collapse", "Open Object Editor"]);
+  assert.deepEqual(group("Units").opens, { label: "Open Object Editor", command: "w3.objectEditor.open", args: ["w3u"] });
+  assert.deepEqual(group("Regions").opens, { label: "Open Regions Tab", command: "w3.terrain.groupItemAction", args: ["regions", null, "select"] });
+  assert.deepEqual(group("Cameras").opens?.args, ["cameras", null, "select"]);
+  assert.equal(group("Triggers").opens?.command, "w3.triggers.open");
+  assert.equal(group("Imported files").opens?.command, "w3.imports.open");
+  // A group with nothing under it still opens its editor; nothing to expand.
+  assert.deepEqual(labels(group("Imported files")), ["Open Import Manager"]);
+  // A kind of custom objects opens that kind; the custom objects' group only expands.
+  const customs = group("Custom objects");
+  assert.deepEqual(labels(customs), ["Expand"]);
+  assert.deepEqual(customs.children!.find((n) => n.label.startsWith("Abilities"))!.opens?.args, ["w3a"]);
+  // Control: an entry without children or editor has no group menu.
+  assert.deepEqual(groupActions({ label: "x" }, false), []);
+  const cam = group("Cameras").children![0];
+  assert.deepEqual(cam.item, { group: "cameras", name: "Intro" });
+  assert.deepEqual(nodeActions(cam), { edit: true, rename: true, remove: true, play: false });
 });
 
 test("project guard: a project that is open but not yet announced is stale until switched", () => {

@@ -45,8 +45,20 @@ export type Target =
 export interface NodeActions { edit: boolean; rename: boolean; remove: boolean; play: boolean }
 export function nodeActions(n: Node): NodeActions {
   const t = n.target;
-  const own = !!t && ((t.kind === "object" && n.custom === true) || t.kind === "trigger" || (t.kind === "variables" && !!t.name) || (t.kind === "sounds" && !!t.name));
+  const own = !!n.item || (!!t && ((t.kind === "object" && n.custom === true) || t.kind === "trigger" || (t.kind === "variables" && !!t.name) || (t.kind === "sounds" && !!t.name)));
   return { edit: !!t, rename: own, remove: own, play: t?.kind === "sounds" && !!t.file };
+}
+
+/** A region or camera: the terrain editor's tab that holds it (w3.terrain.groupItemAction renames and deletes it there). */
+export interface ListItem { group: "regions" | "cameras"; name: string }
+
+/** A group row's "Open …" entry: the editor its entries belong to, by command. */
+export interface GroupOpen { label: string; command: string; args: unknown[] }
+
+/** A group row's menu (a row with entries under it): Expand or Collapse, and Open … where its entries have an editor. */
+export function groupActions(n: Node, isOpen: boolean): ({ label: string; toggle: true } | { label: string; opens: GroupOpen })[] {
+  if (!n.children?.length && !n.opens) return [];
+  return [...(n.children?.length ? [{ label: isOpen ? "Collapse" : "Expand", toggle: true as const }] : []), ...(n.opens ? [{ label: n.opens.label, opens: n.opens }] : [])];
 }
 
 export interface Node {
@@ -60,6 +72,10 @@ export interface Node {
   custom?: boolean;
   /** Nothing uses it. */
   unused?: boolean;
+  /** A region or camera (renamed and deleted in its terrain tab). */
+  item?: ListItem;
+  /** A group: the editor that holds its entries. */
+  opens?: GroupOpen;
 }
 
 type Placed = PlacedJson & { position: number[]; player?: number };
@@ -158,6 +174,8 @@ export function mapSummary(c: MapContents): [string, string][] {
 
 /** The tree: groups by type, with counts. */
 export function buildTree(c: MapContents): Node[] {
+  const OBJECT_EDITOR = (ext: string): GroupOpen => ({ label: "Open Object Editor", command: "w3.objectEditor.open", args: [ext] });
+  const TAB = (group: ListItem["group"], label: string): GroupOpen => ({ label, command: "w3.terrain.groupItemAction", args: [group, null, "select"] });
   const placedGroup = (title: string, list: Placed[], ext: string, prefix: string): Node => {
     const byType = new Map<string, Placed[]>();
     for (const p of list) byType.set(p.id, [...(byType.get(p.id) ?? []), p]);
@@ -168,7 +186,7 @@ export function buildTree(c: MapContents): Node[] {
         return { label: `${c.nameOf(id)} ${g.slice(-4)}`, detail: `${owner(p.player)} ${at(p)}`.trim(), ref: g, target: { kind: "point", x: p.position[0], y: p.position[1], id, editorId: typeof p.editorId === "number" ? p.editorId : undefined } };
       }),
     })).sort((a, b) => a.label.localeCompare(b.label));
-    return { label: `${title} (${list.length})`, children };
+    return { label: `${title} (${list.length})`, children, opens: OBJECT_EDITOR(ext) };
   };
   const unitList = c.units.filter((u) => u.id !== "sloc" && c.kindOf(u.id) !== "w3t");
   const items = c.units.filter((u) => c.kindOf(u.id) === "w3t");
@@ -181,25 +199,28 @@ export function buildTree(c: MapContents): Node[] {
     placedGroup("Items", items, "w3t", "item"),
     placedGroup("Destructables", destructables, "w3b", "dest"),
     placedGroup("Doodads", doodads, "w3d", "doodad"),
-    { label: `Start locations (${starts.length})`, children: starts.map((s): Node => ({ label: owner(s.player) || "Start location", detail: at(s), target: { kind: "point", x: s.position[0], y: s.position[1] } })) },
+    { label: `Start locations (${starts.length})`, opens: { label: "Open Terrain Editor", command: "w3.terrain.open", args: [] },
+      children: starts.map((s): Node => ({ label: owner(s.player) || "Start location", detail: at(s), target: { kind: "point", x: s.position[0], y: s.position[1] } })) },
     { label: `Custom objects (${c.custom.reduce((n, k) => n + k.ids.length, 0)})`, children: c.custom.filter((k) => k.ids.length).map((k): Node => ({
-      label: `${k.label} (${k.ids.length})`,
+      label: `${k.label} (${k.ids.length})`, opens: OBJECT_EDITOR(k.ext),
       children: k.ids.map((o): Node => ({ label: `${c.nameOf(o.id)}`, detail: `${o.id} ← ${o.base}`, ref: o.id, custom: true, target: { kind: "object", ext: k.ext, id: o.id } })),
     })) },
-    { label: `Regions (${c.regions.length})`, children: c.regions.map((r): Node => ({
-      label: r.name, ref: `gg_rct_${ident(r.name)}`, target: { kind: "point", x: (r.left + r.right) / 2, y: (r.bottom + r.top) / 2 },
+    { label: `Regions (${c.regions.length})`, opens: TAB("regions", "Open Regions Tab"), children: c.regions.map((r): Node => ({
+      label: r.name, ref: `gg_rct_${ident(r.name)}`, target: { kind: "point", x: (r.left + r.right) / 2, y: (r.bottom + r.top) / 2 }, item: { group: "regions", name: r.name },
     })) },
-    { label: `Cameras (${c.cameras.length})`, children: c.cameras.map((cam): Node => ({
-      label: cam.name, ref: `gg_cam_${ident(cam.name)}`, target: { kind: "point", x: cam.targetX, y: cam.targetY },
+    { label: `Cameras (${c.cameras.length})`, opens: TAB("cameras", "Open Cameras Tab"), children: c.cameras.map((cam): Node => ({
+      label: cam.name, ref: `gg_cam_${ident(cam.name)}`, target: { kind: "point", x: cam.targetX, y: cam.targetY }, item: { group: "cameras", name: cam.name },
     })) },
-    { label: `Sounds and music (${c.sounds.length})`, children: c.sounds.map((s): Node => ({
+    { label: `Sounds and music (${c.sounds.length})`, opens: { label: "Open Sound Editor", command: "w3.sounds.open", args: [] }, children: c.sounds.map((s): Node => ({
       label: s.name.replace(/^gg_snd_/, ""), detail: s.flags & 8 ? "music" : s.file, ref: s.name, target: { kind: "sounds", name: s.name, file: s.file },
     })) },
-    { label: `Triggers (${triggerItems.length})`, children: triggerItems.map((t): Node => ({ label: t.name, ref: `gg_trg_${ident(t.name)}`, target: { kind: "trigger", name: t.name } })) },
-    { label: `Variables (${c.triggers?.variables.length ?? 0})`, children: (c.triggers?.variables ?? []).map((v): Node => ({
+    { label: `Triggers (${triggerItems.length})`, opens: { label: "Open Trigger Editor", command: "w3.triggers.open", args: [] },
+      children: triggerItems.map((t): Node => ({ label: t.name, ref: `gg_trg_${ident(t.name)}`, target: { kind: "trigger", name: t.name } })) },
+    { label: `Variables (${c.triggers?.variables.length ?? 0})`, opens: { label: "Open Variables", command: "w3.triggers.variables", args: [] }, children: (c.triggers?.variables ?? []).map((v): Node => ({
       label: v.name, detail: `${v.type}${v.isArray ? "[]" : ""}`, ref: `udg:${v.name}`, target: { kind: "variables", name: v.name },
     })) },
-    { label: `Imported files (${c.imports.length})`, children: c.imports.map((p): Node => ({ label: p, target: { kind: "imports" } })) },
+    { label: `Imported files (${c.imports.length})`, opens: { label: "Open Import Manager", command: "w3.imports.open", args: [] },
+      children: c.imports.map((p): Node => ({ label: p, target: { kind: "imports" } })) },
   ];
   return groups;
 }

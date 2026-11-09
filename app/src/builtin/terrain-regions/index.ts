@@ -395,6 +395,23 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return false;
     },
     listCommand,
+    // The Object Manager's entries: the region selected and shown, then renamed or deleted as with the panel's name
+    // field and Delete button.
+    async itemAction(name, action, to) {
+      await load;
+      const r = doc.regions.find((x) => x.name === name) ?? doc.regions.find((x) => x.name.toLowerCase() === name.toLowerCase());
+      if (!r) return `There's no region "${name}" (it may have been renamed or deleted since).`;
+      selected = r;
+      extra = new Set();
+      ed.lookAt((r.left + r.right) / 2, (r.bottom + r.top) / 2);
+      renderPanel();
+      render();
+      if (action === "select") return null;
+      if (!ed.editable) return "This map can't be changed here.";
+      if (action === "delete") deleteSelected();
+      else if (to && to !== r.name) update(r, { name: to });
+      return null;
+    },
     async save() {
       if (!unsaved) return;
       const root = w3.workspace.project()!.root;

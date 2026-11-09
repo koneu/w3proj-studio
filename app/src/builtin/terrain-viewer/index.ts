@@ -1196,6 +1196,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const look = toolGroups.look.get(projectTerrain(w3) ?? "");
       if (look && toolGroups.pendingLook) { look(x, y, pick); toolGroups.pendingLook = null; }
     }),
+    // A region or camera by name, for the Object Manager: shown, renamed or deleted in its tab of the project's terrain
+    // editor (opened first), as there by hand. "select" without a name only brings the tab to the front.
+    w3.commands.register("w3.terrain.groupItemAction", async (group?: unknown, name?: unknown, action?: unknown, to?: unknown) => {
+      const named = typeof name === "string" && name !== "";
+      if ((group !== "regions" && group !== "cameras") || (action !== "select" && action !== "rename" && action !== "delete") || (!named && (name != null || action !== "select"))) {
+        throw new Error("w3.terrain.groupItemAction takes \"regions\" or \"cameras\", a name (none: only the tab), and \"select\", \"rename\" or \"delete\".");
+      }
+      if (action === "rename" && (typeof to !== "string" || !to.trim())) throw new Error("Renaming needs the new name.");
+      const root = w3.workspace.project()?.root;
+      await w3.commands.execute("w3.terrain.open");
+      // Another project opened meanwhile: the name was this one's.
+      if (w3.workspace.project()?.root !== root) return;
+      const view = toolGroups.viewCommands.get(projectTerrain(w3) ?? "");
+      if (!view) throw new Error("The terrain editor didn't open.");
+      const why = await view.groupItemAction(group, named ? name : null, action, typeof to === "string" ? to.trim() : undefined);
+      if (why) throw new Error(why);
+    }),
     // The View commands act on the terrain editor in front: another tab's would change what no one sees.
     ...viewCommandList.map(([id, run]) => w3.commands.register(id, async () => {
       const path = w3.editors.activePath();
@@ -4122,6 +4139,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           listCommand: (cmd) => {
             const g = activeInst();
             return g?.listCommand ? g.listCommand(cmd) : "The open tab has no list: the Regions and Cameras tabs have one.";
+          },
+          groupItemAction: async (group, name, action, to) => {
+            const g = groupInsts.get(group);
+            if (!g?.itemAction) return `The terrain editor has no ${group} tab.`;
+            showTab(group);
+            return name === null ? null : g.itemAction(name, action, to);
           },
           toggleSetting: async (which) => {
             const no = refusedInGameView();

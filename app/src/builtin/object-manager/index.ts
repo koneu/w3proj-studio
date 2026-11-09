@@ -12,7 +12,7 @@ import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
 import { StringTable } from "../../lib/formats/wts";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
-import { ProjectGuard, buildTree, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
+import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
 
 const VIEW = "w3.objectManager.tree";
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
@@ -100,7 +100,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  questions, its undo step; the change is unsaved there). `rowsRoot`: the project the row was made for. */
   const act = async (n: TreeNode, action: "rename" | "delete" | "play", rowsRoot: string | null) => {
     const t = n.target;
-    if (!t || !guard.owns(rowsRoot, rootNow())) return;
+    if (!guard.owns(rowsRoot, rootNow())) return;
+    // A region or camera: renamed or deleted in its tab of the terrain editor.
+    if (n.item && action !== "play") {
+      let to: string | undefined;
+      if (action === "rename") {
+        to = (await w3.window.inputBox({ prompt: `Rename ${n.label}`, value: n.label }))?.trim();
+        if (!to || to === n.label || !guard.owns(rowsRoot, rootNow())) return;
+      }
+      await w3.commands.execute("w3.terrain.groupItemAction", n.item.group, n.item.name, action, to);
+      return;
+    }
+    if (!t) return;
     if (action === "play") { if (t.kind === "sounds" && t.file) await w3.commands.execute("w3.sounds.play", t.file); return; }
     let to: string | undefined;
     if (action === "rename") {
@@ -115,11 +126,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       case "sounds": if (t.name) await w3.commands.execute("w3.sounds.soundAction", t.name, action, to); break;
     }
   };
-  /** The entry's menu: the World Editor's Object Manager commands that fit it. */
-  const menuFor = (n: TreeNode, rowsRoot: string | null): MenuItem[] => {
+  /** The entry's menu: the World Editor's Object Manager commands that fit it; a group's Expand or Collapse and the
+   *  editor of its entries. `toggle` opens or closes the row. */
+  const menuFor = (n: TreeNode, rowsRoot: string | null, isOpen: boolean, toggle: () => void): MenuItem[] => {
     const a = nodeActions(n);
     const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String((e as Error).message ?? e))); };
     const items: MenuItem[] = [];
+    for (const g of groupActions(n, isOpen)) {
+      if ("toggle" in g) items.push({ label: g.label, run: toggle });
+      else items.push({ label: g.label, run: run(async () => { if (guard.owns(rowsRoot, rootNow())) await w3.commands.execute(g.opens.command, ...g.opens.args); }) });
+    }
+    if (items.length && (a.edit || a.rename || a.remove)) items.push("-");
     if (a.edit) items.push({ label: "Edit Object Properties", run: run(async () => { if (n.target && guard.owns(rowsRoot, rootNow())) await go(n.target); }) });
     if (a.rename) items.push({ label: "Rename Object…", run: run(() => act(n, "rename", rowsRoot)) });
     if (a.remove) items.push({ label: "Delete Object", run: run(() => act(n, "delete", rowsRoot)) });
@@ -172,7 +189,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   selected = key;
                   showInfo(n);
                   draw();
-                  const items = menuFor(n, rowsRoot);
+                  const items = menuFor(n, rowsRoot, isOpen, () => { if (open.has(key)) open.delete(key); else open.add(key); draw(); });
                   if (items.length) w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
                 },
               },

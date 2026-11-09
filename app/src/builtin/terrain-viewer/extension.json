@@ -69,6 +69,7 @@
       { "id": "w3.terrain.replaceDoodads", "when": "project", "title": "Replace Doodads…", "category": "Terrain" },
       { "id": "w3.terrain.replaceUnits", "when": "project", "title": "Replace Units…", "category": "Terrain" },
       { "id": "w3.terrain.showPoint", "title": "Show Point on Terrain", "category": "Terrain", "hidden": true },
+      { "id": "w3.terrain.groupItemAction", "title": "Show, Rename or Delete a Region or Camera", "category": "Terrain", "hidden": true },
       { "id": "w3.terrain.viewSelection", "when": "project", "title": "View Selection", "category": "Terrain" },
       { "id": "w3.terrain.viewEntireMap", "when": "project", "title": "View Entire Map", "category": "Terrain" },
       { "id": "w3.terrain.selectInPalette", "when": "project", "title": "Select In Tool Palette", "category": "Terrain" },
