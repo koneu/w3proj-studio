@@ -13,7 +13,8 @@ import {
 import { branchLabels, paramParts, paramText } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
 import type { Eca, Param, TriggerItem } from "../../lib/triggers/wtg";
-import { h } from "../../workbench/dom";
+import { copyText, h } from "../../workbench/dom";
+import { copyAs } from "../../lib/triggers/astext";
 import { editParam, pickFunction } from "./dialogs";
 import { argType, FUNCTION, newEca } from "./params";
 
@@ -50,6 +51,18 @@ let clipboard: Eca[] = [];
 
 /** Blocks have child lists per branch (If/Then/Else, loops, And/Or). */
 const isBlock = (e: Eca) => /Multiple$/.test(e.name);
+
+/** The list holding the ECA at `path` in `t`, and its index there. */
+function locateIn(t: TriggerItem, path: number[]): { list: Eca[]; index: number; eca: Eca } | null {
+  let list = t.ecas;
+  for (let d = 0; d < path.length; d++) {
+    const eca = list[path[d]];
+    if (!eca) return null;
+    if (d === path.length - 1) return { list, index: path[d], eca };
+    list = eca.children;
+  }
+  return null;
+}
 /** Kind of the ECAs in a branch: the If part and And/Or take conditions. */
 const branchKind = (e: Eca, branch: number) =>
   (e.name.startsWith("IfThenElse") && branch === 0) || e.name === "AndMultiple" || e.name === "OrMultiple" ? CONDITION : ACTION;
@@ -72,6 +85,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       reveal: (t, at) => {
         selection.set(t.id, { path: at.path });
         flagged.set(t.id, at);
+      },
+      selectedLines: (t) => {
+        const s = selection.get(t.id);
+        const eca = s && "path" in s && s.branch === undefined ? locateIn(t, s.path)?.eca : undefined;
+        return eca ? [eca] : [];
       },
     }));
   });
@@ -111,6 +129,8 @@ class GuiView {
       if (clipboard.length) items.push(...(items.length ? ["-" as const] : []), { label: `Paste ${clipboard.length > 1 ? `${clipboard.length} lines` : KIND_NAMES[clipboard[0].kind]}`, hint: "Ctrl+V", run: () => this.paste() });
       if (onEca) items.push("-", { label: "Delete", hint: "Del", run: () => this.remove() });
     }
+    // The line onto the system clipboard, as the Trigger Editor words it or as script.
+    if (onEca) items.push("-", { label: "Copy As Text", run: () => void this.copyAs("text") }, { label: "Copy As Script", run: () => void this.copyAs("script") });
     // Triggers this line refers to.
     if (onEca && "path" in sel) {
       const at = this.locate(sel.path);
@@ -145,14 +165,19 @@ class GuiView {
 
   /** The list holding the ECA at `path`, and its index there. */
   private locate(path: number[]): { list: Eca[]; index: number; eca: Eca } | null {
-    let list = this.t.ecas;
-    for (let d = 0; d < path.length; d++) {
-      const eca = list[path[d]];
-      if (!eca) return null;
-      if (d === path.length - 1) return { list, index: path[d], eca };
-      list = eca.children;
-    }
-    return null;
+    return locateIn(this.t, path);
+  }
+
+  /** Copy As Text / Copy As Script of the selected line onto the system clipboard. */
+  private async copyAs(as: "text" | "script") {
+    const s = this.sel;
+    const at = s && "path" in s && s.branch === undefined ? this.locate(s.path) : null;
+    if (!at) return;
+    const text = copyAs(as, this.ed, this.t, [at.eca]);
+    if (text === null) return;
+    const how = as === "text" ? "as text" : "as script";
+    if (await copyText(text)) void this.w3.window.showInfo(`Copied a line of ${this.t.name} ${how}.`);
+    else void this.w3.window.showWarning(`The clipboard refused the copy of a line of ${this.t.name} ${how}.`);
   }
 
   render() {

@@ -402,6 +402,9 @@ export interface TriggerKind {
    *  (indices through children) and mark the parameter at `param` (indices through nested calls, -1 an
    *  array index). */
   reveal?(trigger: TriggerItem, at: TriggerLocation): void;
+  /** The lines selected in the trigger's body (Copy As Text / Copy As Script take them instead of the
+   *  whole trigger), or none. */
+  selectedLines?(trigger: TriggerItem): import("../lib/triggers/wtg").Eca[];
 }
 
 /** A place in a GUI trigger: a line, and in it a parameter. */

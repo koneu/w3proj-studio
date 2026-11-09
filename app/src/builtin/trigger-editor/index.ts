@@ -21,7 +21,8 @@ import {
   allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
-import { errorView, h } from "../../workbench/dom";
+import { copyText, errorView, h } from "../../workbench/dom";
+import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
@@ -189,6 +190,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!openView) throw new Error("Open the Trigger Editor and select a GUI trigger first.");
       await openView.convertSelected();
     }),
+    // The World Editor's Copy As Text / Copy As Script: the selected trigger, or the line selected in it (`lines`, or
+    // the trigger's contents clicked last), onto the system clipboard. What was copied.
+    ...(["text", "script"] as const).map((as) => w3.commands.register(as === "text" ? "w3.triggers.copyAsText" : "w3.triggers.copyAsScript", async (opts?: { lines?: boolean }) => {
+      if (!openView) throw new Error("Open the Trigger Editor and select a trigger first.");
+      return openView.copyToClipboard(as, opts?.lines);
+    })),
     w3.commands.register("w3.triggers.variables", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       const path = triggerFile(w3);
@@ -528,6 +535,29 @@ class TriggerView {
       this.texts.set(now, text);
     });
     return true;
+  }
+
+  /** What Copy As Text (`as` "text") or Copy As Script puts on the clipboard: the selected trigger, or the lines
+   *  selected in its contents when `lines` says so (unset: when its contents were clicked last). Throws when
+   *  there's nothing of the kind to copy. */
+  copyText(as: "text" | "script", lines?: boolean): { text: string; what: string } {
+    const it = this.find(this.selected);
+    if (!it || !("ecas" in it) || it.type === 16 || it.isComment) throw new Error("Select a trigger to copy.");
+    const kind = this.kinds.all().find((k) => k.matches(it, this.handle));
+    const picked = (lines ?? this.area === "detail") ? kind?.selectedLines?.(it) ?? [] : [];
+    if (lines && !picked.length) throw new Error(`Select a line of ${it.name} to copy.`);
+    const src = { display: this.handle.display, file: this.file, language: this.handle.language, customText: (t: TriggerItem) => this.texts.get(t) ?? null };
+    const text = copyAs(as, src, it, picked);
+    if (text === null) throw new Error(`${it.name} is custom text: Copy As Script copies it.`);
+    return { text, what: picked.length ? `${picked.length === 1 ? "a line" : `${picked.length} lines`} of ${it.name}` : it.name };
+  }
+  /** Copy As Text / Copy As Script (see copyText) onto the system clipboard, saying what was copied. The text. */
+  async copyToClipboard(as: "text" | "script", lines?: boolean): Promise<string> {
+    const { text, what } = this.copyText(as, lines);
+    const how = as === "text" ? "as text" : "as script";
+    if (await copyText(text)) void this.w3.window.showInfo(`Copied ${what} ${how}.`);
+    else void this.w3.window.showWarning(`The clipboard refused the copy of ${what} ${how}.`);
+    return text;
   }
 
   /** Renames a tree item, as one undo step. A trigger's gg_trg_ global changes with its name: the GUI
@@ -901,6 +931,14 @@ class TriggerView {
       if (it && isGuiTrigger(it)) items.push("-", { label: "Convert to Custom Text…", run: () => this.convertCommand() });
       if (treeClipboard) items.push("-", { label: `Paste ${treeClipboard.items[0].name}`, hint: "Ctrl+V", run: () => this.pasteItems() });
       if (sel.kind === "item") items.push("-", { label: "Delete", hint: "Del", run: () => this.deleteSelected() });
+    }
+    // The trigger onto the system clipboard (read-only files too): GUI triggers as text and script, custom text as script.
+    const trig = this.find(sel);
+    if (trig && "ecas" in trig && trig.type !== 16 && !trig.isComment) {
+      const copy = (as: "text" | "script") => () => { this.copyToClipboard(as, false).catch((err) => this.w3.window.showError(String((err as Error).message ?? err))); };
+      items.push(...(items.length ? ["-" as const] : []),
+        ...(isGuiTrigger(trig) ? [{ label: "Copy As Text", run: copy("text") }] : []),
+        { label: "Copy As Script", run: copy("script") });
     }
     if (items.length) this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
   }
