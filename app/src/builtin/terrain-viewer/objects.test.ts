@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addMoveTypes, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -174,6 +174,22 @@ const gameTables = () => ({
   "Doodads\\DoodadSkins.txt": "[LTlt]\r\nfile=Doodads\\Tree\r\nnumVar=10\r\n",
   "Units\\HumanUnitFunc.txt": "[hfoo]\r\nAnimprops=upgrade,first\r\n",
   "Units\\UnitData.slk": "ID;PWXL;N;E\r\nC;Y1;X1;K\"unitID\"\r\nC;X2;K\"movetp\"\r\nC;Y2;X1;K\"hfoo\"\r\nC;X2;K\"foot\"\r\nE\r\n",
+});
+
+test("a unit type's own team colour wins over its owner's: the tavern's roof is red whoever owns it", async () => {
+  // UnitSkin.txt gives the tavern (ntav) and the mercenary camps teamColor 0 and up, the rest -1; the World Editor drew
+  // TwistedMeadows' tavern (Neutral Passive) with a red roof where Studio's was black (test round 5, 2026-11-09).
+  const files = { ...gameTables(), "Units\\UnitSkin.txt": "[hfoo]\r\nfile=Units\\Footman\r\nteamColor=-1\r\n[ntav]\r\nfile=buildings\\other\\Tavern\\Tavern\r\nteamColor=0\r\n[nmr2]\r\nfile=Camp\r\nteamColor=12\r\n" };
+  const skins = await loadSkins(fakeGame(files, { "game.installDir": "/team-colour", "game.graphicsMode": "hd" }));
+  assert.equal(skins.get("ntav")?.teamColor, 0);
+  assert.equal(skins.get("nmr2")?.teamColor, 12);
+  assert.equal(skins.get("hfoo")?.teamColor, undefined, "-1: the owner's");
+  assert.equal(drawnTeam(skins.get("ntav")!, 20), 0, "Neutral Passive's tavern: red");
+  assert.equal(drawnTeam(skins.get("hfoo")!, 3), 3, "a footman: its owner's");
+  // The map's object data (utco) changes it, -1 back to the owner's.
+  const out = withObjectArt(skins, [{ kind: "w3u", original: [{ base: "ntav", mods: [{ field: "utco", value: 5 }] }, { base: "nmr2", mods: [{ field: "utco", value: -1 }] }] }]);
+  assert.equal(drawnTeam(out.get("ntav")!, 20), 5);
+  assert.equal(drawnTeam(out.get("nmr2")!, 7), 7);
 });
 
 test("the skins are parsed once per install and graphics mode, and come out alike each time", async () => {
