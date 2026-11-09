@@ -585,6 +585,9 @@ test("main: camera bounds, tileset sound and the calls in their order", () => {
   assert.ok(s.indexOf("CreateRegions") < s.indexOf("CreateAllUnits"));
   assert.ok(s.indexOf("CreateAllUnits") < s.indexOf("InitBlizzard"));
   assert.ok(s.indexOf("InitCustomTriggers") < s.indexOf("RunInitializationTriggers"));
+  // The random groups before anything placed, as World Editor 2.0 saved a map with all four (we-drive, 2026-11-09).
+  const placing = mainSection(setup({}, { techs: true, destructables: true, items: true, randomGroups: true, units: true })).split(EOL).filter((l) => /^ {4}call (Init|Create)/.test(l));
+  assert.deepEqual(placing.slice(0, 5), ["InitTechTree", "InitRandomGroups", "CreateAllDestructables", "CreateAllItems", "CreateAllUnits"].map((f) => `    call ${f}(  )`));
   assert.equal(AMBIENCE.A, "Ashenvale");
   hasNot(mainSection(setup({ tileset: "?" })), "SetAmbientDaySound");
 });

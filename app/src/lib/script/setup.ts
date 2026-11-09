@@ -180,9 +180,11 @@ export function mainSection(i: SetupInput): string {
   if (h.cameras) lines.push(call("CreateCameras"));
   if (h.upgrades) lines.push(call("InitUpgrades"));
   if (h.techs) lines.push(call("InitTechTree"));
+  // The random groups are picked before anything is placed (World Editor 2.0, we-drive 2026-11-09: InitRandomGroups,
+  // CreateAllDestructables, CreateAllItems, CreateAllUnits; the game's maps have no placed items with groups).
+  if (h.randomGroups) lines.push(call("InitRandomGroups"));
   if (h.destructables) lines.push(call("CreateAllDestructables"));
   if (h.items) lines.push(call("CreateAllItems"));
-  if (h.randomGroups) lines.push(call("InitRandomGroups"));
   if (h.units) lines.push(call("CreateAllUnits"));
   lines.push(call("InitBlizzard"), call("InitGlobals"));
   // A map without war3map.wtg has no trigger section to call.
