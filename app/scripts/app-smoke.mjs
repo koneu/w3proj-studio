@@ -3925,6 +3925,301 @@ async function triggersAndAi(page, found) {
   }
 }
 
+/** Parity extras through the app, on a new map and a new campaign: the Trigger Editor's Copy As Text and Copy As Script
+ *  (a trigger from the tree's menu and a line from its own menu, onto the clipboard, the text as the editor shows its
+ *  lines); Allow negative real values (an unreal field refuses -5 from a tool and typed until the setting is on); the
+ *  Import Manager's Replace File (same path and entry, an open editor of the file shows the new content, one undo step);
+ *  the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger), Rename (a sound) and Play
+ *  Sound, done by the owning editors; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
+ *  the CLI's pack, replace and remove are one undo step each) and Remove Button asking whether the map goes too. */
+async function editorExtras(page, found) {
+  const fail = (what) => found.push(`editor extras: ${what}`);
+  const k = await heightKit(page, "Extras");
+  const dir = join(work, "extras");
+  mkdirSync(dir, { recursive: true });
+  const run = (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then((r) => ({ r }), (e) => ({ e: String(e) }))`);
+  /** Right-clicks the first element of `selector` whose text has `text`, then the menu item starting with `item`. */
+  const menu = async (selector, text, item) => {
+    const ok = await page.evaluate(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => e.textContent.includes(${JSON.stringify(text)}));
+      if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
+    if (!ok) return `nothing with "${text}" in ${selector}`;
+    const shown = await until(`the menu item ${item}`, () => page.evaluate(`[...document.querySelectorAll(".context-menu-item")].some((e) => e.textContent.startsWith(${JSON.stringify(item)}))`), 5000).then(() => true, () => false);
+    if (!shown) {
+      const items = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
+      await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      return `the menu of "${text}" has no ${item} (${items.join(" | ")})`;
+    }
+    await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith(${JSON.stringify(item)})).click()`);
+    await sleep(500);
+    return null;
+  };
+  const step = async (what, f) => { const why = await f(); if (why) fail(`${what}: ${why}`); };
+  // The answers a user gives, and the clipboard and the speaker, recorded.
+  await page.evaluate(`(() => {
+    window.__extrasKept = { pick: w3.window.pickFile, save: w3.window.pickSaveFile, input: w3.window.inputBox, ask: w3.window.askDelete, warn: w3.window.showWarning, confirm: w3.window.confirm, play: HTMLMediaElement.prototype.play };
+    window.__clip = []; window.__played = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t) => { window.__clip.push(t); } } });
+    HTMLMediaElement.prototype.play = function () { window.__played.push(this.src); return Promise.resolve(); };
+    w3.window.askDelete = async () => true;
+    w3.window.confirm = async () => true;
+  })()`);
+  const answer = (name, value) => page.evaluate(`w3.window.${name} = async () => ${JSON.stringify(value)}`);
+  const clip = () => page.evaluate(`window.__clip.splice(0)`);
+  try {
+    // ---- Trigger Editor: Copy As Text / Copy As Script ------------------------------------------------------------------
+    await k.tool("create_script_trigger", { name: "Copy Me", script: "" });
+    const wtg = k.read("war3map.wtg.json");
+    const t = wtg.items.find((i) => i.name === "Copy Me");
+    t.isCustom = false;
+    // An event that registers in InitTrig_ (so the whole trigger's script has more than its action line's).
+    t.ecas = [{ kind: 0, name: "TriggerRegisterTimerEventSingle", enabled: true, params: [{ type: 3, value: "2.00" }], children: [] }, { kind: 2, name: "DoNothing", enabled: true, params: [], children: [] }];
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify(wtg, null, 2))})`);
+    await run("w3.triggers.reveal", "Copy Me");
+    await until("the trigger's lines", () => page.evaluate(`document.querySelectorAll(".trig-eca").length === 2`), 20000).catch(() => fail("the trigger editor doesn't show Copy Me's two lines"));
+    const lines = await page.evaluate(`[...document.querySelectorAll(".trig-eca > span")].map((s) => s.textContent)`);
+    const wanted = `Copy Me\n    Events\n        ${lines[0]}\n    Conditions\n    Actions\n        ${lines[1]}\n`;
+    await step("Copy As Text of the trigger", () => menu(".trig-row", "Copy Me", "Copy As Text"));
+    const asText = await clip();
+    if (asText.length !== 1 || asText[0] !== wanted) fail(`Copy As Text put ${JSON.stringify(asText)} on the clipboard, not ${JSON.stringify(wanted)}`);
+    await step("Copy As Script of the trigger", () => menu(".trig-row", "Copy Me", "Copy As Script"));
+    const [script] = await clip();
+    if (!/function Trig_Copy_Me_Actions takes nothing returns nothing\n/.test(script ?? "") || !/function InitTrig_Copy_Me takes nothing returns nothing/.test(script ?? "")
+      || !/TriggerRegisterTimerEventSingle\( gg_trg_Copy_Me, 2\.00 \)/.test(script ?? "") || /\r/.test(script ?? "")) fail(`Copy As Script put ${JSON.stringify((script ?? "").slice(0, 400))}`);
+    // The action line alone, from its own menu.
+    await step("Copy As Text of a line", () => menu(".trig-eca", lines[1], "Copy As Text"));
+    const [line] = await clip();
+    if (line !== `${lines[1]}\n`) fail(`Copy As Text of the action line gave ${JSON.stringify(line)}, not ${JSON.stringify(`${lines[1]}\n`)}`);
+    await step("Copy As Script of a line", () => menu(".trig-eca", lines[1], "Copy As Script"));
+    const [lineScript] = await clip();
+    // The action alone: no event registered.
+    if (!lineScript || !/call DoNothing\(/.test(lineScript) || /TriggerRegisterTimerEventSingle/.test(lineScript)) fail(`Copy As Script of the action line gave ${JSON.stringify((lineScript ?? "").slice(0, 300))}`);
+    // The palette's command: the trigger, and what the menu gave.
+    const cmd = await run("w3.triggers.copyAsText", { lines: false });
+    if (cmd.r !== wanted) fail(`w3.triggers.copyAsText gave ${JSON.stringify(cmd)}`);
+    await clip();
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("copying made the trigger file unsaved");
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Object Editor: Allow negative real values -------------------------------------------------------------------
+    const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Smoke Om" })).id;
+    const w3u = () => k.read("war3map.w3u.json").custom.find((o) => o.id === unit);
+    const modOf = (field) => (w3u()?.mods ?? w3u()?.sets?.[0]?.mods ?? []).find((m) => m.field === field)?.value;
+    const refused = await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "ucol", value: -5 }] }).then(() => null, (e) => e.message);
+    if (!/Allow negative real values/.test(refused ?? "")) fail(`set_object_fields with collision -5 gave ${JSON.stringify(refused)}`);
+    await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", true)`);
+    await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "ucol", value: -5 }] }).catch((e) => fail(`with the setting on, collision -5 was refused: ${e.message}`));
+    if (modOf("ucol") !== -5) fail(`with the setting on, the unit's collision is ${JSON.stringify(modOf("ucol"))}`);
+    // Typed in the Object Editor: refused without the setting, taken with it.
+    await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", undefined)`);
+    await run("w3.objectEditor.open", "w3u", unit);
+    await until("the unit's fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 30000).catch(() => fail("the Object Editor shows no fields"));
+    await page.evaluate(`(() => { const s = document.querySelector("input.obj-field-search"); s.value = "uhpr"; s.dispatchEvent(new Event("input")); })()`);
+    await until("the field uhpr", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000).catch(() => fail("the field filter doesn't find uhpr alone"));
+    const typeRegen = (v) => page.evaluate(`(() => { const i = document.querySelector(".obj-table .obj-value-cell input"); i.value = ${JSON.stringify(v)}; i.dispatchEvent(new Event("change")); return document.querySelector(".obj-table .obj-value-cell input")?.classList.contains("invalid") ?? null; })()`);
+    if ((await typeRegen("-2")) !== true) fail("typing -2 into an unreal field wasn't refused without the setting");
+    await k.save();
+    if (modOf("uhpr") !== undefined) fail(`a refused -2 reached the file: ${modOf("uhpr")}`);
+    await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", true)`);
+    if ((await typeRegen("-2")) !== false) fail("typing -2 into an unreal field was refused with the setting on");
+    await k.save();
+    if (modOf("uhpr") !== -2) fail(`with the setting on, typed regeneration is ${JSON.stringify(modOf("uhpr"))}`);
+    await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", undefined)`);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Import Manager: Replace File --------------------------------------------------------------------------------
+    const IMP = "war3mapImported\\smoke.txt", FILE = "map/war3mapImported/smoke.txt";
+    const onDisk = join(k.root, "map", "war3mapImported", "smoke.txt"), impFile = join(k.root, "map", "war3map.imp.json");
+    const replacement = join(dir, "replacement.txt");
+    writeFileSync(replacement, "new words\n");
+    await page.evaluate(`(async () => {
+      await w3.workspace.writeText(${JSON.stringify(FILE)}, "old words\\n");
+      await w3.workspace.writeText("map/war3map.imp.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [{ flags: 21, path: IMP }] }))});
+      await w3.workspace.refresh();
+    })()`);
+    const impBefore = readFileSync(impFile, "utf8");
+    await page.evaluate(`w3.editors.open(${JSON.stringify(FILE)})`);
+    await until("the text editor", () => page.evaluate(`document.querySelector(".cm-content")?.textContent.includes("old words") ?? false`), 20000).catch(() => fail("the imported text doesn't open in the text editor"));
+    await run("w3.imports.open");
+    await until("the import list", () => page.evaluate(`!!document.querySelector("tr.imp-row")`), 20000);
+    await page.evaluate(`[...document.querySelectorAll("tr.imp-row")].find((r) => r.textContent.includes("smoke.txt"))?.click()`);
+    await answer("pickFile", replacement);
+    const clicked = await page.evaluate(`(() => { const b = document.querySelector(".imp-replace"); if (!b) return false; b.click(); return true; })()`);
+    if (!clicked) fail("the Import Manager shows no Replace button for a selected file");
+    await until("the new content", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail(`after Replace File the file holds ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
+    if (readFileSync(impFile, "utf8") !== impBefore) fail("Replace File changed the import list");
+    if (existsSync(`${onDisk}.replacing`)) fail("Replace File left its copy beside the file");
+    await page.evaluate(`w3.editors.open(${JSON.stringify(FILE)})`);
+    await until("the text editor with the new content", () => page.evaluate(`document.querySelector(".cm-content")?.textContent.includes("new words") ?? false`), 10000)
+      .catch(() => fail("the open text editor of the file doesn't show the replaced content"));
+    await run("w3.imports.open");
+    await sleep(300);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the old content", () => readFileSync(onDisk, "utf8") === "old words\n", 10000).catch(() => fail(`one undo of Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await until("the new content again", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail("redo of Replace File didn't bring the new content back"));
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------
+    const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.from([40, 0, 0, 0]), Buffer.from("WAVEfmt "), Buffer.from([16, 0, 0, 0, 1, 0, 1, 0, 0x40, 0x1f, 0, 0, 0x40, 0x1f, 0, 0, 1, 0, 8, 0]), Buffer.from("data"), Buffer.from([4, 0, 0, 0, 128, 130, 128, 126])]);
+    writeFileSync(join(k.root, "map", "war3mapImported", "boom.wav"), wav);
+    const sound = {
+      name: "gg_snd_boom", file: "war3mapImported\\boom.wav", eaxEffect: "DefaultEAXON", flags: 16, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_boom", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.w3s.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [sound] }))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.views.show("objectManager")`);
+    const summary = await run("w3.objectManager.summary");
+    const rows = new Map(summary.r ?? []);
+    const triggers = k.read("war3map.wtg.json").items.filter((i) => "ecas" in i && i.type !== 16 && !i.isComment).length;
+    if (rows.get("Custom Units") !== "1" || rows.get("Triggers") !== String(triggers) || rows.get("Sounds") !== "1") fail(`the Map Summary says ${JSON.stringify(summary)}`);
+    await page.evaluate(`document.querySelector(".om-summary-button")?.click()`);
+    const shownRows = await page.evaluate(`document.querySelectorAll(".om-summary tr").length`);
+    if (shownRows !== rows.size) fail(`the Map Summary button shows ${shownRows} rows, not ${rows.size}`);
+    /** Filters the Object Manager to `text` and waits for a row having it. */
+    const omFind = async (text) => {
+      await page.evaluate(`(() => { const s = document.querySelector(".om-search"); s.value = ${JSON.stringify(text)}; s.dispatchEvent(new Event("input")); })()`);
+      return until(`the Object Manager row ${text}`, () => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.textContent.includes(${JSON.stringify(text)}))`), 10000).then(() => true, () => false);
+    };
+    const omRefresh = async () => { await run("w3.objectManager.refresh"); await sleep(300); };
+    // A custom object: renamed by the Object Editor, one undo step there.
+    await answer("inputBox", "Smoke Renamed");
+    if (!(await omFind(`${unit} ←`))) fail(`the Object Manager has no row for ${unit}`);
+    else {
+      await step("Rename Object (custom unit)", () => menu(".om-row", `${unit} ←`, "Rename Object"));
+      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("Rename Object left the Object Editor without the change");
+      await k.save();
+      if (modOf("unam") !== "Smoke Renamed") fail(`after Rename Object the unit's name is ${JSON.stringify(modOf("unam"))}`);
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await k.save();
+      if (modOf("unam") !== "Smoke Om") fail(`one undo of Rename Object left the name ${JSON.stringify(modOf("unam"))}`);
+      await page.evaluate(`w3.views.show("objectManager")`);
+      await omRefresh();
+      await omFind(`${unit} ←`);
+      await step("Delete Object (custom unit)", () => menu(".om-row", `${unit} ←`, "Delete Object"));
+      await k.save();
+      if (w3u()) fail("Delete Object left the custom unit in the object data");
+    }
+    // A trigger: renamed and deleted by the Trigger Editor.
+    await page.evaluate(`w3.views.show("objectManager")`);
+    await omRefresh();
+    await answer("inputBox", "Copied Me");
+    if (!(await omFind("Copy Me"))) fail("the Object Manager has no row for the trigger Copy Me");
+    else {
+      await step("Rename Object (trigger)", () => menu(".om-row", "Copy Me", "Rename Object"));
+      await k.save();
+      const names = () => k.read("war3map.wtg.json").items.map((i) => i.name);
+      if (!names().includes("Copied Me") || names().includes("Copy Me")) fail(`after Rename Object the triggers are ${JSON.stringify(names())}`);
+      await page.evaluate(`w3.views.show("objectManager")`);
+      await omRefresh();
+      await omFind("Copied Me");
+      await step("Delete Object (trigger)", () => menu(".om-row", "Copied Me", "Delete Object"));
+      await k.save();
+      if (names().includes("Copied Me")) fail("Delete Object left the trigger");
+    }
+    // A sound: played without opening anything, renamed by the Sound Editor.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.views.show("objectManager")`);
+    await omRefresh();
+    if (!(await omFind("boom"))) fail("the Object Manager has no row for the sound");
+    else {
+      await step("Play Sound", () => menu(".om-row", "boom", "Play Sound"));
+      await until("the sound to play", () => page.evaluate(`window.__played.length > 0`), 5000).catch(() => fail("Play Sound played nothing"));
+      if (await page.evaluate(`w3.editors.activePath()`)) fail(`Play Sound opened ${await page.evaluate(`w3.editors.activePath()`)}`);
+      await answer("inputBox", "smoke_boom");
+      await step("Rename Object (sound)", () => menu(".om-row", "boom", "Rename Object"));
+      await k.save();
+      const s = k.read("war3map.w3s.json").sounds;
+      if (s.length !== 1 || s[0].name !== "gg_snd_smoke_boom") fail(`after Rename Object the sounds are ${JSON.stringify(s.map((x) => x.name))}`);
+    }
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- Campaign Editor: export, replace and remove a chapter's map -------------------------------------------------------
+    const one = join(dir, "One.w3x"), two = join(dir, "Two.w3x");
+    cpSync(join(work, "by-cli.w3x"), one);
+    await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(k.root)}, output: ${JSON.stringify(two)} })`);
+    await until("the second map", () => existsSync(two), 20000);
+    const camp = join(work, "campaign-maps");
+    rmSync(camp, { recursive: true, force: true });
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Smoke Maps", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Smoke Maps", difficulty: "Normal", author: "Me", description: "",
+      flags: 1, background: 0, backgroundPath: "", minimapPath: "", ambientSound: 0, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = "map/war3campaign.w3f.json";
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    const w3f = () => JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8"));
+    const chapterInfo = join(camp, "maps", "One.w3x", "map", "war3map.w3i.json");
+    await answer("pickFile", one);
+    const added = await run("w3.campaign.addMap");
+    if (added.e) fail(`Add map: ${added.e}`);
+    await until("the chapter project", () => existsSync(chapterInfo), 30000).catch(() => fail("Add map didn't unpack One.w3x under maps/"));
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if (w3f().chapters.length !== 1) fail(`after Add map the campaign has ${w3f().chapters.length} buttons`);
+    // Export: the chapter's project packed, as the CLI packs it.
+    const exported = join(dir, "exported.w3x"), byCli = join(dir, "by-cli-chapter.w3x");
+    await answer("pickSaveFile", exported);
+    const ex = await run("w3.campaign.exportMap", "One.w3x");
+    if (ex.e) fail(`Export map: ${ex.e}`);
+    const packedByCli = spawnSync(cli, ["pack", join(camp, "maps", "One.w3x"), "-o", byCli], { encoding: "utf8" });
+    if (packedByCli.status !== 0) fail(`the CLI can't pack the chapter: ${packedByCli.stderr}`);
+    else if (!existsSync(exported) || hash(exported) !== hash(byCli)) fail("the exported chapter map isn't the CLI's pack of it");
+    // Replace: the second map in its place; one undo puts the first back, redo the second.
+    const infoBefore = readFileSync(chapterInfo, "utf8"), twoWidth = k.read("war3map.w3i.json").playableWidth;
+    await answer("pickFile", two);
+    const rep = await run("w3.campaign.replaceMap", "One.w3x");
+    if (rep.e) fail(`Replace map: ${rep.e}`);
+    const width = () => (existsSync(chapterInfo) ? JSON.parse(readFileSync(chapterInfo, "utf8")).playableWidth : null);
+    if (width() !== twoWidth || readFileSync(chapterInfo, "utf8") === infoBefore) fail(`after Replace map the chapter's playable width is ${width()}, not the second map's ${twoWidth}`);
+    if (readdirSync(join(camp, "maps")).join() !== "One.w3x") fail(`after Replace map maps/ holds ${readdirSync(join(camp, "maps")).join(", ")}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the first map back", () => existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore, 10000).catch(() => fail("one undo of Replace map didn't put the first map back"));
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await until("the second map again", () => width() === twoWidth, 10000).catch(() => fail("redo of Replace map didn't bring the second map back"));
+    // Remove Button, answered "and map": both go in one step; undo brings both back.
+    await page.evaluate(`w3.window.showWarning = async (m) => (/Remove the map from the campaign too/.test(m) ? "Remove button and map" : undefined)`);
+    await page.evaluate(`document.querySelector("tr.camp-row")?.click()`);
+    await sleep(200);
+    await page.evaluate(`document.querySelector(".camp-remove-button")?.click()`);
+    await until("the map to go", () => !existsSync(join(camp, "maps", "One.w3x")), 10000).catch(() => fail("Remove button, answered with the map, left maps/One.w3x"));
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if (w3f().chapters.length || w3f().mapOrder.length) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the map back", () => existsSync(chapterInfo), 10000).catch(() => fail("one undo of Remove button and map didn't bring the map back"));
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if (w3f().chapters.length !== 1 || w3f().mapOrder.length !== 1) fail(`after the undo the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
+    // Remove map while a button opens it: asked, the map goes, the button stays; undo brings it back.
+    const rm = await run("w3.campaign.removeMap", "One.w3x");
+    if (rm.e) fail(`Remove map: ${rm.e}`);
+    if (existsSync(join(camp, "maps", "One.w3x"))) fail("Remove map left maps/One.w3x");
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    if (w3f().chapters.length !== 1 || w3f().mapOrder.length !== 0) fail(`after Remove map the campaign has ${w3f().chapters.length} buttons and ${w3f().mapOrder.length} maps in order`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await until("the map back again", () => existsSync(chapterInfo), 10000).catch(() => fail("one undo of Remove map didn't bring the map back"));
+    await page.evaluate(`w3.editors.saveAll()`);
+    await sleep(300);
+    // The campaign builds, with its chapter.
+    const w3n = join(dir, "campaign-maps.w3n");
+    const packed = spawnSync(cli, ["pack", camp, "-o", w3n], { encoding: "utf8" });
+    if (packed.status !== 0) fail(`the campaign doesn't pack: ${packed.stderr}`);
+    else if (!spawnSync(cli, ["ls", w3n], { encoding: "utf8" }).stdout.includes("One.w3x")) fail("the packed campaign has no One.w3x");
+  } finally {
+    await page.evaluate(`(() => { const k = window.__extrasKept; if (!k) return; w3.window.pickFile = k.pick; w3.window.pickSaveFile = k.save; w3.window.inputBox = k.input; w3.window.askDelete = k.ask;
+      w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; HTMLMediaElement.prototype.play = k.play; delete navigator.clipboard; })()`).catch(() => {});
+    await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", undefined)`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -3988,7 +4283,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorExtras, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -4079,6 +4374,7 @@ async function run() {
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
+    await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
