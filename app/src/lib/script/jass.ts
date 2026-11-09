@@ -274,7 +274,7 @@ export function sounds(i: ScriptInput): string {
     // The dialogue keys, by the word after the facial animation file ("unknown2"), as counted over the game's maps:
     // 0 on a dialogue (a speaker unit type or a key set) writes both as they are, -1 too (OrcX02_02); otherwise the
     // keys set are written from editor 7000 on, none before (Undead04, HumanX04 in their 6127 and 7003 versions).
-    // The game's maps have no 0 on a sound without a dialogue, which is what the Sound Editor gives a new sound.
+    // The game's maps have no 0 on a sound without a dialogue: the Sound Editor gives a new sound 1, as they have.
     const spoken = s.unknown2 === 0 && (!!s.speakerUnitType || (s.speakerNameKey ?? -1) >= 0 || (s.dialogueTextKey ?? -1) >= 0);
     const dialogue = (key: number | undefined) => key !== undefined && (spoken || (editorVersion(i) >= 7000 && key >= 0));
     if (dialogue(s.speakerNameKey)) lines.push(`    call SetDialogueSpeakerNameKey( ${n}, "TRIGSTR_${s.speakerNameKey}" )`);

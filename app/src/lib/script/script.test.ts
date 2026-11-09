@@ -787,7 +787,7 @@ test("dialogue keys: all of a spoken dialogue, else those set from editor 7000 o
   const spoken = keys({ dialogueTextKey: -1, speakerNameKey: 370, speakerUnitType: "Hjai", unknown2: 0 });
   has(spoken, '    call SetDialogueSpeakerNameKey( gg_snd_S, "TRIGSTR_370" )');
   has(spoken, '    call SetDialogueTextKey( gg_snd_S, "TRIGSTR_-1" )');
-  // A plain sound the Sound Editor makes (0, no dialogue): nothing.
+  // A sound with the word at 0 and no dialogue (Studio's Sound Editor made such sounds before 2026-11): nothing.
   hasNot(keys({ dialogueTextKey: -1, unknown2: 0 }, 7003), "SetDialogue");
 });
 
