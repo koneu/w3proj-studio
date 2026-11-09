@@ -3443,6 +3443,31 @@ const TWO_PLAYERS_REMOVED = [
   "    call DefineStartLocation( 0, -1306.0, 1475.8 )",
 ];
 
+/** Map Properties › Players of the two-player map after the save: without Modify ally priorities the choices show what
+ *  the save works out (player 1's for player 2 High) and are greyed; turned on, they can be chosen and start from
+ *  those, and the save keeps a changed one (Low) with the flag. */
+async function mapPropertiesPriorities(page, fail, file) {
+  const W3I = "map/war3map.w3i.json";
+  const cells = () => page.evaluate(`[...document.querySelectorAll(".map-info table.map-priorities-ally select")].map((s) => ({ value: s.value, disabled: s.disabled }))`);
+  await page.evaluate(`w3.editors.open(${JSON.stringify(W3I)})`);
+  await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
+  await page.evaluate(`[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Players")?.click()`);
+  await until("the ally priorities", async () => (await cells()).length === 2, 10000).catch(() => {});
+  const shown = await cells();
+  if (JSON.stringify(shown) !== JSON.stringify([{ value: "high", disabled: true }, { value: "high", disabled: true }])) return fail(`Map Properties shows the worked-out priorities as ${JSON.stringify(shown)}, not High and greyed`);
+  const modify = `[...document.querySelectorAll(".map-info label.form-check")].find((l) => l.textContent.includes("Modify ally"))?.querySelector("input")`;
+  await page.evaluate(`(() => { const b = ${modify}; b.checked = true; b.dispatchEvent(new Event("change")); })()`);
+  await until("the choices to open", async () => (await cells()).every((c) => !c.disabled), 5000).catch(() => {});
+  const open = await cells();
+  if (JSON.stringify(open) !== JSON.stringify([{ value: "high", disabled: false }, { value: "high", disabled: false }])) return fail(`with Modify on the priorities are ${JSON.stringify(open)}`);
+  await page.evaluate(`(() => { const s = document.querySelector(".map-info table.map-priorities-ally select"); s.value = "low"; s.dispatchEvent(new Event("change")); })()`);
+  await page.evaluate(`w3.editors.saveAll()`);
+  const saved = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+  if (!(saved.flags & 2) || saved.players[0].allyLow !== 2 || saved.players[0].allyHigh !== 0 || saved.players[1].allyHigh !== 1) {
+    fail(`Map Properties saved Modify and a Low as ${JSON.stringify([saved.flags & 2, saved.players.map((p) => [p.allyLow, p.allyHigh])])}`);
+  }
+}
+
 /** Lines of `a` that `b` doesn't have, counted (a multiset difference). */
 function linesNotIn(a, b) {
   const left = new Map();
@@ -3537,6 +3562,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     // war3mapUnits.doo: the start locations' hit points and mana -1, as the World Editor saves 0.
     const startsAfter = JSON.parse(readFileSync(file("war3mapUnits.doo.json"), "utf8")).units.filter((u) => u.id === "sloc");
     if (startsAfter.some((u) => u.hp !== -1 || u.mana !== -1)) fail(`the start locations' hit points and mana are ${JSON.stringify(startsAfter.map((u) => [u.hp, u.mana]))}, the World Editor saves -1`);
+    if (two) await mapPropertiesPriorities(page, fail, file);
   } finally {
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
