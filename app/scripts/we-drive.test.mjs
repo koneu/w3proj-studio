@@ -95,6 +95,14 @@ test("parseArgs: the looks are parsed up front, need a map before them, and are 
   assert.throws(() => parseArgs(["--map", "m.w3x", ...Array.from({ length: 17 }, () => ["--look", "1,2"]).flat()]), /at most 16/);
 });
 
+test("parseArgs: --save takes the file to copy the saved map to, and needs a map before it", () => {
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--wait-ready", "--save", "out.w3x", "--close"]).steps,
+    [["--map", "m.w3x"], ["--wait-ready", null], ["--save", "out.w3x"], ["--close", null]]);
+  assert.throws(() => parseArgs(["--start", "--save", "out.w3x"]), /--save needs --map/);
+  assert.throws(() => parseArgs(["--save", "out.w3x", "--map", "m.w3x"]), /--save needs --map/);
+  assert.throws(() => parseArgs(["--map", "m.w3x", "--save"]), /needs a value/);
+});
+
 test("addCamerasToMap: the looks' cameras go first in war3map.w3c.json, a missing file is made, an unreadable one refused", () => {
   const dir = mkdtempSync(join(tmpdir(), "we-look-"));
   try {

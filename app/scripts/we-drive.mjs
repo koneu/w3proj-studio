@@ -52,6 +52,8 @@
 //                       With game view on the items above it are greyed: their marks then read as unchecked
 //   --fps MS            how often the terrain view's picture changes during MS (it animates day and night)
 //   --sleep MS          wait
+//   --save FILE         save the map (Ctrl+S; the "Reminder" about the default map name answered with Return) and copy
+//                       what the editor wrote to FILE. Another dialog is reported (with a picture), not answered
 //   --close             quit without saving: closes the main window and answers "don't save" questions
 //
 // Whatever happens, the editor (wineserver -k for its prefix) and the Xvfb display are stopped at the end.
@@ -70,7 +72,7 @@
 //   node scripts/we-drive.mjs --map m.w3x --compare-ready --look center --shot c.png --look 1000,-500 --shot d.png --close
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { farmDir, gameDir, linkedFiles, missing, prefixDir, setup, shimPath, takeLock, userCompatData } from "./we-setup.mjs";
@@ -134,7 +136,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--save", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
@@ -178,6 +180,8 @@ export function parseArgs(argv) {
     throw new Error("--look needs --map before it (its cameras go into the map)");
   }
   if (looks.length && !steps.some(([s]) => s === "--map")) throw new Error("--look needs --map (its cameras go into the map)");
+  const firstSave = steps.findIndex(([s]) => s === "--save"), firstMap = steps.findIndex(([s]) => s === "--map");
+  if (firstSave >= 0 && (firstMap < 0 || firstMap > firstSave)) throw new Error("--save needs --map before it (the editor saves over we-drive's copy of the map)");
   return { opts, steps, looks };
 }
 
@@ -432,6 +436,7 @@ class Session {
       mkdirSync(dir, { recursive: true });
       const copy = join(dir, basename(map));
       copyFileSync(map, copy);
+      this.copy = copy;
       if (looks.length) ({ looks: this.looks, parks: this.parks } = addCamerasToMap(ensureCli(), copy, join(this.opts.work, "look-project"), looks));
       args.push("-loadfile", winePath(copy));
       this.mapName = basename(map);
@@ -531,6 +536,45 @@ class Session {
       }
       await sleep(500);
     }
+  }
+
+  /**
+   * Saves the map (File > Save, Ctrl+S) and copies what the editor wrote to `dest`. The "Reminder" box (a map still
+   * named "Just another Warcraft III map") is answered with Return. Done when the map's copy has changed, no dialog is
+   * open and the file stood still for 2 s; another dialog is reported with a picture of the screen, not answered.
+   */
+  async save(dest) {
+    if (!this.copy) throw new Error("--save needs --map before it (the editor saves over we-drive's copy of the map)");
+    const { main } = this.mainOrThrow();
+    const stamp = () => { try { const s = statSync(this.copy); return `${s.mtimeMs}:${s.size}`; } catch { return null; } };
+    const before = stamp();
+    x11(this.display, "key", "--window", main.id, "ctrl+s");
+    const deadline = Date.now() + this.opts.timeout * 1000, answered = [];
+    let last = before, stillSince = 0;
+    while (Date.now() < deadline) {
+      await sleep(500);
+      if (this.editorExited) throw new Error(`the editor exited while saving (see ${this.log})`);
+      const questions = questionDialogs(this.windows().dialogs);
+      const reminder = questions.find((d) => d.title === "Reminder");
+      if (reminder) {
+        x11(this.display, "key", "--window", reminder.id, "Return");
+        answered.push(reminder.title);
+        stillSince = 0;
+        continue;
+      }
+      if (questions.length) return { saved: false, dialogs: questions.map((d) => ({ title: d.title, rect: d.rect })), screen: this.dialogShot("save") };
+      const now = stamp();
+      if (now !== last) { last = now; stillSince = 0; continue; }
+      if (now !== before && now !== null) {
+        stillSince ||= Date.now();
+        if (Date.now() - stillSince >= 2000) {
+          mkdirSync(dirname(resolve(dest)), { recursive: true });
+          copyFileSync(this.copy, resolve(dest));
+          return { saved: true, file: resolve(dest), bytes: statSync(this.copy).size, answered };
+        }
+      }
+    }
+    return { saved: false, timeout: this.opts.timeout, screen: this.dialogShot("save") };
   }
 
   mainOrThrow() {
@@ -797,6 +841,10 @@ async function main() {
         } else if (step === "--sleep") {
           await sleep(Number(arg));
           out({ step });
+        } else if (step === "--save") {
+          const r = await s.save(arg);
+          out({ step, ...r });
+          if (!r.saved) { failed = true; break; }
         } else if (step === "--close") {
           const r = await s.close();
           out({ step, ...r });
