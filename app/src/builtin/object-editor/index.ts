@@ -11,7 +11,7 @@ import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
 import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/formats/wts";
-import { WtsSession, fileIsMissing, findPackedMap, mapFolderGone, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
+import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
@@ -1346,9 +1346,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Nothing is written into a vanished map folder: it would leave a lone file there.
             const root = w3.workspace.project()?.root;
             if (root) {
-              const folderExists = await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, "map") }).catch(() => true);
-              if (mapFolderGone({ folderExists, isNew, hasWts })) {
-                w3.window.showError("The map folder is missing, so nothing was saved. Restore it (a checkpoint or the packed map has the files) and save again.");
+              const stop = await mapFolderStop(() => w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, "map") }), { isNew, hasWts });
+              if (stop) {
+                w3.window.showError(stop);
                 return;
               }
             }
