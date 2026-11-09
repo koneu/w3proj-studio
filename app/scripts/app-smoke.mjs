@@ -1533,8 +1533,29 @@ async function cameraEditing(page, found) {
   if (await dirty()) fail("a value being typed is already an edit");
   await type("Dist", 3333, "change");
   if (!(await dirty())) fail("the value, entered, isn't an edit");
+  // The preview of a value ends with it: the view is the user's again once it's entered, the field left, or the panel
+  // made again by an undo (which takes the field away without a blur); it once stayed at the previewed camera.
+  const userView = async (when) => {
+    await sleep(300);
+    const now = await view();
+    if (!now || Math.abs(now.distance - before.distance) > 1 || Math.abs(now.target[0] - before.target[0]) > 1 || Math.abs(now.target[1] - before.target[1]) > 1) {
+      fail(`${when}, the view stays at the previewed camera: ${JSON.stringify(now)} (the user's: ${JSON.stringify(before)})`);
+    }
+  };
+  await userView("after a value is entered");
   await k.save();
   if (cameras()[0].distance !== 3333) fail(`the entered distance saved as ${cameras()[0].distance}`);
+  await type("Dist", 4444, "input");
+  await sleep(300);
+  if (Math.abs(((await view())?.distance ?? 0) - 4444) > 1) fail("typing a second distance didn't show it in the view (control)");
+  await type("Dist", 4444, "blur");
+  await userView("after the field is left");
+  await type("Dist", 5555, "input");
+  await k.save();
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await userView("after a save and an undo while a value was being typed");
+  await k.save();
+  if (cameras()[0].distance !== a.distance) fail(`the undo gave the distance ${cameras()[0].distance}, not ${a.distance}`);
   await page.evaluate(`w3.editors.closeAll()`);
 }
 

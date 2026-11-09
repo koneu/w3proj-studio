@@ -181,6 +181,19 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   /** Looks through a camera (the markers hidden until the next click on the map); `focus` gives the map the keys, which
    *  a value being typed keeps. */
   const preview = (c: Camera, focus = true) => { previewing = true; render(); ed.setView(toView(c)); if (focus) ed.focus(); };
+  /** The view before a value being typed was shown through its camera: it comes back once the value is entered, the
+   *  field is left, or the panel is made again (an undo, a save's reload, another selection), so the preview of a
+   *  value never stays as the user's view. View (the button) is looking through a camera on purpose and stays. */
+  let viewBeforeTyping: TerrainView | null = null;
+  const previewTyped = (c: Camera) => { viewBeforeTyping ??= ed.view(); preview(c, false); };
+  const endTypedPreview = () => {
+    const v = viewBeforeTyping;
+    if (!v) return;
+    viewBeforeTyping = null;
+    previewing = false;
+    ed.setView(v);
+    render();
+  };
 
   // ---- pointer -----------------------------------------------------------------------
   /** The camera handle under a point: its eye or its target. */
@@ -209,6 +222,8 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   } });
   const panel = h("div.terrain-region-panel");
   const renderPanel = () => {
+    // The field being typed in goes (without a blur event): its preview ends with it.
+    endTypedPreview();
     jump.replaceChildren(h("option", { value: "" }, "Go to camera…"),
       ...doc.cameras.map((c, i) => [c, i] as const).sort(([a], [b]) => a.name.localeCompare(b.name)).map(([c, i]) => h("option", { value: String(i) }, c.name)));
     const c = selected, many = selection.length > 1;
@@ -231,9 +246,11 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
         // Each value typed shows at once through the camera it's for (the last selected), before it's an edit.
         oninput: () => {
           const v = Number(input.value);
-          if (input.value.trim() !== "" && Number.isFinite(v)) preview({ ...c, [key]: v }, false);
+          if (input.value.trim() !== "" && Number.isFinite(v)) previewTyped({ ...c, [key]: v });
         },
+        onblur: () => endTypedPreview(),
         onchange: () => {
+          endTypedPreview();
           const v = Number(input.value);
           if (input.value.trim() === "" || !Number.isFinite(v)) { renderPanel(); return; }
           const changing = selection.filter((x) => x[key] !== v);
@@ -262,7 +279,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   return {
     toolbar,
     activate() { active = true; previewing = false; void load.then(() => { renderPanel(); render(); }); },
-    deactivate() { active = false; drag = null; ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
+    deactivate() { endTypedPreview(); active = false; drag = null; ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       previewing = false;
