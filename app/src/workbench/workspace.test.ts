@@ -149,6 +149,24 @@ test("recent projects: another spelling of the opened root isn't listed twice", 
   assert.deepEqual(saved.recentProjects, [A, B]);
 });
 
+test("recent projects on Linux: folders that differ only in case are two projects, both kept", async () => {
+  reset();
+  const lower = "/home/u/maps/turtle", upper = "/home/u/maps/Turtle", other = "/home/u/maps/a\\b";
+  backend.set(upper, []);
+  const { ws, saved } = make([lower, "/home/u/maps/a/b", other, upper]);
+  await ws.open(upper);
+  await ws.recentsTidied();
+  assert.deepEqual(saved.recentProjects, [upper, lower, "/home/u/maps/a/b", other]);
+  // Control: the same root again is listed once, and on Windows case doesn't count.
+  await ws.open(upper);
+  await ws.recentsTidied();
+  assert.deepEqual(saved.recentProjects, [upper, lower, "/home/u/maps/a/b", other]);
+  const win = make([A.toUpperCase(), A.replace(/\\/g, "/")]);
+  await win.ws.open(A);
+  await win.ws.recentsTidied();
+  assert.deepEqual(win.saved.recentProjects, [A]);
+});
+
 /** Holds the next directory reads until the returned function is called. */
 const holdReads = () => {
   let release!: () => void;

@@ -279,6 +279,69 @@ fn unpacking_into_a_project_again_keeps_it_in_sync() {
     assert_eq!(fs::read(first).unwrap(), fs::read(second).unwrap());
 }
 
+/// A w3proj.toml that is there but isn't TOML stops a sync from the map: written anew it would lose the pack settings
+/// in it. Nothing below the project changes; once the file reads again, the sync keeps its settings.
+#[test]
+fn a_manifest_that_cant_be_read_stops_the_sync_and_is_kept() {
+    let dir = workdir("broken-manifest");
+    let (first, project) = (dir.join("first.w3x"), dir.join("project"));
+    pack(&fixture(), &first);
+    unpack(&first, &project);
+    let manifest = project.join("w3proj.toml");
+    let good = fs::read_to_string(&manifest).unwrap();
+    let mine = if good.contains("[pack]\n") {
+        good.replacen("[pack]\n", "[pack]\noutput = \"dist/mine.w3x\"\n", 1)
+    } else {
+        format!("{good}\n[pack]\noutput = \"dist/mine.w3x\"\n")
+    };
+    // An unclosed string: not TOML any more. The pack settings in it are the user's.
+    let broken = format!("{mine}oops = \"\n");
+    fs::write(&manifest, &broken).unwrap();
+    fs::write(project.join("map").join("stray.txt"), "kept").unwrap();
+    let o = w3proj(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&trigger_data())]);
+    assert!(!o.status.success(), "the sync went on over a broken w3proj.toml: {}", text(&o));
+    assert!(text(&o).contains("w3proj.toml"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&manifest).unwrap(), broken, "the broken manifest was written over");
+    assert!(project.join("map").join("stray.txt").exists(), "the failed sync changed map/");
+    // Control: the same sync with the manifest readable again goes through and keeps its output.
+    fs::write(&manifest, &mine).unwrap();
+    unpack(&first, &project);
+    assert!(fs::read_to_string(&manifest).unwrap().contains("dist/mine.w3x"));
+    assert!(!project.join("map").join("stray.txt").exists());
+}
+
+/// A chapter map of a campaign whose folder can't be looked into stops the pack: taken for "no chapter there", it
+/// was left out of the campaign without a word. (Unix only: a folder without its search right.)
+#[cfg(unix)]
+#[test]
+fn a_chapter_that_cant_be_checked_stops_the_pack() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = workdir("hidden-chapter");
+    let (project, out) = (dir.join("campaign"), dir.join("out.w3n"));
+    let chapter = project.join("maps").join("Chapter.w3x");
+    fs::create_dir_all(project.join("map")).unwrap();
+    fs::create_dir_all(chapter.join("map")).unwrap();
+    fs::write(project.join("w3proj.toml"), "format = 1\n").unwrap();
+    fs::write(project.join("map").join("notes.txt"), "campaign").unwrap();
+    fs::write(chapter.join("w3proj.toml"), "format = 1\n").unwrap();
+    fs::write(chapter.join("map").join("notes.txt"), "chapter").unwrap();
+    // Control: readable, the chapter is packed into the campaign.
+    pack(&project, &out);
+    assert!(ok(&["ls", s(&out)]).contains("Chapter.w3x"), "the control pack has no chapter");
+    fs::remove_file(&out).unwrap();
+    // Read but not searched: its names list, but whether w3proj.toml is in it can't be checked.
+    fs::set_permissions(&chapter, fs::Permissions::from_mode(0o600)).unwrap();
+    let checkable = chapter.join("w3proj.toml").try_exists().is_ok();
+    let o = w3proj(&["pack", s(&project), "-o", s(&out)]);
+    fs::set_permissions(&chapter, fs::Permissions::from_mode(0o755)).unwrap();
+    if checkable {
+        return; // as root every folder can be searched: nothing to show
+    }
+    assert!(!o.status.success(), "packed without the chapter it couldn't check: {}", text(&o));
+    assert!(text(&o).contains("can't be checked"), "{}", text(&o));
+    assert!(!out.exists(), "a failed pack left a map behind");
+}
+
 /// A file whose name starts with U+FEFF (which a UTF-8 decoder may take for a byte-order mark and drop) packs
 /// under the archive name the app computes for it (tests/fixtures/archive-names.json, which the app's
 /// archivepath.test.ts checks), and unpacks to the same file again.

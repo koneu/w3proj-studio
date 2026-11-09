@@ -101,6 +101,8 @@ export class Workbench {
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
     root.append(this.titleBar.root, main, this.statusBar.root);
     this.notifications = new Notifications(root);
+    // A settings file that is there but can't be read is never written over: said where the user sees it.
+    this.settings.warn = (m) => void this.notifications.show("warning", m);
     this.quickInput = new QuickInput(root);
 
     this.api = this.createApi();

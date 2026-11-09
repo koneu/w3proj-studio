@@ -103,6 +103,7 @@ fn open_project(path: &str) -> CmdResult<ProjectInfo> {
     Ok(ProjectInfo {
         name: manifest.display_name(&root),
         default_output: project::default_output(&root, &manifest)
+            .map_err(err)?
             .to_string_lossy()
             .into_owned(),
         manifest: serde_json::to_value(&manifest).map_err(err)?,
@@ -213,7 +214,11 @@ fn project_files_partial(root: String) -> CmdResult<PartialFiles> {
 fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileInfo>, Vec<Unreadable>)> {
     let mut out = Vec::new();
     let mut unreadable = Vec::new();
-    let rel_of = |path: &Path| path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+    // Part by part: on Linux a `\` is a character of a name, and turned into `/` it would name another path.
+    let rel_of = |path: &Path| {
+        let rel = path.strip_prefix(root).unwrap();
+        rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+    };
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         // Fails the walk, or (when skipping, below the root) notes what was skipped.
@@ -242,6 +247,12 @@ fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileInfo>,
                 }
             };
             let path = entry.path();
+            // A name with a `\` (only possible off Windows) is a stray file of an older version (strays.rs): no
+            // project path can name it (lib/paths.ts takes `\` for a separator), so it isn't listed, never as the
+            // file its name looks like; opening the project offers to move it.
+            if entry.file_name().to_string_lossy().contains('\\') {
+                continue;
+            }
             let rel = rel_of(&path);
             let is_dir = match entry.file_type() {
                 Ok(t) => t.is_dir(),
@@ -628,11 +639,12 @@ fn project_folders(root: String) -> CmdResult<Vec<String>> {
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).map_err(err)? {
             let entry = entry.map_err(err)?;
-            if !entry.file_type().map_err(err)?.is_dir() {
+            // A name with a `\` is a stray of an older version (see walk_project): not a folder path.
+            if !entry.file_type().map_err(err)?.is_dir() || entry.file_name().to_string_lossy().contains('\\') {
                 continue;
             }
             let path = entry.path();
-            let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+            let rel = path.strip_prefix(&root).unwrap().components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
             if !matches!(rel.as_str(), "build" | ".git" | "node_modules") {
                 stack.push(path);
                 out.push(rel);
@@ -1573,6 +1585,31 @@ mod fs_tests {
         assert!(strict.is_err(), "the workspace's list must not pass a folder it couldn't read for an empty one");
         // An unreadable root fails the partial list too: there is nothing it could list.
         assert!(project_files_partial(dir.join("nope").to_string_lossy().into_owned()).is_err());
+    }
+
+    /// A name with a literal `\` (an older version's stray file, strays.rs) isn't listed, and never as the path its
+    /// name looks like: `map/sub\b.txt` next to `map/sub/a.txt` isn't `map/sub/b.txt`, and nothing below a folder named
+    /// `x\y` is `x/y/…`. Unix only: on Windows a name can't hold a `\`.
+    #[cfg(unix)]
+    #[test]
+    fn a_name_with_a_backslash_is_left_out_not_taken_for_a_path() {
+        let (dir, root) = project();
+        std::fs::write(dir.join("map").join(r"sub\b.txt"), b"stray").unwrap();
+        std::fs::create_dir_all(dir.join(r"map\deep")).unwrap();
+        std::fs::write(dir.join(r"map\deep").join("c.txt"), b"stray").unwrap();
+        std::fs::write(dir.join("map").join("plain.txt"), b"p").unwrap();
+        let strict = project_files(root.clone());
+        let partial = project_files_partial(root.clone());
+        let mut folders = project_folders(root).unwrap();
+        folders.sort();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(folders, ["map", "map/sub"], "folders");
+        let paths: Vec<String> = strict.unwrap().into_iter().map(|f| f.path).collect();
+        assert_eq!(paths, ["map/plain.txt", "map/sub/a.txt"]);
+        let partial = partial.unwrap();
+        let paths: Vec<&str> = partial.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["map/plain.txt", "map/sub/a.txt"]);
+        assert!(partial.unreadable.is_empty(), "{:?}", partial.unreadable);
     }
 
     #[test]

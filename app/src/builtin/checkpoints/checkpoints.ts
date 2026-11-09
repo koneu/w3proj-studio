@@ -22,9 +22,12 @@ export function checkpointTime(name: string): number | null {
   return new Date(y, mo - 1, d, h, mi, s).getTime();
 }
 
-/** The checkpoints among `names`, newest first. */
+/** The checkpoints among `names` (paths below build/checkpoints, `/` between folders), newest first. Only files
+ *  directly in the folder are checkpoints: what is in a folder below (recovered/: strays an older version left)
+ *  is never counted toward the number kept, nor pruned. */
 export function newestFirst(names: string[]): { name: string; time: number }[] {
   return names.flatMap((name) => {
+    if (/[\\/]/.test(name)) return [];
     const time = checkpointTime(name);
     return time === null ? [] : [{ name, time }];
   }).sort((a, b) => b.time - a.time);

@@ -8,6 +8,10 @@ import { Emitter } from "./dom";
 export interface Stamp { size: number; modified: number; hash?: string }
 import { timeLimit } from "./timelimit";
 
+/** What tells two recent projects apart: as `fileKey`, case counts only off a Windows root, so on Linux
+ *  `/home/u/Map` and `/home/u/map` are two projects, both listed. A `\` is a separator only on Windows. */
+export const recentKey = (root: string) => (isWindowsPath(root) ? root.replace(/\//g, "\\").toLowerCase() : root);
+
 export class WorkspaceService {
   private info: ProjectInfo | null = null;
   private fileList: FileInfo[] = [];
@@ -47,8 +51,8 @@ export class WorkspaceService {
     // The list first, as the entries were saved; then, off the open's way, the entries under another
     // spelling of a folder (8.3 short name) are merged (see tidyRecents).
     const root = this.info.root;
-    const seen = new Set([root.toLowerCase()]);
-    const others = this.settings.get<string[]>("recentProjects", []).filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
+    const seen = new Set([recentKey(root)]);
+    const others = this.settings.get<string[]>("recentProjects", []).filter((p) => !seen.has(recentKey(p)) && !!seen.add(recentKey(p)));
     await this.settings.set("recentProjects", [root, ...others].slice(0, 10));
     this.tidying = this.tidyRecents(root, ++this.openGen);
     this.onDidChange.fire();
@@ -69,7 +73,7 @@ export class WorkspaceService {
       const spelled = await Promise.all(this.settings.get<string[]>("recentProjects", []).map((p) => timeLimit(invoke<string>("path_normalize", { path: p }), 2000).catch(() => p)));
       if (gen !== this.openGen || this.info?.root !== root) return;
       const seen = new Set<string>();
-      const list = spelled.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase()));
+      const list = spelled.filter((p) => !seen.has(recentKey(p)) && !!seen.add(recentKey(p)));
       if (list.length !== spelled.length || list.some((p, i) => p !== spelled[i])) await this.settings.set("recentProjects", list);
     } catch (e) {
       // Only a tidier list is lost; the open itself went well.
@@ -329,17 +333,60 @@ export class SettingsService implements Settings {
     return [...this.schema.values()];
   }
 
+  /** Why each layer's file can't be written: it is there but couldn't be read. Such a file is never written over
+   *  (its settings would be lost): changes stay in memory for the session, and the user is told. */
+  private problems: Record<SettingsTarget, string | null> = { user: null, project: null };
+  /** Whether a refused write was said since the file was last read (once, not at every change). */
+  private toldRefused: Record<SettingsTarget, boolean> = { user: false, project: false };
+  /** Counts the loads of each layer: a read that finishes after a later load is out of date. */
+  private loads: Record<SettingsTarget, number> = { user: 0, project: 0 };
+  /** Shows a warning to the user (the workbench's notifications); console only until it is set. */
+  warn: (message: string) => void = (m) => console.warn(m);
+
+  /** Why a layer's file is left as it is, or null when it can be written. */
+  problem(target: SettingsTarget = "user"): string | null {
+    return this.problems[target];
+  }
+
+  private fileOf(target: SettingsTarget) {
+    return target === "project" ? this.projectFile : this.path;
+  }
+
+  private describe(target: SettingsTarget, why: string) {
+    const name = target === "project" ? PROJECT_SETTINGS : "Your settings file";
+    const open = target === "project" ? "Open Project Settings (JSON)" : "Open Settings (JSON)";
+    return `${name} (${this.fileOf(target)}) is there, but ${why}. Its settings aren't used, and it is left as it is: changes made now last only until the app closes. Fix it with "${open}".`;
+  }
+
+  /** Takes in a layer's file as read; says when it can't be used. */
+  private took(target: SettingsTarget, file: SettingsFile) {
+    this.problems[target] = file.problem;
+    this.toldRefused[target] = false;
+    if (file.problem) this.warn(this.describe(target, file.problem));
+  }
+
   async load(path: string) {
     this.path = path;
-    this.user = await readJson(path);
-    for (const k of Object.keys(this.user)) this.changed.fire(k);
+    const gen = ++this.loads.user;
+    const file = await readSettingsFile(path);
+    if (gen !== this.loads.user) return;
+    const before = Object.keys(this.user);
+    this.user = file.values;
+    this.took("user", file);
+    for (const k of new Set([...before, ...Object.keys(this.user)])) this.changed.fire(k);
   }
 
   /** Switches the project layer (null: no project open). */
   async loadProject(root: string | null) {
+    const gen = ++this.loads.project;
+    const projectFile = root ? joinPath(root, PROJECT_SETTINGS) : null;
+    const file = projectFile ? await readSettingsFile(projectFile) : { values: {}, problem: null };
+    // Another project (or none) was asked for meanwhile: its layer wins, this read is void.
+    if (gen !== this.loads.project) return;
     const before = Object.keys(this.project);
-    this.projectFile = root ? joinPath(root, PROJECT_SETTINGS) : null;
-    this.project = this.projectFile ? await readJson(this.projectFile) : {};
+    this.projectFile = projectFile;
+    this.project = file.values;
+    this.took("project", file);
     for (const k of new Set([...before, ...Object.keys(this.project)])) this.changed.fire(k);
   }
 
@@ -372,12 +419,41 @@ export class SettingsService implements Settings {
       if (!this.projectFile) throw new Error("No project is open.");
       if (!this.projectAllowed(key)) throw new Error(`${key} is a user setting; projects can't override it.`);
     }
-    const values = target === "project" ? this.project : this.user;
-    if (value === undefined) delete values[key];
-    else values[key] = value;
-    await writeText(target === "project" ? this.projectFile! : this.path, JSON.stringify(values, null, 2) + "\n");
+    const layer = () => (target === "project" ? this.project : this.user);
+    const apply = (values: Record<string, unknown>) => {
+      if (value === undefined) delete values[key];
+      else values[key] = value;
+    };
+    // In memory at once: callers read the value right after asking for it.
+    const mine = layer();
+    apply(mine);
+    const file = this.fileOf(target)!;
+    const job = this.writing[target].catch(() => {}).then(async () => {
+      if (this.fileOf(target) !== file) return; // another project's layer now: the change went with the old one
+      // The file is read again right before it is written: one that is there but can't be read (now, or since it
+      // was loaded) is never written over, since everything in it would be lost.
+      const problem = this.problems[target] ?? (await readSettingsFile(file)).problem;
+      if (this.fileOf(target) !== file) return;
+      if (problem) {
+        this.problems[target] = problem;
+        if (!this.toldRefused[target]) {
+          this.toldRefused[target] = true;
+          this.warn(`${key} was changed for this session only. ${this.describe(target, problem)}`);
+        }
+        return;
+      }
+      // The layer may have been loaded again meanwhile (the file saved as JSON): the change goes onto that.
+      const values = layer();
+      if (values !== mine) apply(values);
+      await writeText(file, JSON.stringify(values, null, 2) + "\n");
+    });
+    this.writing[target] = job;
     this.changed.fire(key);
+    await job;
   }
+
+  /** The writes of each layer's file, one after the other. */
+  private writing: Record<SettingsTarget, Promise<void>> = { user: Promise.resolve(), project: Promise.resolve() };
 
   onDidChange(listener: (key: string) => void): Disposable {
     return this.changed.on(listener);
@@ -387,11 +463,33 @@ export class SettingsService implements Settings {
 /** Project settings, versioned with the project. */
 export const PROJECT_SETTINGS = ".w3proj/settings.json";
 
-async function readJson(path: string): Promise<Record<string, unknown>> {
+/** A settings file as read: its values, and why it couldn't be used when it is there but unreadable (not JSON,
+ *  not an object, not UTF-8, no access). A file that isn't there, or is empty, has no values and no problem. */
+export interface SettingsFile { values: Record<string, unknown>; problem: string | null }
+
+export async function readSettingsFile(path: string): Promise<SettingsFile> {
+  let text: string;
   try {
-    const v = JSON.parse(await readText(path));
-    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-  } catch {
-    return {};
+    text = await readText(path);
+  } catch (e) {
+    // Absent and unreadable are told apart: only a file that is surely not there is "no settings yet".
+    let there: boolean;
+    try {
+      there = await invoke<boolean>("fs_exists", { path });
+    } catch (e2) {
+      return { values: {}, problem: `it can't be checked (${errorText(e2)})` };
+    }
+    return there ? { values: {}, problem: `it can't be read (${errorText(e)})` } : { values: {}, problem: null };
   }
+  if (!text.trim()) return { values: {}, problem: null };
+  let v: unknown;
+  try {
+    v = JSON.parse(text.replace(/^﻿/, ""));
+  } catch (e) {
+    return { values: {}, problem: `it isn't valid JSON (${errorText(e)})` };
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return { values: {}, problem: "it doesn't hold a JSON object" };
+  return { values: v as Record<string, unknown>, problem: null };
 }
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));

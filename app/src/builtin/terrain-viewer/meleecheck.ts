@@ -1,6 +1,8 @@
 // Tests a melee map against what ladder maps do, and says how far each answer can be trusted.
 // Limits come from the same six 1v1 maps as the melee guide, with some room around what was measured.
 
+import { clusterNear } from "./clusters";
+
 type Point = readonly [number, number];
 
 export interface MeleeUnit {
@@ -66,8 +68,10 @@ const HOSTILE = 24, MINE = "ngol", START = "sloc";
 const OWN_MINE = [700, 850] as const;
 /** Measured: nothing nearer than 1,758. */
 const NEAREST_CAMP = 1750;
-/** Creeps this close form one camp, and a camp this close to a mine guards it. */
-const SAME_CAMP = 450, GUARD = 750;
+/** Creeps this close form one camp (the Item Drops overview's camps too). */
+export const SAME_CAMP = 450;
+/** A camp this close to a mine guards it. */
+const GUARD = 750;
 /** Measured over the ladder maps, with a little room. */
 const TREE_NEAR = [500, 750] as const, TREES_1000 = [30, 60] as const;
 /** Ladder camps have at most 6 creeps, reach 364 from their middle, keep creeps 100 apart and other
@@ -98,14 +102,9 @@ interface Camp { centre: [number, number]; creeps: MeleeUnit[]; level: number; s
 /** Neutral hostile units in groups: each within reach of another of the group. */
 export function campsOf(units: readonly MeleeUnit[], facts: Pick<MeleeFacts, "level">): Camp[] {
   const levelOf = (u: MeleeUnit) => u.randomLevel ?? facts.level(u.id) ?? 0;
-  const left = new Set(units.filter((u) => u.player === HOSTILE && u.id !== START && u.id !== MINE));
+  const hostile = units.filter((u) => u.player === HOSTILE && u.id !== START && u.id !== MINE);
   const camps: Camp[] = [];
-  for (const first of left) {
-    left.delete(first);
-    const creeps = [first];
-    for (let i = 0; i < creeps.length; i++) {
-      for (const u of left) if (dist([u.x, u.y], [creeps[i].x, creeps[i].y]) < SAME_CAMP) { creeps.push(u); left.delete(u); }
-    }
+  for (const creeps of clusterNear(hostile, (u) => [u.x, u.y], SAME_CAMP)) {
     const count = creeps.length, x = creeps.reduce((n, u) => n + u.x, 0) / count, y = creeps.reduce((n, u) => n + u.y, 0) / count;
     const levels = creeps.map(levelOf);
     camps.push({ centre: [x, y], creeps, level: levels.reduce((a, b) => a + b, 0), strongest: Math.max(...levels) });

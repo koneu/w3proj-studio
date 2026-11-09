@@ -34,6 +34,22 @@ pub const MAPS_DIR: &str = "maps";
 pub const HEADER_FILE: &str = "header.bin";
 pub const FORMAT_VERSION: u32 = 1;
 
+/// Whether something is at `path`. A path that can't be checked (a folder above it may not be looked
+/// into) is an error, never "not there": what is taken for absent gets created or written over.
+fn there(path: &Path) -> Result<bool> {
+    path.try_exists()
+        .map_err(|e| Error::Project(format!("{} can't be checked: {e}", path.display())))
+}
+
+/// Whether `path` is a folder; an error when that can't be checked (as `there`).
+fn is_folder(path: &Path) -> Result<bool> {
+    match fs::metadata(path) {
+        Ok(m) => Ok(m.is_dir()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(Error::Project(format!("{} can't be checked: {e}", path.display()))),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub format: u32,
@@ -392,7 +408,7 @@ pub fn extract_dir(dir: &Path, codecs: &Registry) -> Result<Extracted> {
             dir.display()
         )));
     }
-    if dir.join(MANIFEST).exists() {
+    if there(&dir.join(MANIFEST))? {
         return Err(Error::Project(format!("{} is a project, not a map folder", dir.display())));
     }
     let mut report = UnpackReport::default();
@@ -464,7 +480,7 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
 
 fn walk(root: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
-    if !root.exists() {
+    if !there(root)? {
         return Ok(out);
     }
     let mut stack = vec![root.to_path_buf()];
@@ -638,7 +654,19 @@ pub fn write_files(project: &Path, ex: Extracted) -> Result<UnpackReport> {
 /// `top`: the project itself (gets git files), not a chapter map inside a campaign.
 fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackReport> {
     fs::create_dir_all(project)?;
-    if let Ok(old) = Manifest::load(project) {
+    // A manifest that is there but can't be read stops the sync: written anew, it would lose the
+    // pack settings (output, raw files) the user put in it.
+    let old = if there(&project.join(MANIFEST))? {
+        Some(Manifest::load(project).map_err(|e| {
+            Error::Project(format!(
+                "{e}. Nothing was written: {} is kept as it is; fix it (or move it away) and sync again",
+                project.join(MANIFEST).display()
+            ))
+        })?)
+    } else {
+        None
+    };
+    if let Some(old) = old {
         let mut raw = old.pack.raw;
         raw.extend(ex.manifest.pack.raw);
         raw.sort();
@@ -654,13 +682,16 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         Some(h) => {
             write_if_changed(&header_path, h)?;
         }
-        None if header_path.exists() => fs::remove_file(&header_path)?,
+        None if there(&header_path)? => fs::remove_file(&header_path)?,
         None => {}
     }
     for (name, text) in [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)] {
         let p = project.join(name);
+        if !top {
+            continue;
+        }
         let outdated = name == ".gitattributes" && fs::read(&p).is_ok_and(|old| old == GITATTRIBUTES_V1.as_bytes());
-        if top && (!p.exists() || outdated) {
+        if !there(&p)? || outdated {
             fs::write(p, text)?;
         }
     }
@@ -774,7 +805,7 @@ fn absolute(p: &Path) -> PathBuf {
 /// (`.w3n` archives have no map header). The files are written by the caller.
 /// Fails if the directory exists and isn't empty.
 pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
-    if project.exists() && fs::read_dir(project)?.next().is_some() {
+    if there(project)? && fs::read_dir(project)?.next().is_some() {
         return Err(Error::Project(format!("{} is not empty", project.display())));
     }
     fs::create_dir_all(project.join(MAP_DIR))?;
@@ -844,7 +875,7 @@ pub type ProjectContents = (Manifest, Vec<u8>, BTreeMap<String, Vec<u8>>);
 pub fn read_project(project: &Path) -> Result<ProjectContents> {
     let manifest = Manifest::load(project)?;
     let header_path = project.join(HEADER_FILE);
-    let prefix = if header_path.exists() {
+    let prefix = if there(&header_path)? {
         fs::read(header_path)?
     } else {
         manifest.map.as_ref().map(|m| m.to_bytes()).unwrap_or_default()
@@ -858,33 +889,34 @@ pub fn read_project(project: &Path) -> Result<ProjectContents> {
 }
 
 /// A campaign has campaign info (war3campaign.w3f, raw or as JSON).
-pub fn is_campaign_project(project: &Path) -> bool {
+/// A path that can't be checked is an error, not "no campaign" (the output's extension follows it).
+pub fn is_campaign_project(project: &Path) -> Result<bool> {
     let map = project.join(MAP_DIR);
-    map.join("war3campaign.w3f").exists() || map.join("war3campaign.w3f.json").exists()
+    Ok(there(&map.join("war3campaign.w3f"))? || there(&map.join("war3campaign.w3f.json"))?)
 }
 
-pub fn default_output(project: &Path, manifest: &Manifest) -> PathBuf {
-    match &manifest.pack.output {
+pub fn default_output(project: &Path, manifest: &Manifest) -> Result<PathBuf> {
+    Ok(match &manifest.pack.output {
         Some(o) => project.join(o),
         None => {
             let name = project
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "map".into());
-            let ext = if is_campaign_project(project) { "w3n" } else { "w3x" };
+            let ext = if is_campaign_project(project)? { "w3n" } else { "w3x" };
             project.join("build").join(format!("{name}.{ext}"))
         }
-    }
+    })
 }
 
 /// Packs a project into a `.w3x`. Writes atomically via a temp file.
 /// Folders under `maps/` that are projects (chapter maps of a campaign).
 fn nested_projects(maps_dir: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
-    if maps_dir.is_dir() {
+    if is_folder(maps_dir)? {
         for entry in fs::read_dir(maps_dir)? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() && entry.path().join(MANIFEST).exists() {
+            if entry.file_type()?.is_dir() && there(&entry.path().join(MANIFEST))? {
                 out.push(entry.file_name().to_string_lossy().into_owned());
             }
         }
@@ -931,9 +963,10 @@ fn prefix_of(ex: &Extracted) -> Vec<u8> {
 pub fn pack(project: &Path, output: Option<&Path>, codecs: &Registry) -> Result<PackReport> {
     let manifest = Manifest::load(project)?;
     let (bytes, count) = pack_bytes(project, codecs)?;
-    let output = output
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| default_output(project, &manifest));
+    let output = match output {
+        Some(o) => o.to_path_buf(),
+        None => default_output(project, &manifest)?,
+    };
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }
