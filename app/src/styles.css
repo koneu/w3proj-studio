@@ -760,6 +760,9 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .om-trigger { cursor: pointer; padding: 1px 0; }
 .om-trigger:hover { text-decoration: underline; }
 .om-hint { margin-top: 4px; font-size: 11px; }
+.om-summary { margin-top: 4px; border-collapse: collapse; width: 100%; }
+.om-summary td { padding: 1px 4px 1px 0; }
+.om-summary-value { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* AI Editor */
 .ai-editor { display: flex; flex-direction: column; height: 100%; overflow: hidden; outline: none; }

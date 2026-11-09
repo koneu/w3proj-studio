@@ -9,8 +9,10 @@ import { loadKind } from "../../lib/objects/metadata";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
+import { StringTable } from "../../lib/formats/wts";
+import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
-import { ProjectGuard, buildTree, idsInText, markUnused, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
+import { ProjectGuard, buildTree, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
 
 const VIEW = "w3.objectManager.tree";
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
@@ -19,6 +21,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let tree: TreeNode[] | null = null, refs = new Map<string, Set<string>>(), loading: Promise<void> | null = null, error = "";
   /** Objects using an id, and how many custom objects nothing uses. */
   let users = new Map<string, Map<string, Target>>(), unusedCount = 0;
+  /** The Map Summary's rows (counts per kind), from the last build. */
+  let summary: [string, string][] = [];
   /** Show only what nothing uses. */
   let unusedOnly = false;
   /** Expanded nodes by their path of labels (kept across refreshes). */
@@ -30,7 +34,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   let loadingToken = 0;
   /** Drops the old project's rows and state. */
   const reset = () => {
-    tree = null; refs = new Map(); users = new Map(); unusedCount = 0; error = ""; selected = ""; query = ""; loading = null; open.clear();
+    tree = null; refs = new Map(); users = new Map(); unusedCount = 0; summary = []; error = ""; selected = ""; query = ""; loading = null; open.clear();
     w3.views.refresh(VIEW);
   };
   /** `force`: the user asked (Refresh); then a project the guard hasn't heard of is taken as the new one. */
@@ -47,7 +51,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const token = guard.begin(), root = rootNow();
       loadingToken = token;
       error = "";
-      let failed = "", result: { tree: TreeNode[]; refs: Map<string, Set<string>>; users: typeof users; unusedCount: number } | null = null;
+      let failed = "", result: { tree: TreeNode[]; refs: Map<string, Set<string>>; users: typeof users; unusedCount: number; summary: [string, string][] } | null = null;
       try {
         const c = await contents(w3);
         const tree = buildTree(c);
@@ -56,14 +60,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const users = objectRefs(c.objects, customIds, c.nameOf);
         const mentioned = new Set(c.texts.flatMap((t) => idsInText(t, customIds)));
         const unusedCount = markUnused(tree, (id) => mentioned.has(id) || users.has(id) || refs.has(id));
-        result = { tree, refs, users, unusedCount };
+        result = { tree, refs, users, unusedCount, summary: mapSummary(c) };
       } catch (e) {
         failed = String((e as Error).message ?? e);
       }
       // The project changed meanwhile: its reset already started the next build.
       if (!guard.valid(token, root)) { if (loadingToken === token) loading = null; return; }
       error = failed;
-      if (result) ({ tree, refs, users, unusedCount } = result);
+      if (result) ({ tree, refs, users, unusedCount, summary } = result);
       loading = null;
       w3.views.refresh(VIEW);
     })();
@@ -92,8 +96,44 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
   };
 
+  /** Rename Object, Delete Object and Play Sound: done by the editor that owns the entry, as it does them by hand (its
+   *  questions, its undo step; the change is unsaved there). `rowsRoot`: the project the row was made for. */
+  const act = async (n: TreeNode, action: "rename" | "delete" | "play", rowsRoot: string | null) => {
+    const t = n.target;
+    if (!t || !guard.owns(rowsRoot, rootNow())) return;
+    if (action === "play") { if (t.kind === "sounds" && t.file) await w3.commands.execute("w3.sounds.play", t.file); return; }
+    let to: string | undefined;
+    if (action === "rename") {
+      to = (await w3.window.inputBox({ prompt: `Rename ${n.label}`, value: n.label }))?.trim();
+      // Another project opened during the question: its rows aren't these.
+      if (!to || to === n.label || !guard.owns(rowsRoot, rootNow())) return;
+    }
+    switch (t.kind) {
+      case "object": await w3.commands.execute("w3.objectEditor.objectAction", t.ext, t.id, action, to); break;
+      case "trigger": await w3.commands.execute("w3.triggers.itemAction", "trigger", t.name, action, to); break;
+      case "variables": if (t.name) await w3.commands.execute("w3.triggers.itemAction", "variable", t.name, action, to); break;
+      case "sounds": if (t.name) await w3.commands.execute("w3.sounds.soundAction", t.name, action, to); break;
+    }
+  };
+  /** The entry's menu: the World Editor's Object Manager commands that fit it. */
+  const menuFor = (n: TreeNode, rowsRoot: string | null): MenuItem[] => {
+    const a = nodeActions(n);
+    const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String((e as Error).message ?? e))); };
+    const items: MenuItem[] = [];
+    if (a.edit) items.push({ label: "Edit Object Properties", run: run(async () => { if (n.target && guard.owns(rowsRoot, rootNow())) await go(n.target); }) });
+    if (a.rename) items.push({ label: "Rename Object…", run: run(() => act(n, "rename", rowsRoot)) });
+    if (a.remove) items.push({ label: "Delete Object", run: run(() => act(n, "delete", rowsRoot)) });
+    if (a.play) items.push("-", { label: "Play Sound", run: run(() => act(n, "play", rowsRoot)) });
+    return items;
+  };
+
   ctx.subscriptions.push(
     w3.commands.register("w3.objectManager.refresh", () => load(true)),
+    // The Map Summary's rows (also shown by the view's button), after a build of the open project.
+    w3.commands.register("w3.objectManager.summary", async () => {
+      await load(true);
+      return summary;
+    }),
     w3.workspace.onDidChange(reload),
     w3.workspace.onDidSave(reload),
     w3.views.register(VIEW, {
@@ -127,6 +167,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   draw();
                 },
                 ondblclick: () => { if (n.target && guard.owns(rowsRoot, rootNow())) void go(n.target).catch((e) => w3.window.showError(String(e))); },
+                oncontextmenu: (e: MouseEvent) => {
+                  e.preventDefault();
+                  selected = key;
+                  showInfo(n);
+                  draw();
+                  const items = menuFor(n, rowsRoot);
+                  if (items.length) w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
+                },
               },
               h("span.tree-icon", {}, kids.length ? (isOpen ? "▾" : "▸") : ""),
               h("span.tree-label", {}, n.label),
@@ -152,9 +200,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             n.target ? h("div.muted.om-hint", {}, "Double-click the entry to go to it.") : null];
           info.replaceChildren(...parts.filter((x): x is HTMLDivElement => x !== null));
         };
+        /** The Map Summary in the info pane: counts per kind, as the World Editor's. */
+        const showSummary = () => {
+          selected = "";
+          draw();
+          info.replaceChildren(h("div.om-info-title", {}, "Map Summary"),
+            h("table.om-summary", {}, h("tbody", {}, ...summary.map(([label, value]) => h("tr", {}, h("td", {}, label), h("td.om-summary-value", {}, value))))));
+        };
         draw();
         const unusedBox = h("input", { type: "checkbox", checked: unusedOnly, onchange: () => { unusedOnly = unusedBox.checked; draw(); } });
-        el.append(h("div.om-view", {}, h("div.om-toolbar", {}, search, h("button.icon-button", { title: "Refresh", onclick: () => void load(true) }, "⟳")),
+        el.append(h("div.om-view", {}, h("div.om-toolbar", {}, search,
+          h("button.icon-button.om-summary-button", { title: "Map Summary: what the map holds, counted per kind", onclick: showSummary }, "Σ"),
+          h("button.icon-button", { title: "Refresh", onclick: () => void load(true) }, "⟳")),
           h("label.om-filter", { title: "Custom objects no placed object, other object, trigger or script uses" }, unusedBox, ` Unused only (${unusedCount})`),
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },
@@ -198,7 +255,10 @@ async function contents(w3: W3Api): Promise<MapContents> {
   const triggers = wtg ? await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null) : null;
   const imp = await json<{ files: { path: string }[] }>("war3map.imp");
   const script = await w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => "");
+  const w3i = await json<{ name?: string; playableWidth?: number; playableHeight?: number; tileset?: string }>("war3map.w3i");
+  const strings = new StringTable(await w3.workspace.readText("map/war3map.wts").catch(() => ""));
   return {
+    info: w3i ? { name: strings.resolve(String(w3i.name ?? "")), playableWidth: Number(w3i.playableWidth ?? 0), playableHeight: Number(w3i.playableHeight ?? 0), tileset: String(w3i.tileset ?? "") } : null,
     units, doodads, kindOf, nameOf: (id) => names.get(id) ?? id, custom,
     regions: (await json<{ regions: MapContents["regions"] }>("war3map.w3r"))?.regions ?? [],
     cameras: (await json<{ cameras: MapContents["cameras"] }>("war3map.w3c"))?.cameras ?? [],

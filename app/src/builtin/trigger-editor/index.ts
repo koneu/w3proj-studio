@@ -26,7 +26,7 @@ import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
 import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
-import { deleteVariable, newVariable, variablesTable, type VariableHost } from "./variables";
+import { deleteVariable, newVariable, renameVariable, variableParams, variablesTable, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
 
@@ -185,6 +185,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.triggers.renameGlobals", async (kind: unknown, pairs: unknown, what?: unknown) => {
       if (typeof kind !== "string" || !Array.isArray(pairs)) throw new Error("w3.triggers.renameGlobals takes a kind and [old, new] name pairs.");
       return renameGlobals(w3, kind, pairs as [string, string][], typeof what === "string" ? what : "objects");
+    }),
+    // Rename or delete a trigger or variable from elsewhere (the Object Manager), as the Trigger Editor does by hand: it
+    // opens at it, and the change is an unsaved undo step there. Delete asks first. True when it was done.
+    w3.commands.register("w3.triggers.itemAction", async (kind: unknown, name: unknown, action: unknown, to?: unknown) => {
+      if ((kind !== "trigger" && kind !== "variable") || typeof name !== "string" || (action !== "rename" && action !== "delete")) {
+        throw new Error("w3.triggers.itemAction takes \"trigger\" or \"variable\", a name and \"rename\" or \"delete\".");
+      }
+      if (action === "rename" && (typeof to !== "string" || !to.trim())) throw new Error("Renaming needs a name.");
+      if (kind === "trigger") await w3.commands.execute("w3.triggers.reveal", name);
+      else await w3.commands.execute("w3.triggers.variables");
+      const view = openView;
+      if (!view) throw new Error("The Trigger Editor didn't open.");
+      if (!view.editable) throw new Error("This trigger file can't be changed here.");
+      return kind === "trigger" ? view.triggerAction(name, action, typeof to === "string" ? to.trim() : "") : view.variableAction(name, action, typeof to === "string" ? to.trim() : "");
     }),
     w3.commands.register("w3.triggers.convertToCustomText", async () => {
       if (!openView) throw new Error("Open the Trigger Editor and select a GUI trigger first.");
@@ -535,6 +549,33 @@ class TriggerView {
       this.texts.set(now, text);
     });
     return true;
+  }
+
+  /** Rename (to `to`) or delete the trigger or comment-free tree item `name` (w3.triggers.itemAction). */
+  async triggerAction(name: string, action: "rename" | "delete", to: string): Promise<boolean> {
+    const it = this.file.items.find((i) => "ecas" in i && i.type !== 16 && i.name === name);
+    if (!it) throw new Error(`There's no trigger "${name}".`);
+    if (action === "rename") return this.rename(it, to);
+    if (!(await this.w3.window.askDelete(`Delete the trigger ${name}?`, "Delete"))) return false;
+    // While the question was open the trigger may have gone (undo, another edit) or the editor closed.
+    const now = this.file.items.find((i) => i.type === it.type && i.id === it.id);
+    if (this.disposed || !now) return false;
+    this.selected = { kind: "item", type: now.type, id: now.id };
+    this.deleteSelected();
+    return !this.file.items.includes(now);
+  }
+  /** Rename (to `to`) or delete the variable `name` (w3.triggers.itemAction), as its row in the table does. */
+  async variableAction(name: string, action: "rename" | "delete", to: string): Promise<boolean> {
+    const v = this.file.variables.find((x) => x.name === name);
+    if (!v) throw new Error(`There's no variable "${name}".`);
+    if (action === "rename") return renameVariable(this.w3, this.vars, v, to);
+    // A used variable is asked about by deleteVariable itself (it clears the uses).
+    if (!variableParams(this.file, v.name).length && !(await this.w3.window.askDelete(`Delete the variable ${name}?`, "Delete"))) return false;
+    if (this.disposed || !this.file.variables.includes(v)) return false;
+    await deleteVariable(this.w3, this.vars, v);
+    const gone = !this.file.variables.some((x) => x.id === v.id && x.name === v.name);
+    if (gone) { this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
+    return gone;
   }
 
   /** What Copy As Text (`as` "text") or Copy As Script puts on the clipboard: the selected trigger, or the lines

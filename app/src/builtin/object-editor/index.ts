@@ -241,6 +241,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const focusers = new Map<string, (id: string) => void>();
   /** Object to show once an editor that is being opened has loaded. */
   let pendingFocus: { path: string; id: string } | null = null;
+  /** Open editors by document path: rename and remove an object as the editor does (its undo step, its question). */
+  const actors = new Map<string, { rename(id: string, name: string): void; remove(id: string): Promise<boolean> }>();
 
   ctx.subscriptions.push(
     w3.services.provide(OBJECTS_SERVICE, objects),
@@ -291,6 +293,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
     }),
 
+    // Rename or delete an object from elsewhere (the Object Manager): the editor opens at it and does it as it does by
+    // hand, as an unsaved change with its undo step (delete asks first). True when it was done.
+    w3.commands.register("w3.objectEditor.objectAction", async (ext: unknown, id: unknown, action: unknown, name?: unknown) => {
+      if (typeof ext !== "string" || typeof id !== "string" || (action !== "rename" && action !== "delete")) throw new Error("w3.objectEditor.objectAction takes a kind, an id and \"rename\" or \"delete\".");
+      if (action === "rename" && (typeof name !== "string" || !name.trim())) throw new Error("Renaming needs a name.");
+      await w3.commands.execute("w3.objectEditor.open", ext, id);
+      const path = [...actors.keys()].find((p) => p.toLowerCase() === `map/war3map.${ext}.json`);
+      const actor = path ? actors.get(path) : undefined;
+      if (!actor) throw new Error(`The Object Editor for ${ext} didn't open.`);
+      if (action === "delete") return actor.remove(id);
+      actor.rename(id, (name as string).trim());
+      return true;
+    }),
     w3.editors.registerProvider("w3.objectEditor", {
       async resolve(el, doc) {
         const exists = () => w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
@@ -1240,6 +1255,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }, () => { status.textContent = `${id}: game data unavailable.`; });
         };
         focusers.set(doc.path, focusObject);
+        const shownObject = (id: string) => {
+          const o = file.custom.find((c) => c.id === id) ?? file.original.find((c) => c.base === id);
+          if (!o) throw new Error(`${id} isn't in this map's object data.`);
+          return o;
+        };
+        actors.set(doc.path, {
+          // As typing the name in its field: the map's string table keeps the text where the name is a TRIGSTR.
+          rename: (id, name) => {
+            if (doc.readOnly) throw new Error("This object data can't be changed here.");
+            const o = shownObject(id);
+            if (!kd) throw new Error("The game's object data isn't loaded yet; try again in a moment.");
+            const f = kd.fieldsFor(o.base).find((x) => /nam$/.test(x.id) && x.valueType === "string");
+            if (!f) throw new Error(`${id} has no name field.`);
+            const level = f.repeat > 0 ? 1 : 0;
+            const ref = trigRef(findMod(o, f.id, level)?.m.value);
+            if (ref !== null) wts.set(ref, name); else setValue(o, f, level, name);
+            select(o);
+            markDirty();
+            renderList();
+            renderDetail();
+          },
+          // As the Delete key on the selected object: its question, then one undo step.
+          remove: async (id) => {
+            if (doc.readOnly) throw new Error("This object data can't be changed here.");
+            select(shownObject(id));
+            const before = file.custom.length + file.original.length;
+            await removeSelection();
+            return file.custom.length + file.original.length < before;
+          },
+        });
         renderList();
         renderDetail();
         if (pendingFocus?.path === doc.path) {
@@ -1332,7 +1377,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
           },
           focus: () => search.focus(),
-          dispose: () => { closed = true; focusers.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose(); },
+          dispose: () => { closed = true; focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose(); },
           watches: ["map/war3map.wts"],
         };
       },

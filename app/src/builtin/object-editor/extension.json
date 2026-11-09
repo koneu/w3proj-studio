@@ -56,7 +56,8 @@
         "title": "Open Object Editor…",
         "category": "Object Editor",
         "keybinding": "f6"
-      }
+      },
+      { "id": "w3.objectEditor.objectAction", "title": "Object Editor: Rename or Delete an Object", "category": "Object Editor", "hidden": true }
     ],
     "viewContainers": [
       {

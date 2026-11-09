@@ -36,9 +36,18 @@ export type Target =
   | { kind: "object"; ext: string; id: string }
   | { kind: "point"; x: number; y: number; /** A placed object: selected too. */ id?: string; editorId?: number }
   | { kind: "trigger"; name: string }
-  | { kind: "variables" }
-  | { kind: "sounds" }
+  | { kind: "variables"; /** The variable, for renaming and deleting it. */ name?: string }
+  | { kind: "sounds"; /** The sound (gg_snd_…) and its file, for playing, renaming and deleting it. */ name?: string; file?: string }
   | { kind: "imports" };
+
+/** What the Object Manager's menu offers for an entry: Edit Object Properties (going to it in its editor), and where
+ *  the owning editor can do it, Rename Object, Delete Object and Play Sound. */
+export interface NodeActions { edit: boolean; rename: boolean; remove: boolean; play: boolean }
+export function nodeActions(n: Node): NodeActions {
+  const t = n.target;
+  const own = !!t && ((t.kind === "object" && n.custom === true) || t.kind === "trigger" || (t.kind === "variables" && !!t.name) || (t.kind === "sounds" && !!t.name));
+  return { edit: !!t, rename: own, remove: own, play: t?.kind === "sounds" && !!t.file };
+}
 
 export interface Node {
   label: string;
@@ -111,6 +120,40 @@ export interface MapContents {
   objects: { ext: string; label: string; objects: ObjectEntry[] }[];
   /** Texts that can mention object ids: the map script, placed objects, map info. */
   texts: string[];
+  /** Map Properties' name (its text), playable size and tileset, for the summary; null without war3map.w3i. */
+  info?: { name: string; playableWidth: number; playableHeight: number; tileset: string } | null;
+}
+
+/** The World Editor's Map Summary (Object Manager): what the map holds, counted per kind, as [label, value] rows. */
+export function mapSummary(c: MapContents): [string, string][] {
+  const rows: [string, string][] = [];
+  if (c.info) rows.push(["Map Name", c.info.name], ["Playable Map Size", `${c.info.playableWidth} × ${c.info.playableHeight}`], ["Tileset", c.info.tileset]);
+  const units = c.units.filter((u) => u.id !== "sloc" && c.kindOf(u.id) !== "w3t");
+  rows.push(["Total Units", String(units.length)]);
+  // Units per owner, in player order (neutral ones after the players).
+  const byOwner = new Map<number, number>();
+  for (const u of units) { const p = ownerOf(u.player) ?? -1; byOwner.set(p, (byOwner.get(p) ?? 0) + 1); }
+  for (const [p, n] of [...byOwner].sort((a, b) => a[0] - b[0])) rows.push([`Units (${owner(p < 0 ? undefined : p) || "no owner"})`, String(n)]);
+  const custom = (ext: string) => c.custom.find((k) => k.ext === ext)?.ids.length ?? 0;
+  rows.push(
+    ["Items", String(c.units.filter((u) => c.kindOf(u.id) === "w3t").length)],
+    ["Doodads (Trees/Destructibles)", String(c.doodads.filter((d) => c.kindOf(d.id) === "w3b").length)],
+    ["Doodads (Other)", String(c.doodads.filter((d) => c.kindOf(d.id) !== "w3b").length)],
+    ["Regions", String(c.regions.length)],
+    ["Cameras", String(c.cameras.length)],
+    ["Triggers", String(c.triggers?.items.filter((i) => "ecas" in i && i.type !== 16 && !i.isComment).length ?? 0)],
+    ["Variables", String(c.triggers?.variables.length ?? 0)],
+    ["Sounds", String(c.sounds.length)],
+    ["Custom Objects (Total)", String(c.custom.reduce((n, k) => n + k.ids.length, 0))],
+    ["Custom Units", String(custom("w3u"))],
+    ["Custom Items", String(custom("w3t"))],
+    ["Custom Destructibles", String(custom("w3b"))],
+    ["Custom Doodads", String(custom("w3d"))],
+    ["Custom Abilities", String(custom("w3a"))],
+    ["Custom Buffs/Effects", String(custom("w3h"))],
+    ["Custom Upgrades", String(custom("w3q"))],
+  );
+  return rows;
 }
 
 /** The tree: groups by type, with counts. */
@@ -150,11 +193,11 @@ export function buildTree(c: MapContents): Node[] {
       label: cam.name, ref: `gg_cam_${ident(cam.name)}`, target: { kind: "point", x: cam.targetX, y: cam.targetY },
     })) },
     { label: `Sounds and music (${c.sounds.length})`, children: c.sounds.map((s): Node => ({
-      label: s.name.replace(/^gg_snd_/, ""), detail: s.flags & 8 ? "music" : s.file, ref: s.name, target: { kind: "sounds" },
+      label: s.name.replace(/^gg_snd_/, ""), detail: s.flags & 8 ? "music" : s.file, ref: s.name, target: { kind: "sounds", name: s.name, file: s.file },
     })) },
     { label: `Triggers (${triggerItems.length})`, children: triggerItems.map((t): Node => ({ label: t.name, ref: `gg_trg_${ident(t.name)}`, target: { kind: "trigger", name: t.name } })) },
     { label: `Variables (${c.triggers?.variables.length ?? 0})`, children: (c.triggers?.variables ?? []).map((v): Node => ({
-      label: v.name, detail: `${v.type}${v.isArray ? "[]" : ""}`, ref: `udg:${v.name}`, target: { kind: "variables" },
+      label: v.name, detail: `${v.type}${v.isArray ? "[]" : ""}`, ref: `udg:${v.name}`, target: { kind: "variables", name: v.name },
     })) },
     { label: `Imported files (${c.imports.length})`, children: c.imports.map((p): Node => ({ label: p, target: { kind: "imports" } })) },
   ];

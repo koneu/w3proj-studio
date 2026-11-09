@@ -8,6 +8,9 @@
   "contributes": {
     "viewContainers": [{ "id": "objectManager", "title": "Object Manager", "icon": "☰", "order": 6 }],
     "views": [{ "id": "w3.objectManager.tree", "title": "Object Manager", "container": "objectManager" }],
-    "commands": [{ "id": "w3.objectManager.refresh", "title": "Object Manager: Refresh", "category": "Module" }]
+    "commands": [
+      { "id": "w3.objectManager.refresh", "title": "Object Manager: Refresh", "category": "Module" },
+      { "id": "w3.objectManager.summary", "title": "Object Manager: Map Summary", "category": "Module", "hidden": true }
+    ]
   }
 }
