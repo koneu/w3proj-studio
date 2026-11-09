@@ -12,7 +12,7 @@ import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
-import { TerrainToolRegistry, type HeightCommands, type ViewCommands } from "./toolhost";
+import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
@@ -44,6 +44,7 @@ import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStr
 import { campsOf, checkMelee } from "./meleecheck";
 import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
 import { resetVariations } from "../../lib/terrain/variation";
+import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, snapped, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
@@ -1140,6 +1141,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!reset) throw new Error("Switch to a terrain editor first.");
       refuseLostView(path);
       if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
+    }),
+    // Reset Height Field and Adjust Cliff Levels (the World Editor's Advanced menu): the terrain editor in front. Unlike
+    // the World Editor's, each is one undo step, so neither asks first.
+    w3.commands.register("w3.terrain.resetHeightField", async () => {
+      const path = w3.editors.activePath();
+      const ground = path ? toolGroups.wholeMapGround.get(path) : undefined;
+      if (!ground) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
+      const r = ground.resetHeightField();
+      if (typeof r === "string") void w3.window.showWarning(r);
+      else if (r === 0) void w3.window.showInfo("The ground is flat over its cliff levels already.");
+    }),
+    w3.commands.register("w3.terrain.adjustCliffLevels", async (given?: number) => {
+      const path = w3.editors.activePath();
+      const ground = path ? toolGroups.wholeMapGround.get(path) : undefined;
+      if (!ground) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
+      let by = typeof given === "number" ? given : undefined;
+      if (by === undefined) {
+        const { min, max } = ground.range();
+        const typed = await w3.window.inputBox({ prompt: `Cliff levels to move the whole map by (${min} to +${max}; negative is down)`, value: "0" });
+        if (typed === undefined) return;
+        const t = typed.trim();
+        by = /^[+-]?\d+$/.test(t) ? Number(t) : Number.NaN;
+        if (!Number.isInteger(by)) { void w3.window.showWarning(`"${typed}" isn't a whole number of cliff levels.`); return; }
+        // The editor may have closed while the box was open.
+        if (toolGroups.wholeMapGround.get(path!) !== ground) return;
+      }
+      const r = ground.adjustCliffLevels(by);
+      if (typeof r === "string") void w3.window.showWarning(r);
     }),
     // Replace Cliff Type, Tiles, Doodads, Units: the dialog, or `req` as given (scripts and tests). How many changed.
     ...([["w3.terrain.replaceCliffType", "cliffs"], ["w3.terrain.replaceTiles", "tiles"], ["w3.terrain.replaceDoodads", "doodads"], ["w3.terrain.replaceUnits", "units"]] as const)
@@ -3653,6 +3684,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return true;
         };
         toolGroups.resetVariations.set(doc.path, resetGround);
+        // Reset Height Field and Adjust Cliff Levels: the whole map's ground, one undo step each. What stands on the
+        // ground follows it (commitTerrain), doodads with a height of their own stay, as in the World Editor.
+        const wholeGround = (change: (log: CornerUndo) => number | string): number | string => {
+          if (!editable) throw new Error("This terrain is read-only.");
+          if (glDead) throw new Error(VIEW_LOST);
+          const log = new CornerUndo();
+          const r = change(log);
+          if (typeof r === "string" || r === 0) return r;
+          return commitTerrain({ ...log.step(terrain), cliffs: true }) ? r : "Not done: the water would go past the game's limits.";
+        };
+        const wholeGroundCmds: WholeMapGround = {
+          resetHeightField: () => wholeGround((log) => resetHeightField(terrain, log)),
+          adjustCliffLevels: (by) => wholeGround((log) => adjustCliffLevels(terrain, by, log)),
+          range: () => cliffShiftRange(terrain),
+        };
+        toolGroups.wholeMapGround.set(doc.path, wholeGroundCmds);
         // ---- Replace Cliff Type, Tiles, Doodads, Units (commands; the dialog is in replace.ts) -------------------
         const replaceTypes: ReplaceTypes = {
           choices: async (kind) => {
@@ -4515,6 +4562,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
+            if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);
             if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);
             if (toolGroups.heightCommands.get(doc.path) === heightCommands) toolGroups.heightCommands.delete(doc.path);
             if (toolGroups.replaceTypes.get(doc.path) === replaceTypes) toolGroups.replaceTypes.delete(doc.path);

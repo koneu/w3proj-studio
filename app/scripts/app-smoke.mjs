@@ -1415,6 +1415,87 @@ async function flyingHeights(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Adjust Cliff Levels and Reset Height Field on the whole map, by their commands: each one undo step, what stands on the
+ *  ground follows it, a doodad with a height of its own stays (as in the World Editor), a shift past the levels the map
+ *  can have is refused with nothing changed, and undoing gives every file back byte for byte. */
+async function wholeMapGround(page, found) {
+  const fail = (what) => found.push(`whole-map ground: ${what}`);
+  const k = await heightKit(page, "WholeGround");
+  const TXT = "map/war3map.w3e.txt";
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "LTlt", x: 512, y: 512 }], ignoreRoom: true });
+  await k.tool("place_objects", { objects: [{ id: "hfoo", x: 256, y: 0, player: 1 }], ignoreRoom: true });
+  await k.tool("sculpt_terrain", { mode: "raise", amount: 96, left: -512, bottom: -512, right: 512, top: 512 });
+  await k.save();
+  if (k.doodads().length !== 2) return fail(`the trees weren't placed: ${k.doodads().length}`);
+  // The second tree given a height of its own (Set Uniform Doodad Heights on it alone).
+  await k.tab("Select");
+  await k.look(512, 512, { id: "LTlt", x: 512, y: 512 });
+  await sleep(300);
+  const set = await k.run("w3.terrain.setUniformDoodadHeights", 700);
+  if (set) return fail(`Set Uniform Doodad Heights: ${set}`);
+  await k.save();
+  if (k.doodads().find((d) => d.position[0] === 512)?.position[2] !== 700) return fail(`the fixed tree (control): ${JSON.stringify(k.doodads().map((d) => d.position))}`);
+  const files = ["war3map.w3e.txt", "war3map.doo.json", "war3mapUnits.doo.json"];
+  const contents = () => files.map((f) => readFileSync(join(k.root, "map", f), "utf8"));
+  const kept = contents();
+  /** The files that aren't as they were at the start, and where they first differ. */
+  const changedFiles = () => contents().flatMap((c, i) => {
+    if (c === kept[i]) return [];
+    let at = 0;
+    while (at < c.length && c[at] === kept[i][at]) at++;
+    return [`${files[i]} at ${at}: "${kept[i].slice(Math.max(0, at - 30), at + 30)}" → "${c.slice(Math.max(0, at - 30), at + 30)}"`];
+  });
+  const hashes = () => changedFiles().join(" | ");
+  const original = "";
+  const text = () => readFileSync(join(k.root, "map", "war3map.w3e.txt"), "utf8");
+  const section = (name) => { const m = new RegExp(`^\\[${name}\\][^\\n]*\\n([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`, "m").exec(text()); return m ? m[0] : ""; };
+  // A grid of one value is written "[layer] all 2".
+  const levels = () => { const s = section("layer"), all = /^\[layer\] all (\S)/.exec(s); return all ? [all[1]] : [...s.replace(/^\[layer\][^\n]*\n?/, "").replace(/\s/g, "")]; };
+  const before = { levels: levels(), tree: k.doodads().find((d) => d.position[0] === 0).position[2], foot: k.units().find((u) => u.id === "hfoo").position[2] };
+  if (!section("height").includes("[height]") || /\[height\] all 0/.test(section("height"))) fail(`the raised ground isn't in the terrain (control): ${section("height").slice(0, 80)}`);
+  const DIGITS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/";
+  const lv = (ch) => DIGITS.indexOf(ch);
+  if (!before.levels.length || before.levels.some((c) => lv(c) < 0)) return fail(`the cliff levels can't be read (control): ${section("layer").slice(0, 80)}`);
+
+  // Up by one: every level one higher, the tree and the footman 128 higher, the fixed tree where it was.
+  let err = await k.run("w3.terrain.adjustCliffLevels", 1);
+  if (err) fail(`Adjust Cliff Levels: ${err}`);
+  await k.save();
+  const up = levels();
+  if (up.length !== before.levels.length || up.some((c, i) => lv(c) !== lv(before.levels[i]) + 1)) fail(`levels after +1: ${up.slice(0, 8).join("")}… (before ${before.levels.slice(0, 8).join("")}…)`);
+  const tree = k.doodads().find((d) => d.position[0] === 0).position[2], foot = k.units().find((u) => u.id === "hfoo").position[2];
+  if (Math.abs(tree - (before.tree + 128)) > 0.01) fail(`the tree went from ${before.tree} to ${tree}, not 128 up`);
+  if (Math.abs(foot - (before.foot + 128)) > 0.01) fail(`the footman went from ${before.foot} to ${foot}, not 128 up`);
+  if (k.doodads().find((d) => d.position[0] === 512).position[2] !== 700) fail("the tree with a height of its own moved");
+  // One undo takes it all back, byte for byte.
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await k.save();
+  if (hashes() !== original) fail(`one undo of Adjust Cliff Levels didn't give the files back as they were: ${hashes()}`);
+
+  // Past the bottom: refused, nothing changed, nothing to save.
+  await k.clearToasts();
+  err = await k.run("w3.terrain.adjustCliffLevels", -20);
+  if (err) fail(`a refused shift threw: ${err}`);
+  await sleep(300);
+  if (!/Not done/.test(await k.toasts())) fail(`a shift past level 0 wasn't refused with a message: "${await k.toasts()}"`);
+  if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("a refused shift left unsaved changes");
+
+  // Reset Height Field: flat over the levels, the tree back on the (now flat) ground, then undone.
+  err = await k.run("w3.terrain.resetHeightField");
+  if (err) fail(`Reset Height Field: ${err}`);
+  await k.save();
+  if (!/^\[height\] all 0$/m.test(text())) fail(`after Reset Height Field the heights are ${section("height").slice(0, 80)}`);
+  const flatTree = k.doodads().find((d) => d.position[0] === 0).position[2];
+  if (Math.abs(flatTree - (lv(before.levels[0]) - 2) * 128) > 0.01) fail(`after the reset the tree stands at ${flatTree}`);
+  if (k.doodads().find((d) => d.position[0] === 512).position[2] !== 700) fail("the reset moved the tree with a height of its own");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await sleep(300);
+  await k.save();
+  if (hashes() !== original) fail(`one undo of Reset Height Field didn't give the files back as they were: ${hashes()}`);
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Enforce Camera Bounds and Enforce Water Height Limits. Each is run on and off against the same input, which is what
  *  shows the setting made the difference: a nudge, a paste and a placement against the camera bounds, and deep water
  *  drawn on ground raised so high that its surface would pass the limit of the stored level. */
@@ -4041,7 +4122,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, flyingHeights, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, flyingHeights, wholeMapGround, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -4125,6 +4206,7 @@ async function run() {
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
+    await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
     await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));

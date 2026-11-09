@@ -41,6 +41,15 @@ export interface HeightCommands {
   firstDoodadHeight(): number | null;
 }
 
+/** Reset Height Field and Adjust Cliff Levels on one open terrain editor's whole map, each one undo step: how many
+ *  corners changed (0: nothing to do), or why it was refused (nothing changed then). */
+export interface WholeMapGround {
+  resetHeightField(): number | string;
+  adjustCliffLevels(by: number): number | string;
+  /** How far the cliff levels can move (lib/terrain/wholemap.ts cliffShiftRange). */
+  range(): { min: number; max: number };
+}
+
 type Point = { x: number; y: number; object?: unknown };
 type PickObjects = { file: "units" | "doodads"; accept(entry: unknown): boolean; radius?: number };
 
@@ -59,6 +68,8 @@ export class TerrainToolRegistry implements TerrainService {
   readonly look = new Map<string, (x: number, y: number, ref?: PlacedRef) => void>();
   /** Set by each open terrain editor, by its file: Reset Texture Variations, as one undo step; false when nothing changed. */
   readonly resetVariations = new Map<string, () => boolean>();
+  /** Set by each open terrain editor, by its file: Reset Height Field and Adjust Cliff Levels. */
+  readonly wholeMapGround = new Map<string, WholeMapGround>();
   /** Set by each open terrain editor, by its file: the View commands (command palette) on that editor. */
   readonly viewCommands = new Map<string, ViewCommands>();
   /** Set by each open terrain editor, by its file: Set Uniform Doodad Heights and Reset Fixed Object Heights. */
