@@ -12,7 +12,7 @@ import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
 import { abilityOrders, gameTeamColors, specialUnits, teamColors } from "./objects";
 import { AMBIENCE, configSection, dayNightModels, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
-import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText, triggersSection } from "./triggers";
+import { convertToCustom, triggerCustomText, triggersSection } from "./triggers";
 import { fixed, itemsSection, unitsSection, type UnitJson } from "./units";
 
 const EOL = "\r\n";
@@ -768,15 +768,26 @@ test("Convert to Custom Text: the trigger's functions as the World Editor writes
   assert.equal(plain.runOnInit, false, "without the event it isn't run at the start");
 });
 
-test("the placed objects whose globals only a trigger keeps", () => {
-  const kill = (g: string, extra: Partial<Eca> = {}) => eca(2, "KillUnit", [{ type: 1, value: g }], extra);
-  const a = trigger("A", [kill("gg_unit_hfoo_0001"), kill("gg_unit_hfoo_0002"), kill("gg_unit_hfoo_0003"), kill("udg_x")]);
-  const b = trigger("B", [kill("gg_unit_hfoo_0002")]);
-  const off = trigger("Off", [kill("gg_unit_hfoo_0003")], { enabled: false });
-  // 0002 stays (B uses it); 0003 stays declared (Off mentions it) but is no longer created into it.
-  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), a), ["gg_unit_hfoo_0001", "gg_unit_hfoo_0003"]);
-  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), b), []);
-  assert.deepEqual(placedGlobalsOnlyIn(wtg([a, b, off]), off), []);
+test("placed objects that custom text names keep their globals, as the World Editor reads custom text for them", () => {
+  // As World Editor 2.0 saved a converted trigger that still kills footman 0003 (we-drive, 2026-11-09).
+  const units = [unit({ editorId: 3 }), unit({ editorId: 4, position: [400, 0, 0] }), unit({ editorId: 5, position: [800, 0, 0] }), unit({ editorId: 6, position: [900, 0, 0] })];
+  const custom = (header: string, on: string, off: string) => ({ reforged: false, version: 1, comment: "", header, texts: [on, off] });
+  const sections = (c: ReturnType<typeof custom>, triggers = wtg([trigger("Use", [], { isCustom: true }), trigger("Off", [], { isCustom: true, enabled: false, id: 1 })])) =>
+    generateSections(input({ triggers, custom: c, units: units as unknown as PlacedJson[], kindOf: () => "unit" }));
+  const s = sections(custom("// gg_unit_hfoo_0005 in the header", "call KillUnit( gg_unit_hfoo_0003 )", "call KillUnit( gg_unit_hfoo_0004 )"));
+  const g = s.get("Global Variables")!, made = s.get("Unit Creation")!;
+  for (const n of ["0003", "0004", "0005"]) assert.ok(g.includes(`gg_unit_hfoo_${n} `), `gg_unit_hfoo_${n} declared`);
+  hasNot(g, "gg_unit_hfoo_0006");
+  has(made, "    set gg_unit_hfoo_0003 = BlzCreateUnitWithSkin( p, 'hfoo', 100.0, 200.0, 0.000, 'hfoo' )");
+  has(made, "    set gg_unit_hfoo_0005 = BlzCreateUnitWithSkin( p, 'hfoo', 800.0, 0.0, 0.000, 'hfoo' )");
+  // A disabled trigger's text declares, but isn't compiled: nothing is created into it (as for GUI triggers).
+  has(made, "    set u = BlzCreateUnitWithSkin( p, 'hfoo', 400.0, 0.0, 0.000, 'hfoo' )");
+  // Without the names, no globals: the text of a GUI trigger's slot isn't read either.
+  const none = sections(custom("", "call KillUnit( u )", "gg_unit_hfoo_0004"), wtg([trigger("Use", [], { isCustom: true }), trigger("Gui", [], { id: 1 })]));
+  hasNot(none.get("Global Variables")!, "gg_unit_hfoo");
+  hasNot(none.get("Unit Creation")!, "gg_unit_hfoo");
+  // The whole name: a longer identifier isn't the global.
+  hasNot(sections(custom("", "call KillUnit( xgg_unit_hfoo_0003 )", "")).get("Global Variables")!, "gg_unit_hfoo_0003");
 });
 
 // ---- Lua ----------------------------------------------------------------------------------
