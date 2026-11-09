@@ -192,6 +192,16 @@ export interface TextureAnim {
   scaling?: Track;
 }
 
+/** A light (LITE): where it is (its node) and how far it reaches, for the terrain view's Light Ranges. */
+export interface ModelLight {
+  node: Node;
+  /** 0 omnidirectional, 1 directional, 2 ambient. */
+  type: number;
+  /** World units from the light: full strength up to the start, nothing past the end. */
+  attenuationStart: number;
+  attenuationEnd: number;
+}
+
 export interface Model {
   version: number;
   name: string;
@@ -209,6 +219,8 @@ export interface Model {
   ribbons: RibbonEmitter[];
   /** By `Layer.textureAnimId` (-1: none). */
   textureAnims: TextureAnim[];
+  /** The model's lights (LITE), when it has any. They don't light anything here: the terrain view shows their reach. */
+  lights?: ModelLight[];
   /** Chunks present but not rendered (lights, cameras, …). */
   skipped: string[];
   warnings: string[];
@@ -309,6 +321,24 @@ function readNode(r: Reader, kind: string): Node {
   const flags = r.u32();
   const tracks = readTracks(r, start + size);
   return { name, objectId, parentId, flags, kind, translation: tracks.KGTR, rotation: tracks.KGRT, scaling: tracks.KGSC };
+}
+
+/** A light's fixed values after its node, up to `end` (the light's end). Two layouts: the classic one (type,
+ *  attenuation start and end, colour, intensity, ambient colour and intensity: 48 bytes) and the Reforged one, which
+ *  has a word after the type and shadow and falloff values after the ambient intensity (72 bytes; every light of the
+ *  game's version 1800 models). Told apart by what follows the classic part: a track's tag, or the end, is classic.
+ *  Null when the values aren't readable or make no sense. */
+function readLight(r: Reader, node: Node, end: number): ModelLight | null {
+  const left = end - r.p;
+  if (left < 48) return null;
+  const trackAt = (at: number) => at + 4 <= end && /^K[A-Z]{3}$/.test(String.fromCharCode(r.u8[at], r.u8[at + 1], r.u8[at + 2], r.u8[at + 3]));
+  const classic = left < 72 || r.p + 48 === end || trackAt(r.p + 48);
+  const type = r.u32();
+  if (!classic) r.u32();
+  const attenuationStart = r.f32(), attenuationEnd = r.f32();
+  const ok = (v: number) => Number.isFinite(v) && v >= 0 && v < 1e7;
+  if (!ok(attenuationStart) || !ok(attenuationEnd) || type > 2) return null;
+  return { node, type, attenuationStart, attenuationEnd };
 }
 
 function readParticleEmitter2(r: Reader, end: number): ParticleEmitter2 {
@@ -536,8 +566,22 @@ export function parseMdx(buf: Uint8Array): Model {
             model.ribbons.push(e);
           }
           break;
+        case "LITE":
+          while (r.p < end) {
+            const oStart = r.p;
+            const oSize = r.u32();
+            r.need(oSize - 4, "light");
+            const n = readNode(r, "lite");
+            node(n);
+            // A light whose values can't be read is left out; its node stays, as the other objects' do.
+            const light = readLight(r, n, oStart + oSize);
+            if (light) (model.lights ??= []).push(light);
+            r.p = oStart + oSize;
+          }
+          model.skipped.push(tag);
+          break;
         // Objects with an outer size: only their node matters here.
-        case "ATCH": case "PREM": case "LITE": case "CORN":
+        case "ATCH": case "PREM": case "CORN":
           while (r.p < end) {
             const oStart = r.p;
             const oSize = r.u32();

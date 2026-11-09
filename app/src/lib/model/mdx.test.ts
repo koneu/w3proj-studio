@@ -63,6 +63,55 @@ test("a Reforged layer's diffuse flipbook is its texture track; the normal slot'
   assert.equal(still.slotTracks, undefined);
 });
 
+/** A model with one light per entry of `lights`: `words` 18 is the Reforged layout (the game's 1800 models: type, a
+ *  word, start, end, …), 12 the classic one (type, start, end, …); `track` adds an intensity track after the values;
+ *  `size` overrides the light's stated size. */
+function lightModel(lights: { words: 12 | 18; start: number; end: number; track?: boolean; size?: number }[]): Uint8Array {
+  const parts: number[] = [];
+  const u32 = (v: number) => parts.push(v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255);
+  const f32 = (v: number) => { const b = new Uint8Array(new Float32Array([v]).buffer); parts.push(...b); };
+  const tag = (s: string) => parts.push(...[...s].map((c) => c.charCodeAt(0)));
+  tag("MDLX");
+  tag("VERS"); u32(4); u32(1800);
+  tag("LITE");
+  const chunk = parts.length; u32(0);
+  lights.forEach((l, i) => {
+    const at = parts.length; u32(0);
+    u32(96); parts.push(...new Array(80).fill(0)); u32(i); u32(0xffffffff); u32(0x200); // node: size, name, id, parent, flags
+    u32(0); if (l.words === 18) u32(i % 2);
+    f32(l.start); f32(l.end);
+    const rest = l.words === 18 ? 14 : 9;
+    for (let k = 0; k < rest; k++) f32(1);
+    if (l.track) { tag("KLAI"); u32(1); u32(0); u32(0xffffffff); u32(0); f32(10); }
+    const n = l.size ?? parts.length - at;
+    parts.splice(at, 4, n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24);
+  });
+  const n = parts.length - chunk - 4;
+  parts.splice(chunk, 4, n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24);
+  return new Uint8Array(parts);
+}
+
+test("lights: how far each reaches, in the Reforged layout and the classic one, with or without tracks", () => {
+  const m = parseMdx(lightModel([{ words: 18, start: 80, end: 200 }, { words: 18, start: 0, end: 10, track: true }, { words: 12, start: 50, end: 300 }, { words: 12, start: 5, end: 60, track: true }]));
+  assert.deepEqual(m.lights?.map((l) => [l.attenuationStart, l.attenuationEnd]), [[80, 200], [0, 10], [50, 300], [5, 60]]);
+  assert.deepEqual(m.lights?.map((l) => l.node.objectId), [0, 1, 2, 3]);
+  assert.deepEqual(m.warnings, []);
+  assert.equal(parseMdx(model(["a.blp"])).lights, undefined, "a model without lights has none");
+});
+
+test("lights: a damaged one is left out or warned about, never read past its end", () => {
+  // Too short to hold the values: no light, but the node is there and the model reads.
+  const short = parseMdx(lightModel([{ words: 12, start: 1, end: 2, size: 4 + 96 + 20 }]));
+  assert.equal(short.lights, undefined);
+  assert.ok(short.warnings.length > 0, "the light's stated size doesn't match the chunk");
+  // Values that make no sense.
+  assert.equal(parseMdx(lightModel([{ words: 18, start: -5, end: NaN }])).lights, undefined);
+  // A stated size under the size field itself.
+  const tiny = parseMdx(lightModel([{ words: 18, start: 1, end: 2, size: 2 }]));
+  assert.equal(tiny.lights, undefined);
+  assert.ok(tiny.warnings.some((w) => w.startsWith("LITE")));
+});
+
 test("texture paths are renamed in place; the rest of the file stays", () => {
   const src = model(["Doodads/X/Rock_Diffuse.tif", "ReplaceableTextures/EnvironmentMap.blp"]);
   const out = renameTextures(src, (p) => p.replace(/\.tif$/, ".dds"));
