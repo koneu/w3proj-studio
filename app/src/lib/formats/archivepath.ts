@@ -27,15 +27,15 @@ export function toProjectPath(archiveName: string): string {
   return comps.map(escapeComponent).join("/");
 }
 
-/** U+FEFF, the byte-order mark (built from its code: the character itself is invisible in the source). */
-const BOM = String.fromCharCode(0xfeff);
+/** UTF-8 decoding that keeps a U+FEFF at the start of a component: a plain TextDecoder drops it as a byte-order
+ *  mark, but it's part of the name, and the packer (crates/w3proj/src/paths.rs) keeps it. */
+const UTF8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /** Project path below the map folder → archive name. */
 export function toArchiveName(projectPath: string): string {
-  // Nothing escaped, no surrogate (a lone one the UTF-8 round trip below replaces by U+FFFD) and no U+FEFF (which
-  // its decoder drops at the start of a component): the name is the path with "\" (most paths, and
-  // the Problems checks turn thousands per run).
-  if (!projectPath.includes("%") && !/[\uD800-\uDFFF]/.test(projectPath) && !projectPath.includes(BOM)) return projectPath.split("/").join("\\");
+  // Nothing escaped and no surrogate (a lone one the UTF-8 round trip below replaces by U+FFFD): the name is the
+  // path with "\" (most paths, and the Problems checks turn thousands per run).
+  if (!projectPath.includes("%") && !/[\uD800-\uDFFF]/.test(projectPath)) return projectPath.split("/").join("\\");
   return projectPath.split("/").map((part) => {
     const bytes: number[] = [];
     for (let i = 0; i < part.length;) {
@@ -47,6 +47,6 @@ export function toArchiveName(projectPath: string): string {
       bytes.push(...new TextEncoder().encode(c));
       i += c.length;
     }
-    return new TextDecoder().decode(new Uint8Array(bytes));
+    return UTF8.decode(new Uint8Array(bytes));
   }).join("\\");
 }

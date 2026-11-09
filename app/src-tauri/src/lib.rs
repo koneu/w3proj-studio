@@ -1405,6 +1405,17 @@ mod fs_tests {
         std::fs::remove_dir_all(&base).unwrap();
     }
 
+    /// fs_write_bytes takes its path from a header the app escapes with encodeURIComponent: a name that starts
+    /// with U+FEFF (which archive names may) comes back with it, not without.
+    #[test]
+    fn percent_decode_keeps_a_leading_byte_order_mark() {
+        assert_eq!(percent_decode("%2Fp%2Fmap%2F%EF%BB%BFb.mdx").unwrap(), "/p/map/\u{feff}b.mdx");
+        assert_eq!(percent_decode("%EF%BB%BF%EF%BB%BFx").unwrap(), "\u{feff}\u{feff}x");
+        assert_eq!(percent_decode("\u{feff}plain").unwrap(), "\u{feff}plain");
+        // Control: other escapes decode as before.
+        assert_eq!(percent_decode("a%20b%25").unwrap(), "a b%");
+    }
+
     #[test]
     fn fs_stat_reports_what_project_files_does() {
         let (dir, root) = project();

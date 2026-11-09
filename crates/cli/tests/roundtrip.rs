@@ -279,6 +279,40 @@ fn unpacking_into_a_project_again_keeps_it_in_sync() {
     assert_eq!(fs::read(first).unwrap(), fs::read(second).unwrap());
 }
 
+/// A file whose name starts with U+FEFF (which a UTF-8 decoder may take for a byte-order mark and drop) packs
+/// under the archive name the app computes for it (tests/fixtures/archive-names.json, which the app's
+/// archivepath.test.ts checks), and unpacks to the same file again.
+#[test]
+fn a_name_starting_with_a_byte_order_mark_keeps_it_through_pack_and_unpack() {
+    let dir = workdir("bom-name");
+    let (first, project, packed, again) = (dir.join("first.w3x"), dir.join("project"), dir.join("packed.w3x"), dir.join("again"));
+    pack(&fixture(), &first);
+    unpack(&first, &project);
+    let fixture_names: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(fixture().join("../archive-names.json")).unwrap()).unwrap();
+    let case = fixture_names["roundTrip"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["path"].as_str().unwrap().starts_with("war3mapImported/\u{feff}"))
+        .expect("a case with a leading U+FEFF in the fixture");
+    let (path, archive) = (case["path"].as_str().unwrap(), case["archive"].as_str().unwrap());
+    let file = path.split('/').fold(project.join("map"), |p, c| p.join(c));
+    fs::write(&file, "bom named").unwrap();
+
+    pack(&project, &packed);
+    let listing = ok(&["ls", s(&packed)]);
+    assert!(listing.lines().any(|l| l.split_whitespace().nth(3) == Some(archive)), "{archive:?} in {listing}");
+    let o = w3proj(&["cat", s(&packed), archive]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(o.stdout, b"bom named");
+    // Control: the name without the mark isn't in the map.
+    assert!(!w3proj(&["cat", s(&packed), &archive.replace('\u{feff}', "")]).status.success());
+
+    unpack(&packed, &again);
+    assert_eq!(fs::read(path.split('/').fold(again.join("map"), |p, c| p.join(c))).unwrap(), b"bom named");
+}
+
 /// Runs `w3proj args` with its output pipe already closed on the reader's side, like `| head`.
 fn run_with_closed_pipe(args: &[&str]) -> Output {
     use std::process::Stdio;

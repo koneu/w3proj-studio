@@ -112,4 +112,32 @@ mod tests {
         rt("double\\\\sep");
         rt("end\\");
     }
+
+    /// The pairs the app's TypeScript side checks too (`app/src/lib/formats/archivepath.test.ts`):
+    /// both sides name every file the same way, a U+FEFF at the start of a name included.
+    #[test]
+    fn the_names_the_app_uses() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/archive-names.json");
+        let fixture: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let pairs = |key: &str| -> Vec<(String, String)> {
+            fixture[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| (c["path"].as_str().unwrap().to_string(), c["archive"].as_str().unwrap().to_string()))
+                .collect()
+        };
+        let both = pairs("roundTrip");
+        // Control: the cases this is about are there.
+        assert!(both.iter().filter(|(p, _)| p.contains('\u{feff}')).count() >= 4);
+        for (path, archive) in &both {
+            assert_eq!(&to_archive_name(path), archive, "{path:?}");
+            assert_eq!(&to_project_path(archive), path, "{archive:?}");
+        }
+        let one_way = pairs("toArchive");
+        assert!(one_way.len() >= 2);
+        for (path, archive) in &one_way {
+            assert_eq!(&to_archive_name(path), archive, "{path:?}");
+        }
+    }
 }

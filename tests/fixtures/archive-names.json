@@ -1,0 +1,22 @@
+{
+  "about": "Project paths below map/ and the archive names they pack to. Read by the TypeScript side (app/src/lib/formats/archivepath.test.ts) and the Rust side (crates/w3proj/src/paths.rs), so both map names the same way. roundTrip: both directions; toArchive: project path to archive name only (an escape the unpacker never writes).",
+  "roundTrip": [
+    { "path": "war3map.j", "archive": "war3map.j" },
+    { "path": "war3mapImported/a b.mdx", "archive": "war3mapImported\\a b.mdx" },
+    { "path": "war3mapImported/﻿bom.txt", "archive": "war3mapImported\\﻿bom.txt" },
+    { "path": "﻿war3mapImported/x.blp", "archive": "﻿war3mapImported\\x.blp" },
+    { "path": "﻿﻿double.txt", "archive": "﻿﻿double.txt" },
+    { "path": "a/b﻿.mdx", "archive": "a\\b﻿.mdx" },
+    { "path": "100%25.blp", "archive": "100%.blp" },
+    { "path": "%25﻿after.txt", "archive": "%﻿after.txt" },
+    { "path": "﻿100%25.blp", "archive": "﻿100%.blp" },
+    { "path": "a%3Ab%3F.txt", "archive": "a:b?.txt" },
+    { "path": "%63on.txt", "archive": "con.txt" },
+    { "path": "trailing%2E", "archive": "trailing." },
+    { "path": "été/中.txt", "archive": "été\\中.txt" }
+  ],
+  "toArchive": [
+    { "path": "%EF%BB%BFescaped.txt", "archive": "﻿escaped.txt" },
+    { "path": "war3mapImported/%EF%BB%BF%25.txt", "archive": "war3mapImported\\﻿%.txt" }
+  ]
+}
