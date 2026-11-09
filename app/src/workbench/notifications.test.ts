@@ -30,3 +30,10 @@ test("other keys move on, so the next Delete can't answer for something else", (
 test("holding a modifier isn't moving on", () => {
   for (const k of ["Shift", "Control", "Alt", "Meta"]) assert.equal(deleteQuestionKey(key(k)), null);
 });
+
+test("keys the webview calls Unidentified (WebKitGTK) go by the physical key (lib/keys.ts)", () => {
+  const unnamed = (code: string, repeat = false) => ({ key: "Unidentified", code, repeat, target: { tagName: "DIV" } });
+  assert.equal(deleteQuestionKey(unnamed("Delete")), "yes");
+  assert.equal(deleteQuestionKey(unnamed("Escape")), "no");
+  assert.equal(deleteQuestionKey(unnamed("ShiftLeft")), null, "a modifier");
+});

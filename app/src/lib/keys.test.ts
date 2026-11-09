@@ -15,3 +15,19 @@ test("keyOf: the key as the webview names it; the physical key where WebKitGTK s
   assert.equal(keyOf({ key: "Unidentified", code: "" }), "Unidentified", "nothing to go by: left as it is");
   assert.equal(keyOf({ key: "Unidentified" }), "Unidentified");
 });
+
+test("keyOf: the rest of WebKitGTK's Unidentified chords (Ctrl+Alt+F-keys and number pad operators), Shift's capitals, modifiers", () => {
+  assert.equal(keyOf({ key: "Unidentified", code: "F5" }), "F5", "Ctrl+Alt+F5");
+  assert.equal(keyOf({ key: "Unidentified", code: "NumpadAdd" }), "+", "Ctrl+Alt+Numpad +");
+  assert.equal(keyOf({ key: "Unidentified", code: "NumpadSubtract" }), "-");
+  assert.equal(keyOf({ key: "Unidentified", code: "NumpadMultiply" }), "*");
+  assert.equal(keyOf({ key: "Unidentified", code: "NumpadDivide" }), "/");
+  assert.equal(keyOf({ key: "Unidentified", code: "NumpadEnter" }), "Enter");
+  assert.equal(keyOf({ key: "Unidentified", code: "Numpad7" }), "7");
+  assert.equal(keyOf({ key: "Unidentified", code: "KeyZ", shiftKey: true }), "Z", "with Shift a letter is its capital, as e.key gives it");
+  assert.equal(keyOf({ key: "Unidentified", code: "AltLeft" }), "Alt");
+  assert.equal(keyOf({ key: "Unidentified", code: "ControlRight" }), "Control");
+  // Control: what the webview names stays, Shift or not.
+  assert.equal(keyOf({ key: "z", code: "KeyZ", shiftKey: true }), "z");
+  assert.equal(keyOf({ key: "Home", code: "Numpad7" }), "Home", "Shift+Numpad 7 is Home: the key counts, not the place");
+});

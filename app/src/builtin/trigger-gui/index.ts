@@ -11,6 +11,7 @@ import {
   type TriggerEditorHandle, type TriggerGuiService, type TriggerLocation, type TriggerParamEditor, type TriggersService,
 } from "../../extensions/services";
 import { branchLabels, paramParts, paramText } from "../../lib/triggers/display";
+import { keyOf } from "../../lib/keys";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
 import type { Eca, Param, TriggerItem } from "../../lib/triggers/wtg";
 import { copyText, h } from "../../workbench/dom";
@@ -147,13 +148,13 @@ class GuiView {
     const s = this.sel;
     const onEca = !!s && "path" in s && s.branch === undefined;
     if (e.ctrlKey || e.metaKey) {
-      const k = e.key.toLowerCase();
+      const k = keyOf(e).toLowerCase();
       if (k === "c" && onEca) { this.copy(false); return true; }
       if (k === "x" && onEca && this.ed.editable) { this.copy(true); return true; }
       if (k === "v" && this.ed.editable && clipboard.length) { this.paste(); return true; }
       return false;
     }
-    if (e.key !== "Delete" || !this.ed.editable || !onEca) return false;
+    if (keyOf(e) !== "Delete" || !this.ed.editable || !onEca) return false;
     this.remove();
     return true;
   }

@@ -4,6 +4,8 @@
 // No editor state here: the viewer passes what it has, the tests pass made-up values.
 
 import type { GridSize } from "./viewcmds";
+// This file's own keyOf names a command's key (for tooltips).
+import { keyOf as eventKey } from "../../lib/keys";
 
 export type TerrainLook = "textured" | "wireframe" | "hidden";
 export const TERRAIN_LOOKS: readonly TerrainLook[] = ["textured", "wireframe", "hidden"];
@@ -136,12 +138,13 @@ export const VIEW_KEYS: readonly { key: string; command: string }[] = [
   { key: "Ctrl+M", command: "w3.terrain.toggleCameraObjects" },
 ];
 
-type Keys = { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
+type Keys = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
 
 /** The key as the table writes it ("Ctrl+Shift+L"), or null for one with Alt or a key that isn't a letter. */
 function keyName(e: Keys): string | null {
-  if (e.altKey || !/^[a-z]$/i.test(e.key)) return null;
-  return `${e.ctrlKey || e.metaKey ? "Ctrl+" : ""}${e.shiftKey ? "Shift+" : ""}${e.key.toUpperCase()}`;
+  const key = eventKey(e);
+  if (e.altKey || !/^[a-z]$/i.test(key)) return null;
+  return `${e.ctrlKey || e.metaKey ? "Ctrl+" : ""}${e.shiftKey ? "Shift+" : ""}${key.toUpperCase()}`;
 }
 
 /** The command of a View key, or null. */
@@ -175,7 +178,8 @@ const ARROWS: Record<string, [number, number]> = {
 
 export function cameraKey(e: Keys & { code?: string }): CameraMove | null {
   if (e.altKey) return null;
-  const dir = ARROWS[e.key] ?? (e.code && /^\d$/.test(e.key) ? ARROWS[e.code] : undefined);
+  const key = eventKey(e);
+  const dir = ARROWS[key] ?? (e.code && /^\d$/.test(key) ? ARROWS[e.code] : undefined);
   if (!dir) return null;
   if (e.ctrlKey || e.metaKey) {
     if (dir[1]) return { zoom: dir[1] > 0 ? 1 / CAMERA_STEPS.zoom : CAMERA_STEPS.zoom };

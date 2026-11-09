@@ -69,6 +69,8 @@ import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview"
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+// viewmodes' keyOf names a command's key (for tooltips); this is the event's.
+import { keyOf as eventKey } from "../../lib/keys";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, type PlayerInfo } from "../../lib/terrain/startlocations";
@@ -1615,6 +1617,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // A stroke commits here, not through changed(): the view layers follow every edit.
           refreshLayersSoon();
           notifyGroups(e);
+          // Other modules (TerrainService.onDidEdit) hear of every edit, not only of undo and redo.
+          if (toolGroups.liveLists === liveLists) toolGroups.edited({ terrain: e.terrain, objects: e.objects });
           shadowEditsSoon();
           minimapStale.set();
           occupancyPromise = walkPromise = destructablePromise = standingPromise = null;
@@ -2963,8 +2967,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** Ctrl+C, X, V and A, and the keys while pasting. True when the key did something. */
         const clipboardKey = (e: KeyboardEvent) => {
-          if (pasting && e.key === "Escape") { endPaste(); return true; }
-          if (terrainArea && e.key === "Escape") { setArea(null); return true; }
+          if (pasting && eventKey(e) === "Escape") { endPaste(); return true; }
+          if (terrainArea && eventKey(e) === "Escape") { setArea(null); return true; }
           const turn = turnKey(e);
           if (turn && pasting) {
             if (!e.repeat) { pasting = turnFragment(pasting, turn); if (pasteAt) showPaste(pasteAt); }
@@ -2972,7 +2976,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (turn && editable && !activeGroup && selectedEntries().length) { if (!e.repeat) turnSelection(turn); return true; }
           if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
-          const key = e.key.toLowerCase();
+          const key = eventKey(e).toLowerCase();
           if (key === "c" && terrainArea) { copyArea(terrainArea); return true; }
           if (key === "c") return copySelection();
           if (key === "x") {
@@ -3251,7 +3255,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const input = h("input.terrain-sel-expr", {
               type: "text", placeholder: common(k), title,
               onkeydown: (e: KeyboardEvent) => {
-                if (e.key !== "Enter" || !input.value.trim()) return;
+                if (eventKey(e) !== "Enter" || !input.value.trim()) return;
                 const err = massEdit(group, k, input.value.trim());
                 input.classList.toggle("invalid", !!err);
                 input.title = err ? `${err}\n\n${title}` : title;
@@ -3384,7 +3388,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const filterHelp = "Select all objects matching every condition (and the Box selects kinds): field op value, op = != < > <= >= or : (contains). Fields: id, kind (unit, item, destructable, doodad), owner (Player 1 = 1), name, x, y, z, facing, scale, variation. Examples: kind=unit owner=1 · name:tree scale>1.1 · id=LTlt";
         const filterInput = h("input.terrain-filter", {
           type: "text", placeholder: "Filter, e.g. kind=unit owner=1 · name:tree", title: filterHelp,
-          onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") void runFilter(); },
+          onkeydown: (e: KeyboardEvent) => { if (eventKey(e) === "Enter") void runFilter(); },
         });
         const runFilter = async () => {
           if (!filterInput.value.trim()) return;
@@ -3780,7 +3784,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         syncPick();
         const stopPick = toolGroups.onChange(syncPick);
-        const live = () => ({ units: unitsFile?.list ?? [], doodads: dooFile?.list ?? [] });
+        /** TerrainService.placedObjects: a list not loaded yet (or unreadable) is null, so its user reads the saved file. */
+        const live = () => ({ units: unitsFile?.list ?? null, doodads: dooFile?.list ?? null });
         /** While picking objects: the accepted placement nearest to a ground point, if close enough. */
         const pickTarget = (g: [number, number, number] | null): Placed | null => {
           const o = toolGroups.picking?.objects;
@@ -4435,18 +4440,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const t = e.target as HTMLElement;
           if (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "range", "button"].includes((t as HTMLInputElement).type))) return;
           if (!(e.ctrlKey || e.metaKey)) return;
-          if (e.key === "z" || e.key === "Z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
-          else if (e.key === "y" || e.key === "Y") { e.preventDefault(); redo(); }
+          const key = eventKey(e).toLowerCase();
+          if (key === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+          else if (key === "y") { e.preventDefault(); redo(); }
         });
         // Arrow keys scroll like in the World Editor.
         canvas.addEventListener("keydown", (e) => {
           // No edits by key on a view that isn't drawn (the message over it takes the mouse). Ctrl+S still saves: it's a command.
           if (glDead) return;
-          if (toolGroups.picking && e.key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
-          if (e.key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
+          const key = eventKey(e);
+          if (toolGroups.picking && key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
+          if (key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
           if (clipboardKey(e)) { e.preventDefault(); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
-          if (e.key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
+          if (key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
           if (isRecallKey(e) && !activeGroup) {
             e.preventDefault();
             if (e.repeat || facing) return;
@@ -4467,9 +4474,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!e.repeat) void w3.commands.execute(viewCommand).catch((err) => w3.window.showError(String((err as Error)?.message ?? err)));
             return;
           }
-          if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
-          if (editable && selectedEntries().length && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
-          if (editable && selectedEntries().length && (e.key === "[" || e.key === "]")) { e.preventDefault(); byKey(e, () => rotateSelected(e.key === "[" ? 15 : -15)); return; }
+          if ((key === "f" || key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
+          if (editable && selectedEntries().length && (key === "Delete" || key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
+          if (editable && selectedEntries().length && (key === "[" || key === "]")) { e.preventDefault(); byKey(e, () => rotateSelected(key === "[" ? 15 : -15)); return; }
           const edit = editable && !activeGroup && selectedEntries().length ? selectionKey(e) : null;
           if (edit) { e.preventDefault(); byKey(e, () => keyEdit(edit)); return; }
           // The camera keys, as the World Editor's (viewmodes.ts cameraKey): arrows scroll, Shift faster, Ctrl+Up and
@@ -4529,7 +4536,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
         // Wherever the key comes up, and if it never does here: Alt+Tab takes it along.
-        const areaKeyUp = (e: KeyboardEvent) => { if (e.key.toLowerCase() === "a") areaKey = false; };
+        const areaKeyUp = (e: KeyboardEvent) => { if (eventKey(e).toLowerCase() === "a") areaKey = false; };
         const areaKeyLost = () => { areaKey = false; };
         window.addEventListener("keyup", areaKeyUp);
         window.addEventListener("blur", areaKeyLost);
@@ -4803,7 +4810,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopPick();
             stopPickRing();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
-            if (toolGroups.liveLists === liveLists) toolGroups.liveLists = null;
+            if (toolGroups.liveLists === liveLists) {
+              toolGroups.liveLists = null;
+              // Closed (unsaved changes gone with it): the saved files are what there is again (TerrainService.onDidEdit).
+              toolGroups.edited({ terrain: false, objects: true });
+            }
             if (toolGroups.look.get(doc.path) === look) toolGroups.look.delete(doc.path);
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);

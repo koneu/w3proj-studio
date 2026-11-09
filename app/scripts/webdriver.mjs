@@ -39,8 +39,20 @@ const KEYS = {
 // DevTools' modifier bits, in the order they're pressed.
 const MODIFIERS = [[2, ""], [8, ""], [1, ""], [4, ""]]; // Control, Shift, Alt, Meta
 
-function keyValue(key) {
+// The number pad, by its code: DevTools' key is what it types ("7", "+"), which WebDriver would take for the main
+// keys. WebDriver's Numpad0…Numpad9 are U+E01A…U+E023, then Multiply, Add, Separator, Subtract, Decimal, Divide.
+const NUMPAD = Object.fromEntries([
+  ...Array.from({ length: 10 }, (_, i) => [`Numpad${i}`, 0xe01a + i]),
+  ["NumpadMultiply", 0xe024], ["NumpadAdd", 0xe025], ["NumpadSubtract", 0xe027], ["NumpadDecimal", 0xe028], ["NumpadDivide", 0xe029],
+].map(([code, c]) => [code, String.fromCharCode(c)]));
+
+// A modifier pressed alone (WebDriver's Shift U+E008, Control U+E009, Alt U+E00A, Meta U+E03D).
+const MODIFIER_KEYS = { Shift: String.fromCharCode(0xe008), Control: String.fromCharCode(0xe009), Alt: String.fromCharCode(0xe00a), Meta: String.fromCharCode(0xe03d) };
+
+function keyValue(key, code) {
+  if (code && NUMPAD[code]) return NUMPAD[code];
   if (KEYS[key]) return KEYS[key];
+  if (MODIFIER_KEYS[key]) return MODIFIER_KEYS[key];
   if ([...key].length === 1) return key;
   throw new Error(`webdriver.mjs doesn't know the key "${key}": add it to KEYS`);
 }
@@ -95,7 +107,7 @@ export class WebDriverPage {
   actions(actions) { return this.request("POST", "/actions", { actions }); }
 
   key(type, params) {
-    const value = keyValue(params.key);
+    const value = keyValue(params.key, params.code);
     const mods = MODIFIERS.filter(([bit]) => (params.modifiers ?? 0) & bit).map(([, v]) => v);
     const steps = type === "keyDown"
       ? [...mods.map((v) => ({ type: "keyDown", value: v })), { type: "keyDown", value }]

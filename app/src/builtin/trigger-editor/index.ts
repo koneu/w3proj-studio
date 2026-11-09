@@ -9,6 +9,7 @@ import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
 import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
 import { resetTriggers } from "../../lib/triggers/defaults";
+import { keyOf } from "../../lib/keys";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -31,6 +32,7 @@ import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, renameVariable, variableParams, variablesTable, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
+import { Listeners } from "../../lib/listeners";
 
 /** A trigger of events, conditions and actions (not custom text, a script item or a comment). */
 const isGuiTrigger = (it: Item): it is TriggerItem => "ecas" in it && it.type === 8 && !it.isCustom && !it.isComment;
@@ -48,6 +50,10 @@ class KindRegistry implements TriggersService {
   }
   all() { return [...this.kinds].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); }
   onChange(l: () => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
+  liveTriggers() { return openView?.file ?? null; }
+  /** Told by the open editor after each edit, undo and redo, and when it closes. */
+  readonly edits = new Listeners();
+  onDidEdit(listener: () => void) { return this.edits.add(listener); }
 }
 
 /** Copied tree items with their contents, custom text and variables (shared by all maps). */
@@ -316,7 +322,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.replaceChildren();
         const code = await w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null);
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d), code);
-        if (!doc.readOnly) openView = view;
+        if (!doc.readOnly) {
+          openView = view;
+          view.edited = () => { if (openView === view) kinds.edits.fire(); };
+        }
         if (startWithVariables) { startWithVariables = false; view.showVariables(); }
         if (startWithTrigger) {
           const { name, at } = startWithTrigger;
@@ -339,7 +348,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
           watches: game ? [] : [WCT_TEXT, WCT_RAW],
-          dispose: () => { view.dispose(); if (openView === view) openView = null; },
+          dispose: () => {
+            view.dispose();
+            if (openView === view) { openView = null; kinds.edits.fire(); }
+          },
         };
       },
     }),
@@ -561,9 +573,9 @@ class TriggerView {
     // Code editors have their own undo, copy and paste.
     if (e.target instanceof Element && e.target.closest(".cm-editor")) return;
     if (this.area === "detail" && this.body?.keyDown?.(e)) { e.preventDefault(); return; }
-    if (e.key === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
+    if (keyOf(e) === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
-    const k = e.key.toLowerCase();
+    const k = keyOf(e).toLowerCase();
     if (this.area === "tree" && (k === "c" || k === "x" || k === "v")) {
       e.preventDefault();
       if (k === "v") this.pasteItems(); else this.copyItem(k === "x");
@@ -835,13 +847,17 @@ class TriggerView {
     this.setDirty(this.dirty);
     this.renderTree();
     if (!opts.keepView) this.renderDetail();
+    this.edited();
   }
   step(dir: -1 | 1) {
     if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
     else if (dir > 0 && this.at < this.undo.length) this.restore(this.undo[this.at++].after);
     else return;
     this.setDirty(this.dirty);
+    this.edited();
   }
+  /** After each edit, undo and redo (TriggersService.onDidEdit; set by the provider). */
+  edited: () => void = () => {};
 
   // ---- items ------------------------------------------------------------------------
   private find(sel: Selection): Item | undefined {
@@ -1139,7 +1155,7 @@ class TriggerView {
   private query = "";
   private searchBox = h("input.trig-search", { type: "search", placeholder: "Search triggers (names, actions, script)",
     oninput: () => { clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => { this.query = this.searchBox.value; this.renderTree(); }, 150); },
-    onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") { this.searchBox.value = ""; this.query = ""; this.renderTree(); } } });
+    onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") { this.searchBox.value = ""; this.query = ""; this.renderTree(); } } });
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   /** Items matching `q` in the current mode, with the categories containing them. */
   private searchMatches(q: string, children: Map<number, Item[]>): Set<Item> {

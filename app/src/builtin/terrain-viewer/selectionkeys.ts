@@ -1,6 +1,7 @@
 // The World Editor's keys for what's selected. Height and scale are for doodads and destructables:
 // a unit stands on the ground, at the size its type says.
 
+import { keyOf } from "../../lib/keys";
 import type { Turn } from "../../lib/terrain/fragment";
 
 export type SelectionKey =
@@ -16,37 +17,38 @@ type Keys = { key: string; code: string; ctrlKey: boolean; metaKey: boolean; alt
 export function selectionKey(e: Keys): SelectionKey | null {
   if (e.altKey) return null;
   const ctrl = e.ctrlKey || e.metaKey;
-  if (e.key === "PageUp") return ctrl ? { raise: HEIGHT } : { scale: [0, 0, SIZE] };
-  if (e.key === "PageDown") return ctrl ? { raise: -HEIGHT } : { scale: [0, 0, -SIZE] };
+  const key = keyOf(e);
+  if (key === "PageUp") return ctrl ? { raise: HEIGHT } : { scale: [0, 0, SIZE] };
+  if (key === "PageDown") return ctrl ? { raise: -HEIGHT } : { scale: [0, 0, -SIZE] };
   if (ctrl) {
     const nudge: Record<string, [number, number]> = {
       ArrowLeft: [-NUDGE, 0], ArrowRight: [NUDGE, 0], ArrowUp: [0, NUDGE], ArrowDown: [0, -NUDGE],
       Numpad4: [-NUDGE, 0], Numpad6: [NUDGE, 0], Numpad8: [0, NUDGE], Numpad2: [0, -NUDGE],
     };
-    const move = nudge[e.code] ?? nudge[e.key];
+    const move = nudge[e.code] ?? nudge[key];
     return move ? { nudge: move } : null;
   }
-  if (e.key === "Home") return { scale: [SIZE, SIZE, 0] };
-  if (e.key === "End") return { scale: [-SIZE, -SIZE, 0] };
-  if (e.key === "+") return { scale: [SIZE, SIZE, SIZE] };
-  if (e.key === "-") return { scale: [-SIZE, -SIZE, -SIZE] };
-  if (e.key === "/") return { rotate: TURN };
-  if (e.key === "*") return { rotate: -TURN };
+  if (key === "Home") return { scale: [SIZE, SIZE, 0] };
+  if (key === "End") return { scale: [-SIZE, -SIZE, 0] };
+  if (key === "+") return { scale: [SIZE, SIZE, SIZE] };
+  if (key === "-") return { scale: [-SIZE, -SIZE, -SIZE] };
+  if (key === "/") return { rotate: TURN };
+  if (key === "*") return { rotate: -TURN };
   return null;
 }
 
 type PlainKeys = Keys & { shiftKey: boolean };
 
 /** Space alone: selects the last selected object, or deselects. */
-export const isRecallKey = (e: PlainKeys) => e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+export const isRecallKey = (e: PlainKeys) => keyOf(e) === " " && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
 
 /** Ctrl+F1: the selection in the Object Editor. */
-export const isObjectEditorKey = (e: Keys) => e.key === "F1" && (e.ctrlKey || e.metaKey) && !e.altKey;
+export const isObjectEditorKey = (e: Keys) => keyOf(e) === "F1" && (e.ctrlKey || e.metaKey) && !e.altKey;
 
 /** H and V mirror, R turns a quarter, Shift+R back: for the selection and for what's being pasted. */
 export function turnKey(e: PlainKeys): Turn | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
-  switch (e.key.toLowerCase()) {
+  switch (keyOf(e).toLowerCase()) {
     case "h": return "mirrorX";
     case "v": return "mirrorY";
     case "r": return e.shiftKey ? "ccw" : "cw";

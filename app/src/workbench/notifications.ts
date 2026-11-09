@@ -1,3 +1,4 @@
+import { keyOf } from "../lib/keys";
 import { copyButton, h } from "./dom";
 
 type Severity = "info" | "warning" | "error";
@@ -8,12 +9,13 @@ const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta"]);
  *  and has to mean nothing: only a new press answers. Typing in a field stays typing. Any other key
  *  moves on, like arrows to another object: the question was about what was selected before, so it
  *  goes, or the next Delete would answer it for something else. */
-export function deleteQuestionKey(e: { key: string; repeat: boolean; target: unknown }): "yes" | "no" | "away" | null {
-  if (MODIFIERS.has(e.key)) return null;
+export function deleteQuestionKey(e: { key: string; code?: string; repeat: boolean; target: unknown }): "yes" | "no" | "away" | null {
+  const key = keyOf(e);
+  if (MODIFIERS.has(key)) return null;
   const t = e.target as { tagName?: string; isContentEditable?: boolean } | null;
   const typing = t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || !!t?.isContentEditable;
-  if (e.key === "Delete") return e.repeat || typing ? null : "yes";
-  if (e.key === "Escape") return e.repeat ? null : "no";
+  if (key === "Delete") return e.repeat || typing ? null : "yes";
+  if (key === "Escape") return e.repeat ? null : "no";
   return "away";
 }
 
@@ -33,7 +35,7 @@ export class Notifications {
       const onKey = (e: KeyboardEvent) => {
         const answer = deleteQuestionKey(e);
         if (answer === "away") { close(); return; }
-        if (!answer) { if (e.key === "Delete" && e.repeat) { e.preventDefault(); e.stopPropagation(); } return; }
+        if (!answer) { if (keyOf(e) === "Delete" && e.repeat) { e.preventDefault(); e.stopPropagation(); } return; }
         // It answers this, and mustn't reach the list behind and ask again.
         e.preventDefault();
         e.stopPropagation();

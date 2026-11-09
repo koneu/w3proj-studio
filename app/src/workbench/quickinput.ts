@@ -1,4 +1,5 @@
 import type { QuickPickItem } from "../extensions/api";
+import { keyOf } from "../lib/keys";
 import { h } from "./dom";
 
 /** Subsequence match; returns a score (lower is better) or -1. */
@@ -67,10 +68,11 @@ export class QuickInput {
         resolve(it);
       };
       const onKey = (e: KeyboardEvent) => {
-        if (e.key === "ArrowDown") { active = Math.min(active + 1, shown.length - 1); render(); e.preventDefault(); }
-        else if (e.key === "ArrowUp") { active = Math.max(active - 1, 0); render(); e.preventDefault(); }
-        else if (e.key === "Enter") { finish(shown[active]); e.preventDefault(); }
-        else if (e.key === "Escape") { finish(undefined); e.preventDefault(); }
+        const key = keyOf(e);
+        if (key === "ArrowDown") { active = Math.min(active + 1, shown.length - 1); render(); e.preventDefault(); }
+        else if (key === "ArrowUp") { active = Math.max(active - 1, 0); render(); e.preventDefault(); }
+        else if (key === "Enter") { finish(shown[active]); e.preventDefault(); }
+        else if (key === "Escape") { finish(undefined); e.preventDefault(); }
       };
       const cleanup = this.open(opts.placeholder ?? "", opts.value ?? "", render, onKey, () => finish(undefined));
       render();
@@ -82,8 +84,9 @@ export class QuickInput {
     return new Promise((resolve) => {
       const finish = (v: string | undefined) => { cleanup(); resolve(v); };
       const onKey = (e: KeyboardEvent) => {
-        if (e.key === "Enter") { finish(this.input.value); e.preventDefault(); }
-        else if (e.key === "Escape") { finish(undefined); e.preventDefault(); }
+        const key = keyOf(e);
+        if (key === "Enter") { finish(this.input.value); e.preventDefault(); }
+        else if (key === "Escape") { finish(undefined); e.preventDefault(); }
       };
       const cleanup = this.open(opts.placeholder ?? "", opts.value ?? "", () => {}, onKey, () => finish(undefined));
       this.list.replaceChildren();

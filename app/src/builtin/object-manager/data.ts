@@ -105,6 +105,25 @@ export function objectRefs(kinds: { ext: string; label: string; objects: ObjectE
   return out;
 }
 
+/** One kind's object data, saved (war3map.<ext>.json) or as an open Object Editor holds it (with its custom objects'
+ *  names). */
+export interface KindData { custom?: readonly ObjectEntry[]; original?: readonly ObjectEntry[]; names?: ReadonlyMap<string, string> }
+
+/** The object data of every kind in `kinds` ([ext, label]): an open editor's (`live`) where there is one, else the saved
+ *  file's (`saved`, null when absent). The custom ids per kind, every object per kind, and the names the editors show. */
+export function objectKinds(kinds: readonly [string, string][], saved: ReadonlyMap<string, KindData | null>, live: ReadonlyMap<string, KindData>):
+  { custom: MapContents["custom"]; objects: MapContents["objects"]; names: Map<string, string> } {
+  const custom: MapContents["custom"] = [], objects: MapContents["objects"] = [], names = new Map<string, string>();
+  for (const [ext, label] of kinds) {
+    const file = live.get(ext) ?? saved.get(ext) ?? null;
+    const own = (file?.custom ?? []).filter((o): o is ObjectEntry & { id: string } => typeof o.id === "string");
+    custom.push({ ext, label, ids: own.map((o) => ({ id: o.id, base: o.base })) });
+    objects.push({ ext, label: label.replace(/s$/, ""), objects: [...(file?.original ?? []), ...(file?.custom ?? [])] });
+    for (const [id, n] of file?.names ?? []) names.set(id, n);
+  }
+  return { custom, objects, names };
+}
+
 /** Those of `ids` that a text mentions as a whole word: JASS 'h000', Lua FourCC("h000"), JSON "h000". */
 export function idsInText(text: string, ids: ReadonlySet<string>): string[] {
   return [...new Set(text.match(/(?<![A-Za-z0-9])[A-Za-z0-9]{4}(?![A-Za-z0-9])/g) ?? [])].filter((t) => ids.has(t));
@@ -179,7 +198,8 @@ export function buildTree(c: MapContents): Node[] {
   const TAB = (group: ListItem["group"], label: string): GroupOpen => ({ label, command: "w3.terrain.groupItemAction", args: [group, null, "select"] });
   const placedGroup = (title: string, list: Placed[], ext: string, prefix: string): Node => {
     const byType = new Map<string, Placed[]>();
-    for (const p of list) byType.set(p.id, [...(byType.get(p.id) ?? []), p]);
+    // Pushed, not copied: a big map has thousands of trees of one type.
+    for (const p of list) { const ps = byType.get(p.id); if (ps) ps.push(p); else byType.set(p.id, [p]); }
     const children = [...byType].map(([id, ps]): Node => ({
       label: `${c.nameOf(id)} (${ps.length})`, detail: id, ref: id, target: { kind: "object", ext, id },
       children: ps.map((p): Node => {

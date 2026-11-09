@@ -1,7 +1,9 @@
 import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { outside, rangeNote } from "../../lib/objects/limits";
+import { keyOf } from "../../lib/keys";
 import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits, type GameplayLimits } from "../../lib/objects/constlimits";
-import { OBJECTS_SERVICE } from "../../extensions/services";
+import { OBJECTS_SERVICE, type LiveObjectData } from "../../extensions/services";
+import { Listeners } from "../../lib/listeners";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
@@ -199,7 +201,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   for (const t of ["keydown", "keyup", "mousedown"] as const) window.addEventListener(t, trackShift, true);
   ctx.subscriptions.push({ dispose: () => { for (const t of ["keydown", "keyup", "mousedown"] as const) window.removeEventListener(t, trackShift, true); } });
   const images = imageLoader(w3);
+  /** Open editors by document path: their kind and object data as they hold it now (ObjectsService.liveObjects). */
+  const liveData = new Map<string, { kind: string; data(): LiveObjectData }>();
+  /** ObjectsService.onDidEdit's listeners. */
+  const edits = new Listeners<string>();
   const objects = objectsService(w3, {
+    liveObjects: () => new Map([...liveData.values()].map((l) => [l.kind, l.data()])),
+    onDidEdit: (listener) => edits.add(listener),
     async typesFor(ids: readonly string[], root?: string) {
       const view = await viewMap(w3, undefined, root);
       const seeds = [...new Set(ids)].flatMap((id) => view.customs.get(id) ?? []);
@@ -355,6 +363,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return stripColors(baseName(o));
         };
+        /** The object data as it is here now, for other modules (ObjectsService.liveObjects). */
+        const liveNow = (): LiveObjectData => ({
+          custom: file.custom, original: file.original,
+          names: new Map(file.custom.flatMap((o): [string, string][] => { const n = o.id ? nameOf(o) : ""; return n ? [[o.id!, n]] : []; })),
+        });
 
         /** The anchor (single selection, Shift+click range start). */
         let selected: Obj | null = file.custom[0] ?? file.original[0] ?? null;
@@ -381,29 +394,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const snapshot = () => JSON.stringify({ custom: file.custom, original: file.original, wts: wts.snapshot() });
         const history = [snapshot()];
         let at = 0;
+        /** Other modules hear of each edit, undo and redo here (ObjectsService.onDidEdit). */
+        const told = () => { if (liveData.get(doc.path)?.data === liveNow) edits.fire(kind); };
         const record = () => {
           const s = snapshot();
           if (s === history[at]) return;
           history.splice(at + 1, history.length, s);
           if (history.length > 200) history.shift();
           at = history.length - 1;
+          told();
         };
         /** Records the change (undo) and re-evaluates the dirty state against the last saved content. */
         const isDirty = () => isDirtyNow(serialize(), saved, hasWts && wts.dirty);
         const markDirty = () => { record(); doc.setDirty(isDirty()); };
-        const keyOf = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
+        const objectKey = (o: Obj) => (o.id ? `c:${o.id}` : `o:${o.base}`);
         const restore = (s: string) => {
-          const keys = new Set([...selection].map(keyOf)), anchor = selected ? keyOf(selected) : null;
+          const keys = new Set([...selection].map(objectKey)), anchor = selected ? objectKey(selected) : null;
           const d = JSON.parse(s) as { custom: Obj[]; original: Obj[]; wts: WtsSnapshot };
           file.custom = d.custom;
           file.original = d.original;
           if (hasWts) wts.restore(d.wts);
           const all = [...file.custom, ...file.original];
-          selection = new Set(all.filter((o) => keys.has(keyOf(o))));
-          selected = all.find((o) => keyOf(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
+          selection = new Set(all.filter((o) => keys.has(objectKey(o))));
+          selected = all.find((o) => objectKey(o) === anchor) ?? [...selection][0] ?? all[0] ?? null;
           if (selected) selection.add(selected);
           doc.setDirty(isDirty());
           renderDetail();
+          told();
         };
         const step = (dir: -1 | 1) => {
           const to = at + dir;
@@ -597,10 +614,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         listEl.tabIndex = 0;
         listEl.addEventListener("keydown", (e) => {
-          if (e.key === "Delete") { e.preventDefault(); removeSelection(); }
-          else if (e.key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selection = new Set(visible); renderDetail(); }
-          else if (e.key === "c" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelection(); }
-          else if (e.key === "v" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void paste(); }
+          const key = keyOf(e);
+          if (key === "Delete") { e.preventDefault(); removeSelection(); }
+          else if (key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selection = new Set(visible); renderDetail(); }
+          else if (key === "c" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); copySelection(); }
+          else if (key === "v" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void paste(); }
         });
 
         const hasMods = (o: Obj) => modLists(o).some((l) => l.mods.length > 0);
@@ -834,7 +852,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             markDirty();
             renderDetail();
           };
-          const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(); } },
+          const overlay = h("div.picker-overlay", { onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(); } },
             h("div.picker.obj-autofill", {},
               h("h3", {}, `Auto Fill Levels: ${f.label}`),
               h("div.terrain-sel-row", {}, h("span.muted", {}, "Start from level"), fromEl),
@@ -1122,7 +1140,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               })));
           }
           const close = () => overlay.remove();
-          const overlay = h("div.picker-overlay", { tabindex: -1, onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (e.key === "Escape") close(); } },
+          const overlay = h("div.picker-overlay", { tabindex: -1, onmousedown: (e: MouseEvent) => { if (e.target === overlay) close(); }, onkeydown: (e: KeyboardEvent) => { if (keyOf(e) === "Escape") close(); } },
             h("div.picker.diff-dialog", {},
               h("div.picker-header", {},
                 h("strong", {}, `Diff — ${objs.length} objects`),
@@ -1234,7 +1252,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const typing = (t instanceof HTMLInputElement && t.type !== "checkbox" && t.value !== t.defaultValue)
             || (t instanceof HTMLTextAreaElement && t.value !== t.defaultValue);
           if (typing) return;
-          const k = e.key.toLowerCase();
+          const k = keyOf(e).toLowerCase();
           if (k === "z" && !e.shiftKey) { e.preventDefault(); step(-1); }
           else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); step(1); }
         });
@@ -1334,6 +1352,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           w3.workspace.onDidChange(() => void loadLimits()),
         ] : [];
         if (kind === "w3u") void loadLimits();
+        // The map's own object data: other modules see it as it is here (the newest editor of a file counts).
+        const isLive = !doc.readOnly && doc.path.toLowerCase().startsWith("map/");
+        if (isLive) liveData.set(doc.path, { kind, data: liveNow });
         loadKind(w3, kind).then(
           (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderList(); renderDetail(); },
           (e) => { status.textContent = `Game data unavailable — showing raw ids (${e})`; },
@@ -1412,7 +1433,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
           },
           focus: () => search.focus(),
-          dispose: () => { closed = true; focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose(); },
+          dispose: () => {
+            closed = true; focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose();
+            // Closed: the saved file is what there is again.
+            if (liveData.get(doc.path)?.data === liveNow) { liveData.delete(doc.path); edits.fire(kind); }
+          },
           watches: ["map/war3map.wts"],
         };
       },
