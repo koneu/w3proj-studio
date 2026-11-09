@@ -16,6 +16,8 @@ const SECTIONS = ["TriggerEvents", "TriggerConditions", "TriggerActions", "Trigg
 export interface TriggerFunction {
   name: string;
   kind: number;
+  /** The first game version it's in: 0 Reign of Chaos, 1 The Frozen Throne. */
+  version: number;
   args: string[];
   /** Calls only. */
   returns?: string;
@@ -90,7 +92,7 @@ export function parseTriggerData(text: string, strings: Map<string, string> = ne
       const vals = splitList(value);
       const call = si === CALL;
       const args = (call ? vals.slice(3) : vals.slice(1)).filter((a) => a && a !== "nothing");
-      functions[si].set(key, { name: key, kind: si, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [], hint: "", scriptName: key });
+      functions[si].set(key, { name: key, kind: si, version: Number(vals[0]) || 0, args, returns: call ? vals[2] : undefined, displayName: key, pattern: [], category: "", defaults: [], hint: "", scriptName: key });
     } else if (section === "TriggerCategories") {
       const v = splitList(value);
       categories.set(key, { name: str(v[0] ?? key), icon: v[1] ?? "", hideName: v[2] === "1" });

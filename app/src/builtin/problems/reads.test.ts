@@ -17,8 +17,11 @@ import { mapChecks } from "./mapchecks";
  *  lookups (40 calls on the mini map with the additions below, against 75 before them). A new check
  *  that reads more raises it, on purpose. (121 → 127: the object data asks for a kind's tables and its
  *  metadata at once, so for the kinds this made-up game hasn't the tables of, the metadata is asked
- *  for too before the load fails; twice, as a failed load is tried again. The real game has them all.) */
-const BUDGET = 127;
+ *  for too before the load fails; twice, as a failed load is tried again. The real game has them all.
+ *  127 → 130: Trigger validation reads TriggerData with the editor's strings, for the functions' names,
+ *  and the custom script texts, which can run triggers; the triggers themselves are read once for both
+ *  trigger checks.) */
+const BUDGET = 130;
 
 /** The mini map, found from where the tests run (app/ or the repository). */
 function fixture(): string {

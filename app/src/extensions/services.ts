@@ -393,7 +393,14 @@ export interface TriggerKind {
   itemType?: 8 | 32;
   /** Whether "New …" offers it in this editor (e.g. only for JASS maps). Default: yes. */
   available?(editor: TriggerEditorHandle): boolean;
+  /** Called before the trigger is shown for a found problem (Problems): select the line at `path`
+   *  (indices through children) and mark the parameter at `param` (indices through nested calls, -1 an
+   *  array index). */
+  reveal?(trigger: TriggerItem, at: TriggerLocation): void;
 }
+
+/** A place in a GUI trigger: a line, and in it a parameter. */
+export interface TriggerLocation { path: number[]; param?: number[] }
 
 export interface TriggerEditorHandle {
   readonly file: import("../lib/triggers/wtg").TriggerFile;

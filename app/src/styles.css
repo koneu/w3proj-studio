@@ -618,6 +618,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-param.editable { color: #8ab4f8; cursor: pointer; text-decoration: underline dotted; }
 .trig-param.editable:hover { text-decoration: underline; }
 .trig-param.unset { color: var(--error); }
+/* A found problem (Problems): its line, or its parameter in the line. */
+.trig-flagged { outline: 1px solid var(--error); outline-offset: 1px; border-radius: 2px; }
 .trig-dialog { width: min(640px, 94%); }
 .trig-dialog-wide { width: min(820px, 94%); height: min(560px, 80%); }
 .trig-dialog-body { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }

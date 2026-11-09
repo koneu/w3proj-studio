@@ -5,6 +5,10 @@
 
 import type { W3Api } from "../../extensions/api";
 import { readMapDoc, readMapDocStrict } from "../../lib/formats/mapdoc";
+import { parseIni } from "../../lib/formats/text";
+import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
+import { validateTriggers, type TriggerIssue } from "../../lib/triggers/validate";
+import { readWctFile, readWtgFile, textTriggers, wtgPath, type TriggerFile } from "../../lib/triggers/wtg";
 import { FileLookup } from "./checks";
 
 export class RunScope {
@@ -32,6 +36,51 @@ export class RunScope {
   /** Starts reading these documents at once, instead of one after another as the checks ask. */
   async prefetch(paths: string[]): Promise<void> {
     if (this.share) await Promise.all(paths.map((p) => this.doc(p)));
+  }
+
+  private triggerFile: Promise<TriggerFile | null> | null = null;
+  private data: Promise<TriggerData> | null = null;
+
+  /** The game's TriggerData with its display names (WorldEditStrings), read once per run. */
+  triggerData(): Promise<TriggerData> {
+    const load = async () => {
+      const strings = new Map<string, string>();
+      for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
+        for (const sec of parseIni(await this.w3.game.readText(f, { background: true }).catch(() => "")).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
+      }
+      return parseTriggerData(await this.w3.game.readText("UI\\TriggerData.txt", { background: true }), strings);
+    };
+    if (!this.share) return load();
+    return (this.data ??= load());
+  }
+
+  /** The project's GUI triggers, read once per run: null without a trigger file; a file that is there and
+   *  can't be read rejects (callers tell the two apart). */
+  triggers(): Promise<TriggerFile | null> {
+    const load = async () => {
+      const path = wtgPath(this.w3.workspace.files());
+      return path ? readWtgFile(this.w3.workspace, path, () => this.triggerData()) : null;
+    };
+    if (!this.share) return load();
+    return (this.triggerFile ??= load());
+  }
+
+  private validation: Promise<TriggerIssue[] | null> | null = null;
+
+  /** What Validate Map Triggers finds in the project's GUI triggers, once per run; null without a trigger
+   *  file; rejects when the trigger file is there and can't be read. */
+  triggerIssues(): Promise<TriggerIssue[] | null> {
+    const load = async () => {
+      const file = await this.triggers();
+      if (!file) return null;
+      const data = await this.triggerData();
+      // Script texts that can run triggers: none without the file; when it can't be read, which triggers
+      // it runs isn't known (null), and none is called unused.
+      const scripts = await readWctFile(this.w3.workspace, textTriggers(file).length).then((c) => (c ? [c.header, ...c.texts] : []), () => null);
+      return validateTriggers(file, data, { scripts });
+    };
+    if (!this.share) return load();
+    return (this.validation ??= load());
   }
 
   /** The run's lookup of the map's and the game's files (made at first use). */

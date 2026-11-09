@@ -8,7 +8,7 @@
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
 import {
   TRIGGER_GUI_SERVICE, TRIGGERS_SERVICE,
-  type TriggerEditorHandle, type TriggerGuiService, type TriggerParamEditor, type TriggersService,
+  type TriggerEditorHandle, type TriggerGuiService, type TriggerLocation, type TriggerParamEditor, type TriggersService,
 } from "../../extensions/services";
 import { branchLabels, paramParts, paramText } from "../../lib/triggers/display";
 import { ACTION, CONDITION, EVENT } from "../../lib/triggers/triggerdata";
@@ -39,6 +39,8 @@ class ParamEditors implements TriggerGuiService {
  *  list through children) or a branch of a block (path of the block + branch). */
 type Sel = { path: number[]; branch?: number } | { section: number };
 const selection = new Map<number, Sel>();
+/** A line and parameter shown for a found problem (Problems), per trigger, until the next selection. */
+const flagged = new Map<number, TriggerLocation>();
 const SECTIONS = [[EVENT, "Events"], [CONDITION, "Conditions"], [ACTION, "Actions"]] as const;
 const KIND_NAMES = ["Event", "Condition", "Action"];
 type DropAt = { path: number[] } | { path: number[]; branch: number } | { section: number };
@@ -66,6 +68,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const view = new GuiView(w3, el, t, ed, editors);
         view.render();
         return { keyDown: (e) => view.keyDown(e) };
+      },
+      reveal: (t, at) => {
+        selection.set(t.id, { path: at.path });
+        flagged.set(t.id, at);
       },
     }));
   });
@@ -133,7 +139,9 @@ class GuiView {
   }
 
   private get sel(): Sel | undefined { return selection.get(this.t.id); }
-  private select(s: Sel) { selection.set(this.t.id, s); this.render(); }
+  private select(s: Sel) { selection.set(this.t.id, s); flagged.delete(this.t.id); this.render(); }
+  /** An edit of the trigger: a problem's mark goes (its place may have moved). */
+  private edit(label: string, change: () => void) { flagged.delete(this.t.id); this.ed.edit(label, change); }
 
   /** The list holding the ECA at `path`, and its index there. */
   private locate(path: number[]): { list: Eca[]; index: number; eca: Eca } | null {
@@ -194,7 +202,7 @@ class GuiView {
     }
     const f = await pickFunction(this.ed, `New ${KIND_NAMES[target.kind]}`, [...this.ed.data.functions[target.kind].values()]);
     if (!f) return;
-    this.ed.edit(`New ${KIND_NAMES[target.kind].toLowerCase()}`, () => {
+    this.edit(`New ${KIND_NAMES[target.kind].toLowerCase()}`, () => {
       target.list.splice(target.index, 0, newEca(this.ed.data, f, this.ed.file, target.group));
       selection.set(this.t.id, { path: target.path });
     });
@@ -235,7 +243,7 @@ class GuiView {
     const to = this.target(kind);
     if (typeof to === "string") { void this.w3.window.showWarning(`Can't paste a ${KIND_NAMES[kind].toLowerCase()} here. ${to}`); return; }
     const missing = this.missingVariables(clipboard);
-    this.ed.edit(`Paste ${KIND_NAMES[kind].toLowerCase()}`, () => {
+    this.edit(`Paste ${KIND_NAMES[kind].toLowerCase()}`, () => {
       const ecas = clipboard.map((e) => {
         const c = structuredClone(e);
         if (to.group === undefined) delete c.group; else c.group = to.group;
@@ -278,7 +286,7 @@ class GuiView {
   }
   private dropAt(to: DropAt) {
     const from = this.dragFrom!;
-    this.ed.edit("Move", () => {
+    this.edit("Move", () => {
       const src = this.locate(from)!;
       const eca = src.eca;
       let list: Eca[], anchor: Eca | null = null, group: number | undefined, after: () => number;
@@ -348,7 +356,7 @@ class GuiView {
     const s = this.sel;
     const at = s && "path" in s ? this.locate(s.path) : null;
     if (!at || !s || !("path" in s)) return;
-    this.ed.edit(`Delete ${at.eca.name}`, () => {
+    this.edit(`Delete ${at.eca.name}`, () => {
       at.list.splice(at.index, 1);
       selection.delete(this.t.id);
     });
@@ -362,7 +370,7 @@ class GuiView {
     let j = at.index + dir;
     while (j >= 0 && j < at.list.length && !same(at.list[j])) j += dir;
     if (j < 0 || j >= at.list.length) return;
-    this.ed.edit("Move", () => {
+    this.edit("Move", () => {
       [at.list[at.index], at.list[j]] = [at.list[j], at.list[at.index]];
       selection.set(this.t.id, { path: [...s.path.slice(0, -1), j] });
     });
@@ -370,38 +378,42 @@ class GuiView {
   private toggle() {
     const s = this.sel;
     const at = s && "path" in s ? this.locate(s.path) : null;
-    if (at) this.ed.edit(at.eca.enabled ? "Disable" : "Enable", () => { at.eca.enabled = !at.eca.enabled; });
+    if (at) this.edit(at.eca.enabled ? "Disable" : "Enable", () => { at.eca.enabled = !at.eca.enabled; });
   }
   private async editParamAt(owner: Param[], i: number, type: string, limits?: [number | null, number | null]) {
     const p = await editParam(this.ed, type, owner[i], this.editors.forType(type), limits);
-    if (p) this.ed.edit("Edit parameter", () => { owner[i] = p; });
+    if (p) this.edit("Edit parameter", () => { owner[i] = p; });
   }
   /** The index of an array variable parameter (an integer of its own). */
   private async editIndex(p: Param) {
     const current = p.index ?? { type: 3, value: "0" };
     const v = await editParam(this.ed, "integer", current, this.editors.forType("integer"));
-    if (v) this.ed.edit("Edit array index", () => { p.index = v; });
+    if (v) this.edit("Edit array index", () => { p.index = v; });
   }
 
   // ---- display ----------------------------------------------------------------------
-  /** A function's sentence with each argument as a link (nested calls inside). */
-  private sentence(kind: number, name: string, params: Param[]): (HTMLElement | string)[] {
+  /** A function's sentence with each argument as a link (nested calls inside). `at`: where its parameters
+   *  are in the line marked for a problem (indices through nested calls), null elsewhere. */
+  private sentence(kind: number, name: string, params: Param[], at: number[] | null = null): (HTMLElement | string)[] {
     const ed = this.ed, f = ed.data.find(kind, name);
+    const marked = flagged.get(this.t.id)?.param?.join();
+    const mark = (here: number[] | null) => (here && here.join() === marked ? ".trig-flagged" : "");
     const link = (i: number): HTMLElement => {
       const p = params[i], type = argType(ed.data, ed.file, kind, name, params, i);
+      const here = at ? [...at, i] : null, inIndex = here ? [...here, -1] : null;
       const unset = !p || p.type < 0;
       const content: (HTMLElement | string)[] = p && p.type === FUNCTION && p.call
-        ? ["(", ...this.sentence(p.call.kind, p.call.name, p.call.params), ")"]
+        ? ["(", ...this.sentence(p.call.kind, p.call.name, p.call.params, here), ")"]
         : [unset ? `<${f?.args[i] ?? "?"}>` : paramParts(p, ed.display, type).text];
       if (p?.index) {
         const idx = p.index;
-        content.push("[", h(`span.trig-param${ed.editable ? ".editable" : ""}`, {
+        content.push("[", h(`span.trig-param${ed.editable ? ".editable" : ""}${mark(inIndex)}`, {
           title: "Array index (integer)",
           onclick: (e: Event) => { if (!ed.editable) return; e.stopPropagation(); void this.editIndex(p); },
-        }, idx.type === FUNCTION && idx.call ? ["(", ...this.sentence(idx.call.kind, idx.call.name, idx.call.params), ")"] : paramText(idx, ed.display, "integer")), "]");
+        }, idx.type === FUNCTION && idx.call ? ["(", ...this.sentence(idx.call.kind, idx.call.name, idx.call.params, inIndex), ")"] : paramText(idx, ed.display, "integer")), "]");
       }
       const trigRef = p && p.type === 1 && p.value.startsWith("gg_trg_");
-      return h(`span.trig-param${unset ? ".unset" : ""}${ed.editable ? ".editable" : ""}`, {
+      return h(`span.trig-param${unset ? ".unset" : ""}${ed.editable ? ".editable" : ""}${mark(here)}`, {
         title: `${ed.data.types.get(type)?.name ?? type}${trigRef ? " · Ctrl+click opens the trigger" : ""}`,
         onclick: (e: MouseEvent) => {
           if (trigRef && (e.ctrlKey || e.metaKey)) { e.stopPropagation(); ed.openTrigger(p.value); return; }
@@ -423,10 +435,12 @@ class GuiView {
     void ed.icon(cat?.icon ?? "").then((url) => { if (url) img.src = url; else img.classList.add("none"); });
     const s = this.sel;
     const active = !!s && "path" in s && s.branch === undefined && s.path.join() === path.join();
-    const line = h(`div.trig-eca.trig-pick${e.enabled ? "" : ".off"}${active ? ".active" : ""}`, {
+    // The line of a found problem: marked itself when the problem isn't one parameter's.
+    const flag = flagged.get(this.t.id), onFlag = !!flag && flag.path.join() === path.join();
+    const line = h(`div.trig-eca.trig-pick${e.enabled ? "" : ".off"}${active ? ".active" : ""}${onFlag && !flag?.param ? ".trig-flagged" : ""}`, {
       title: e.name, onclick: () => this.select({ path }), oncontextmenu: (ev: MouseEvent) => this.menu(ev, { path }),
       ...this.dnd({ path }, path),
-    }, img, h("span", {}, ...(cat && !cat.hideName ? [`${cat.name} - `] : []), ...this.sentence(e.kind, e.name, e.params)));
+    }, img, h("span", {}, ...(cat && !cat.hideName ? [`${cat.name} - `] : []), ...this.sentence(e.kind, e.name, e.params, onFlag ? [] : null)));
     if (!isBlock(e) && !e.children.length) return line;
     const labels = branchLabels(e.name);
     const groups = new Set([...labels.keys(), ...e.children.map((c) => c.group ?? 0)]);
