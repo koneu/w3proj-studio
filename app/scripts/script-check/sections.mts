@@ -37,6 +37,9 @@ const orders = O.abilityOrders(readdirSync("abil").map((f) => parseIni(read("abi
 const stats: Record<string, [number, number]> = {};
 // lib/script/guard: maps the World Editor made must not look as if they had code of their own.
 const guarded: [string, string[]][] = [];
+// JASS maps whose script differs from Studio's by more than the order of placed objects: the guard asks before the
+// first regeneration.
+const asked: string[] = [];
 let checked = 0;
 // The Problems view's trigger references and Lua check: what the World Editor made has no such problems.
 const luaBroken: string[] = [];
@@ -127,6 +130,8 @@ for (const m of maps) {
   checked++;
   // Sections are compared for JASS only (the World Editor's Lua comes with other spacing).
   if (scriptFile.endsWith(".lua")) continue;
+  // A fresh import's first regeneration (no stamp yet): which World Editor scripts it would ask about.
+  if (G.scriptDecision(norm(file), norm(whole), null).action === "keep") asked.push(m);
   const gen = J.generateSections(input), orig = J.splitSections(file);
   const fs = (stats["(whole file)"] ??= [0, 0]); fs[1]++; if (norm(whole) === norm(file)) fs[0]++;
   if (only === "(whole file)" && norm(whole) !== norm(file) && shown < showN) {
@@ -147,7 +152,7 @@ for (const m of maps) {
     }
   }
 }
-const detail = { stats, broken: [...luaBroken, ...broken], guarded, checked, luaBroken, otherBroken: broken };
+const detail = { stats, broken: [...luaBroken, ...broken], guarded, asked, checked, luaBroken, otherBroken: broken };
 // Under run.mjs (SCRIPT_CHECK_SHARD set) nothing is printed here: it puts the shards' details together and prints that.
 if (!process.env.SCRIPT_CHECK_SHARD) printSections(detail);
 if (process.env.SCRIPT_CHECK_JSON) writeFileSync(process.env.SCRIPT_CHECK_JSON, JSON.stringify(detail));

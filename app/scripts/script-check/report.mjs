@@ -3,12 +3,13 @@
 // as if one process had gone over all the maps.
 
 /** sections.mts: `stats` per section as [identical, compared], and the problems found. */
-export function printSections({ stats, broken, guarded, checked }) {
+export function printSections({ stats, broken, guarded, asked = [], checked }) {
   for (const [k, [ok, n]] of Object.entries(stats)) console.log(`${(k || "(header)").padEnd(20)} ${ok}/${n}`);
   console.log(`problems: ${broken.length} in the game's maps`);
   for (const b of broken.slice(0, 20)) console.log(`  ${b}`);
   console.log(`guard: ${guarded.length} of ${checked} maps would keep their script`);
   for (const [m, lost] of guarded) console.log(`  ${m}: ${lost.length} (${lost.slice(0, 6).join(", ")})`);
+  console.log(`guard: asks about ${asked.length} JASS scripts before their first regeneration`);
 }
 
 /** jass-valid.mts. With `heads`, also the lines about common.j and Blizzard.j, and the report lines
@@ -40,6 +41,7 @@ export function mergeSections(shards) {
     // The Lua check of every map comes before the trigger references of any, as in one process.
     broken: [...shards.flatMap((s) => s.luaBroken), ...shards.flatMap((s) => s.otherBroken)],
     guarded: shards.flatMap((s) => s.guarded),
+    asked: shards.flatMap((s) => s.asked ?? []),
     checked: shards.reduce((n, s) => n + s.checked, 0),
   };
 }

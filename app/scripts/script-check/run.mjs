@@ -143,7 +143,7 @@ validRuns.shown();
 printValid(valid, { heads: true });
 mistakeRuns.shown();
 const measured = {
-  sections: { identical: sections.stats, problems: sections.broken.length, guarded: sections.guarded.length, checked: sections.checked },
+  sections: { identical: sections.stats, problems: sections.broken.length, guarded: sections.guarded.length, asked: sections.asked.length, checked: sections.checked },
   valid: { common: valid.common, blizzard: valid.blizzard, maps: valid.maps, clean: valid.clean, reports: valid.reports },
   mistakes,
 };
@@ -174,6 +174,8 @@ for (const [k, [ok, n]] of Object.entries(base.sections.identical)) {
 }
 atMost("problems reported on the game's maps", measured.sections.problems, base.sections.problems);
 atMost("maps the guard would keep", measured.sections.guarded, base.sections.guarded);
+if (base.sections.asked === undefined) problems.push("scripts the guard asks about: not in the baseline");
+else atMost("scripts the guard asks about", measured.sections.asked, base.sections.asked);
 atMost("reports on common.j", measured.valid.common, base.valid.common);
 atMost("reports on Blizzard.j", measured.valid.blizzard, base.valid.blizzard);
 atMost("reports on valid maps", measured.valid.reports, base.valid.reports);
