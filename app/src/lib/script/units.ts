@@ -110,9 +110,10 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     : `    set ${v} = BlzCreateUnitWithSkin( p, '${u.id}', ${pos}, '${u.skinId ?? u.id}' )`];
   if (uprooted(u)) lines.push(`    call IssueImmediateOrder( ${v}, "unroot" )`);
   if (isGoldMine(i, u.id)) lines.push(`    call SetResourceAmount( ${v}, ${u.gold} )`);
-  // -2: "camp" (guard position), written as an acquisition range of 200.
+  // -1 is the type's default. -2: "camp" (guard position), written as an acquisition range of 200. A stored 0 is
+  // written as it is (World Editor 2.0, we-drive 2026-11-09: 0.0, 0.5 and 500 each with their own call).
   if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
-  else if (u.targetAcquisition > 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
+  else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
   if (u.level > 1) lines.push(`    call SetHeroLevel( ${v}, ${u.level}, false )`);
   // A hero's own attributes (0: its default ones), as the World Editor writes them (seen in the game's campaign map
   // WC2Orc12 and in a map it saved with a Paladin of 30/20/25).

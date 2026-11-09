@@ -196,6 +196,10 @@ test("placed changes are written, defaults aren't", () => {
   has(u, "    call UnitAddItemToSlotById( u, 'ratc', 1 )");
   // -2 is "camp": a fixed range.
   has(units([unit({ targetAcquisition: -2 })]), "    call SetUnitAcquireRange( u, 200.0 )");
+  // A stored 0 is a range of its own (World Editor 2.0, we-drive 2026-11-09), -1 the default.
+  has(units([unit({ targetAcquisition: 0 })]), "    call SetUnitAcquireRange( u, 0.0 )");
+  has(units([unit({ targetAcquisition: 0.5 })]), "    call SetUnitAcquireRange( u, 0.5 )");
+  hasNot(units([unit({ targetAcquisition: -1 })]), "SetUnitAcquireRange");
 });
 
 test("a hero's own attributes follow its level, before its life; 0 is its default ones", () => {
