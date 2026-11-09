@@ -60,6 +60,9 @@ export interface Skin {
   /** Buildings (`buildingShadow`, `ushb`) and destructables (`shadow`, `bshd`): a shadow image of one texel per
    *  32 × 32 cell, put into the ground's shadow map (viewshadows.ts). */
   buildingShadow?: string;
+  /** Doodads: false when the World Editor leaves them out of the baked shadow map, war3map.shd (DoodadSkins.txt
+   *  `shadow=0`, field `dshd`: corn, flowers, rubble, …); otherwise they cast into it. */
+  bakesShadow?: boolean;
 }
 
 /** Random unit, building and item (war3mapUnits.doo) and the object kind each is placed as. */
@@ -127,6 +130,7 @@ export function shadowName(v: string | undefined): string | undefined {
 /** The shadow fields of a skin table entry (units and destructables; doodads' `shadow` is whether the World
  *  Editor bakes them into war3map.shd). */
 function shadowFields(get: (k: string) => string | undefined, kind: string): Partial<Skin> {
+  if (kind === "w3d") return get("shadow")?.trim() === "0" ? { bakesShadow: false } : {};
   if (kind === "w3b") {
     const building = shadowName(get("shadow"));
     return building ? { buildingShadow: building } : {};
@@ -195,7 +199,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
     unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb",
   },
   w3t: { file: "ifil", modelScale: "isca" },
-  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr" },
+  w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd" },
   w3b: { file: "bfil", numVar: "bvar", texId: "btxi", texFile: "btxf", minScale: "bmis", maxScale: "bmas", randScale: "bcpr", fixedRot: "bfxr", buildingShadow: "bshd" },
 };
 
@@ -227,6 +231,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "unitShadow" || key === "buildingShadow") skin[key] = shadowName(String(m.value));
         else if (key === "animProps") skin.animProps = parseAnimProps(String(m.value));
         else if (key === "randScale") skin.randScale = n === 1;
+        else if (key === "bakesShadow") skin.bakesShadow = n !== 0;
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
           || key === "shadowX" || key === "shadowY" || key === "shadowW" || key === "shadowH") && Number.isFinite(n)) skin[key] = n;

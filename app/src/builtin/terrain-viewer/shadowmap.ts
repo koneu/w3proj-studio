@@ -54,7 +54,8 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
       since = performance.now();
     }
     const skin = skins.get(d.id) ?? skins.get(baseOf(d.id) ?? "");
-    if (!skin || skin.kind !== "w3d") continue;
+    // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
+    if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
     const mesh = await modelMesh(path, readFile);
     if (mesh) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
