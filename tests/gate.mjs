@@ -281,7 +281,7 @@ const steps = [
   { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, after: ["appsmoke#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
   { id: "clippy", name: "clippy", tier: "commit", weight: 4, after: ["appsmoke#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
   { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke#built"], locks: [["dist", "w"]], run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
-  { id: "tsc", name: "types and module boundaries", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
+  { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 2, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app }) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];

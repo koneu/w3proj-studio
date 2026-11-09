@@ -29,7 +29,7 @@ oracle only proves the code does what the code does.
 
 | Layer | Oracle | Where | Runs |
 |---|---|---|---|
-| Static | compilers, clippy, module boundaries | `npm run check`, clippy | every commit, CI |
+| Static | compilers, clippy, module boundaries; every tooling script loads (`node --check`) and app-smoke's `--only` map names the same checks as its full run | `npm run check` (`scripts/check-scripts.mjs`), clippy | every commit, CI |
 | Unit | known answers, round trips | `#[test]`, `src/**/*.test.ts` | every commit, CI |
 | System | the map's own bytes: pack → unpack → pack is identical | `crates/cli/tests/` on `tests/fixtures/mini-map` | every commit, CI |
 | Hostile input | never panics; what parses still round-trips | `crates/w3proj/tests/robustness.rs`, `wtg_hostile.rs` | every commit (200 rounds), corpus tier (20,000) |
