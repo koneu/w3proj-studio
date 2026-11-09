@@ -31,6 +31,7 @@ import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, renameVariable, variableParams, variablesTable, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
+import { Listeners } from "../../lib/listeners";
 
 /** A trigger of events, conditions and actions (not custom text, a script item or a comment). */
 const isGuiTrigger = (it: Item): it is TriggerItem => "ecas" in it && it.type === 8 && !it.isCustom && !it.isComment;
@@ -48,6 +49,10 @@ class KindRegistry implements TriggersService {
   }
   all() { return [...this.kinds].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)); }
   onChange(l: () => void) { this.listeners.add(l); return () => this.listeners.delete(l); }
+  liveTriggers() { return openView?.file ?? null; }
+  /** Told by the open editor after each edit, undo and redo, and when it closes. */
+  readonly edits = new Listeners();
+  onDidEdit(listener: () => void) { return this.edits.add(listener); }
 }
 
 /** Copied tree items with their contents, custom text and variables (shared by all maps). */
@@ -316,7 +321,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.replaceChildren();
         const code = await w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null);
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d), code);
-        if (!doc.readOnly) openView = view;
+        if (!doc.readOnly) {
+          openView = view;
+          view.edited = () => { if (openView === view) kinds.edits.fire(); };
+        }
         if (startWithVariables) { startWithVariables = false; view.showVariables(); }
         if (startWithTrigger) {
           const { name, at } = startWithTrigger;
@@ -339,7 +347,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
           watches: game ? [] : [WCT_TEXT, WCT_RAW],
-          dispose: () => { view.dispose(); if (openView === view) openView = null; },
+          dispose: () => {
+            view.dispose();
+            if (openView === view) { openView = null; kinds.edits.fire(); }
+          },
         };
       },
     }),
@@ -835,13 +846,17 @@ class TriggerView {
     this.setDirty(this.dirty);
     this.renderTree();
     if (!opts.keepView) this.renderDetail();
+    this.edited();
   }
   step(dir: -1 | 1) {
     if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
     else if (dir > 0 && this.at < this.undo.length) this.restore(this.undo[this.at++].after);
     else return;
     this.setDirty(this.dirty);
+    this.edited();
   }
+  /** After each edit, undo and redo (TriggersService.onDidEdit; set by the provider). */
+  edited: () => void = () => {};
 
   // ---- items ------------------------------------------------------------------------
   private find(sel: Selection): Item | undefined {

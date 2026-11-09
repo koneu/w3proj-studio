@@ -3780,7 +3780,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         syncPick();
         const stopPick = toolGroups.onChange(syncPick);
-        const live = () => ({ units: unitsFile?.list ?? [], doodads: dooFile?.list ?? [] });
+        /** TerrainService.placedObjects: a list not loaded yet (or unreadable) is null, so its user reads the saved file. */
+        const live = () => ({ units: unitsFile?.list ?? null, doodads: dooFile?.list ?? null });
         /** While picking objects: the accepted placement nearest to a ground point, if close enough. */
         const pickTarget = (g: [number, number, number] | null): Placed | null => {
           const o = toolGroups.picking?.objects;
