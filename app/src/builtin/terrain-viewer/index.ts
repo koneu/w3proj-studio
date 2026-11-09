@@ -1084,6 +1084,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const listed = items as { index: unknown; id: unknown }[];
       for (const [i, it] of listed.entries()) if (!Number.isInteger(it?.index) || typeof it?.id !== "string") throw new Error(`items[${i}] needs an index and an id.`);
       const key = fileKey(kind);
+      const { root } = requireProject(w3);
       const { handle } = await liveEditor();
       // As the panel: regions by name for a waygate; a war3map.w3i that can't be read leaves the item tables unchecked.
       const text = await mapStrings(w3).catch(() => (v: string) => v);
@@ -1093,6 +1094,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const changes = propChangesOf(properties as Record<string, unknown>, regions);
       if (!changes.length) throw new Error("properties names nothing to change.");
       const data = await loadFactsData(w3);
+      // The types, regions and tables were read from this project: another one opened meanwhile isn't changed by them.
+      if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
       const kindOf = (id: string) => {
         const t = handle.objects.type(id)?.kind;
         return key === "units" ? (t === "w3t" ? "w3t" : "w3u") : (t === "w3b" ? "w3b" : "w3d");
