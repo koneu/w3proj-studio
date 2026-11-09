@@ -525,6 +525,13 @@ test("player slots", () => {
   has(s, "    call SetPlayerRaceSelectable( Player(3), true )");
   // With fixed settings only "selectable" races can be changed.
   has(playersSection(setup({ flags: 0x20 })), "    call SetPlayerRaceSelectable( Player(0), false )");
+  // Which bit 1 of the fixed start field says, not the race (we-drive save of World Editor 7003, 2026-11-09).
+  const fixedSet = (race: number, fixedStart: number) => playersSection(setup({ flags: 0x60, players: [player(0, { race, fixedStart })] }));
+  has(fixedSet(1, 2), "    call SetPlayerRaceSelectable( Player(0), true )");
+  has(fixedSet(0, 0), "    call SetPlayerRaceSelectable( Player(0), false )");
+  has(fixedSet(0, 2), "    call SetPlayerRaceSelectable( Player(0), true )");
+  has(fixedSet(2, 3), "    call SetPlayerRaceSelectable( Player(0), true )");
+  has(fixedSet(2, 1), "    call SetPlayerRaceSelectable( Player(0), false )");
 });
 
 test("rescuable players can be rescued by every user player", () => {
