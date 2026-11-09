@@ -68,25 +68,27 @@ export function findLabel(index: Map<string, SoundLabel>, file: string): SoundLa
 }
 
 /** A new entry for `file`: labelled game sounds take the label (settings unset, as the World
- *  Editor writes them), other files the editor's usual defaults. */
+ *  Editor writes them), other files the editor's usual defaults. The word after the facial animation file (`unknown2`)
+ *  is 1, as on every sound without a dialogue in the game's maps (plain, labelled, imported and music alike; 0 only on
+ *  dialogue): the generated script's dialogue keys go by it (lib/script/jass.ts). */
 export function newSound(name: string, file: string, opts: { music?: boolean; imported?: boolean; label?: SoundLabel }): Sound {
   const common = {
     name, file, variableName: name, dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
-    speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "",
+    speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
   };
   if (opts.music) {
     return { ...common, eaxEffect: "DefaultEAXON", flags: MUSIC | (opts.imported ? IMPORTED : 0), fadeInRate: 0, fadeOutRate: 0, volume: 127,
       pitch: 1, pitchVariance: 0, priority: 8, channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0,
-      coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "", unknown2: 0 };
+      coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "" };
   }
   if (opts.label) {
     const l = opts.label;
     const flags = (/LOOPING/.test(l.flags) ? LOOPING : 0) | (/WANT3D/.test(l.flags) ? THREE_D | STOP_OUT_OF_RANGE : 0);
     return { ...common, eaxEffect: l.eax, flags, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: UNSET, pitchVariance: UNSET, priority: 8,
       channel: -1, minDistance: UNSET, maxDistance: UNSET, distanceCutoff: UNSET, coneInside: UNSET, coneOutside: UNSET, coneOutsideVolume: 0,
-      coneOrientation: [UNSET, UNSET, UNSET], assetLabel: l.name, assetFile: file, unknown2: 0 };
+      coneOrientation: [UNSET, UNSET, UNSET], assetLabel: l.name, assetFile: file };
   }
   return { ...common, eaxEffect: "DefaultEAXON", flags: opts.imported ? IMPORTED : 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1,
     pitchVariance: 0, priority: 8, channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0,
-    coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "", unknown2: opts.imported ? 1 : 0 };
+    coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "" };
 }

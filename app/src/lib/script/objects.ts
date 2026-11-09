@@ -30,6 +30,36 @@ interface ObjectMod { field: string; value: unknown }
 interface ObjectEntry { id?: string; base: string; mods?: ObjectMod[] }
 export interface ObjectFile { original?: ObjectEntry[]; custom?: ObjectEntry[] }
 
+/** The object data kinds the script is made from. */
+export type ScriptObjectKind = "w3u" | "w3t" | "w3a" | "w3b";
+
+/** Reads one object file: `campaign` is war3campaign.<kind> of a chapter map's campaign, else war3map.<kind>; `skin` its
+ *  Skin file. Null when there's none. */
+export type ObjectFileReader = (kind: ScriptObjectKind, skin: boolean, campaign: boolean) => Promise<ObjectFile | null>;
+
+/** A kind's object files in the order they apply, for teamColors, buildingTypes and the rest (a later file's entry
+ *  changes what it sets): a chapter map's campaign's (war3campaign.<kind>, then its Skin file) first, then the map's own
+ *  (war3map.<kind>, war3mapSkin.<kind>). So the map's data wins over the campaign's, as in the game and the World Editor.
+ *  `inCampaign`: whether the map is a chapter of a campaign. A failed read fails it (a file that can't be read mustn't
+ *  pass for one that sets nothing). */
+export async function scriptObjectFiles(read: ObjectFileReader, inCampaign: boolean): Promise<Record<ScriptObjectKind, (ObjectFile | null)[]>> {
+  const kinds: ScriptObjectKind[] = ["w3u", "w3t", "w3a", "w3b"];
+  const lists = await Promise.all(kinds.map((kind) => Promise.all([
+    ...(inCampaign ? [read(kind, false, true), read(kind, true, true)] : []),
+    read(kind, false, false), read(kind, true, false),
+  ])));
+  return { w3u: lists[0], w3t: lists[1], w3a: lists[2], w3b: lists[3] };
+}
+
+/** The custom object ids of a kind's files (scriptObjectFiles), but those only a Skin file lists: Skin files repeat the
+ *  objects of their main file (the campaign's or the map's), and an id only there isn't an object of its own. */
+export function customIdsOf(files: (ObjectFile | null)[]): Set<string> {
+  const ids = new Set<string>();
+  // Main files are at even places (main, Skin, main, Skin).
+  files.forEach((f, i) => { if (i % 2 === 0) for (const o of f?.custom ?? []) if (o.id) ids.add(o.id); });
+  return ids;
+}
+
 /** Team colours the game's unit types come with (the teamColor column of Units\unitUI.slk, parsed). */
 export function gameTeamColors(rows: Record<string, string>[]): Map<string, number> {
   const out = new Map<string, number>();

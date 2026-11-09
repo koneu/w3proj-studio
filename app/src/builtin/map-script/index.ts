@@ -3,7 +3,7 @@ import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesServ
 import { soundDurationMs } from "../../lib/audio/duration";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
-import { KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_INPUTS, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash } from "../../lib/script/guard";
+import { isScriptInput, KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash } from "../../lib/script/guard";
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -18,7 +18,8 @@ import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, scriptSoundDurations, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { dayNightModels } from "../../lib/script/setup";
-import { abilityOrders, buildingTypes, destructableTints, gameTeamColors, heroAbilities, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
+import { abilityOrders, buildingTypes, customIdsOf, destructableTints, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
+import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { meleeBlockers, meleeFlagsAfter, type MeleeInfo } from "../../lib/terrain/owner";
@@ -38,9 +39,6 @@ const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
 const scriptPath = (lua: boolean) => (lua ? "map/war3map.lua" : "map/war3map.j");
-
-/** Files war3map.j is made from (also as their .json documents). */
-const INPUTS = SCRIPT_INPUTS;
 
 /** vJASS in trigger texts (libraries, scopes, structs, block comments, //! directives), or a
  *  script JassHelper compiled ("//globals from <library>:", LIBRARY_<name> constants). Such
@@ -138,16 +136,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const w3e = w3ePath ? await readTerrainBytes(w3ePath, { readText: () => w3.workspace.readText(w3ePath), readBytes: () => w3.workspace.readBytes(w3ePath) }).catch(() => null) : null;
     const terrain = w3e ? parseW3e(w3e) : null;
 
-    // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
-    type Objects = { custom?: { id: string; base: string; mods?: { field: string; value: unknown }[] }[] };
-    const unitFiles = await Promise.all(["map/war3map.w3u", "map/war3mapSkin.w3u"].map((f) => json<Objects & ObjectFile>(f)));
+    // Custom objects: their base decides, unless the map sets "is a building" (ubdg). A chapter map has its campaign's
+    // object data too, under its own (scriptObjectFiles). Whether there is a campaign, and its files, must be known: an
+    // unknown answer fails the generation rather than leaving the campaign's objects out.
+    const campaign = await findCampaign(w3);
+    const objectFiles = await scriptObjectFiles((kind, skin, inCampaign) => (inCampaign
+      ? readCampaignObjects<ObjectFile>(w3, campaign!, kind, skin)
+      : json<ObjectFile>(`map/war3map${skin ? "Skin" : ""}.${kind}`)), campaign !== undefined);
+    const unitFiles = objectFiles.w3u;
     const colors = teamColors(unitFiles, g.unitColors), special = specialUnits(unitFiles);
     const isBuilding = buildingTypes(unitFiles, g.buildings);
-    const customIds = async (f: string) => new Set(((await json<Objects>(f))?.custom ?? []).map((o) => o.id));
-    const abilityFiles = await Promise.all(["map/war3map.w3a", "map/war3mapSkin.w3a"].map((f) => json<Objects & ObjectFile>(f)));
-    const customAbilities = new Set((abilityFiles[0]?.custom ?? []).map((o) => o.id)), customItems = await customIds("map/war3map.w3t");
-    const heroAbility = heroAbilities(abilityFiles, g.heroAbilities);
-    const destructableTint = destructableTints(await Promise.all(["map/war3map.w3b", "map/war3mapSkin.w3b"].map((f) => json<ObjectFile>(f))));
+    const customAbilities = customIdsOf(objectFiles.w3a), customItems = customIdsOf(objectFiles.w3t);
+    const heroAbility = heroAbilities(objectFiles.w3a, g.heroAbilities);
+    const destructableTint = destructableTints(objectFiles.w3b);
     const kindOf = (id: string): ReturnType<NonNullable<ScriptInput["kindOf"]>> => {
       if (id === "sloc") return "sloc";
       // A random item has no type of its own.
@@ -353,7 +354,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const project = w3.workspace.project();
     if (project === openProject) return;
     openProject = project;
-    if (project) void adopt("opened");
+    if (project) void adopt("opened").then(() => refreshChapter(project.root));
+  };
+  /** A chapter map's script that is this app's (stamped) is made again when the project opens: its campaign's object
+   *  data may have changed while it was closed (edited in the campaign project), and no save in this project tells.
+   *  Nothing is written when it comes out the same; a script that isn't this app's is left alone (no question). */
+  const refreshChapter = async (root: string) => {
+    try {
+      if (!campaignOf(root) || !w3.settings.get<boolean>("script.generateOnSave") || w3.workspace.project()?.root !== root) return;
+      if (!(await findCampaign(w3, root))) return;
+      const stamp = (await w3.workspace.readText(STAMP).catch(() => null))?.trim();
+      let ours = false;
+      for (const p of SCRIPT_FILES) {
+        const t = await w3.workspace.readText(p).catch(() => null);
+        if (t !== null && stamp === scriptHash(t)) ours = true;
+      }
+      if (ours && w3.workspace.project()?.root === root) await write("opened (a chapter of a campaign)", false, root);
+    } catch (e) {
+      out.append(`opened: the chapter's map script wasn't made again: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
   opened();
 
@@ -419,7 +438,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return capped(findSymbols(jassSymbols(env, ""), filter, typeof kind === "string" ? kind : undefined), limit, 80);
     }),
     w3.workspace.onDidSave((path) => {
-      if (!INPUTS.test(path) || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
+      // A chapter map's script is made from its campaign's object files too.
+      if (!isScriptInput(path, campaignOf(w3.workspace.project()?.root)) || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
       clearTimeout(timer);
       pending = path;
       timer = setTimeout(() => { pending = null; void afterSave(path); }, 800);

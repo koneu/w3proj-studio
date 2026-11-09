@@ -7,7 +7,8 @@ import { Listeners } from "../../lib/listeners";
 import { h } from "../../workbench/dom";
 import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } from "../../lib/objects/metadata";
 import { pickBaseObject } from "./picker";
-import { iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
+import { campaignObjects, iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
+import { findCampaign } from "../../lib/objects/campaign";
 import { toProjectPath } from "../../lib/formats/archivepath";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
@@ -62,10 +63,17 @@ async function packedMapPath(w3: W3Api): Promise<string | null> {
 /** An object data file without objects, in the version of the map's other object data (else
  *  Reforged's). */
 async function emptyFile(w3: W3Api): Promise<ObjectFile> {
-  const sibling = w3.workspace.files().find((f) => /^map\/war3map\.w3[utabdhq]\.json$/i.test(f.path));
+  const sibling = w3.workspace.files().find((f) => /^map\/war3(map|campaign)\.w3[utabdhq]\.json$/i.test(f.path));
   const version = sibling ? JSON.parse(await w3.workspace.readText(sibling.path)).version ?? 3 : 3;
   return { format: FORMAT, version, original: [], custom: [] };
 }
+/** Whether the open project is a campaign (it has war3campaign.w3f, as the Campaign Editor decides). */
+const isCampaignProject = (w3: W3Api) => w3.workspace.files().some((f) => /^map\/war3campaign\.w3f(\.json)?$/i.test(f.path.replace(/\\/g, "/")));
+/** The object data file of a kind the Object Editor edits in the open project: a campaign's own (war3campaign.<kind>,
+ *  which every chapter map uses, as the World Editor's Campaign Editor edits it), else the map's (war3map.<kind>). */
+const objectDocPath = (w3: W3Api, ext: string) => `map/${isCampaignProject(w3) ? "war3campaign" : "war3map"}.${ext}.json`;
+/** The string table of an object data file: a campaign's own texts are in war3campaign.wts. */
+const wtsOf = (docPath: string) => (/(^|\/)war3campaign\.w3[utabdhq]\.json$/i.test(docPath.replace(/\\/g, "/")) ? "map/war3campaign.wts" : "map/war3map.wts");
 /** Path field types (UnitMetaData & co.) that get a file browser. */
 const PATH_KIND: Record<string, FileKind> = { model: "model", modelList: "model", icon: "image", texture: "image" };
 const KINDS: { ext: string; label: string; singular: string }[] = [
@@ -265,10 +273,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const list = h("div.tree");
         el.append(list);
         const files = new Map(w3.workspace.files().map((f) => [f.path.toLowerCase(), f.path]));
+        if (isCampaignProject(w3)) list.append(h("div.muted.obj-kinds-note", {}, "The campaign's object data: every chapter map has these objects."));
         for (const k of KINDS) {
-          const path = files.get(`map/war3map.${k.ext}.json`);
+          const wanted = objectDocPath(w3, k.ext);
+          const path = files.get(wanted.toLowerCase());
           const counts = h("small.muted", {}, path ? "…" : "none yet");
-          list.append(h("div.tree-row.obj-kind", { title: path ?? `Creates map/war3map.${k.ext}.json`, onclick: () => w3.commands.execute("w3.objectEditor.open", k.ext).catch((e) => w3.window.showError(String(e))) },
+          list.append(h("div.tree-row.obj-kind", { title: path ?? `Creates ${wanted}`, onclick: () => w3.commands.execute("w3.objectEditor.open", k.ext).catch((e) => w3.window.showError(String(e))) },
             h("span.tree-icon", {}, KIND_ICONS[k.ext]),
             h("span.tree-label", {}, k.label),
             counts));
@@ -289,10 +299,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // `focusId` (optional) shows that object, e.g. when coming from the terrain view.
     w3.commands.register("w3.objectEditor.open", async (ext?: string, focusId?: string) => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
-      ext ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: k.label, description: `war3map.${k.ext}`, value: k.ext })), { placeholder: "Which object data?" }))?.value;
+      ext ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: k.label, description: objectDocPath(w3, k.ext).slice(4, -5), value: k.ext })), { placeholder: "Which object data?" }))?.value;
       if (!ext) return;
-      // A kind the map has no file for opens empty; the file is created on the first save.
-      const path = `map/war3map.${ext}.json`;
+      // A kind the map (or campaign) has no file for opens empty; the file is created on the first save.
+      const path = objectDocPath(w3, ext);
       const open = w3.workspace.files().find((f) => f.path.toLowerCase() === path.toLowerCase())?.path ?? path;
       if (focusId) pendingFocus = { path: open, id: focusId };
       await w3.editors.open(open, "w3.objectEditor");
@@ -309,11 +319,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (typeof ext !== "string" || typeof id !== "string" || (action !== "rename" && action !== "delete")) throw new Error("w3.objectEditor.objectAction takes a kind, an id and \"rename\" or \"delete\".");
       if (action === "rename" && (typeof name !== "string" || !name.trim())) throw new Error("Renaming needs a name.");
       await w3.commands.execute("w3.objectEditor.open", ext, id);
-      const path = [...actors.keys()].find((p) => p.toLowerCase() === `map/war3map.${ext}.json`);
+      const path = [...actors.keys()].find((p) => p.toLowerCase() === objectDocPath(w3, ext).toLowerCase());
       const actor = path ? actors.get(path) : undefined;
       if (!actor) throw new Error(`The Object Editor for ${ext} didn't open.`);
       if (action === "delete") return actor.remove(id);
       actor.rename(id, (name as string).trim());
+      return true;
+    }),
+    // A chapter map's campaign object, edited where the World Editor edits it: in the campaign. Opens the campaign project
+    // (which asks about this map's unsaved changes) and its Object Editor at the object. True when it got there.
+    w3.commands.register("w3.objectEditor.openInCampaign", async (ext: unknown, id: unknown) => {
+      if (typeof ext !== "string" || !KINDS.some((k) => k.ext === ext) || typeof id !== "string") throw new Error("w3.objectEditor.openInCampaign takes a kind (w3u, …) and an object id.");
+      const campaign = await findCampaign(w3);
+      if (!campaign) throw new Error("This map isn't a chapter of a campaign project.");
+      const same = (a: string | undefined) => (a ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === campaign.replace(/\/+$/, "").toLowerCase();
+      await w3.commands.execute("w3.project.open", campaign);
+      // Not opened (unsaved changes kept, or it failed): nothing more.
+      if (!same(w3.workspace.project()?.root)) return false;
+      await w3.commands.execute("w3.objectEditor.open", ext, id);
       return true;
     }),
     // Reset Standard Objects To Defaults (the World Editor's File menu): of the open Object Editor's kind, `ext` for another
@@ -322,11 +345,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       const active = w3.editors.activePath();
       let kindExt = typeof ext === "string" ? ext.toLowerCase() : active && actors.has(active) ? active.replace(/\.json$/i, "").split(".").pop()!.toLowerCase() : undefined;
-      kindExt ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: `Reset Standard ${k.label} to Defaults`, description: `war3map.${k.ext}`, value: k.ext })), { placeholder: "Which object data?" }))?.value;
+      kindExt ??= (await w3.window.quickPick(KINDS.map((k) => ({ label: `Reset Standard ${k.label} to Defaults`, description: objectDocPath(w3, k.ext).slice(4, -5), value: k.ext })), { placeholder: "Which object data?" }))?.value;
       if (!kindExt) return false;
       if (!KINDS.some((k) => k.ext === kindExt)) throw new Error(`No object data kind ${kindExt}.`);
       await w3.commands.execute("w3.objectEditor.open", kindExt);
-      const path = [...actors.keys()].find((p) => p.toLowerCase() === `map/war3map.${kindExt}.json`);
+      const path = [...actors.keys()].find((p) => p.toLowerCase() === objectDocPath(w3, kindExt!).toLowerCase());
       if (!path) throw new Error(`The Object Editor for ${kindExt} didn't open.`);
       return actors.get(path)!.resetAll();
     }),
@@ -340,8 +363,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const kindInfo = KINDS.find((k) => k.ext === kind);
         const optInts = OPT_INTS.has(kind);
 
-        // The map's string table: TRIGSTR_n values show (and edit) their text in war3map.wts.
-        const wtsText = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+        // The map's string table: TRIGSTR_n values show (and edit) their text in war3map.wts (a campaign's own object
+        // data: war3campaign.wts).
+        const WTS = wtsOf(doc.path), wtsName = WTS.slice(4);
+        const wtsText = await w3.workspace.readText(WTS).catch(() => null);
         const wts = new WtsSession(wtsText ?? "");
         const hasWts = wtsText !== null;
         const trigRef = (v: unknown) => {
@@ -363,6 +388,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return stripColors(baseName(o));
         };
+        // A chapter map's campaign's objects of this kind: the chapter has them too, but they're edited in the campaign
+        // (as the World Editor's Campaign Editor does), so they're listed here to look at only. One that can't be read
+        // says so; its ids then aren't known to be free, and no new ids are given out.
+        const openedRoot = w3.workspace.project()?.root;
+        let campaign: Awaited<ReturnType<typeof campaignObjects>> = null;
+        let campaignError: string | null = null;
+        if (!/war3campaign\./i.test(doc.path) && doc.path.toLowerCase().startsWith("map/")) {
+          try { campaign = await campaignObjects(w3, kind, openedRoot); } catch (e) { campaignError = e instanceof Error ? e.message : String(e); }
+        }
+        const campaignStrings = new StringTable(campaign?.wts ?? "");
+        const campaignStr = (v: unknown) => { const n = typeof v === "string" ? StringTable.ref(v) : null; return n !== null && campaignStrings.has(n) ? campaignStrings.get(n)! : null; };
+        /** The campaign's objects the list shows: its custom ones the map doesn't have itself (the map's own wins), and
+         *  the game objects it changes. */
+        const campaignListed = (): Obj[] => {
+          if (!campaign) return [];
+          const own = new Set(file.custom.map((o) => o.id));
+          return [...(campaign.custom as Obj[]).filter((o) => o.id && !own.has(o.id)), ...(campaign.original as Obj[])];
+        };
+        const campaignName = (o: Obj) => {
+          for (const { mods } of modLists(o)) {
+            const m = mods.find((m) => /nam$/.test(m.field) && m.type === "string");
+            if (m) return stripColors(campaignStr(m.value) ?? String(m.value));
+          }
+          return stripColors(baseName(o));
+        };
+        /** The campaign object shown (read-only); the map's selection is empty meanwhile. */
+        let campaignShown: Obj | null = null;
         /** The object data as it is here now, for other modules (ObjectsService.liveObjects). */
         const liveNow = (): LiveObjectData => ({
           custom: file.custom, original: file.original,
@@ -376,6 +428,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const select = (o: Obj | null) => {
           selected = o;
           selection = new Set(o ? [o] : []);
+          campaignShown = null;
         };
         /** Objects in list order (for Shift ranges and ordered multi views). */
         let visible: Obj[] = [];
@@ -494,7 +547,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }, `Clean up (${unchanged})`)
             : undefined;
           visible = [...inOrder(file.custom), ...inOrder(file.original)].filter(matchesFilter);
-          listEl.replaceChildren(...group("Custom", file.custom), ...group("Modified standard", file.original, cleanUp));
+          listEl.replaceChildren(...group("Custom", file.custom), ...group("Modified standard", file.original, cleanUp), ...campaignGroup());
+        };
+        /** A chapter map's campaign's objects: shown to look at, edited in the campaign. */
+        const campaignGroup = (): HTMLElement[] => {
+          if (campaignError) return [h("div.obj-group.obj-campaign-error", { title: campaignError }, h("span", {}, "Campaign: its object data can't be read"))];
+          if (!campaign) return [];
+          const sorted = sortByName ? [...campaignListed()].sort((a, b) => campaignName(a).localeCompare(campaignName(b))) : campaignListed();
+          const items = sorted.filter((o) => !filter || `${o.base} ${o.id ?? ""} ${campaignName(o)} ${kd?.searchText(o.base) ?? ""}`.toLowerCase().includes(filter));
+          return [
+            h("div.obj-group", { title: `The campaign's ${kindInfo?.label.toLowerCase() ?? "objects"} (war3campaign.${kind}): this map has them too. They're edited in the campaign.` },
+              h("span", {}, `Campaign (${items.length})`)),
+            ...items.map((o) => h(`div.obj-item.obj-campaign${campaignShown === o ? ".selected" : ""}`, {
+              title: o.id ? "A custom object of the campaign" : "A game object the campaign changes",
+              onclick: () => { select(null); campaignShown = o; renderDetail(); },
+            },
+            ICON_FIELD[kind] ? itemIcon(o) : null,
+            h("code", {}, o.id ?? o.base),
+            o.id ? h("small", { title: stripColors(baseName(o)) }, `← ${o.base}`) : null,
+            h("span", {}, campaignName(o)),
+            h("span.badge", {}, "campaign"))),
+          ];
         };
 
         const clickItem = (o: Obj, e: MouseEvent) => {
@@ -584,11 +657,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               if (plan.items.some((i) => i.fate !== "chosen")) void w3.window.showInfo(summary(plan));
             } catch (e) { void w3.window.showError(String((e as Error).message ?? e)); return; }
           } else {
-            for (const c of copies) {
-              const id = await freeIdFor(c.base, taken);
-              taken.add(id);
-              made.push(pastedObject(c as EditObject, id, file.version) as Obj);
-            }
+            try {
+              for (const c of copies) {
+                const id = await freeIdFor(c.base, taken);
+                taken.add(id);
+                made.push(pastedObject(c as EditObject, id, file.version) as Obj);
+              }
+            } catch (e) { void w3.window.showError(String((e as Error).message ?? e)); return; }
+            if (!here()) return;
             file.custom.push(...made);
           }
           selected = made[made.length - 1];
@@ -752,7 +828,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (ref !== null) {
             const text = wts.table.get(ref) ?? "";
             const input = h(`input.obj-value${inherited ? ".inherited" : ""}`, {
-              value: text, title: `Text of TRIGSTR_${ref} in war3map.wts (every use of this string changes)`,
+              value: text, title: `Text of TRIGSTR_${ref} in ${wtsName} (every use of this string changes)`,
               onchange: () => { wts.set(ref, input.value); markDirty(); renderDetail(); },
             });
             return h("div.obj-value-cell", {}, input, h("div.obj-resolved", {}, h("code", {}, `TRIGSTR_${ref}`), " · map string"));
@@ -982,12 +1058,65 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const f = kind === "w3u" ? kd?.fieldById.get("uani") : undefined;
           return f ? effective(o, f, 0) : "";
         };
+        /** A campaign object, to look at: its fields as the campaign sets them (the game's where it doesn't), no editing.
+         *  "Edit in the Campaign" opens the campaign project's Object Editor at it. */
+        const renderCampaignObject = (o: Obj) => {
+          const shown = (v: unknown) => stripColors(campaignStr(v) ?? String(v));
+          const rows: HTMLElement[] = [];
+          const known = new Set<Mod>();
+          if (kd) {
+            const lf = LEVEL_FIELD[kind];
+            const levels = Math.max(1, Number((lf ? findMod(o, lf, 0)?.m.value : undefined) ?? kd.levels(o.base)) || 1);
+            const q = fieldFilter.toLowerCase();
+            for (const f of kd.fieldsFor(o.base)) {
+              for (const lv of f.repeat > 0 ? Array.from({ length: levels }, (_, i) => i + 1) : [0]) {
+                const found = findMod(o, f.id, lv);
+                if (found) known.add(found.m);
+                if (modifiedOnly && !found) continue;
+                if (q && !`${f.label} ${f.id}`.toLowerCase().includes(q)) continue;
+                const value = found ? found.m.value : (kd.defaultValue(o.base, f, lv) ?? "");
+                rows.push(h(`tr${found ? ".modified" : ""}`, {},
+                  h("td", { title: `${f.category} · ${f.type}` }, h("span.obj-field-label", {}, f.label), h("code", {}, f.id)),
+                  h("td.muted", {}, f.repeat > 0 && levels > 1 ? String(lv) : ""),
+                  h("td.obj-campaign-value", { title: found ? "Set by the campaign" : "The game's value" }, shown(value))));
+              }
+            }
+          }
+          // Fields the table didn't show (unknown ones, or without the game's data).
+          for (const m of modLists(o).flatMap((l) => l.mods).filter((m) => !known.has(m))) {
+            rows.push(h("tr.modified", {}, h("td", {}, h("code", {}, m.field)), h("td.muted", {}, m.level ? String(m.level) : ""), h("td.obj-campaign-value", {}, shown(m.value))));
+          }
+          const what = o.id ? `${o.id} (based on ${o.base}${baseName(o) ? ` · ${stripColors(baseName(o))}` : ""})` : o.base;
+          detailEl.replaceChildren(
+            h("div.obj-detail-header", {},
+              h("h2", {}, campaignName(o) || "(unnamed)"),
+              h("code", {}, what),
+              h("button.obj-edit-in-campaign", {
+                title: "Opens the campaign project (this map closes) and its Object Editor at this object",
+                onclick: () => void w3.commands.execute("w3.objectEditor.openInCampaign", kind, o.id ?? o.base).catch(failed),
+              }, "Edit in the Campaign…")),
+            h("div.muted.obj-campaign-note", {}, `${o.id ? "A custom object" : "A change to a game object"} of the campaign (war3campaign.${kind}): every chapter map has it. `
+              + "It's edited in the campaign; an object of the same id in this map replaces it here."),
+            h("div.obj-detail-toolbar", {},
+              fieldSearch,
+              h("label", {}, h("input", { type: "checkbox", checked: modifiedOnly, onchange: (e: Event) => { modifiedOnly = (e.target as HTMLInputElement).checked; renderDetail(); } }), " Modified only")),
+            rows.length
+              ? h("table.obj-table.obj-campaign-table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Field"), h("th", {}, "Lvl"), h("th", {}, "Value"))), h("tbody", {}, ...rows))
+              : h("div.muted", {}, modifiedOnly ? "No modified fields." : "No fields match."));
+        };
         /** Values of the shown object past the World Editor's range. */
         let overCount = 0;
         const renderDetailInner = () => {
           // Edits can change names and the clean-up count in the list too.
+          // Choosing one of the map's objects (also Ctrl+click, an undo) leaves the campaign's.
+          if (selection.size) campaignShown = null;
           renderList();
           const scroll = detailEl.scrollTop;
+          if (campaignShown) {
+            renderCampaignObject(campaignShown);
+            detailEl.scrollTop = scroll;
+            return;
+          }
           if (!selected) {
             detailEl.replaceChildren(h("div.muted", {}, kd ? `No ${kindInfo?.label.toLowerCase() ?? "objects"} yet — use "+ New".` : "No objects in this file."));
             return;
@@ -1168,6 +1297,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** Where an id is in use in the other object types ("a custom item of this map"), or null. */
         const usedElsewhere = async (id: string): Promise<string | null> => {
+          const ofCampaign = (await campaignIds()).get(id);
+          if (ofCampaign) return `a custom ${ofCampaign} of the campaign`;
           for (const k of KINDS) {
             if (k.ext === kind) continue;
             const text = await w3.workspace.readText(`map/war3map.${k.ext}.json`).catch(() => null);
@@ -1178,14 +1309,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           return null;
         };
-        const takenIds = () => new Set<string>([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...(kd?.baseIds ?? [])]);
+        /** A chapter map's campaign's custom objects of every kind (id → its kind, singular), read once: a new object's
+         *  id shouldn't be one of them, or it would replace the campaign's in this map. Rejects when they can't be read. */
+        let campaignIdList: Promise<Map<string, string>> | null = null;
+        const campaignIds = () => {
+          campaignIdList ??= (async () => {
+            const ids = new Map<string, string>();
+            if (campaignError) throw new Error(`The campaign's object data can't be read (${campaignError}), so it isn't known which ids it uses.`);
+            for (const k of KINDS) {
+              const c = k.ext === kind ? campaign : await campaignObjects(w3, k.ext, openedRoot);
+              for (const o of c?.custom ?? []) if (o.id && !ids.has(o.id)) ids.set(o.id, k.singular);
+            }
+            return ids;
+          })();
+          campaignIdList.catch(() => { campaignIdList = null; });
+          return campaignIdList;
+        };
+        const takenIds = () => new Set<string>([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...(kd?.baseIds ?? []),
+          ...((campaign?.custom ?? []).map((o) => o.id ?? ""))]);
         /** The next free id, like the World Editor (also free among the other object types). */
         const freeIdFor = async (base: string, taken: Set<string>) => {
           let free = nextFreeId(kind, base, taken);
           for (let n = 0; n < 50 && (await usedElsewhere(free)); n++) { taken.add(free); free = nextFreeId(kind, base, taken); }
           return free;
         };
-        const newObject = async () => {
+        // Fails, saying why, when the ids in use can't be told (a campaign whose object data can't be read).
+        const newObject = () => newObjectAsked().catch((e) => failed(e));
+        const newObjectAsked = async () => {
           const base = await pickBase(`New ${kindInfo?.singular ?? "object"} based on… (hold Shift to choose the id)`);
           if (!base || base.length !== 4) return;
           const askId = shiftHeld;
@@ -1265,7 +1415,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
           // The fields the map keeps in its Skin file (names, models, art) belong in the exported file. All objects
           // are exported here, so the Skin file's own entries come along; Export Object takes the chosen ones only.
-          const merged = mergeSkin(file as unknown as EditFile, await readMapDocStrict<EditFile>(w3, `map/war3mapSkin.${kind}.json`), { addSkinOnly: true }) as unknown as ObjectFile;
+          const skinPath = doc.path.replace(/(war3map|war3campaign)(\.w3[utabdhq]\.json)$/i, "$1Skin$2");
+          const merged = mergeSkin(file as unknown as EditFile, await readMapDocStrict<EditFile>(w3, skinPath), { addSkinOnly: true }) as unknown as ObjectFile;
           const own = { ...merged, custom: merged.custom.map((o) => copyOf(o as EditObject, text)), original: merged.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
@@ -1293,11 +1444,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderList();
           renderDetail();
           if (o) return;
+          // A custom object of a chapter map's campaign: shown as the campaign has it (edited in the campaign).
+          const fromCampaign = (campaign?.custom as Obj[] | undefined)?.find((c) => c.id === id);
+          if (fromCampaign) {
+            campaignShown = fromCampaign;
+            status.textContent = `${id}: a custom object of the campaign — "Edit in the Campaign…" opens it there.`;
+            renderList();
+            renderDetail();
+            return;
+          }
           // An unchanged game object: shown as a standard entry without modifications, like the World
           // Editor (such entries aren't written, so this changes nothing until a field is edited).
           void loadKind(w3, kind).then((k) => {
             if (!k.names.has(id)) {
-              status.textContent = `${id} isn't in this map's object data or the game's — a campaign's custom object is edited in the campaign project.`;
+              status.textContent = campaignError ? `${id} isn't in this map's object data or the game's, and the campaign's can't be read: ${campaignError}`
+                : `${id} isn't in this map's object data, its campaign's or the game's.`;
               return;
             }
             const std: Obj = file.version >= 3 ? { base: id, mods: [] } : { base: id, end: id, mods: [] };
@@ -1393,7 +1554,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               write: (text) => doc.writeText(text),
               afterWrite: async () => {
                 if (isNew && !exists()) await w3.workspace.refresh();
-                // Edited strings go to war3map.wts, merged onto the file as it is now (other editors
+                // Edited strings go to war3map.wts (war3campaign.wts), merged onto the file as it is now (other editors
                 // may have saved strings meanwhile; only changed blocks are rewritten).
                 if (!hasWts) return;
                 const outcome = await attempt(async () => {
@@ -1405,16 +1566,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     return fileIsMissing({
                       error,
                       refreshed,
-                      listed: paths.includes("map/war3map.wts"),
-                      otherMapFiles: paths.some((p) => p.startsWith("map/") && p !== "map/war3map.wts" && p !== doc.path.toLowerCase()),
+                      listed: paths.includes(WTS.toLowerCase()),
+                      otherMapFiles: paths.some((p) => p.startsWith("map/") && p !== WTS.toLowerCase() && p !== doc.path.toLowerCase()),
                     });
                   };
-                  return wts.save(() => w3.workspace.readText("map/war3map.wts"), (t) => w3.workspace.writeText("map/war3map.wts", t), isMissing);
+                  return wts.save(() => w3.workspace.readText(WTS), (t) => w3.workspace.writeText(WTS, t), isMissing);
                 });
                 if (!outcome.ok) {
                   // The object file is written; saving again rewrites it unchanged and retries the strings.
                   await w3.workspace.refresh().catch(() => {});
-                  w3.window.showError(`war3map.wts: strings not saved (${outcome.error instanceof Error ? outcome.error.message : outcome.error})`);
+                  w3.window.showError(`${wtsName}: strings not saved (${outcome.error instanceof Error ? outcome.error.message : outcome.error})`);
                 } else {
                   result = outcome.value;
                 }
@@ -1440,7 +1601,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Closed: the saved file is what there is again.
             if (liveData.get(doc.path)?.data === liveNow) { liveData.delete(doc.path); edits.fire(kind); }
           },
-          watches: ["map/war3map.wts"],
+          watches: [WTS],
         };
       },
     }),
