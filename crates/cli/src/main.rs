@@ -137,10 +137,27 @@ fn baseline_diffs(before: &BTreeMap<String, String>, now: &BTreeMap<String, Stri
     out
 }
 
+/// Whether a file is a project's output written with Windows separators on Linux, where a backslash is part
+/// of the name: `<project>\build\checkpoints\….w3x` next to the project folder `<project>`.
+fn is_misnamed_project_output(path: &std::path::Path) -> bool {
+    let Some(dir) = path.parent() else { return false };
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match name.split_once('\\') {
+        Some((first, _)) if !first.is_empty() => dir.join(first).join(w3proj::project::MANIFEST).is_file(),
+        _ => false,
+    }
+}
+
 /// Maps given directly, plus the maps and campaigns found in given folders (sorted), each with
-/// its baseline key: the path below the given folder (`/`-separated), or the file name.
+/// its baseline key: the path below the given folder (`/`-separated), or the file name. Projects
+/// found below a given folder (folders holding `w3proj.toml`) are left out, with their outputs
+/// under other names (`is_misnamed_project_output`): their `build/` maps and checkpoints are made
+/// by packing, not maps of their own. A project folder given directly is searched.
 fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
-    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>, top: bool) -> Result<()> {
+        if !top && dir.join(w3proj::project::MANIFEST).is_file() {
+            return Ok(());
+        }
         let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
             .with_context(|| format!("reading {}", dir.display()))?
             .map(|e| e.map(|e| e.path()))
@@ -148,8 +165,10 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
         entries.sort();
         for p in entries {
             if p.is_dir() {
-                walk(&p, out)?;
-            } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["w3x", "w3m", "w3n"].contains(&e.to_ascii_lowercase().as_str())) {
+                walk(&p, out, false)?;
+            } else if p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["w3x", "w3m", "w3n"].contains(&e.to_ascii_lowercase().as_str()))
+                && !is_misnamed_project_output(&p)
+            {
                 out.push(p);
             }
         }
@@ -159,7 +178,7 @@ fn expand_maps(args: &[PathBuf]) -> Result<Vec<(PathBuf, String)>> {
     for a in args {
         if a.is_dir() {
             let mut found = Vec::new();
-            walk(a, &mut found)?;
+            walk(a, &mut found, true)?;
             out.extend(found.into_iter().map(|p| {
                 let rel = p.strip_prefix(a).unwrap_or(&p);
                 let key = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");

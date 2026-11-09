@@ -286,6 +286,43 @@ fn a_closed_pipe_does_not_hide_a_failing_verify() {
     assert!(!String::from_utf8_lossy(&o.stderr).contains("panicked"), "{}", text(&o));
 }
 
+/// A folder of maps that also holds projects checks the maps, not what the projects packed: their `build/` maps and
+/// checkpoints are outputs (the corpus tier failed on them), also one whose name is such a path with backslashes.
+#[test]
+fn verify_on_a_folder_leaves_out_the_projects_outputs() {
+    let dir = workdir("verify_outputs");
+    let maps = dir.join("maps");
+    let project = maps.join("proj");
+    fs::create_dir_all(project.join("build/checkpoints")).unwrap();
+    pack(&fixture(), &maps.join("real.w3x"));
+    // Outputs that aren't maps: verify fails if it reads any of them.
+    let outputs = [project.join("build/proj.w3x"), project.join("build/checkpoints/proj 2026-11-08 07-11-01.w3x")];
+    for o in &outputs {
+        fs::write(o, b"this is not an archive").unwrap();
+    }
+    let misnamed = maps.join("proj\\build\\checkpoints\\proj 2026-11-08 07-11-21.w3x");
+    if cfg!(unix) {
+        fs::write(&misnamed, b"this is not an archive").unwrap();
+    }
+    let verify = |path: &Path| {
+        let o = w3proj(&["verify", s(path), "--game", "none"]);
+        (o.status.code(), text(&o))
+    };
+    // Control: without its manifest the folder is no project, and its maps are read (and fail).
+    let (code, out) = verify(&maps);
+    assert_eq!(code, Some(1), "{out}");
+    assert!(outputs.iter().all(|o| out.contains(&*o.to_string_lossy())), "{out}");
+    assert!(!cfg!(unix) || out.contains("07-11-21"), "{out}");
+    fs::write(project.join("w3proj.toml"), "").unwrap();
+    let (code, out) = verify(&maps);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("real.w3x") && out.contains("1 ok"), "{out}");
+    // Given directly, a project's folder is searched.
+    let (code, out) = verify(&project);
+    assert_eq!(code, Some(1), "{out}");
+    assert!(out.contains("0 ok") && out.contains("2 failed"), "{out}");
+}
+
 /// `verify` on all cores prints what one map after the other prints, in the same order, with the
 /// failures in their places and the same exit code.
 #[test]
