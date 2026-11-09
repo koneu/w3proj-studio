@@ -394,10 +394,12 @@ fn verify_on_a_folder_leaves_out_the_projects_outputs() {
     let dir = workdir("verify_outputs");
     let maps = dir.join("maps");
     let project = maps.join("proj");
-    fs::create_dir_all(project.join("build/checkpoints")).unwrap();
+    // Joined part by part: `join("build/x")` keeps the `/` on Windows, where verify prints `\`.
+    let build = project.join("build");
+    fs::create_dir_all(build.join("checkpoints")).unwrap();
     pack(&fixture(), &maps.join("real.w3x"));
     // Outputs that aren't maps: verify fails if it reads any of them.
-    let outputs = [project.join("build/proj.w3x"), project.join("build/checkpoints/proj 2026-11-08 07-11-01.w3x")];
+    let outputs = [build.join("proj.w3x"), build.join("checkpoints").join("proj 2026-11-08 07-11-01.w3x")];
     for o in &outputs {
         fs::write(o, b"this is not an archive").unwrap();
     }

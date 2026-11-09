@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Tests run bundled elsewhere, from app/ (scripts/test.mjs): the module is found from there.
@@ -38,5 +38,5 @@ test("mainCheckout inside this checkout: the main checkout's folder (control: gi
   const r = mainCheckoutIn(app);
   assert.equal(r.status, 0, r.err);
   const top = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: app, encoding: "utf8" }).stdout.trim();
-  assert.equal(JSON.parse(r.out), join(top, ".."));
+  assert.equal(JSON.parse(r.out), resolve(top, ".."));
 });
