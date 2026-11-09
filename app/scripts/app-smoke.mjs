@@ -4178,7 +4178,7 @@ async function placerAndCampaign(page, found) {
     if (existsSync(map)) {
       await sleep(300);
       const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
-      for (const line of ["set itemID = ChooseRandomItemEx( ITEM_TYPE_PERMANENT, 3 )", "set unitID = gg_rg_007[0]", "BlzCreateItemWithSkin( itemID,"]) {
+      for (const line of ["set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 3, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )", "set unitID = gg_rg_007[0]", "BlzCreateItemWithSkin( itemID,"]) {
         if (!script.includes(line)) fail(`the packed script has no "${line}"`);
       }
       if (/'[ui]DNR'/.test(script)) fail("the packed script creates a random object by its placeholder id");
