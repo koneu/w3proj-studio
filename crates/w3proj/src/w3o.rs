@@ -1,9 +1,13 @@
 //! `.w3o`: all of a map's object data in one file, what the World Editor's Export All Object Data
 //! writes and Import All Object Data reads.
 //!
-//! Layout, as documented by the modding community; **not yet compared with a file the World Editor
-//! wrote** (nothing in the install shows one), so it is built to be read back by this code only
-//! until that comparison is made:
+//! Layout, as documented by the modding community and confirmed by files Blizzard's own World Editor
+//! wrote: the game's Reforged campaign AI files `Scripts/reforged_u05_navy.wai`,
+//! `reforged_u08_blue.wai`, `reforged_u08_red.wai`, `reforged_u08_teal.wai` and `u05_mint.wai` (in
+//! `War3.w3mod`) carry, after the AI's documented end, the path of the `.w3o` they were made with, its
+//! date, and then that `.w3o` (see `embeddedObjectData` in `app/src/lib/ai/wai.ts`). All five read
+//! with [`unpack`] to the end of the file (units, items, destructables, doodads and abilities present,
+//! buffs and upgrades flagged absent) and [`pack`] gives the same bytes back (checked 2026-11-09):
 //! ```text
 //! u32 version (1)
 //! for each kind in KINDS order (units, items, destructables, doodads, abilities, buffs, upgrades):
