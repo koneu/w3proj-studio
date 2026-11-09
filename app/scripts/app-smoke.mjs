@@ -4110,6 +4110,10 @@ async function staleEditors(page, found) {
   } finally {
     await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; if (!kept) return;
       ed.memory = kept.memory; delete ed.resolveTab; ed.confirm = kept.confirm; w3.window.showWarning = kept.warn; w3.window.pickSaveFile = kept.save; window.__open?.(); })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 /** Parity extras through the app, on a new map and a new campaign: the Trigger Editor's Copy As Text and Copy As Script
  *  (a trigger from the tree's menu and a line from its own menu, onto the clipboard, the text as the editor shows its
  *  lines); Allow negative real values (an unreal field refuses -5 from a tool and typed until the setting is on); the
