@@ -126,6 +126,8 @@ export function viewChecks(column, items = VIEW_ITEMS) {
 }
 // The first-start dialog's Continue button, from the dialog's corner.
 const WELCOME = { title: "Welcome to the Warcraft III World Editor", button: { x: 473, y: 470 } };
+/** The editor's module windows: it opens those that were open when it was last closed again at the start. */
+const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Editor", "Import Manager", "AI Editor", "Campaign Editor", "Object Manager"]);
 // The tool palette (at 1356,30 in the display): the first row of the camera layer's list, the rows' height, and
 // View Selected Camera, from the palette's corner (TESTING.md, "Applying a camera object").
 const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, y: 89 } };
@@ -467,6 +469,14 @@ class Session {
         // Once, then again only if it's still there 15 s later (it stays until the editor has loaded the map).
         if (Date.now() - (this.clicked.get(d.id) ?? 0) > 15000) {
           x11(this.display, "click", `${d.rect[0] + WELCOME.button.x},${d.rect[1] + WELCOME.button.y}`);
+          this.clicked.set(d.id, Date.now());
+          this.answered = [...(this.answered ?? []), d.title];
+        }
+      } else if (REOPENED_MODULES.has(d.title)) {
+        // A module window the editor opens again because a run before closed the editor with it open (the farm's
+        // prefix is shared): closed, once per window, so the map's view is what's shown.
+        if (!this.clicked.has(d.id)) {
+          x11(this.display, "close", d.id);
           this.clicked.set(d.id, Date.now());
           this.answered = [...(this.answered ?? []), d.title];
         }

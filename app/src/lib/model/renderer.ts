@@ -10,6 +10,7 @@ import type { Extent, Model, TextureAnim, Track } from "./mdx";
 import { ParticleInstance, ParticleRenderer } from "./particles";
 import type { SceneLight } from "./dnclight";
 import { setTone, TONE_FS, type Tone } from "./tone";
+import { depthTexture, setSunShadow, SUN_FS, type SunShadow } from "./sunshadow";
 
 /** Shading without a scene light (model viewer): soft ambient plus a light from the front left. */
 export const DEFAULT_LIGHT: SceneLight = { dir: [0.4, -0.3, 0.85], diffuse: [0.7, 0.7, 0.7], ambient: [0.45, 0.45, 0.45] };
@@ -334,7 +335,7 @@ uniform highp sampler2D uBones;
 // Optional ground height map (R32F, one texel per terrain corner): cliff models
 // follow it. uHeightRect = world x/y of corner (0,0), corners per row/column.
 uniform highp sampler2D uHeight; uniform float uUseHeight; uniform vec4 uHeightRect;
-out vec3 vNormal; out vec2 vUV;
+out vec3 vNormal; out vec2 vUV; out highp vec3 vWorldPos;
 ${FOG_VS}
 float groundAt(vec2 p) {
   vec2 g = clamp((p - uHeightRect.xy) / 128.0, vec2(0.0), uHeightRect.zw - 1.0);
@@ -368,14 +369,17 @@ void main() {
       vNormal = mix(n, normalize(vec3(-sx, -sy, 1.0)), flatness);
     }
   }
+  vWorldPos = world.xyz;
   gl_Position = uViewProj * world;
   vFogDepth = gl_Position.w;
 }`;
 
 const FS = `#version 300 es
 precision mediump float;
-in vec3 vNormal; in vec2 vUV;
+in vec3 vNormal; in vec2 vUV; in highp vec3 vWorldPos;
 uniform sampler2D uTex; uniform vec4 uColor; uniform float uAlphaTest; uniform float uUnshaded;
+// uShadowPass 1: drawing the sun's shadow map (depth only): what the alpha test keeps casts.
+uniform float uShadowPass;
 // uOpaque 1: an opaque layer (filter mode None), whose texture's alpha doesn't count (layerAlpha).
 uniform float uOpaque;
 // HD materials: the ORM texture's alpha masks where team colour goes.
@@ -387,13 +391,17 @@ uniform vec3 uLightDir; uniform vec3 uDiffuse; uniform vec3 uAmbient;
 out vec4 outColor;
 ${FOG_FS}
 ${TONE_FS}
+${SUN_FS}
 void main() {
   vec4 c = texture(uTex, vUV);
-  if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
-  c *= uColor;
+  c.a *= uColor.a;
   if (uOpaque > 0.5) c.a = uColor.a;
   if (c.a < uAlphaTest) discard;
-  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : uAmbient + uDiffuse * facing(vNormal, uLightDir);
+  if (uShadowPass > 0.5) { outColor = vec4(1.0); return; }
+  if (uHd > 0.5) c.rgb = mix(c.rgb, c.rgb * uTeam, texture(uOrm, vUV).a);
+  c.rgb *= uColor.rgb;
+  float lit = uUnshaded > 0.5 ? 1.0 : sunLit(vWorldPos, vNormal);
+  vec3 light = uUnshaded > 0.5 ? vec3(1.0) : sunLight(uAmbient, uDiffuse, vNormal, uLightDir, lit);
   vec3 glow = uGlow > 0.5 ? texture(uEmissive, vUV).rgb * uColor.rgb : vec3(0.0);
   outColor = vec4(fogged(mix(tonedGlow(c.rgb, light, glow), uMix.rgb, uMix.a)), c.a);
 }`;
@@ -476,7 +484,7 @@ export interface InstanceRuns {
   runs: { team: number; first: number; count: number }[];
 }
 
-const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix"] as const;
+const UNIFORMS = ["uViewProj", "uBones", "uTex", "uOrm", "uEmissive", "uGlow", "uHd", "uTeam", "uColor", "uAlphaTest", "uUnshaded", "uOpaque", "uHeight", "uUseHeight", "uHeightRect", "uMix", "uFogColor", "uFogRange", "uFogStyle", "uTone", "uShadeWrap", "uLightDir", "uDiffuse", "uAmbient", "uTexMatrix", "uShadowPass", "uSunShadow", "uSunLookup", "uSunOn", "uSunTexel", "uSunStep"] as const;
 
 /** Resources shared by every model drawn into one context. */
 interface Shared {
@@ -490,6 +498,8 @@ interface Shared {
   /** 1×1 team colour and generated team glow, per player colour. */
   team: WebGLTexture[];
   glow: WebGLTexture[];
+  /** A 1×1 depth texture lit everywhere: the shadow sampler's when there's no shadow map (see sunshadow.ts). */
+  noSun: WebGLTexture;
   /** The context was lost since these were made: they are gone, and are made again on the next use. */
   stale: boolean;
 }
@@ -532,6 +542,7 @@ function shared(gl: WebGL2RenderingContext): Shared {
       white: solid([255, 255, 255, 255]),
       team: TEAM_COLORS.map(([, c]) => solid([...c, 255])),
       glow: TEAM_COLORS.map(([, c]) => glow(c)),
+      noSun: depthTexture(gl, 1, new Uint16Array([65535]))!,
     };
     sharedByContext.set(gl, s);
     const made = s;
@@ -564,6 +575,16 @@ export interface DrawOptions {
   light?: SceneLight;
   /** How the lit colour becomes a pixel (tone.ts; default 0, colour × light). */
   tone?: Tone;
+  /** The sun's shadow map the model is shaded with (HD; sunshadow.ts); none: all lit. */
+  sun?: SunShadow | null;
+  /** Draws into the sun's shadow map instead (depth only): the layers that hide what's behind them (opaque and
+   *  alpha-tested ones), from both sides, with their alpha test. */
+  shadowPass?: boolean;
+}
+
+/** The depth texture shaders read as "no shadow anywhere" in this context (setSunShadow's fallback). */
+export function noSunTexture(gl: WebGL2RenderingContext): WebGLTexture {
+  return shared(gl).noSun;
 }
 
 export interface HeightMap {
@@ -829,8 +850,13 @@ export class ModelGpu {
     for (const r of runs) total += r.count;
     if (!total || !instances.buffer) return;
     const gl = this.gl, m = this.model, sh = this.sh, u = sh.u;
-    const pass = opts.pass ?? "all";
+    const shadow = opts.shadowPass === true;
+    // The shadow map holds what hides the sun: opaque layers (and blend layers drawn as opaque, see classified).
+    const pass = shadow ? "opaque" : opts.pass ?? "all";
     gl.useProgram(sh.prog);
+    gl.uniform1f(u.uShadowPass, shadow ? 1 : 0);
+    // Never the map being drawn into as a texture at the same time.
+    setSunShadow(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], shadow ? null : opts.sun, sh.noSun);
     gl.uniformMatrix4fv(u.uViewProj, false, viewProj);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.boneTex);
@@ -845,14 +871,18 @@ export class ModelGpu {
       gl.uniform1i(u.uHeight, 3);
       gl.uniform4f(u.uHeightRect, hm.x, hm.y, hm.width, hm.height);
     }
-    const mx = opts.mix ?? [0, 0, 0, 0];
-    gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
-    setFog(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.fog);
-    const light = opts.light ?? DEFAULT_LIGHT;
-    setTone(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.tone, light);
-    gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
-    gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
-    gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);
+    // The shadow map's fragments stop after the alpha test: colour, fog and light don't count there (every other draw
+    // sets them again).
+    if (!shadow) {
+      const mx = opts.mix ?? [0, 0, 0, 0];
+      gl.uniform4f(u.uMix, mx[0], mx[1], mx[2], mx[3]);
+      setFog(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.fog);
+      const light = opts.light ?? DEFAULT_LIGHT;
+      setTone(gl, (name) => (u as Record<string, WebGLUniformLocation | null>)[name], opts.tone, light);
+      gl.uniform3f(u.uLightDir, light.dir[0], light.dir[1], light.dir[2]);
+      gl.uniform3f(u.uDiffuse, light.diffuse[0], light.diffuse[1], light.diffuse[2]);
+      gl.uniform3f(u.uAmbient, light.ambient[0], light.ambient[1], light.ambient[2]);
+    }
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(u.uTex, 0);
     // Runs that follow each other in the buffer are drawn in one call where the colour doesn't show.
@@ -868,17 +898,18 @@ export class ModelGpu {
       gl.uniformMatrix3fv(u.uTexMatrix, false, texMatrix);
       const tex = m.textures[texIndex];
       // Team colour (1) and team glow (2) are textures of the player's colour.
-      const teamTexture = tex?.replaceableId === 1 ? sh.team : tex?.replaceableId === 2 ? sh.glow : null;
-      if (!teamTexture) gl.bindTexture(gl.TEXTURE_2D, this.textures[texIndex] ?? sh.white);
+      // (The shadow map takes the shape only: a team colour texture is opaque, and colours don't count.)
+      const teamTexture = shadow ? null : tex?.replaceableId === 1 ? sh.team : tex?.replaceableId === 2 ? sh.glow : null;
+      if (!teamTexture) gl.bindTexture(gl.TEXTURE_2D, (tex?.replaceableId === 1 && shadow ? null : this.textures[texIndex]) ?? sh.white);
       // HD layers list [diffuse, normal, ORM, emissive, team colour, environment]; the ORM's alpha masks the player colour.
-      const orm = layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
+      const orm = !shadow && layer.textureIds.length >= 3 ? this.textures[layer.textureIds[2]] : null;
       gl.uniform1f(u.uHd, orm ? 1 : 0);
       if (orm) {
         gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D, orm);
         gl.activeTexture(gl.TEXTURE0);
       }
-      const emissive = emissiveSlot(m, layer) !== null ? this.textures[layer.textureIds[3]] : null;
+      const emissive = !shadow && emissiveSlot(m, layer) !== null ? this.textures[layer.textureIds[3]] : null;
       gl.uniform1f(u.uGlow, emissive ? 1 : 0);
       if (emissive) {
         gl.activeTexture(gl.TEXTURE4);
@@ -905,6 +936,8 @@ export class ModelGpu {
       if (sf & 0x80) gl.depthMask(false);
       if (opts.onTop) gl.disable(gl.DEPTH_TEST);
       if (opts.tint && mode <= 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
+      // Into the shadow map: depth only, every face (a leaf card or a cloak casts from both sides), always tested.
+      if (shadow) { gl.disable(gl.BLEND); gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); }
       const v = opts.wireframe ? g.wireVao : g.vao;
       const prim = opts.wireframe ? gl.LINES : gl.TRIANGLES, count = opts.wireframe ? g.wireCount : g.indexCount;
       gl.bindVertexArray(v.vao);

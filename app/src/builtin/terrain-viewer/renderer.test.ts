@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, withGroup } from "./renderer";
+import { castsSunShadow, hdWaterColor, meanBrightness, TerrainRenderer, waterRamp, waterTile, withGroup } from "./renderer";
+
+test("HD's real shadows are cast by units and doodads, not by cliffs, shoreline waves or see-through previews", () => {
+  const one = [{ world: new Float32Array(16), team: 0 }];
+  assert.equal(castsSunShadow({ group: "units", instances: one }), true);
+  assert.equal(castsSunShadow({ group: "doodads", instances: one }), true);
+  // cliff.w3m in the World Editor's HD view: the same picture with View > Shadows on and off.
+  assert.equal(castsSunShadow({ group: "cliffs", instances: one, followGround: true }), false);
+  assert.equal(castsSunShadow({ group: "shoreline", instances: one }), false);
+  assert.equal(castsSunShadow({ group: "units", instances: one, tint: [1, 1, 1, 0.5] }), false, "a start building's see-through look");
+  assert.equal(castsSunShadow({ group: "units", instances: [] }), false);
+});
 
 const b = (group: string, name: string) => ({ group, name });
 const names = (list: { name: string }[]) => list.map((x) => x.name).join(" ");

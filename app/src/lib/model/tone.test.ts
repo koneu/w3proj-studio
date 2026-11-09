@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { facing, hdLight, hdTone, shadeWrap, toneOf } from "./tone";
+import { facing, GAME_LIGHT_FILL, hdLight, hdTone, shadeWrap, SUN_SHADE, sunAmbient, sunFacing, sunLight, toneOf } from "./tone";
 import type { SceneLight } from "./dnclight";
 
 const near = (a: number, b: number, tol: number, what: string) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} not within ${tol} of ${b}`);
@@ -75,6 +75,49 @@ test("HD: the picture's curve is ACES up to the middle, and white sooner near th
   assert.equal(hdTone(50), 1);
   assert.equal(hdTone(-1), 0);
   for (let x = 0; x < 2; x += 0.01) assert.ok(hdTone(x + 0.01) >= hdTone(x), `rising at ${x}`);
+});
+
+test("HD's real shadows: lit, the shading is facing()'s; between, it goes over smoothly", () => {
+  const l = sun(1.95, SOUTH_WEST, 0.2, 5.85);
+  for (const n of [[0, 0, 1], [0, -1, 0], [0.3, 0.2, 0.9], [-1, 0, 0]]) {
+    near(sunFacing(n, l.dir, 5.85, 1), facing(n, l.dir, 5.85), 1e-12, `normal ${n}`);
+    const half = sunFacing(n, l.dir, 5.85, 0.5), none = sunFacing(n, l.dir, 5.85, 0), full = sunFacing(n, l.dir, 5.85, 1);
+    near(half, (none + full) / 2, 1e-12, `half lit, normal ${n}`);
+  }
+  assert.equal(sunAmbient(1), 1);
+  assert.equal(sunAmbient(0), SUN_SHADE.ambient);
+  assert.equal(sunAmbient(7), 1, "clamped");
+});
+
+test("HD's real shadows: the light in a shadow as the World Editor's pictures measured it (we-drive 2026-11-09)", () => {
+  // A test map on cliff.w3m's flat ground under its lighting at 06:00 (sun from the south-west, 52° from straight up,
+  // ambient colour 0.84 in green) with the sun's intensity, the ambient's and the shadow intensity changed one at a
+  // time: the light in a footman's and a gryphon's shadow over the editor's own light (green, tone curve inverted).
+  const inShadow = (intensity: number, ambient: number, shadow: number) => {
+    const h = hdLight(sun(intensity, SOUTH_WEST, 0.84 * ambient, shadow));
+    return h.ambient[1] * sunAmbient(0) + h.diffuse[1] * sunFacing([0, 0, 1], h.dir, shadeWrap(2, h), 0);
+  };
+  const lit = (intensity: number, ambient: number, shadow: number) => flatFactor(sun(intensity, SOUTH_WEST, 0.84 * ambient, shadow));
+  for (const [i, a, s, measured, tol] of [
+    [1.95, 0.2, 0, 0.314, 0.04], [1, 0.2, 0, 0.314, 0.04], [1.95, 0, 0, 0, 0.03],
+    [1.95, 0.2, 2, 2.675, 0.35], [1, 0.2, 2, 1.889, 0.3], [1.95, 0, 2, 2.593, 0.4],
+  ]) near(inShadow(i, a, s), measured, tol, `sun ${i}, ambient ${a}, shadow intensity ${s}`);
+  // Darker than the lit ground without shadow intensity, about as light at 1 (the editor's shadows all but vanish),
+  // lighter above: cliff.w3m's 5.85 gives yellow shadows on orange sand (1.64 times the lit ground's light, in blue).
+  assert.ok(inShadow(1.95, 0.2, 0) < 0.4 * lit(1.95, 0.2, 0));
+  near(inShadow(1.95, 0.2, 1) / lit(1.95, 0.2, 1), 1, 0.15, "shadow intensity 1");
+  near(inShadow(1.95, 0.2, 5.85) / lit(1.95, 0.2, 5.85), 1.64, 0.15, "shadow intensity 5.85");
+});
+
+test("HD's real shadows under the game's own lighting keep about half the light (map 03's footmen, we-drive)", () => {
+  // Lordaeron's HD terrain model at 06:00 (no ambient, shadow intensity 0.265): 0.51 of the lit ground's light in green.
+  const l = hdLight({ dir: [-0.392, -0.169, 0.904], diffuse: [1.026, 1.026, 1.199], ambient: [-0.03, -0.03, -0.03], shadow: 0.265, fill: GAME_LIGHT_FILL });
+  const at = (lit: number) => sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, shadeWrap(2, l), l.fill ?? 0, lit);
+  near(at(0) / at(1), 0.51, 0.04, "with the game's fill");
+  near(at(1), facing([0, 0, 1], l.dir, shadeWrap(2, l)) * l.diffuse[1], 1e-12, "lit: the fill changes nothing");
+  // A map's own lighting model has none: the same light without it is nearly black in shadow.
+  assert.ok(sunLight(l.ambient[1], l.diffuse[1], [0, 0, 1], l.dir, shadeWrap(2, l), 0, 0) / at(1) < 0.1);
+  assert.equal(hdLight({ dir: [0, 0, 1], diffuse: [1, 1, 1], ambient: [0, 0, 0] }).fill, undefined);
 });
 
 test("the classic picture (and the model viewer) shade by the cosine alone", () => {

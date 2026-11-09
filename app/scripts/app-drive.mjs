@@ -35,7 +35,8 @@
 //   --sleep MS          wait
 //   --frame-cost MS     CPU time of the terrain view's frames drawn during MS (by performance.now): the frames, and
 //                       per frame the whole frame, posing the placed models, the particles. Animated objects
-//                       redraw about 30 times a second by themselves
+//                       redraw about 30 times a second by themselves; and the last frame's real shadows (HD: cast or
+//                       not, the shadow map's texel on the ground, how many objects cast)
 //   --shot FILE.png     picture of the active editor's canvas (the terrain or model view), else of the window
 //   --shot-window FILE  picture of the whole window
 //   --mcp NAME[=JSON]   call an MCP tool with JSON arguments; prints its text answer
@@ -283,7 +284,8 @@ async function main() {
           await sleep(ms);
           const c = await page.evaluate(`window.__driveEd.frameCost()`);
           const per = (v) => (c.frames ? Math.round((v / c.frames) * 100) / 100 : null);
-          out({ step, ms, frames: c.frames, perFrame: { frameMs: per(c.frameMs), poseMs: per(c.poseMs), particleMs: per(c.particleMs) } });
+          const sun = await page.evaluate(`window.__driveEd.sunShadows?.() ?? null`);
+          out({ step, ms, frames: c.frames, perFrame: { frameMs: per(c.frameMs), poseMs: per(c.poseMs), particleMs: per(c.particleMs) }, sunShadows: sun });
         } else if (step === "--shot") {
           out({ step, file: await shot(arg, await canvasClip()) });
         } else if (step === "--shot-window") {

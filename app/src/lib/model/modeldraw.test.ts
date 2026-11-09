@@ -80,3 +80,56 @@ test("a model is drawn in the tone it's asked for (tone.ts), with its light's HD
   assert.deepEqual(both({ tone: 2, light }), [[2], [5.85]], "HD");
   assert.deepEqual(both({ tone: 1, light }), [[1], [0]], "classic: the cosine alone");
 });
+
+/** What a draw of a one-layer model did: draw calls, its uniform1f values by name, the textures bound on unit 5. */
+function drawRecord(filterMode: number, opts: DrawOpts) {
+  const { gl, floats } = recordingGl();
+  let unit = 0;
+  const draws: number[] = [], onFive: unknown[] = [], caps: [string, number][] = [];
+  const recording = new Proxy(gl as unknown as Record<string, unknown>, {
+    get: (t, k) => {
+      if (k === "TEXTURE0") return 1000;
+      if (k === "activeTexture") return (u: number) => { unit = u - 1000; };
+      if (k === "bindTexture") return (_t: number, tex: unknown) => { if (unit === 5) onFive.push(tex); };
+      if (k === "drawElementsInstanced") return (_m: number, _c: number, _t: number, _o: number, n: number) => { draws.push(n); };
+      if (k === "enable" || k === "disable") return (cap: number) => { caps.push([k, cap]); };
+      if (k === "CULL_FACE") return 77;
+      return t[k as string];
+    },
+  }) as unknown as WebGL2RenderingContext;
+  const gpu = new ModelGpu(recording, model(filterMode));
+  gpu.pose({ frame: 0, seqStart: 0, seqEnd: 0, time: 0 });
+  floats.length = 0;
+  onFive.length = 0;
+  caps.length = 0;
+  gpu.drawInstances(new Float32Array(16), { buffer: {} as WebGLBuffer, runs: [{ team: 0, first: 0, count: 3 }] }, opts);
+  const f = (name: string) => floats.filter(([n]) => n === name).map(([, v]) => v);
+  return { draws, f, onFive, caps };
+}
+
+test("into the sun's shadow map go the layers that hide what's behind them, from both sides, alpha-tested", () => {
+  for (const mode of [0, 1]) {
+    const r = drawRecord(mode, { shadowPass: true });
+    assert.deepEqual(r.draws, [3], `mode ${mode} casts, every instance in one draw`);
+    assert.deepEqual(r.f("uShadowPass"), [1]);
+    assert.deepEqual(r.f("uAlphaTest"), [mode === 1 ? 0.75 : 0.01], "the same cut as when drawn: leaves cast their shape");
+    assert.ok(r.caps.some(([k, c]) => k === "disable" && c === 77), "both sides");
+  }
+  for (const mode of [2, 3, 4, 5, 6]) assert.deepEqual(drawRecord(mode, { shadowPass: true }).draws, [], `mode ${mode} (blended) casts nothing`);
+  assert.deepEqual(drawRecord(0, {}).f("uShadowPass"), [0], "drawn as usual otherwise");
+});
+
+test("a model is shaded with the sun's shadow map it's given, and the map isn't read while it's drawn into", () => {
+  const map = { name: "the sun's map" } as unknown as WebGLTexture;
+  const sun = { texture: map, lookup: new Float32Array(16), texel: 4, size: 2048 };
+  const lit = drawRecord(0, { sun });
+  assert.deepEqual(lit.f("uSunOn"), [1]);
+  assert.deepEqual(lit.onFive, [map]);
+  const none = drawRecord(0, {});
+  assert.deepEqual(none.f("uSunOn"), [0], "no map: all lit");
+  assert.equal(none.onFive.length, 1, "a depth texture is still bound for the shadow sampler");
+  assert.notEqual(none.onFive[0], map);
+  const pass = drawRecord(0, { sun, shadowPass: true });
+  assert.deepEqual(pass.f("uSunOn"), [0]);
+  assert.ok(!pass.onFive.includes(map), "never the map being drawn into");
+});

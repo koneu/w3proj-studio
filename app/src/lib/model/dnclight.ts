@@ -335,6 +335,9 @@ export interface SceneLight {
   ambient: [number, number, number];
   /** The light's shadow intensity (HD shading uses it, see tone.ts hdLight); absent: 0. */
   shadow?: number;
+  /** The share of the lit light the HD view keeps in its real shadows besides what the light itself gives there
+   *  (tone.ts GAME_LIGHT_FILL: the game's own HD lighting); absent: 0. */
+  fill?: number;
 }
 
 /** A track's value at `time` (keys in order; Hermite/Bezier use their tangents). */
