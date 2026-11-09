@@ -1,0 +1,170 @@
+// What the terrain view shows, as the World Editor's View menu has it: each layer on or off, the terrain textured,
+// as a wireframe or hidden, and game view (View > Lock to Game View Settings, key V), which shows the map as the
+// game would and nothing of the editor's own. And the World Editor's keys for those items in the view.
+// No editor state here: the viewer passes what it has, the tests pass made-up values.
+
+import type { GridSize } from "./viewcmds";
+
+export type TerrainLook = "textured" | "wireframe" | "hidden";
+export const TERRAIN_LOOKS: readonly TerrainLook[] = ["textured", "wireframe", "hidden"];
+/** View > Terrain's key (Ctrl+T) goes round: textured, wireframe, hidden (the World Editor, we-drive 2026-11-09). */
+export const nextTerrainLook = (t: TerrainLook): TerrainLook => TERRAIN_LOOKS[(TERRAIN_LOOKS.indexOf(t) + 1) % TERRAIN_LOOKS.length];
+
+/** Everything the view can show or leave out. The first group is what the map looks like, the second the editor's
+ *  own marks over it. */
+export interface ViewSet {
+  terrain: TerrainLook;
+  doodads: boolean;
+  units: boolean;
+  water: boolean;
+  blight: boolean;
+  cliffs: boolean;
+  effects: boolean;
+  weather: boolean;
+  /** The map's day and night lighting (off: an even light). */
+  lighting: boolean;
+  fog: boolean;
+  grid: GridSize;
+  naval: boolean;
+  heights: boolean;
+  cameras: boolean;
+  /** Pathing - Ground. */
+  pathing: boolean;
+  regions: boolean;
+  lightRanges: boolean;
+}
+
+/** The layers that are a picture laid over the ground (built per pathing cell, see refreshLayers). */
+export const GROUND_LAYERS = ["naval", "heights", "cameras", "pathing", "regions"] as const;
+export type GroundLayer = (typeof GROUND_LAYERS)[number];
+/** The layers a View command switches on and off. */
+export type ToggleLayer = GroundLayer | "lightRanges" | "doodads" | "units" | "blight";
+
+export interface Shown extends ViewSet {
+  /** The start locations and the start buildings drawn in their rings. */
+  starts: boolean;
+}
+
+/**
+ * What the view draws: the set as it is, or in game view the game's picture. The World Editor's game view greys out
+ * every View item and draws the map as the game does: terrain textured, doodads, units, water, blight, lighting,
+ * weather and fog on (TESTING.md: its fog map shows only fog colour with game view on), and none of the editor's
+ * marks: no grid, pathing, regions, camera objects, camera bounds, light ranges or start locations (we-drive,
+ * map 03 with regions, a camera, lights, every one of those items on, 2026-11-09). Turned off, the items are as they
+ * were. Studio's own marks (height map, naval pathing) go with the editor's.
+ */
+export function shownView(set: ViewSet, gameView: boolean): Shown {
+  if (!gameView) return { ...set, starts: true };
+  return {
+    terrain: "textured", doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true, weather: true,
+    lighting: true, fog: true,
+    grid: "none", naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
+    starts: false,
+  };
+}
+
+/** Whether any of the ground layers is drawn. */
+export const anyGroundLayer = (s: Pick<ViewSet, GroundLayer>) => GROUND_LAYERS.some((k) => s[k]);
+
+// ---- light ranges ------------------------------------------------------------------------------
+
+/** A circle on the ground: centre, radius, colour 0–255. */
+export interface RangeRing { x: number; y: number; r: number; rgb: [number, number, number] }
+
+/** The World Editor's Light Ranges colour (green). */
+export const LIGHT_RANGE_RGB: [number, number, number] = [60, 255, 60];
+
+/**
+ * Light Ranges for one light of one placed object: a ring on the ground round where the light is (`pivot`, in the
+ * model, through the object's `world` matrix: column-major 4×4) as far as it reaches (the attenuation's end, scaled
+ * with the object), and a fainter one where it starts to fade, when that's nearer. None for a light that reaches nowhere.
+ */
+export function lightRings(world: ArrayLike<number>, pivot: readonly number[], light: { attenuationStart: number; attenuationEnd: number }): RangeRing[] {
+  const [px, py, pz] = [pivot[0] ?? 0, pivot[1] ?? 0, pivot[2] ?? 0];
+  const x = world[0] * px + world[4] * py + world[8] * pz + world[12];
+  const y = world[1] * px + world[5] * py + world[9] * pz + world[13];
+  // The object's size across: the length of its x axis.
+  const scale = Math.hypot(world[0], world[1], world[2]);
+  const end = light.attenuationEnd * scale, start = light.attenuationStart * scale;
+  if (!(end > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return [];
+  const rings: RangeRing[] = [{ x, y, r: end, rgb: LIGHT_RANGE_RGB }];
+  if (start > 0 && start < end) rings.push({ x, y, r: start, rgb: [30, 150, 30] });
+  return rings;
+}
+
+// ---- keys --------------------------------------------------------------------------------------
+
+/** The World Editor's keys for its View items (its View menu, read by we-drive --view-menu), and the command each
+ *  runs here. Only items Studio has; Fog Effects (F) is left out, as F turns the selection to face the pointer. */
+export const VIEW_KEYS: readonly { key: string; command: string }[] = [
+  { key: "V", command: "w3.terrain.toggleGameView" },
+  { key: "Ctrl+T", command: "w3.terrain.cycleTerrainDisplay" },
+  { key: "Ctrl+D", command: "w3.terrain.toggleDoodads" },
+  { key: "Ctrl+U", command: "w3.terrain.toggleUnits" },
+  { key: "W", command: "w3.terrain.toggleWater" },
+  { key: "H", command: "w3.terrain.toggleBlight" },
+  { key: "L", command: "w3.terrain.toggleLighting" },
+  { key: "E", command: "w3.terrain.toggleWeather" },
+  { key: "Ctrl+Shift+L", command: "w3.terrain.toggleLightRanges" },
+  { key: "P", command: "w3.terrain.toggleGroundPathing" },
+  { key: "N", command: "w3.terrain.toggleNavalPathing" },
+  { key: "Ctrl+R", command: "w3.terrain.toggleRegions" },
+  { key: "Ctrl+M", command: "w3.terrain.toggleCameraObjects" },
+];
+
+type Keys = { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
+
+/** The key as the table writes it ("Ctrl+Shift+L"), or null for one with Alt or a key that isn't a letter. */
+function keyName(e: Keys): string | null {
+  if (e.altKey || !/^[a-z]$/i.test(e.key)) return null;
+  return `${e.ctrlKey || e.metaKey ? "Ctrl+" : ""}${e.shiftKey ? "Shift+" : ""}${e.key.toUpperCase()}`;
+}
+
+/** The command of a View key, or null. */
+export function viewKeyCommand(e: Keys): string | null {
+  const name = keyName(e);
+  return (name && VIEW_KEYS.find((k) => k.key === name)?.command) || null;
+}
+
+// ---- camera keys -------------------------------------------------------------------------------
+
+/** What a camera key does: pan by a share of the view's height (x right, y up on the screen), zoom (distance times
+ *  `zoom`) or turn (radians, positive turns the view's left side away). */
+export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: number };
+
+/**
+ * The World Editor's camera keys in its terrain view (we-drive, one press each on map 03 at distance 2200 with nothing
+ * selected, 2026-11-09): an arrow (or the number pad's) moves the start location in the middle 48 pixels of 844 down
+ * the picture, Shift+Up 210; Ctrl+Up and Ctrl+Down zoom in and out by about 11%; Ctrl+Left and Ctrl+Right turn the
+ * view about 5°, its left side away for Left. Studio with these steps at the same camera (app-drive --camera
+ * we:center,2200): 53 (at 1/17.5) and 261 (at 4.4 times that) before they were tuned to these; zoom 12.7% at 1.12.
+ * Alt with an arrow, Insert, Delete, Page Up and Down, Home and End don't move the camera (with something selected the
+ * Page keys, Home and End change it: selectionkeys.ts; so do Ctrl and the arrows, which nudge it). The pointer at the
+ * view's edge didn't scroll it in we-drive's display, so Studio has no edge scrolling.
+ */
+export const CAMERA_STEPS = { pan: 1 / 19, fast: 3.8, zoom: 1.11, turn: (5 * Math.PI) / 180 };
+
+const ARROWS: Record<string, [number, number]> = {
+  ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+  Numpad8: [0, 1], Numpad2: [0, -1], Numpad4: [-1, 0], Numpad6: [1, 0],
+};
+
+export function cameraKey(e: Keys & { code?: string }): CameraMove | null {
+  if (e.altKey) return null;
+  const dir = ARROWS[e.key] ?? (e.code && /^\d$/.test(e.key) ? ARROWS[e.code] : undefined);
+  if (!dir) return null;
+  if (e.ctrlKey || e.metaKey) {
+    if (dir[1]) return { zoom: dir[1] > 0 ? 1 / CAMERA_STEPS.zoom : CAMERA_STEPS.zoom };
+    return { turn: dir[0] < 0 ? CAMERA_STEPS.turn : -CAMERA_STEPS.turn };
+  }
+  const step = CAMERA_STEPS.pan * (e.shiftKey ? CAMERA_STEPS.fast : 1);
+  return { pan: [dir[0] * step, dir[1] * step] };
+}
+
+/** The key of a command, for its tooltip ("Game view (V)"); undefined for none. */
+export const keyOf = (command: string) => VIEW_KEYS.find((k) => k.command === command)?.key;
+
+/** The View keys with Ctrl, as the workbench writes a chord ("ctrl+shift+l"): the terrain view keeps them while it
+ *  has the keyboard, over the commands bound to them elsewhere (Ctrl+R: Reload Window). */
+export const OWN_CHORDS: readonly string[] = VIEW_KEYS.filter((k) => k.key.startsWith("Ctrl+"))
+  .map((k) => k.key.toLowerCase());

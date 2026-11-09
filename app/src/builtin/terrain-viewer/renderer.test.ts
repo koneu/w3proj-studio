@@ -46,6 +46,20 @@ test("HD with the lighting on (the editor's game view) draws no shoreline waves;
   assert.equal(shown(2, true, "doodads"), true, "only the shoreline");
 });
 
+test("game view leaves out the editor-only batches; a wireframe or hidden terrain leaves out the cliffs", () => {
+  const view = (o: object) => ({ hiddenGroups: new Set<string>(), tone: 2, gameView: false, groundLook: "textured", showEditorOnly: true, groupShown: TerrainRenderer.prototype.groupShown, ...o }) as unknown as TerrainRenderer;
+  const shown = (v: TerrainRenderer, b: { group: string; editorOnly?: boolean }) => TerrainRenderer.prototype.batchShown.call(v, b);
+  const starts = { group: "units", editorOnly: true }, units = { group: "units" }, cliffs = { group: "cliffs" };
+  assert.equal(shown(view({}), starts), true);
+  assert.equal(shown(view({ showEditorOnly: false }), starts), false, "the start locations in game view");
+  assert.equal(shown(view({ showEditorOnly: false }), units), true, "the units stay");
+  assert.equal(shown(view({ hiddenGroups: new Set(["units"]) }), starts), false, "hidden with the units");
+  assert.equal(shown(view({ groundLook: "wireframe" }), cliffs), false);
+  assert.equal(shown(view({ groundLook: "hidden" }), cliffs), false);
+  assert.equal(shown(view({ groundLook: "hidden" }), units), true);
+  assert.equal(shown(view({}), cliffs), true);
+});
+
 // Lordaeron Summer's ramp from TerrainArt\Water.slk (Smin/Smax/Dmin/Dmax: r, g, b, a in 0–1).
 const LORDAERON = {
   shallowMin: [1, 1, 1, 10 / 255], shallowMax: [117 / 255, 117 / 255, 200 / 255, 219 / 255],

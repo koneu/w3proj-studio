@@ -1,5 +1,6 @@
 import type { PlacedRef } from "./pickmatch";
 import type { ReplaceTypes } from "./replace";
+import type { Shown, TerrainLook, ToggleLayer, ViewSet } from "./viewmodes";
 // The "w3.terrain" service: tool groups other extensions add to the terrain
 // editor (see extensions/services.ts). Open editors follow registrations.
 // Also picks a point on the map for other modules (trigger parameters).
@@ -11,15 +12,22 @@ export interface ViewCommands {
   viewSelection(): string | null;
   viewEntireMap(): void;
   selectInPalette(): Promise<string | null>;
-  /** Pathing - Naval, Height Map, Camera Objects: flips the layer and returns whether it's shown now. */
-  toggleLayer(layer: "naval" | "heights" | "cameras"): boolean;
-  /** Small, Medium or Large Grid Display: the same size again switches the grid off. Returns the grid shown now. */
-  toggleGrid(size: "small" | "medium" | "large"): "none" | "small" | "medium" | "large";
+  /** A View item (Pathing - Naval and Ground, Height Map, Camera Objects, Regions, Light Ranges, Doodads, Units,
+   *  Water, Blight): flips it and returns whether it's on now. In game view nothing changes, and the answer is why. */
+  toggleLayer(layer: ToggleLayer | "water"): boolean | string;
+  /** Lighting and Weather, which are settings: as toggleLayer. */
+  toggleSetting(which: "lighting" | "weather"): Promise<boolean | string>;
+  /** View > Terrain: textured, wireframe, hidden, and round again. Returns what it is now, or why not (game view). */
+  cycleTerrain(): TerrainLook | string;
+  /** Lock to Game View Settings (V): returns whether game view is on now. */
+  toggleGameView(): Promise<boolean>;
+  /** Small, Medium or Large Grid Display: the same size again switches the grid off. Returns the grid shown now, or why not (game view). */
+  toggleGrid(size: "small" | "medium" | "large"): "none" | "small" | "medium" | "large" | string;
   /** Cycle Random Groups - Next (1) or Previous (-1): objects placed from a random group show the unit, building or item
    *  the group's next line puts there, then the question mark again. Says what is shown now. */
   cycleRandomGroups(step: 1 | -1): Promise<string>;
-  /** What is shown, for the status line and tests. */
-  state(): { grid: "none" | "small" | "medium" | "large"; naval: boolean; heights: boolean; cameras: boolean; camera: { target: [number, number, number]; distance: number } };
+  /** What is chosen and what is shown (game view sets the choice aside), for the status line and tests. */
+  state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number } };
 }
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */

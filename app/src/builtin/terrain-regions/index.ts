@@ -267,6 +267,8 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     toolbar,
     activate() { active = true; void load.then(() => { renderPanel(); render(); }); },
     deactivate() { active = false; drag = null; draft = null; ed.setGroundOverlay(null); ed.setLabels(null); ed.host.style.cursor = ""; },
+    // What the Regions layer draws: the regions as edited here, saved or not.
+    async regionObjects() { await load; return doc.regions; },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
       const [x, y] = p.ground;
