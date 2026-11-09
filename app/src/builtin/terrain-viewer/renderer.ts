@@ -1188,9 +1188,11 @@ export class TerrainRenderer {
       // locations in game view.
       if (this.hiddenGroups.has(b.group) || (b.editorOnly && !this.showEditorOnly)) continue;
       for (const inst of b.instances) {
-        if (!inst.pick || !inst.sphere) continue;
+        // A doodad's click helper picks its doodad, by the helper's own sphere.
+        const target = inst.follows?.owner ?? inst, pick = target.pick;
+        if (!pick || !inst.sphere) continue;
         const [cx, cy, cz, sr] = inst.sphere;
-        const r = radiusOf?.(inst);
+        const r = inst.follows ? undefined : radiusOf?.(inst);
         let t = Infinity;
         if (r === undefined) {
           const ox = o[0] - cx, oy = o[1] - cy, oz = o[2] - cz;
@@ -1198,7 +1200,7 @@ export class TerrainRenderer {
           const disc = p * p - q;
           if (disc >= 0) t = -p - Math.sqrt(disc);
         } else {
-          const [px, py, pz] = inst.pick.placed.position;
+          const [px, py, pz] = pick.placed.position;
           const bottom = pz - 16, top = Math.max(pz + 32, cz + sr * 0.8);
           // Side of the cylinder (the xy circle), then its top cap.
           const ox = o[0] - px, oy = o[1] - py;
@@ -1217,7 +1219,7 @@ export class TerrainRenderer {
             if (tc > 0 && hx * hx + hy * hy <= r * r) t = Math.min(t, tc);
           }
         }
-        if (t > 0 && t < bestT) { bestT = t; best = inst; }
+        if (t > 0 && t < bestT) { bestT = t; best = target; }
       }
     }
     return best;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ObjectLoader, type Placed, type Skin } from "./objects";
+import { TerrainRenderer } from "./renderer";
 
 // How placed objects are drawn as the World Editor draws them, apart from objects.test.ts so that it builds against
 // the loader as it was before (scripts/fails-without.mjs fails it by what it asserts).
@@ -81,6 +82,23 @@ test("a doodad with a click helper gets the editor's see-through cube at 0.4 of 
   assert.deepEqual(drawnScale(cube.world), [0.48, 0.48, 0.48]);
   assert.ok(Math.abs(Math.atan2(cube.world[1], cube.world[0]) - Math.PI / 4) < 1e-6);
   assert.deepEqual(out.problems, []);
+});
+
+test("a click on a doodad's click helper picks the doodad, not in game view", async () => {
+  const loader = new ObjectLoader(fakeGl(), () => Promise.resolve(standModel()), () => {});
+  const fire = placed("YOtf", [1, 1, 1]);
+  fire.position = [400, 0, 0];
+  const out = await loader.load("doodads", [fire], new Map([["YOtf", { ...skin("w3d", 1, 1), clickHelper: true }]]), () => 0);
+  // The doodad's own model picks nothing here (no radius for it, a sphere far off): only its helper is in the way.
+  const model = out.batches.find((b) => !b.instances[0].follows)!, helper = out.batches.find((b) => b.instances[0].follows)!;
+  model.instances[0].sphere = [0, 0, -5000, 1];
+  const pick = (showEditorOnly: boolean) => TerrainRenderer.prototype.pickObject.call(
+    { batches: out.batches, hiddenGroups: new Set<string>(), showEditorOnly } as unknown as TerrainRenderer,
+    // Down onto the helper's top (the cube is 0.4 × 128 high, on the doodad's spot).
+    { origin: [400, 0, 2000], dir: [0, 0, -1] }, () => undefined);
+  assert.ok(helper.instances[0].sphere![2] > 0, "the helper stands on the ground");
+  assert.equal(pick(true), model.instances[0], "the doodad, through its helper");
+  assert.equal(pick(false), null, "game view leaves the helper out");
 });
 
 test("without the click helper's model the doodads are drawn without one, and nothing is reported against them", async () => {
