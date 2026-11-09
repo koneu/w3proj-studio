@@ -187,15 +187,23 @@ It never starts the game itself.
 Both sides at the same size, camera and lighting, then `pic-compare.mjs`:
 
 ```sh
-node scripts/we-drive.mjs --map M --compare-ready --look center --shot we.png --close        # lit
-node scripts/app-drive.mjs --map M --terrain --view-size 1184x844 --camera we --compare-ready lit --shot st.png
+node scripts/we-drive.mjs --map M --compare-ready --look center --shot we.png --close        # game view
+node scripts/app-drive.mjs --map M --terrain --view-size 1184x844 --camera we --compare-ready game --shot st.png
 node scripts/pic-compare.mjs we.png st.png --sample --diff d.png
 ```
 
 | World Editor (we-drive) | Studio (app-drive) |
 |---|---|
-| `--compare-ready`: game view on, the day fixed (06:00) | `--compare-ready lit`: `terrain.lighting.enabled` on, `terrain.lighting.hour` 6 |
-| `--compare-ready-unlit`: game view off, View > Lighting off | `--compare-ready unlit`: `terrain.lighting.enabled` off (Studio's even light) |
+| `--compare-ready`: game view on, the day fixed (06:00) | `--compare-ready game`: Studio's game view (`terrain.gameView`, V), lighting on at hour 6: no start locations, regions, cameras, pathing, grids or light ranges, as the editor's |
+| (game view off, the editor's marks drawn, lit) | `--compare-ready lit`: `terrain.lighting.enabled` on, `terrain.lighting.hour` 6, game view off (the pair used before Studio had a game view: start locations still drawn) |
+| `--compare-ready-unlit`: game view off, View > Lighting off | `--compare-ready unlit`: `terrain.lighting.enabled` off (Studio's even light), game view off |
+
+**What the editor's game view leaves out** (we-drive on a copy of map 03 with two regions, a camera, three lit
+doodads, and Regions, Camera Objects, Pathing - Ground, Camera Bounds, Light Ranges and a grid all on, 2026-11-09):
+all of those, and the start location with its start building; units, doodads, water and the lighting stay. Every View
+item is greyed while it's on, and comes back as it was after. Studio's game view (viewmodes.ts `shownView`) does the
+same, and its badge "Game View" stands where the editor's "Game View Settings" note would. Studio's toggles and keys
+are checked by app-smoke (`viewModes`).
 | `--look x,y[,distance[,aoa[,fov[,rotation]]]]` | `--camera "we:x,y[,distance…]"` (only angle 304 and field of view 70 are fitted) |
 
 Studio's defaults are lighting on at hour 12 (`terrain.lighting.*` in the terrain viewer's extension.json). On map

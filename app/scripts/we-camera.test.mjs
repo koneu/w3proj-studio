@@ -74,10 +74,11 @@ test("addLookCameras puts the looks first, in the file's version, and keeps the 
 });
 
 test("studioLighting pairs the editor's comparison states with Studio's lighting settings", () => {
-  assert.deepEqual(studioLighting("lit"), { "terrain.lighting.enabled": true, "terrain.lighting.hour": WE_FIXED_HOUR });
+  assert.deepEqual(studioLighting("game"), { "terrain.gameView": true, "terrain.lighting.enabled": true, "terrain.lighting.hour": WE_FIXED_HOUR });
+  assert.deepEqual(studioLighting("lit"), { "terrain.gameView": false, "terrain.lighting.enabled": true, "terrain.lighting.hour": WE_FIXED_HOUR });
   assert.equal(WE_FIXED_HOUR, 6);
-  assert.deepEqual(studioLighting("unlit"), { "terrain.lighting.enabled": false });
-  assert.throws(() => studioLighting("dusk"), /lit or unlit/);
+  assert.deepEqual(studioLighting("unlit"), { "terrain.gameView": false, "terrain.lighting.enabled": false });
+  assert.throws(() => studioLighting("dusk"), /game, lit or unlit/);
 });
 
 test("parkingLooks: opposite corners of the terrain; fartherPark picks the one away from the look", () => {

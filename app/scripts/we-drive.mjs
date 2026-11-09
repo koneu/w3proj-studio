@@ -40,6 +40,7 @@
 //   --shot-screen FILE  picture of the whole display (dialogs included)
 //   --key KEY           press a key in the editor ("v", "Escape", "Up", "ctrl+z"; X keysym names)
 //   --click X,Y         click at a position of the display (fixed size, so positions stay put)
+//   --move X,Y          move the pointer there without a click (e.g. to the terrain view's edge, which scrolls it)
 //   --wheel N           turn the mouse wheel over the terrain view: N notches, positive zooms in
 //   --windows           list the editor's windows: title, rect, and which are dialogs
 //   --game-view STATE   "on", "off" or "status": the state of View > Lock to Game View Settings, read from the
@@ -131,7 +132,7 @@ const CAMERA_PALETTE = { row: { x: 40, y: 147 }, rowHeight: 13, view: { x: 120, 
 /** As many looks as the palette's list shows without scrolling (it has room for more; this is what was tried). */
 const MAX_LOOKS = 16;
 
-const VALUE_STEPS = new Set(["--map", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
+const VALUE_STEPS = new Set(["--map", "--shot", "--shot-window", "--shot-screen", "--key", "--click", "--move", "--wheel", "--game-view", "--fps", "--sleep", "--look", "--view"]);
 const FLAG_STEPS = new Set(["--start", "--wait-ready", "--compare-ready", "--compare-ready-unlit", "--windows", "--view-menu", "--close"]);
 
 /** The title of the editor's loading window ("Loading Units n/300"): it stays while a big map loads. */
@@ -758,6 +759,10 @@ async function main() {
           x11(s.display, "click", arg);
           await sleep(300);
           out({ step, at: arg, dialogs: s.windows().dialogs.map((d) => d.title) });
+        } else if (step === "--move") {
+          if (!/^\d+,\d+$/.test(arg)) throw new Error("--move wants X,Y");
+          x11(s.display, "move", arg);
+          out({ step, at: arg });
         } else if (step === "--wheel") {
           // Mouse wheel over the middle of the terrain view: positive zooms in (button 4), negative out (button 5).
           const n = Number(arg);
