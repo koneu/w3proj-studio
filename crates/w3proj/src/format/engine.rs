@@ -127,6 +127,9 @@ fn read_prim(p: Prim, r: &mut Reader) -> Result<Value> {
     })
 }
 
+/// The most items of a list of empty structs whose count comes from the file (a u32 in front, or an expression).
+const MAX_EMPTY_ITEMS: usize = 1 << 16;
+
 /// Reads one node's value. `frames` holds the enclosing objects.
 fn read(node: &Node, r: &mut Reader, frames: &mut Vec<Map<String, Value>>, at: &mut Attempt) -> Result<Value> {
     match &node.kind {
@@ -160,8 +163,14 @@ fn read(node: &Node, r: &mut Reader, frames: &mut Vec<Map<String, Value>>, at: &
             };
             // Every item takes at least one byte (except empty structs), so a
             // count larger than the rest of the file is a misread, not a reason
-            // to allocate gigabytes.
-            if n > r.d.len() - r.p && !matches!(item.kind, Kind::Struct(ref f) if f.is_empty()) {
+            // to allocate gigabytes. Empty structs read nothing, so the bytes
+            // left can't bound them, but a count from the file still asks for
+            // that many values: they get a fixed limit instead.
+            let empty = matches!(item.kind, Kind::Struct(ref f) if f.is_empty());
+            if empty && !matches!(count, Count::Fixed(_)) && n > MAX_EMPTY_ITEMS {
+                return Err(Error::Format(format!("count {n} of empty items exceeds {MAX_EMPTY_ITEMS}")));
+            }
+            if n > r.d.len() - r.p && !empty {
                 return Err(Error::Format(format!("count {n} exceeds the remaining {} bytes", r.d.len() - r.p)));
             }
             let mut items = Vec::with_capacity(n);

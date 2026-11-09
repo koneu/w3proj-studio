@@ -394,6 +394,34 @@ mod tests {
         let defs = load_definitions(&[]).unwrap();
         assert!(defs.iter().any(|d| d.name == "w3i" && d.matches("war3map.w3i")));
     }
+
+    /// Items that read no bytes (empty structs) can't be held to the bytes left, but a count from the file is still
+    /// bounded: a u32 in front of them or a count read from a field asks for millions of `{}` from four bytes otherwise.
+    /// The control: a few of them decode and round-trip, also at the end of the file.
+    #[test]
+    fn counts_of_empty_items_are_bounded() {
+        let prefixed = Definition::parse(
+            r#"{ "name": "t", "files": ["t.bin"], "jsonFormat": "t/1",
+                 "fields": [ { "name": "marks", "type": "list", "count": "u32", "item": { "type": "struct", "fields": [] } } ] }"#,
+            Source::Builtin,
+        )
+        .unwrap();
+        let counted = Definition::parse(
+            r#"{ "name": "t", "files": ["t.bin"], "jsonFormat": "t/1",
+                 "fields": [ { "name": "n", "type": "u32" },
+                             { "name": "marks", "type": "list", "count": "n", "item": { "type": "struct", "fields": [] } } ] }"#,
+            Source::Builtin,
+        )
+        .unwrap();
+        for def in [&prefixed, &counted] {
+            let few = decode(def, &3u32.to_le_bytes()).unwrap().value;
+            assert_eq!(few["marks"].as_array().map(Vec::len), Some(3));
+            assert_eq!(encode(def, &few).unwrap(), 3u32.to_le_bytes());
+            for n in [1u32 << 24, u32::MAX] {
+                assert!(decode(def, &n.to_le_bytes()).is_err(), "{} items from four bytes", n);
+            }
+        }
+    }
 }
 
 /// Map info fixtures through the built-in w3i definition (formerly the
