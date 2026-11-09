@@ -381,14 +381,39 @@ test("a placed random item picks its type when the map starts, and is no unit", 
   const list = items([unit({ id: "iDNR", randomType: 2, randomUnits: [{ id: "ratc", chance: 60 }] })]);
   has(list, "    call RandomDistAddItem( 'ratc', 60 )");
   has(list, "    set itemID = RandomDistChoose(  )");
-  // Coloured (newer editors) inside the if.
-  has(items([unit({ id: "iDNR", randomType: 1, randomGroup: 0, randomPosition: 0 })], 7003), "        call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  // Newer editors create it into the local, but give it no colour.
+  const grouped = items([unit({ id: "iDNR", randomType: 1, randomGroup: 0, randomPosition: 0, color: 3 })], 7003);
+  has(grouped, "        set i = BlzCreateItemWithSkin( itemID, 100.0, 200.0, itemID )");
+  hasNot(grouped, "ItemColor");
 });
 
-test("newer editors colour every item", () => {
+test("World Editor 2.0 picks random items with ChooseRandomItemExWithFilter, any class and level too", () => {
+  // As it saved them (we-drive, 2026-11-09).
+  const random = (randomLevel: string, randomClass: number) => items([unit({ id: "iDNR", randomType: 0, randomLevel, randomClass })], 7003);
+  has(random("ffffff", 0), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("010000", 0), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, 1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("020000", 1), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("ffffff", 4), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_ARTIFACT, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  has(random("060000", 7), "    set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_MISCELLANEOUS, 6, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )");
+  // Its item drops the same.
+  const drops = dropFunction("Unit000001_DropItems", [[{ id: "YYI2", chance: 50 }, { id: "YiI/", chance: 30 }], [{ id: "YYI/", chance: 100 }]], 7003);
+  has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, 2, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 50 )");
+  has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 30 )");
+  has(drops, "        call RandomDistAddItem( ChooseRandomItemExWithFilter( ITEM_TYPE_ANY, -1, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY ), 100 )");
+  // The game's older maps keep theirs.
+  has(dropFunction("Unit000001_DropItems", [[{ id: "YYI2", chance: 50 }]], 6113), "        call RandomDistAddItem( ChooseRandomItemEx( ITEM_TYPE_ANY, 2 ), 50 )");
+});
+
+test("newer editors colour every item, whatever its stored colour; World Editor 2.0 of build 24371 with 24", () => {
   hasNot(items([unit()]), "ItemColor");
   has(items([unit()], 7000), "    call SetItemColor( i, ConvertPlayerColor(0) )");
   has(items([unit()], 7003), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  const build = (gameBuild: number, color: number, player = 0) => itemsSection({ units: [unit({ color, player })], kindOf: () => "item", referenced: new Set(), editorVersion: 7003, gameBuild });
+  for (const [color, player] of [[-1, 0], [0, 0], [3, 0], [24, 0], [-1, 27], [5, 27], [7, 3]]) {
+    has(build(24371, color, player), "    call BlzSetItemColor( i, ConvertPlayerColor(24) )");
+    // The game's maps of builds up to 24356 have 0 (their items store -1).
+    has(build(24356, color, player), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  }
 });
 
 const dest = (extra: Partial<DestructableJson> = {}): DestructableJson => ({ id: "LTlt", variation: 2, position: [1, 2, 3], angle: 0, scale: [1, 1, 1], flags: 0, life: 100, editorId: 1, ...extra });

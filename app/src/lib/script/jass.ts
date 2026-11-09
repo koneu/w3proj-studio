@@ -382,6 +382,8 @@ export function generateSections(i: ScriptInput): Map<string, string> {
 }
 
 const editorVersion = (i: ScriptInput) => (i.info.editorVersion as number | undefined) ?? 0;
+/** The build of war3map.w3i's gameVersion [major, minor, patch, build], if it has one. */
+const gameBuild = (i: ScriptInput) => { const v = i.info.gameVersion; return Array.isArray(v) && typeof v[3] === "number" ? v[3] : undefined; };
 
 function randomGroups(i: ScriptInput): string {
   const body = randomGroupsSection((i.info.unitTables as RandomGroupJson[] | undefined) ?? []);
@@ -414,7 +416,7 @@ function destructableObjects(i: ScriptInput): string {
 
 function placedItems(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
-  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
   return body ? banner("Items") + body : "";
 }
 
