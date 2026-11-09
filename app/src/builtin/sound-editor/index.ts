@@ -14,6 +14,8 @@ import { bindUndoKeys, History } from "../../lib/undo";
 import { exportSound, replaceSound } from "./soundfiles";
 import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
+import { Listeners } from "../../lib/listeners";
+import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
   findLabel, isUnset, labelIndex, logicalPath, newSound, soundName, IMPORTED, LOOPING, MUSIC, SOUND_EXTENSIONS, STOP_OUT_OF_RANGE, THREE_D, UNSET,
   type Sound, type SoundLabel,
@@ -94,8 +96,16 @@ const needEditor = () => {
   return current;
 };
 
+/** SoundsService.onDidEdit's listeners. */
+const edits = new Listeners();
+
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  const service: SoundsService = {
+    liveSounds: () => (current?.canEdit ? current.sounds : null),
+    onDidEdit: (listener) => edits.add(listener),
+  };
   ctx.subscriptions.push(
+    w3.services.provide(SOUNDS_SERVICE, service),
     w3.commands.register("w3.sounds.open", async () => {
       if (!w3.workspace.project()) throw new Error("Open or import a project first.");
       // The JSON form, else the raw file (decoded by the format engine); a map without sounds
@@ -160,8 +170,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           });
           doc.setDirty(history.dirty);
           editor.refresh();
+          if (current === editor) edits.fire();
         });
-        const changed = () => { history.commit(); doc.setDirty(history.dirty); };
+        const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly);
         current = editor;
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
@@ -179,7 +190,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             history.markSaved();
             doc.setDirty(false);
           },
-          dispose: () => { editor.dispose(); unbindKeys(); if (current === editor) current = null; },
+          dispose: () => {
+            editor.dispose();
+            unbindKeys();
+            if (current === editor) { current = null; edits.fire(); }
+          },
         };
       },
     }),
@@ -390,6 +405,8 @@ class SoundEditor {
     return s;
   }
   get canEdit() { return this.editable; }
+  /** The map's sounds as they are here now (SoundsService.liveSounds). */
+  get sounds(): readonly Sound[] { return this.doc.sounds; }
 
   private renderList() {
     const rows = this.doc.sounds.map((s) => h(`tr.snd-row${this.selected === s ? ".active" : ""}`, {

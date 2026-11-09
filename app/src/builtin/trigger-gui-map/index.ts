@@ -48,8 +48,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     };
 
     // The open terrain editor's placements (unsaved ones too), else the saved files.
-    const units = async () => (terrain.placedObjects()?.units as Placed[] | undefined) ?? (await json<{ units: Placed[] }>("map/war3mapUnits.doo"))?.units ?? [];
-    const doodads = async () => (terrain.placedObjects()?.doodads as Placed[] | undefined) ?? (await json<{ doodads: Placed[] }>("map/war3map.doo"))?.doodads ?? [];
+    const units = async () => (terrain.placedObjects()?.units as Placed[] | null | undefined) ?? (await json<{ units: Placed[] }>("map/war3mapUnits.doo"))?.units ?? [];
+    const doodads = async () => (terrain.placedObjects()?.doodads as Placed[] | null | undefined) ?? (await json<{ doodads: Placed[] }>("map/war3map.doo"))?.doodads ?? [];
     const placedOf: Record<string, () => Promise<(TriggerParamChoice & { at: number[] })[]>> = {
       unit: async () => placed(await units(), "w3u", "unit", true),
       item: async () => placed(await units(), "w3t", "item", false),

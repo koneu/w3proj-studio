@@ -3,20 +3,30 @@
 // triggers that use it; double-click goes to it (object editor, terrain,
 // trigger editor, sound editor, import manager).
 
-import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainService } from "../../extensions/services";
+import type { Disposable, ExtensionContext, W3Api } from "../../extensions/api";
+import {
+  OBJECTS_SERVICE, SOUNDS_SERVICE, TERRAIN_SERVICE, TRIGGERS_SERVICE, type ObjectsService, type SoundsService, type TerrainService, type TriggersService,
+} from "../../extensions/services";
 import { loadKind } from "../../lib/objects/metadata";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { readWtgFile, wtgPath } from "../../lib/triggers/wtg";
+import { readWtgFile, wtgPath, type TriggerFile } from "../../lib/triggers/wtg";
 import { StringTable } from "../../lib/formats/wts";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
-import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectRefs, type MapContents, type Node as TreeNode, type ObjectEntry, type Target } from "./data";
+import {
+  ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs,
+  type KindData, type MapContents, type Node as TreeNode, type Target,
+} from "./data";
 
 const VIEW = "w3.objectManager.tree";
-/** The Terrain Viewer's editor id. */
-const TERRAIN_EDITOR = "w3.terrainViewer";
+/** The editors whose unsaved state the rows follow (by editor id). */
+const TERRAIN_EDITOR = "w3.terrainViewer", TRIGGER_EDITOR = "w3.triggerEditor", SOUND_EDITOR = "w3.soundEditor", OBJECT_EDITOR = "w3.objectEditor";
+/** How long the rows wait after a change before they're built again (changes meanwhile wait with them). */
+const REBUILD_DELAY = 1000;
+
+/** The open editors the rows take their entries from (unsaved changes included); null: the saved files. */
+interface LiveSources { terrain: TerrainService | null; triggers: TriggersService | null; sounds: SoundsService | null; objects: ObjectsService | null }
 const KINDS: [string, string][] = [["w3u", "Units"], ["w3t", "Items"], ["w3b", "Destructables"], ["w3d", "Doodads"], ["w3a", "Abilities"], ["w3h", "Buffs"], ["w3q", "Upgrades"]];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -34,11 +44,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const rootNow = () => w3.workspace.project()?.root ?? null;
   const guard = new ProjectGuard(rootNow());
   let loadingToken = 0;
+  /** The saved files read for the last builds (parsed), by path: read again only after something was saved or changed
+   *  on disk, so a rebuild after an edit in an editor doesn't read the whole map again. */
+  let saved = new Map<string, Promise<unknown>>();
+  const forgetSaved = () => { saved = new Map(); };
   /** Drops the old project's rows and state. */
   const reset = () => {
-    tree = null; refs = new Map(); users = new Map(); unusedCount = 0; summary = []; error = ""; selected = ""; query = ""; loading = null; open.clear();
+    tree = null; refs = new Map(); users = new Map(); unusedCount = 0; summary = []; error = ""; selected = ""; query = ""; loading = null; again = false; open.clear();
+    forgetSaved();
     w3.views.refresh(VIEW);
   };
+  /** A change came in while a build was running: build again once it's done. */
+  let again = false;
   /** `force`: the user asked (Refresh); then a project the guard hasn't heard of is taken as the new one. */
   const load = (force = false) => {
     if (!w3.workspace.project()) return Promise.resolve();
@@ -49,13 +66,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       guard.switched(rootNow());
       reset();
     }
+    // Asked for while a build runs (Refresh, Map Summary): that build may predate the last edit, so the answer is the
+    // next one's, which starts as the running one ends.
+    if (force && loading) {
+      again = true;
+      return loading.then(() => loading ?? undefined);
+    }
     loading ??= (async () => {
       const token = guard.begin(), root = rootNow();
       loadingToken = token;
       error = "";
       let failed = "", result: { tree: TreeNode[]; refs: Map<string, Set<string>>; users: typeof users; unusedCount: number; summary: [string, string][] } | null = null;
       try {
-        const c = await contents(w3, terrain);
+        const c = await contents(w3, live, saved);
         const tree = buildTree(c);
         const refs = c.triggers ? triggerRefs(c.triggers) : new Map();
         const customIds = new Set(c.custom.flatMap((k) => k.ids.map((o) => o.id)));
@@ -72,10 +95,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (result) ({ tree, refs, users, unusedCount, summary } = result);
       loading = null;
       w3.views.refresh(VIEW);
+      // An edit made while this build ran may not be in it.
+      if (again && !disposed) { again = false; void load(); }
     })();
     return loading;
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const rebuild = () => { if (loading) again = true; else void load(); };
   const reload = () => {
     clearTimeout(timer);
     if (guard.switched(rootNow())) {
@@ -84,24 +110,34 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       void load();
       return;
     }
-    timer = setTimeout(() => void load(), 1000);
+    // Edits come in bursts (typing, dragging, undo held down): one build after the last.
+    timer = setTimeout(rebuild, REBUILD_DELAY);
   };
 
-  /** The terrain editor's service, once one of its editors was in front (asked for only then: getting it starts the
-   *  Terrain Viewer). Its regions and cameras, unsaved ones included, are the rows'; its edits rebuild them. */
-  let terrain: TerrainService | null = null, stopEdits: { dispose(): void } | null = null;
-  /** Whether a terrain editor was open at the last tab change. */
-  let terrainOpen = false, disposed = false;
-  const hookTerrain = () => {
-    if (terrain) return;
-    void w3.services.get<TerrainService>(TERRAIN_SERVICE).then((t) => {
-      if (disposed || terrain) return;
-      terrain = t;
-      // An edit, undo or redo that is neither ground nor placed objects: a region, a camera.
-      stopEdits = t.onDidEdit((what) => { if (!what.terrain && !what.objects) reload(); });
-      terrainOpen = true;
+  /** The editors' services, each once one of its editors was in front (asked for only then: getting one can start its
+   *  extension). What they hold, unsaved changes included, is the rows'; their edits, undo, redo and closing rebuild them. */
+  const live: LiveSources = { terrain: null, triggers: null, sounds: null, objects: null };
+  const hooked = new Set<string>(), stops: Disposable[] = [];
+  let disposed = false;
+  const hook = <T>(service: string, attach: (s: T) => Disposable) => {
+    if (hooked.has(service)) return;
+    hooked.add(service);
+    void w3.services.get<T>(service).then((s) => {
+      if (disposed) return;
+      stops.push(attach(s));
       reload();
-    }, () => {});
+    }, () => { hooked.delete(service); });
+  };
+  const hookTerrain = () => hook<TerrainService>(TERRAIN_SERVICE, (t) => {
+    live.terrain = t;
+    // Placed objects, regions, cameras, …, and closing: everything but a change of the ground alone.
+    return t.onDidEdit((what) => { if (what.objects || !what.terrain) reload(); });
+  });
+  const hooks: Record<string, () => void> = {
+    [TERRAIN_EDITOR]: hookTerrain,
+    [TRIGGER_EDITOR]: () => hook<TriggersService>(TRIGGERS_SERVICE, (s) => { live.triggers = s; return s.onDidEdit(reload); }),
+    [SOUND_EDITOR]: () => hook<SoundsService>(SOUNDS_SERVICE, (s) => { live.sounds = s; return s.onDidEdit(reload); }),
+    [OBJECT_EDITOR]: () => hook<ObjectsService>(OBJECTS_SERVICE, (s) => { live.objects = s; return s.onDidEdit(reload); }),
   };
 
   const go = async (t: Target) => {
@@ -141,12 +177,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // Another project opened during the question: its rows aren't these.
       if (!to || to === n.label || !guard.owns(rowsRoot, rootNow())) return;
     }
+    let editor: string | null = null;
     switch (t.kind) {
-      case "object": await w3.commands.execute("w3.objectEditor.objectAction", t.ext, t.id, action, to); break;
-      case "trigger": await w3.commands.execute("w3.triggers.itemAction", "trigger", t.name, action, to); break;
-      case "variables": if (t.name) await w3.commands.execute("w3.triggers.itemAction", "variable", t.name, action, to); break;
-      case "sounds": if (t.name) await w3.commands.execute("w3.sounds.soundAction", t.name, action, to); break;
+      case "object": await w3.commands.execute("w3.objectEditor.objectAction", t.ext, t.id, action, to); editor = OBJECT_EDITOR; break;
+      case "trigger": await w3.commands.execute("w3.triggers.itemAction", "trigger", t.name, action, to); editor = TRIGGER_EDITOR; break;
+      case "variables": if (t.name) { await w3.commands.execute("w3.triggers.itemAction", "variable", t.name, action, to); editor = TRIGGER_EDITOR; } break;
+      case "sounds": if (t.name) { await w3.commands.execute("w3.sounds.soundAction", t.name, action, to); editor = SOUND_EDITOR; } break;
     }
+    // The rows follow that editor, which holds the change (unsaved); its edits rebuild them from now on.
+    if (editor) { hooks[editor](); reload(); }
   };
   /** The entry's menu: the World Editor's Object Manager commands that fit it; a group's Expand or Collapse and the
    *  editor of its entries. `toggle` opens or closes the row; `filtering`: a filter opened the groups (no toggle then). */
@@ -173,19 +212,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await load(true);
       return summary;
     }),
-    w3.workspace.onDidChange(reload),
-    w3.workspace.onDidSave(reload),
-    // Regions and cameras come from the open terrain editor (unsaved changes included): a Delete Object, Rename Object
-    // or undo there changes the rows, and so does closing it (the saved files are what there is then).
-    w3.editors.onDidChangeActive((active) => {
-      if (active?.editor === TERRAIN_EDITOR) hookTerrain();
-      const t = terrain;
-      if (!t) return;
-      void t.listedObjects().then((l) => {
-        const has = l !== null;
-        if (has !== terrainOpen && !disposed) { terrainOpen = has; reload(); }
-      }, () => {});
-    }),
+    // A saved or changed file is read again (listeners run in order: forgotten before the rebuild is due).
+    w3.workspace.onDidChange(() => { forgetSaved(); reload(); }),
+    w3.workspace.onDidSave(() => { forgetSaved(); reload(); }),
+    // Placed objects, regions, cameras, triggers, variables, sounds and custom objects come from the open editors
+    // (unsaved changes included): a Delete Object, Rename Object or undo there changes the rows, and so does closing one
+    // (the saved files are what there is then: each editor's service tells of that too).
+    w3.editors.onDidChangeActive((active) => { if (active) hooks[active.editor]?.(); }),
     w3.views.register(VIEW, {
       render(el) {
         if (!w3.workspace.project()) { el.append(h("div.view-empty", {}, "Open or import a project to see its objects.")); return; }
@@ -212,7 +245,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 style: { paddingLeft: `${6 + depth * 14}px` }, title: n.detail ?? "",
                 onclick: () => {
                   selected = key;
-                  if (kids.length) { if (open.has(key)) open.delete(key); else open.add(key); }
+                  // While filtering the groups are open by themselves: a click there would flip a state nobody sees.
+                  if (kids.length && !filtering()) { if (open.has(key)) open.delete(key); else open.add(key); }
                   showInfo(n);
                   draw();
                 },
@@ -266,57 +300,73 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },
     }),
-    { dispose: () => { disposed = true; clearTimeout(timer); stopEdits?.dispose(); } },
+    { dispose: () => { disposed = true; clearTimeout(timer); for (const s of stops.splice(0)) s.dispose(); } },
   );
 }
 
-/** Reads the map's files (JSON forms) and the game's object data for names and kinds. */
-async function contents(w3: W3Api, terrain: TerrainService | null): Promise<MapContents> {
+/** Reads the map's contents and the game's object data for names and kinds: what an open editor holds (`live`, unsaved
+ *  changes included) where one is open, else the saved files (JSON forms; parsed ones kept in `saved` until it's
+ *  replaced, which happens when something is saved or changes on disk). */
+async function contents(w3: W3Api, live: LiveSources, saved: Map<string, Promise<unknown>>): Promise<MapContents> {
   const root = w3.workspace.project()!.root;
-  const json = async <T>(name: string): Promise<T | null> => {
+  const cached = <T>(key: string, read: () => Promise<T>): Promise<T> => {
+    let p = saved.get(key) as Promise<T> | undefined;
+    if (!p) saved.set(key, (p = read()));
+    return p;
+  };
+  const json = <T>(name: string): Promise<T | null> => cached(name, async () => {
     const text = await w3.workspace.readText(`map/${name}.json`).catch(() => null)
       ?? await w3.backend.invoke<string>("codec_decode", { root, path: `map/${name}` }).catch(() => null);
     return text ? JSON.parse(text) as T : null;
-  };
+  });
   const objects = await w3.services.get<ObjectsService>(OBJECTS_SERVICE).catch(() => null);
-  // Kinds: game ids plus the map's custom ids per object type.
-  const custom: MapContents["custom"] = [];
-  const objectData: MapContents["objects"] = [];
-  const kindIds = new Map<string, Set<string>>();
   // Every kind's game tables asked at once, as background reads: a map opening while this view is
   // built goes first.
   const kindData = new Map(KINDS.map(([ext]) => [ext, loadKind(w3, ext, { background: true }).catch(() => null)]));
-  for (const [ext, label] of KINDS) {
-    const file = await json<{ custom: { id: string; base: string }[]; original?: ObjectEntry[] }>(`war3map.${ext}`);
-    const ids = (file?.custom ?? []).map((o) => ({ id: o.id, base: o.base }));
-    objectData.push({ ext, label: label.replace(/s$/, ""), objects: [...(file?.original ?? []), ...(file?.custom ?? [])] });
-    custom.push({ ext, label, ids });
-    const kd = await kindData.get(ext)!;
-    kindIds.set(ext, new Set([...(kd?.baseIds ?? []), ...ids.map((o) => o.id)]));
-  }
+  const savedKinds = new Map<string, KindData | null>();
+  for (const [ext] of KINDS) savedKinds.set(ext, await json<KindData>(`war3map.${ext}`));
+  const wtg = wtgPath(w3.workspace.files());
+  const savedTriggers = wtg
+    ? await cached(`wtg:${wtg}`, () => readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null))
+    : null;
+  const imp = await json<{ files: { path: string }[] }>("war3map.imp");
+  const script = await cached("script", () => w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => ""));
+  const w3i = await json<{ name?: string; playableWidth?: number; playableHeight?: number; tileset?: string }>("war3map.w3i");
+  const strings = await cached("wts", async () => new StringTable(await w3.workspace.readText("map/war3map.wts").catch(() => "")));
+  const savedUnits = await json<{ units: MapContents["units"] }>("war3mapUnits.doo");
+  const savedDoodads = await json<{ doodads: MapContents["doodads"] }>("war3map.doo");
+  const savedRegions = await json<{ regions: MapContents["regions"] }>("war3map.w3r");
+  const savedCameras = await json<{ cameras: MapContents["cameras"] }>("war3map.w3c");
+  const savedSounds = await json<{ sounds: MapContents["sounds"] }>("war3map.w3s");
+  const kds = new Map<string, Awaited<ReturnType<typeof loadKind>> | null>();
+  for (const [ext] of KINDS) kds.set(ext, await kindData.get(ext)!);
+  // Regions and cameras as the open terrain editor's tabs hold them (a Delete Object there is unsaved).
+  const lists = await live.terrain?.listedObjects().catch(() => null);
+
+  // From here on what the open editors hold, taken together (nothing else runs in between), else the saved files.
+  const placed = live.terrain?.placedObjects() ?? null;
+  const units = [...((placed?.units as MapContents["units"] | null | undefined) ?? savedUnits?.units ?? [])];
+  const doodads = [...((placed?.doodads as MapContents["doodads"] | null | undefined) ?? savedDoodads?.doodads ?? [])];
+  const triggers: TriggerFile | null = live.triggers?.liveTriggers() ?? savedTriggers;
+  const sounds = [...((live.sounds?.liveSounds() as MapContents["sounds"] | null | undefined) ?? savedSounds?.sounds ?? [])];
+  const { custom, objects: objectData, names: editorNames } = objectKinds(KINDS, savedKinds, live.objects?.liveObjects() ?? new Map());
+  // Kinds: game ids plus the map's custom ids per object type.
+  const kindIds = new Map(custom.map((k) => [k.ext, new Set([...(kds.get(k.ext)?.baseIds ?? []), ...k.ids.map((o) => o.id)])]));
   const kindOf = (id: string) => (kindIds.get("w3t")?.has(id) ? "w3t" : kindIds.get("w3b")?.has(id) ? "w3b" : kindIds.get("w3u")?.has(id) ? "w3u" : "w3d");
-  const units = (await json<{ units: MapContents["units"] }>("war3mapUnits.doo"))?.units ?? [];
-  const doodads = (await json<{ doodads: MapContents["doodads"] }>("war3map.doo"))?.doodads ?? [];
-  // Names of every id shown (looked up once).
+  const texts = [script, JSON.stringify(units), JSON.stringify(doodads), JSON.stringify(w3i)];
+
+  // Names of every id shown (looked up once); a custom object's name as its open Object Editor shows it.
   const ids = new Set<string>([...units.map((u) => u.id), ...doodads.map((d) => d.id), ...custom.flatMap((k) => k.ids.map((o) => o.id))]);
   const names = new Map<string, string>();
-  await Promise.all([...ids].map(async (id) => { const n = await objects?.name(id).catch(() => undefined); if (n) names.set(id, n); }));
-  const wtg = wtgPath(w3.workspace.files());
-  const triggers = wtg ? await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt", { background: true }))).catch(() => null) : null;
-  const imp = await json<{ files: { path: string }[] }>("war3map.imp");
-  const script = await w3.workspace.readText("map/war3map.j").catch(() => w3.workspace.readText("map/war3map.lua")).catch(() => "");
-  const w3i = await json<{ name?: string; playableWidth?: number; playableHeight?: number; tileset?: string }>("war3map.w3i");
-  const strings = new StringTable(await w3.workspace.readText("map/war3map.wts").catch(() => ""));
-  // Regions and cameras as the open terrain editor holds them (a Delete Object there is unsaved); else as saved.
-  const live = await terrain?.listedObjects().catch(() => null);
+  await Promise.all([...ids].filter((id) => !editorNames.has(id)).map(async (id) => { const n = await objects?.name(id).catch(() => undefined); if (n) names.set(id, n); }));
+  for (const [id, n] of editorNames) names.set(id, n);
   return {
     info: w3i ? { name: strings.resolve(String(w3i.name ?? "")), playableWidth: Number(w3i.playableWidth ?? 0), playableHeight: Number(w3i.playableHeight ?? 0), tileset: String(w3i.tileset ?? "") } : null,
     units, doodads, kindOf, nameOf: (id) => names.get(id) ?? id, custom,
-    regions: (live?.regions as MapContents["regions"] | null | undefined) ?? (await json<{ regions: MapContents["regions"] }>("war3map.w3r"))?.regions ?? [],
-    cameras: (live?.cameras as MapContents["cameras"] | null | undefined) ?? (await json<{ cameras: MapContents["cameras"] }>("war3map.w3c"))?.cameras ?? [],
-    sounds: (await json<{ sounds: MapContents["sounds"] }>("war3map.w3s"))?.sounds ?? [],
-    triggers, imports: (imp?.files ?? []).map((f) => f.path), objects: objectData,
+    regions: (lists?.regions as MapContents["regions"] | null | undefined) ?? savedRegions?.regions ?? [],
+    cameras: (lists?.cameras as MapContents["cameras"] | null | undefined) ?? savedCameras?.cameras ?? [],
+    sounds, triggers, imports: (imp?.files ?? []).map((f) => f.path), objects: objectData,
     // Item drops of placed objects and the map's item tables and techtree name ids too.
-    texts: [script, JSON.stringify(units), JSON.stringify(doodads), JSON.stringify(await json("war3map.w3i"))],
+    texts,
   };
 }

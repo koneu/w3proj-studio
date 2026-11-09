@@ -11,6 +11,7 @@
       { "id": "w3.sounds.replace", "when": "project", "title": "Replace Internal Sound…", "category": "Sound Editor" },
       { "id": "w3.sounds.play", "title": "Sound Editor: Play Sound File", "category": "Sound Editor", "hidden": true },
       { "id": "w3.sounds.soundAction", "title": "Sound Editor: Rename or Delete a Sound", "category": "Sound Editor", "hidden": true }
-    ]
+    ],
+    "services": [{ "id": "w3.sounds", "description": "The map's sounds as the open Sound Editor holds them (unsaved changes included): liveSounds, onDidEdit." }]
   }
 }
