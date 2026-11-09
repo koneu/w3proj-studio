@@ -10,6 +10,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
+import { listKey, moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { CAMERA_CELL, cameraColors, cameraEye, type CameraLook } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
@@ -272,6 +273,25 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     const gone = new Set(selection);
     commit(doc.cameras, doc.cameras.filter((x) => !gone.has(x)), []);
   };
+  /** The camera list in the map's order (lib/terrain/objectlist.ts): Select Next / Previous selects and shows one, Move
+   *  Up / Down changes the selected one's place (one undo step; the order war3map.w3c keeps). */
+  const listCommand = (cmd: ListCommand): string | null => {
+    if (!doc.cameras.length) return "The map has no cameras.";
+    if (cmd === "next" || cmd === "previous") {
+      const c = stepInList(doc.cameras, selected, cmd === "next" ? 1 : -1)!;
+      select([c]);
+      ed.lookAt(c.targetX, c.targetY);
+      renderPanel();
+      render();
+      return null;
+    }
+    if (!ed.editable) return "This map can't be changed here.";
+    if (!selected) return "Select a camera first.";
+    const moved = moveInList(doc.cameras, selected, cmd === "up" ? -1 : 1);
+    if (!moved) return `${selected.name} is already ${cmd === "up" ? "first" : "last"} in the list.`;
+    commit(doc.cameras, moved, [selected]);
+    return null;
+  };
   const toolbar = h("div.terrain-group-tools", {},
     h("button", { title: "New camera from the current view", onclick: () => { if (ed.editable) create(); } }, "Create from view"),
     jump, count, hover, panel);
@@ -350,8 +370,11 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     keyDown(e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selected) { deleteSelected(); return true; }
       if (e.key === "Escape" && selected) { select([]); renderPanel(); render(); return true; }
+      const cmd = listKey(e);
+      if (cmd) { const why = listCommand(cmd); if (why) void w3.window.showInfo(why); return true; }
       return false;
     },
+    listCommand,
     async save() {
       if (!unsaved) return;
       // Version 0 files (classic, or written empty) take the Reforged layout once they have cameras.

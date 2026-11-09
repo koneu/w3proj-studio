@@ -112,6 +112,26 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
   if (minimapMode !== "never" && s.units && !gone()) await updateMinimapIcons(w3, s.now, s.units);
 }
 
+/** Calculate Shadows (the World Editor's Calculate Shadows and Save Map): war3map.shd made again in whole from the
+ *  project's saved terrain and doodads, not only where edits changed it, with the sun of the settings. `stored` is the
+ *  file as it is (null when absent; unreadable is an error: the caller decides about writing over it). */
+export async function fullShadows(w3: W3Api, opts: {
+  terrainPath: string;
+  objects: () => Promise<{ skins: Skins; baseOf: (id: string) => string | undefined }>;
+  read: (path: string) => Promise<Uint8Array>;
+}): Promise<{ shd: Uint8Array; stored: Uint8Array | null }> {
+  const path = opts.terrainPath;
+  const now = parseW3e(await readTerrainBytes(path, { readText: () => w3.workspace.readText(path), readBytes: () => w3.workspace.readBytes(path) }));
+  // A doodads file that's there but can't be read stops it: shadows without its trees would be written over good ones.
+  const [dooFile, objects] = await Promise.all([loadPlacedFile(w3, "war3map.doo", "doodads"), opts.objects()]);
+  const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
+  const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
+  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun);
+  const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
+  const stored = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
+  return { shd, stored };
+}
+
 /** The derived files of a project with no terrain editor open, from its saved files: what a tool's edit
  *  changed is there already. `from` is the state before the edits (shadows are updated from there).
  *  Nothing is opened. Throws when the terrain can't be read; the parts' own failures are shown. */

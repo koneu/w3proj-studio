@@ -1,15 +1,35 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { anyGroundLayer, CAMERA_STEPS, cameraKey, keyOf, lightRings, nextTerrainLook, shownView, VIEW_KEYS, viewKeyCommand, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_STEPS, cameraKey, DROP_RING, dropRings, keyOf, lightRings, nextTerrainLook, shownView, VIEW_KEYS, viewKeyCommand, type ViewSet } from "./viewmodes";
 
 const chosen: ViewSet = {
   terrain: "wireframe", doodads: false, units: true, water: false, blight: false, cliffs: false, effects: false, weather: false,
   lighting: false, fog: false, grid: "small", naval: true, heights: true, cameras: true, pathing: true, regions: true, lightRanges: true,
+  info: true,
 };
 
 test("shownView: without game view, what was chosen, start locations included", () => {
   assert.deepEqual(shownView(chosen, false), { ...chosen, starts: true });
+});
+
+test("shownView: Info Display off hides the start locations, and nothing else", () => {
+  assert.deepEqual(shownView({ ...chosen, info: false }, false), { ...chosen, info: false, starts: false });
+  assert.equal(shownView({ ...chosen, info: true }, true).info, false, "game view draws no info");
+});
+
+test("dropRings: a ring round each unit with an item table or item sets, none for others or start locations", () => {
+  const rings = dropRings([
+    { id: "hfoo", position: [100, 200, 0], itemTable: -1, itemSets: [[{ id: "ratc", chance: 100 }]] },
+    { id: "hfoo", position: [300, 400, 0], itemTable: 0, itemSets: [] },
+    { id: "hfoo", position: [500, 600, 0], itemTable: -1, itemSets: [] },
+    { id: "hkni", position: [700, 800, 0] },
+    { id: "sloc", position: [0, 0, 0], itemTable: 3 },
+    { id: "hfoo", position: [NaN, 0, 0], itemTable: 1 },
+  ]);
+  assert.deepEqual(rings.map((r) => [r.x, r.y]), [[100, 200], [300, 400]]);
+  assert.ok(rings.every((r) => r.r === DROP_RING.r && r.rgb.every((c) => c === 255)));
+  assert.equal(viewKeyCommand(key("i")), "w3.terrain.toggleInfoDisplay");
 });
 
 test("shownView: game view shows the map as the game does, whatever was chosen, and the choice comes back after", () => {

@@ -32,16 +32,18 @@ export interface ViewSet {
   pathing: boolean;
   regions: boolean;
   lightRanges: boolean;
+  /** View > Info Display (I): the start locations, and a ring round each unit that drops items. */
+  info: boolean;
 }
 
 /** The layers that are a picture laid over the ground (built per pathing cell, see refreshLayers). */
 export const GROUND_LAYERS = ["naval", "heights", "cameras", "pathing", "regions"] as const;
 export type GroundLayer = (typeof GROUND_LAYERS)[number];
 /** The layers a View command switches on and off. */
-export type ToggleLayer = GroundLayer | "lightRanges" | "doodads" | "units" | "blight";
+export type ToggleLayer = GroundLayer | "lightRanges" | "doodads" | "units" | "blight" | "info";
 
 export interface Shown extends ViewSet {
-  /** The start locations and the start buildings drawn in their rings. */
+  /** The start locations and the start buildings drawn in their rings (with Info Display). */
   starts: boolean;
 }
 
@@ -52,15 +54,36 @@ export interface Shown extends ViewSet {
  * marks: no grid, pathing, regions, camera objects, camera bounds, light ranges or start locations (we-drive,
  * map 03 with regions, a camera, lights, every one of those items on, 2026-11-09). Turned off, the items are as they
  * were. Studio's own marks (height map, naval pathing) go with the editor's.
+ *
+ * Info Display (View menu, I, on by default) draws the start locations and a ring of white marks round every unit that
+ * drops items; turned off, both go and the units stay as they are (we-drive, SD, a copy of (2)EchoIsles with footmen
+ * of players 1, 2, 6, Neutral Hostile and Neutral Passive and one with an item set, 2026-11-09).
  */
 export function shownView(set: ViewSet, gameView: boolean): Shown {
-  if (!gameView) return { ...set, starts: true };
+  if (!gameView) return { ...set, starts: set.info };
   return {
     terrain: "textured", doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true, weather: true,
     lighting: true, fog: true,
     grid: "none", naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
-    starts: false,
+    info: false, starts: false,
   };
+}
+
+// ---- info display ------------------------------------------------------------------------------
+
+/** The ring Info Display draws round a unit that drops items (white, as the editor's marks). */
+export const DROP_RING = { r: 44, rgb: [255, 255, 255] as [number, number, number] };
+
+/** Info Display's rings: one round each placed unit with an item table or item sets of its own (start locations and
+ *  items have none). */
+export function dropRings(units: readonly { id: string; position: readonly number[]; itemTable?: number; itemSets?: readonly unknown[] }[]): RangeRing[] {
+  const out: RangeRing[] = [];
+  for (const u of units) {
+    const drops = (u.itemTable ?? -1) >= 0 || (u.itemSets?.length ?? 0) > 0;
+    const [x, y] = u.position;
+    if (drops && u.id !== "sloc" && Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y, r: DROP_RING.r, rgb: DROP_RING.rgb });
+  }
+  return out;
 }
 
 /** Whether any of the ground layers is drawn. */
@@ -108,6 +131,7 @@ export const VIEW_KEYS: readonly { key: string; command: string }[] = [
   { key: "Ctrl+Shift+L", command: "w3.terrain.toggleLightRanges" },
   { key: "P", command: "w3.terrain.toggleGroundPathing" },
   { key: "N", command: "w3.terrain.toggleNavalPathing" },
+  { key: "I", command: "w3.terrain.toggleInfoDisplay" },
   { key: "Ctrl+R", command: "w3.terrain.toggleRegions" },
   { key: "Ctrl+M", command: "w3.terrain.toggleCameraObjects" },
 ];

@@ -3,7 +3,8 @@ import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
-import { deriveFromProject, editMapDoc, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
+import { checkpointIfOn } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
@@ -17,7 +18,7 @@ import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, 
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, cameraKey, keyOf, lightRings, nextTerrainLook, OWN_CHORDS, shownView, TERRAIN_LOOKS, viewKeyCommand, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, cameraKey, dropRings, keyOf, lightRings, nextTerrainLook, OWN_CHORDS, shownView, TERRAIN_LOOKS, viewKeyCommand, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -29,7 +30,9 @@ import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
 import { loadSkins, ObjectLoader, objectsInRect, placement, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
-import { exportMinimap, type ExportOptions, type ExportSource } from "./minimapexport";
+import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
+import { MINIMAP_SIZE, minimapFrame } from "./minimap";
+import { MinimapPanel, viewOutline } from "./minimappanel";
 import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings } from "./minimapgen";
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
@@ -215,6 +218,7 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleGroundPathing", (v) => why(v.toggleLayer("pathing"))],
   ["w3.terrain.toggleRegions", (v) => why(v.toggleLayer("regions"))],
   ["w3.terrain.toggleLightRanges", (v) => why(v.toggleLayer("lightRanges"))],
+  ["w3.terrain.toggleInfoDisplay", (v) => why(v.toggleLayer("info"))],
   ["w3.terrain.toggleDoodads", (v) => why(v.toggleLayer("doodads"))],
   ["w3.terrain.toggleUnits", (v) => why(v.toggleLayer("units"))],
   ["w3.terrain.toggleWater", (v) => why(v.toggleLayer("water"))],
@@ -228,6 +232,10 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleLargeGrid", (v) => why(v.toggleGrid("large"), GRIDS)],
   ["w3.terrain.cycleRandomGroupsNext", (v) => v.cycleRandomGroups(1)],
   ["w3.terrain.cycleRandomGroupsPrevious", (v) => v.cycleRandomGroups(-1)],
+  ["w3.terrain.selectNextInList", (v) => v.listCommand("next")],
+  ["w3.terrain.selectPreviousInList", (v) => v.listCommand("previous")],
+  ["w3.terrain.moveUpInList", (v) => v.listCommand("up")],
+  ["w3.terrain.moveDownInList", (v) => v.listCommand("down")],
 ];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
@@ -295,6 +303,57 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrain.settle", async () => {
       clearTimeout(rebuildTimer);
       await runRebuild();
+    }),
+    // Calculate Shadows (the World Editor's Calculate Shadows and Save Map): everything unsaved is saved, then
+    // war3map.shd is made again in whole from the saved terrain and doodads (edits only update the cells they change).
+    // Like the editor's it's saved, not an undo step: a checkpoint of the map before keeps the old file. In turn with
+    // the rebuilds, which write the same file. How many cells changed.
+    w3.commands.register("w3.terrain.calculateShadows", async () => {
+      const { root } = requireProject(w3);
+      const path = projectTerrain(w3);
+      if (!path) throw new Error("This project has no terrain (war3map.w3e).");
+      await w3.editors.saveAll();
+      // A rebuild still due from the last edit first: the file is made from what's saved.
+      clearTimeout(rebuildTimer);
+      await runRebuild();
+      if (w3.workspace.project()?.root !== root) return null;
+      const doc = { path } as EditorDocument;
+      const { shd, stored } = await w3.window.withProgress("Calculating shadows", () => fullShadows(w3, {
+        terrainPath: path,
+        objects: async () => {
+          const [skins, { bases, art }] = await Promise.all([loadSkins(w3), mapObjectData(w3)]);
+          return { skins: withObjectArt(skins, art), baseOf: (id: string) => bases.get(id) };
+        },
+        read: (p) => readFile(w3, doc, p),
+      }));
+      const changed = stored && stored.length === shd.length ? shd.reduce((n, v, i) => n + (v !== stored[i] ? 1 : 0), 0) : shd.length;
+      if (changed) {
+        // Outside the rebuilds' turn: making a checkpoint waits for them (w3.terrain.settle).
+        if (stored) await checkpointIfOn(w3, "Calculate Shadows");
+        // Written in the rebuilds' turn, which write the same file; only over the file the work started from: another
+        // project, or an edit's rebuild meanwhile, and nothing is written.
+        const run = rebuilding.then(async () => {
+          if (w3.workspace.project()?.root !== root) return "gone";
+          const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
+          const now = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
+          if ((now === null) !== (stored === null) || (now && stored && (now.length !== stored.length || now.some((v, i) => v !== stored[i])))) return "moved";
+          await w3.workspace.writeBytes("map/war3map.shd", shd);
+          if (!stored) await w3.workspace.refresh();
+          return "written";
+        });
+        rebuilding = run.then(() => {}, () => {});
+        const done = await run;
+        if (done === "gone") return null;
+        if (done === "moved") throw new Error("The shadow map changed while the shadows were being calculated (an edit's rebuild): nothing was written. Calculate them again.");
+      }
+      void w3.window.showInfo(changed ? `Shadows calculated: ${changed} of the shadow map's cells changed (war3map.shd saved).` : "Shadows calculated: the shadow map was already up to date.");
+      return changed;
+    }),
+    // Window > Minimap: the minimap panel in every terrain view, on or off (a setting, kept for the next session).
+    w3.commands.register("w3.terrain.toggleMinimap", async () => {
+      const on = w3.settings.get<boolean>("terrain.minimap.panel", false) !== true;
+      await w3.settings.set("terrain.minimap.panel", on);
+      return on;
     }),
     // After a resize or its undo: a rebuild still due was planned for the terrain that was just replaced.
     w3.commands.register("w3.terrain.dropRebuild", () => {
@@ -1344,6 +1403,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const gameBadge = h("div.terrain-gameview-badge", { hidden: !gameViewOn(), title: "Game view (V): lit and fogged as in the game, without the editor's marks" }, "Game View");
         /** Set with the View commands (below): draws the view again after a setting it depends on changed. */
         let viewChanged = () => {};
+        /** Set with the minimap panel (below): its picture again after edits, its outline after the camera moved, and
+         *  the panel shown or not after its setting changed. */
+        let minimapPanelSoon = (_ms?: number) => {}, minimapOutline = () => {}, minimapSetting = () => {};
         /** Set with the layers (below): after another tab opened, the layers that tab draws itself. */
         let layersAfterTab = () => {};
         /** The toolbar's boxes after the tab changed (the Regions tab holds the Regions box on). */
@@ -1421,6 +1483,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stopWeatherSaves = w3.workspace.onDidSave((path) => { if (/war3map\.w3[ir]\.json$/i.test(path)) void loadWeather(); if (/war3map\.w3i\.json$/i.test(path)) void loadBorder(); });
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
+          if (key === "terrain.minimap.panel") minimapSetting();
+          else if (key.startsWith("terrain.minimap.")) minimapPanelSoon();
           if (key === "terrain.sky") void showSkyChoice();
           if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds") viewSyncs.forEach((f) => f());
           if (key.startsWith("terrain.lighting.")) applyLight();
@@ -2058,8 +2122,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (pendingSel) trySelect(pendingSel);
           pendingSel = null;
-          // The light ranges of the objects as they are now.
+          // The light ranges of the objects as they are now, and Info Display's rings of the units.
           showLightRanges();
+          showDropRings();
+          minimapPanelSoon();
           redraw();
         }
         // Object data (models, scales, …), the import list or imported files saved elsewhere (the
@@ -3791,7 +3857,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The View items as chosen (the toolbar, the side panel's Doodads and Units, the commands and keys). Lighting,
          *  fog and weather are settings. Game view sets the choice aside without changing it: `shown` is what's drawn. */
         const viewState = {
-          grid: "none" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
+          grid: "none" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, info: true,
           terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
         };
         const viewSet = (): ViewSet => ({ ...viewState, lighting: lightOn(),
@@ -3904,6 +3970,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         layersAfterTab = () => { if (shown.pathing || shown.regions) void refreshLayers(); };
         const refreshLayersSoon = () => {
           if (shown.lightRanges) showLightRanges();
+          showDropRings();
+          minimapPanelSoon();
           if (!anyGroundLayer(shown)) return;
           clearTimeout(layerTimer);
           layerTimer = setTimeout(() => void refreshLayers(), 400);
@@ -3938,6 +4006,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setRings("lights", rings);
           redraw();
         };
+        /** Info Display: a ring round every placed unit that drops items, while units and Info Display are shown. Made
+         *  again when the units or their places change (dropsKey). */
+        let dropsKey = "";
+        const showDropRings = () => {
+          const rings = shown.info && shown.units ? dropRings(unitsFile?.list ?? []) : [];
+          const key = rings.map((r) => `${r.x.toFixed(1)},${r.y.toFixed(1)}`).join(";");
+          if (key === dropsKey) return;
+          dropsKey = key;
+          renderer.setRings("drops", rings);
+          redraw();
+        };
         /** Draws what `shown` says, after the choice or game view changed. */
         const applyView = () => {
           const was = shown;
@@ -3965,6 +4044,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           applyGrid();
           if (anyGroundLayer(was) || anyGroundLayer(shown)) void refreshLayers();
           showLightRanges();
+          showDropRings();
           // A selected start location can't stay selected where it isn't shown.
           if (!shown.starts && selectedEntries().some((p) => p.id === "sloc")) clearSelection();
           viewSyncs.forEach((f) => f());
@@ -3999,6 +4079,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const viewCommands: ViewCommands = {
           viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
+          listCommand: (cmd) => {
+            const g = activeInst();
+            return g?.listCommand ? g.listCommand(cmd) : "The open tab has no list: the Regions and Cameras tabs have one.";
+          },
           toggleSetting: async (which) => {
             const no = refusedInGameView();
             if (no) return no;
@@ -4009,7 +4093,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -4045,6 +4129,54 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           viewSyncs.push(() => { box.checked = get(); if (forced) box.disabled = gameViewOn(); });
           return h("label.model-toggle", title ? { title } : {}, box, ` ${label}`);
         };
+
+        // ---- Minimap panel (minimappanel.ts) ----------------------------------------------------------------
+        /** The camera margins the picture leaves out (war3map.w3i), as the picture was last made with. */
+        let minimapMargins: [number, number, number, number] = [0, 0, 0, 0];
+        const minimapPanel = new MinimapPanel(176, (px, py) => {
+          const [wx, wy] = minimapFrame(terrain, minimapMargins, MINIMAP_SIZE).toWorld(px, py);
+          const x = Math.max(terrain.offsetX, Math.min(terrain.offsetX + (terrain.width - 1) * 128, wx));
+          const y = Math.max(terrain.offsetY, Math.min(terrain.offsetY + (terrain.height - 1) * 128, wy));
+          renderer.target = [x, y, heightAt(terrain, x, y)];
+          redraw();
+        });
+        let minimapSeq = 0, minimapTimer: ReturnType<typeof setTimeout> | undefined;
+        /** The panel's picture, made again from the editor's state (unsaved edits included) as Export Minimap draws it. */
+        const refreshMinimapPanel = async () => {
+          if (!minimapPanel.shown) return;
+          const seq = ++minimapSeq;
+          const src = await exportSource();
+          const rgba = await exportPicture(src, { ...DEFAULT_EXPORT, size: MINIMAP_SIZE, playableOnly: true });
+          // A later refresh, or the panel turned off, wins.
+          if (seq !== minimapSeq || !minimapPanel.shown) return;
+          minimapMargins = src.base.margins;
+          minimapPanel.setPicture(rgba, MINIMAP_SIZE);
+          showMinimapOutline();
+        };
+        const refreshMinimapPanelSoon = (ms = 1200) => {
+          if (!minimapPanel.shown) return;
+          clearTimeout(minimapTimer);
+          minimapTimer = setTimeout(() => void refreshMinimapPanel().catch((e) => w3.window.showError(`The minimap panel couldn't be drawn: ${(e as Error).message ?? e}`)), ms);
+        };
+        minimapPanelSoon = refreshMinimapPanelSoon;
+        /** The view's outline on the panel, after the camera moved (each frame drawn). */
+        const showMinimapOutline = () => {
+          if (!minimapPanel.shown || !canvas.clientWidth) return;
+          const frame = minimapFrame(terrain, minimapMargins, MINIMAP_SIZE);
+          const ground = viewOutline((x, y) => renderer.ray(x, y), canvas.clientWidth, canvas.clientHeight, renderer.target[2], renderer.distance * 20);
+          minimapPanel.setOutline(ground.map(([x, y]) => frame.toPixel(x, y)));
+        };
+        minimapOutline = showMinimapOutline;
+        const minimapShown = () => w3.settings.get<boolean>("terrain.minimap.panel", false) === true;
+        const applyMinimapSetting = () => {
+          const on = minimapShown();
+          if (on === minimapPanel.shown) return;
+          minimapPanel.shown = on;
+          viewSyncs.forEach((f) => f());
+          if (on) refreshMinimapPanelSoon(0);
+        };
+        minimapSetting = applyMinimapSetting;
+        applyMinimapSetting();
         el.append(h("div.model-viewer", {},
           h("div.model-main", {},
             h("div.model-toolbar", {},
@@ -4064,8 +4196,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
               layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras", "w3.terrain.toggleCameraObjects"),
               layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
+              layerToggle("Info", "Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
               layerBusy,
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
+              toggle("Minimap", minimapShown, (v) => void w3.settings.set("terrain.minimap.panel", v), false, "The minimap in the view's corner: click or drag on it to move the view there"),
               ...(editable ? [
                 switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", true),
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
@@ -4081,7 +4215,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
               h("span.muted", {}, dragHint, " · Middle-drag or arrow keys (Shift: faster): pan · Right-drag or Ctrl+Left/Right: rotate · Wheel or Ctrl+Up/Down: zoom")),
             ...(editable ? [tabsEl, groupBar] : []),
-            h("div.model-stage", {}, canvas, labelLayer, gameBadge, glLost)),
+            h("div.model-stage", {}, canvas, labelLayer, gameBadge, minimapPanel.el, glLost)),
           side));
         // The View keys with Ctrl stay with the map while it has the keyboard (Ctrl+R: Regions, not Reload Window).
         canvas.dataset.ownKeys = OWN_CHORDS.join(" ");
@@ -4357,6 +4491,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (canvas.clientWidth > 0 && due && !glDead) {
             renderer.render();
             placeLabels();
+            minimapOutline();
             dirty = loadDirty = false;
             lastSize = size;
             lastFrame = now;
@@ -4382,6 +4517,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const ready = () => Promise.all([objectsPlaced.catch(() => {}), objectReload.settled()]).then(() => {});
+        /** What Export Minimap and the minimap panel draw, as the editor has it now (unsaved edits included). */
+        const exportSource = async (): Promise<ExportSource> => {
+          await ready();
+          const rf = (p: string) => readFile(w3, doc, p);
+          // Copies: the picture is of the moment it was asked for, whatever is edited while it is drawn.
+          const doodads = [...(dooFile?.list ?? [])], units = [...(unitsFile?.list ?? [])];
+          return {
+            base: await minimapBase(w3, terrain, doodads, rf),
+            terrain, units,
+            pathing: () => handle.pathing({ filtered: true }),
+            regions: async () => (await readMapDoc<{ regions?: { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }[] }>(w3, "map/war3map.w3r.json"))?.regions ?? [],
+            iconKind: () => iconKinds(w3),
+            iconImage: (type) => minimapIconImage(w3, type, rf),
+            params: minimapSettings(w3),
+          };
+        };
         const takeScreenshot = async (size: number, area: Area | null, angle: ViewAngle, colors: { rgba: Uint8Array; width: number; height: number } | null, hide: ReturnType<typeof hiddenInPicture>) => {
           let timer = 0;
           const inTime = await Promise.race([
@@ -4439,21 +4590,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             minimapStale.set();
             await updateDerived(dooFile?.list ?? [], from?.terrain ?? terrain, from?.doodads ?? dooFile?.list ?? []);
           },
-          minimapSource: async () => {
-            await ready();
-            const rf = (p: string) => readFile(w3, doc, p);
-            // Copies: the picture is of the moment it was asked for, whatever is edited while it is drawn.
-            const doodads = [...(dooFile?.list ?? [])], units = [...(unitsFile?.list ?? [])];
-            return {
-              base: await minimapBase(w3, terrain, doodads, rf),
-              terrain, units,
-              pathing: () => handle.pathing({ filtered: true }),
-              regions: async () => (await readMapDoc<{ regions?: { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }[] }>(w3, "map/war3map.w3r.json"))?.regions ?? [],
-              iconKind: () => iconKinds(w3),
-              iconImage: (type) => minimapIconImage(w3, type, rf),
-              params: minimapSettings(w3),
-            };
-          },
+          minimapSource: exportSource,
         };
         // A read-only editor (a game map) never derives: it isn't the project's.
         if (editable) openedBy.set(doc.path, record);
@@ -4610,6 +4747,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopObjectWatch.dispose();
             objectReload.cancel();
             stopLightSettings.dispose();
+            // The minimap panel's picture still due, or being made, isn't drawn any more.
+            clearTimeout(minimapTimer);
+            minimapSeq++;
             stopWeatherWatch.dispose();
             stopWeatherSaves.dispose();
             stopShadows();

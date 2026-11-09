@@ -7,6 +7,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { weatherName } from "../../lib/terrain/weather";
+import { listKey, moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -265,6 +266,26 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (!gone.size) return;
     commit(doc.regions, doc.regions.filter((x) => !gone.has(x)), null);
   };
+  /** The region list in the map's order (lib/terrain/objectlist.ts): Select Next / Previous selects and shows one, Move
+   *  Up / Down changes the selected one's place (one undo step; the order war3map.w3r keeps). */
+  const listCommand = (cmd: ListCommand): string | null => {
+    if (!doc.regions.length) return "The map has no regions.";
+    if (cmd === "next" || cmd === "previous") {
+      const r = stepInList(doc.regions, selected, cmd === "next" ? 1 : -1)!;
+      selected = r;
+      extra = new Set();
+      ed.lookAt((r.left + r.right) / 2, (r.bottom + r.top) / 2);
+      renderPanel();
+      render();
+      return null;
+    }
+    if (!ed.editable) return "This map can't be changed here.";
+    if (!selected) return "Select a region first.";
+    const moved = moveInList(doc.regions, selected, cmd === "up" ? -1 : 1);
+    if (!moved) return `${selected.name} is already ${cmd === "up" ? "first" : "last"} in the list.`;
+    commit(doc.regions, moved, selected);
+    return null;
+  };
   const toolbar = h("div.terrain-group-tools", {}, jump, count, hover, panel, soundList);
 
   return {
@@ -369,8 +390,11 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     keyDown(e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selected) { deleteSelected(); return true; }
       if (e.key === "Escape" && selected) { selected = null; extra = new Set(); renderPanel(); render(); return true; }
+      const cmd = listKey(e);
+      if (cmd) { const why = listCommand(cmd); if (why) void w3.window.showInfo(why); return true; }
       return false;
     },
+    listCommand,
     async save() {
       if (!unsaved) return;
       const root = w3.workspace.project()!.root;

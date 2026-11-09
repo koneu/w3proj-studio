@@ -73,6 +73,20 @@ export const MINIMAP_SIZE = 256;
 const LORDAERON_WATER: Rgb = [0, 0, 192];
 const HUE_OFFSET = 64;
 
+/** Where world points are on a minimap picture of `size` pixels, and back (the terrain view's minimap panel: a click
+ *  moves the camera there, the view's outline is drawn on it). The same mapping renderMinimap draws with. */
+export function minimapFrame(t: Pick<Terrain, "width" | "height" | "offsetX" | "offsetY">, margins: [number, number, number, number], size: number, wholeMap = false) {
+  const [ml, mr, mb, mt] = wholeMap ? [0, 0, 0, 0] : margins;
+  const N = Math.max(1, Math.round(size));
+  const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt;
+  const scale = N / Math.max(1, pw, ph);
+  const ox = (N - pw * scale) / 2, oy = (N - ph * scale) / 2;
+  return {
+    toPixel: (wx: number, wy: number): [number, number] => [((wx - t.offsetX) / 128 - ml) * scale + ox, N - (((wy - t.offsetY) / 128 - mb) * scale + oy)],
+    toWorld: (px: number, py: number): [number, number] => [((px - ox) / scale + ml) * 128 + t.offsetX, ((N - py - oy) / scale + mb) * 128 + t.offsetY],
+  };
+}
+
 /** RGBA pixels, rows top to bottom (north up). */
 export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const { terrain: t, tileColor, waterColor } = input;
@@ -126,7 +140,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   }
 
   /** Pixel of a world point. */
-  const at = (wx: number, wy: number) => [((wx - t.offsetX) / 128 - ml) * scale + ox, N - (((wy - t.offsetY) / 128 - mb) * scale + oy)] as const;
+  const at = minimapFrame(t, input.margins, N, input.wholeMap).toPixel;
   const rad = P.objectRadius * scale;
   for (const o of input.objects) {
     const [cx, cy] = at(o.x, o.y);

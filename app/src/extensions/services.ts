@@ -99,6 +99,9 @@ export interface TerrainToolGroupInstance {
   pointerLeave?(): void;
   /** Keys while the map has focus; return true when handled. */
   keyDown?(e: KeyboardEvent): boolean;
+  /** The group's object list (regions, cameras: the World Editor's Edit > Select Next / Previous in List, Move Up / Down
+   *  in List): null when done, else why not. */
+  listCommand?(cmd: "next" | "previous" | "up" | "down"): string | null;
   /** After every edit, undo and redo, from any group. */
   changed?(what: { terrain: boolean; objects: boolean }): void;
   /** Adjusts the generated pathing map (flags per 32×32 cell, rows from the south) before it is shown or saved. */

@@ -1,6 +1,7 @@
 import type { PlacedRef } from "./pickmatch";
 import type { ReplaceTypes } from "./replace";
 import type { Shown, TerrainLook, ToggleLayer, ViewSet } from "./viewmodes";
+import type { MinimapPanel } from "./minimappanel";
 // The "w3.terrain" service: tool groups other extensions add to the terrain
 // editor (see extensions/services.ts). Open editors follow registrations.
 // Also picks a point on the map for other modules (trigger parameters).
@@ -26,9 +27,14 @@ export interface ViewCommands {
   /** Cycle Random Groups - Next (1) or Previous (-1): objects placed from a random group show the unit, building or item
    *  the group's next line puts there, then the question mark again. Says what is shown now. */
   cycleRandomGroups(step: 1 | -1): Promise<string>;
+  /** Edit > Select Next / Previous in List, Move Up / Down in List: on the open tab's object list (Regions, Cameras).
+   *  Null when done, else why not. */
+  listCommand(cmd: "next" | "previous" | "up" | "down"): string | null;
   /** What is chosen and what is shown (game view sets the choice aside), for the status line and tests; `sunShadows`
    *  the last frame's real shadows (HD: cast or not, the shadow map's texel on the ground, how many objects cast). */
-  state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number };
+  state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;
+    /** The minimap panel: shown, its picture in, the view's outline on it (picture pixels). */
+    minimap: ReturnType<MinimapPanel["state"]> };
 }
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */
