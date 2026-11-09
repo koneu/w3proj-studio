@@ -4051,6 +4051,8 @@ async function editorExtras(page, found) {
     await page.evaluate(`w3.editors.open(${JSON.stringify(FILE)})`);
     await until("the text editor with the new content", () => page.evaluate(`document.querySelector(".cm-content")?.textContent.includes("new words") ?? false`), 10000)
       .catch(() => fail("the open text editor of the file doesn't show the replaced content"));
+    // Closed before undo and redo: closing a tab while the workbench reopens it for a write elsewhere throws in fileSaved.
+    await page.evaluate(`w3.editors.close(${JSON.stringify(FILE)})`);
     await run("w3.imports.open");
     await sleep(300);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
