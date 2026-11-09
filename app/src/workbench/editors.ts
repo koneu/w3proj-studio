@@ -19,7 +19,7 @@ interface Tab {
   conflict?: HTMLElement;
   /** Its editor is being created: what is saved meanwhile may have been read before the save. */
   loading?: boolean;
-  /** Files saved (in the app or on disk, lower case) while it loaded: looked at once it's there. */
+  /** Files saved (in the app or on disk; their keys) while it loaded: looked at once it's there. */
   missed?: Set<string>;
   /** Its editor couldn't be created: opening the file again, or the file being saved, tries again. */
   failed?: boolean;
@@ -49,6 +49,9 @@ export interface DocumentIO {
   /** The file's size and time on disk now, and a hash of its contents where it can (null: it doesn't exist;
    *  undefined: not a file on disk). */
   stat?(path: string): Promise<Stamp | null | undefined>;
+  /** The key a file is known by (the workspace's `key`: lower case only where the file system ignores case);
+   *  without it, lower case. Saved and changed files are matched to tabs by it. */
+  key?(path: string): string;
 }
 
 /** Tabbed editor area. Picks an editor provider per file from the
@@ -130,7 +133,8 @@ export class EditorService {
   }
 
   isDirty(path: string): boolean {
-    return this.tabs.some((t) => t.path.toLowerCase() === path.toLowerCase() && t.dirty);
+    const key = this.key(path);
+    return this.tabs.some((t) => this.key(t.path) === key && t.dirty);
   }
 
   /** Undoes in the active editor, wherever the focus is, and leaves the focus in it. False: it can't. */
@@ -280,9 +284,14 @@ export class EditorService {
     return this.io.stat ? this.io.stat(path).catch(() => undefined) : undefined;
   }
 
-  /** The files a tab's editor shows: its own and those it watches (lower case). */
+  /** The key a file is known by (DocumentIO.key). */
+  private key(path: string) {
+    return this.io.key ? this.io.key(path) : path.replace(/\\/g, "/").toLowerCase();
+  }
+
+  /** The files a tab's editor shows: its own and those it watches (`key`: a file's key). */
   private shows(t: Tab, key: string) {
-    return t.path.toLowerCase() === key || !!t.instance?.watches?.some((w) => w.toLowerCase() === key);
+    return this.key(t.path) === key || !!t.instance?.watches?.some((w) => this.key(w) === key);
   }
 
   private async load(tab: Tab) {
@@ -309,7 +318,7 @@ export class EditorService {
     const missed = [...tab.missed ?? []];
     tab.missed = undefined;
     if (!this.tabs.includes(tab)) return;
-    if (tab.failed ? missed.includes(tab.path.toLowerCase()) : missed.some((k) => this.shows(tab, k))) {
+    if (tab.failed ? missed.includes(this.key(tab.path)) : missed.some((k) => this.shows(tab, k))) {
       if (!tab.dirty) await this.reopen(tab);
       else this.flagConflict(tab);
     }
@@ -322,11 +331,11 @@ export class EditorService {
     const kept: string[] = [];
     for (const t of this.tabs.filter((x) => x.provider)) {
       if (t.loading) { for (const k of paths) t.missed?.add(k); continue; }
-      if (![...paths].some((k) => this.shows(t, k)) && !(t.failed && paths.has(t.path.toLowerCase()))) continue;
+      if (![...paths].some((k) => this.shows(t, k)) && !(t.failed && paths.has(this.key(t.path)))) continue;
       if (t.dirty) { kept.push(t.path); continue; }
-      const own = paths.has(t.path.toLowerCase());
+      const own = paths.has(this.key(t.path));
       const inPlace = !own && t.instance?.reloadFile
-        ? (await Promise.all([...paths].filter((k) => this.shows(t, k)).map((k) => t.instance!.reloadFile!(k).catch(() => false)))).every(Boolean)
+        ? (await Promise.all([...paths].filter((k) => this.shows(t, k)).map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)))).every(Boolean)
         : false;
       if (inPlace) t.stamp = await this.stampOf(t.path);
       else await this.reopen(t);
@@ -377,18 +386,18 @@ export class EditorService {
    *  other than the writer open it again, or, with unsaved changes, say so and offer to; editors
    *  watching it (`EditorInstance.watches`) open again when they have no unsaved changes. */
   async fileSaved(path: string) {
-    const key = path.replace(/\\/g, "/").toLowerCase();
+    const key = this.key(path);
     for (const t of this.tabs.filter((x) => x.provider && x.writing === 0)) {
       // Closed while an earlier tab of this loop was reloading.
       if (!this.tabs.includes(t)) continue;
       // Still loading: it may have read the file before this save. Looked at once it's there.
       if (t.loading) { t.missed?.add(key); continue; }
-      const own = t.path.toLowerCase() === key;
+      const own = this.key(t.path) === key;
       // Its editor couldn't be created, perhaps because the file wasn't there yet: it is now.
       if (!t.instance) { if (own && t.failed) await this.reopen(t); continue; }
       if (!this.shows(t, key)) continue;
       if (!t.dirty) {
-        const inPlace = await t.instance!.reloadFile?.(key).catch(() => false);
+        const inPlace = await t.instance!.reloadFile?.(key.toLowerCase()).catch(() => false);
         if (inPlace) t.stamp = await this.stampOf(t.path);
         else if (t.instance) await this.reopen(t);
         continue;

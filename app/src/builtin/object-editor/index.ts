@@ -50,7 +50,9 @@ async function packedMapPath(w3: W3Api): Promise<string | null> {
   if (!project) return null;
   const find = async () => {
     const output = project.default_output;
-    const exists = await w3.backend.invoke<boolean>("fs_exists", { path: output }).catch(() => false);
+    // Not known whether the build output is there: no map is pointed at rather than perhaps the wrong one.
+    const exists = await w3.backend.invoke<boolean>("fs_exists", { path: output }).catch(() => null);
+    if (exists === null) return null;
     const newest = exists ? null : await w3.commands.execute<string | null>("w3.checkpoints.newest").catch(() => null);
     return findPackedMap(output, exists, newest);
   };

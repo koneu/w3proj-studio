@@ -16,10 +16,10 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { inflateSync } from "node:zlib";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, Hands, problems, sleep, until } from "./cdp.mjs";
 import { launch } from "./webdriver.mjs";
@@ -2257,6 +2257,155 @@ async function settledMapPicture(page, still = 100, tries = 8) {
     prev = next;
   }
   return prev;
+}
+
+/** What must not cost a user's files (data-safety-2), in the real app and on the real disk:
+ *  1. The Pathing Editor never writes over a .w3proj/pathing.json it couldn't read, or one for another map size, unless the
+ *     user chose to replace it, and then a backup of it is kept (under a name no earlier backup has).
+ *  2. fs_exists answers a path in a folder it may not look into with an error, not "not there" (not on Windows).
+ *  3. On Linux two project files that differ only in case are two files: a write to one is neither the other's entry nor
+ *     hides the other's outside change, and opening the project says they can't both go into the map archive.
+ *  4. On Linux files an older version left with a `\` in their name (next to the project) are found when it opens, left
+ *     alone when the user says so, and otherwise moved where they belong (a copy of what is there is deleted, a file that
+ *     differs from what is there stays). */
+async function dataSafety(page, found) {
+  const fail = (what) => found.push(`data safety: ${what}`);
+  const k = await heightKit(page, "DataSafety");
+  const { hands, root } = k;
+  const pathing = join(root, ".w3proj", "pathing.json");
+  const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+  const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
+  /** The terrain editor opened again: the Pathing Editor reads its file when the editor is made. */
+  const reopen = async () => {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await sleep(300);
+    await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
+    await editorUp();
+    await sleep(1000);
+    await k.tab("Pathing");
+    await sleep(500);
+  };
+  const warned = () => page.evaluate(`window.__warned.splice(0)`);
+  const answer = (a) => page.evaluate(`window.__answer = ${JSON.stringify(a)}`);
+  /** A drag across the middle of the map with the Pathing tab's brush, then a save. */
+  const stroke = async () => {
+    const c = await hands.where(".model-stage canvas");
+    await hands.drag({ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y });
+    await sleep(400);
+    await k.save();
+  };
+  const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
+  await page.evaluate(`(() => { window.__warned = []; window.__answer = undefined; window.__dataSafetyWarn = w3.window.showWarning; w3.window.showWarning = async (m, ...a) => { window.__warned.push(m); return window.__answer; }; })()`);
+  const locked = join(work, "data-safety-locked");
+  try {
+    // ---- 1a. A pathing.json that isn't JSON: said on opening, painting asks, Cancel writes nothing and leaves no undo step ----
+    mkdirSync(dirname(pathing), { recursive: true });
+    const broken = `{ "format": "w3proj.pathing/1", "width": 256, oops`;
+    writeFileSync(pathing, broken);
+    await reopen();
+    let said = await warned();
+    if (!said.some((m) => m.includes("pathing.json is there, but it isn't valid JSON"))) fail(`opening with a broken pathing.json said ${JSON.stringify(said)}`);
+    const notice = await page.evaluate(`document.querySelector(".pathing-notice")?.textContent ?? null`);
+    if (!/can't be read: painting is off/.test(notice ?? "")) fail(`the Pathing tab doesn't say painting is off: ${JSON.stringify(notice)}`);
+    await answer("Cancel");
+    await stroke();
+    said = await warned();
+    if (!said.some((m) => m.includes("Start a new file") || m.includes("start a new overrides file"))) fail(`painting over a broken pathing.json asked ${JSON.stringify(said)}`);
+    if (read(pathing) !== broken) fail("a stroke after Cancel wrote over the broken pathing.json");
+    if (await dirty()) fail("a refused stroke left the terrain editor with unsaved changes");
+    // ---- 1b. Choosing a new file: the next stroke paints, the save keeps the old file as pathing.json.bak ----
+    await answer("Start a new file");
+    await stroke();
+    if (read(pathing) !== broken) fail("the stroke that asked painted too");
+    await stroke();
+    const fresh = JSON.parse(read(pathing) ?? "null");
+    if (!fresh || fresh.width !== 256 || !(fresh.cells?.length > 0)) fail(`after choosing a new file the save wrote ${JSON.stringify(read(pathing))?.slice(0, 120)}`);
+    if (read(`${pathing}.bak`) !== broken) fail(`the broken pathing.json wasn't kept as pathing.json.bak (${JSON.stringify(read(`${pathing}.bak`))})`);
+    // ---- 1c. A file for another map size: Cancel writes nothing; Replace backs it up under a name not yet taken ----
+    const otherSize = JSON.stringify({ format: "w3proj.pathing/1", width: 128, height: 128, note: "mine", cells: [[1, 1, 2, 0]] });
+    writeFileSync(pathing, otherSize);
+    await reopen();
+    said = await warned();
+    if (!said.some((m) => m.includes("is for a 128×128 pathing map"))) fail(`opening with another size's pathing.json said ${JSON.stringify(said)}`);
+    await answer("Cancel");
+    await stroke();
+    if (!(await warned()).some((m) => m.includes("Painting replaces them"))) fail("painting over another size's overrides asked nothing");
+    if (read(pathing) !== otherSize) fail("a stroke after Cancel wrote over another size's pathing.json");
+    await answer("Replace");
+    await stroke();
+    await stroke();
+    const replaced = JSON.parse(read(pathing) ?? "null");
+    if (replaced?.width !== 256 || !(replaced.cells?.length > 0)) fail(`Replace wrote ${JSON.stringify(read(pathing))?.slice(0, 120)}`);
+    if (read(`${pathing}.bak2`) !== otherSize) fail("another size's pathing.json wasn't kept as pathing.json.bak2");
+    if (read(`${pathing}.bak`) !== broken) fail("the second backup wrote over the first");
+
+    if (process.platform === "win32") return;
+    // ---- 2. A file in a folder that can't be looked into: an error, not "not there" ----
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, "war3campaign.w3f"), "c");
+    chmodSync(locked, 0o000);
+    let lookable = true;
+    try { readdirSync(locked); } catch { lookable = false; }
+    if (!lookable) {
+      const r = await page.evaluate(`w3.backend.invoke("fs_exists", { path: ${JSON.stringify(join(locked, "war3campaign.w3f"))} }).then((v) => ({ v }), (e) => ({ e: String(e) }))`);
+      if (!/can't be checked/.test(r.e ?? "")) fail(`fs_exists in a folder that can't be looked into answered ${JSON.stringify(r)}`);
+    }
+    chmodSync(locked, 0o755);
+    const r = await page.evaluate(`w3.backend.invoke("fs_exists", { path: ${JSON.stringify(join(locked, "war3campaign.w3f"))} })`);
+    if (r !== true) fail(`fs_exists of a file that is there answered ${r} (control)`);
+
+    // ---- 3. Two files that differ only in case ----
+    writeFileSync(join(root, "map", "Notes.txt"), "theirs");
+    writeFileSync(join(root, "map", "notes.txt"), "x");
+    await page.evaluate(`w3.workspace.refresh()`);
+    await page.evaluate(`w3.workspace.writeText("map/notes.txt", "mine, longer")`);
+    if (read(join(root, "map", "Notes.txt")) !== "theirs") fail("a write to map/notes.txt changed map/Notes.txt");
+    const sizes = await page.evaluate(`Object.fromEntries(w3.workspace.files().filter((f) => /^map\\/notes\\.txt$/i.test(f.path)).map((f) => [f.path, f.size]))`);
+    if (sizes["map/Notes.txt"] !== 6 || sizes["map/notes.txt"] !== 12) fail(`the file list after writing one of two names that differ in case: ${JSON.stringify(sizes)}`);
+    writeFileSync(join(root, "map", "Notes.txt"), "theirs, changed");
+    const changed = await page.evaluate(`w3Workbench.workspace.externalChanges().then((s) => [...s])`);
+    if (JSON.stringify(changed) !== JSON.stringify(["map/Notes.txt"])) fail(`an outside change to map/Notes.txt next to our map/notes.txt was reported as ${JSON.stringify(changed)}`);
+
+    // ---- 4. Stray files of an older version next to the project ----
+    const BS = String.fromCharCode(92);
+    const name = basename(root), parent = dirname(root);
+    const stray = (file) => join(parent, [name, "build", "checkpoints", file].join(BS));
+    const checkpoints = join(root, "build", "checkpoints");
+    mkdirSync(checkpoints, { recursive: true });
+    writeFileSync(join(checkpoints, "copy.w3x"), "same");
+    writeFileSync(join(checkpoints, "clash.w3x"), "them");
+    writeFileSync(stray("moved.w3x"), "stray");
+    writeFileSync(stray("copy.w3x"), "same");
+    writeFileSync(stray("clash.w3x"), "mine");
+    const strays = () => readdirSync(parent).filter((f) => f.includes(BS)).sort();
+    const openAgain = async () => {
+      await page.evaluate(`w3.commands.execute("w3.project.close")`);
+      await sleep(300);
+      await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(root)})`);
+      await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`), 20000);
+    };
+    await answer("Leave them");
+    await openAgain();
+    await until("the question about stray files", async () => (await page.evaluate(`window.__warned.length`)) >= 2, 20000).catch(() => {});
+    said = await warned();
+    if (!said.some((m) => m.includes("map/Notes.txt") && m.includes("map/notes.txt") && m.includes("differ only in case"))) fail(`opening a project with map/Notes.txt and map/notes.txt said ${JSON.stringify(said)}`);
+    const question = said.find((m) => m.includes("left by an older version on Linux"));
+    if (!question) fail(`opening a project with stray files said ${JSON.stringify(said)}`);
+    else if (!/3 files/.test(question) || !/1 file can be moved/.test(question) || !/1 file is a copy/.test(question) || !/1 file can't be moved/.test(question)) fail(`the question about stray files: ${question}`);
+    await sleep(500);
+    if (strays().length !== 3) fail(`"Leave them" changed the stray files: ${strays().join(", ")}`);
+    await answer("Move and delete copies");
+    await openAgain();
+    await until("the stray file moved", () => existsSync(join(checkpoints, "moved.w3x")), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints"));
+    await sleep(500);
+    if (read(join(checkpoints, "moved.w3x")) !== "stray") fail("the moved checkpoint differs");
+    if (read(join(checkpoints, "copy.w3x")) !== "same" || read(join(checkpoints, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
+    if (JSON.stringify(strays()) !== JSON.stringify([[name, "build", "checkpoints", "clash.w3x"].join(BS)])) fail(`after moving, the stray files left are ${JSON.stringify(strays())}`);
+    if (read(stray("clash.w3x")) !== "mine") fail("the stray that differs from what is there was changed");
+  } finally {
+    if (existsSync(locked)) { chmodSync(locked, 0o755); rmSync(locked, { recursive: true, force: true }); }
+    await page.evaluate(`(() => { if (window.__dataSafetyWarn) w3.window.showWarning = window.__dataSafetyWarn; window.__dataSafetyWarn = null; })()`);
+  }
 }
 
 /** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
@@ -5750,7 +5899,7 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, itemDrops, triggersAndAi, staleEditors, scriptGuard, resizeUndo, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, itemDrops, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, shouldHaves, placerAndCampaign, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
@@ -5847,6 +5996,7 @@ async function run() {
     await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
+    await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));

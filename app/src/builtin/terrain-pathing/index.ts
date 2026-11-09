@@ -7,7 +7,8 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
-import { overridesForSize, pathingOverridesText, validPathingOverrides } from "../../lib/terrain/resize";
+import { overridesForSize, pathingOverridesText } from "../../lib/terrain/resize";
+import { backupPath, mayPaint, readPathingFile, replaceQuestion, type PathingFile } from "./file";
 import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
@@ -49,9 +50,17 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let overrides = new Map<number, Override>();
   /** Set when overrides changed since loading or saving. */
   let unsaved = false;
+  /** Counts the changes: one made while a save writes stays unsaved. */
+  let changes = 0;
   let fileExists = false;
   /** The file as read: its fields other than the overrides are saved along with them. */
   let readFile: unknown = null;
+  /** The file as found when the editor opened; null until it has been looked at. */
+  let found: PathingFile | null = null;
+  /** The user chose to replace a file that can't be used (unreadable, another size): a save backs it up first. */
+  let replacing = false;
+  /** A question about replacing it is on screen. */
+  let asking = false;
   let mode: Mode = "block", radius = 2;
   const flags = { walk: true, fly: false, build: true };
   let active = false;
@@ -62,19 +71,35 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let showStanding = true;
   let loading: Promise<void> | null = null;
 
-  const load = w3.workspace.readText(FILE).then((text) => {
-    const parsed = JSON.parse(text) as unknown;
+  // A file that isn't there is started by the first stroke; one that is there and can't be used is said once
+  // here, and kept: painting is off until the user chooses to replace it (see ask).
+  const exists = (p: string) => w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(p) });
+  const load = readPathingFile(() => exists(FILE), () => w3.workspace.readText(FILE), W, H).then((f) => {
+    found = f;
+    if (f.state === "absent") return;
     fileExists = true;
-    readFile = parsed;
-    const j = overridesForSize(parsed, W, H);
-    if (!j) {
-      w3.window.showWarning(validPathingOverrides(parsed)
-        ? `${FILE} is for a ${parsed.width}×${parsed.height} pathing map, this map's is ${W}×${H}; its overrides are ignored.`
-        : `${FILE} isn't a pathing overrides file; its overrides are ignored.`);
+    if (f.state === "unreadable") {
+      void w3.window.showWarning(`${FILE} is there, but ${f.why}: its overrides are ignored, and painting pathing is off so that it isn't written over.`);
       return;
     }
-    for (const [x, y, set, clear] of j.cells) if (x >= 0 && x < W && y >= 0 && y < H) overrides.set(y * W + x, { set, clear });
-  }).catch(() => { /* no overrides yet */ });
+    readFile = f.file;
+    if (f.state === "otherSize") {
+      void w3.window.showWarning(`${FILE} is for a ${f.file.width}×${f.file.height} pathing map, this map's is ${W}×${H}: its overrides are ignored. Painting asks before replacing them.`);
+      return;
+    }
+    for (const [x, y, set, clear] of f.file.cells) if (x >= 0 && x < W && y >= 0 && y < H) overrides.set(y * W + x, { set, clear });
+  }).finally(() => { if (active) render(); });
+  /** Asks whether to replace a file painting can't use; painting starts with the next stroke once the user agreed. */
+  const ask = async () => {
+    const q = replaceQuestion(found, FILE, W, H);
+    if (!q || asking) return;
+    asking = true;
+    try {
+      if ((await w3.window.showWarning(q.message, ...q.actions)) === q.actions[0]) { replacing = true; render(); }
+    } finally {
+      asking = false;
+    }
+  };
 
   const apply = (cells: Uint8Array) => {
     for (const [i, o] of overrides) cells[i] = (cells[i] | o.set) & ~o.clear;
@@ -97,6 +122,8 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     for (let i = 0; i < cells.length; i++) rgba.set(showStanding && standing?.[i] && !overrides.has(i) ? [170, 70, 230, 150] : colour(cells[i], overrides.has(i)), i * 4);
     ed.setGroundOverlay(rgba, W, H);
     count.textContent = `${overrides.size.toLocaleString()} cells overridden`;
+    notice.textContent = !found || mayPaint(found, replacing) ? (replacing ? `A save replaces ${FILE} (the old one is kept as a backup).` : "")
+      : found.state === "unreadable" ? `${FILE} can't be read: painting is off.` : `${FILE} is for another map size: painting asks first.`;
   };
   const refresh = () => {
     if (!active) return;
@@ -143,11 +170,13 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   const restore = (values: Map<number, Override | undefined>) => {
     for (const [i, o] of values) if (o) overrides.set(i, { ...o }); else overrides.delete(i);
     unsaved = true;
+    changes++;
     render();
   };
 
   // ---- toolbar -----------------------------------------------------------------------
   const count = h("span.muted");
+  const notice = h("span.pathing-notice", { role: "status" });
   const modeButtons = new Map<Mode, HTMLButtonElement>();
   const setMode = (m: Mode) => { mode = m; for (const [k, b] of modeButtons) b.classList.toggle("active", k === m); ed.focus(); };
   const modeButton = (m: Mode, label: string, title: string) => {
@@ -175,6 +204,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       ed.pushEdit({ undo: () => restore(before), redo: () => restore(cleared), terrain: false, objects: false });
     } }, "Clear overrides"),
     count,
+    notice,
     h("span.pathing-legends", {},
       legend("rgb(230,50,50)", "unwalkable"), legend("rgb(40,70,200)", "deep water"), legend("rgb(60,210,80)", "unflyable"),
       legend("rgb(240,190,40)", "unbuildable"), legend("rgb(20,20,20)", "blocked"), legend("rgba(255,255,255,0.5)", "manual"),
@@ -190,6 +220,8 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     deactivate() { active = false; ed.setGroundOverlay(null); ed.setBrush(null); },
     pointerDown(p) {
       if (!ed.editable || !p.ground) return false;
+      // The file isn't known yet, or can't be used: no stroke (no change, no undo step); asked about instead.
+      if (!mayPaint(found, replacing)) { void ask(); return true; }
       stroke = new Map();
       last = null;
       paint(p.ground);
@@ -205,6 +237,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       if (!before?.size) return;
       const after = new Map([...before.keys()].map((i) => [i, overrides.get(i) && { ...overrides.get(i)! }] as const));
       unsaved = true;
+      changes++;
       ed.pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: false, objects: false });
     },
     pointerLeave() { ed.setBrush(null); },
@@ -217,13 +250,23 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     },
     async save() {
       if (!unsaved || (!fileExists && !overrides.size)) return;
+      // Never over a file that couldn't be used, unless the user chose to replace it: then it is backed up first.
+      if (!mayPaint(found, replacing)) throw new Error(`${FILE} wasn't written: it couldn't be read as this map's pathing overrides.`);
+      const at = changes;
       const cells = [...overrides].sort((a, b) => a[0] - b[0]).map(([i, o]) => [i % W, Math.floor(i / W), o.set, o.clear]);
-      const own = readFile && typeof readFile === "object" && !Array.isArray(readFile) ? readFile : {};
+      const own = found?.state === "ok" && readFile && typeof readFile === "object" && !Array.isArray(readFile) ? readFile : {};
       const file = { ...own, format: FORMAT, width: W, height: H, cells: cells as [number, number, number, number][] };
+      if (replacing && found?.state !== "ok" && found?.state !== "absent" && (await exists(FILE))) {
+        const backup = await backupPath(FILE, exists);
+        await w3.workspace.copy(FILE, backup);
+        w3.window.showInfo(`The ${FILE} that couldn't be used is kept as ${backup}.`);
+      }
       await w3.workspace.writeText(FILE, pathingOverridesText(file));
       fileExists = true;
       readFile = file;
-      unsaved = false;
+      found = { state: "ok", file };
+      replacing = false;
+      if (changes === at) unsaved = false;
     },
     dispose() { ed.setGroundOverlay(null); },
   };
