@@ -240,6 +240,10 @@ pub fn blte_decode(d: &[u8]) -> Result<Vec<u8>> {
         return Err(Error::Corrupt("BLTE header truncated"));
     }
     let count = u32::from_be_bytes([0, d[9], d[10], d[11]]) as usize;
+    // The chunk entries lie in the header, and the header in the stream: a count that claims more is refused.
+    if 12 + count * 24 > header_size.min(d.len()) {
+        return Err(Error::Corrupt("BLTE chunk count past the header"));
+    }
     let mut p = header_size;
     for i in 0..count {
         let info = 12 + i * 24;
@@ -339,6 +343,42 @@ mod tests {
     #[test]
     fn blte_rejects_encrypted() {
         assert!(matches!(blte_decode(b"BLTE\0\0\0\0Exyz"), Err(Error::Encrypted)));
+    }
+
+    /// A chunk count that claims more entries than the header holds is refused, not read past the end. The control:
+    /// the same stream with the count it really has decodes.
+    #[test]
+    fn blte_chunk_count_past_the_header() {
+        let chunk = [b"N".as_slice(), b"abc"].concat();
+        let stream = |count: u8, header_size: u32| {
+            let mut d = b"BLTE".to_vec();
+            d.extend(header_size.to_be_bytes());
+            d.extend([0x0F, 0, 0, count]);
+            d.extend((chunk.len() as u32).to_be_bytes());
+            d.extend(0u32.to_be_bytes());
+            d.extend([0u8; 16]);
+            d.extend(&chunk);
+            d
+        };
+        assert_eq!(blte_decode(&stream(1, 36)).unwrap(), b"abc");
+        // Two entries claimed, one there: the second entry would lie in the chunk's bytes and past the end.
+        assert!(matches!(blte_decode(&stream(2, 36)), Err(Error::Corrupt(_))));
+        // The most the 24-bit count can claim.
+        let mut huge = stream(1, 36);
+        huge[9..12].copy_from_slice(&[0xFF, 0xFF, 0xFF]);
+        assert!(matches!(blte_decode(&huge), Err(Error::Corrupt(_))));
+        // A header that ends where its first entry would start: the entry isn't there at all.
+        let mut bare = b"BLTE".to_vec();
+        bare.extend(12u32.to_be_bytes());
+        bare.extend([0x0F, 0, 0, 1]);
+        assert!(matches!(blte_decode(&bare), Err(Error::Corrupt(_))));
+        // Two entries claimed and the stream ends inside the second.
+        let mut short = stream(1, 60);
+        short[11] = 2;
+        short.truncate(40);
+        assert!(matches!(blte_decode(&short), Err(Error::Corrupt(_))));
+        // A header size that ends before its own entries.
+        assert!(matches!(blte_decode(&stream(1, 20)), Err(Error::Corrupt(_))));
     }
 
     #[test]
