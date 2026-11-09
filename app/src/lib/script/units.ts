@@ -43,6 +43,8 @@ export interface UnitsInput {
   teamColor?: (id: string) => number | undefined;
   /** The orders that turn an ability's autocast on and off, if it has one. */
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
+  /** Whether an ability is a hero ability (lib/script/objects heroAbilities): unlearned ones get no autocast order. */
+  heroAbility?: (ability: string) => boolean;
 }
 
 /** Fixed decimals of a 32-bit float, ties to even like C's printf (-3722.25 → -3722.2). */
@@ -110,10 +112,6 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     : `    set ${v} = BlzCreateUnitWithSkin( p, '${u.id}', ${pos}, '${u.skinId ?? u.id}' )`];
   if (uprooted(u)) lines.push(`    call IssueImmediateOrder( ${v}, "unroot" )`);
   if (isGoldMine(i, u.id)) lines.push(`    call SetResourceAmount( ${v}, ${u.gold} )`);
-  // -1 is the type's default. -2: "camp" (guard position), written as an acquisition range of 200. A stored 0 is
-  // written as it is (World Editor 2.0, we-drive 2026-11-09: 0.0, 0.5 and 500 each with their own call).
-  if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
-  else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
   if (u.level > 1) lines.push(`    call SetHeroLevel( ${v}, ${u.level}, false )`);
   // A hero's own attributes (0: its default ones), as the World Editor writes them (seen in the game's campaign map
   // WC2Orc12 and in a map it saved with a Paladin of 30/20/25).
@@ -122,9 +120,15 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
   }
   if (u.hp !== -1) lines.push(`    set life = GetUnitState( ${v}, UNIT_STATE_LIFE )`, `    call SetUnitState( ${v}, UNIT_STATE_LIFE, ${(u.hp / 100).toFixed(2)} * life )`);
   if (u.mana !== -1) lines.push(`    call SetUnitState( ${v}, UNIT_STATE_MANA, ${u.mana} )`);
+  // -1 is the type's default. -2: "camp" (guard position), written as an acquisition range of 200. A stored 0 is
+  // written as it is (World Editor 2.0, we-drive 2026-11-09: 0.0, 0.5 and 500 each with their own call). After the
+  // hero level and the mana (the game's maps: 308 times after the mana, 10 after the level, never before either).
+  if (u.targetAcquisition === -2) lines.push(`    call SetUnitAcquireRange( ${v}, 200.0 )`);
+  else if (u.targetAcquisition >= 0) lines.push(`    call SetUnitAcquireRange( ${v}, ${r1(u.targetAcquisition)} )`);
   for (const a of u.abilities) {
     for (let l = 0; l < a.level; l++) lines.push(`    call SelectHeroSkill( ${v}, '${a.id}' )`);
-    // Autocast abilities are switched on or off as placed.
+    // Autocast abilities are switched on or off as placed; a hero ability not learned (level 0) isn't.
+    if (a.level === 0 && i.heroAbility?.(a.id)) continue;
     const orders = i.autocastOrders?.(a.id), order = a.autocast ? orders?.on : orders?.off;
     if (order) lines.push(`    call IssueImmediateOrder( ${v}, "${order}" )`);
   }
@@ -163,8 +167,9 @@ export function itemsSection(i: UnitsInput): string {
   const colorFn = ev >= 7003 ? "BlzSetItemColor" : ev >= 7000 ? "SetItemColor" : null;
   const colorOf = (it: UnitJson) => (it.id === RANDOM_ITEM && colorFn ? -1 : !colorFn ? it.color : (i.gameBuild ?? 0) >= 24371 ? 24 : 0);
   const local = (it: UnitJson) => (colorFn || colorOf(it) !== -1 ? "i" : null);
-  // An item needs a variable when a trigger refers to it or it gets a colour; else it's a plain call.
-  const usesLocal = items.some((it) => !i.referenced.has(global(it)) && local(it));
+  // An item needs a variable when a trigger refers to it or it gets a colour; else it's a plain call. Editors from
+  // 7000 on declare the local even when every item has its global (OrcX01_05 of editor 7003).
+  const usesLocal = !!colorFn || items.some((it) => !i.referenced.has(global(it)) && local(it));
   const lines = ["function CreateAllItems takes nothing returns nothing", "    local integer itemID", ...(usesLocal ? ["    local item i"] : []), ""];
   for (const it of items) {
     const g = global(it);

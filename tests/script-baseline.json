@@ -10,7 +10,7 @@
         375
       ],
       "(whole file)": [
-        196,
+        217,
         326
       ],
       "": [
@@ -22,7 +22,7 @@
         326
       ],
       "Custom Script Code": [
-        322,
+        326,
         326
       ],
       "Random Groups": [
@@ -42,7 +42,7 @@
         326
       ],
       "Sound Assets": [
-        320,
+        326,
         326
       ],
       "Destructable Objects": [
@@ -62,11 +62,15 @@
         326
       ],
       "Unit Creation": [
-        299,
+        324,
+        326
+      ],
+      "Custom Script Code (header)": [
+        326,
         326
       ],
       "Upgrades": [
-        317,
+        326,
         326
       ],
       "TechTree": [
@@ -74,7 +78,7 @@
         326
       ],
       "Triggers": [
-        319,
+        326,
         326
       ],
       "Players": [
@@ -92,7 +96,7 @@
     },
     "problems": 46,
     "guarded": 0,
-    "asked": 42,
+    "asked": 2,
     "checked": 375
   },
   "valid": {

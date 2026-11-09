@@ -16,9 +16,9 @@ import { checkJass } from "../../lib/jass/check";
 import { gameJassEnv, jassSymbols, triggerOfFunctions } from "../../lib/jass/env";
 import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
-import { generateScript, parseSoundLabels, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
+import { generateScript, parseSoundLabels, scriptSoundDurations, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { dayNightModels } from "../../lib/script/setup";
-import { abilityOrders, gameTeamColors, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
+import { abilityOrders, buildingTypes, destructableTints, gameTeamColors, heroAbilities, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { meleeFlagsAfter } from "../../lib/terrain/owner";
@@ -59,6 +59,7 @@ interface GameTables {
   buildings: Set<string>;
   items: Set<string>;
   abilities: Set<string>;
+  heroAbilities: Set<string>;
   orders: Map<string, AbilityOrders>;
   unitColors: Map<string, number>;
   worldEdit: Map<string, Map<string, string>>;
@@ -83,11 +84,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const text = (p: string) => w3.game.readText(p).catch(() => "");
       const balance = parseSlk(await text("Units\\UnitBalance.slk"));
       const orders = abilityOrders(await Promise.all(ABILITY_FUNC.map(async (f) => parseIni(await text(f)))));
+      const abilityRows = parseSlk(await text("Units\\AbilityData.slk"));
       return {
         data: parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")),
         buildings: new Set(balance.filter((r) => r.isbldg === "1").map((r) => r.unitBalanceID)),
         items: new Set(parseSlk(await text("Units\\ItemData.slk")).map((r) => r.itemID)),
-        abilities: new Set(parseSlk(await text("Units\\AbilityData.slk")).map((r) => r.alias)),
+        abilities: new Set(abilityRows.map((r) => r.alias)),
+        heroAbilities: new Set(abilityRows.filter((r) => r.hero === "1").map((r) => r.alias)),
         orders,
         unitColors: gameTeamColors(parseSlk(await text("Units\\unitUI.slk"))),
         worldEdit: parseIni(await text("UI\\WorldEditData.txt")),
@@ -137,26 +140,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
     // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
     type Objects = { custom?: { id: string; base: string; mods?: { field: string; value: unknown }[] }[] };
-    const customUnits = new Map<string, { base: string; bldg?: boolean }>();
     const unitFiles = await Promise.all(["map/war3map.w3u", "map/war3mapSkin.w3u"].map((f) => json<Objects & ObjectFile>(f)));
     const colors = teamColors(unitFiles, g.unitColors), special = specialUnits(unitFiles);
-    for (const file of unitFiles) {
-      for (const o of file?.custom ?? []) {
-        const b = o.mods?.find((m) => m.field === "ubdg");
-        customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
-      }
-    }
+    const isBuilding = buildingTypes(unitFiles, g.buildings);
     const customIds = async (f: string) => new Set(((await json<Objects>(f))?.custom ?? []).map((o) => o.id));
-    const customAbilities = await customIds("map/war3map.w3a"), customItems = await customIds("map/war3map.w3t");
+    const abilityFiles = await Promise.all(["map/war3map.w3a", "map/war3mapSkin.w3a"].map((f) => json<Objects & ObjectFile>(f)));
+    const customAbilities = new Set((abilityFiles[0]?.custom ?? []).map((o) => o.id)), customItems = await customIds("map/war3map.w3t");
+    const heroAbility = heroAbilities(abilityFiles, g.heroAbilities);
+    const destructableTint = destructableTints(await Promise.all(["map/war3map.w3b", "map/war3mapSkin.w3b"].map((f) => json<ObjectFile>(f))));
     const kindOf = (id: string): ReturnType<NonNullable<ScriptInput["kindOf"]>> => {
       if (id === "sloc") return "sloc";
       // A random item has no type of its own.
       if (id === "iDNR") return "item";
       if (g.abilities.has(id) || customAbilities.has(id)) return "ability";
       if (g.items.has(id) || customItems.has(id)) return "item";
-      const c = customUnits.get(id);
-      if (c) return (c.bldg ?? g.buildings.has(c.base)) ? "building" : "unit";
-      return g.buildings.has(id) ? "building" : "unit";
+      return isBuilding(id) ? "building" : "unit";
     };
 
     // As the World Editor does when saving. Only ever off: the game's maps don't say when it comes
@@ -184,17 +182,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const lights = dayNightModels(w3lText === null ? null : JSON.parse(w3lText), { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") });
 
     const sounds = (await json<{ sounds: NonNullable<ScriptInput["sounds"]> }>("map/war3map.w3s"))?.sounds ?? [];
-    const durations = await soundDurations(sounds.map((s) => s.file), path);
+    const soundDuration = await soundDurations(sounds.map((s) => s.file), path);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
       lights,
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
       units: (await json<{ units: ScriptInput["units"] }>("map/war3mapUnits.doo"))?.units,
       doodads: (await json<{ doodads: ScriptInput["doodads"] }>("map/war3map.doo"))?.doodads,
       regions: (await json<{ regions: ScriptInput["regions"] }>("map/war3map.w3r"))?.regions,
       cameras: (await json<{ cameras: ScriptInput["cameras"] }>("map/war3map.w3c"))?.cameras,
-      sounds, soundDuration: (f) => durations.get(f), soundLabel: (l) => g.soundLabels.get(l), string: (v) => wts?.resolve(v) ?? v,
+      sounds, soundDuration, soundLabel: (l) => g.soundLabels.get(l), string: (v) => wts?.resolve(v) ?? v,
     });
     if (!language) return { path, text: script };
     // The language's compiler gets the script as the World Editor hands it to JassHelper.
@@ -202,24 +200,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title };
   };
 
-  /** Sound lengths in ms: imported files, the game's, else what the current script says. */
-  const soundDurations = async (soundFiles: string[], path: string) => {
-    const out = new Map<string, number>();
-    const old = new Map<string, number>();
+  /** Sound lengths in ms, by file and sound name: imported files, the game's, else what the current script says
+   *  (scriptSoundDurations: per sound, so sounds of one unreadable file each keep their own). */
+  const soundDurations = async (soundFiles: string[], path: string): Promise<(file: string, name: string) => number | undefined> => {
+    const measured = new Map<string, number>();
     const script = await w3.workspace.readText(path).catch(() => null);
-    // JASS ("set x = CreateSound( "…"") or Lua ("x = CreateSound("…"").
-    if (script !== null) {
-      const fileOf = new Map<string, string>();
-      for (const m of script.matchAll(/(\w+) = CreateSound\( ?"((?:[^"\\]|\\.)*)"/g)) fileOf.set(m[1], m[2].replace(/\\\\/g, "\\"));
-      for (const m of script.matchAll(/SetSoundDuration\( ?(\w+), (\d+) ?\)/g)) { const f = fileOf.get(m[1]); if (f) old.set(f, Number(m[2])); }
-    }
+    const old = scriptSoundDurations(script ?? "");
     for (const f of new Set(soundFiles)) {
       const buf = await w3.workspace.readBytes(`map/${f.replace(/\\/g, "/")}`).catch(() => w3.game.read(f)).catch(() => null);
       const ms = buf ? soundDurationMs(buf) : null;
-      const d = ms ?? old.get(f);
-      if (d !== undefined) out.set(f, d);
+      if (ms !== null) measured.set(f, ms);
     }
-    return out;
+    return (file, name) => measured.get(file) ?? old(file, name);
   };
 
   let running: Promise<boolean> = Promise.resolve(true);

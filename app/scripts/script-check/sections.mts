@@ -29,7 +29,9 @@ const balance = parseSlk(read("UnitBalance.slk"));
 const buildings = new Set(balance.filter((r: any) => r.isbldg === "1").map((r: any) => r.unitBalanceID));
 const unitIds = new Set(balance.map((r: any) => r.unitBalanceID));
 const itemIds = new Set(parseSlk(read("ItemData.slk")).map((r: any) => r.itemID));
-const abilityIds = new Set(parseSlk(read("AbilityData.slk")).map((r: any) => r.alias));
+const abilityRows = parseSlk(read("AbilityData.slk"));
+const abilityIds = new Set(abilityRows.map((r: any) => r.alias));
+const gameHeroAbilities = new Set<string>(abilityRows.filter((r: any) => r.hero === "1").map((r: any) => r.alias));
 const labels = existsSync("soundinfo") ? J.parseSoundLabels(readdirSync("soundinfo").map((f) => read("soundinfo/" + f))) : new Map();
 const gameColors = O.gameTeamColors(parseSlk(read("unitUI.slk")));
 const orders = O.abilityOrders(readdirSync("abil").map((f) => parseIni(read("abil/" + f))));
@@ -56,7 +58,7 @@ for (const m of maps) {
 }
 let shown = 0;
 const json = (d: string, n: string) => (existsSync(`${d}/${n}.json`) ? JSON.parse(read(`${d}/${n}.json`)) : null);
-const norm = (x: string) => x.replace(/SetSoundDuration\( (\w+), \d+ \)/g, "SetSoundDuration( $1, 0 )").replace(/\s+$/g, "");
+const norm = (x: string) => x.replace(/\s+$/g, "");
 
 for (const m of maps) {
   const d = `ws/${m}/map`;
@@ -82,35 +84,30 @@ for (const m of maps) {
   const wj = (stats["(wtg via JSON)"] ??= [0, 0]); wj[1]++; if (same(W.writeWtg(W.parseWtgJson(W.writeWtgJson(triggers))), wtgBytes)) wj[0]++;
   const wts = existsSync(`${d}/war3map.wts`) ? new StringTable(read(`${d}/war3map.wts`)) : null;
   const terrain = existsSync(`${d}/war3map.w3e.txt`) ? T.parseW3e(w3eFromText(read(`${d}/war3map.w3e.txt`))) : existsSync(`${d}/war3map.w3e`) ? T.parseW3e(new Uint8Array(readFileSync(`${d}/war3map.w3e`))) : null;
-  // Custom objects: their base decides, unless the map sets "is a building" (ubdg).
-  const customUnits = new Map<string, { base: string; bldg?: boolean }>();
-  for (const f of ["war3map.w3u", "war3mapSkin.w3u"]) {
-    for (const o of json(d, f)?.custom ?? []) {
-      const b = o.mods?.find((x: any) => x.field === "ubdg");
-      customUnits.set(o.id, { base: o.base, bldg: b ? b.value === 1 : undefined });
-    }
-  }
+  // Custom objects: their base decides, unless the map sets "is a building" (ubdg); as the app reads them.
   const unitFiles = [json(d, "war3map.w3u"), json(d, "war3mapSkin.w3u")];
   const colors = O.teamColors(unitFiles, gameColors), special = O.specialUnits(unitFiles);
+  const isBuilding = O.buildingTypes(unitFiles, buildings);
   const customAbilities = new Set<string>((json(d, "war3map.w3a")?.custom ?? []).map((o: any) => o.id));
+  const heroAbility = O.heroAbilities([json(d, "war3map.w3a"), json(d, "war3mapSkin.w3a")], gameHeroAbilities);
+  const destructableTint = O.destructableTints([json(d, "war3map.w3b"), json(d, "war3mapSkin.w3b")]);
   const customItems = new Set<string>((json(d, "war3map.w3t")?.custom ?? []).map((o: any) => o.id));
   const kindOf = (id: string): any => {
     if (id === "sloc") return "sloc";
     if (id === "iDNR") return "item";
     if (abilityIds.has(id) || customAbilities.has(id)) return "ability";
     if (itemIds.has(id) || customItems.has(id)) return "item";
-    const c = customUnits.get(id);
-    if (c) return (c.bldg ?? buildings.has(c.base)) ? "building" : "unit";
-    return buildings.has(id) ? "building" : "unit";
+    return isBuilding(id) ? "building" : "unit";
   };
   const lt = (info.lightEnvironment || info.tileset) as string;
   const input = {
-    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a), teamColor: (id: string) => colors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
+    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a), heroAbility, destructableTint, teamColor: (id: string) => colors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
     lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") },
     groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
     regions: json(d, "war3map.w3r")?.regions, cameras: json(d, "war3map.w3c")?.cameras, sounds: json(d, "war3map.w3s")?.sounds,
-    soundDuration: () => 0, soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
+    // Sound lengths as the app takes them when it can't read the sound files: from the script there is.
+    soundDuration: J.scriptSoundDurations(read(scriptFile)), soundLabel: (l: string) => labels.get(l), string: (v: string) => wts?.resolve(v) ?? v,
   };
   // The whole file, exactly (only sound durations are left out: they need the game's sound files).
   const whole = J.generateScript(input), file = read(scriptFile);

@@ -29,11 +29,12 @@ export function upgradesSection(playerIds: number[], upgrades: UpgradeJson[]): s
     const lines: string[] = [];
     for (const id of [...new Set(mine.map((u) => u.id))]) {
       const levels = mine.filter((u) => u.id === id);
-      // Researched levels (availability 2) start done; unavailable ones (0) cap the upgrade.
-      const done = levels.filter((u) => u.availability === 2).map((u) => u.level);
-      if (done.length) lines.push(`    call SetPlayerTechResearched( Player(${p}), '${id}', ${Math.max(...done) + 1} )`);
+      // Unavailable levels (availability 0) cap the upgrade; researched ones (2) start done. The cap comes
+      // first, as the World Editor writes it (9 of the game's maps have both for one upgrade).
       const off = levels.filter((u) => u.availability === 0).map((u) => u.level);
       if (off.length) lines.push(`    call SetPlayerTechMaxAllowed( Player(${p}), '${id}', ${Math.min(...off)} )`);
+      const done = levels.filter((u) => u.availability === 2).map((u) => u.level);
+      if (done.length) lines.push(`    call SetPlayerTechResearched( Player(${p}), '${id}', ${Math.max(...done) + 1} )`);
     }
     return lines;
   });
