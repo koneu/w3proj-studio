@@ -24,6 +24,12 @@ test("pruning always leaves the newest, and never touches other files", () => {
   assert.deepEqual(toPrune(names, 0), ["a 2026-01-01 00-00-00.w3x"]);
 });
 
+test("files in a folder below build/checkpoints (recovered/) are no checkpoints: not counted, never pruned", () => {
+  const names = ["a 2026-01-01 00-00-00.w3x", "a 2026-03-01 00-00-00.w3x", "recovered/a 2025-01-01 00-00-00.w3x"];
+  assert.deepEqual(toPrune(names, 1), ["a 2026-01-01 00-00-00.w3x"]);
+  assert.deepEqual(newestFirst(names).map((c) => c.name), ["a 2026-03-01 00-00-00.w3x", "a 2026-01-01 00-00-00.w3x"]);
+});
+
 test("when a checkpoint is due", () => {
   const file = (modified: number, size = 10): FileInfo => ({ path: "map/x", size, modified });
   const min = 60_000, big = 1 << 30;
