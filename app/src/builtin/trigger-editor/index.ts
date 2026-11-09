@@ -18,7 +18,7 @@ import { ident } from "../../lib/script/jass";
 import { convertToCustom, placedGlobalsOnlyIn, triggerCustomText } from "../../lib/script/triggers";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import {
-  allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
+  allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_RAW, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
 import { errorView, h } from "../../workbench/dom";
@@ -295,6 +295,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => view.step(-1),
           redo: () => view.step(1),
           save,
+          // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
+          // again, else its next save would put back the texts it read.
+          watches: game ? [] : [WCT_TEXT, WCT_RAW],
           dispose: () => { view.dispose(); if (openView === view) openView = null; },
         };
       },

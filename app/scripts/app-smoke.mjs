@@ -3925,6 +3925,126 @@ async function triggersAndAi(page, found) {
   }
 }
 
+/** An editor doesn't save over what was saved after it read the file. Round 4 lost a trigger that way: an AI tool created
+ *  it right after the project opened, while the Trigger Editor of the last session was coming back, and the editor's next
+ *  save deleted it. 1. A tool's save while the editor loads: it opens again once it's there. 2. The triggers' texts
+ *  (war3map.wct.txt) saved by a tool while it's open: it opens again. 3. Its file changed on disk without the app
+ *  hearing of it: saving asks, Cancel writes nothing. 4. A tab that couldn't open (its file wasn't there yet, a tab of
+ *  the last session) opens once the file is written (the AI Editor's New), and Add To Map works. */
+async function staleEditors(page, found) {
+  const fail = (what) => found.push(`stale editors: ${what}`);
+  const k = await heightKit(page, "StaleEditors");
+  const WTG = "map/war3map.wtg.json";
+  const wtgText = () => readFileSync(join(k.root, "map", "war3map.wtg.json"), "utf8");
+  const wct = () => readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8");
+  const rows = () => page.evaluate(`(() => {
+    document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+    return [...document.querySelectorAll(".trig-row")].map((r) => r.textContent.trim());
+  })()`);
+  /** Renames a trigger in the Trigger Editor (an edit, not saved). */
+  const rename = (from, to) => page.evaluate(`(async () => {
+    document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+    const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === ${JSON.stringify(from)});
+    if (!row) return "no trigger ${from} in the tree";
+    row.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const input = document.querySelector(".trig-name");
+    input.value = ${JSON.stringify(to)};
+    input.dispatchEvent(new Event("change"));
+    await new Promise((r) => setTimeout(r, 300));
+    return w3.editors.isDirty(${JSON.stringify(WTG)}) ? null : "renaming ${from} left nothing unsaved";
+  })()`);
+  await page.evaluate(`(() => {
+    const ed = w3Workbench.editors;
+    window.__stale = { memory: ed.memory, resolveTab: ed.resolveTab, confirm: ed.confirm, warn: w3.window.showWarning, save: w3.window.pickSaveFile };
+    w3.window.showWarning = async () => "Only GUI triggers";
+  })()`);
+  try {
+    await page.evaluate(`w3.editors.closeAll()`);
+    // ---- 1. The Trigger Editor comes back with the project and arrives late; a tool creates a trigger after it read ----
+    await page.evaluate(`(() => {
+      const ed = w3Workbench.editors, kept = window.__stale;
+      window.__read = false;
+      window.__gate = new Promise((r) => { window.__open = r; });
+      ed.memory = { load: () => ({ tabs: [{ path: ${JSON.stringify(WTG)}, editor: "w3.triggerEditor" }], active: ${JSON.stringify(WTG)} }), store: () => {} };
+      ed.resolveTab = function (tab, p) {
+        return kept.resolveTab.call(ed, tab, { ...p, resolve: async (el, doc) => {
+          const made = await p.resolve(el, doc);
+          // The first time only: it has read the files and isn't there yet.
+          if (!window.__read) { window.__read = true; await window.__gate; }
+          return made;
+        } });
+      };
+      void ed.restore();
+    })()`);
+    await until("the Trigger Editor read the files", () => page.evaluate(`window.__read`), 30000);
+    await k.tool("create_script_trigger", { name: "Late Probe", script: "// late probe one\n" });
+    await page.evaluate(`window.__open()`);
+    await sleep(1500);
+    if (!(await rows()).includes("Late Probe")) fail(`a trigger a tool created while the Trigger Editor loaded isn't in its tree: ${(await rows()).join(" | ")}`);
+    const firstName = (await rows()).find((r) => r === "Melee Initialization") ?? null;
+    if (!firstName) fail(`the new map has no Melee Initialization: ${(await rows()).join(" | ")}`);
+    else {
+      const r = await rename(firstName, "Melee Start");
+      if (r) fail(r);
+      await k.save();
+      if (!/"Late Probe"/.test(wtgText()) || !/late probe one/.test(wct())) fail("the Trigger Editor's save deleted the trigger a tool created while it loaded");
+    }
+
+    // ---- 2. The texts saved by a tool while the editor is open and saved: it doesn't put back the old ones -------------
+    await k.tool("create_script_trigger", { name: "Text Probe", script: "// text probe one\n" });
+    await sleep(1500);
+    await k.tool("set_trigger_script", { name: "Text Probe", script: "// text probe two\n" });
+    await sleep(1500);
+    const r2 = await rename("Melee Start", "Melee Begin");
+    if (r2) fail(r2);
+    await k.save();
+    if (!/text probe two/.test(wct())) fail("the Trigger Editor's save put back the script a tool had changed while it was open");
+
+    // ---- 3. Its file changed on disk, unheard of: the save asks; Cancel writes nothing, Overwrite saves ---------------
+    const r3 = await rename("Melee Begin", "Melee Opening");
+    if (r3) fail(r3);
+    const onDisk = wtgText().replace('"Text Probe"', '"Changed On Disk"');
+    if (onDisk === wtgText()) fail("no Text Probe in the file to change on disk");
+    writeFileSync(join(k.root, "map", "war3map.wtg.json"), onDisk);
+    await page.evaluate(`(() => { window.__asked = []; window.__answer = "Cancel"; w3Workbench.editors.confirm = async (m, ...a) => { window.__asked.push(m); return window.__answer; }; })()`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    let asked = await page.evaluate(`window.__asked.splice(0)`);
+    if (asked.length !== 1 || !/changed on disk/.test(asked[0])) fail(`saving over a file changed on disk asked ${JSON.stringify(asked)}`);
+    if (wtgText() !== onDisk) fail("Cancel on the question still wrote over the file changed on disk");
+    if (!(await page.evaluate(`w3.editors.isDirty(${JSON.stringify(WTG)})`))) fail("after Cancel the Trigger Editor isn't unsaved any more");
+    await page.evaluate(`window.__answer = "Overwrite"`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    asked = await page.evaluate(`window.__asked.splice(0)`);
+    if (asked.length !== 1 || !/"Melee Opening"/.test(wtgText())) fail(`Overwrite didn't save (asked ${asked.length} times)`);
+    // Control: a save with nothing changed on disk doesn't ask.
+    const r4 = await rename("Melee Opening", "Melee Again");
+    if (r4) fail(r4);
+    await page.evaluate(`w3.editors.saveAll()`);
+    asked = await page.evaluate(`window.__asked.splice(0)`);
+    if (asked.length || !/"Melee Again"/.test(wtgText())) fail(`a save of a file nothing else changed asked ${JSON.stringify(asked)}`);
+    await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; ed.confirm = kept.confirm; delete ed.resolveTab; })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- 4. A tab of the last session whose file isn't there yet, then the AI Editor's New writes it -------------------
+    const dir = join(work, "stale-ai");
+    mkdirSync(dir, { recursive: true });
+    const wai = join(dir, "Stale Raider.wai").replace(/\\/g, "/");
+    rmSync(wai, { force: true });
+    await page.evaluate(`(() => { w3Workbench.editors.memory = { load: () => ({ tabs: [{ path: ${JSON.stringify(wai)}, editor: "w3.aiEditor" }], active: ${JSON.stringify(wai)} }), store: () => {} }; void w3Workbench.editors.restore(); })()`);
+    const tabText = `(w3Workbench.editors.tabs.find((t) => t.path === ${JSON.stringify(wai)})?.el.innerText ?? "")`;
+    await until("the missing AI file's tab", () => page.evaluate(`${tabText}.includes("Could not open")`), 20000).catch(() => fail("the tab of a missing AI file didn't say it couldn't open it (the check needs that)"));
+    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); await new Promise((r) => setTimeout(r, 1500)); })()`);
+    if (await page.evaluate(`${tabText}.includes("Could not open")`)) fail("after New AI wrote the file its tab still says it couldn't open it");
+    const addErr = await k.run("w3.ai.addToMap");
+    if (addErr) fail(`Add To Map after New AI: ${addErr}`);
+  } finally {
+    await page.evaluate(`(() => { const ed = w3Workbench.editors, kept = window.__stale; if (!kept) return;
+      ed.memory = kept.memory; delete ed.resolveTab; ed.confirm = kept.confirm; w3.window.showWarning = kept.warn; w3.window.pickSaveFile = kept.save; window.__open?.(); })()`);
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function run() {
   // WebView2's helpers outlive the app by a moment.
   rmSync(work, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
@@ -3988,7 +4108,7 @@ async function run() {
     // --only=<check> runs one of the checks below on its own, for working on it.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only) {
-      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await ({ objectCopy, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening, heightsLimits, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, triggersAndAi, staleEditors, placeObjects, gameReadsOnce, moduleFunctions, byHand, drawCalls, contextLoss, shouldHaves, placerAndCampaign, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project) })[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
       return found;
     }
@@ -4076,6 +4196,7 @@ async function run() {
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
     await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
+    await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));

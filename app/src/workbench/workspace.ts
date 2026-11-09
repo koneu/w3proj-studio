@@ -167,6 +167,10 @@ export class WorkspaceService {
   readBytes(p: string) {
     return readBytes(this.resolve(p));
   }
+  /** The file's size and time as the disk has them now; null when it doesn't exist. */
+  stat(p: string) {
+    return invoke<Stamp | null>("fs_stat", { path: this.resolve(p) });
+  }
   async writeText(p: string, text: string) {
     await this.tracked(p, new TextEncoder().encode(text).length, (target) => writeText(target, text));
     this.onDidSave.fire(p.replace(/\\/g, "/"));

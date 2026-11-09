@@ -75,6 +75,7 @@ export class Workbench {
         }
       },
       readBytes: (p) => (isGame(p) ? this.game.read(gamePath(p)) : this.workspace.readBytes(p)),
+      stat: async (p) => (p.startsWith("w3:") || isGame(p) ? undefined : this.workspace.stat(p)),
       writeBytes: async (p, b) => {
         if (isGame(p)) throw new Error("game files are read-only");
         await this.workspace.writeBytes(p, b);
