@@ -4186,6 +4186,16 @@ async function keybindings(page, found) {
     await page.evaluate(`w3.commands.execute("w3.keybindings.open", ${JSON.stringify(query)})`);
     await until(`the rows for ${query}`, () => page.evaluate(`document.querySelectorAll(".kb-row[data-command]").length > 0`), 10000);
   };
+  /** Clicks an element of the editor's rows as a person would: earlier checks' toasts (bottom right, where the rows'
+   *  buttons are) are cleared first, and what is under the pointer must be that element, else the click would land on
+   *  something else and the check says what covers it. */
+  const clickRow = async (selector) => {
+    await k.clearToasts();
+    const at = await k.hands.where(selector);
+    const hit = await page.evaluate(`(() => { const e = document.elementFromPoint(${at.x}, ${at.y}); const want = document.querySelector(${JSON.stringify(selector)}); return e && want && (e === want || want.contains(e)) ? null : (e ? e.outerHTML.slice(0, 160) : "nothing"); })()`);
+    if (hit) throw new Error(`${selector} is covered by ${hit}`);
+    await k.hands.click(selector);
+  };
   const backToMap = async () => {
     await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
     await until("the terrain editor in front", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 10000);
@@ -4215,7 +4225,7 @@ async function keybindings(page, found) {
     await openShortcuts("@command:w3.terrain.cycleGrid");
     const row = `.kb-row[data-command="w3.terrain.cycleGrid"]`;
     if ((await page.evaluate(`document.querySelector(${JSON.stringify(row)})?.dataset.key`)) !== "g") fail("Grid Display isn't listed with G");
-    await k.hands.click(`${row} .kb-change`);
+    await clickRow(`${row} .kb-change`);
     await until("the key field", () => page.evaluate(`document.activeElement?.classList.contains("kb-record")`), 5000).catch(() => fail("Change didn't open a field to press the key into"));
     await k.hands.chord("J");
     const shown = await page.evaluate(`document.querySelector(".kb-record")?.value`);
@@ -4238,7 +4248,7 @@ async function keybindings(page, found) {
 
     // Reset: G again, J nothing; keybindings.json says nothing of the command.
     await openShortcuts("@command:w3.terrain.cycleGrid");
-    await k.hands.click(`${row} .kb-reset`);
+    await clickRow(`${row} .kb-reset`);
     await until("the reset in keybindings.json", () => rules().length === 0, 5000).catch(() => fail(`keybindings.json after Reset: ${JSON.stringify(rules())}`));
     await backToMap();
     await press("G");
