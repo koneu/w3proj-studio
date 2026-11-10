@@ -29,11 +29,13 @@ export class TitleBar {
     document.title = project ? `${project} - W3Proj Studio` : "W3Proj Studio";
   }
 
-  /** Closing with unsaved work asks first, however the window is closed. `settle` says whether to go on. */
-  guardClose(unsaved: () => number, settle: () => Promise<boolean>) {
+  /** Closing with unsaved work asks first, however the window is closed. `settle` says whether to go on.
+   *  `beforeClose` runs first in any case (the open tabs are remembered where their editors are). */
+  guardClose(unsaved: () => number, settle: () => Promise<boolean>, beforeClose?: () => void) {
     try {
       const w = getCurrentWindow();
       void w.onCloseRequested(async (e) => {
+        try { beforeClose?.(); } catch { /* closing goes on */ }
         if (!unsaved()) return;
         e.preventDefault();
         if (await settle()) await w.destroy();

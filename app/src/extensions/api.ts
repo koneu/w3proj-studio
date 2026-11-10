@@ -41,6 +41,10 @@ export interface EditorContribution {
   patterns: string[];
   /** "default" editors open on click; "option" ones only via "Reopen With…". */
   priority?: "default" | "option";
+  /** What happens to its tabs when the graphics mode (game.graphicsMode) changes. "reopen": it shows the mode's art,
+   *  so its tabs without unsaved changes open again in place (their viewState kept). "self": the editor follows
+   *  the mode by itself. Not given: only its tabs of game files ("game:…", which are read in the mode) open again. */
+  graphicsMode?: "reopen" | "self";
 }
 
 /** One declared setting (shown in the Settings editor). */
@@ -132,9 +136,15 @@ export interface EditorDocument {
   writeText(text: string): Promise<void>;
   writeBytes(bytes: Uint8Array): Promise<void>;
   setDirty(dirty: boolean): void;
+  /** What the editor's `viewState()` gave when this tab was last open (the project's last session, or before it
+   *  was opened again in place), if anything: the editor checks it, since the file may have changed meanwhile. */
+  readonly viewState?: unknown;
 }
 
 export interface EditorInstance {
+  /** Where the editor is in its file (scroll position, selection; small and JSON-able: one bigger than 4096
+   *  characters as JSON isn't kept): kept with the project's open tabs and given back as `EditorDocument.viewState`. */
+  viewState?(): unknown;
   save?(): Promise<void>;
   focus?(): void;
   dispose?(): void;
@@ -271,6 +281,9 @@ export interface W3Api {
     /** Opens the editors of one file (of one editor id, if given) again in place, in their tabs, for what they show
      *  besides the file (the graphics mode). Those with unsaved changes are left; resolves with how many. */
     reopen(path: string, providerId?: string): Promise<number>;
+    /** Opens the project's remembered tabs again (their editors, order, active tab and viewState), e.g. after
+     *  closeAll() for a sync that rewrote the files. Tabs open now stay. */
+    restore(): Promise<void>;
   };
   window: {
     showInfo(message: string, ...actions: string[]): Promise<string | undefined>;
