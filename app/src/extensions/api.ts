@@ -268,6 +268,9 @@ export interface W3Api {
     closeAll(): Promise<void>;
     /** Closes the editors of one file without asking. */
     close(path: string): Promise<void>;
+    /** Opens the editors of one file (of one editor id, if given) again in place, in their tabs, for what they show
+     *  besides the file (the graphics mode). Those with unsaved changes are left; resolves with how many. */
+    reopen(path: string, providerId?: string): Promise<number>;
   };
   window: {
     showInfo(message: string, ...actions: string[]): Promise<string | undefined>;

@@ -4,6 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { rangeOf, type FieldRange } from "./limits";
+import { artValue } from "./artset";
 import { listItem, parseIni, parseIniRaw, parseSlk, unquote, westring } from "../formats/text";
 
 export type ValueType = "int" | "real" | "unreal" | "string";
@@ -77,8 +78,9 @@ export interface KindData {
   levels(baseId: string): number;
   /** Fields that apply to a base object. */
   fieldsFor(baseId: string): FieldMeta[];
-  /** Inherited value of a field (level is 1-based for repeating fields, else 0). */
-  defaultValue(baseId: string, f: FieldMeta, level: number): string | undefined;
+  /** Inherited value of a field (level is 1-based for repeating fields, else 0). `artMode`: the graphics mode whose
+   *  art fields to read ("sd", "hd", "de"; see artset.ts), else the one set (`game.graphicsMode`). */
+  defaultValue(baseId: string, f: FieldMeta, level: number, artMode?: string): string | undefined;
 }
 
 /** English words of table rows: their internal name and comment columns, which no locale changes.
@@ -329,12 +331,12 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
         return true;
       });
     },
-    defaultValue(baseId, f, level) {
+    defaultValue(baseId, f, level, artMode) {
       if (f.slk === "Profile") {
         // Reforged skin files split some fields per art set ("Art:sd", "Art:hd").
         const kv = profile.get(baseId), key = f.field.toLowerCase();
-        const mode = w3.settings.get<string>("game.graphicsMode") ?? "hd";
-        const raw = kv?.get(`${key}:${mode}`) ?? kv?.get(key) ?? kv?.get(`${key}:sd`);
+        const mode = artMode ?? w3.settings.get<string>("game.graphicsMode") ?? "hd";
+        const raw = kv ? artValue((k) => kv.get(k), key, mode) : undefined;
         if (raw === undefined) return undefined;
         if (f.repeat > 0) return listItem(raw, Math.max(0, level - 1)) ?? undefined;
         return f.index > 0 ? listItem(raw, f.index) : unquote(raw);

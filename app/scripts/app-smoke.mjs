@@ -1876,6 +1876,71 @@ async function flyingHeights(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
+ *  HD model is OgreMauler and Classic one Ogre, is drawn with each in turn. In the 3.0 art (DE) the Ogre Lord (nogl),
+ *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
+ *  editor with unsaved edits stays as it is and offers to save first; Save and Reopen does both. */
+async function artModeReload(page, found) {
+  const fail = (what) => found.push(`art mode reload: ${what}`);
+  const k = await heightKit(page, "ArtMode");
+  const original = await k.setting("game.graphicsMode");
+  const setMode = (m) => page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(m)})`);
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__artGroup?.dispose();
+    window.__artEds = [];
+    window.__artGroup = s.registerToolGroup({ id: "smoke-art", title: "smoke-art", order: 998, create: (ed) => { window.__artEds.push(ed); return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const editors = () => page.evaluate(`window.__artEds.length`);
+  const drawn = (id) => page.evaluate(`window.__artEds.at(-1)?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)})?.model ?? null`);
+  const waitModel = async (what, id, re, ms = 30000) => until(what, async () => re.test((await drawn(id)) ?? ""), ms)
+    .catch(async () => fail(`${what}: ${id} is drawn with ${await drawn(id)}`));
+  try {
+    await setMode("hd");
+    // Opened again after the mode change (when it was another): the group's editor is the newest one.
+    await sleep(500);
+    await k.tool("place_objects", { objects: [{ id: "nogm", x: 0, y: 0, player: 1 }, { id: "nogl", x: 384, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    await waitModel("HD's Ogre Mauler", "nogm", /OgreMauler\\OgreMauler\.mdx$/i);
+    const view = `window.__artEds.at(-1)?.view()`;
+    await page.evaluate(`window.__artEds.at(-1).setView({ target: [256, 128, 0], distance: 1800 })`);
+    const before = await page.evaluate(view);
+    const opened = await editors();
+    await setMode("sd");
+    await waitModel("after switching to SD, the Classic Ogre", "nogm", /\\Ogre\\Ogre\.mdx$/i);
+    if ((await editors()) === opened) fail("switching to SD didn't open the terrain editor again");
+    const after = await page.evaluate(view);
+    if (Math.abs(after.target[0] - before.target[0]) > 1 || Math.abs(after.distance - before.distance) > 1) fail(`the camera moved with the reopen: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== "map/war3map.w3e.txt") fail("the terrain editor isn't the active tab after the reopen");
+    await setMode("de");
+    await waitModel("DE's Ogre Lord", "nogl", /OgreLord\\OgreLord\.mdx$/i);
+
+    // Unsaved edits: the editor stays, and says so.
+    await k.clearToasts();
+    const raised = await page.evaluate(`(() => {
+      const ed = window.__artEds.at(-1), t = ed.terrain, i = Math.round(-t.offsetY / 128) * t.width + Math.round(-t.offsetX / 128), was = t.corners[i].height;
+      t.corners[i].height = was + 64;
+      return ed.commitTerrain({ corners: [i], undo: () => { t.corners[i].height = was; }, redo: () => { t.corners[i].height = was + 64; } });
+    })()`);
+    if (!raised) return fail("the raise was refused");
+    const kept = await editors();
+    await setMode("hd");
+    const button = `[...document.querySelectorAll(".notifications button")].find((b) => b.textContent === "Save and Reopen")`;
+    await until("the offer to save first", () => page.evaluate(`!!${button}`), 10000)
+      .catch(async () => fail(`no "Save and Reopen" after switching with unsaved edits: ${await k.toasts()}`));
+    if ((await editors()) !== kept) fail("the editor with unsaved edits was opened again (its edits gone)");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the unsaved edits are gone after the mode change");
+    if (/OgreMauler/i.test((await drawn("nogm")) ?? "")) fail("the editor with unsaved edits changed its art");
+    await page.evaluate(`${button}?.click()`);
+    await waitModel("after Save and Reopen, HD's Ogre Mauler", "nogm", /OgreMauler\\OgreMauler\.mdx$/i);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("still unsaved after Save and Reopen");
+  } finally {
+    await page.evaluate(`window.__artGroup?.dispose(); window.__artGroup = null; window.__artEds = null;`);
+    await setMode(original ?? "hd");
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -3866,12 +3931,18 @@ async function graphicsModes(page, found) {
   await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
   // The doodads: a bridge, a wall end cap (two variations) and a tall pillar (nine), all with Reforged models.
   const TYPES = ["LCcb", "YSw5", "LCpt", "LCct"];
-  const make = (name, modes) => {
+  const SPLIT_UNITS = ["ngrk", "nogm"];
+  const make =(name, modes) => {
     const root = join(dir, name);
     cpSync(FIXTURE, root, { recursive: true });
     const doo = json(join(root, "map", "war3map.doo.json"));
     TYPES.forEach((id, i) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position: [256 + i * 128, 256, 0] }));
     put(join(root, "map", "war3map.doo.json"), doo);
+    // Units whose Classic model isn't their HD one (UnitSkin.txt file:sd and file:hd: the mud golem's HD MudGolem,
+    // Classic RockGolem; the Ogre Mauler's OgreMauler, Ogre): every mode has its own, so none may be reported.
+    const units = json(join(root, "map", "war3mapUnits.doo.json"));
+    SPLIT_UNITS.forEach((id, i) => units.units.push({ ...units.units[0], id, skinId: id, player: 24, editorId: 100 + i, position: [256 + i * 128, -256, 0] }));
+    put(join(root, "map", "war3mapUnits.doo.json"), units);
     const w3i = json(join(root, "map", "war3map.w3i.json"));
     w3i.supportedModes = modes;
     put(join(root, "map", "war3map.w3i.json"), w3i);
@@ -6551,6 +6622,7 @@ async function run() {
       // One check per line, in alphabetical order (check-scripts.mjs keeps it so): branches that add checks then touch
       // different lines and merge without conflicts.
       const onlyChecks = {
+        artModeReload,
         byHand,
         cameraEditing,
         chapterObjects,
@@ -6692,6 +6764,7 @@ async function run() {
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
+    await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
     await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
     await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));

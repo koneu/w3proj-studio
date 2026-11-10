@@ -279,9 +279,9 @@ interface PlacedEntry { id: string; variation?: number; position: number[] }
  *  the Classic one (bits as the game's maps use them: Classic campaign 1, Reforged campaign 2,
  *  melee 3, Forsaken Kingdom 4). */
 const MODES = [
-  { bit: 1, name: "Classic", layer: null },
-  { bit: 2, name: "Reforged (HD)", layer: "_hd" },
-  { bit: 4, name: "Reforged (DE)", layer: "_de" },
+  { bit: 1, name: "Classic", layer: null, art: "sd" },
+  { bit: 2, name: "Reforged (HD)", layer: "_hd", art: "hd" },
+  { bit: 4, name: "Reforged (DE)", layer: "_de", art: "de" },
 ] as const;
 
 /** Placed objects whose model is missing in a graphics mode the map supports (Classic falls
@@ -342,11 +342,13 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
   }
   const kindOf = (id: string, fromUnits: boolean) => custom.get(id)?.kind
     ?? (fromUnits ? ["w3u", "w3t"] : ["w3d", "w3b"]).find((k) => kinds.get(k)?.names.has(id));
-  const value = (id: string, kind: string, field: string): string | undefined => {
+  /** `artMode`: the graphics mode whose game art to read (the skin tables split the model per mode: the Ogre
+   *  Mauler's Classic model isn't its HD one), else the one set. */
+  const value = (id: string, kind: string, field: string, artMode?: string): string | undefined => {
     const c = custom.get(id);
     if (c?.mods.has(field)) return c.mods.get(field);
     const k = kinds.get(kind), base = c?.base ?? id, f = k?.fieldById.get(field);
-    return k && f ? k.defaultValue(base, f, 0) : undefined;
+    return k && f ? k.defaultValue(base, f, 0, artMode) : undefined;
   };
   const found = new Map<string, (typeof MODES)[number][]>();
   /** The supported modes that can't load a model: not in the map (imports count for every
@@ -372,17 +374,21 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
     for (const p of list) {
       const kind = kindOf(p.id, key === "units");
       if (!kind) continue; // unknown types: the "Placed objects" check
-      const model = value(p.id, kind, ART[kind].model);
-      if (!model || model === "_") continue;
-      const variations = Number(ART[kind].variations ? value(p.id, kind, ART[kind].variations!) : 1) || 1;
-      const stem = model.replace(/\.(mdl|mdx)$/i, "");
-      const path = `${stem}${variations > 1 ? p.variation ?? 0 : ""}.mdx`;
-      const modes = await missingIn(path);
-      if (!modes.length) continue;
-      const m = missing.get(p.id) ?? { items: [], paths: new Set(), modes: new Set() };
+      // Each mode by the model it reads: a Classic player sees the Classic one.
+      let m: { items: PlacedEntry[]; paths: Set<string>; modes: Set<string> } | undefined;
+      for (const mode of supported) {
+        const model = value(p.id, kind, ART[kind].model, mode.art);
+        if (!model || model === "_") continue;
+        const variations = Number(ART[kind].variations ? value(p.id, kind, ART[kind].variations!, mode.art) : 1) || 1;
+        const stem = model.replace(/\.(mdl|mdx)$/i, "");
+        const path = `${stem}${variations > 1 ? p.variation ?? 0 : ""}.mdx`;
+        if (!(await missingIn(path)).includes(mode)) continue;
+        m ??= missing.get(p.id) ?? { items: [], paths: new Set(), modes: new Set() };
+        m.paths.add(path);
+        m.modes.add(mode.name);
+      }
+      if (!m) continue;
       m.items.push(p);
-      m.paths.add(path);
-      for (const mode of modes) m.modes.add(mode.name);
       missing.set(p.id, m);
     }
     for (const [id, { items, paths, modes }] of missing) {
