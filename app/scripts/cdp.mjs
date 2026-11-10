@@ -72,8 +72,36 @@ export class Hands {
   mouse(type, x, y, buttons = 0, modifiers = 0) {
     return this.page.send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" && !buttons ? "none" : "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1, modifiers });
   }
+  /** Where a click on the element lands on it: its centre (`where`), with nothing else on top there. A toast that only
+   *  tells something (an earlier check's note in the lower right, where many buttons are) is closed by its × first; a
+   *  toast that asks something, or anything else on top, fails the click, naming what covers the element: the click
+   *  would land on that instead. */
+  async reach(selector, text = null) {
+    for (let round = 0; round < 8; round++) {
+      const at = await this.where(selector, text);
+      const cover = await this.page.evaluate(`((x, y) => {
+        const want = [...document.querySelectorAll(${JSON.stringify(selector)})].find((e) => ${JSON.stringify(text)} === null || e.textContent.trim() === ${JSON.stringify(text)});
+        const hit = document.elementFromPoint(x, y);
+        // Nothing found there (off the window) is left to the click; so is the element's own part, or what holds it
+        // when the element itself takes no pointer (an icon in a button).
+        if (!want || !hit || want === hit || want.contains(hit) || hit.contains(want)) return null;
+        const tell = (e) => {
+          const cls = typeof e.className === "string" ? e.className.split(" ").filter(Boolean).map((c) => "." + c).join("") : "";
+          return e.tagName.toLowerCase() + cls + ' "' + (e.textContent || "").trim().slice(0, 100) + '"';
+        };
+        const toast = hit.closest(".toast");
+        const asks = toast && [...toast.querySelectorAll(".toast-actions button")].some((b) => !b.classList.contains("toast-close") && !b.classList.contains("copy-error"));
+        if (toast && !asks && toast.querySelector(".toast-close")) { toast.querySelector(".toast-close").click(); return { closed: tell(toast) }; }
+        return { covered: tell(toast || hit) };
+      })(${at.x}, ${at.y})`);
+      if (!cover) return at;
+      if (cover.covered) throw new Error(`${selector}${text ? ` "${text}"` : ""} is covered at ${Math.round(at.x)},${Math.round(at.y)} by ${cover.covered}: a click there would land on that`);
+      await sleep(50);
+    }
+    throw new Error(`${selector}${text ? ` "${text}"` : ""} stays covered by toasts after closing eight`);
+  }
   async click(selector, text = null, modifiers = 0) {
-    const { x, y } = await this.where(selector, text);
+    const { x, y } = await this.reach(selector, text);
     await this.mouse("mouseMoved", x, y, 0, modifiers);
     await this.mouse("mousePressed", x, y, 1, modifiers);
     await this.mouse("mouseReleased", x, y, 0, modifiers);

@@ -10,6 +10,7 @@ import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditor
 import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
 import { resetTriggers } from "../../lib/triggers/defaults";
 import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni } from "../../lib/formats/text";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -594,15 +595,14 @@ class TriggerView {
     if (e.target instanceof Element && e.target.closest(".cm-editor")) return;
     if (this.area === "detail" && this.body?.keyDown?.(e)) { e.preventDefault(); return; }
     if (keyOf(e) === "Delete" && this.handle.editable) { e.preventDefault(); this.deleteSelected(); return; }
+    const step = undoStepOf(this.w3.keybindings.commandsFor(e));
+    if (step) { e.preventDefault(); this.step(step === "undo" ? -1 : 1); return; }
     if (!(e.ctrlKey || e.metaKey)) return;
     const k = keyOf(e).toLowerCase();
     if (this.area === "tree" && (k === "c" || k === "x" || k === "v")) {
       e.preventDefault();
       if (k === "v") this.pasteItems(); else this.copyItem(k === "x");
-      return;
     }
-    if (k === "z" && !e.shiftKey) { e.preventDefault(); this.step(-1); }
-    else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); this.step(1); }
   };
 
   constructor(private w3: W3Api, private el: HTMLElement, private kinds: KindRegistry, public file: TriggerFile,
@@ -639,6 +639,7 @@ class TriggerView {
       ],
     };
     el.tabIndex = -1;
+    addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", this.keydown);
     const treePane = h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, this.searchBox, editable ? this.toolbar() : null, this.tree);
     el.append(treePane, this.detail);

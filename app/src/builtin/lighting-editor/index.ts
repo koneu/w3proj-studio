@@ -190,7 +190,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const toTime = (hour: number) => Math.round(seq.start + (hour / 24) * span);
         const root = h("div.form-body.lighting-editor");
         el.append(root);
-        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
+        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
 
         const num = (get: () => number, set: (v: number) => void, step = "0.05") => {
           const input = h("input.form-input.form-num.lighting-num", { type: "number", step, value: String(Number(get().toPrecision(6))) });

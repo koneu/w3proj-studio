@@ -45,7 +45,8 @@ import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, t
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
-import { borderFlags, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, joinSteps, KEY_COMMANDS, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
+import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
+import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
@@ -70,6 +71,7 @@ import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
@@ -106,6 +108,10 @@ const LOADING_FRAME_MS = 250;
 const PICTURE_WAIT_MS = 120_000;
 /** How long the shadow map waits for edits to pause before predicting the cells they change (ms). */
 const SHADOW_EDIT_DELAY = 700;
+/** How much a step of the mouse wheel zooms. */
+const WHEEL_ZOOM = 1.15;
+/** Which key on the keyboard an event is of, whatever Shift made of it (A and a), so that a held key's release is found. */
+const keyCodeOf = (e: KeyboardEvent) => e.code || eventKey(e).toLowerCase();
 
 
 const KIND_LABELS: Record<string, string> = { w3u: "Unit", w3t: "Item", w3b: "Destructable", w3d: "Doodad" };
@@ -248,6 +254,13 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** The key that turns the selection toward the pointer now (T by default), for hints. */
   const faceKey = () => w3.keybindings.labelFor(FACE_COMMAND) ?? "no key";
+  /** The key held for an area of ground (A by default), for hints. */
+  const areaKeyName = () => w3.keybindings.labelFor(AREA_COMMAND) ?? "the area key (none now)";
+  /** The camera's mouse buttons now, for the hint under the view (the keys are the World Editor's by default). */
+  const cameraHelp = () => {
+    const drag = (id: string) => { const k = w3.keybindings.labelFor(id); return k ? `${k} drag or ` : ""; };
+    return ` · ${drag(MOUSE_CONTROLS.translate)}arrow keys (Shift: faster): pan · ${drag(MOUSE_CONTROLS.rotate)}Ctrl+Left/Right: rotate · Wheel or Ctrl+Up/Down: zoom`;
+  };
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   /** The open terrain editor, for tools. */
   /** Nearly always a burst of edits: the derived files wait for the last of them. */
@@ -1290,6 +1303,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!view) throw new Error("Switch to a terrain editor first.");
       refuseLostView(path);
       view.keyCommand(id);
+    })),
+    // The held controls only work held over the map: as commands they say how.
+    ...[...HELD_COMMANDS].map((id) => w3.commands.register(id, () => {
+      const key = w3.keybindings.labelFor(id);
+      void w3.window.showInfo(key
+        ? `This is held over the terrain view, not run: ${key}${id === AREA_COMMAND ? " held while dragging with the left button" : ""}.`
+        : "This is held over the terrain view, not run, and has no key or mouse button now: give it one in Keyboard Shortcuts.");
     })),
     // Object heights, on the terrain editor that has the focus.
     w3.commands.register("w3.terrain.setUniformDoodadHeights", async (given?: number) => {
@@ -2984,8 +3004,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 h("button", { title: "Flatten hills and dips, keeping the cliff levels", onclick: () => commit(changeArea(terrain, a, (c) => { if (groundHeight(c) === 0) return false; setGroundHeight(c, 0); return true; }), "This ground is flat already.") }, "Reset height field"))),
           );
         };
-        /** The Select tab's mode: dragging selects objects or a block of ground. Holding A does an area in either. */
-        let areaMode = false, withObjects = true, areaKey = false;
+        /** The Select tab's mode: dragging selects objects or a block of ground. Holding A (the area key: AREA_COMMAND)
+         *  does an area in either; `areaKeyCode` is the key held, so that its release ends it. */
+        let areaMode = false, withObjects = true, areaKey = false, areaKeyCode = "";
         /** A press on the way to being an area: where it began. */
         let areaPress: { from: [number, number]; x: number; y: number; moved: boolean } | null = null;
         /** A block of ground, with what stands on it if so chosen. */
@@ -3148,6 +3169,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  turning what's being pasted or what's selected, and the clipboard (Ctrl+C, X, V and A by default). True when
          *  one did something. */
         const earlyKeys = (ids: readonly string[], repeat: boolean) => {
+          // Escape (Cancel) ends picking a point for a tool, then the paste, then the area drawn.
+          if (ids.includes(CANCEL_COMMAND)) {
+            if (toolGroups.picking) { showPickTarget(null); toolGroups.picking.finish(undefined); return true; }
+            if (pasting) { endPaste(); return true; }
+            if (terrainArea) { setArea(null); return true; }
+          }
           const turn = turnOf(ids);
           if (turn && pasting) {
             if (!repeat) { pasting = turnFragment(pasting, turn); if (pasteAt) showPaste(pasteAt); }
@@ -3163,11 +3190,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (ids.includes(CLIPBOARD_COMMANDS.selectAll) && !activeGroup) { selectEntries(allPlaced().filter((o) => o.id !== "sloc").map((o) => o.p)); return true; }
           return false;
         };
-        /** Escape while pasting or with an area drawn, and the key commands before a tab's own keys. */
-        const clipboardKey = (e: KeyboardEvent, ids: readonly string[]) => {
-          if (pasting && eventKey(e) === "Escape") { endPaste(); return true; }
-          if (terrainArea && eventKey(e) === "Escape") { setArea(null); return true; }
-          return earlyKeys(ids, e.repeat);
+        /** The key commands the open tab takes (`ids` as earlyKeys'): Cancel and Delete when it has something of its own
+         *  (placing an object, a region or camera selected), and the list items of the Regions and Cameras tabs. With no
+         *  tab taking a list key it does what else it is bound to (Ctrl+Page Up raises the selection). */
+        const tabKeys = (ids: readonly string[]) => {
+          const g = activeInst();
+          if (!g) return false;
+          if (ids.includes(CANCEL_COMMAND) && g.cancel?.()) return true;
+          if (ids.includes(DELETE_COMMAND) && g.deleteSelection?.()) return true;
+          const list = listCommandOf(ids);
+          if (list && g.listCommand) {
+            const why = g.listCommand(list);
+            if (why) void w3.window.showInfo(why);
+            return true;
+          }
+          return false;
         };
 
         /** Alt: the selection goes to the pointer, keeping its shape, and follows it while held. */
@@ -3327,7 +3364,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           selected = null;
           group = [];
           selInfo.className = "terrain-selection muted";
-          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : "Click a unit, item, doodad or destructable, or drag a box around several. Hold A and drag for an area.");
+          selInfo.replaceChildren(areaMode ? "Drag over the ground to select an area." : `Click a unit, item, doodad or destructable, or drag a box around several. Hold ${areaKeyName()} and drag for an area.`);
           renderer.setSelection(null);
           redraw();
         };
@@ -3540,8 +3577,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         );
 
         function selectBar() {
-          const objectsOnly = h("button.chip", { title: "A drag selects objects. Hold A and drag to select a block of ground", onclick: () => setMode(false) }, "Objects");
-          const ground = h("button.chip", { title: "A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Holding A and dragging does this in Objects too", onclick: () => setMode(true) }, "Area");
+          const objectsOnly = h("button.chip", { title: `A drag selects objects. Hold ${areaKeyName()} and drag to select a block of ground`, onclick: () => setMode(false) }, "Objects");
+          const ground = h("button.chip", { title: `A drag selects a block of ground, then Ctrl+C copies it. Esc clears it. Holding ${areaKeyName()} and dragging does this in Objects too`, onclick: () => setMode(true) }, "Area");
           const standing = h("input", { type: "checkbox", checked: withObjects, onchange: () => {
             withObjects = standing.checked;
             if (terrainArea) terrainArea = { ...terrainArea, objects: withObjects };
@@ -3560,7 +3597,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ground.classList.toggle("on", area);
             standingWrap.hidden = !area;
             kindsWrap.hidden = filterInput.hidden = filterRun.hidden = area;
-            dragHint.textContent = area ? "Drag: select an area" : "Drag: select box · Hold A and drag: select an area";
+            dragHint.textContent = dragHintText();
             setArea(null);
             clearSelection();
             keysToMap();
@@ -3912,7 +3949,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }, () => {});
         }
         const tabsEl = h("div.terrain-tabs");
-        const dragHint = h("span", {}, "Drag: select box · Hold A and drag: select an area");
+        /** The hint for the left button's drag in the Select tab's mode, naming the area key in effect. */
+        const dragHintText = () => (areaMode ? "Drag: select an area" : `Drag: select box · Hold ${areaKeyName()} and drag: select an area`);
+        const dragHint = h("span", {}, dragHintText());
+        /** The camera's mouse buttons, named as they are bound now. */
+        const cameraHint = h("span", {}, cameraHelp());
         const builtinBar = selectBar();
         const groupBar = h("div.model-toolbar.terrain-tools", {}, builtinBar);
         /** The active tab: null = the built-in tools. */
@@ -4386,7 +4427,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const viewCommands: ViewCommands = {
           viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
-          keyCommand: (id) => !glDead && KEY_COMMANDS.has(id) && (earlyKeys([id], false) || lateKeys([id], false)),
+          keyCommand: (id) => !glDead && KEY_COMMANDS.has(id) && (earlyKeys([id], false) || tabKeys([id]) || lateKeys([id], false)),
           listCommand: (cmd) => {
             const g = activeInst();
             return g?.listCommand ? g.listCommand(cmd) : "The open tab has no list: the Regions and Cameras tabs have one.";
@@ -4531,7 +4572,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Reset camera", onclick: () => { resetCamera(); keysToMap(); } }, "⟲"),
               h("button", { title: "View Entire Map", onclick: () => { viewEntireMap(); keysToMap(); } }, "⛶"),
               h("button", { title: "View Selection", onclick: () => { const why = viewSelection(); if (why) void w3.window.showInfo(why); keysToMap(); } }, "◎"),
-              h("span.muted", {}, dragHint, " · Middle-drag or arrow keys (Shift: faster): pan · Right-drag or Ctrl+Left/Right: rotate · Wheel or Ctrl+Up/Down: zoom")),
+              h("span.muted", {}, dragHint, cameraHint)),
             ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas, labelLayer, gameBadge, minimapPanel.el, glLost)),
           side));
@@ -4541,6 +4582,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Tooltips name the keys the commands have now.
         const stopKeyTitles = w3.keybindings.onDidChange(() => {
           for (const n of el.querySelectorAll<HTMLElement>("[data-key-command]")) n.title = withKey(n.dataset.keyTitle ?? "", n.dataset.keyCommand ?? "");
+          dragHint.textContent = dragHintText();
+          cameraHint.textContent = cameraHelp();
         });
         applyView();
 
@@ -4556,7 +4599,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.target[1] += (-cy * dx - sy * dy) * s;
           redraw();
         };
-        let drag: { x: number; y: number; button: number } | null = null;
+        /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */
+        let drag: { x: number; y: number; mode: "translate" | "rotate" } | null = null;
         /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
         let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
         const dragObjects = (p: Vec3) => {
@@ -4624,16 +4668,29 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             }
           }
           if (e.button === 0) setArea(null);
-          if (e.button === 0 && editable && !activeGroup && selectedEntries().length && (ctrl || e.altKey)) {
+          // What the button is bound to (the World Editor's mouse controls: the middle button pans, the right one turns,
+          // Alt and the left button move the selection to the pointer, Ctrl and the left button turn it toward it).
+          const ids = w3.keybindings.mouseCommandsFor(e);
+          const control = mouseControlOf(ids, (c) => c === "translate" || c === "rotate" || (editable && !activeGroup && selectedEntries().length > 0));
+          if (control === "moveToPointer" || control === "rotateToPointer") {
             const g = groundAt(e);
             if (g) {
               e.preventDefault();
-              if (e.altKey) startMoveTo(g);
+              if (control === "moveToPointer") startMoveTo(g);
               else { startFacing(); faceHeld = true; faceToward(g); }
               refreshGroupRings();
               return;
             }
           }
+          if (e.button === 1) e.preventDefault();
+          if (control === "translate" || control === "rotate") {
+            drag = { x: e.clientX, y: e.clientY, mode: control };
+            press = null;
+            return;
+          }
+          // Any other command bound to the button (the user's) runs once per press.
+          const others = ids.filter((id) => !HELD_COMMANDS.has(id));
+          if (others.length && lateKeys(others, false)) { e.preventDefault(); return; }
           if (e.button === 0) {
             const rect = canvas.getBoundingClientRect();
             const inst = editable && !e.ctrlKey && !e.shiftKey ? renderer.pickObject(renderer.ray(e.clientX - rect.left, e.clientY - rect.top), pickRadius, strays) : null;
@@ -4650,8 +4707,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             press = { x: e.clientX, y: e.clientY };
             return;
           }
-          if (e.button === 1) e.preventDefault();
-          drag = { x: e.clientX, y: e.clientY, button: e.button };
           press = null;
         });
         canvas.addEventListener("mousemove", (e) => {
@@ -4681,21 +4736,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (e.button === 0 && press && !box?.shown) pickAt(e);
           press = null;
         });
-        // Undo/redo anywhere in the editor (toolbars, panels), except while typing.
+        // Undo/redo anywhere in the editor (toolbars, panels), except while typing: Undo and Redo's keys (Ctrl+Z, Ctrl+Y,
+        // Ctrl+Shift+Z by default), which the workbench leaves to the editor (undoKeys).
+        addKeyContext(el, UNDO_CONTEXT);
         el.addEventListener("keydown", (e) => {
           if (glDead) return;
           const t = e.target as HTMLElement;
           if (t.tagName === "TEXTAREA" || (t.tagName === "INPUT" && !["checkbox", "range", "button"].includes((t as HTMLInputElement).type))) return;
-          if (!(e.ctrlKey || e.metaKey)) return;
-          const key = eventKey(e).toLowerCase();
-          if (key === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
-          else if (key === "y") { e.preventDefault(); redo(); }
+          const step = undoStepOf(w3.keybindings.commandsFor(e));
+          if (step) { e.preventDefault(); if (step === "redo") redo(); else undo(); }
         });
         /** The key commands after a tab's own keys (`ids` as earlyKeys'): Space, Ctrl+F1, the View keys and any other
          *  command bound here, facing the pointer, deleting, the selection's keys, and last the camera's (as the World
          *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection Ctrl
          *  and the arrows nudge it instead). True when one did something. */
         const lateKeys = (ids: readonly string[], repeat: boolean) => {
+          // Escape with nothing else to end: facing the pointer, else the selection.
+          if (ids.includes(CANCEL_COMMAND)) {
+            if (facing) endFacing(false); else clearSelection();
+            return true;
+          }
           if (ids.includes(RECALL_COMMAND) && !activeGroup) {
             if (repeat || facing) return true;
             if (selectedEntries().length) clearSelection(); else selectEntries(lastSelected);
@@ -4709,7 +4769,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           // The World Editor's View keys (V game view, Ctrl+T terrain, Ctrl+D doodads, …), and whatever else the user
           // bound under terrainFocus: run as commands, once per press. H and V mirror what's selected or being pasted
           // first (earlyKeys).
-          const command = ids.find((id) => !KEY_COMMANDS.has(id));
+          const command = ids.find(runsAsCommand);
           if (command) {
             if (!repeat) void w3.commands.execute(command).catch((err) => w3.window.showError(String((err as Error)?.message ?? err)));
             return true;
@@ -4730,15 +4790,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         canvas.addEventListener("keydown", (e) => {
           // No edits by key on a view that isn't drawn (the message over it takes the mouse). Ctrl+S still saves: it's a command.
           if (glDead) return;
-          const key = eventKey(e);
-          if (toolGroups.picking && key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
-          if (key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
           // What the key is bound to here (the World Editor's keys by default; the user's keybindings.json), the binding
-          // that wins first. The view keeps its own order: the paste and the selection first, then a tab's own keys.
+          // that wins first. The view keeps its own order: picking, the paste and the selection first, then the open
+          // tab's, then the rest.
           const ids = w3.keybindings.commandsFor(e);
-          if (clipboardKey(e, ids)) { e.preventDefault(); return; }
+          // The area key counts while held (up again: areaKeyUp), whatever else it does.
+          if (ids.includes(AREA_COMMAND)) { areaKey = true; areaKeyCode = keyCodeOf(e); }
+          if (earlyKeys(ids, e.repeat)) { e.preventDefault(); return; }
+          if (tabKeys(ids)) { e.preventDefault(); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
-          if (key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
           if (lateKeys(ids, e.repeat)) e.preventDefault();
         });
         const onMove = (e: MouseEvent) => {
@@ -4753,7 +4813,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!drag) return;
           const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
           drag.x = e.clientX; drag.y = e.clientY;
-          if (drag.button === 0 || drag.button === 1) {
+          if (drag.mode === "translate") {
             pan(dx, dy);
           } else {
             renderer.yaw -= dx * 0.01;
@@ -4789,14 +4849,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         window.addEventListener("mousemove", onMove);
         window.addEventListener("mouseup", onUp);
         // Wherever the key comes up, and if it never does here: Alt+Tab takes it along.
-        const areaKeyUp = (e: KeyboardEvent) => { if (eventKey(e).toLowerCase() === "a") areaKey = false; };
+        const areaKeyUp = (e: KeyboardEvent) => { if (areaKey && keyCodeOf(e) === areaKeyCode) areaKey = false; };
         const areaKeyLost = () => { areaKey = false; };
         window.addEventListener("keyup", areaKeyUp);
         window.addEventListener("blur", areaKeyLost);
         canvas.addEventListener("wheel", (e) => {
           e.preventDefault();
-          renderer.distance = Math.max(200, Math.min(renderer.terrain.width * 300, renderer.distance * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
-          redraw();
+          // The wheel's bindings: Camera - Zoom In and Out by default (a wheel step zooms by its own amount), or what else
+          // the user bound to it.
+          const ids = w3.keybindings.mouseCommandsFor(e);
+          const move = cameraMoveOf(ids);
+          if (move && "zoom" in move) {
+            renderer.distance = Math.max(200, Math.min(renderer.terrain.width * 300, renderer.distance * (move.zoom > 1 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM)));
+            redraw();
+            return;
+          }
+          const others = ids.filter((id) => !HELD_COMMANDS.has(id));
+          if (others.length) lateKeys(others, false);
         }, { passive: false });
         // Screen-edge scrolling, as the World Editor's (viewmodes.ts edgeScroll): the pointer resting at a side of the
         // view scrolls it, while the view has the keyboard, the window has the focus and no button is held (a drag pans

@@ -8,7 +8,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
-import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
@@ -186,13 +186,13 @@ class SettingsView {
     private wts: string, private fileName: string, private campaign: boolean) {
     el.classList.add("gs-editor");
     el.tabIndex = -1;
+    addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => {
       const t = e.target as HTMLElement;
       if ((t instanceof HTMLInputElement && t.type !== "checkbox") || t instanceof HTMLTextAreaElement) return;
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = keyOf(e).toLowerCase();
-      if (k === "z" && !e.shiftKey) { this.step(this.undoStack, this.redoStack); e.preventDefault(); }
-      else if (k === "y" || (k === "z" && e.shiftKey)) { this.step(this.redoStack, this.undoStack); e.preventDefault(); }
+      const step = undoStepOf(w3.keybindings.commandsFor(e));
+      if (step === "undo") { this.step(this.undoStack, this.redoStack); e.preventDefault(); }
+      else if (step === "redo") { this.step(this.redoStack, this.undoStack); e.preventDefault(); }
     });
     this.render();
   }

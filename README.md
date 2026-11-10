@@ -34,8 +34,9 @@ What the World Editor doesn't have:
   and automatic checkpoints keep packed copies to go back to.
 - **VS Code's way of working.** Activity bar, side views, tabs, a command palette (Ctrl+Shift+P) for every
   command, quick file open (Ctrl+P), and settings per user or per project (`.w3proj/settings.json`, versioned with
-  the map). Inside the terrain view the World Editor's keys and mouse still apply, and every key, the terrain
-  view's included, can be changed in Keyboard Shortcuts (Ctrl+K Ctrl+S) or `keybindings.json`.
+  the map). Inside the terrain view the World Editor's keys and mouse still apply, and every key (undo and redo,
+  the terrain view's and its mouse buttons and wheel included) can be changed in Keyboard Shortcuts (Ctrl+K Ctrl+S)
+  or `keybindings.json`.
 - **Extensions.** Nearly every editor is an extension on a public API; you can add commands, views, editors,
   settings, MCP tools and Problems checks, or turn a built-in off and replace it.
 - **Editable binary formats.** The map file layouts are [format definitions](#format-definitions) (JSON), not
@@ -427,8 +428,12 @@ edits either layer; the map tools' parameters live under `terrain.*` (pathing, s
 its keys, records a new key by pressing it, removes one, resets a command and shows keys bound twice; it writes
 `keybindings.json` next to `settings.json` (a list of `{ key, command, when }`; a command written `-id` takes a default
 away), which can be edited by hand and applies at once. Context keys for `when`: `project`, `editor`, `inputFocus`, and
-those of the element with the keyboard (`data-key-context`): the terrain view's keys, the World Editor's by default, are
-all under `terrainFocus`, and the view reads them with `w3.keybindings.commandsFor(event)`.
+those of the elements around the one with the keyboard (`data-key-context`): the terrain view's keys, the World Editor's
+by default, are all under `terrainFocus`, and the view reads them with `w3.keybindings.commandsFor(event)`; an editor
+with its own undo says `undoKeys`, where Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z are Undo and Redo's keys. The mouse has keys
+too, as the World Editor's Configure Controls: `leftbutton`, `middlebutton`, `rightbutton`, `wheelup`, `wheeldown`, with
+modifiers (`alt+leftbutton`); the terrain view reads them with `w3.keybindings.mouseCommandsFor(event)` (its camera's
+Translate and Rotate, the selection's Move and Rotate to the pointer, the wheel's zoom).
 
 **Services and dependencies.** An extension shares functionality by declaring
 `"contributes": { "services": [{ "id": "me.thing" }] }` and calling

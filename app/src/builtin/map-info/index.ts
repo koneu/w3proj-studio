@@ -622,7 +622,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (focus) target?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
         };
         el.append(h("div.map-info", {}, nav, body));
-        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
+        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
         show(section, firstAnchor);
         const controller: OpenEditor = {
           root,

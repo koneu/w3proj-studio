@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
-import { KEY_COMMANDS } from "./selectionkeys";
+import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 
 // The View and camera keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
@@ -12,7 +12,7 @@ const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.j
 const bindings = defaultBindings([], manifest.contributes.keybindings);
 type Ev = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
 const bound = (e: Ev) => { const c = eventChord(e); return c ? commandsFor(bindings, c, { terrainFocus: true }) : []; };
-const viewKeyCommand = (e: Ev) => bound(e).find((id) => !KEY_COMMANDS.has(id)) ?? null;
+const viewKeyCommand = (e: Ev) => bound(e).find(runsAsCommand) ?? null;
 const cameraKey = (e: Ev) => cameraMoveOf(bound(e));
 const keyOf = (command: string) => { const k = primaryKey(bindings, command); return k ? keyLabel(k) : undefined; };
 
@@ -116,14 +116,16 @@ test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Rig
 
 test("every View key runs a command the terrain viewer declares, one per key; titles don't name keys that can change", () => {
   const ids = new Map(manifest.contributes.commands.map((c) => [c.id, c.title]));
-  const view = bindings.filter((b) => !KEY_COMMANDS.has(b.command));
+  const view = bindings.filter((b) => runsAsCommand(b.command));
   assert.equal(view.length, 17, "the World Editor's View keys Studio has");
   for (const b of bindings) assert.ok(ids.has(b.command), `${b.command} (${b.key}) isn't declared`);
   for (const b of view) assert.ok(!/\([^)]*\)$/.test(ids.get(b.command)!), `${b.command}'s title names a key: ${ids.get(b.command)}`);
   assert.equal(new Set(view.map((b) => b.key)).size, view.length, "one View command per key");
   // Each camera command has its keys, and every key command is declared.
   for (const id of Object.keys(CAMERA_COMMANDS)) assert.ok(bindings.some((b) => b.command === id), id);
-  for (const id of KEY_COMMANDS) assert.ok(ids.has(id), `${id} isn't declared`);
+  for (const id of [...KEY_COMMANDS, ...HELD_COMMANDS]) assert.ok(ids.has(id), `${id} isn't declared`);
+  // The tabs' list commands bound here are the tabs', not run as commands (no "the open tab has no list" note).
+  for (const b of bindings) if (b.key.startsWith("ctrl+tab") || b.key === "ctrl+shift+tab") assert.equal(runsAsCommand(b.command), false, b.command);
 });
 
 test("lightRings: round where the light is, as far as it reaches, scaled with the object", () => {

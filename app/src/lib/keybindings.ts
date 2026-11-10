@@ -19,7 +19,12 @@ import { keyOf } from "./keys";
 
 // ---- keys --------------------------------------------------------------------------------------------------------
 
-const NAMED = /^(?:f(?:[1-9]|1[0-9]|2[0-4])|numpad[0-9]|up|down|left|right|space|enter|escape|tab|backspace|delete|insert|home|end|pageup|pagedown|pause|capslock|contextmenu)$/;
+const NAMED = /^(?:f(?:[1-9]|1[0-9]|2[0-4])|numpad[0-9]|up|down|left|right|space|enter|escape|tab|backspace|delete|insert|home|end|pageup|pagedown|pause|capslock|contextmenu|leftbutton|middlebutton|rightbutton|wheelup|wheeldown)$/;
+/** The mouse's "keys", as the World Editor's Configure Controls offers them (its WESTRING_MOUSE_BUTTON_* and
+ *  WESTRING_MOUSE_WHEEL_*): a button, pressed with modifiers ("alt+leftbutton"), or the wheel turned. Only a view that
+ *  reads them (the terrain view: w3.keybindings.mouseCommandsFor) does anything with them. */
+const MOUSE = /^(?:leftbutton|middlebutton|rightbutton|wheelup|wheeldown)$/;
+const BUTTONS = ["leftbutton", "middlebutton", "rightbutton"] as const;
 const ALIAS: Record<string, string> = {
   arrowup: "up", arrowdown: "down", arrowleft: "left", arrowright: "right", esc: "escape", del: "delete", return: "enter",
   spacebar: "space", " ": "space", pgup: "pageup", pgdown: "pagedown", page_up: "pageup", page_down: "pagedown",
@@ -67,7 +72,24 @@ export function normalizeKey(spec: unknown): string | null {
   const chords = spec.trim().split(/\s+/).filter(Boolean);
   if (!chords.length || chords.length > 2) return null;
   const out = chords.map(normalizeChord);
-  return out.every((c) => c !== null) ? out.join(" ") : null;
+  if (!out.every((c) => c !== null)) return null;
+  // A mouse button or the wheel is a key of its own: nothing waits for a second chord after it, or before it.
+  if (out.length > 1 && out.some((c) => isMouseKey(c!))) return null;
+  return out.join(" ");
+}
+
+/** Whether a key (in its written form) is the mouse's: a button or the wheel, with or without modifiers. */
+export function isMouseKey(key: string): boolean {
+  return MOUSE.test(key.split("+").pop() ?? "");
+}
+
+/** The mouse chord of a button pressed ("ctrl+rightbutton") or the wheel turned ("wheeldown"); null for other buttons
+ *  (back, forward) and a wheel that only went sideways. */
+export function mouseChord(e: { type?: string; button?: number; deltaY?: number; ctrlKey: boolean; metaKey?: boolean; altKey: boolean; shiftKey: boolean }): string | null {
+  let key: string | undefined;
+  if (e.type === "wheel" || (e.deltaY !== undefined && e.button === undefined)) key = e.deltaY ? (e.deltaY > 0 ? "wheeldown" : "wheelup") : undefined;
+  else key = BUTTONS[e.button ?? -1];
+  return key ? chordOf({ ctrl: e.ctrlKey || !!e.metaKey, alt: e.altKey, shift: e.shiftKey }, key) : null;
 }
 
 const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta", "AltGraph", "OS", "Hyper", "Super"]);
@@ -83,7 +105,10 @@ export function eventChord(e: { key: string; code?: string; ctrlKey: boolean; me
   return chordOf({ ctrl: e.ctrlKey || !!e.metaKey, alt: e.altKey, shift: e.shiftKey }, key);
 }
 
-const LABEL: Record<string, string> = { pageup: "Page Up", pagedown: "Page Down", capslock: "Caps Lock", contextmenu: "Menu", backspace: "Backspace", space: "Space" };
+const LABEL: Record<string, string> = {
+  pageup: "Page Up", pagedown: "Page Down", capslock: "Caps Lock", contextmenu: "Menu", backspace: "Backspace", space: "Space",
+  leftbutton: "Left Button", middlebutton: "Middle Button", rightbutton: "Right Button", wheelup: "Wheel Up", wheeldown: "Wheel Down",
+};
 
 /** "ctrl+k ctrl+s" as people write it: Ctrl+K Ctrl+S; "numpad8" NumPad 8, "pageup" Page Up. */
 export function keyLabel(key: string): string {
@@ -274,6 +299,59 @@ export function commandsFor(bindings: readonly Binding[], chord: string, ctx: Ke
   return out;
 }
 
+const MOD_ORDER = ["ctrl", "alt", "shift"];
+const splitChord = (chord: string) => { const parts = chord.split("+"); const key = parts.pop()!; return { key, mods: parts }; };
+
+/** Every command a mouse chord is bound to where its `when` holds, the binding that wins first. A button pressed with
+ *  more modifiers than any binding of it names still counts (as the terrain view's middle button pans and its right
+ *  button turns with Ctrl held too): the bindings whose modifiers are all held match, those naming the most modifiers
+ *  first, then the later one. */
+export function mouseCommandsFor(bindings: readonly Binding[], chord: string, ctx: KeyContext): string[] {
+  const pressed = splitChord(chord);
+  if (!MOUSE.test(pressed.key)) return [];
+  const found: { command: string; mods: number; at: number }[] = [];
+  bindings.forEach((b, at) => {
+    if (b.key.includes(" ")) return;
+    const k = splitChord(b.key);
+    if (k.key !== pressed.key || !k.mods.every((m) => pressed.mods.includes(m)) || !whenHolds(b.when, ctx)) return;
+    found.push({ command: b.command, mods: k.mods.filter((m) => MOD_ORDER.includes(m)).length, at });
+  });
+  found.sort((a, b) => b.mods - a.mods || b.at - a.at);
+  const out: string[] = [];
+  for (const f of found) if (!out.includes(f.command)) out.push(f.command);
+  return out;
+}
+
+// ---- undo and redo -------------------------------------------------------------------------------------------------
+// Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z are the Edit menu's Undo and Redo, bound under `undoKeys`: the context key of an editor
+// that takes back its own steps (the element with its key handler says it in data-key-context). The workbench leaves
+// those keys to the editor, which asks what the key is bound to (undoStepOf): bound in the workbench as well, a key
+// would step twice.
+
+export const UNDO_CONTEXT = "undoKeys";
+export const UNDO_COMMAND = "workbench.undo";
+export const REDO_COMMAND = "workbench.redo";
+export const UNDO_BINDINGS: readonly KeybindingRule[] = [
+  { key: "ctrl+z", command: UNDO_COMMAND, when: UNDO_CONTEXT },
+  { key: "ctrl+y", command: REDO_COMMAND, when: UNDO_CONTEXT },
+  { key: "ctrl+shift+z", command: REDO_COMMAND, when: UNDO_CONTEXT },
+];
+
+/** Undo or redo, by the commands a key is bound to (the winner first); null for neither. */
+export function undoStepOf(commands: readonly string[]): "undo" | "redo" | null {
+  for (const c of commands) {
+    if (c === UNDO_COMMAND) return "undo";
+    if (c === REDO_COMMAND) return "redo";
+  }
+  return null;
+}
+
+/** Adds a context key to an element's data-key-context (keeping the ones it has). */
+export function addKeyContext(el: { dataset: DOMStringMap }, key: string) {
+  const keys = (el.dataset.keyContext ?? "").split(/\s+/).filter(Boolean);
+  if (!keys.includes(key)) el.dataset.keyContext = [...keys, key].join(" ");
+}
+
 /** The other bindings with the same key: they compete when their `when`s hold together. */
 export function conflictsOf(bindings: readonly Binding[], b: Pick<Binding, "key" | "command" | "when">): Binding[] {
   return bindings.filter((o) => o.key === b.key && !(o.command === b.command && sameWhen(o.when, b.when)));
@@ -285,18 +363,22 @@ export function primaryKey(bindings: readonly Binding[], command: string): strin
   return (mine.filter((b) => b.source === "user").pop() ?? mine[0])?.key;
 }
 
-type ElementLike = { tagName?: string; type?: string; isContentEditable?: boolean; closest?: (s: string) => ElementLike | null; getAttribute?: (n: string) => string | null };
+type ElementLike = { tagName?: string; type?: string; isContentEditable?: boolean; parentElement?: ElementLike | null; closest?: (s: string) => ElementLike | null; getAttribute?: (n: string) => string | null };
 const TYPING_INPUTS = /^(?:text|search|email|url|password|number|tel|date|time|datetime-local|month|week)?$/;
 
-/** What the element a key went to says about it: the context keys of its closest `data-key-context` (the view's own
- *  keys), whether it is a field one types into (context key `inputFocus`), and whether it takes every key itself
- *  (`data-all-keys`: a field recording a key, where Ctrl+S is the key wanted, not Save). */
+/** What the element a key went to says about it: the context keys of every `data-key-context` it is in (the views' own
+ *  keys: the terrain view's canvas says terrainFocus, the editor around it undoKeys), whether it is a field one types
+ *  into (context key `inputFocus`), and whether it takes every key itself (`data-all-keys`: a field recording a key,
+ *  where Ctrl+S is the key wanted, not Save). */
 export function targetContext(target: EventTarget | null): { own: Set<string>; inputFocus: boolean; allKeys: boolean } {
   const el = target as ElementLike | null;
   const own = new Set<string>();
   if (!el || typeof el.closest !== "function") return { own, inputFocus: false, allKeys: false };
-  const holder = el.closest("[data-key-context]");
-  for (const k of (holder?.getAttribute?.("data-key-context") ?? "").split(/\s+/)) if (k) own.add(k);
+  for (let holder = el.closest("[data-key-context]"), n = 0; holder && n < 64; n++) {
+    for (const k of (holder.getAttribute?.("data-key-context") ?? "").split(/\s+/)) if (k) own.add(k);
+    const up = holder.parentElement;
+    holder = up && typeof up.closest === "function" ? up.closest("[data-key-context]") : null;
+  }
   const tag = (el.tagName ?? "").toUpperCase();
   const inputFocus = tag === "TEXTAREA" || tag === "SELECT" || (tag === "INPUT" && TYPING_INPUTS.test((el.type ?? "").toLowerCase())) || !!el.isContentEditable || !!el.closest(".cm-editor");
   return { own, inputFocus, allKeys: !!el.closest("[data-all-keys]") };
@@ -521,6 +603,10 @@ export class KeybindingService {
 
   commandsFor(chord: string, ctx: KeyContext): string[] {
     return commandsFor(this.bindings(), chord, ctx);
+  }
+
+  mouseCommandsFor(chord: string, ctx: KeyContext): string[] {
+    return mouseCommandsFor(this.bindings(), chord, ctx);
   }
 
   resolve(chords: readonly string[], ctx: KeyContext) {

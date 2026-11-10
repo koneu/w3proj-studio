@@ -13,7 +13,7 @@ import {
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
 import { generateAiScript } from "../../lib/ai/script";
-import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { callText, paramText, type DisplayContext } from "../../lib/triggers/display";
@@ -187,6 +187,7 @@ class AiView {
     this.display = { data, objectName: (id) => this.names.get(id) };
     el.classList.add("ai-editor");
     el.tabIndex = -1;
+    addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => this.keyDown(e));
     void loadHeroSkills(w3).then((m) => { this.skills = m; if (this.tab === 1) this.render(); });
     this.render();
@@ -312,10 +313,9 @@ class AiView {
   private keyDown(e: KeyboardEvent) {
     const t = e.target as HTMLElement;
     if (t instanceof HTMLInputElement && t.type === "text" || t instanceof HTMLTextAreaElement) return;
-    if (!(e.ctrlKey || e.metaKey)) return;
-    const k = keyOf(e).toLowerCase();
-    if (k === "z" && !e.shiftKey) { this.undo(); e.preventDefault(); }
-    else if (k === "y" || (k === "z" && e.shiftKey)) { this.redo(); e.preventDefault(); }
+    const step = undoStepOf(this.w3.keybindings.commandsFor(e));
+    if (step === "undo") { this.undo(); e.preventDefault(); }
+    else if (step === "redo") { this.redo(); e.preventDefault(); }
   }
 
   // ---- names ---------------------------------------------------------------------------

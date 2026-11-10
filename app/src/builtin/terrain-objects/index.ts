@@ -11,7 +11,6 @@ import {
   OBJECTS_SERVICE, TERRAIN_SERVICE,
   type ObjectsService, type PlacedEntry, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance,
 } from "../../extensions/services";
-import { keyOf } from "../../lib/keys";
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
@@ -345,9 +344,11 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       });
     },
     pointerLeave() { lastGround = null; ed.setBrush(null); void showGhost(null); },
-    keyDown(e) {
-      if (keyOf(e) === "Escape" && placing) { placing = null; update(); void showGhost(null); return true; }
-      return false;
+    // Escape (the view's Cancel) stops placing.
+    cancel() {
+      if (!placing) return false;
+      placing = null; update(); void showGhost(null);
+      return true;
     },
   };
 }

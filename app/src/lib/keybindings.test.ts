@@ -8,7 +8,7 @@ import { test } from "node:test";
 import {
   addKey, changeKey, changeWhen, commandsFor, conflictsOf, defaultBindings, effectiveBindings, eventChord, isViewBinding, keyLabel,
   KeybindingService, normalizeKey, parseKeybindingsFile, parseWhen, evalWhen, primaryKey, removeBinding, resetCommand, resolve,
-  targetContext, userRules, type Binding,
+  targetContext, userRules, type Binding, isMouseKey, mouseChord, mouseCommandsFor, UNDO_BINDINGS, UNDO_CONTEXT, undoStepOf,
 } from "./keybindings";
 
 const ev = (key: string, mods: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) =>
@@ -177,6 +177,93 @@ test("the element a key went to: its view's context keys, a typing field, a fiel
   assert.equal(targetContext(el("INPUT", { "data-all-keys": "" }, "text") as unknown as EventTarget).allKeys, true);
   assert.deepEqual(targetContext(null), { own: new Set(), inputFocus: false, allKeys: false });
   assert.equal(targetContext({} as EventTarget).inputFocus, false, "the window");
+});
+
+test("the context keys of every element around the target count: the terrain canvas in an editor with undo keys", () => {
+  type El = { tagName: string; attrs: Record<string, string>; parentElement: El | null; getAttribute(n: string): string | null; closest(s: string): El | null };
+  const node = (tag: string, attrs: Record<string, string>, parent: El | null): El => {
+    const me: El = {
+      tagName: tag, attrs, parentElement: parent,
+      getAttribute: (n) => attrs[n] ?? null,
+      closest: (s) => {
+        for (let at: El | null = me; at; at = at.parentElement) if (s === "[data-key-context]" && at.attrs["data-key-context"] !== undefined) return at;
+        return null;
+      },
+    };
+    return me;
+  };
+  const editor = node("DIV", { "data-key-context": "undoKeys" }, node("BODY", {}, null));
+  const canvas = node("CANVAS", { "data-key-context": "terrainFocus" }, node("DIV", {}, editor));
+  assert.deepEqual([...targetContext(canvas as unknown as EventTarget).own].sort(), ["terrainFocus", "undoKeys"]);
+  assert.deepEqual([...targetContext(node("BUTTON", {}, editor) as unknown as EventTarget).own], ["undoKeys"]);
+});
+
+test("mouse keys: the World Editor's buttons and wheel, written one way, read from events, a key of their own", () => {
+  assert.equal(normalizeKey("Alt+LeftButton"), "alt+leftbutton");
+  assert.equal(normalizeKey("shift+ctrl+rightbutton"), "ctrl+shift+rightbutton");
+  assert.equal(normalizeKey("wheelup"), "wheelup");
+  assert.equal(normalizeKey("ctrl+k leftbutton"), null, "no second chord with the mouse");
+  assert.equal(normalizeKey("middlebutton ctrl+s"), null);
+  assert.equal(keyLabel("ctrl+middlebutton"), "Ctrl+Middle Button");
+  assert.equal(keyLabel("wheeldown"), "Wheel Down");
+  assert.equal(isMouseKey("alt+leftbutton"), true);
+  assert.equal(isMouseKey("ctrl+l"), false);
+  const m = (button: number, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) =>
+    ({ type: "mousedown", button, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+  assert.equal(mouseChord(m(0)), "leftbutton");
+  assert.equal(mouseChord(m(1, { ctrlKey: true })), "ctrl+middlebutton");
+  assert.equal(mouseChord(m(2, { metaKey: true, shiftKey: true })), "ctrl+shift+rightbutton", "Cmd counts as Ctrl");
+  assert.equal(mouseChord(m(3)), null, "back and forward aren't keys");
+  // A wheel event is a mouse event with button 0: its type tells.
+  const w = (deltaY: number, mods = {}) => ({ type: "wheel", button: 0, deltaY, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+  assert.equal(mouseChord(w(100)), "wheeldown");
+  assert.equal(mouseChord(w(-3, { altKey: true })), "alt+wheelup");
+  assert.equal(mouseChord(w(0)), null, "sideways only");
+});
+
+test("a mouse button matches the bindings whose modifiers it holds, those naming most first, then the later", () => {
+  const bindings = defaultBindings([], [
+    { key: "middlebutton", command: "pan", when: "view" },
+    { key: "rightbutton", command: "turn", when: "view" },
+    { key: "ctrl+leftbutton", command: "face", when: "view" },
+    { key: "alt+leftbutton", command: "move", when: "view" },
+    { key: "wheelup", command: "zoomIn", when: "view" },
+    { key: "g", command: "grid", when: "view" },
+  ]);
+  const ctx = { view: true };
+  assert.deepEqual(mouseCommandsFor(bindings, "middlebutton", ctx), ["pan"]);
+  assert.deepEqual(mouseCommandsFor(bindings, "ctrl+shift+middlebutton", ctx), ["pan"], "more modifiers held still pan");
+  assert.deepEqual(mouseCommandsFor(bindings, "ctrl+alt+leftbutton", ctx), ["move", "face"], "a tie: the later binding first");
+  assert.deepEqual(mouseCommandsFor(bindings, "shift+leftbutton", ctx), [], "nothing is bound to the left button alone");
+  assert.deepEqual(mouseCommandsFor(bindings, "ctrl+wheelup", ctx), ["zoomIn"]);
+  assert.deepEqual(mouseCommandsFor(bindings, "middlebutton", {}), [], "when");
+  assert.deepEqual(mouseCommandsFor(bindings, "g", ctx), [], "keys aren't the mouse's");
+  // The user's own binding naming more modifiers comes first; one of the button alone still matches after it.
+  const mine = effectiveBindings(bindings, [{ key: "shift+middlebutton", command: "grid", when: "view" }]);
+  assert.deepEqual(mouseCommandsFor(mine, "ctrl+shift+middlebutton", ctx), ["grid", "pan"]);
+  // Taken away, a default matches nothing.
+  assert.deepEqual(mouseCommandsFor(effectiveBindings(bindings, [{ key: "rightbutton", command: "-turn" }]), "rightbutton", ctx), []);
+});
+
+test("undo and redo: the editors' keys are the Edit commands' bindings under undoKeys, left to the editor", () => {
+  const bindings = defaultBindings([], UNDO_BINDINGS);
+  const step = (e: ReturnType<typeof ev>, ctx: Record<string, unknown> = { [UNDO_CONTEXT]: true }) => {
+    const c = eventChord(e);
+    return c ? undoStepOf(commandsFor(bindings, c, ctx)) : null;
+  };
+  assert.equal(step(ev("z", { ctrlKey: true })), "undo");
+  assert.equal(step(ev("Z", { ctrlKey: true, shiftKey: true })), "redo");
+  assert.equal(step(ev("y", { ctrlKey: true })), "redo");
+  assert.equal(step(ev("z", { metaKey: true })), "undo", "Cmd counts as Ctrl");
+  assert.equal(step(ev("z")), null);
+  assert.equal(step(ev("z", { ctrlKey: true }), {}), null, "outside an editor with undo keys");
+  // The workbench leaves them to the editor: a view binding where the element says undoKeys.
+  const r = resolve(bindings, ["ctrl+z"], { [UNDO_CONTEXT]: true });
+  assert.ok(r && "binding" in r && isViewBinding(r.binding, new Set([UNDO_CONTEXT])));
+  // Rebound by the user, the new key undoes and the old one doesn't.
+  const mine = effectiveBindings(bindings, [{ key: "ctrl+z", command: "-workbench.undo" }, { key: "ctrl+u", command: "workbench.undo", when: UNDO_CONTEXT }]);
+  assert.equal(undoStepOf(commandsFor(mine, "ctrl+u", { [UNDO_CONTEXT]: true })), "undo");
+  assert.equal(undoStepOf(commandsFor(mine, "ctrl+z", { [UNDO_CONTEXT]: true })), null);
 });
 
 test("every default key of the built-in manifests can be read, and its command is declared", () => {

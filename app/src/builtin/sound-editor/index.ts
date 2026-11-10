@@ -175,7 +175,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
         const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly);
         current = editor;
-        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo());
+        const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
         return {
           undo: () => { history.undo(); },

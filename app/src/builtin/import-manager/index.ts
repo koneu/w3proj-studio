@@ -9,6 +9,7 @@ import { formatBytes, h } from "../../workbench/dom";
 import { findPathRefs, updatePathRefs } from "./references";
 import { clickSelection } from "../../lib/selection";
 import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
@@ -98,14 +99,16 @@ class ImportView {
     private folder: string) {
     el.classList.add("imp-editor");
     el.tabIndex = -1;
+    addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => {
       // The filter field keeps its own keys (Ctrl+Z there takes back what was typed).
       if ((e.target as HTMLElement).closest("input, textarea, select")) return;
-      const key = keyOf(e).toLowerCase(), ctrl = (e.ctrlKey || e.metaKey) && !e.altKey;
+      const key = keyOf(e).toLowerCase();
       // Replace File's undo and redo, as the title bar's buttons.
-      if (ctrl && (key === "z" || key === "y")) {
+      const step = undoStepOf(w3.keybindings.commandsFor(e));
+      if (step) {
         e.preventDefault();
-        this.step(key === "z" && !e.shiftKey ? -1 : 1);
+        this.step(step === "undo" ? -1 : 1);
       } else if (key === "a" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         this.selected = new Set(this.shown.map(entryKey));

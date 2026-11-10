@@ -1,6 +1,7 @@
 import type { ExtensionContext, W3Api, MenuItem } from "../../extensions/api";
 import { outside, rangeNote } from "../../lib/objects/limits";
 import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { constantWarning, GAME_CONSTANT_FILES, MAP_CONSTANTS, readGameplayLimits, type GameplayLimits } from "../../lib/objects/constlimits";
 import { OBJECTS_SERVICE, type LiveObjectData } from "../../extensions/services";
 import { Listeners } from "../../lib/listeners";
@@ -1311,17 +1312,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           ),
         );
         saved = serialize();
-        // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) anywhere in the editor. In a text field only when nothing was
-        // typed since its value was set (else the field undoes its own typing).
+        // Undo and Redo's keys (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z) anywhere in the editor. In a text field only when nothing
+        // was typed since its value was set (else the field undoes its own typing).
+        addKeyContext(el, UNDO_CONTEXT);
         el.addEventListener("keydown", (e) => {
-          if (!(e.ctrlKey || e.metaKey)) return;
+          const which = undoStepOf(w3.keybindings.commandsFor(e));
+          if (!which) return;
           const t = e.target as HTMLElement;
           const typing = (t instanceof HTMLInputElement && t.type !== "checkbox" && t.value !== t.defaultValue)
             || (t instanceof HTMLTextAreaElement && t.value !== t.defaultValue);
           if (typing) return;
-          const k = keyOf(e).toLowerCase();
-          if (k === "z" && !e.shiftKey) { e.preventDefault(); step(-1); }
-          else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); step(1); }
+          e.preventDefault();
+          step(which === "undo" ? -1 : 1);
         });
         const exportFile = async () => {
           const path = await w3.window.pickSaveFile({ title: `Export ${kindInfo?.label ?? kind}`, defaultPath: `${kindInfo?.label ?? kind}.${kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });

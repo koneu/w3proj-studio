@@ -8,7 +8,7 @@ import { McpTools } from "../extensions/mcp";
 import { backendInvoke } from "./trackedinvoke";
 import { invoke, listen, NotUtf8Error, readBytes, readText, writeBytes, writeText } from "./backend";
 import { CommandService } from "./commands";
-import { conflictsOf, eventChord, isViewBinding, keyLabel, KeybindingService, normalizeKey, targetContext } from "../lib/keybindings";
+import { conflictsOf, eventChord, isViewBinding, keyLabel, KeybindingService, mouseChord, normalizeKey, REDO_COMMAND, targetContext, UNDO_BINDINGS, UNDO_COMMAND } from "../lib/keybindings";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
 import { menuTree, whyBlocked } from "./menus";
@@ -329,7 +329,12 @@ export class Workbench {
           const chord = eventChord(e);
           return chord ? wb.keybindings.commandsFor(chord, wb.keyContext(e.target).ctx) : [];
         },
+        mouseCommandsFor: (e) => {
+          const chord = mouseChord(e);
+          return chord ? wb.keybindings.mouseCommandsFor(chord, wb.keyContext(e.target).ctx) : [];
+        },
         chordOf: (e) => eventChord(e),
+        mouseChordOf: (e) => mouseChord(e),
         normalize: (key) => normalizeKey(key),
         label: (key) => keyLabel(key),
         labelFor: (command) => { const k = wb.keybindings.primaryKey(command); return k ? keyLabel(k) : undefined; },
@@ -430,9 +435,10 @@ export class Workbench {
       if (pick.value) await this.editors.open(path, pick.value);
       this.notifications.show("info", pick.value ? `${glob} now opens with ${pick.label}.` : `Removed the default editor for ${glob}.`);
     }, { category: "File" });
-    // No keys: each editor binds Ctrl+Z itself, and bound here too they'd step twice.
-    c("workbench.undo", "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit", menu: "Edit:1:1", when: "undo" });
-    c("workbench.redo", "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit", menu: "Edit:1:2", when: "undo" });
+    // Their keys (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z) are bound under undoKeys: the editors read them (lib/keybindings.ts
+    // undoStepOf), and the workbench leaves them to the editor, so a key steps once.
+    c(UNDO_COMMAND, "Undo", () => { if (!this.editors.undo()) this.notifications.show("info", "This editor has no undo."); }, { category: "Edit", menu: "Edit:1:1", when: "undo" });
+    c(REDO_COMMAND, "Redo", () => { if (!this.editors.redo()) this.notifications.show("info", "This editor has no redo."); }, { category: "Edit", menu: "Edit:1:2", when: "undo" });
     c("workbench.openSettings", "Open Settings (JSON)", async () => {
       const p = this.settings.settingsPath();
       // The file is made with the setting most likely to need changing: the game's folder (the programs follow it).
@@ -454,6 +460,7 @@ export class Workbench {
       await this.editors.open(p, "w3.textEditor");
     }, { category: "Preferences" });
     c("workbench.reload", "Reload Window", () => location.reload(), { category: "Developer", keybinding: "ctrl+r" });
+    this.keybindings.contribute("core", UNDO_BINDINGS);
     c("workbench.showLog", "Show Extension Host Log", () => this.log.show(), { category: "Developer", menu: "Help:2:1" });
   }
 

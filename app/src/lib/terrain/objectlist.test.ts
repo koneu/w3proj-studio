@@ -1,9 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { listKey, moveInList, stepInList } from "./objectlist";
+import { readFileSync } from "node:fs";
+import { listCommandOf, LIST_COMMANDS, moveInList, stepInList } from "./objectlist";
+import { commandsFor, defaultBindings, eventChord } from "../keybindings";
+
+// The list keys are the terrain viewer's default bindings (extension.json), read as the view reads them: what a key is
+// bound to under terrainFocus, then the first list command among those.
+const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { commands: { id: string }[]; keybindings: { key: string; command: string; when?: string }[] } };
+const bindings = defaultBindings([], manifest.contributes.keybindings);
+const listKey = (e: { key: string; code?: string; ctrlKey: boolean; metaKey?: boolean; altKey: boolean; shiftKey: boolean }) => {
+  const chord = eventChord(e);
+  return chord ? listCommandOf(commandsFor(bindings, chord, { terrainFocus: true })) : null;
+};
 
 const key = (k: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) =>
   ({ key: k, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+
+test("the list commands are declared commands, and only outside terrainFocus their keys do nothing", () => {
+  const ids = new Set(manifest.contributes.commands.map((c) => c.id));
+  for (const id of Object.keys(LIST_COMMANDS)) assert.ok(ids.has(id), id);
+  assert.equal(listCommandOf(commandsFor(bindings, "ctrl+tab", {})), null, "outside the map");
+  assert.equal(listCommandOf(["toString", "constructor"]), null, "names of an object's own aren't commands");
+});
 
 test("listKey: the World Editor's keys for its list items, with their modifiers exactly", () => {
   assert.equal(listKey(key("Tab", { ctrlKey: true })), "next");

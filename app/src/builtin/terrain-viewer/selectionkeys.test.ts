@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { borderFlags, FACE_COMMAND, joinSteps, KEY_COMMANDS, OBJECT_EDITOR_COMMAND, RECALL_COMMAND, scaled, selectionEditOf, turnOf } from "./selectionkeys";
-import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
+import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, FACE_COMMAND, HELD_COMMANDS, joinSteps, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf } from "./selectionkeys";
+import { commandsFor, defaultBindings, eventChord, keyLabel, mouseChord, mouseCommandsFor, primaryKey, UNDO_BINDINGS, UNDO_CONTEXT } from "../../lib/keybindings";
 
 // The selection's keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
 // what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then what those commands do.
@@ -15,7 +15,7 @@ const turnKey = (e: Ev) => turnOf(bound(e));
 const isRecallKey = (e: Ev) => bound(e).includes(RECALL_COMMAND);
 const isFaceKey = (e: Ev) => bound(e).includes(FACE_COMMAND);
 const isObjectEditorKey = (e: Ev) => bound(e).includes(OBJECT_EDITOR_COMMAND);
-const viewKeyCommand = (e: Ev) => bound(e).find((id) => !KEY_COMMANDS.has(id)) ?? null;
+const viewKeyCommand = (e: Ev) => bound(e).find(runsAsCommand) ?? null;
 const FACE_KEY = keyLabel(primaryKey(bindings, FACE_COMMAND) ?? "");
 
 const press = (key: string, more: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
@@ -72,7 +72,7 @@ test("T turns the selection toward the pointer; F is the World Editor's Fog Effe
   assert.equal(isFaceKey({ ...keys, key: "f", code: "KeyF" }), false);
   // No View key and no selection key takes T.
   assert.equal(viewKeyCommand({ ...keys, shiftKey: false }), null);
-  assert.equal(bindings.some((b) => b.key === "t" && !KEY_COMMANDS.has(b.command)), false);
+  assert.equal(bindings.some((b) => b.key === "t" && runsAsCommand(b.command)), false);
   assert.equal(turnKey({ ...keys, shiftKey: false }), null);
   assert.equal(selectionKey(keys), null);
 });
@@ -121,6 +121,59 @@ test("keys the webview calls Unidentified (WebKitGTK) go by the physical key (li
   assert.equal(isRecallKey({ key: "Unidentified", code: "Space", ...plain }), true);
   assert.equal(isObjectEditorKey({ key: "Unidentified", code: "F1", ...plain, ctrlKey: true }), true);
   assert.equal(turnKey({ key: "Unidentified", code: "KeyR", ...plain, shiftKey: true }), "ccw");
+});
+
+test("mouse controls by default: the middle button pans, the right turns, Alt and Ctrl with the left move and face", () => {
+  type M = Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>;
+  const control = (button: number, mods: M = {}, selection = true) => {
+    const chord = mouseChord({ type: "mousedown", button, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+    const ids = chord ? mouseCommandsFor(bindings, chord, { terrainFocus: true }) : [];
+    return mouseControlOf(ids, (c) => c === "translate" || c === "rotate" || selection);
+  };
+  assert.equal(control(1), "translate");
+  assert.equal(control(1, { ctrlKey: true, shiftKey: true }), "translate", "with modifiers too, as before");
+  assert.equal(control(2), "rotate");
+  assert.equal(control(2, { ctrlKey: true }), "rotate");
+  assert.equal(control(0, { altKey: true }), "moveToPointer");
+  assert.equal(control(0, { ctrlKey: true }), "rotateToPointer");
+  assert.equal(control(0, { metaKey: true }), "rotateToPointer", "Cmd counts as Ctrl");
+  assert.equal(control(0, { ctrlKey: true, altKey: true }), "moveToPointer", "Alt first, as before");
+  assert.equal(control(0, { altKey: true, shiftKey: true }), "moveToPointer");
+  assert.equal(control(0, { altKey: true }, false), null, "nothing selected: the left button's own (select, box)");
+  for (const mods of [{}, { shiftKey: true }] as M[]) assert.equal(control(0, mods), null, JSON.stringify(mods));
+  assert.equal(control(3), null, "back and forward do nothing");
+  // The wheel zooms, with or without modifiers; Wheel Up comes nearer.
+  const wheel = (deltaY: number, mods: M = {}) => {
+    const chord = mouseChord({ type: "wheel", button: 0, deltaY, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+    return chord ? mouseCommandsFor(bindings, chord, { terrainFocus: true }) : [];
+  };
+  assert.deepEqual(wheel(-100), ["w3.terrain.camera.zoomIn"]);
+  assert.deepEqual(wheel(100, { ctrlKey: true }), ["w3.terrain.camera.zoomOut"]);
+  // Their commands are held, not run, and declared.
+  const declared = new Set((manifest as unknown as { contributes: { commands: { id: string }[] } }).contributes.commands.map((c) => c.id));
+  for (const id of [...Object.values(MOUSE_CONTROLS), AREA_COMMAND]) { assert.ok(HELD_COMMANDS.has(id), id); assert.ok(declared.has(id), id); assert.equal(runsAsCommand(id), false, id); }
+});
+
+test("Undo's keys reach the map too (its editor says undoKeys), but the view doesn't run them: the editor's handler does", () => {
+  // With the workbench's Undo and Redo bindings, Ctrl+Z on the canvas is bound to workbench.undo there; run by the view
+  // as one of "the other commands bound here" as well, a resize was undone twice (app-smoke resizeUndo).
+  const all = [...defaultBindings([], UNDO_BINDINGS), ...bindings];
+  const ctx = { terrainFocus: true, [UNDO_CONTEXT]: true };
+  for (const chord of ["ctrl+z", "ctrl+y", "ctrl+shift+z"]) {
+    const ids = commandsFor(all, chord, ctx);
+    assert.ok(ids.length > 0, `${chord} is bound on the map (control)`);
+    assert.equal(ids.find(runsAsCommand), undefined, chord);
+  }
+});
+
+test("Escape cancels, A held selects an area (Shift too, not with Ctrl or Alt)", () => {
+  const plain = { code: "", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+  assert.deepEqual(bound({ ...plain, key: "Escape" }), [CANCEL_COMMAND]);
+  assert.ok(bound({ ...plain, key: "a" }).includes(AREA_COMMAND));
+  assert.ok(bound({ ...plain, key: "A", shiftKey: true }).includes(AREA_COMMAND));
+  assert.ok(bound({ ...plain, key: "Unidentified", code: "KeyA" }).includes(AREA_COMMAND), "WebKitGTK's unnamed key");
+  for (const mods of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }]) assert.equal(bound({ ...plain, key: "a", ...mods }).includes(AREA_COMMAND), false, JSON.stringify(mods));
+  assert.equal(runsAsCommand(CANCEL_COMMAND), false);
 });
 
 test("a size has a floor, and no drift from adding fractions", () => {
