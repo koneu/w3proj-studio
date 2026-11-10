@@ -17,11 +17,16 @@ Warcraft is a trademark of Blizzard Entertainment. You need your own installed c
 
 What the World Editor doesn't have:
 
-- **AI integration.** A built-in [MCP](https://modelcontextprotocol.io/) server lets AI clients (Claude Desktop,
-  Claude Code, VS Code, …) read and edit the open map: about 70 tools for terrain, objects, triggers, regions, map
-  properties, checkpoints and problems, plus design guides they can read. Write tools are off until you turn them
-  on (`mcp.writeTools`), every AI edit is one undo step with a checkpoint taken first, and the app can set up the
-  clients it finds. Extensions add their own tools (see [Extensions](#extensions)).
+- **AI integration.** Performance and cost heavily depend on provided guides and used models. Examples where done witth buildin guides and Claude Opus 5.5.
+
+  #### Example Forestpath
+    > "can you familiarize yourself with warcraft mapping and use the war3-proj konnektor to build a nice forest in region 000, with a path from south to east."
+        ![](docs/images/forestpath-1.png)
+
+    > "can you make the coner section more interesting"
+        ![](docs/images/forestpath-2.png)
+
+
 - **Problems view.** Checks the project like a compiler would: JASS errors in the map script, files that object
   data uses but nobody has, textures missing from imported models, placed objects of unknown types, imports
   without their file, triggers nothing runs. Click a problem to jump there; Build runs the checks first.
@@ -48,18 +53,9 @@ What the World Editor doesn't have:
 
 ## Caveats
 
-- **Formats are partly best guesses.** Blizzard doesn't document them. The codecs come from community work and
-  from samples (676 local maps round-trip byte for byte), but a byte-exact round trip doesn't prove what a field
-  *means*. Where a reading is uncertain the file stays raw instead of being rewritten. Maps from unusual editor
-  versions or patches can still show something wrong.
-- **It depends on Blizzard's game.** Nothing of the game is shipped. Studio reads the installed Warcraft III's
-  files (object tables, models, textures, trigger definitions), so without an install there's little it can
-  show or check, and Test Map needs the game itself. A game patch can change those files under it.
-- **Few users.** It's a small project; many maps and workflows have never been through it. Keep your maps in git
-  or keep backups.
-- **Tested mostly without the game.** Unit and system tests, a headless UI test, the real app driven hidden and a
-  corpus of real maps run on every change. Whether the game and the World Editor accept everything Studio writes
-  is checked by hand, and only for part of it so far. The terrain view's rendering is an approximation.
+- **Formats are mostly best guesses.** all of this migth brake with the next update. Always make sure you can open with WE.
+- **It depends on Blizzard's game.**
+- **Few users.** All of this migth work for my workflows, but brake in yours.
 
 ## How a map is stored
 
