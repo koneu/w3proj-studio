@@ -1906,6 +1906,71 @@ async function flyingHeights(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
+ *  HD model is OgreMauler and Classic one Ogre, is drawn with each in turn. In the 3.0 art (DE) the Ogre Lord (nogl),
+ *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
+ *  editor with unsaved edits stays as it is and offers to save first; Save and Reopen does both. */
+async function artModeReload(page, found) {
+  const fail = (what) => found.push(`art mode reload: ${what}`);
+  const k = await heightKit(page, "ArtMode");
+  const original = await k.setting("game.graphicsMode");
+  const setMode = (m) => page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(m)})`);
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__artGroup?.dispose();
+    window.__artEds = [];
+    window.__artGroup = s.registerToolGroup({ id: "smoke-art", title: "smoke-art", order: 998, create: (ed) => { window.__artEds.push(ed); return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const editors = () => page.evaluate(`window.__artEds.length`);
+  const drawn = (id) => page.evaluate(`window.__artEds.at(-1)?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)})?.model ?? null`);
+  const waitModel = async (what, id, re, ms = 30000) => until(what, async () => re.test((await drawn(id)) ?? ""), ms)
+    .catch(async () => fail(`${what}: ${id} is drawn with ${await drawn(id)}`));
+  try {
+    await setMode("hd");
+    // Opened again after the mode change (when it was another): the group's editor is the newest one.
+    await sleep(500);
+    await k.tool("place_objects", { objects: [{ id: "nogm", x: 0, y: 0, player: 1 }, { id: "nogl", x: 384, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    await waitModel("HD's Ogre Mauler", "nogm", /OgreMauler\\OgreMauler\.mdx$/i);
+    const view = `window.__artEds.at(-1)?.view()`;
+    await page.evaluate(`window.__artEds.at(-1).setView({ target: [256, 128, 0], distance: 1800 })`);
+    const before = await page.evaluate(view);
+    const opened = await editors();
+    await setMode("sd");
+    await waitModel("after switching to SD, the Classic Ogre", "nogm", /\\Ogre\\Ogre\.mdx$/i);
+    if ((await editors()) === opened) fail("switching to SD didn't open the terrain editor again");
+    const after = await page.evaluate(view);
+    if (Math.abs(after.target[0] - before.target[0]) > 1 || Math.abs(after.distance - before.distance) > 1) fail(`the camera moved with the reopen: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== "map/war3map.w3e.txt") fail("the terrain editor isn't the active tab after the reopen");
+    await setMode("de");
+    await waitModel("DE's Ogre Lord", "nogl", /OgreLord\\OgreLord\.mdx$/i);
+
+    // Unsaved edits: the editor stays, and says so.
+    await k.clearToasts();
+    const raised = await page.evaluate(`(() => {
+      const ed = window.__artEds.at(-1), t = ed.terrain, i = Math.round(-t.offsetY / 128) * t.width + Math.round(-t.offsetX / 128), was = t.corners[i].height;
+      t.corners[i].height = was + 64;
+      return ed.commitTerrain({ corners: [i], undo: () => { t.corners[i].height = was; }, redo: () => { t.corners[i].height = was + 64; } });
+    })()`);
+    if (!raised) return fail("the raise was refused");
+    const kept = await editors();
+    await setMode("hd");
+    const button = `[...document.querySelectorAll(".notifications button")].find((b) => b.textContent === "Save and Reopen")`;
+    await until("the offer to save first", () => page.evaluate(`!!${button}`), 10000)
+      .catch(async () => fail(`no "Save and Reopen" after switching with unsaved edits: ${await k.toasts()}`));
+    if ((await editors()) !== kept) fail("the editor with unsaved edits was opened again (its edits gone)");
+    if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the unsaved edits are gone after the mode change");
+    if (/OgreMauler/i.test((await drawn("nogm")) ?? "")) fail("the editor with unsaved edits changed its art");
+    await page.evaluate(`${button}?.click()`);
+    await waitModel("after Save and Reopen, HD's Ogre Mauler", "nogm", /OgreMauler\\OgreMauler\.mdx$/i);
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("still unsaved after Save and Reopen");
+  } finally {
+    await page.evaluate(`window.__artGroup?.dispose(); window.__artGroup = null; window.__artEds = null;`);
+    await setMode(original ?? "hd");
+  }
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** The Cameras tab: two cameras selected with a click and a Shift+click show the values they share and an empty field
  *  where they differ; a value typed there goes to both as one undo step. Duplicate copies the selected cameras with new
  *  names, one step. A value typed for one camera shows through it in the view at once, before it's an edit. */
@@ -3896,12 +3961,18 @@ async function graphicsModes(page, found) {
   await page.evaluate(`(async () => { const h = w3Workbench.host; await Promise.all(h.extensions.filter((e) => !e.disabled).map((e) => h.activate(e))); })()`);
   // The doodads: a bridge, a wall end cap (two variations) and a tall pillar (nine), all with Reforged models.
   const TYPES = ["LCcb", "YSw5", "LCpt", "LCct"];
-  const make = (name, modes) => {
+  const SPLIT_UNITS = ["ngrk", "nogm"];
+  const make =(name, modes) => {
     const root = join(dir, name);
     cpSync(FIXTURE, root, { recursive: true });
     const doo = json(join(root, "map", "war3map.doo.json"));
     TYPES.forEach((id, i) => doo.doodads.push({ ...doo.doodads[0], id, skinId: id, variation: 0, position: [256 + i * 128, 256, 0] }));
     put(join(root, "map", "war3map.doo.json"), doo);
+    // Units whose Classic model isn't their HD one (UnitSkin.txt file:sd and file:hd: the mud golem's HD MudGolem,
+    // Classic RockGolem; the Ogre Mauler's OgreMauler, Ogre): every mode has its own, so none may be reported.
+    const units = json(join(root, "map", "war3mapUnits.doo.json"));
+    SPLIT_UNITS.forEach((id, i) => units.units.push({ ...units.units[0], id, skinId: id, player: 24, editorId: 100 + i, position: [256 + i * 128, -256, 0] }));
+    put(join(root, "map", "war3mapUnits.doo.json"), units);
     const w3i = json(join(root, "map", "war3map.w3i.json"));
     w3i.supportedModes = modes;
     put(join(root, "map", "war3map.w3i.json"), w3i);
@@ -4092,6 +4163,69 @@ async function keyChords(page, found) {
   } finally {
     await page.evaluate(`(() => { for (const off of window.__smokeChordOff ?? []) off(); window.__smokeChordOff = null; })()`);
   }
+}
+
+/** The command palette (Ctrl+Shift+P) and quick picks by mouse, as VS Code's: the entry under the pointer is
+ *  highlighted, the wheel scrolls the list, a click picks the entry. The user found it unusable with the mouse
+ *  (2026-11-10, Linux). The mouse goes in as WebDriver's pointer on Linux, so WebKitGTK's own events come out. */
+async function paletteMouse(page, found) {
+  const fail = (what) => found.push(`palette mouse: ${what}`);
+  const hands = new Hands(page);
+  const shown = `!document.querySelector(".quick-input").hidden`;
+  const items = `[...document.querySelectorAll(".quick-input-item")]`;
+  const activeIndex = `${items}.findIndex((e) => e.classList.contains("active"))`;
+  // Over a terrain view, as the user had it: its canvas takes the mouse and the keys.
+  await heightKit(page, "Palette");
+  await hands.click(".model-stage canvas");
+  await hands.chord("Ctrl+Shift+P");
+  await until("the command palette", () => page.evaluate(shown), 5000).catch(() => fail("Ctrl+Shift+P didn't show the palette"));
+  try {
+    if (!(await page.evaluate(shown))) return;
+    const count = await page.evaluate(`${items}.length`);
+    if (count < 20) return fail(`only ${count} commands in the palette`);
+    // The pointer over the fourth entry: it is the highlighted one (Enter takes it).
+    const at = await page.evaluate(`(() => { const r = ${items}[3].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await hands.mouse("mouseMoved", at.x, at.y);
+    await until("the entry under the pointer highlighted", async () => (await page.evaluate(activeIndex)) === 3, 3000)
+      .catch(async () => fail(`with the pointer over the fourth entry, entry ${await page.evaluate(activeIndex)} is highlighted`));
+    // The wheel over the list scrolls it.
+    const list = await page.evaluate(`(() => { const l = document.querySelector(".quick-input-list"), r = l.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, room: l.scrollHeight - l.clientHeight }; })()`);
+    if (list.room <= 0) fail("the palette's list doesn't scroll (everything fits)");
+    else {
+      await hands.wheel(list.x, list.y, 300);
+      await until("the list scrolled", async () => (await page.evaluate(`document.querySelector(".quick-input-list").scrollTop`)) > 0, 3000)
+        .catch(() => fail("the mouse wheel over the palette's list didn't scroll it"));
+      if (!(await page.evaluate(shown))) fail("the wheel closed the palette");
+    }
+    // Escape still closes it, with the pointer over it.
+    await hands.chord("Escape");
+    await until("the palette closed", async () => !(await page.evaluate(shown)), 3000).catch(() => fail("Escape didn't close the palette"));
+  } finally {
+    if (await page.evaluate(shown)) await hands.chord("Escape");
+  }
+
+  // A click picks the entry clicked (here a quick pick of its own, whose answer can be read).
+  await page.evaluate(`(() => { window.__smokePick = "waiting"; w3.window.quickPick(Array.from({ length: 40 }, (_, i) => ({ label: "Smoke entry " + i, value: i })), { placeholder: "smoke" }).then((p) => { window.__smokePick = p ? p.value : null; }); })()`);
+  await until("the quick pick", () => page.evaluate(shown), 5000);
+  await hands.click(".quick-input-item", "Smoke entry 5");
+  await until("the clicked entry picked", async () => (await page.evaluate(`window.__smokePick`)) !== "waiting", 3000).catch(() => {});
+  const picked = await page.evaluate(`window.__smokePick`);
+  if (picked !== 5) fail(`clicking "Smoke entry 5" gave ${JSON.stringify(picked)}`);
+  if (await page.evaluate(shown)) { fail("the quick pick stayed open after the click"); await hands.chord("Escape"); }
+
+  // Opened by the mouse alone, from the title bar's search box: the keys are in the palette's input then, to type
+  // and to go up and down (WebKitGTK focuses a clicked button after its handlers ran).
+  await hands.click(".titlebar-search");
+  await until("the palette from the title bar", () => page.evaluate(shown), 5000).catch(() => fail("the title bar's search box didn't show the palette"));
+  await sleep(300);
+  if (!(await page.evaluate(`document.activeElement === document.querySelector(".quick-input-box")`))) {
+    fail(`opened from the title bar, the keys are in ${await page.evaluate(`document.activeElement?.className || document.activeElement?.tagName`)}, not the palette's input`);
+  }
+  await hands.chord("ArrowDown");
+  if ((await page.evaluate(activeIndex)) !== 1) fail(`ArrowDown in the palette opened from the title bar highlighted entry ${await page.evaluate(activeIndex)}`);
+  await hands.chord("Escape");
+  await until("the palette closed", async () => !(await page.evaluate(shown)), 3000).catch(() => fail("Escape didn't close the palette opened from the title bar"));
+  await page.evaluate(`w3.editors.closeAll()`);
 }
 
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
@@ -6614,6 +6748,7 @@ async function run() {
       // One check per line, in alphabetical order (check-scripts.mjs keeps it so): branches that add checks then touch
       // different lines and merge without conflicts.
       const onlyChecks = {
+        artModeReload,
         byHand,
         cameraEditing,
         chapterObjects,
@@ -6640,6 +6775,7 @@ async function run() {
         objectLayout,
         objectManagerLive,
         objectsWhileOpening,
+        paletteMouse,
         placeObjects,
         placerAndCampaign,
         playerStarts: (p, f) => playerStarts(p, f, project),
@@ -6755,6 +6891,7 @@ async function run() {
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
     await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
+    await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
     await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
     await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
@@ -6780,6 +6917,7 @@ async function run() {
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
+    await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));

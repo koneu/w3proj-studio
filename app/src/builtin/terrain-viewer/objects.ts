@@ -12,6 +12,7 @@ import { placeholderImage, placeholderModel } from "../../lib/model/placeholder"
 import { worldSphere } from "../../lib/model/frustum";
 import { bounds, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
+import { artValue } from "../../lib/objects/artset";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
 export interface Placed {
@@ -202,7 +203,7 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   for (const [f, kind] of SKIN_FILES) {
     const text = tables.get(f) ?? "";
     for (const [id, sec] of parseIni(text)) {
-      const get = (k: string) => sec.get(`${k}:${mode}`) ?? sec.get(k);
+      const get = (k: string) => artValue((key) => sec.get(key), k, mode);
       const file = get("file");
       if (!file) continue;
       out.set(id, {

@@ -252,6 +252,19 @@ test("the skins are parsed once per install and graphics mode, and come out alik
   assert.equal(skinParses.count - before, 3, "another mode, another install: parsed again");
 });
 
+test("a type with only Classic and HD models has one in the 3.0 art (DE) too: the Ogre Lord of LastRefuge", async () => {
+  // UnitSkin.txt names nogl's model only as file:hd and file:sd; with no file:de and no plain file, the DE view drew
+  // nothing for it (the user, 2026-11-10). DE falls back to Classic, as the storage's layers do.
+  const files = { ...gameTables(), "Units\\UnitSkin.txt": "[nogl]\r\nfile:hd=Units\\Creeps\\OgreLord\\OgreLord\r\nfile:sd=units\\creeps\\OgreLord\\OgreLordSD\r\nmodelScale:hd=1.1\r\nmodelScale:sd=1.3\r\n[nogm]\r\nfile:hd=Units\\Creeps\\OgreMauler\\OgreMauler\r\nfile:sd=units\\creeps\\Ogre\\Ogre\r\nfile:de=units\\creeps\\Ogre\\OgreDE\r\n" };
+  const of = async (mode: string) => loadSkins(fakeGame(files, { "game.installDir": "/art-sets", "game.graphicsMode": mode }));
+  const de = await of("de");
+  assert.equal(de.get("nogl")?.file, "units\\creeps\\OgreLord\\OgreLordSD");
+  assert.equal(de.get("nogl")?.modelScale, 1.3);
+  assert.equal(de.get("nogm")?.file, "units\\creeps\\Ogre\\OgreDE", "its own key first");
+  assert.equal((await of("hd")).get("nogl")?.file, "Units\\Creeps\\OgreLord\\OgreLord");
+  assert.equal((await of("sd")).get("nogm")?.file, "units\\creeps\\Ogre\\Ogre");
+});
+
 test("a reloaded game's changed table is seen, and a table that couldn't be read isn't kept as empty", async () => {
   const files = gameTables(), settings = { "game.installDir": "/cache-c", "game.graphicsMode": "hd" }, broken = new Set<string>();
   const w3 = fakeGame(files, settings, broken);
