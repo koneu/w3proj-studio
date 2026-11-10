@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../extensions/api";
-import { checkpointBefore, checkpointIfOn, forgetCheckpointsOffWarning } from "../lib/checkpoint";
+import { checkpointBefore, checkpointIfOn, checkpointOrStop, forgetCheckpointsOffWarning } from "../lib/checkpoint";
 import { CommandService } from "./commands";
 
 function app(checkpoint: "works" | "fails" | "absent", answer?: string) {
@@ -47,6 +47,24 @@ test("checkpointIfOn: made, it says nothing; without the extension it goes on an
   assert.deepEqual(other.asked, []);
   const failing = app("fails");
   await assert.rejects(checkpointIfOn(failing.w3, "Delete Invalid Objects"), /disk full/);
+  assert.deepEqual(failing.asked, []);
+  forgetCheckpointsOffWarning();
+});
+
+test("checkpointOrStop (map shrink, AI tools' big changes): without the extension it goes on with the one-time warning; a failure stops with 'Nothing changed'", async () => {
+  forgetCheckpointsOffWarning();
+  assert.equal(await checkpointOrStop(app("works").w3, "Shrinking the map"), true);
+  const off = app("absent");
+  assert.equal(await checkpointOrStop(off.w3, "Shrinking the map"), false);
+  assert.equal(await checkpointOrStop(off.w3, "An AI tool's change"), false);
+  assert.equal(off.asked.length, 1, "once per session");
+  assert.match(off.asked[0], /Shrinking the map went on without a checkpoint/);
+  // Shared with checkpointIfOn's callers: one warning a session for all of them.
+  const other = app("absent");
+  assert.equal(await checkpointIfOn(other.w3, "Delete Invalid Objects"), false);
+  assert.deepEqual(other.asked, []);
+  const failing = app("fails");
+  await assert.rejects(checkpointOrStop(failing.w3, "Shrinking the map"), /^Error: Nothing changed: the checkpoint failed \(disk full\)\.$/);
   assert.deepEqual(failing.asked, []);
   forgetCheckpointsOffWarning();
 });

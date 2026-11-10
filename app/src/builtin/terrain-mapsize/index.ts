@@ -14,6 +14,7 @@ import { resizeHistory, resizeLoss, settleWithin, warnsAboutUnsaved, workspaceIO
 import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
 import { KEPT_SCRIPT_WORDS } from "../../lib/script/guard";
+import { checkpointOrStop } from "../../lib/checkpoint";
 
 const SIDES = ["Left", "Right", "Bottom", "Top"] as const;
 
@@ -144,7 +145,7 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const undoable = "Ctrl+Z in the terrain editor or Undo Resize takes it back while Studio stays open";
     const c = await w3.window.showWarning(
       lost.length
-        ? `Shrink the map? This removes ${lost.join(" and ")}. The map is saved first and a checkpoint is made. ${undoable}; after a restart, restore the checkpoint.`
+        ? `Shrink the map? This removes ${lost.join(" and ")}. The map is saved first and a checkpoint is made (where checkpoints are on). ${undoable}; after a restart, restore the checkpoint.`
         : `${grow || shrink ? "Resize the map" : "Change the camera bounds"}? The map is saved first. ${undoable}.`,
       "Apply", "Cancel");
     if (c !== "Apply") return;
@@ -152,7 +153,8 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       // A restart forgets the kept files; what a shrink cuts off stays in a checkpoint. The checkpoint is part of the
       // progress shown: packing a big map takes a while, and nothing else says that something is happening.
       const r = await w3.window.withProgress(lost.length ? "Saving a checkpoint, then changing the map size" : "Changing the map size", async () => {
-        if (lost.length) await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${(e as Error).message ?? e}).`); });
+        // Without the Checkpoints extension it goes on, warned once a session, like the other checkpoint users.
+        if (lost.length) await checkpointOrStop(w3, "Shrinking the map");
         return ed.resizeMap([...change], [...complements]);
       });
       void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} outside the new map removed` : ""}.`);

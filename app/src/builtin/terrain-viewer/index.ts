@@ -4,7 +4,7 @@ import { worldSphere } from "../../lib/model/frustum";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { runLayerJobs } from "./layerjobs";
 import { deriveFromProject, editMapDoc, fullShadows, updateMinimapIcons as writeMinimapIcons, writeDerived } from "./derive";
-import { checkpointIfOn } from "../../lib/checkpoint";
+import { checkpointIfOn, checkpointOrStop } from "../../lib/checkpoint";
 import { weatherEffect, type WeatherBox } from "../../lib/model/weather";
 import { skyList } from "./skies";
 import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
@@ -583,8 +583,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const withConsent = async (question: string, yes: string, setting: string) => {
     // The user can drop the question. What stays is what protects their work.
     if (w3.settings.get<boolean>(setting, true) === false) requireSaved();
-    else await askUser(`${question} This can't be undone with AI undo; a checkpoint is made first.`, yes);
-    await w3.commands.execute("w3.checkpoints.create", { quiet: true }).catch((e) => { throw new Error(`Nothing changed: the checkpoint failed (${e}).`); });
+    else await askUser(`${question} This can't be undone with AI undo; a checkpoint is made first (where checkpoints are on).`, yes);
+    // Without the Checkpoints extension it goes on, warned once a session, like the other checkpoint users.
+    return checkpointOrStop(w3, "An AI tool's change");
   };
 
   let cliffKindsRead: Promise<CliffKind[]> | null = null;
@@ -749,10 +750,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       };
       if (dryRun === true) return result;
       refuseLostView(projectTerrain(w3));
-      await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}? Undo Resize in Studio takes it back until Studio closes.`, "Resize map", "mcp.confirmResize");
+      const checkpointed = await withConsent(`resize the map from ${t.width - 1} × ${t.height - 1} to ${width} × ${height}${removed ? `, removing ${removed} object${removed === 1 ? "" : "s"} outside it` : ""}? Undo Resize in Studio takes it back until Studio closes.`, "Resize map", "mcp.confirmResize");
       refuseLostView(projectTerrain(w3));
       const done = await w3.window.withProgress("Changing the map size", () => handle.resizeMap(change, complements));
-      return { ...result, objectsRemoved: done.removed, undo: "undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; the checkpoint just made stays." };
+      return { ...result, objectsRemoved: done.removed, undo: `undo_last_edit doesn't cover this. The user can take the resize back with Undo Resize (or Ctrl+Z in the terrain editor) until Studio closes; ${checkpointed ? "the checkpoint just made stays." : "no checkpoint was made: the Checkpoints extension is off."}` };
     }),
     w3.mcp.registerTool("check_path", async ({ from, to, unitSize }) => {
       const [start, goal] = [await readPlace(from, "from"), await readPlace(to, "to")];

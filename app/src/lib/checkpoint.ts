@@ -29,6 +29,17 @@ export async function checkpointIfOn(w3: W3Api, what: string): Promise<boolean> 
   }
 }
 
+/** checkpointIfOn before a change that drops something (a map shrink, an AI tool's big change): a failed
+ *  checkpoint stops it with "Nothing changed: …"; without the extension it goes on with the same one-time warning.
+ *  True when a checkpoint was made. */
+export async function checkpointOrStop(w3: W3Api, what: string): Promise<boolean> {
+  try {
+    return await checkpointIfOn(w3, what);
+  } catch (e) {
+    throw new Error(`Nothing changed: the checkpoint failed (${e instanceof Error ? e.message : String(e)}).`);
+  }
+}
+
 /** For tests: the next checkpointIfOn without the extension warns again, as in a new session. */
 export function forgetCheckpointsOffWarning() { saidOff = false; }
 
