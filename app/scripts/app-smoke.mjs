@@ -5077,6 +5077,8 @@ async function chapterObjects(page, found) {
   const placed = json(join(chapter, "map", "war3mapUnits.doo.json"));
   placed.units.push({ ...placed.units[0], id: "c001", skinId: "c001", editorId: 7, position: [256, 256, 0] });
   put(join(chapter, "map", "war3mapUnits.doo.json"), placed);
+  // Trigger texts as a project keeps them (the mini map has none): the MCP tools add a script trigger below.
+  put(join(chapter, "map", "war3map.wct.txt"), "//== war3map.wct: version 1, reforged, comment \"\" ==\n//== header ==\n\n//== trigger 0: Foo Init ==\n\n//== trigger 1: Foo Branch ==\n\n");
   const script = () => (existsSync(join(chapter, "map", "war3map.j")) ? readFileSync(join(chapter, "map", "war3map.j"), "utf8") : "");
   const colourOf = (text, id) => new RegExp(`'${id}'[^\\n]*\\n\\s*call SetUnitColor\\( \\w+, ConvertPlayerColor\\((\\d+)\\) \\)`).exec(text)?.[1];
   try {
@@ -5095,6 +5097,26 @@ async function chapterObjects(page, found) {
     await page.evaluate(`(() => { const e = [...document.querySelectorAll(".picker-campaign")].map((b) => b.parentElement).find((r) => r?.textContent.includes("c001")); e?.click(); })()`);
     const picked = await Promise.race([page.evaluate(`window.__pick.then((p) => p && p.id)`), sleep(5000).then(() => "timeout")]);
     if (picked !== "c001") fail(`choosing the campaign object in the browser gave ${JSON.stringify(picked)}`);
+
+    // ---- the MCP object tools in the chapter: the campaign's objects listed, changed only in the campaign ----
+    {
+      const tool = mcpTool(page);
+      const campaignBefore = readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8");
+      const listed = JSON.parse(await tool("list_objects", { kind: "units" }).catch((e) => JSON.stringify({ error: e.message })));
+      if (!listed.items?.some((o) => o.id === "c001" && o.campaign && o.name === "Campaign Grunt")) fail(`list_objects in the chapter: ${JSON.stringify(listed)}`);
+      const refused = await tool("set_object_fields", { kind: "units", id: "c001", changes: [{ field: "uhpm", value: 1 }] }).then(() => null, (e) => e.message);
+      if (!/campaign project/.test(refused ?? "")) fail(`set_object_fields on the campaign's c001 in the chapter: ${refused ?? "not refused"}`);
+      // A chapter object a custom script trigger names: delete_object says so.
+      const made = JSON.parse(await tool("create_object", { kind: "units", base: "hfoo" })).id;
+      if (made === "c001") fail("create_object in the chapter took the campaign's id");
+      await tool("create_script_trigger", { name: "Uses It", script: `function Trig_Uses_It_Actions takes nothing returns nothing\n  call CreateUnit( Player(0), '${made}', 0, 0, 0 )\nendfunction\n` });
+      const said = await tool("delete_object", { kind: "units", id: made }).catch((e) => e.message);
+      if (!/custom script of Uses It/.test(said)) fail(`delete_object of an object a script names said: ${said}`);
+      if (readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8") !== campaignBefore) fail("the MCP tools in the chapter changed war3campaign.w3u");
+      await tool("undo_last_edit").catch(() => {});
+      await tool("undo_last_edit").catch(() => {});
+      await tool("undo_last_edit").catch(() => {});
+    }
 
     // ---- the chapter's Object Editor ----
     const before = readFileSync(join(camp, "map", "war3campaign.w3u.json"), "utf8");
@@ -5133,6 +5155,17 @@ async function chapterObjects(page, found) {
     if (!wts.includes("Campaign Warrior")) fail(`the rename isn't in war3campaign.wts: ${JSON.stringify(wts.slice(0, 120))}`);
     if (existsSync(join(camp, "map", "war3map.wts"))) fail("the campaign's Object Editor wrote a war3map.wts");
     if (json(join(camp, "map", "war3campaign.w3u.json")).custom[0]?.mods?.find((m) => m.field === "unam")?.value !== "TRIGSTR_001") fail("the rename changed the name's string reference");
+
+    // ---- the MCP object tools in the campaign project: war3campaign.*, as its Object Editor ----
+    {
+      const tool = mcpTool(page);
+      const made = await tool("create_object", { kind: "units", base: "hfoo" }).then((t) => JSON.parse(t).id, (e) => fail(`create_object in the campaign: ${e.message}`));
+      if (made && !json(join(camp, "map", "war3campaign.w3u.json")).custom.some((o) => o.id === made)) fail(`create_object in the campaign project didn't add ${made} to war3campaign.w3u`);
+      if (existsSync(join(camp, "map", "war3map.w3u.json"))) fail("create_object in the campaign project wrote a war3map.w3u");
+      const listed = JSON.parse(await tool("list_objects", { kind: "units" }));
+      if (!listed.items?.some((o) => o.id === "c001" && !o.campaign)) fail(`list_objects in the campaign project: ${JSON.stringify(listed)}`);
+      if (made) await tool("undo_last_edit").catch((e) => fail(`undo of create_object in the campaign: ${e.message}`));
+    }
 
     // ---- the campaign changed meanwhile: the chapter's script follows when it opens ----
     await page.evaluate(`w3.workspace.writeText("map/war3campaign.w3u.json", ${JSON.stringify(JSON.stringify(units(3)))})`);
