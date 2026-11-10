@@ -39,6 +39,8 @@ export interface UnitsInput {
   goldMine?: (id: string) => boolean;
   /** Whether a (custom) unit type is a waygate, besides nwgt. */
   waygate?: (id: string) => boolean;
+  /** Whether a unit type allows a custom team colour (lib/script/objects customColorTypes); without it, waygates do. */
+  customColor?: (id: string) => boolean;
   /** Team colour a unit type has in the map's object data (lib/script/objects). */
   teamColor?: (id: string) => number | undefined;
   /** The orders that turn an ability's autocast on and off, if it has one. */
@@ -139,7 +141,8 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
     const r = i.regionName?.(u.waygate);
     if (r) lines.push(`    call WaygateSetDestination( ${v}, GetRectCenterX(${r}), GetRectCenterY(${r}) )`, `    call WaygateActivate( ${v}, true )`);
   }
-  const color = waygate && u.color !== -1 ? u.color : i.teamColor?.(u.id);
+  const custom = i.customColor ? i.customColor(u.id) : waygate;
+  const color = custom && u.color !== -1 ? u.color : i.teamColor?.(u.id);
   if (color !== undefined) lines.push(`    call SetUnitColor( ${v}, ConvertPlayerColor(${color}) )`);
   // Items drop from a map item table or the unit's own sets.
   const drops = dropFunctionOf("Unit", u, i.units.indexOf(u), i.itemTables);

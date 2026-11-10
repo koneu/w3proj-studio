@@ -26,6 +26,29 @@ export function abilityOrders(tables: Iterable<Map<string, Map<string, string>>>
   return out;
 }
 
+/** The orders of an ability placed switched on, a map's own ability's through its base (war3map.w3a and its Skin file):
+ *  World Editor 2.0 writes "healon" for a custom ability based on Heal (we-drive, 2026-11-10). */
+export function autocastOrdersOf(orders: ReadonlyMap<string, AbilityOrders>, files: (ObjectFile | null | undefined)[]): (ability: string) => AbilityOrders | undefined {
+  const bases = new Map<string, string>();
+  for (const f of files) for (const o of f?.custom ?? []) if (o.id && !bases.has(o.id)) bases.set(o.id, o.base);
+  return (id) => orders.get(id) ?? orders.get(bases.get(id) ?? "");
+}
+
+/** The game's unit types that allow a custom team colour (the customTeamColor column of Units\unitUI.slk, parsed:
+ *  only the waygate). */
+export function gameCustomColors(rows: Record<string, string>[]): Set<string> {
+  // A table that couldn't be read (or has no such column) leaves the waygate, as the game's has it.
+  if (!rows.some((r) => r.customTeamColor !== undefined)) return new Set(["nwgt"]);
+  return new Set(rows.filter((r) => r.customTeamColor?.trim() === "1").map((r) => r.unitUIID));
+}
+
+/** Whether a placed unit's own colour counts: its type allows a custom team colour (field utcc, as the map sets it, a
+ *  custom type's from its base). World Editor 2.0 writes SetUnitColor for those only (we-drive, 2026-11-10: a footman
+ *  type given utcc, yes; a waygate type without it, no). */
+export function customColorTypes(files: (ObjectFile | null | undefined)[], game: ReadonlySet<string> = new Set(["nwgt"])): (id: string) => boolean {
+  return flagOf(files, "utcc", game);
+}
+
 interface ObjectMod { field: string; value: unknown }
 interface ObjectEntry { id?: string; base: string; mods?: ObjectMod[] }
 export interface ObjectFile { original?: ObjectEntry[]; custom?: ObjectEntry[] }

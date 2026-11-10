@@ -9,7 +9,7 @@ import { destructablesSection, type DestructableJson } from "./destructables";
 import { dropFunction, dropFunctionOf, dropSection, itemTableFunction, randomGroupsSection } from "./drops";
 import { banner, generateScript, generateSections, HEADER_SECTION, header, ident, literal, parseSoundLabels, placedName, scriptSoundDurations, splitSections, str, type PlacedJson, type ScriptInput } from "./jass";
 import { CONCAT, expr, INT_DIV, jassToLua, RAW } from "./lua";
-import { abilityOrders, buildingTypes, destructableTints, gameTeamColors, heroAbilities, specialUnits, teamColors } from "./objects";
+import { abilityOrders, autocastOrdersOf, buildingTypes, customColorTypes, destructableTints, gameCustomColors, gameTeamColors, heroAbilities, specialUnits, teamColors } from "./objects";
 import { AMBIENCE, configSection, dayNightModels, mainSection, playersSection, type SetupInput } from "./setup";
 import { techTreeSection, upgradesSection } from "./techs";
 import { convertToCustom, triggerCustomText, triggersSection } from "./triggers";
@@ -281,6 +281,27 @@ test("only waygates mean the placement's own colour and target", () => {
   has(gate, "    call SetUnitColor( u, ConvertPlayerColor(3) )");
   has(gate, "    call WaygateActivate( u, true )");
   has(units([unit({ id: "n000", color: 3, waygate: 0 })], { regionName, waygate: (id: string) => id === "n000" }), "    call WaygateActivate( u, true )");
+});
+
+// World Editor 2.0 on a copy of cliff.w3m (we-drive, 2026-11-10): h001 (a footman with Allow Custom Team Color) and
+// colour 6 got SetUnitColor 6, n000 (a waygate type with it off) and colour 4 none, a waygate with colour 2 got 2.
+test("the placement's own colour counts where its type allows a custom team colour (utcc), a footman's too", () => {
+  const files = [{ original: [], custom: [{ id: "h001", base: "hfoo", mods: [{ field: "utcc", value: 1 }] }, { id: "n000", base: "nwgt", mods: [{ field: "utcc", value: 0 }] }, { id: "n001", base: "nwgt" }] }];
+  const customColor = customColorTypes(files, gameCustomColors([{ unitUIID: "nwgt", customTeamColor: "1" }, { unitUIID: "hfoo", customTeamColor: "0" }]));
+  assert.deepEqual(["nwgt", "hfoo", "h001", "n000", "n001"].map(customColor), [true, false, true, false, true]);
+  has(units([unit({ id: "h001", color: 6 })], { customColor }), "    call SetUnitColor( u, ConvertPlayerColor(6) )");
+  hasNot(units([unit({ id: "n000", color: 4 })], { customColor }), "SetUnitColor");
+  has(units([unit({ id: "nwgt", color: 2 })], { customColor }), "    call SetUnitColor( u, ConvertPlayerColor(2) )");
+  hasNot(units([unit({ id: "hfoo", color: 6 })], { customColor }), "SetUnitColor");
+  // A unit table that couldn't be read leaves the waygate.
+  assert.deepEqual([...gameCustomColors([])], ["nwgt"]);
+});
+
+test("a map's own ability is switched on by its base's orders", () => {
+  // World Editor 2.0 wrote "healon" for a footman type with A000 (based on Heal) placed active (we-drive, 2026-11-10).
+  const orders = autocastOrdersOf(new Map([["Ahea", { on: "healon", off: "healoff" }]]), [{ custom: [{ id: "A000", base: "Ahea" }, { id: "A001", base: "AHtb" }] }, null]);
+  assert.deepEqual([orders("Ahea"), orders("A000"), orders("A001"), orders("A002")], [{ on: "healon", off: "healoff" }, { on: "healon", off: "healoff" }, undefined, undefined]);
+  has(units([unit({ id: "h000", abilities: [{ id: "A000", autocast: 1, level: 0 }] })], { autocastOrders: orders }), '    call IssueImmediateOrder( u, "healon" )');
 });
 
 test("a type's team colour goes on placed units", () => {

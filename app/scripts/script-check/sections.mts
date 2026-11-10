@@ -33,7 +33,8 @@ const abilityRows = parseSlk(read("AbilityData.slk"));
 const abilityIds = new Set(abilityRows.map((r: any) => r.alias));
 const gameHeroAbilities = new Set<string>(abilityRows.filter((r: any) => r.hero === "1").map((r: any) => r.alias));
 const labels = existsSync("soundinfo") ? J.parseSoundLabels(readdirSync("soundinfo").map((f) => read("soundinfo/" + f))) : new Map();
-const gameColors = O.gameTeamColors(parseSlk(read("unitUI.slk")));
+const unitUI = parseSlk(read("unitUI.slk"));
+const gameColors = O.gameTeamColors(unitUI), gameCustomColors = O.gameCustomColors(unitUI);
 const orders = O.abilityOrders(readdirSync("abil").map((f) => parseIni(read("abil/" + f))));
 
 const stats: Record<string, [number, number]> = {};
@@ -101,7 +102,8 @@ for (const m of maps) {
   };
   const lt = (info.lightEnvironment || info.tileset) as string;
   const input = {
-    info, data, triggers, custom, kindOf, autocastOrders: (a: string) => orders.get(a), heroAbility, destructableTint, teamColor: (id: string) => colors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
+    info, data, triggers, custom, kindOf, autocastOrders: O.autocastOrdersOf(orders, [json(d, "war3map.w3a"), json(d, "war3mapSkin.w3a")]), heroAbility, destructableTint, teamColor: (id: string) => colors.get(id), goldMine: (id: string) => special.goldMines.has(id), waygate: (id: string) => special.waygates.has(id),
+    customColor: O.customColorTypes(unitFiles, gameCustomColors),
     lights: { terrain: light("TerrainLights", lt, "Terrain"), unit: light("UnitLights", lt, "Unit") },
     groundHeight: terrain ? (x: number, y: number) => T.heightAt(terrain, x, y) : undefined,
     units: json(d, "war3mapUnits.doo")?.units, doodads: json(d, "war3map.doo")?.doodads,
