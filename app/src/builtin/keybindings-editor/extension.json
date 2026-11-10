@@ -1,0 +1,10 @@
+{
+  "id": "w3.keybindingsEditor",
+  "name": "Keyboard Shortcuts",
+  "version": "0.1.0",
+  "description": "Every command with its keys (the World Editor's Configure Controls): search, record a new key, remove, reset to the default; conflicts shown. Kept in keybindings.json in the settings folder.",
+  "contributes": {
+    "editors": [{ "id": "w3.keybindingsEditor", "title": "Keyboard Shortcuts", "patterns": ["w3:keybindings"] }],
+    "commands": [{ "id": "w3.keybindings.open", "menu": "File:5:2", "title": "Open Keyboard Shortcuts", "category": "Preferences", "keybinding": "ctrl+k ctrl+s" }]
+  }
+}

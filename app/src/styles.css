@@ -476,6 +476,25 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .settings-text { width: min(560px, 100%); }
 .settings-json { width: min(560px, 100%); font-family: var(--mono); font-size: 12px; }
 .settings .invalid { outline: 1px solid var(--error); }
+/* Keyboard Shortcuts (builtin/keybindings-editor) */
+.settings.kb { max-width: 1200px; }
+.kb-search-line { display: flex; gap: 6px; }
+.kb-search-line .kb-search { flex: 1; }
+.kb-record-search.on { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+.kb-problem { flex-basis: 100%; color: var(--error); font-size: 12px; }
+.kb-row { display: grid; grid-template-columns: minmax(220px, 2.2fr) minmax(150px, 1.2fr) minmax(90px, 1fr) minmax(90px, 0.8fr) auto; gap: 10px; align-items: baseline; padding: 4px 8px; border-left: 2px solid transparent; }
+.kb-row:hover { background: var(--bg-2); }
+.kb-row.user { border-left-color: var(--accent-2); }
+.kb-head { font-weight: 600; border-bottom: 1px solid var(--border); position: sticky; }
+.kb-command { display: flex; flex-direction: column; min-width: 0; }
+.kb-command code { font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.kb-key { font-family: var(--mono); font-size: 12px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-2); }
+.kb-conflict { margin-left: 6px; color: var(--warning, #d7ba7d); }
+.kb-when, .kb-source { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.kb-actions { display: flex; gap: 6px; white-space: nowrap; }
+.kb-record { width: 100%; font-family: var(--mono); }
+.kb-conflicts { font-size: 11px; }
+.kb-none { padding: 8px; }
 .terrain-place-opt { margin-left: 10px; color: var(--fg); }
 .picker-icon { width: 24px; height: 24px; flex: none; border-radius: 2px; background: var(--bg-2); }
 .picker-icon.none { visibility: hidden; }
