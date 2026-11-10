@@ -34,7 +34,8 @@ What the World Editor doesn't have:
   and automatic checkpoints keep packed copies to go back to.
 - **VS Code's way of working.** Activity bar, side views, tabs, a command palette (Ctrl+Shift+P) for every
   command, quick file open (Ctrl+P), and settings per user or per project (`.w3proj/settings.json`, versioned with
-  the map). Inside the terrain view the World Editor's keys and mouse still apply.
+  the map). Inside the terrain view the World Editor's keys and mouse still apply, and every key, the terrain
+  view's included, can be changed in Keyboard Shortcuts (Ctrl+K Ctrl+S) or `keybindings.json`.
 - **Extensions.** Nearly every editor is an extension on a public API; you can add commands, views, editors,
   settings, MCP tools and Problems checks, or turn a built-in off and replace it.
 - **Editable binary formats.** The map file layouts are [format definitions](#format-definitions) (JSON), not
