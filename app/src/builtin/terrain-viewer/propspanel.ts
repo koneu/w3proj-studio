@@ -56,7 +56,8 @@ function named(host: PropsPanelHost, id: string, kinds?: string[]): HTMLElement 
   const random = randomItemLabel(id);
   const el = h("span.terrain-prop-name", { title: id }, random ?? id);
   if (random) return el;
-  void host.name(id, kinds).then((n) => { if (n) el.textContent = `${n} (${id})`; }).catch(() => { /* id stays */ });
+  // The whole name in the tooltip too: a narrow side view cuts it off with an ellipsis.
+  void host.name(id, kinds).then((n) => { if (n) el.textContent = el.title = `${n} (${id})`; }).catch(() => { /* id stays */ });
   return el;
 }
 
@@ -109,7 +110,7 @@ function randomRows(host: PropsPanelHost, entries: readonly Entry[], send: (c: P
     const units = choice.units;
     const put = (list: RandomUnit[]) => choose({ by: "table", units: list });
     units.forEach((u, i) => {
-      const chance = h("input.terrain-sel-num", { type: "number", min: 0, max: 100, step: 1, value: String(u.chance), "data-prop": `random-chance-${i}`, title: "Chance in percent",
+      const chance = h("input.terrain-sel-num.terrain-prop-chance", { type: "number", min: 0, max: 100, step: 1, value: String(u.chance), "data-prop": `random-chance-${i}`, title: "Chance in percent",
         onchange: () => {
           const v = Number(chance.value);
           if (chance.value.trim() === "" || !Number.isFinite(v)) { chance.value = String(u.chance); return; }

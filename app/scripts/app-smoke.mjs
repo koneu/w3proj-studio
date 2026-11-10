@@ -1180,7 +1180,14 @@ async function viewModes(page, found) {
   noise = await pixelsApart(page, plain, await mapPicture(page));
   s = await state();
   await trial("B", "cameraBounds", () => key("b", "KeyB", 66), 100);
+  // One toolbar box shows the line (the World Editor's Camera Bounds) and follows B; the other is Enforce Camera Bounds,
+  // a setting B leaves alone, named so the two aren't taken for each other.
+  const boundsBoxes = await page.evaluate(`[...document.querySelectorAll(".model-toggle")].map((l) => l.textContent.trim()).filter((t) => /bounds/i.test(t))`);
+  if (boundsBoxes.join() !== "Camera bounds,Enforce camera bounds") fail(`the toolbar's bounds boxes: ${JSON.stringify(boundsBoxes)}`);
+  if ((await k.box("Camera bounds")) !== true || (await k.box("Enforce camera bounds")) !== false || (await k.setting("terrain.enforceCameraBounds")) === true)
+    fail(`after B the Camera bounds box is ${await k.box("Camera bounds")}, Enforce camera bounds ${await k.box("Enforce camera bounds")}`);
   await key("b", "KeyB", 66);
+  if ((await k.box("Camera bounds")) !== false) fail("the Camera bounds box didn't follow B off");
   if ((await state()).cameraBounds || (await changed()) > 150) fail("B twice isn't the plain picture");
   const fogBefore = (await state()).shown.fog;
   await key("f", "KeyF", 70);
@@ -1273,6 +1280,17 @@ async function unitProperties(page, found) {
   const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`);
   const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(); };
   const unit = (id) => k.units().find((u) => u.id === id);
+  /** The sizes of the properties row holding the × button `prop` (side view's inner width, row, ×, Choose…, number box). */
+  const rowLayout = (prop) => page.evaluate(`(() => {
+    const b = document.querySelector(${JSON.stringify(at(prop))}), row = b?.closest(".terrain-prop-row");
+    if (!row) return { missing: ${JSON.stringify(prop)} };
+    const r = (e) => e?.getBoundingClientRect(), rr = r(row), br = r(b);
+    const choose = row.querySelector("button:not(.icon-button)"), input = row.querySelector("input"), name = row.querySelector(".terrain-prop-name");
+    return { sideWidth: row.closest(".model-side")?.clientWidth, rowHeight: Math.round(rr.height), rowMid: Math.round(rr.y + rr.height / 2),
+      buttonHeight: Math.round(br.height), buttonWidth: Math.round(br.width), buttonMid: Math.round(br.y + br.height / 2),
+      chooseHeight: choose ? Math.round(r(choose).height) : 0, inputWidth: input ? Math.round(r(input).width) : 0,
+      nameTitle: name?.title ?? "", nameText: name?.textContent ?? "", nameCut: name ? name.scrollWidth > name.clientWidth : false };
+  })()`);
 
   // The hero: what applies shows, what doesn't (gold, colour) doesn't; showing it changes nothing.
   const before = hash(join(k.root, "map", "war3mapUnits.doo.json"));
@@ -1370,6 +1388,11 @@ async function unitProperties(page, found) {
     // The × at the row's end: WebKitGTK's overlay scrollbar of the side view lay over it and took the click.
     const hit = await page.evaluate(`(() => { const b = document.querySelector(${JSON.stringify(at("skin-own"))}); b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return e === b || b.contains(e) ? "" : String(e?.tagName) + "." + String(e?.className) + " at x " + Math.round(r.x); })()`);
     if (hit) fail(`the skin's × is covered by ${hit}`);
+    // At the side view's width the Skin row is one line: the name cut with an ellipsis (whole in its tooltip), Choose…
+    // on one line, the × of a normal size in the row's middle.
+    const skinRow = await rowLayout("skin-own");
+    if (skinRow.rowHeight > 30 || skinRow.chooseHeight > 28 || skinRow.buttonHeight < 20 || Math.abs(skinRow.buttonMid - skinRow.rowMid) > 2 || !/hkni/.test(skinRow.nameText) || skinRow.nameTitle !== skinRow.nameText)
+      fail(`the Skin row in a side view ${skinRow.sideWidth} px wide: ${JSON.stringify(skinRow)}`);
     await k.hands.click(at("skin-own"));
     await settled();
     await k.save();
@@ -1379,6 +1402,13 @@ async function unitProperties(page, found) {
   // back without a level.
   await select({ id: "uDNR", x: -768, y: 768 });
   if (await value("random-by") !== "table" || Number(await value("random-chance-0")) !== 60) fail(`the random unit's choice shows ${await value("random-by")}, ${await value("random-chance-0")}`);
+  // Each line of the table on one line at the side view's width: the chance box takes three digits and the spinner
+  // (it was 34 px, "60" showed as "6"), the × of a normal size in the row's middle, not up at its corner.
+  for (const i of [0, 1]) {
+    const line = await rowLayout(`random-remove-${i}`);
+    if (line.inputWidth < 56 || line.rowHeight > 30 || line.buttonHeight < 20 || line.buttonWidth < 20 || Math.abs(line.buttonMid - line.rowMid) > 2)
+      fail(`the random unit's line ${i} in a side view ${line.sideWidth} px wide: ${JSON.stringify(line)}`);
+  }
   await choose("random-by", "level");
   await choose("random-level", "3");
   await k.save();
@@ -2092,7 +2122,7 @@ async function heightsLimits(page, found) {
   await sleep(500);
   await k.focusMap();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
-  if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
+  if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Enforce camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
   for (let i = 0; i < 3; i++) await hands.key("ArrowRight", "ArrowRight", 39, 2);
   await k.save();
   if (nearEdge()?.position[0] !== br) fail(`three nudges to the right with Enforce Camera Bounds on left the doodad at ${nearEdge()?.position[0]}, the bound is ${br}`);
