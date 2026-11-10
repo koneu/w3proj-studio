@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { EditFile, EditObject } from "./objectedit";
-import { describeImport, exportParts, onlyObjects, planImport } from "./w3o";
+import { convertVersion, describeConversion, describeImport, exportParts, onlyObjects, planImport } from "./w3o";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { forgetCheckpointsOffWarning } from "../../lib/checkpoint";
 import { commandNotFound } from "../../lib/commanderror";
@@ -59,14 +59,47 @@ test("importing merges by id and base, counts what was added and replaced", () =
   assert.equal(describeImport(plan), "4 units (2 replaced), 1 abilities");
 });
 
-test("another object data version is refused, and then nothing at all is planned", () => {
+test("another object data version is converted to the map's, and the question says so", () => {
   const have = file(3, [], [unit("h000", "Old")]);
-  assert.throws(() => planImport({ w3u: have, w3t: null }, [
+  const plan = planImport({ w3u: have, w3t: null }, [
     { kind: "w3t", file: file(3, [], [bare("ratf", "I000")]) },
-    { kind: "w3u", file: file(1, [], [old1("hfoo", "h009")]) },
-  ]), /version 3, the file's version 1/);
-  // An empty file of the map doesn't hold the kind back.
-  assert.equal(planImport({ w3u: file(3, [], []) }, [{ kind: "w3u", file: file(1, [], [old1("hfoo", "h009")]) }]).writes[0].file.version, 1);
+    { kind: "w3u", file: file(1, [], [{ ...old1("hfoo", "h009"), mods: [mod("unam", "Older")] }]) },
+  ]);
+  const u = plan.writes.find((w) => w.kind === "w3u")!;
+  assert.equal(u.file.version, 3);
+  assert.deepEqual(u.file.custom.map((o) => [o.id, o.mods![0].value]), [["h000", "Old"], ["h009", "Older"]]);
+  assert.deepEqual(plan.conversions, [{ kind: "w3u", from: 1, to: 3, dropped: 0, objects: [] }]);
+  assert.equal(describeConversion("w3u", plan.conversions[0]), " The file's units are object data version 1, converted to the map's version 3.");
+  // An empty file of the map doesn't hold the kind back: it takes the file's version, nothing converted.
+  const empty = planImport({ w3u: file(3, [], []) }, [{ kind: "w3u", file: file(1, [], [old1("hfoo", "h009")]) }]);
+  assert.equal(empty.writes[0].file.version, 1);
+  assert.deepEqual(empty.conversions, []);
+});
+
+test("down from version 3 an object keeps its flag-0 set; the other sets' fields are counted as left out", () => {
+  const sets: EditObject = { base: "hfoo", id: "h001", sets: [{ flag: 0, mods: [mod("unam", "Sd")] }, { flag: 2, mods: [mod("unam", "Hd"), mod("uhpm", 9)] }] };
+  const onlyFlagged: EditObject = { base: "hkni", sets: [{ flag: 1, mods: [mod("uhpm", 5)] }, { flag: 2, mods: [] }] };
+  const plain: EditObject = { base: "hpea", id: "h002", mods: [mod("unam", "Plain")] };
+  const plan = planImport({ w3u: file(1, [], [old1("hfoo", "h000")]) }, [{ kind: "w3u", file: file(3, [onlyFlagged], [sets, plain]) }]);
+  const w = plan.writes[0].file;
+  assert.equal(w.version, 1);
+  const byId = (id: string) => w.custom.find((o) => o.id === id)!;
+  assert.deepEqual(byId("h001"), { base: "hfoo", id: "h001", end: "h001", mods: [mod("unam", "Sd")] });
+  assert.deepEqual(byId("h002"), { base: "hpea", id: "h002", end: "h002", mods: [mod("unam", "Plain")] });
+  assert.deepEqual(w.original, [{ base: "hkni", end: "hkni", mods: [] }]);
+  assert.deepEqual(plan.conversions, [{ kind: "w3u", from: 3, to: 1, dropped: 3, objects: ["h001", "hkni"] }]);
+  assert.match(describeConversion("w3u", plan.conversions[0]), /version 3, converted to the map's version 1\. 3 fields of flagged sets .* left out: h001, hkni\./);
+});
+
+test("convertVersion: the same version is the same file; 1 and 2 differ only in the number; unknown versions are refused", () => {
+  const f = file(2, [std("hfoo", 3)], [old1("hfoo", "h000")]);
+  assert.equal(convertVersion(f, 2).file, f);
+  assert.equal(convertVersion(f, 2).conversion, null);
+  const one = convertVersion(f, 1);
+  assert.deepEqual({ ...one.file, version: 2 }, { ...f, original: [{ ...std("hfoo", 3), end: "hfoo" }] });
+  assert.equal(f.original[0].end, undefined, "the given file isn't changed");
+  assert.throws(() => convertVersion(f, 4), /version 4/);
+  assert.throws(() => convertVersion(file(7, [], []), 3), /version 7/);
 });
 
 interface Options { unsaved?: string[]; confirm?: boolean; pick?: string | null; save?: string | null; w3o?: { kind: string; text: string }[] }
@@ -171,7 +204,7 @@ test("Import goes on with the Checkpoints extension off, and says once that no c
   forgetCheckpointsOffWarning();
 });
 
-test("Import changes nothing when declined, cancelled, unsaved, or of another version", async () => {
+test("Import changes nothing when declined, cancelled or unsaved; another version is converted and named in the question", async () => {
   const mine = J(file(3, [], [unit("h000", "Old")]));
   const w3o = [{ kind: "w3u", text: J(file(3, [], [unit("h000", "New")])) }];
   const declined = fake({ "map/war3map.w3u.json": mine }, { w3o, confirm: false });
@@ -182,9 +215,18 @@ test("Import changes nothing when declined, cancelled, unsaved, or of another ve
   const other = fake({ "map/war3map.w3u.json": mine, "map/war3map.w3t.json": J(file(3, [], [bare("ratf", "I001")])) }, {
     w3o: [{ kind: "w3u", text: J(file(3, [], [unit("h009", "N")])) }, { kind: "w3t", text: J(file(1, [], [old1("ratf", "I000")])) }],
   });
-  await assert.rejects(importObjectData(other.w3), /can't be mixed/);
-  assert.equal(other.fs.get("map/war3map.w3u.json"), mine, "the kind that could be merged was not written either");
-  assert.deepEqual(other.log.filter((l) => l.startsWith("write")), []);
+  assert.equal(await importObjectData(other.w3), 2);
+  assert.match(other.asked[0], /The file's items are object data version 1, converted to the map's version 3\./);
+  const t = JSON.parse(other.fs.get("map/war3map.w3t.json")!) as EditFile;
+  assert.deepEqual([t.version, t.custom.map((o) => o.id)], [3, ["I001", "I000"]]);
+  // A version-3 file into a version-1 map: the flagged set's fields can't go along, and the question names them.
+  const old = fake({ "map/war3map.w3u.json": J(file(1, [], [old1("hfoo", "h000")])) }, {
+    w3o: [{ kind: "w3u", text: J(file(3, [], [{ base: "hfoo", id: "h001", sets: [{ flag: 0, mods: [mod("unam", "Sd")] }, { flag: 2, mods: [mod("unam", "Hd")] }] }])) }],
+  });
+  assert.equal(await importObjectData(old.w3), 1);
+  assert.match(old.asked[0], /1 field of flagged sets \(Reforged's\) can't be held in version 1 and is left out: h001\./);
+  const u = JSON.parse(old.fs.get("map/war3map.w3u.json")!) as EditFile;
+  assert.deepEqual([u.version, u.custom[1]], [1, { base: "hfoo", id: "h001", end: "h001", mods: [mod("unam", "Sd")] }]);
 });
 
 import { mergeSkin } from "./w3o";
@@ -309,7 +351,7 @@ test("Import drops the stale Skin fields in the same write, and says so in the q
   await importObjectData(calm.w3);
   assert.deepEqual(calm.log.filter((l) => l.startsWith("write")), ["write map/war3map.w3u.json"]);
   assert.doesNotMatch(calm.asked[0], /Skin/);
-  assert.equal(describeSkin({ writes: [], conflicts: [], skins: [] }), "");
+  assert.equal(describeSkin({ writes: [], conflicts: [], skins: [], conversions: [] }), "");
 });
 
 test("a corrupt Skin file refuses the import and nothing is written", async () => {

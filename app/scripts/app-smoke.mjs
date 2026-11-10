@@ -3573,6 +3573,18 @@ async function moduleFunctions(page, found) {
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
       await sleep(300);
     }
+    // Regions as the Region Editor has them: the mini map's one region deleted there and not saved leaves the picture.
+    const withRegions = { ...given, terrain: false, water: false, regions: true };
+    const r1 = join(dir, "minimap-r1.png"), r2 = join(dir, "minimap-r2.png");
+    const savedRegions = readFileSync(join(b, "map", "war3map.w3r.json"));
+    const whyR = (await exportWith(withRegions, r1)) ?? (await page.evaluate(`w3.commands.execute("w3.terrain.groupItemAction", "regions", "Middle", "delete").then(() => null, (e) => String(e))`)) ?? (await exportWith(withRegions, r2));
+    if (whyR) fail(`Export Minimap of an unsaved region edit: ${whyR}`);
+    else {
+      if (picture(r1).raw.equals(picture(r2).raw)) fail("the exported minimap still shows the region deleted (unsaved) in the Region Editor");
+      if (!readFileSync(join(b, "map", "war3map.w3r.json")).equals(savedRegions)) fail("exporting the minimap saved the regions");
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await sleep(300);
+    }
     await page.evaluate(`w3.editors.closeAll()`);
     verify(b, "minimap");
   }

@@ -1,7 +1,7 @@
 // Export Minimap: a picture of the map as the minimap draws it, as a PNG file anywhere on disk, with the World
 // Editor's options (WESTRING_EXPORTMINIMAP_*, MINIMAPOPT_*): what it includes (terrain, water, the pathing map,
 // doodads, units, regions, preview icons), the playable area or the whole map, the image size and smoothing. It is
-// made from the terrain editor's state as it is now, unsaved edits included (regions: as saved).
+// made from the terrain editor's state as it is now, unsaved edits included (regions: the Region Editor's).
 
 import type { W3Api } from "../../extensions/api";
 import { encodePng } from "../../lib/image/png";

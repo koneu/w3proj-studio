@@ -4,7 +4,7 @@ import type { W3Api } from "../../extensions/api";
 import { jsonPathOf, mapStrings, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import type { EditFile, EditObject } from "./objectedit";
-import { describeConflicts, describeImport, describeSkin, exportParts, mergeSkin, KIND_NAMES, onlyObjects, planImport, W3O_KINDS, withOwnTexts } from "./w3o";
+import { describeConflicts, describeConversion, describeImport, describeSkin, exportParts, mergeSkin, KIND_NAMES, onlyObjects, planImport, W3O_KINDS, withOwnTexts } from "./w3o";
 
 const WE_FILTER = [{ name: "Object data (.w3o)", extensions: ["w3o"] }];
 const withExt = (p: string) => (/\.w3o$/i.test(p) ? p : `${p}.w3o`);
@@ -57,7 +57,8 @@ export async function exportObjects(w3: W3Api, kind: string, file: EditFile, obj
 }
 
 /** Takes in a .w3o: every kind in it is merged into the map's, objects with the same id replace
- *  the map's. Asks first, makes a checkpoint, and changes nothing if any kind can't be merged. */
+ *  the map's; another object data version is converted to the map's, the question naming what
+ *  can't be carried. Asks first, makes a checkpoint, and changes nothing if any kind can't be merged. */
 export async function importObjectData(w3: W3Api): Promise<number> {
   if (!w3.workspace.project()) throw new Error("Open or import a project first.");
   const open = unsavedObjectFiles(w3);
@@ -85,7 +86,8 @@ export async function importObjectData(w3: W3Api): Promise<number> {
     const path = jsonPathOf(w3, `war3mapSkin.${sk.kind}`);
     texts.push({ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(sk.file) }) });
   }
-  if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${describeConflicts(plan)}${describeSkin(plan)} A checkpoint is made first, to come back to, where they're enabled.`, "Import", 60_000))) return 0;
+  const converted = plan.conversions.map((c) => describeConversion(c.kind, c)).join("");
+  if (!(await w3.window.confirm(`Import ${describeImport(plan)}? Objects with the same id replace the map's.${converted}${describeConflicts(plan)}${describeSkin(plan)} A checkpoint is made first, to come back to, where they're enabled.`, "Import", 60_000))) return 0;
   await checkpointIfOn(w3, "Import Object Data");
   for (const t of texts) await w3.workspace.writeText(t.path, t.text);
   await w3.workspace.refresh();
