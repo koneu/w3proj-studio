@@ -6093,9 +6093,25 @@ async function editorExtras(page, found) {
     else if (!existsSync(exported) || hash(exported) !== hash(byCli)) fail("the exported chapter map isn't the CLI's pack of it");
     // Replace: the second map in its place; one undo puts the first back, redo the second.
     const infoBefore = readFileSync(chapterInfo, "utf8"), twoWidth = k.read("war3map.w3i.json").playableWidth;
+    // A file of the chapter's project the second map doesn't have: asked about first, as a sync asks; Cancel changes
+    // nothing, Replace moves it out with the old map (undo brings it back).
+    const lacking = join(camp, "maps", "One.w3x", "map", "smoke-added.txt");
+    writeFileSync(lacking, "mine");
+    const replaceAnswer = (a) => page.evaluate(`(() => { window.__replaceAsked = []; w3.window.showWarning = async (m, ...actions) => {
+      if (!/project: /.test(m) || !actions.includes("Replace")) return undefined;
+      window.__replaceAsked.push(m); return ${JSON.stringify(a)}; }; })()`);
     await answer("pickFile", two);
+    await replaceAnswer("Cancel");
+    const kept = await run("w3.campaign.replaceMap", "One.w3x");
+    const askedFirst = await page.evaluate(`window.__replaceAsked`);
+    if (kept.e) fail(`Replace map, cancelled: ${kept.e}`);
+    if (askedFirst.length !== 1 || !askedFirst[0].includes("maps/One.w3x/map/smoke-added.txt")) fail(`Replace map didn't ask about the file the new map lacks: ${JSON.stringify(askedFirst)}`);
+    if (readFileSync(chapterInfo, "utf8") !== infoBefore || !existsSync(lacking)) fail("Replace map, cancelled, changed the chapter");
+    await answer("pickFile", two);
+    await replaceAnswer("Replace");
     const rep = await run("w3.campaign.replaceMap", "One.w3x");
     if (rep.e) fail(`Replace map: ${rep.e}`);
+    if (existsSync(lacking)) fail("after Replace map the file the new map lacks is still in the chapter");
     const width = () => (existsSync(chapterInfo) ? JSON.parse(readFileSync(chapterInfo, "utf8")).playableWidth : null);
     if (width() !== twoWidth || readFileSync(chapterInfo, "utf8") === infoBefore) fail(`after Replace map the chapter's playable width is ${width()}, not the second map's ${twoWidth}`);
     if (readdirSync(join(camp, "maps")).join() !== "One.w3x") fail(`after Replace map maps/ holds ${readdirSync(join(camp, "maps")).join(", ")}`);
@@ -6107,6 +6123,7 @@ async function editorExtras(page, found) {
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await until("the first map back", async () => existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore && !(await campaignDirty()), 10000)
       .catch(async () => fail(`one undo of Replace map didn't put the first map back (${existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore ? "the files are back" : "the files aren't back"}, the campaign ${await campaignDirty() ? "is" : "isn't"} changed)`));
+    if (!existsSync(lacking) || readFileSync(lacking, "utf8") !== "mine") fail("undo of Replace map didn't bring back the file the new map lacks");
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
     await until("the second map again", async () => width() === twoWidth && (await campaignDirty()), 10000).catch(() => fail("redo of Replace map didn't bring the second map back"));
     // Remove Button, answered "and map": both go in one step; undo brings both back.
