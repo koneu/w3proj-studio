@@ -12,6 +12,7 @@
 
 import type { Turn } from "../../lib/terrain/fragment";
 import { listCommandOf } from "../../lib/terrain/objectlist";
+import { undoStepOf } from "../../lib/keybindings";
 import { CAMERA_COMMANDS } from "./viewmodes";
 
 export type SelectionKey =
@@ -107,8 +108,10 @@ export function mouseControlOf(commands: readonly string[], usable: (c: MouseCon
 }
 
 /** Whether the view runs a command bound under terrainFocus as a command (the View keys, the user's own): not its own
- *  key commands, held controls or the tabs' list commands, which it handles itself. */
-export const runsAsCommand = (id: string) => !KEY_COMMANDS.has(id) && !HELD_COMMANDS.has(id) && listCommandOf([id]) === null;
+ *  key commands, held controls or the tabs' list commands, which it handles itself, nor Undo and Redo, whose keys
+ *  (under undoKeys, which the editor around the view gives too) its editor's own handler takes: run here as well, a
+ *  key would step twice. */
+export const runsAsCommand = (id: string) => !KEY_COMMANDS.has(id) && !HELD_COMMANDS.has(id) && listCommandOf([id]) === null && undoStepOf([id]) === null;
 
 /** A scale after a step, never so small the object is gone. */
 export const scaled = (scale: readonly number[], step: readonly number[]): [number, number, number] =>

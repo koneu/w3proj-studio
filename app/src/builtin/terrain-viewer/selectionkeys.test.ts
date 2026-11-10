@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, FACE_COMMAND, HELD_COMMANDS, joinSteps, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf } from "./selectionkeys";
-import { commandsFor, defaultBindings, eventChord, keyLabel, mouseChord, mouseCommandsFor, primaryKey } from "../../lib/keybindings";
+import { commandsFor, defaultBindings, eventChord, keyLabel, mouseChord, mouseCommandsFor, primaryKey, UNDO_BINDINGS, UNDO_CONTEXT } from "../../lib/keybindings";
 
 // The selection's keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
 // what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then what those commands do.
@@ -152,6 +152,18 @@ test("mouse controls by default: the middle button pans, the right turns, Alt an
   // Their commands are held, not run, and declared.
   const declared = new Set((manifest as unknown as { contributes: { commands: { id: string }[] } }).contributes.commands.map((c) => c.id));
   for (const id of [...Object.values(MOUSE_CONTROLS), AREA_COMMAND]) { assert.ok(HELD_COMMANDS.has(id), id); assert.ok(declared.has(id), id); assert.equal(runsAsCommand(id), false, id); }
+});
+
+test("Undo's keys reach the map too (its editor says undoKeys), but the view doesn't run them: the editor's handler does", () => {
+  // With the workbench's Undo and Redo bindings, Ctrl+Z on the canvas is bound to workbench.undo there; run by the view
+  // as one of "the other commands bound here" as well, a resize was undone twice (app-smoke resizeUndo).
+  const all = [...defaultBindings([], UNDO_BINDINGS), ...bindings];
+  const ctx = { terrainFocus: true, [UNDO_CONTEXT]: true };
+  for (const chord of ["ctrl+z", "ctrl+y", "ctrl+shift+z"]) {
+    const ids = commandsFor(all, chord, ctx);
+    assert.ok(ids.length > 0, `${chord} is bound on the map (control)`);
+    assert.equal(ids.find(runsAsCommand), undefined, chord);
+  }
 });
 
 test("Escape cancels, A held selects an area (Shift too, not with Ctrl or Alt)", () => {
