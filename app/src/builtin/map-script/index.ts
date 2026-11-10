@@ -21,6 +21,7 @@ import { dayNightModels } from "../../lib/script/setup";
 import { abilityOrders, autocastOrdersOf, buildingTypes, customColorTypes, customIdsOf, destructableTints, gameCustomColors, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { checkpointBefore } from "../../lib/checkpoint";
+import { joinPath } from "../../lib/paths";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { meleeBlockers, meleeFlagsAfter, type MeleeInfo } from "../../lib/terrain/owner";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
@@ -187,7 +188,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const lights = dayNightModels(w3lText === null ? null : JSON.parse(w3lText), { terrain: light("TerrainLights", "Terrain"), unit: light("UnitLights", "Unit") });
 
     const sounds = (await json<{ sounds: NonNullable<ScriptInput["sounds"]> }>("map/war3map.w3s"))?.sounds ?? [];
-    const soundDuration = await soundDurations(sounds.map((s) => s.file), path);
+    const soundDuration = await soundDurations(sounds.map((s) => s.file), path, campaign);
 
     const script = generateScript({
       info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
@@ -206,14 +207,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { path, text: await language.compile({ script, commonJ, blizzardJ }), language: language.title };
   };
 
-  /** Sound lengths in ms, by file and sound name: imported files, the game's, else what the current script says
-   *  (scriptSoundDurations: per sound, so sounds of one unreadable file each keep their own). */
-  const soundDurations = async (soundFiles: string[], path: string): Promise<(file: string, name: string) => number | undefined> => {
+  /** Sound lengths in ms, by file and sound name: imported files (a chapter map's, else its campaign's, as the game
+   *  finds them), the game's, else what the current script says (scriptSoundDurations: per sound, so sounds of one
+   *  unreadable file each keep their own). `campaign`: a chapter map's campaign project. */
+  const soundDurations = async (soundFiles: string[], path: string, campaign?: string): Promise<(file: string, name: string) => number | undefined> => {
     const measured = new Map<string, number>();
     const script = await w3.workspace.readText(path).catch(() => null);
     const old = scriptSoundDurations(script ?? "");
     for (const f of new Set(soundFiles)) {
-      const buf = await w3.workspace.readBytes(`map/${f.replace(/\\/g, "/")}`).catch(() => w3.game.read(f)).catch(() => null);
+      const rel = `map/${f.replace(/\\/g, "/")}`;
+      const buf = await w3.workspace.readBytes(rel)
+        .catch(() => (campaign === undefined ? Promise.reject(new Error("no campaign")) : w3.workspace.readBytes(joinPath(campaign, rel))))
+        .catch(() => w3.game.read(f)).catch(() => null);
       const ms = buf ? soundDurationMs(buf) : null;
       if (ms !== null) measured.set(f, ms);
     }

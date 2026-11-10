@@ -25,9 +25,10 @@ export const readMapDocStrict = async <T>(w3: W3Api, path: string, read: (w3: W3
   return null;
 };
 
-/** Turns "TRIGSTR_012" into the text in war3map.wts; anything else stays. */
-export async function mapStrings(w3: W3Api): Promise<(value: string) => string> {
-  const text = await w3.workspace.readText("map/war3map.wts").catch(() => null);
+/** Turns "TRIGSTR_012" into the text in war3map.wts (`path`: another string table, such as a campaign's
+ *  map/war3campaign.wts); anything else stays. */
+export async function mapStrings(w3: W3Api, path = "map/war3map.wts"): Promise<(value: string) => string> {
+  const text = await w3.workspace.readText(path).catch(() => null);
   if (text === null) return (value) => value;
   const table = new StringTable(text);
   return (value) => table.resolve(value);
