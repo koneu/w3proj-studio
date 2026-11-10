@@ -8,7 +8,7 @@ import { changeEach, dropsOf, type TypeFacts } from "./unitprops";
 
 const facts = (kind = "w3u"): TypeFacts => ({
   kind, hero: false, building: false, invulnerable: false, attacks: true, acquireRange: 500, maxHp: 420, maxMana: 0, skills: [], toggles: [], slots: 0,
-  goldMine: false, waygate: false, maxLevel: 10, levelSkip: 2,
+  goldMine: false, waygate: false, customColor: false, maxLevel: 10, levelSkip: 2,
 });
 /** A unit as World Editor 2.0 writes it (subversion 11), at a place, for a player (from 0). */
 const unit = (id: string, x: number, y: number, player: number, more: Record<string, unknown> = {}): Placed => ({

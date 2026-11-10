@@ -7,9 +7,12 @@
 import { h } from "../../workbench/dom";
 import {
   ACQUIRE_CAMP, ACQUIRE_NORMAL, CAMP_RANGE, COLORS, DEFAULT, activeOthers, attributesAt, commonFields, isActive, maxSkillLevel, pointsSpent,
-  heroPools, randomItemLabel, sameValue, type PropChange, type TypeFacts,
+  heroPools, randomItemLabel, sameValue, setTotal, skinOfEntry, type PropChange, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
+import {
+  ITEM_CLASSES, MAX_RANDOM_LEVEL, positionsFor, randomOf, randomWhatOf, type RandomChoice, type RandomGroup, type RandomUnit,
+} from "../../lib/terrain/randomplace";
 
 export interface PropsPanelHost {
   items: { entry: Placed; facts: TypeFacts }[];
@@ -17,6 +20,10 @@ export interface PropsPanelHost {
   readOnly?: boolean;
   /** The map's regions (war3map.w3r): number and name. */
   regions: { index: number; name: string }[];
+  /** Map Properties' random groups; null when war3map.w3i couldn't be read. */
+  groups: RandomGroup[] | null;
+  /** Opens Map Properties on its random groups (the World Editor's Edit Random Groups). */
+  editGroups?(): void;
   /** Makes the change as one undo step and shows the panel again; the reason when it's refused. */
   change(c: PropChange): string | null;
   /** Display name of an object id. */
@@ -51,6 +58,74 @@ function named(host: PropsPanelHost, id: string, kinds?: string[]): HTMLElement 
   if (random) return el;
   void host.name(id, kinds).then((n) => { if (n) el.textContent = `${n} (${id})`; }).catch(() => { /* id stays */ });
   return el;
+}
+
+const RANDOM_TITLES = { unit: "Random unit", building: "Random building", item: "Random item" } as const;
+const ANY_OF = { unit: "Any neutral hostile unit", building: "Any neutral passive building", item: "Any item" } as const;
+
+/** The World Editor's Random Unit tab for Random Units, Buildings or Items of one id: any of a level (an item also of
+ *  a class; a building any neutral passive one), a random group's position, or the object's own table of types and
+ *  chances (Use Custom Table). Each control sends the whole choice. */
+function randomRows(host: PropsPanelHost, entries: readonly Entry[], send: (c: PropChange) => void): HTMLElement[] {
+  const what = randomWhatOf(entries[0].id)!;
+  const choice = sameValue(entries, (e) => randomOf(e as unknown as Record<string, unknown>));
+  const kinds = what === "item" ? ["w3t"] : ["w3u"];
+  const plural = what === "item" ? "items" : `${what}s`;
+  const choose = (v: RandomChoice) => send({ field: "random", value: v });
+  const usable = (host.groups ?? []).filter((g) => positionsFor(g, what).length);
+  const out: HTMLElement[] = [h("div.terrain-sel-sub.muted", {}, RANDOM_TITLES[what])];
+  const by = select(choice === undefined ? undefined : choice?.by ?? "unknown", [
+    ["level", ANY_OF[what]], ["group", "From a random group"], ["table", "Own table"],
+    ...(choice === null ? [["unknown", "Unknown (kept as stored)"] as [string, string]] : []),
+  ], "random-by", (v) => {
+    if (v === "level") choose({ by: "level", level: what === "building" ? -1 : 1, ...(what === "item" ? { itemClass: 0 } : {}) });
+    else if (v === "table") choose({ by: "table", units: [] });
+    else if (v === "group") {
+      const g = usable[0];
+      if (!g) { host.warn(host.groups === null ? "Map Properties couldn't be read (war3map.w3i), so its random groups aren't known." : `No random group of Map Properties has a position for ${plural}.`); return; }
+      choose({ by: "group", group: g.number, position: positionsFor(g, what)[0] });
+    }
+  });
+  out.push(row("Chosen from", by));
+  if (!choice) return out;
+  if (choice.by === "level" && what !== "building") {
+    out.push(row("Level", select(String(choice.level), [["-1", "Any"], ...Array.from({ length: MAX_RANDOM_LEVEL + 1 }, (_, i) => [String(i), String(i)] as [string, string])],
+      "random-level", (v) => choose({ ...choice, level: Number(v) }))));
+    if (what === "item") {
+      out.push(row("Class", select(String(choice.itemClass ?? 0), ITEM_CLASSES.map((c, i) => [String(i), c] as [string, string]),
+        "random-class", (v) => choose({ ...choice, itemClass: Number(v) }))));
+    }
+  } else if (choice.by === "group") {
+    const g = (host.groups ?? []).find((x) => x.number === choice.group);
+    const groupOptions = usable.map((x) => [String(x.number), `${x.number}: ${x.name}`] as [string, string]);
+    out.push(row("Group", select(String(choice.group), groupOptions, "random-group", (v) => {
+      const next = usable.find((x) => String(x.number) === v);
+      if (next) choose({ by: "group", group: next.number, position: positionsFor(next, what)[0] });
+    }), ...(host.editGroups ? [" ", h("button", { title: "Map Properties › Random Groups", onclick: () => host.editGroups?.() }, "Edit…")] : [])));
+    const positions = g ? positionsFor(g, what) : [];
+    out.push(row("Position", select(String(choice.position), positions.map((p) => [String(p), `Position ${p + 1}`] as [string, string]),
+      "random-position", (v) => choose({ ...choice, position: Number(v) }))));
+  } else if (choice.by === "table") {
+    const units = choice.units;
+    const put = (list: RandomUnit[]) => choose({ by: "table", units: list });
+    units.forEach((u, i) => {
+      const chance = h("input.terrain-sel-num", { type: "number", min: 0, max: 100, step: 1, value: String(u.chance), "data-prop": `random-chance-${i}`, title: "Chance in percent",
+        onchange: () => {
+          const v = Number(chance.value);
+          if (chance.value.trim() === "" || !Number.isFinite(v)) { chance.value = String(u.chance); return; }
+          put(units.map((x, k) => (k === i ? { ...x, chance: v } : x)));
+        } });
+      out.push(row("", named(host, u.id, kinds), " ", chance, "%",
+        h("button.icon-button", { title: "Take it out of the table", "data-prop": `random-remove-${i}`, onclick: () => put(units.filter((_, k) => k !== i)) }, "×")));
+    });
+    const total = setTotal(units);
+    const add = h("button", { "data-prop": "random-add", title: `Add a type to the table (the World Editor's New Unit)`, onclick: async () => {
+      const picked = await host.pick(`Add to the random ${what}'s table`, kinds);
+      if (picked !== undefined) put([...units, { id: picked, chance: Math.max(0, 100 - total) }]);
+    } }, "Add…");
+    out.push(row(units.length ? "Total" : "", ...(units.length ? [h(total > 100 ? "span.terrain-prop-over" : "span", { title: total > 100 ? "More than 100%: the game picks by the chances' shares" : "" }, `${total}%`), " "] : [h("span.muted", {}, "empty: nothing is placed "), " "]), add));
+  }
+  return out;
 }
 
 /** The properties of the selected objects, or null when none apply. */
@@ -205,6 +280,21 @@ export function propsPanel(host: PropsPanelHost): HTMLElement | null {
       case "life":
         rows.push(row("Life %", numberBox(same((e) => e.life as number), { min: 0, max: 100, prop: "life", title: "Percent of its hit points; 0 places it dead" }, (v) => send({ field: "life", value: v })),
           ofMax(maxShared((f) => f.maxHp))));
+        break;
+      case "skin": {
+        // The World Editor's Skin (Choose Skin lists the types of the object's kind): null is the type's own look.
+        const skin = same((e) => (skinOfEntry(e) === e.id ? null : skinOfEntry(e)));
+        const kinds = [facts.kind];
+        const choose = h("button", { "data-prop": "skin", title: "Draw and create it with another type's look (the game's BlzCreateUnitWithSkin)", onclick: async () => {
+          const picked = await host.pick("Skin", kinds);
+          if (picked !== undefined) send({ field: "skin", value: picked });
+        } }, "Choose…");
+        rows.push(row("Skin", skin === undefined ? MIXED : skin === null ? h("span.muted", {}, "its own") : named(host, skin, kinds), " ", choose,
+          ...(skin !== null ? [h("button.icon-button", { "data-prop": "skin-own", title: "Back to the type's own look", onclick: () => send({ field: "skin", value: null }) }, "×")] : [])));
+        break;
+      }
+      case "random":
+        rows.push(...randomRows(host, entries, send));
         break;
       case "drops":
         // A block of its own higher up in the panel (dropsedit.ts dropsBlock).

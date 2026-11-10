@@ -55,11 +55,46 @@ export const POSITION_OF: Record<RandomWhat, number> = { unit: 0, building: 1, i
 /** Item classes of a random item by level (randomClass): 0 any, then the game's classes. */
 export const ITEM_CLASSES = ["Any Class", "Permanent", "Charged", "Power Up", "Artifact", "Purchasable", "Campaign", "Miscellaneous"];
 
-export type RandomSpec =
+/** One line of a placed random object's own table (randomType 2): a type and its chance in percent. */
+export interface RandomUnit { id: string; chance: number }
+
+/** How a random object is chosen (Unit Properties' Random Unit tab, WESTRING_RUG_TYPE_*). */
+export type RandomChoice =
   /** Any of a level (-1: any level); an item also of a class (0: any). A building is any neutral passive one. */
-  | { what: RandomWhat; by: "level"; level: number; itemClass?: number }
+  | { by: "level"; level: number; itemClass?: number }
   /** A random group's position: the object its chosen line has there. */
-  | { what: RandomWhat; by: "group"; group: number; position: number };
+  | { by: "group"; group: number; position: number }
+  /** The object's own table ("Use Custom Table"): one of these by their chances. */
+  | { by: "table"; units: RandomUnit[] };
+
+export type RandomSpec = RandomChoice & { what: RandomWhat };
+
+/** What a random object's id places (uDNR, bDNR, iDNR), else undefined. */
+export function randomWhatOf(id: string): RandomWhat | undefined {
+  return (Object.keys(RANDOM_IDS) as RandomWhat[]).find((w) => RANDOM_IDS[w] === id);
+}
+
+/** The highest level offered for a random object by level (the Object Placer's Random… and Unit Properties). */
+export const MAX_RANDOM_LEVEL = 20;
+
+/** A random level from the placement file's 3 bytes (levelBytes' hex): ffffff is any (-1); anything unreadable too. */
+export function levelOf(hex: unknown): number {
+  if (typeof hex !== "string" || !/^[0-9a-fA-F]{6}$/.test(hex)) return -1;
+  const v = parseInt(hex.slice(0, 2), 16) | (parseInt(hex.slice(2, 4), 16) << 8) | (parseInt(hex.slice(4, 6), 16) << 16);
+  return v === 0xffffff ? -1 : v;
+}
+
+/** How a placed random object is chosen now, from its fields; null for a randomType the file doesn't know. */
+export function randomOf(e: Record<string, unknown>): RandomChoice | null {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  if (e.randomType === 0) return { by: "level", level: levelOf(e.randomLevel), itemClass: n(e.randomClass) };
+  if (e.randomType === 1) return { by: "group", group: n(e.randomGroup), position: n(e.randomPosition) };
+  if (e.randomType === 2) {
+    const list = Array.isArray(e.randomUnits) ? e.randomUnits as unknown[] : [];
+    return { by: "table", units: list.map((u) => u as Partial<RandomUnit>).map((u) => ({ id: String(u?.id ?? ""), chance: n(u?.chance) })) };
+  }
+  return null;
+}
 
 export interface RandomGroup { number: number; name: string; positions: number[]; lines?: { chance: number; ids: string[] }[] }
 
@@ -75,8 +110,10 @@ export function applyRandom(e: Record<string, unknown>, spec: RandomSpec): void 
   for (const k of ["randomLevel", "randomClass", "randomGroup", "randomPosition", "randomUnits"]) delete e[k];
   if (spec.by === "level") {
     Object.assign(e, { randomType: 0, randomLevel: levelBytes(spec.what === "building" ? -1 : spec.level), randomClass: spec.what === "item" ? Math.max(0, Math.min(7, spec.itemClass ?? 0)) : 0 });
-  } else {
+  } else if (spec.by === "group") {
     Object.assign(e, { randomType: 1, randomGroup: spec.group, randomPosition: spec.position });
+  } else {
+    Object.assign(e, { randomType: 2, randomUnits: spec.units.map((u) => ({ id: u.id, chance: u.chance })) });
   }
 }
 
@@ -87,6 +124,7 @@ export function randomName(spec: RandomSpec, groups: readonly RandomGroup[] = []
     const g = groups.find((x) => x.number === spec.group);
     return `${title} (group ${g ? `“${g.name}”` : spec.group}, position ${spec.position + 1})`;
   }
+  if (spec.by === "table") return `${title} (own table of ${spec.units.length})`;
   const level = spec.level < 0 ? "Any" : `Level ${spec.level}`;
   if (spec.what === "building") return "Random Neutral Passive Building";
   if (spec.what === "unit") return `Random ${level} Neutral Hostile Unit`;

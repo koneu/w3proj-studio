@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   activeOthers, applyChange, attributesAt, changeAll, changeAllOf, checkChange, notOffered, commonFields, dropsOf, fieldsFor, fitSkills, heroPools, isActive, maxSkillLevel, propSnapshot,
-  ownSetsOnly, propChangesOf, randomItemLabel, redistribute, setTotal, tableChoice, type TypeFacts,
+  ownSetsOnly, propChangesOf, randomItemLabel, redistribute, restoreProps, setTotal, skinOfEntry, tableChoice, type TypeFacts,
 } from "./unitprops";
 import type { Placed } from "./objects";
+import { randomOf } from "../../lib/terrain/randomplace";
 
 const facts = (more: Partial<TypeFacts> = {}): TypeFacts => ({
   kind: "w3u", hero: false, building: false, invulnerable: false, attacks: true, acquireRange: 500, maxHp: 420, maxMana: 0, skills: [], toggles: [], slots: 0,
-  goldMine: false, waygate: false, maxLevel: 10, levelSkip: 2, ...more,
+  goldMine: false, waygate: false, customColor: false, maxLevel: 10, levelSkip: 2, ...more,
 });
 // The Paladin as the game has it: three skills of three levels from hero level 1, an ultimate at 6.
 const PALADIN = facts({
@@ -36,21 +37,22 @@ const get = (e: Placed) => e as unknown as Record<string, unknown>;
 // What the World Editor's Unit Properties showed on 2026-11-08 (we-drive, a copy of Turtle Rock with these placed):
 // a Paladin hit points, mana, level, attributes and the acquisition range, Abilities, Inventory and Items Dropped;
 // a footman hit points and the range, Inventory, Items Dropped; a barracks only hit points; a gold mine only its
-// gold; a waygate its destination and Custom Color, no hit points. Drops on all of them.
+// gold; a waygate its destination and Custom Color, no hit points. Drops on all of them. And a Skin on every one
+// (2026-11-10).
 test("only the fields that apply to a type are shown, as in the World Editor", () => {
-  assert.deepEqual(fieldsFor(unit("hfoo"), facts()), ["hp", "acquire", "drops"]);
-  assert.deepEqual(fieldsFor(unit("hfoo"), facts({ slots: 6 })), ["hp", "inventory", "acquire", "drops"]);
-  assert.deepEqual(fieldsFor(unit("Hpal"), PALADIN), ["hp", "mana", "level", "attributes", "skills", "inventory", "acquire", "drops"]);
-  assert.deepEqual(fieldsFor(unit("hbar"), facts({ building: true, attacks: false, maxHp: 1500 })), ["hp", "drops"]);
-  assert.deepEqual(fieldsFor(unit("ngol"), facts({ goldMine: true, building: true, invulnerable: true, attacks: false })), ["gold", "drops"]);
-  assert.deepEqual(fieldsFor(unit("nwgt"), facts({ waygate: true, building: true, invulnerable: true, attacks: false })), ["waygate", "color", "drops"]);
+  assert.deepEqual(fieldsFor(unit("hfoo"), facts()), ["hp", "acquire", "skin", "drops"]);
+  assert.deepEqual(fieldsFor(unit("hfoo"), facts({ slots: 6 })), ["hp", "inventory", "acquire", "skin", "drops"]);
+  assert.deepEqual(fieldsFor(unit("Hpal"), PALADIN), ["hp", "mana", "level", "attributes", "skills", "inventory", "acquire", "skin", "drops"]);
+  assert.deepEqual(fieldsFor(unit("hbar"), facts({ building: true, attacks: false, maxHp: 1500 })), ["hp", "skin", "drops"]);
+  assert.deepEqual(fieldsFor(unit("ngol"), facts({ goldMine: true, building: true, invulnerable: true, attacks: false })), ["gold", "skin", "drops"]);
+  assert.deepEqual(fieldsFor(unit("nwgt"), facts({ waygate: true, customColor: true, building: true, invulnerable: true, attacks: false })), ["waygate", "color", "skin", "drops"]);
   assert.ok(!fieldsFor(unit("hfoo"), facts()).includes("gold"), "a footman's 12500 isn't gold");
   assert.ok(fieldsFor(unit("nmrl"), facts({ maxMana: 200 })).includes("mana"));
   // A value that isn't the default shows anyway, so it can be set back.
   assert.ok(fieldsFor(unit("ngol", { hp: 50 }), facts({ goldMine: true, invulnerable: true })).includes("hp"));
   assert.ok(fieldsFor(unit("hbar", { targetAcquisition: -2 }), facts({ attacks: false })).includes("acquire"));
   assert.deepEqual(fieldsFor(unit("sloc"), facts()), [], "a start location has none");
-  assert.deepEqual(fieldsFor(unit("ratf"), facts({ kind: "w3t" })), []);
+  assert.deepEqual(fieldsFor(unit("ratf"), facts({ kind: "w3t" })), ["skin"]);
   assert.deepEqual(fieldsFor(destructable(), facts({ kind: "w3b" })), ["life", "drops"]);
   assert.deepEqual(fieldsFor(destructable({ id: "CPct", life: 255 }), facts({ kind: "w3d" })), [], "a plain doodad can't die");
   assert.deepEqual(fieldsFor(destructable({ id: "CPct", itemSets: [[{ id: "ratf", chance: 100 }]] }), facts({ kind: "w3d" })), ["drops"], "drops it has can be taken off");
@@ -132,8 +134,8 @@ test("values outside the World Editor's ranges are refused", () => {
   assert.ok(ok({ field: "acquire", value: -1 }) && ok({ field: "acquire", value: -2 }) && ok({ field: "acquire", value: 750.5 }));
   assert.ok(!ok({ field: "acquire", value: 0 }) && !ok({ field: "acquire", value: -3 }) && !ok({ field: "acquire", value: 5001 }));
   assert.ok(ok({ field: "level", value: 10 }) && !ok({ field: "level", value: 11 }) && !ok({ field: "level", value: 0 }));
-  assert.match(checkChange(u, f, { field: "color", value: 3 }) ?? "", /Only a waygate/);
-  const wg = unit("nwgt"), wf = facts({ waygate: true });
+  assert.match(checkChange(u, f, { field: "color", value: 3 }) ?? "", /allows a custom team colour/);
+  const wg = unit("nwgt"), wf = facts({ waygate: true, customColor: true });
   assert.ok([-1, 0, 23].every((value) => checkChange(wg, wf, { field: "color", value }) === null) && checkChange(wg, wf, { field: "color", value: 24 }));
   assert.ok(ok({ field: "attributes", value: null }) && ok({ field: "attributes", value: [1, 1, 1] }) && !ok({ field: "attributes", value: [0, 5, 5] }));
   assert.ok(ok({ field: "slot", slot: 5, id: "ratf" }) && !ok({ field: "slot", slot: 6, id: "ratf" }) && !ok({ field: "slot", slot: 0, id: "rat" }));
@@ -266,7 +268,7 @@ test("inventory slots stay in order and empty slots leave the list", () => {
 test("several objects change all together, or none when one refuses", () => {
   const a = unit("hfoo"), b = unit("Hpal", { level: 1 });
   const items = [{ entry: a, facts: facts() }, { entry: b, facts: PALADIN }];
-  assert.deepEqual(commonFields(items), ["hp", "acquire", "drops"]);
+  assert.deepEqual(commonFields(items), ["hp", "acquire", "skin", "drops"]);
   const r = changeAll(items, { field: "hp", value: 40 });
   assert.ok("changed" in r && r.changed.length === 2);
   assert.deepEqual([get(a).hp, get(b).hp], [40, 40]);
@@ -305,7 +307,7 @@ test("an AI tool's properties become the panel's changes: names, words and numbe
 
 test("an AI tool may set only what the panel shows for a type", () => {
   // A footman stores 12500 in its gold field, a start location hit points: neither is offered.
-  assert.match(notOffered([{ entry: unit("hfoo"), facts: facts() }], [{ field: "gold", value: 5 }]) ?? "", /hfoo has no gold in Unit Properties \(it has hp, acquire, drops\)/);
+  assert.match(notOffered([{ entry: unit("hfoo"), facts: facts() }], [{ field: "gold", value: 5 }]) ?? "", /hfoo has no gold in Unit Properties \(it has hp, acquire, skin, drops\)/);
   assert.match(notOffered([{ entry: unit("sloc"), facts: facts() }], [{ field: "hp", value: 50 }]) ?? "", /sloc has no hp in Unit Properties\.$/);
   assert.equal(notOffered([{ entry: unit("Hpal"), facts: PALADIN }], [{ field: "skill", id: "AHhb", level: 1 }, { field: "slot", slot: 0, id: "ankh" }]), null);
   assert.equal(notOffered([{ entry: unit("hmpr"), facts: PRIEST }], [{ field: "active", id: "Ahea", on: true }]), null);
@@ -326,6 +328,92 @@ test("several changes to several objects: all of them, or none when one is refus
   // What's already so changes nothing.
   const same = changeAllOf(items, [{ field: "hp", value: 40 }]);
   assert.ok("changed" in same && same.changed.length === 0);
+});
+
+test("a skin: another type's look, or back to its own; every unit and item has one, a start location none", () => {
+  const u = unit("hfoo"), f = facts();
+  assert.equal(skinOfEntry(u), "hfoo");
+  assert.equal(checkChange(u, f, { field: "skin", value: "hkni" }), null);
+  assert.equal(applyChange(u, f, { field: "skin", value: "hkni" }), true);
+  assert.equal(get(u).skinId, "hkni");
+  assert.equal(skinOfEntry(u), "hkni");
+  // The type's own is stored as its id, as the World Editor and new placements store it.
+  assert.equal(applyChange(u, f, { field: "skin", value: null }), true);
+  assert.equal(get(u).skinId, "hfoo");
+  assert.match(checkChange(u, f, { field: "skin", value: "kni" }) ?? "", /four characters/);
+  assert.match(checkChange(u, f, { field: "skin", value: "0x00000000" }) ?? "", /four characters/);
+  assert.match(checkChange(unit("sloc"), f, { field: "skin", value: "hkni" }) ?? "", /start location/);
+  // A file without skins (version 8 of older editors) has none to set.
+  const old = unit("hfoo") as unknown as Record<string, unknown>;
+  delete old.skinId;
+  assert.ok(!fieldsFor(old as unknown as Placed, f).includes("skin"));
+  assert.match(checkChange(old as unknown as Placed, f, { field: "skin", value: "hkni" }) ?? "", /no skinId/);
+  assert.equal(skinOfEntry({ ...unit("hfoo"), skinId: "" } as unknown as Placed), "hfoo", "an empty one is the type's own");
+  // Several of one kind share it; a unit and an item don't.
+  assert.ok(commonFields([{ entry: unit("hfoo"), facts: f }, { entry: unit("hkni"), facts: f }]).includes("skin"));
+  assert.ok(!commonFields([{ entry: unit("hfoo"), facts: f }, { entry: unit("ratf"), facts: facts({ kind: "w3t" }) }]).includes("skin"));
+});
+
+// The World Editor's Random Unit tab (we-drive, 2026-11-10): Random Unit Type "Any Neutral Hostile Unit", "From Random
+// Group" or "Use Custom Table" (a list of "60% - Forest Troll Shadow Priest"), written as randomType 0, 1 and 2.
+test("a random object's choice: by level, from a random group, or its own table, with only that layout's fields", () => {
+  const groups = [{ number: 3, name: "Creeps", positions: [0, 2, 1] }];
+  const r = unit("uDNR"), f = facts({ attacks: false });
+  assert.ok(fieldsFor(r, f).includes("random"));
+  assert.ok(!fieldsFor(unit("hfoo"), f).includes("random"));
+  assert.deepEqual(randomOf(get(r)), { by: "level", level: 1, itemClass: 0 });
+  const ctx = { groups };
+  assert.ok("changed" in changeAll([{ entry: r, facts: f }], { field: "random", value: { by: "table", units: [{ id: "nfsp", chance: 60 }, { id: "nfsh", chance: 40 }] } }, ctx));
+  assert.deepEqual([get(r).randomType, get(r).randomUnits, "randomLevel" in get(r), "randomClass" in get(r)], [2, [{ id: "nfsp", chance: 60 }, { id: "nfsh", chance: 40 }], false, false]);
+  assert.equal(checkChange(r, f, { field: "random", value: { by: "group", group: 3, position: 0 } }, ctx), null);
+  assert.match(checkChange(r, f, { field: "random", value: { by: "group", group: 3, position: 1 } }, ctx) ?? "", /isn't one for units/, "position 2 holds items");
+  assert.match(checkChange(r, f, { field: "random", value: { by: "group", group: 4, position: 0 } }, ctx) ?? "", /no random group #4/);
+  applyChange(r, f, { field: "random", value: { by: "group", group: 3, position: 0 } });
+  assert.deepEqual([get(r).randomType, get(r).randomGroup, get(r).randomPosition, "randomUnits" in get(r)], [1, 3, 0, false]);
+  applyChange(r, f, { field: "random", value: { by: "level", level: -1 } });
+  assert.deepEqual([get(r).randomType, get(r).randomLevel, get(r).randomClass, "randomGroup" in get(r)], [0, "ffffff", 0, false]);
+  // Ranges: levels 0 to 20 or any, a class only for items, a building has no level, a table's lines.
+  assert.match(checkChange(r, f, { field: "random", value: { by: "level", level: 21 } }) ?? "", /0 to 20/);
+  assert.match(checkChange(r, f, { field: "random", value: { by: "level", level: 2, itemClass: 3 } }) ?? "", /Only a Random Item/);
+  assert.equal(checkChange(unit("iDNR"), facts({ kind: "w3t" }), { field: "random", value: { by: "level", level: 2, itemClass: 3 } }), null);
+  assert.match(checkChange(unit("bDNR"), f, { field: "random", value: { by: "level", level: 2 } }) ?? "", /no level/);
+  assert.match(checkChange(r, f, { field: "random", value: { by: "table", units: [{ id: "uDNR", chance: 50 }] } }) ?? "", /random object/);
+  assert.match(checkChange(r, f, { field: "random", value: { by: "table", units: [{ id: "nfsp", chance: 101 }] } }) ?? "", /0 to 100/);
+  assert.match(checkChange(unit("hfoo"), f, { field: "random", value: { by: "level", level: 1 } }) ?? "", /Only a Random Unit/);
+  // Units, buildings and items at once: no common choice (the World Editor refuses a table for them).
+  assert.ok(!commonFields([{ entry: unit("uDNR"), facts: f }, { entry: unit("bDNR"), facts: f }]).includes("random"));
+  assert.ok(commonFields([{ entry: unit("uDNR"), facts: f }, { entry: unit("uDNR"), facts: f }]).includes("random"));
+});
+
+test("undoing a random choice puts back its own layout, without the other layout's fields", () => {
+  const r = unit("uDNR"), f = facts();
+  const before = propSnapshot(r);
+  applyChange(r, f, { field: "random", value: { by: "group", group: 0, position: 1 } });
+  const after = propSnapshot(r);
+  restoreProps(r, before);
+  assert.deepEqual(propSnapshot(r), before);
+  assert.ok(!("randomGroup" in get(r)) && !("randomPosition" in get(r)), JSON.stringify(get(r)));
+  restoreProps(r, after);
+  assert.deepEqual(propSnapshot(r), after);
+  assert.ok(!("randomLevel" in get(r)));
+  // changeAllOf: a choice made through several changes leaves no field behind either.
+  const s = unit("uDNR");
+  const done = changeAllOf([{ entry: s, facts: f }], [{ field: "random", value: { by: "table", units: [] } }]);
+  assert.ok("changed" in done && done.changed.length === 1);
+  assert.deepEqual([get(s).randomType, get(s).randomUnits, "randomLevel" in get(s)], [2, [], false]);
+});
+
+test("an AI tool's skin and random choice", () => {
+  const groups = [{ number: 3, name: "Creeps" }];
+  assert.deepEqual(propChangesOf({ skin: "hkni" }), [{ field: "skin", value: "hkni" }]);
+  assert.deepEqual(propChangesOf({ skin: "default" }), [{ field: "skin", value: null }]);
+  assert.deepEqual(propChangesOf({ random: { level: "any" } }), [{ field: "random", value: { by: "level", level: -1 } }]);
+  assert.deepEqual(propChangesOf({ random: { level: 2, itemClass: 1 } }), [{ field: "random", value: { by: "level", level: 2, itemClass: 1 } }]);
+  assert.deepEqual(propChangesOf({ random: { group: "Creeps", position: 1 } }, [], groups), [{ field: "random", value: { by: "group", group: 3, position: 0 } }]);
+  assert.deepEqual(propChangesOf({ random: { units: [{ id: "nfsp", chance: 60, x: 1 }] } }), [{ field: "random", value: { by: "table", units: [{ id: "nfsp", chance: 60 }] } }]);
+  assert.throws(() => propChangesOf({ random: { group: "Nope", position: 1 } }, [], groups), /no random group called "Nope"/);
+  assert.throws(() => propChangesOf({ random: { level: 1, group: 2 } }), /random must be/);
+  assert.throws(() => propChangesOf({ skin: 5 }), /skin must be/);
 });
 
 test("skills and attributes are common only to one type; inventory to as many slots", () => {

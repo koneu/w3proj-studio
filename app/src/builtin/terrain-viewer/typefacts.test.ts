@@ -9,6 +9,8 @@ const UNITS: Record<string, Record<string, string>> = {
   hfoo: { uhpm: "420", umpm: "", uabi: "Adef,Aihn", ubdg: "0", uaen: "1", uacq: "500", ulev: "2" },
   nshe: { uhpm: "15", ulev: "0" },
   hpea: { uhpm: "220", uabi: "Ahar,Arep,Ahrl,Amil", ubdg: "0", uaen: "3" },
+  h001: { uhpm: "420", uabi: "A003,Adef", ubdg: "0", uaen: "1", utcc: "1" },
+  nwgt: { uhpm: "1000", uabi: "Awrp,Avul", ubdg: "1", utcc: "1" },
   ngol: { uhpm: "150000", uabi: "Agld,Avul", ubdg: "1", uaen: "0" },
   h000: { uhpm: "500", uabi: "A001", ubdg: "0" },
   n000: { uhpm: "150000", uabi: "A002,Avul", ubdg: "1" },
@@ -26,6 +28,7 @@ const data: FactsData = {
   destructable: (id, field) => (id === "LTlt" && field === "bhps" ? "50" : ""),
   ability: (id, field) => ABILITIES[id]?.fields[field] ?? "",
   abilityCode: (id) => ABILITIES[id]?.code ?? id,
+  abilityBase: (id) => (id === "A003" ? "Ahea" : id),
   goldMines: new Set(["ngol", "ugol", "egol"]),
   waygates: new Set(["nwgt"]),
   toggleable: new Set(["Adef", "Ahea", "Ainf"]),
@@ -56,6 +59,18 @@ test("the abilities a type can be placed with switched on: those the script has 
   assert.deepEqual(typeFacts("hpea", "w3u", data).toggles, []);
   assert.deepEqual(typeFacts("Hpal", "w3u", data).toggles, []);
   assert.deepEqual(typeFacts("sloc", "w3u", data).toggles, []);
+});
+
+test("a map's own ability based on an autocast one gets its Active box, by its own id", () => {
+  // A003 is based on Heal: the World Editor offers it and writes "healon" (we-drive, 2026-11-10).
+  assert.deepEqual(typeFacts("h001", "w3u", data).toggles, ["A003", "Adef"]);
+});
+
+test("a custom colour only for types that allow one (Allow Custom Team Color)", () => {
+  assert.equal(typeFacts("nwgt", "w3u", data).customColor, true);
+  assert.equal(typeFacts("h001", "w3u", data).customColor, true, "a footman type given utcc");
+  assert.equal(typeFacts("hfoo", "w3u", data).customColor, false);
+  assert.equal(typeFacts("ngol", "w3u", data).customColor, false);
 });
 
 test("gold mines and waygates by the map's lists or by their abilities; invulnerable and attacking by the data", () => {

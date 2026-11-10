@@ -1221,9 +1221,20 @@ async function unitProperties(page, found) {
   const fail = (what) => found.push(`unit properties: ${what}`);
   const k = await heightKit(page, "UnitProps");
   const TXT = "map/war3map.w3e.txt";
-  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }, { id: "hfoo", x: 768, y: 768, player: 1 }], ignoreRoom: true });
+  // A Random Unit given its own table as it's placed (place_objects takes set_object_properties' properties).
+  const table = [{ id: "nfsp", chance: 60 }, { id: "nfsh", chance: 40 }];
+  await k.tool("place_objects", { objects: [{ id: "Hpal", x: 0, y: 0, player: 1 }, { id: "ngol", x: 768, y: 0 }, { id: "nwgt", x: 0, y: 768 }, { id: "hfoo", x: 768, y: 768, player: 1 },
+    { id: "uDNR", x: -768, y: 768, player: 25, properties: { random: { units: table } } }], ignoreRoom: true });
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: -768, y: 0 }], ignoreRoom: true });
   await k.save();
+  const placedRandom = k.units().find((u) => u.id === "uDNR");
+  if (placedRandom?.randomType !== 2 || JSON.stringify(placedRandom.randomUnits) !== JSON.stringify(table) || "randomLevel" in placedRandom) fail(`the random unit placed with its table: ${JSON.stringify(placedRandom)}`);
+  // A property an object can't have refuses the whole call: nothing is placed.
+  const placedBefore = hash(join(k.root, "map", "war3mapUnits.doo.json"));
+  const wrong = await k.tool("place_objects", { objects: [{ id: "hkni", x: -768, y: -768, player: 1 }, { id: "hfoo", x: -1024, y: -768, player: 1, properties: { gold: 5 } }], ignoreRoom: true })
+    .then(() => "accepted", (e) => e.message);
+  if (!/objects\[1\]: hfoo has no gold/.test(wrong)) fail(`place_objects with a footman's gold: ${wrong}`);
+  if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== placedBefore) fail("a refused place_objects changed war3mapUnits.doo");
   const units = k.read("war3mapUnits.doo.json"), info = k.read("war3map.w3i.json"), regions = k.read("war3map.w3r.json");
   if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
   units.subversion = 11;
@@ -1327,6 +1338,57 @@ async function unitProperties(page, found) {
   await k.save();
   if (unit("ngol").gold !== 9000) fail(`the gold mine's gold: ${unit("ngol").gold}`);
   if (unit("nwgt").waygate !== 0 || unit("nwgt").color !== 3) fail(`the waygate: ${JSON.stringify([unit("nwgt").waygate, unit("nwgt").color])}`);
+  // Drawn as the World Editor draws them: the waygate in its own colour (Allow Custom Team Color), a footman given a
+  // knight's skin as the knight.
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__propsGroup?.dispose();
+    window.__propsGroup = s.registerToolGroup({ id: "smoke-props", title: "smoke-props", order: 998, create: (ed) => { window.__propsEd = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const drawn = (id) => page.evaluate(`window.__propsEd?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)}) ?? null`);
+  try {
+    await until("the waygate drawn in its colour", async () => (await drawn("nwgt"))?.team === 3, 20000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await drawn("nwgt"))}`); });
+  } catch (e) { fail(e.message); }
+  await select({ id: "hfoo", x: 768, y: 768 });
+  if (!(await shown("skin"))) fail("the footman has no Skin");
+  else {
+    await k.hands.click(at("skin"));
+    await until("the unit browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
+    await k.hands.click("input.picker-search");
+    await k.hands.type("hkni");
+    const knightRow = `[...document.querySelectorAll(".picker-rows > .picker-row")].find((r) => r.querySelector("code")?.textContent === "hkni")`;
+    await until("the knight in the browser", () => page.evaluate(`!!${knightRow}`), 10000).catch((e) => fail(e.message));
+    await page.evaluate(`${knightRow}?.setAttribute("data-smoke-pick", "")`);
+    await k.hands.click('[data-smoke-pick]');
+    await settled();
+    await k.save();
+    if (unit("hfoo").skinId !== "hkni") fail(`the footman's skin: ${unit("hfoo").skinId}`);
+    await until("the footman drawn as a knight", async () => /knight/i.test((await drawn("hfoo"))?.model ?? ""), 20000)
+      .catch(async (e) => fail(`${e.message}: ${JSON.stringify(await drawn("hfoo"))}`));
+    await k.clearToasts();
+    // The × at the row's end: WebKitGTK's overlay scrollbar of the side view lay over it and took the click.
+    const hit = await page.evaluate(`(() => { const b = document.querySelector(${JSON.stringify(at("skin-own"))}); b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return e === b || b.contains(e) ? "" : String(e?.tagName) + "." + String(e?.className) + " at x " + Math.round(r.x); })()`);
+    if (hit) fail(`the skin's × is covered by ${hit}`);
+    await k.hands.click(at("skin-own"));
+    await settled();
+    await k.save();
+    if (unit("hfoo").skinId !== "hfoo") fail(`the footman's skin back to its own: ${unit("hfoo").skinId} (${await shown("skin-own") ? "the button is there" : "no button"}; ${await k.toasts()})`);
+  }
+  // The Random Unit tab: its own table shown; by level instead, written without the table; one undo puts the table
+  // back without a level.
+  await select({ id: "uDNR", x: -768, y: 768 });
+  if (await value("random-by") !== "table" || Number(await value("random-chance-0")) !== 60) fail(`the random unit's choice shows ${await value("random-by")}, ${await value("random-chance-0")}`);
+  await choose("random-by", "level");
+  await choose("random-level", "3");
+  await k.save();
+  let r = unit("uDNR");
+  if (r.randomType !== 0 || r.randomLevel !== "030000" || "randomUnits" in r) fail(`the random unit by level 3: ${JSON.stringify(r)}`);
+  await undo();
+  await undo();
+  await k.save();
+  r = unit("uDNR");
+  if (r.randomType !== 2 || JSON.stringify(r.randomUnits) !== JSON.stringify(table) || "randomLevel" in r || "randomClass" in r) fail(`two undos back to the table: ${JSON.stringify(r)}`);
 
   // A destructable's life, in war3map.doo.
   await select({ id: "LTlt", x: -768, y: 0 });
@@ -1382,6 +1444,8 @@ async function unitProperties(page, found) {
     [[paladin, footman], { level: 2 }, /Nothing was changed.*hfoo has no level/],
     [[paladin], { level: 5, hp: 0 }, /hp: Hit points go from 1 to 100/],
     [[footman], { active: { Ahea: true } }, /isn't one of this unit's abilities/],
+    [[footman], { random: { level: 1 } }, /hfoo has no random/],
+    [[paladin], { skin: "kni" }, /skin: A skin is an object id of four characters/],
   ];
   for (const [items, properties, why] of refusals) {
     const r = await k.tool("set_object_properties", { kind: "units", items, properties }).then(() => "accepted", (e) => e.message);
@@ -1389,6 +1453,7 @@ async function unitProperties(page, found) {
   }
   if (hash(join(k.root, "map", "war3mapUnits.doo.json")) !== unitsBefore) fail("a refused set_object_properties changed war3mapUnits.doo");
   await k.verify(fail);
+  await page.evaluate(`window.__propsGroup?.dispose(); delete window.__propsGroup; delete window.__propsEd;`);
   await page.evaluate(`w3.editors.closeAll()`);
   // This check views a gold mine and a tree with the game's tables read: kept, they'd leave gameReadsOnce's scene
   // nothing to read from the game (its control). The game's files are forgotten, as after a patch.

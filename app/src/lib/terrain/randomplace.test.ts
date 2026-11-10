@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyRandom, cycledId, levelBytes, positionsFor, randomName, rollLook, type LookOptions } from "./randomplace";
+import { applyRandom, cycledId, levelBytes, levelOf, positionsFor, randomName, randomOf, randomWhatOf, rollLook, type LookOptions } from "./randomplace";
 
 const tree = { numVar: 10, randScale: true, minScale: 0.8, maxScale: 1.2, fixedRot: null };
 const plain: LookOptions = { variation: null, randomVariation: false, randomRotation: false, randomScale: "off" };
@@ -67,6 +67,21 @@ const groups = [
   { number: 2, name: "Creeps", positions: [0, 1, 2], lines: [{ chance: 60, ids: ["nfoh", "ntav", "ratc"] }, { chance: 40, ids: ["nmoo", "0x00000000", "ckng"] }] },
   { number: 5, name: "Empty", positions: [0], lines: [] },
 ];
+
+test("a random object's own table (randomType 2), and its choice read back from any layout", () => {
+  const e: Record<string, unknown> = { id: "uDNR", randomType: 0, randomLevel: "030000", randomClass: 0 };
+  assert.deepEqual(randomOf(e), { by: "level", level: 3, itemClass: 0 });
+  applyRandom(e, { what: "unit", by: "table", units: [{ id: "nfsp", chance: 60 }, { id: "nfsh", chance: 40 }] });
+  assert.deepEqual(e, { id: "uDNR", randomType: 2, randomUnits: [{ id: "nfsp", chance: 60 }, { id: "nfsh", chance: 40 }] });
+  assert.deepEqual(randomOf(e), { by: "table", units: [{ id: "nfsp", chance: 60 }, { id: "nfsh", chance: 40 }] });
+  assert.deepEqual(randomOf({ randomType: 1, randomGroup: 2, randomPosition: 1 }), { by: "group", group: 2, position: 1 });
+  assert.equal(randomOf({ randomType: 7 }), null);
+  // Levels: little-endian, ffffff any; what isn't three bytes of hex is any too (a hand-edited file).
+  assert.deepEqual(["010000", "ffffff", "140000", "0001", "zz0000", 5].map(levelOf), [1, -1, 20, -1, -1, -1]);
+  assert.equal(levelOf(levelBytes(17)), 17);
+  assert.deepEqual(["uDNR", "bDNR", "iDNR", "hfoo"].map(randomWhatOf), ["unit", "building", "item", undefined]);
+  assert.equal(randomName({ what: "unit", by: "table", units: [{ id: "nfsp", chance: 100 }] }), "Random Unit (own table of 1)");
+});
 
 test("names say what is placed", () => {
   assert.equal(randomName({ what: "unit", by: "level", level: 2 }), "Random Level 2 Neutral Hostile Unit");

@@ -18,6 +18,8 @@ export interface FactsData extends HeroConstants {
   ability(id: string, field: string, level: number): string;
   /** The game ability an ability works as (AbilityData code: Apak is an AInv), through a custom one's base. */
   abilityCode(id: string): string;
+  /** A map's own ability's base (A000 based on Ahea: Ahea), the id itself else. */
+  abilityBase(id: string): string;
   goldMines: ReadonlySet<string>;
   /** Abilities that can be placed switched on: those the map script has an order for (lib/script/objects.ts
    *  abilityOrders: autocast with Orderon and Orderoff, toggles with Order and Unorder). */
@@ -37,7 +39,7 @@ const list = (v: string) => v.split(",").map((s) => s.trim()).filter((s) => s &&
 export function typeFacts(id: string, kind: string, d: FactsData): TypeFacts {
   const facts: TypeFacts = {
     kind, hero: false, building: false, invulnerable: false, attacks: false, acquireRange: 0, maxHp: 0, maxMana: 0, skills: [], toggles: [], slots: 0,
-    goldMine: false, waygate: false, maxLevel: d.maxHeroLevel, levelSkip: d.levelSkip,
+    goldMine: false, waygate: false, customColor: false, maxLevel: d.maxHeroLevel, levelSkip: d.levelSkip,
   };
   if (kind === "w3b") facts.maxHp = num(d.destructable(id, "bhps"));
   if (kind !== "w3u" || id === "sloc") return facts;
@@ -50,14 +52,16 @@ export function typeFacts(id: string, kind: string, d: FactsData): TypeFacts {
   facts.goldMine = d.goldMines.has(id) || codes.some((a) => GOLD_CODES.has(a.code));
   facts.waygate = d.waygates.has(id) || codes.some((a) => a.code === WAYGATE_CODE);
   facts.invulnerable = codes.some((a) => a.code === INVULNERABLE_CODE);
+  facts.customColor = num(d.unit(id, "utcc")) === 1;
   // Attacks enabled (weapsOn): the World Editor offers the acquisition range only to units that attack.
   facts.attacks = num(d.unit(id, "uaen")) > 0;
   facts.acquireRange = num(d.unit(id, "uacq"));
   const level = d.unit(id, "ulev");
   if (level.trim() !== "" && Number.isFinite(Number(level))) facts.level = Number(level);
   if (codes.some((a) => a.code === INVENTORY_CODE)) facts.slots = INVENTORY_SLOTS;
-  // By the ability's own id, as the map script looks up its orders (a map's own ability based on Heal has none there).
-  facts.toggles = [...new Set(codes.map((a) => a.id).filter((a) => d.toggleable.has(a)))];
+  // By the ability's id, or a map's own ability's base (one based on Heal is placed with "healon" too, as the World
+  // Editor writes it: we-drive 2026-11-10), as the map script looks up its orders (lib/script/objects.ts autocastOrdersOf).
+  facts.toggles = [...new Set(codes.map((a) => a.id).filter((a) => d.toggleable.has(a) || d.toggleable.has(d.abilityBase(a))))];
   if (facts.hero) {
     facts.attributes = {
       str: num(d.unit(id, "ustr")), agi: num(d.unit(id, "uagi")), int: num(d.unit(id, "uint")),
@@ -112,6 +116,7 @@ export async function loadFactsData(w3: W3Api): Promise<FactsData> {
     destructable: (id, field) => value(destructables, destructableMods, id, field, 0),
     ability: (id, field, level) => value(abilities, abilityMods, id, field, level),
     abilityCode: (id) => { const base = abilityMods.get(id)?.base ?? id; return codes.get(base) ?? base; },
+    abilityBase: (id) => abilityMods.get(id)?.base ?? id,
     goldMines: special.goldMines, waygates: special.waygates, toggleable: new Set(orders.keys()),
     ...heroConstants(gameMisc, mapMisc),
   };
