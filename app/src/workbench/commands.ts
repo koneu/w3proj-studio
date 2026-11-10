@@ -1,7 +1,7 @@
 import type { CommandContribution, Disposable } from "../extensions/api";
 import { commandNotFound } from "../lib/commanderror";
-import { keyOf } from "../lib/keys";
 import { disposable } from "./dom";
+import { eventChord } from "../lib/keybindings";
 
 export interface CommandInfo extends CommandContribution {
   extensionId: string;
@@ -40,25 +40,13 @@ export class CommandService {
     return [...this.contributed.values()].filter((c) => !c.hidden);
   }
 
-  /** Normalised "ctrl+shift+p" style chord for a keyboard event (the physical key where the webview can't tell the
-   *  key: lib/keys.ts). */
+  /** Every declared command, hidden ones too (their keys can still be bound). */
+  contributions(): CommandInfo[] {
+    return [...this.contributed.values()];
+  }
+
+  /** Normalised "ctrl+shift+p" style chord for a keyboard event (keybindings.ts eventChord); "" for a modifier alone. */
   static chord(e: KeyboardEvent): string {
-    const parts = [];
-    if (e.ctrlKey || e.metaKey) parts.push("ctrl");
-    if (e.altKey) parts.push("alt");
-    if (e.shiftKey) parts.push("shift");
-    parts.push(keyOf(e).toLowerCase());
-    return parts.join("+");
+    return eventChord(e) ?? "";
   }
-
-  forChord(chord: string): CommandInfo | undefined {
-    return [...this.contributed.values()].find((c) => c.keybinding?.toLowerCase() === chord);
-  }
-}
-
-/** Whether the key's target, or an element around it, keeps this chord for itself (its data-own-keys lists it, space
- *  separated): then no command bound to the chord runs, and the key goes on to the element. */
-export function ownsChord(target: EventTarget | null, chord: string): boolean {
-  const owner = (target as { closest?: (s: string) => { dataset?: Record<string, string | undefined> } | null } | null)?.closest?.("[data-own-keys]");
-  return !!owner?.dataset?.ownKeys?.split(/\s+/).includes(chord);
 }

@@ -37,6 +37,9 @@ export interface ViewCommands {
   /** A named object of a tab's list (the Regions or Cameras tab, by its group id): the tab comes to the front and does
    *  the action (TerrainToolGroupInstance.itemAction); no name: only the tab. Null when done, else why not. */
   groupItemAction(group: string, name: string | null, action: "select" | "rename" | "delete", to?: string): Promise<string | null>;
+  /** One of the view's key commands (camera, selection, clipboard: index.ts KEY_COMMANDS) as its key would do it,
+   *  once; true when it did something. */
+  keyCommand(id: string): boolean;
   /** What is chosen and what is shown (game view sets the choice aside), for the status line and tests; `sunShadows`
    *  the last frame's real shadows (HD: cast or not, the shadow map's texel on the ground, how many objects cast). */
   state(): Omit<ViewSet, "lighting" | "fog" | "weather"> & { gameView: boolean; shown: Shown; camera: { target: [number, number, number]; distance: number; yaw: number }; sunShadows: { drawn: boolean; texel: number; casters: number }; shadowImages: number;

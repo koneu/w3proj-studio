@@ -350,6 +350,15 @@ edits either layer; the map tools' parameters live under `terrain.*` (pathing, s
 } }
 ```
 
+**Keys.** A command's `keybinding` is its default key; more keys, or keys that apply only somewhere, go in
+`contributes.keybindings` (`{ "key": "ctrl+k ctrl+s", "command": "…", "when": "terrainFocus" }`, as VS Code's).
+*Preferences: Open Keyboard Shortcuts* (Ctrl+K Ctrl+S, the World Editor's Configure Controls) lists every command with
+its keys, records a new key by pressing it, removes one, resets a command and shows keys bound twice; it writes
+`keybindings.json` next to `settings.json` (a list of `{ key, command, when }`; a command written `-id` takes a default
+away), which can be edited by hand and applies at once. Context keys for `when`: `project`, `editor`, `inputFocus`, and
+those of the element with the keyboard (`data-key-context`): the terrain view's keys, the World Editor's by default, are
+all under `terrainFocus`, and the view reads them with `w3.keybindings.commandsFor(event)`.
+
 **Services and dependencies.** An extension shares functionality by declaring
 `"contributes": { "services": [{ "id": "me.thing" }] }` and calling
 `w3.services.provide("me.thing", impl)` in `activate`. Users call

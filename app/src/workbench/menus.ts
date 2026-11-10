@@ -2,6 +2,7 @@
 // extension adds to the menus the way it adds a command.
 
 import type { CommandContribution } from "../extensions/api";
+import { keyLabel, normalizeKey } from "../lib/keybindings";
 
 /** The World Editor's order. A menu an extension names that isn't here goes before Help. */
 const ORDER = ["File", "Edit", "View", "Scenario", "Module", "Tools", "Help"];
@@ -9,8 +10,8 @@ const ORDER = ["File", "Edit", "View", "Scenario", "Module", "Tools", "Help"];
 export interface MenuEntry { id: string; title: string; shortcut?: string; when?: CommandContribution["when"] }
 export interface Menu { name: string; groups: MenuEntry[][] }
 
-/** "ctrl+shift+b" as the World Editor would write it: Ctrl+Shift+B. */
-export const shortcutText = (keys: string) => keys.split("+").map((k) => (k.length === 1 || /^f\d+$/i.test(k) ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1))).join("+");
+/** "ctrl+shift+b" as the World Editor would write it: Ctrl+Shift+B ("ctrl+k ctrl+s": Ctrl+K Ctrl+S). */
+export const shortcutText = (keys: string) => keyLabel(normalizeKey(keys) ?? keys);
 
 /** "File:2:1" is the menu File, group 2, first in it. Group and place are optional. */
 function place(menu: string) {

@@ -18,7 +18,7 @@ import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, 
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraKey, dropRings, EDGE_SCROLL, edgeScroll, keyOf, lightRings, lineAlong, nextTerrainLook, OWN_CHORDS, shownView, TERRAIN_LOOKS, viewKeyCommand, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, lightRings, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -45,7 +45,7 @@ import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, t
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
-import { borderFlags, FACE_KEY, FIXED_HEIGHT, isFaceKey, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
+import { borderFlags, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, joinSteps, KEY_COMMANDS, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
@@ -69,7 +69,6 @@ import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview"
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
 import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
-// viewmodes' keyOf names a command's key (for tooltips); this is the event's.
 import { keyOf as eventKey } from "../../lib/keys";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
 import { pictureTarget } from "./picturetarget";
@@ -247,6 +246,8 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
 ];
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  /** The key that turns the selection toward the pointer now (T by default), for hints. */
+  const faceKey = () => w3.keybindings.labelFor(FACE_COMMAND) ?? "no key";
   const toolGroups = new TerrainToolRegistry(() => w3.commands.execute("w3.terrain.open").then(() => undefined));
   /** The open terrain editor, for tools. */
   /** Nearly always a burst of edits: the derived files wait for the last of them. */
@@ -1268,6 +1269,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const why = await run(view);
       if (why) void w3.window.showInfo(why);
     })),
+    // So do the view's key commands, run otherwise than by their keys in the view.
+    ...[...KEY_COMMANDS].map((id) => w3.commands.register(id, () => {
+      const path = w3.editors.activePath();
+      const view = path ? toolGroups.viewCommands.get(path) : undefined;
+      if (!view) throw new Error("Switch to a terrain editor first.");
+      refuseLostView(path);
+      view.keyCommand(id);
+    })),
     // Object heights, on the terrain editor that has the focus.
     w3.commands.register("w3.terrain.setUniformDoodadHeights", async (given?: number) => {
       const view = (w3.editors.activePath() ? toolGroups.heightCommands.get(w3.editors.activePath()!) : undefined) ?? toolGroups.heightCommands.get(projectTerrain(w3) ?? "");
@@ -1711,8 +1720,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           doc.setDirty(mark.isDirty(at));
         };
         /** Runs a key's edit; however long the key is held, it's one undo step. */
-        const byKey = (e: KeyboardEvent, edit: () => void) => {
-          keyPress = e.repeat ? "repeat" : "first";
+        const byKey = (repeat: boolean, edit: () => void) => {
+          keyPress = repeat ? "repeat" : "first";
           try { edit(); } finally { keyPress = null; }
         };
         const groundAt = (e: MouseEvent) => {
@@ -3119,28 +3128,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           objectsTouched = true;
           void rebuildObjects();
         };
-        /** Ctrl+C, X, V and A, and the keys while pasting. True when the key did something. */
-        const clipboardKey = (e: KeyboardEvent) => {
+        /** The key commands that come before a tab's own keys (`ids`: what the key is bound to, the winner first):
+         *  turning what's being pasted or what's selected, and the clipboard (Ctrl+C, X, V and A by default). True when
+         *  one did something. */
+        const earlyKeys = (ids: readonly string[], repeat: boolean) => {
+          const turn = turnOf(ids);
+          if (turn && pasting) {
+            if (!repeat) { pasting = turnFragment(pasting, turn); if (pasteAt) showPaste(pasteAt); }
+            return true;
+          }
+          if (turn && editable && !activeGroup && selectedEntries().length) { if (!repeat) turnSelection(turn); return true; }
+          if (ids.includes(CLIPBOARD_COMMANDS.copy)) {
+            if (terrainArea) { copyArea(terrainArea); return true; }
+            if (copySelection()) return true;
+          }
+          if (ids.includes(CLIPBOARD_COMMANDS.cut) && !terrainArea && editable && copySelection()) { deleteEntries(copyable()); return true; }
+          if (ids.includes(CLIPBOARD_COMMANDS.paste) && editable && startPaste()) return true;
+          if (ids.includes(CLIPBOARD_COMMANDS.selectAll) && !activeGroup) { selectEntries(allPlaced().filter((o) => o.id !== "sloc").map((o) => o.p)); return true; }
+          return false;
+        };
+        /** Escape while pasting or with an area drawn, and the key commands before a tab's own keys. */
+        const clipboardKey = (e: KeyboardEvent, ids: readonly string[]) => {
           if (pasting && eventKey(e) === "Escape") { endPaste(); return true; }
           if (terrainArea && eventKey(e) === "Escape") { setArea(null); return true; }
-          const turn = turnKey(e);
-          if (turn && pasting) {
-            if (!e.repeat) { pasting = turnFragment(pasting, turn); if (pasteAt) showPaste(pasteAt); }
-            return true;
-          }
-          if (turn && editable && !activeGroup && selectedEntries().length) { if (!e.repeat) turnSelection(turn); return true; }
-          if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
-          const key = eventKey(e).toLowerCase();
-          if (key === "c" && terrainArea) { copyArea(terrainArea); return true; }
-          if (key === "c") return copySelection();
-          if (key === "x") {
-            if (terrainArea || !editable || !copySelection()) return false;
-            deleteEntries(copyable());
-            return true;
-          }
-          if (key === "v") return editable && startPaste();
-          if (key === "a" && !activeGroup) { selectEntries(allPlaced().filter((o) => o.id !== "sloc").map((o) => o.p)); return true; }
-          return false;
+          return earlyKeys(ids, e.repeat);
         };
 
         /** Alt: the selection goes to the pointer, keeping its shape, and follows it while held. */
@@ -3280,10 +3291,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => { void viewSelection(); keysToMap(); } }, "View"),
               ...(editable ? [
                 h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); keysToMap(); }) }, "Select in palette"),
-                h("button", { title: `Turn toward the pointer (${FACE_KEY}); click to apply`, onclick: startFacing }, "Face point"), ...turnButtons(), ...heightButtons(),
+                h("button", { title: `Turn toward the pointer (${faceKey()}); click to apply`, onclick: startFacing }, "Face point"), ...turnButtons(), ...heightButtons(),
                 h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
               ] : [])),
-            ...(editable ? [h("div.muted", {}, `Drag it to move · [ ] to turn · ${FACE_KEY} face point · Del to delete · Ctrl+C, then Ctrl+V to copy`)] : []),
+            ...(editable ? [h("div.muted", {}, `Drag it to move · [ ] to turn · ${faceKey()} face point · Del to delete · Ctrl+C, then Ctrl+V to copy`)] : []),
           );
           renderer.setSelection(ringOf(inst));
           redraw();
@@ -3436,7 +3447,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               massField("Facing", "facing", help), massField("Scale", "scale", help), massField("Variation", "variation", help),
               h("div.terrain-sel-actions.wrap", {},
                 quick("Select all of these types", "Select every object of the selected types", selectSameTypes),
-                quick("Face point", `Turn every selected object toward the pointer (${FACE_KEY}); click to apply`, startFacing),
+                quick("Face point", `Turn every selected object toward the pointer (${faceKey()}); click to apply`, startFacing),
                 ...turnButtons(), ...heightButtons(),
                 quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
                 quick("Random variation", "A random model variation for each object", () => applyMass(group, (p) => {
@@ -3451,7 +3462,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 })),
                 quick("Drop to ground", "Set every object's height to the ground under it", () => applyMass(group, (p) => ({ position: [p.position[0], p.position[1], heightAt(terrain, p.position[0], p.position[1])] }))),
                 h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
-              h("div.muted", {}, `Drag one to move all · [ ] turn each · ${FACE_KEY} face point · Del delete · Ctrl+click adds/removes · Shift+box adds`),
+              h("div.muted", {}, `Drag one to move all · [ ] turn each · ${faceKey()} face point · Del delete · Ctrl+click adds/removes · Shift+box adds`),
             ] : []),
           );
           redraw();
@@ -4359,6 +4370,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const viewCommands: ViewCommands = {
           viewSelection, viewEntireMap, selectInPalette, toggleLayer, cycleRandomGroups, toggleGameView,
+          keyCommand: (id) => !glDead && KEY_COMMANDS.has(id) && (earlyKeys([id], false) || lateKeys([id], false)),
           listCommand: (cmd) => {
             const g = activeInst();
             return g?.listCommand ? g.listCommand(cmd) : "The open tab has no list: the Regions and Cameras tabs have one.";
@@ -4384,15 +4396,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
-        /** "Label (key)" for a toolbar box's tooltip. */
-        const withKey = (title: string, command: string) => (keyOf(command) ? `${title} (${keyOf(command)})` : title);
+        /** "Label (key)" for a toolbar box's tooltip: the key the command has now. */
+        const withKey = (title: string, command: string) => { const k = w3.keybindings.labelFor(command); return k ? `${title} (${k})` : title; };
+        /** A tooltip naming the command's key, which follows when the key is changed (stopKeyTitles, below). */
+        const keyTitle = (title: string, command: string) => ({ title: withKey(title, command), "data-key-title": title, "data-key-command": command });
         /** A toolbar box for a View item: game view greys it out (the World Editor's View menu does so too). */
         const layerToggle = (label: string, title: string, layer: ToggleLayer | "water", command?: string) => {
           const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); keysToMap(); } });
           // The Regions and Pathing tabs' own pictures are those layers: on, and not to be turned off, while the tab is open.
           const byTab = () => shownByTab(layer);
           viewSyncs.push(() => { box.checked = viewState[layer] || byTab(); box.disabled = gameViewOn() || byTab(); });
-          return h("label.model-toggle", { title: command ? withKey(title, command) : title }, box, ` ${label}`);
+          return h("label.model-toggle", command ? keyTitle(title, command) : { title }, box, ` ${label}`);
         };
         /** A box for one of the Advanced switches; the command and the box are the same setting. Game view greys it
          *  out when `forced` (View > Shadows in the World Editor). */
@@ -4401,20 +4415,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); if (forced) box.disabled = gameViewOn(); });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };
-        const gridSelect = h("select", { title: withKey("Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", "w3.terrain.cycleGrid"), onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
+        const gridSelect = h("select", { ...keyTitle("Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", "w3.terrain.cycleGrid"), onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
         viewSyncs.push(() => { gridSelect.value = viewState.grid; gridSelect.disabled = gameViewOn(); });
-        const terrainSelect = h("select", { title: withKey("Terrain: textured, as a wireframe, or hidden", "w3.terrain.cycleTerrainDisplay"), onchange: () => { if (!gameViewOn()) setTerrain(terrainSelect.value as TerrainLook); keysToMap(); } },
+        const terrainSelect = h("select", { ...keyTitle("Terrain: textured, as a wireframe, or hidden", "w3.terrain.cycleTerrainDisplay"), onchange: () => { if (!gameViewOn()) setTerrain(terrainSelect.value as TerrainLook); keysToMap(); } },
           ...TERRAIN_LOOKS.map((t) => h("option", { value: t }, t === "textured" ? "Terrain" : t === "wireframe" ? "Wireframe" : "No terrain")));
         viewSyncs.push(() => { terrainSelect.value = viewState.terrain; terrainSelect.disabled = gameViewOn(); });
         const gameViewBox = h("input", { type: "checkbox", checked: gameViewOn(), onchange: () => { if (gameViewBox.checked !== gameViewOn()) void toggleGameView(); keysToMap(); } });
         viewSyncs.push(() => { gameViewBox.checked = gameViewOn(); });
 
         /** A box for a setting of the view's; game view greys it out when `forced`. */
-        const toggle = (label: string, get: () => boolean, set: (v: boolean) => void, forced = false, title?: string) => {
+        const toggle = (label: string, get: () => boolean, set: (v: boolean) => void, forced = false, title?: string | ReturnType<typeof keyTitle>) => {
           const box = h("input", { type: "checkbox", checked: get(), onchange: () => { set(box.checked); redraw(); keysToMap(); } });
           viewSyncs.push(() => { box.checked = get(); if (forced) box.disabled = gameViewOn(); });
-          return h("label.model-toggle", title ? { title } : {}, box, ` ${label}`);
+          return h("label.model-toggle", title === undefined ? {} : typeof title === "string" ? { title } : title, box, ` ${label}`);
         };
 
         // ---- Minimap panel (minimappanel.ts) ----------------------------------------------------------------
@@ -4467,7 +4481,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         el.append(h("div.model-viewer", {},
           h("div.model-main", {},
             h("div.model-toolbar", {},
-              h("label.model-toggle", { title: withKey("Game view: the map lit and fogged as the game shows it, without regions, cameras, start locations, pathing or grids", "w3.terrain.toggleGameView") }, gameViewBox, " Game view"),
+              h("label.model-toggle", keyTitle("Game view: the map lit and fogged as the game shows it, without regions, cameras, start locations, pathing or grids", "w3.terrain.toggleGameView"), gameViewBox, " Game view"),
               terrainSelect,
               layerToggle("Doodads", "Doodads and destructables", "doodads", "w3.terrain.toggleDoodads"),
               layerToggle("Units", "Units, items and start locations", "units", "w3.terrain.toggleUnits"),
@@ -4475,7 +4489,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Blight", "Blighted ground (off: the ground's own tiles)", "blight", "w3.terrain.toggleBlight"),
               toggle("Effects", () => viewState.effects, (v) => { viewState.effects = v; applyView(); }, true),
               toggle("Animate", () => w3.settings.get<boolean>("terrain.animate", true) !== false, (v) => void w3.settings.set("terrain.animate", v)),
-              h("label.model-toggle", { title: withKey("The map's day and night lighting; off: an even light", "w3.terrain.toggleLighting") }, lightBox, " Lighting"), lightSelect,
+              h("label.model-toggle", keyTitle("The map's day and night lighting; off: an even light", "w3.terrain.toggleLighting"), lightBox, " Lighting"), lightSelect,
               gridSelect,
               layerToggle("Height map", "Colours the ground by height, with a line at every 32 units", "heights"),
               layerToggle("Ground pathing", "Pathing - Ground: magenta where nothing walks, blue where nothing can be built", "pathing", "w3.terrain.toggleGroundPathing"),
@@ -4493,8 +4507,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
                 switchBox("Camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
               ] : []),
-              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true, withKey("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
-              toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, withKey("The map's weather", "w3.terrain.toggleWeather")),
+              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
+              toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, keyTitle("The map's weather", "w3.terrain.toggleWeather")),
               switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true, true),
               skySelect,
               toggle("Cliffs", () => viewState.cliffs, (v) => { viewState.cliffs = v; applyView(); }, true),
@@ -4505,8 +4519,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             ...(editable ? [tabsEl, groupBar] : []),
             h("div.model-stage", {}, canvas, labelLayer, gameBadge, minimapPanel.el, glLost)),
           side));
-        // The View keys with Ctrl stay with the map while it has the keyboard (Ctrl+R: Regions, not Reload Window).
-        canvas.dataset.ownKeys = OWN_CHORDS.join(" ");
+        // Keys bound under terrainFocus are the map's while it has the keyboard (Ctrl+R: Regions, not Reload Window): the
+        // workbench leaves them to the keydown handler below.
+        canvas.dataset.keyContext = "terrainFocus";
+        // Tooltips name the keys the commands have now.
+        const stopKeyTitles = w3.keybindings.onDidChange(() => {
+          for (const n of el.querySelectorAll<HTMLElement>("[data-key-command]")) n.title = withKey(n.dataset.keyTitle ?? "", n.dataset.keyCommand ?? "");
+        });
         applyView();
 
         // ---- camera ------------------------------------------------------------------
@@ -4656,49 +4675,55 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
           else if (key === "y") { e.preventDefault(); redo(); }
         });
-        // Arrow keys scroll like in the World Editor.
+        /** The key commands after a tab's own keys (`ids` as earlyKeys'): Space, Ctrl+F1, the View keys and any other
+         *  command bound here, facing the pointer, deleting, the selection's keys, and last the camera's (as the World
+         *  Editor's: arrows scroll, Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn; with a selection Ctrl
+         *  and the arrows nudge it instead). True when one did something. */
+        const lateKeys = (ids: readonly string[], repeat: boolean) => {
+          if (ids.includes(RECALL_COMMAND) && !activeGroup) {
+            if (repeat || facing) return true;
+            if (selectedEntries().length) clearSelection(); else selectEntries(lastSelected);
+            return true;
+          }
+          if (ids.includes(OBJECT_EDITOR_COMMAND)) {
+            const pick = selectedEntries().map(findInstance)[0]?.pick;
+            if (pick) openObject(pick.kind, pick.id);
+            return true;
+          }
+          // The World Editor's View keys (V game view, Ctrl+T terrain, Ctrl+D doodads, …), and whatever else the user
+          // bound under terrainFocus: run as commands, once per press. H and V mirror what's selected or being pasted
+          // first (earlyKeys).
+          const command = ids.find((id) => !KEY_COMMANDS.has(id));
+          if (command) {
+            if (!repeat) void w3.commands.execute(command).catch((err) => w3.window.showError(String((err as Error)?.message ?? err)));
+            return true;
+          }
+          if (ids.includes(FACE_COMMAND) && !activeGroup) { startFacing(); return true; }
+          if (ids.includes(DELETE_COMMAND) && editable && selectedEntries().length) { deleteSelected(); return true; }
+          // Turning by key works with a tab open too ([ and ] did before they were bindings); the rest wants none.
+          const edit = editable && selectedEntries().length ? selectionEditOf(ids) : null;
+          if (edit && (!activeGroup || "rotate" in edit)) { byKey(repeat, () => keyEdit(edit)); return true; }
+          const move = cameraMoveOf(ids);
+          if (!move) return false;
+          if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
+          else if ("zoom" in move) { renderer.distance = Math.max(200, Math.min(maxDistance(), renderer.distance * move.zoom)); redraw(); }
+          else { renderer.yaw += move.turn; redraw(); }
+          return true;
+        };
+        // The keys, as the World Editor's by default.
         canvas.addEventListener("keydown", (e) => {
           // No edits by key on a view that isn't drawn (the message over it takes the mouse). Ctrl+S still saves: it's a command.
           if (glDead) return;
           const key = eventKey(e);
           if (toolGroups.picking && key === "Escape") { e.preventDefault(); showPickTarget(null); toolGroups.picking.finish(undefined); return; }
           if (key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) areaKey = true;
-          if (clipboardKey(e)) { e.preventDefault(); return; }
+          // What the key is bound to here (the World Editor's keys by default; the user's keybindings.json), the binding
+          // that wins first. The view keeps its own order: the paste and the selection first, then a tab's own keys.
+          const ids = w3.keybindings.commandsFor(e);
+          if (clipboardKey(e, ids)) { e.preventDefault(); return; }
           if (activeInst()?.keyDown?.(e)) { e.preventDefault(); return; }
           if (key === "Escape") { if (facing) endFacing(false); else clearSelection(); return; }
-          if (isRecallKey(e) && !activeGroup) {
-            e.preventDefault();
-            if (e.repeat || facing) return;
-            if (selectedEntries().length) clearSelection(); else selectEntries(lastSelected);
-            return;
-          }
-          if (isObjectEditorKey(e)) {
-            e.preventDefault();
-            const pick = selectedEntries().map(findInstance)[0]?.pick;
-            if (pick) openObject(pick.kind, pick.id);
-            return;
-          }
-          // The World Editor's View keys (V game view, Ctrl+T terrain, Ctrl+D doodads, …: viewmodes.ts). H and V mirror
-          // what's selected or being pasted first (clipboardKey, above).
-          const viewCommand = viewKeyCommand(e);
-          if (viewCommand) {
-            e.preventDefault();
-            if (!e.repeat) void w3.commands.execute(viewCommand).catch((err) => w3.window.showError(String((err as Error)?.message ?? err)));
-            return;
-          }
-          if (isFaceKey(e) && !activeGroup) { e.preventDefault(); startFacing(); return; }
-          if (editable && selectedEntries().length && (key === "Delete" || key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
-          if (editable && selectedEntries().length && (key === "[" || key === "]")) { e.preventDefault(); byKey(e, () => rotateSelected(key === "[" ? 15 : -15)); return; }
-          const edit = editable && !activeGroup && selectedEntries().length ? selectionKey(e) : null;
-          if (edit) { e.preventDefault(); byKey(e, () => keyEdit(edit)); return; }
-          // The camera keys, as the World Editor's (viewmodes.ts cameraKey): arrows scroll, Shift faster, Ctrl+Up and
-          // Down zoom, Ctrl+Left and Right turn. With a selection Ctrl and the arrows nudge it instead (above).
-          const move = cameraKey(e);
-          if (!move) return;
-          e.preventDefault();
-          if ("pan" in move) pan(-move.pan[0] * canvas.clientHeight, move.pan[1] * canvas.clientHeight);
-          else if ("zoom" in move) { renderer.distance = Math.max(200, Math.min(maxDistance(), renderer.distance * move.zoom)); redraw(); }
-          else { renderer.yaw += move.turn; redraw(); }
+          if (lateKeys(ids, e.repeat)) e.preventDefault();
         });
         const onMove = (e: MouseEvent) => {
           if (box) {
@@ -5083,6 +5108,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             window.removeEventListener("mouseup", onUp);
             window.removeEventListener("keyup", areaKeyUp);
             window.removeEventListener("blur", areaKeyLost);
+            stopKeyTitles.dispose();
             glWatch.dispose();
             if (glDead) lostViews.delete(doc.path);
             renderer.dispose();

@@ -5,8 +5,9 @@ import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
 import { backendInvoke } from "./trackedinvoke";
-import { invoke, listen, NotUtf8Error, readBytes, writeBytes } from "./backend";
-import { CommandService, ownsChord } from "./commands";
+import { invoke, listen, NotUtf8Error, readBytes, readText, writeBytes, writeText } from "./backend";
+import { CommandService } from "./commands";
+import { conflictsOf, eventChord, isViewBinding, keyLabel, KeybindingService, normalizeKey, targetContext } from "../lib/keybindings";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
 import { menuTree, whyBlocked } from "./menus";
@@ -19,7 +20,7 @@ import { QuickInput } from "./quickinput";
 import { StatusBar } from "./statusbar";
 import { ViewService } from "./views";
 import { PROJECT_SETTINGS, SettingsService, WorkspaceService } from "./workspace";
-import { isFullPath } from "../lib/paths";
+import { isFullPath, joinPath, separatorOf } from "../lib/paths";
 
 /** Shows the mouse pointer before a native dialog (see ui_show_cursor in the backend). */
 const showCursor = () => invoke("ui_show_cursor").catch(() => {});
@@ -31,6 +32,12 @@ const UNDO_NOTE = "The user doesn't need undo steps for this work: don't plan ar
 
 export class Workbench {
   readonly commands = new CommandService();
+  /** Keys of the commands: their defaults and the user's keybindings.json (in the settings folder). */
+  readonly keybindings = new KeybindingService(this.commands, {
+    readText,
+    writeText,
+    exists: (path) => invoke<boolean>("fs_exists", { path }),
+  });
   readonly views = new ViewService();
   readonly settings = new SettingsService();
   readonly workspace = new WorkspaceService(this.settings);
@@ -83,8 +90,9 @@ export class Workbench {
       writeText: async (p, t) => {
         if (isGame(p)) throw new Error("game files are read-only");
         await this.workspace.writeText(p, t);
-        // Settings edited as JSON take effect on save.
+        // Settings edited as JSON take effect on save, and so do keys.
         if (p === this.settings.settingsPath()) await this.settings.load(p);
+        if (p === this.keybindings.filePath()) await this.keybindings.load(p);
         const project = this.workspace.project();
         if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
       },
@@ -94,7 +102,8 @@ export class Workbench {
     this.progress = new Progress(this.statusBar.progress);
 
     const main = h("div.main", {}, this.views.activityBar, this.views.sidebar, h("div.editor-column", {}, this.editors.root, this.output.root));
-    this.menuBar = new MenuBar(() => menuTree(this.commands.all()), (c) => this.run(c),
+    // The menus show each command's key in effect (the user's, else its default).
+    this.menuBar = new MenuBar(() => menuTree(this.commands.all().map((c) => ({ ...c, keybinding: this.keybindings.primaryKey(c.id) }))), (c) => this.run(c),
       (when) => whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo() }));
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
     this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking());
@@ -103,6 +112,8 @@ export class Workbench {
     this.notifications = new Notifications(root);
     // A settings file that is there but can't be read is never written over: said where the user sees it.
     this.settings.warn = (m) => void this.notifications.show("warning", m);
+    this.keybindings.warn = (m) => void this.notifications.show("warning", m);
+    this.keybindings.onDidChange(() => this.menuBar.render());
     this.quickInput = new QuickInput(root);
 
     this.api = this.createApi();
@@ -157,6 +168,9 @@ export class Workbench {
   async start() {
     const paths = await invoke<{ settings: string; user_extensions: string }>("app_paths");
     await this.settings.load(paths.settings);
+    // keybindings.json lives next to settings.json.
+    const settingsDir = paths.settings.slice(0, Math.max(0, paths.settings.lastIndexOf(separatorOf(paths.settings))));
+    await this.keybindings.load(joinPath(settingsDir || ".", "keybindings.json"));
     this.host.addBuiltins();
     try {
       this.host.addExternal(await invoke("extensions_scan", { projectRoot: null }));
@@ -174,6 +188,8 @@ export class Workbench {
     // gets the focus back: the file list refreshes and their open editors reload.
     let checking = false;
     window.addEventListener("focus", async () => {
+      // keybindings.json edited in another program: its keys apply now.
+      void this.keybindings.reloadIfChanged().catch((e) => this.log.append(`reading keybindings.json failed: ${e}`));
       if (checking || !this.workspace.project()) return;
       checking = true;
       try {
@@ -232,6 +248,7 @@ export class Workbench {
     for (const e of c.editors ?? []) this.editors.contribute(rec.manifest.id, e);
     if (c.configuration) this.settings.contribute(rec.manifest.id, c.configuration.title ?? rec.manifest.name, c.configuration.properties);
     if (c.mcpTools) this.mcp.declare(rec.manifest.id, rec.source, c.mcpTools);
+    if (Array.isArray(c.keybindings)) this.keybindings.contribute(rec.manifest.id, c.keybindings);
   }
 
   private createApi(): W3Api {
@@ -301,6 +318,25 @@ export class Workbench {
         listFolder: (path) => wb.workspace.listFolder(path),
       },
       settings: wb.settings,
+      keybindings: {
+        commandsFor: (e) => {
+          const chord = eventChord(e);
+          return chord ? wb.keybindings.commandsFor(chord, wb.keyContext(e.target).ctx) : [];
+        },
+        chordOf: (e) => eventChord(e),
+        normalize: (key) => normalizeKey(key),
+        label: (key) => keyLabel(key),
+        labelFor: (command) => { const k = wb.keybindings.primaryKey(command); return k ? keyLabel(k) : undefined; },
+        items: () => wb.keybindings.items(),
+        conflicts: (b) => conflictsOf(wb.keybindings.bindings(), b),
+        changeKey: (b, key) => wb.keybindings.changeKey({ ...b }, key),
+        changeWhen: (b, when) => wb.keybindings.changeWhen({ ...b }, when),
+        addKey: (command, key, when) => wb.keybindings.addKey(command, key, when),
+        remove: (b) => wb.keybindings.remove({ ...b }),
+        reset: (command) => wb.keybindings.reset(command),
+        file: () => ({ path: wb.keybindings.filePath(), problem: wb.keybindings.fileProblem(), ignored: wb.keybindings.ignored() }),
+        onDidChange: (l) => wb.keybindings.onDidChange(l),
+      },
       game: {
         info: () => wb.game.info(),
         list: () => wb.game.list(),
@@ -329,11 +365,10 @@ export class Workbench {
       this.commands.register(id, run);
     };
     c("workbench.commandPalette", "Show All Commands", async () => {
-      const items = this.commands.all().map((cmd) => ({
-        label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title,
-        description: cmd.keybinding?.toUpperCase(),
-        value: cmd.id,
-      }));
+      const items = this.commands.all().map((cmd) => {
+        const key = this.keybindings.primaryKey(cmd.id);
+        return { label: cmd.category ? `${cmd.category}: ${cmd.title}` : cmd.title, description: key ? keyLabel(key) : undefined, value: cmd.id };
+      });
       items.sort((a, b) => a.label.localeCompare(b.label));
       const pick = await this.quickInput.pick(items, { placeholder: "Type a command" });
       if (pick) this.run(pick.value!);
@@ -405,21 +440,68 @@ export class Workbench {
       await this.workspace.refresh();
       await this.editors.open(PROJECT_SETTINGS, "w3.textEditor");
     }, { category: "Preferences" });
+    c("workbench.openKeybindingsFile", "Open Keyboard Shortcuts (JSON)", async () => {
+      const p = this.keybindings.filePath();
+      if (!p) throw new Error("The settings folder isn't known yet.");
+      // Made as an empty list the first time; a file that is there is opened as it is, readable or not.
+      if (!(await invoke<boolean>("fs_exists", { path: p }))) await this.keybindings.update((raw) => [...raw]);
+      await this.editors.open(p, "w3.textEditor");
+    }, { category: "Preferences" });
     c("workbench.reload", "Reload Window", () => location.reload(), { category: "Developer", keybinding: "ctrl+r" });
     c("workbench.showLog", "Show Extension Host Log", () => this.log.show(), { category: "Developer", menu: "Help:2:1" });
   }
 
+  /** The context a key is pressed in (keybindings' `when`), and the context keys the element it went to gives. */
+  keyContext(target: EventTarget | null): { ctx: Record<string, unknown>; own: Set<string>; allKeys: boolean } {
+    const t = targetContext(target);
+    const ctx: Record<string, unknown> = { project: !!this.workspace.project(), editor: !!this.editors.activePath(), inputFocus: t.inputFocus };
+    for (const k of t.own) ctx[k] = true;
+    return { ctx, own: t.own, allKeys: t.allKeys };
+  }
+
+  /** The first chord of a two-chord key (Ctrl+K of Ctrl+K Ctrl+S) while the second is awaited. */
+  private pendingChord: string | null = null;
+  private chordStatus: { text: string } | null = null;
+  private chordStatusTimer: ReturnType<typeof setTimeout> | undefined;
+  private showChordStatus(text: string, ms = 0) {
+    this.chordStatus ??= this.statusBar.add({ id: "keybindings.chord", text: "", priority: -100 });
+    this.chordStatus.text = text;
+    clearTimeout(this.chordStatusTimer);
+    if (ms) this.chordStatusTimer = setTimeout(() => { if (this.chordStatus) this.chordStatus.text = ""; }, ms);
+  }
+
   private registerKeybindings() {
     window.addEventListener("keydown", (e) => {
-      const chord = CommandService.chord(e);
-      // An element that keeps some keys while it has the keyboard (the terrain view's Ctrl+R: Regions, not Reload
-      // Window) names them in data-own-keys; they go on to it.
-      if (ownsChord(e.target, chord)) return;
-      const cmd = this.commands.forChord(chord);
-      if (cmd) {
+      const chord = eventChord(e);
+      if (!chord) return; // a modifier alone (and the first chord of two stays awaited)
+      const { ctx, own, allKeys } = this.keyContext(e.target);
+      // A field recording a key takes every key itself.
+      if (allKeys) return;
+      if (this.pendingChord) {
+        const first = this.pendingChord;
+        this.pendingChord = null;
         e.preventDefault();
         e.stopPropagation();
-        this.run(cmd.id);
+        const r = this.keybindings.resolve([first, chord], ctx);
+        if (r && "binding" in r) { this.showChordStatus(""); this.run(r.binding.command); }
+        else this.showChordStatus(`The key combination (${keyLabel(first)}, ${keyLabel(chord)}) is not a command.`, 4000);
+        return;
+      }
+      const r = this.keybindings.resolve([chord], ctx);
+      if (r && "pending" in r) {
+        this.pendingChord = chord;
+        e.preventDefault();
+        e.stopPropagation();
+        this.showChordStatus(`(${keyLabel(chord)}) was pressed. Waiting for the second key of the chord…`);
+        return;
+      }
+      if (r && "binding" in r) {
+        // A key bound under the context of the element with the keyboard (the terrain view's G, its Ctrl+R: Regions, not
+        // Reload Window) goes on to it: the view reads its keys itself (w3.keybindings.commandsFor).
+        if (isViewBinding(r.binding, own)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.run(r.binding.command);
         return;
       }
       // A re-render removed the focused field, or the clicked button: the focus fell to the page

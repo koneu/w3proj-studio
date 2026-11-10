@@ -1,8 +1,17 @@
-// The World Editor's keys for what's selected. Height and scale are for doodads and destructables:
-// a unit stands on the ground, at the size its type says.
+// The World Editor's keys for what's selected, as commands: their keys are the terrain view's default key bindings
+// (extension.json `contributes.keybindings`, which the user can change). Height and scale are for doodads and
+// destructables: a unit stands on the ground, at the size its type says.
+//
+// The defaults: Page Up and Down scale the height (Ctrl: raise and lower), Home and End the width, + and - all of it,
+// / and [ turn left, * and ] right, Ctrl and an arrow (or the number pad's) nudge; H and V mirror, R turns a quarter,
+// Shift+R back (the selection, or what's being pasted); T turns it toward the pointer (not F, the World Editor's Fog
+// Effects; T is none of its terrain view's keys: its View menu, read by we-drive --view-menu, 2026-11-10); Space
+// selects the last selection, or nothing; Ctrl+F1 shows it in the Object Editor; Delete and Backspace delete it;
+// Ctrl+C, X, V and A copy, cut, paste and select all. Shift with them does the same, as before they were bindings,
+// except where Shift is a key of its own (Shift+R).
 
-import { keyOf } from "../../lib/keys";
 import type { Turn } from "../../lib/terrain/fragment";
+import { CAMERA_COMMANDS } from "./viewmodes";
 
 export type SelectionKey =
   | { raise: number }
@@ -12,55 +21,57 @@ export type SelectionKey =
 
 const HEIGHT = 16, TURN = 15, SIZE = 0.05, NUDGE = 32;
 
-type Keys = { key: string; code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean };
+/** What each selection command does to the selection (with a selection, an editable map and no tab's tool open). */
+export const SELECTION_COMMANDS: Readonly<Record<string, SelectionKey>> = {
+  "w3.terrain.selection.raise": { raise: HEIGHT },
+  "w3.terrain.selection.lower": { raise: -HEIGHT },
+  "w3.terrain.selection.moveUp": { nudge: [0, NUDGE] },
+  "w3.terrain.selection.moveDown": { nudge: [0, -NUDGE] },
+  "w3.terrain.selection.moveLeft": { nudge: [-NUDGE, 0] },
+  "w3.terrain.selection.moveRight": { nudge: [NUDGE, 0] },
+  "w3.terrain.selection.scaleUp": { scale: [SIZE, SIZE, SIZE] },
+  "w3.terrain.selection.scaleDown": { scale: [-SIZE, -SIZE, -SIZE] },
+  "w3.terrain.selection.scaleUpXY": { scale: [SIZE, SIZE, 0] },
+  "w3.terrain.selection.scaleDownXY": { scale: [-SIZE, -SIZE, 0] },
+  "w3.terrain.selection.scaleUpZ": { scale: [0, 0, SIZE] },
+  "w3.terrain.selection.scaleDownZ": { scale: [0, 0, -SIZE] },
+  "w3.terrain.selection.rotateLeft": { rotate: TURN },
+  "w3.terrain.selection.rotateRight": { rotate: -TURN },
+};
 
-export function selectionKey(e: Keys): SelectionKey | null {
-  if (e.altKey) return null;
-  const ctrl = e.ctrlKey || e.metaKey;
-  const key = keyOf(e);
-  if (key === "PageUp") return ctrl ? { raise: HEIGHT } : { scale: [0, 0, SIZE] };
-  if (key === "PageDown") return ctrl ? { raise: -HEIGHT } : { scale: [0, 0, -SIZE] };
-  if (ctrl) {
-    const nudge: Record<string, [number, number]> = {
-      ArrowLeft: [-NUDGE, 0], ArrowRight: [NUDGE, 0], ArrowUp: [0, NUDGE], ArrowDown: [0, -NUDGE],
-      Numpad4: [-NUDGE, 0], Numpad6: [NUDGE, 0], Numpad8: [0, NUDGE], Numpad2: [0, -NUDGE],
-    };
-    const move = nudge[e.code] ?? nudge[key];
-    return move ? { nudge: move } : null;
-  }
-  if (key === "Home") return { scale: [SIZE, SIZE, 0] };
-  if (key === "End") return { scale: [-SIZE, -SIZE, 0] };
-  if (key === "+") return { scale: [SIZE, SIZE, SIZE] };
-  if (key === "-") return { scale: [-SIZE, -SIZE, -SIZE] };
-  if (key === "/") return { rotate: TURN };
-  if (key === "*") return { rotate: -TURN };
+/** The first selection command's edit among `commands` (what a key is bound to, the winner first), or null. */
+export function selectionEditOf(commands: readonly string[]): SelectionKey | null {
+  for (const c of commands) if (SELECTION_COMMANDS[c]) return SELECTION_COMMANDS[c];
   return null;
 }
 
-type PlainKeys = Keys & { shiftKey: boolean };
+/** The quarter turns and mirrors, for the selection and for what's being pasted. */
+export const TURN_COMMANDS: Readonly<Record<string, Turn>> = {
+  "w3.terrain.selection.mirrorX": "mirrorX",
+  "w3.terrain.selection.mirrorY": "mirrorY",
+  "w3.terrain.selection.rotate90cw": "cw",
+  "w3.terrain.selection.rotate90ccw": "ccw",
+};
 
-/** Space alone: selects the last selected object, or deselects. */
-export const isRecallKey = (e: PlainKeys) => keyOf(e) === " " && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
-
-/** Studio's key for turning the selection toward the pointer ("Face point"). Not F, the World Editor's Fog Effects;
- *  T is none of its terrain view's keys (its View menu, read by we-drive --view-menu, 2026-11-10). */
-export const FACE_KEY = "T";
-/** T alone (Shift too, for caps lock's sake): the selection turns toward the pointer. Ctrl+T is View > Terrain. */
-export const isFaceKey = (e: Keys) => keyOf(e).toUpperCase() === FACE_KEY && !e.ctrlKey && !e.metaKey && !e.altKey;
-
-/** Ctrl+F1: the selection in the Object Editor. */
-export const isObjectEditorKey = (e: Keys) => keyOf(e) === "F1" && (e.ctrlKey || e.metaKey) && !e.altKey;
-
-/** H and V mirror, R turns a quarter, Shift+R back: for the selection and for what's being pasted. */
-export function turnKey(e: PlainKeys): Turn | null {
-  if (e.ctrlKey || e.metaKey || e.altKey) return null;
-  switch (keyOf(e).toLowerCase()) {
-    case "h": return "mirrorX";
-    case "v": return "mirrorY";
-    case "r": return e.shiftKey ? "ccw" : "cw";
-    default: return null;
-  }
+export function turnOf(commands: readonly string[]): Turn | null {
+  for (const c of commands) if (TURN_COMMANDS[c]) return TURN_COMMANDS[c];
+  return null;
 }
+
+/** The terrain view's other key commands, which act on the selection or the clipboard. */
+export const FACE_COMMAND = "w3.terrain.selection.facePointer";
+export const RECALL_COMMAND = "w3.terrain.selection.recall";
+export const OBJECT_EDITOR_COMMAND = "w3.terrain.selection.viewInObjectEditor";
+export const DELETE_COMMAND = "w3.terrain.selection.delete";
+export const CLIPBOARD_COMMANDS = { copy: "w3.terrain.copy", cut: "w3.terrain.cut", paste: "w3.terrain.paste", selectAll: "w3.terrain.selectAll" } as const;
+
+/** The terrain view's own key commands (camera, selection, clipboard): the view runs them as their keys say, in its own
+ *  order (index.ts lateKeys, earlyKeys); as commands (the palette, a key bound outside the view) they act on the terrain
+ *  editor in front. Any other command bound under terrainFocus (the View keys) the view runs as a command. */
+export const KEY_COMMANDS: ReadonlySet<string> = new Set([
+  ...Object.keys(CAMERA_COMMANDS), ...Object.keys(SELECTION_COMMANDS), ...Object.keys(TURN_COMMANDS),
+  FACE_COMMAND, RECALL_COMMAND, OBJECT_EDITOR_COMMAND, DELETE_COMMAND, ...Object.values(CLIPBOARD_COMMANDS),
+]);
 
 /** A scale after a step, never so small the object is gone. */
 export const scaled = (scale: readonly number[], step: readonly number[]): [number, number, number] =>

@@ -9,7 +9,8 @@ export interface CommandContribution {
   id: string;
   title: string;
   category?: string;
-  /** e.g. "ctrl+shift+b", "f5" */
+  /** Its default key, e.g. "ctrl+shift+b", "f5", "ctrl+k ctrl+s" (more keys, or keys with a `when`:
+   *  `contributes.keybindings`). The user can change it (Keyboard Shortcuts, keybindings.json). */
   keybinding?: string;
   /** Hide from the command palette. */
   hidden?: boolean;
@@ -110,8 +111,24 @@ export interface ExtensionManifest {
     services?: ServiceContribution[];
     configuration?: ConfigurationContribution;
     mcpTools?: McpToolContribution[];
+    keybindings?: KeybindingContribution[];
   };
 }
+
+/** A default key of a command (as VS Code's `contributes.keybindings`): later ones win over earlier ones for the same
+ *  key, the user's keybindings.json over all. */
+export interface KeybindingContribution {
+  /** "g", "ctrl+shift+l", "numpad8", "ctrl+k ctrl+s". */
+  key: string;
+  command: string;
+  /** Where it applies: context keys with !, &&, ||, == and != ("terrainFocus"). Bindings whose `when` names a context
+   *  key of the element with the keyboard (its `data-key-context`) are that view's to handle: it reads them through
+   *  `w3.keybindings.commandsFor`. */
+  when?: string;
+}
+
+/** A key in effect, as the Keyboard Shortcuts editor lists it. */
+export interface KeybindingInfo { key: string; command: string; when?: string; source: "default" | "user"; extensionId?: string }
 
 export interface ViewProvider {
   render(container: HTMLElement): void | Disposable;
@@ -332,6 +349,34 @@ export interface W3Api {
     onDidSave(listener: (path: string) => void): Disposable;
   };
   settings: Settings;
+  /** Keys of commands: the defaults and the user's keybindings.json. */
+  keybindings: {
+    /** The commands a key event is bound to where its `when` holds (for the element the event went to), the winner
+     *  first. For a view that handles its own keys (`data-key-context`). */
+    commandsFor(e: KeyboardEvent): string[];
+    /** The chord of a key event ("ctrl+shift+l"), null for a modifier alone. */
+    chordOf(e: KeyboardEvent): string | null;
+    /** A key in its one written form, or null when it isn't one. */
+    normalize(key: string): string | null;
+    /** "ctrl+k ctrl+s" as people read it: "Ctrl+K Ctrl+S". */
+    label(key: string): string;
+    /** The key a command's menu entry and tooltip show, as people read it; undefined for none. */
+    labelFor(command: string): string | undefined;
+    /** Every command (hidden ones too) with its keys in effect. */
+    items(): { command: string; title: string; category?: string; extensionId?: string; bindings: KeybindingInfo[]; userTouched: boolean }[];
+    /** Other keys in effect with the same key. */
+    conflicts(b: Pick<KeybindingInfo, "key" | "command" | "when">): KeybindingInfo[];
+    changeKey(b: KeybindingInfo, key: string): Promise<void>;
+    /** Where the binding applies (empty: everywhere). */
+    changeWhen(b: KeybindingInfo, when: string): Promise<void>;
+    addKey(command: string, key: string, when?: string): Promise<void>;
+    remove(b: KeybindingInfo): Promise<void>;
+    /** The command back to its default keys. */
+    reset(command: string): Promise<void>;
+    /** keybindings.json: its path, why it isn't used (there but unreadable), entries left out. */
+    file(): { path: string; problem: string | null; ignored: readonly string[] };
+    onDidChange(listener: () => void): Disposable;
+  };
   /** The installed game's own files (CASC storage), read-only. Plain paths
    *  like "Units\\UnitData.slk" resolve through the game's mod layers for
    *  the configured graphics mode; full paths ("War3.w3mod:…") are exact. */

@@ -1,7 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { borderFlags, FACE_KEY, isFaceKey, isObjectEditorKey, isRecallKey, joinSteps, scaled, selectionKey, turnKey } from "./selectionkeys";
-import { VIEW_KEYS, viewKeyCommand } from "./viewmodes";
+import { readFileSync } from "node:fs";
+import { borderFlags, FACE_COMMAND, joinSteps, KEY_COMMANDS, OBJECT_EDITOR_COMMAND, RECALL_COMMAND, scaled, selectionEditOf, turnOf } from "./selectionkeys";
+import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
+
+// The selection's keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
+// what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then what those commands do.
+const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { keybindings: { key: string; command: string; when?: string }[] } };
+const bindings = defaultBindings([], manifest.contributes.keybindings);
+type Ev = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey?: boolean };
+const bound = (e: Ev) => { const c = eventChord({ ...e, shiftKey: !!e.shiftKey }); return c ? commandsFor(bindings, c, { terrainFocus: true }) : []; };
+const selectionKey = (e: Ev) => selectionEditOf(bound(e));
+const turnKey = (e: Ev) => turnOf(bound(e));
+const isRecallKey = (e: Ev) => bound(e).includes(RECALL_COMMAND);
+const isFaceKey = (e: Ev) => bound(e).includes(FACE_COMMAND);
+const isObjectEditorKey = (e: Ev) => bound(e).includes(OBJECT_EDITOR_COMMAND);
+const viewKeyCommand = (e: Ev) => bound(e).find((id) => !KEY_COMMANDS.has(id)) ?? null;
+const FACE_KEY = keyLabel(primaryKey(bindings, FACE_COMMAND) ?? "");
 
 const press = (key: string, more: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
   selectionKey({ key, code: more.code ?? "", ctrlKey: false, metaKey: false, altKey: false, ...more });
@@ -57,7 +72,7 @@ test("T turns the selection toward the pointer; F is the World Editor's Fog Effe
   assert.equal(isFaceKey({ ...keys, key: "f", code: "KeyF" }), false);
   // No View key and no selection key takes T.
   assert.equal(viewKeyCommand({ ...keys, shiftKey: false }), null);
-  assert.equal(VIEW_KEYS.some((k) => k.key === FACE_KEY), false);
+  assert.equal(bindings.some((b) => b.key === "t" && !KEY_COMMANDS.has(b.command)), false);
   assert.equal(turnKey({ ...keys, shiftKey: false }), null);
   assert.equal(selectionKey(keys), null);
 });

@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { anyGroundLayer, CAMERA_STEPS, cameraBoundsCorners, cameraKey, DROP_RING, EDGE_SCROLL, edgeScroll, lineAlong, dropRings, keyOf, lightRings, nextTerrainLook, shownView, VIEW_KEYS, viewKeyCommand, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
+import { KEY_COMMANDS } from "./selectionkeys";
+import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
+
+// The View and camera keys are the terrain viewer's default key bindings (extension.json), read as the view reads them:
+// what a key is bound to under terrainFocus (lib/keybindings.ts commandsFor), then the View command (any that isn't
+// one of the view's own key commands) or the camera move.
+const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { commands: { id: string; title: string }[]; keybindings: { key: string; command: string; when?: string }[] } };
+const bindings = defaultBindings([], manifest.contributes.keybindings);
+type Ev = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
+const bound = (e: Ev) => { const c = eventChord(e); return c ? commandsFor(bindings, c, { terrainFocus: true }) : []; };
+const viewKeyCommand = (e: Ev) => bound(e).find((id) => !KEY_COMMANDS.has(id)) ?? null;
+const cameraKey = (e: Ev) => cameraMoveOf(bound(e));
+const keyOf = (command: string) => { const k = primaryKey(bindings, command); return k ? keyLabel(k) : undefined; };
 
 const chosen: ViewSet = {
   terrain: "wireframe", doodads: false, units: true, water: false, blight: false, cliffs: false, effects: false, weather: false,
@@ -101,14 +114,16 @@ test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Rig
   for (const k of [key("ArrowUp", { altKey: true }), key("PageUp"), key("PageDown"), key("Home"), key("End"), key("Insert"), key("Delete")]) assert.equal(cameraKey(k), null, k.key);
 });
 
-test("every View key runs a command the terrain viewer declares", () => {
-  const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as { contributes: { commands: { id: string; title: string }[] } };
+test("every View key runs a command the terrain viewer declares, one per key; titles don't name keys that can change", () => {
   const ids = new Map(manifest.contributes.commands.map((c) => [c.id, c.title]));
-  for (const { key: k, command } of VIEW_KEYS) {
-    assert.ok(ids.has(command), `${command} (${k}) isn't declared`);
-    assert.ok(ids.get(command)!.includes(`(${k})`), `${command}'s title names its key ${k}`);
-  }
-  assert.equal(new Set(VIEW_KEYS.map((k) => k.key)).size, VIEW_KEYS.length, "one command per key");
+  const view = bindings.filter((b) => !KEY_COMMANDS.has(b.command));
+  assert.equal(view.length, 17, "the World Editor's View keys Studio has");
+  for (const b of bindings) assert.ok(ids.has(b.command), `${b.command} (${b.key}) isn't declared`);
+  for (const b of view) assert.ok(!/\([^)]*\)$/.test(ids.get(b.command)!), `${b.command}'s title names a key: ${ids.get(b.command)}`);
+  assert.equal(new Set(view.map((b) => b.key)).size, view.length, "one View command per key");
+  // Each camera command has its keys, and every key command is declared.
+  for (const id of Object.keys(CAMERA_COMMANDS)) assert.ok(bindings.some((b) => b.command === id), id);
+  for (const id of KEY_COMMANDS) assert.ok(ids.has(id), `${id} isn't declared`);
 });
 
 test("lightRings: round where the light is, as far as it reaches, scaled with the object", () => {

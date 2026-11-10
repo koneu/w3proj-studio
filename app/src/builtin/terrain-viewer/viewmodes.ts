@@ -4,8 +4,6 @@
 // No editor state here: the viewer passes what it has, the tests pass made-up values.
 
 import type { GridSize } from "./viewcmds";
-// This file's own keyOf names a command's key (for tooltips).
-import { keyOf as eventKey } from "../../lib/keys";
 
 export type TerrainLook = "textured" | "wireframe" | "hidden";
 export const TERRAIN_LOOKS: readonly TerrainLook[] = ["textured", "wireframe", "hidden"];
@@ -120,44 +118,13 @@ export function lightRings(world: ArrayLike<number>, pivot: readonly number[], l
 }
 
 // ---- keys --------------------------------------------------------------------------------------
-
-/** The World Editor's keys for its View items (its View menu, read by we-drive --view-menu), and the command each
- *  runs here. Only items Studio has. Turning the selection toward the pointer is T (selectionkeys.ts FACE_KEY), as F
- *  is Fog Effects. */
-export const VIEW_KEYS: readonly { key: string; command: string }[] = [
-  { key: "F", command: "w3.terrain.toggleFogEffects" },
-  { key: "G", command: "w3.terrain.cycleGrid" },
-  { key: "B", command: "w3.terrain.toggleCameraBounds" },
-  { key: "V", command: "w3.terrain.toggleGameView" },
-  { key: "Ctrl+T", command: "w3.terrain.cycleTerrainDisplay" },
-  { key: "Ctrl+D", command: "w3.terrain.toggleDoodads" },
-  { key: "Ctrl+U", command: "w3.terrain.toggleUnits" },
-  { key: "W", command: "w3.terrain.toggleWater" },
-  { key: "H", command: "w3.terrain.toggleBlight" },
-  { key: "L", command: "w3.terrain.toggleLighting" },
-  { key: "E", command: "w3.terrain.toggleWeather" },
-  { key: "Ctrl+Shift+L", command: "w3.terrain.toggleLightRanges" },
-  { key: "P", command: "w3.terrain.toggleGroundPathing" },
-  { key: "N", command: "w3.terrain.toggleNavalPathing" },
-  { key: "I", command: "w3.terrain.toggleInfoDisplay" },
-  { key: "Ctrl+R", command: "w3.terrain.toggleRegions" },
-  { key: "Ctrl+M", command: "w3.terrain.toggleCameraObjects" },
-];
-
-type Keys = { key: string; code?: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean };
-
-/** The key as the table writes it ("Ctrl+Shift+L"), or null for one with Alt or a key that isn't a letter. */
-function keyName(e: Keys): string | null {
-  const key = eventKey(e);
-  if (e.altKey || !/^[a-z]$/i.test(key)) return null;
-  return `${e.ctrlKey || e.metaKey ? "Ctrl+" : ""}${e.shiftKey ? "Shift+" : ""}${key.toUpperCase()}`;
-}
-
-/** The command of a View key, or null. */
-export function viewKeyCommand(e: Keys): string | null {
-  const name = keyName(e);
-  return (name && VIEW_KEYS.find((k) => k.key === name)?.command) || null;
-}
+// The World Editor's keys in its terrain view are the default key bindings of the terrain view's commands
+// (extension.json `contributes.keybindings`, all under `terrainFocus`); the user can change them (Keyboard Shortcuts).
+// Its View items' keys come from its View menu (we-drive --view-menu): F Fog Effects, G grid, B camera bounds, V game
+// view, Ctrl+T terrain, Ctrl+D doodads, Ctrl+U units, W water, H blight, L lighting, E weather, Ctrl+Shift+L light
+// ranges, P and N pathing, I info display, Ctrl+R regions, Ctrl+M camera objects. Turning the selection toward the
+// pointer is T, as F is Fog Effects. The view reads what a key is bound to (w3.keybindings.commandsFor) and keeps its
+// own order: H and V mirror a selection or a paste before they are View keys.
 
 // ---- camera keys -------------------------------------------------------------------------------
 
@@ -177,22 +144,29 @@ export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: 
  */
 export const CAMERA_STEPS = { pan: 1 / 19, fast: 3.8, zoom: 1.11, turn: (5 * Math.PI) / 180 };
 
-const ARROWS: Record<string, [number, number]> = {
-  ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
-  Numpad8: [0, 1], Numpad2: [0, -1], Numpad4: [-1, 0], Numpad6: [1, 0],
+const PAN = CAMERA_STEPS.pan, FAST = CAMERA_STEPS.pan * CAMERA_STEPS.fast;
+
+/** What each camera command does (the World Editor's Camera - Translate, Translate Fast, Zoom and Rotate; their keys:
+ *  the arrows and the number pad's, with Shift faster, Ctrl+Up and Down zoom, Ctrl+Left and Right turn). */
+export const CAMERA_COMMANDS: Readonly<Record<string, CameraMove>> = {
+  "w3.terrain.camera.panUp": { pan: [0, PAN] },
+  "w3.terrain.camera.panDown": { pan: [0, -PAN] },
+  "w3.terrain.camera.panLeft": { pan: [-PAN, 0] },
+  "w3.terrain.camera.panRight": { pan: [PAN, 0] },
+  "w3.terrain.camera.panUpFast": { pan: [0, FAST] },
+  "w3.terrain.camera.panDownFast": { pan: [0, -FAST] },
+  "w3.terrain.camera.panLeftFast": { pan: [-FAST, 0] },
+  "w3.terrain.camera.panRightFast": { pan: [FAST, 0] },
+  "w3.terrain.camera.zoomIn": { zoom: 1 / CAMERA_STEPS.zoom },
+  "w3.terrain.camera.zoomOut": { zoom: CAMERA_STEPS.zoom },
+  "w3.terrain.camera.rotateLeft": { turn: CAMERA_STEPS.turn },
+  "w3.terrain.camera.rotateRight": { turn: -CAMERA_STEPS.turn },
 };
 
-export function cameraKey(e: Keys & { code?: string }): CameraMove | null {
-  if (e.altKey) return null;
-  const key = eventKey(e);
-  const dir = ARROWS[key] ?? (e.code && /^\d$/.test(key) ? ARROWS[e.code] : undefined);
-  if (!dir) return null;
-  if (e.ctrlKey || e.metaKey) {
-    if (dir[1]) return { zoom: dir[1] > 0 ? 1 / CAMERA_STEPS.zoom : CAMERA_STEPS.zoom };
-    return { turn: dir[0] < 0 ? CAMERA_STEPS.turn : -CAMERA_STEPS.turn };
-  }
-  const step = CAMERA_STEPS.pan * (e.shiftKey ? CAMERA_STEPS.fast : 1);
-  return { pan: [dir[0] * step, dir[1] * step] };
+/** The camera move of the first camera command among `commands` (what a key is bound to, the winner first), or null. */
+export function cameraMoveOf(commands: readonly string[]): CameraMove | null {
+  for (const c of commands) if (CAMERA_COMMANDS[c]) return CAMERA_COMMANDS[c];
+  return null;
 }
 
 /** Screen-edge scrolling: the pointer within `edge` CSS pixels of the view's side scrolls toward it, `speed` view
@@ -237,11 +211,3 @@ export function lineAlong(corners: readonly (readonly [number, number])[], step 
   }
   return out;
 }
-
-/** The key of a command, for its tooltip ("Game view (V)"); undefined for none. */
-export const keyOf = (command: string) => VIEW_KEYS.find((k) => k.command === command)?.key;
-
-/** The View keys with Ctrl, as the workbench writes a chord ("ctrl+shift+l"): the terrain view keeps them while it
- *  has the keyboard, over the commands bound to them elsewhere (Ctrl+R: Reload Window). */
-export const OWN_CHORDS: readonly string[] = VIEW_KEYS.filter((k) => k.key.startsWith("Ctrl+"))
-  .map((k) => k.key.toLowerCase());

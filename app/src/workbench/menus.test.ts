@@ -34,6 +34,7 @@ test("shortcuts read as people write them", () => {
   assert.equal(shortcutText("ctrl+shift+b"), "Ctrl+Shift+B");
   assert.equal(shortcutText("f5"), "F5");
   assert.equal(shortcutText("ctrl+,"), "Ctrl+,");
+  assert.equal(shortcutText("ctrl+k ctrl+s"), "Ctrl+K Ctrl+S");
   assert.equal(menuTree([cmd("a", "File", "ctrl+f5")])[0].groups[0][0].shortcut, "Ctrl+F5");
 });
 
