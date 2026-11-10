@@ -270,9 +270,10 @@ fn unpacking_into_a_project_again_keeps_it_in_sync() {
     unpack(&first, &project);
     let before = files(&project.join("map"));
 
-    // A stray file disappears, because the project mirrors the map.
+    // A stray file disappears, because the project mirrors the map (asked for: without the flag the sync refuses,
+    // see a_resync_that_would_delete_files_lists_them_and_writes_nothing).
     fs::write(project.join("map/stray.txt"), "left over").unwrap();
-    unpack(&first, &project);
+    ok(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&trigger_data()), "--allow-deletes"]);
 
     assert_eq!(before, files(&project.join("map")));
     pack(&project, &second);
@@ -305,9 +306,36 @@ fn a_manifest_that_cant_be_read_stops_the_sync_and_is_kept() {
     assert!(project.join("map").join("stray.txt").exists(), "the failed sync changed map/");
     // Control: the same sync with the manifest readable again goes through and keeps its output.
     fs::write(&manifest, &mine).unwrap();
-    unpack(&first, &project);
+    ok(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&trigger_data()), "--allow-deletes"]);
     assert!(fs::read_to_string(&manifest).unwrap().contains("dist/mine.w3x"));
     assert!(!project.join("map").join("stray.txt").exists());
+}
+
+/// A re-sync that would delete files the user added under map/ writes nothing and lists them, as the
+/// app asks first; --allow-deletes deletes them.
+#[test]
+fn a_resync_that_would_delete_files_lists_them_and_writes_nothing() {
+    let dir = workdir("resync-deletes");
+    let (first, project) = (dir.join("first.w3x"), dir.join("project"));
+    pack(&fixture(), &first);
+    unpack(&first, &project);
+    // Control: a re-sync that deletes nothing goes through without the flag.
+    unpack(&first, &project);
+    let added = project.join("map").join("added.txt");
+    fs::write(&added, "mine").unwrap();
+    let script = project.join("map").join("war3map.j");
+    let before = fs::read(&script).unwrap();
+    fs::write(&script, b"changed").unwrap();
+    let o = w3proj(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&trigger_data())]);
+    assert!(!o.status.success(), "the sync deleted without asking: {}", text(&o));
+    assert!(text(&o).contains("would delete map/added.txt"), "{}", text(&o));
+    assert!(text(&o).contains("--allow-deletes"), "{}", text(&o));
+    assert_eq!(fs::read_to_string(&added).unwrap(), "mine");
+    assert_eq!(fs::read(&script).unwrap(), b"changed", "the refused sync wrote other files");
+    let out = ok(&["unpack", s(&first), s(&project), "--game", "none", "--trigger-data", s(&trigger_data()), "--allow-deletes"]);
+    assert!(out.contains("1 deleted"), "{out}");
+    assert!(!added.exists());
+    assert_eq!(fs::read(&script).unwrap(), before);
 }
 
 /// A chapter map of a campaign whose folder can't be looked into stops the pack: taken for "no chapter there", it

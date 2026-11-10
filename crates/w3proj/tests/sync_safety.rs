@@ -153,6 +153,94 @@ fn a_sync_with_a_name_in_another_case_leaves_one_file() {
     assert_eq!((report.deleted, report.written), (0, 0));
 }
 
+/// A chapter map whose folder comes in another case: one folder afterwards, holding what the old one
+/// had beside the map files (its build/), under the new name where the file system tells cases apart.
+#[test]
+fn a_sync_with_a_chapter_in_another_case_leaves_one_folder() {
+    let dir = workdir("chapter-case");
+    let root = new_project(&dir);
+    let maps = root.join("maps");
+    let chapter = maps.join("Chapter.w3x");
+    project::create(&chapter, Some(header("Chapter"))).unwrap();
+    fs::write(chapter.join("map").join("war3map.j"), SCRIPT).unwrap();
+    fs::create_dir_all(chapter.join("build")).unwrap();
+    fs::write(chapter.join("build").join("keep.txt"), b"mine").unwrap();
+    let campaign = || {
+        let mut ex = extracted(&root, "Campaign", &[("war3map.j", SCRIPT)]);
+        // The chapter's manifest, from wherever its folder is now.
+        let from = if chapter.join(MANIFEST).exists() { chapter.clone() } else { maps.join("chapter.w3x") };
+        ex.nested.insert("chapter.w3x".into(), extracted(&from, "Chapter", &[("war3map.j", SCRIPT)]));
+        ex
+    };
+    let codecs = w3proj::Registry::with_formats(&[]).unwrap();
+    assert_eq!(project::would_delete(&root, &campaign(), &codecs).unwrap(), Vec::<String>::new(), "nothing is lost by the rename");
+    project::write_files(&root, campaign()).unwrap();
+    let mut listed: Vec<String> = fs::read_dir(&maps).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    listed.sort();
+    if case_sensitive(&dir) {
+        assert_eq!(listed, ["chapter.w3x"]);
+    } else {
+        assert_eq!(listed, ["Chapter.w3x"], "the folder keeps its name");
+    }
+    let now = maps.join("chapter.w3x");
+    assert_eq!(fs::read(now.join("build").join("keep.txt")).unwrap(), b"mine");
+    assert_eq!(fs::read(now.join("map").join("war3map.j")).unwrap(), SCRIPT);
+    let report = project::write_files(&root, campaign()).unwrap();
+    assert_eq!((report.deleted, report.written), (0, 0), "the same sync again changes nothing");
+}
+
+/// A case-sensitive file system with both cases of a chapter folder: the one the sync brings is synced,
+/// the other goes, and the question before deleting names it.
+#[test]
+fn a_chapter_folder_beside_its_own_name_in_another_case_goes() {
+    let dir = workdir("chapter-case-both");
+    if !case_sensitive(&dir) {
+        return;
+    }
+    let root = new_project(&dir);
+    let maps = root.join("maps");
+    for name in ["Chapter.w3x", "chapter.w3x", "CHAPTER.w3x"] {
+        project::create(&maps.join(name), Some(header("Chapter"))).unwrap();
+        fs::write(maps.join(name).join("map").join("war3map.j"), SCRIPT).unwrap();
+    }
+    let chapter = maps.join("chapter.w3x");
+    let campaign = || {
+        let mut ex = extracted(&root, "Campaign", &[("war3map.j", SCRIPT)]);
+        ex.nested.insert("chapter.w3x".into(), extracted(&chapter, "Chapter", &[("war3map.j", SCRIPT)]));
+        ex
+    };
+    let codecs = w3proj::Registry::with_formats(&[]).unwrap();
+    assert_eq!(project::would_delete(&root, &campaign(), &codecs).unwrap(), ["maps/CHAPTER.w3x/", "maps/Chapter.w3x/"]);
+    project::write_files(&root, campaign()).unwrap();
+    let names: Vec<String> = fs::read_dir(&maps).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["chapter.w3x"]);
+}
+
+/// The atomic rename makes a new file: on Unix it gets the old file's permissions, not the default
+/// ones. The git files are replaced in one step too (an outdated `.gitattributes`).
+#[cfg(unix)]
+#[test]
+fn a_sync_keeps_the_permissions_of_the_files_it_replaces() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = workdir("permissions");
+    let root = new_project(&dir);
+    let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    fs::set_permissions(root.join(MANIFEST), fs::Permissions::from_mode(0o600)).unwrap();
+    // The default .gitattributes before the LFS rules, which a sync replaces.
+    let v1 = "# Keep every map file byte-exact; text files still diff normally.\n* -text\n*.j diff\n*.lua diff\n*.json diff\n*.txt diff\n*.wts diff\n*.fdf diff\n*.toc diff\n";
+    let attributes = root.join(".gitattributes");
+    fs::write(&attributes, v1).unwrap();
+    fs::set_permissions(&attributes, fs::Permissions::from_mode(0o640)).unwrap();
+    let link = dir.join("old-gitattributes");
+    fs::hard_link(&attributes, &link).unwrap();
+    project::write_files(&root, extracted(&root, "Renamed", &[("war3map.j", SCRIPT)])).unwrap();
+    assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Renamed");
+    assert_eq!(mode(&root.join(MANIFEST)), 0o600, "the manifest's permissions");
+    assert_ne!(fs::read_to_string(&attributes).unwrap(), v1, "the outdated .gitattributes is replaced");
+    assert_eq!(fs::read_to_string(&link).unwrap(), v1, ".gitattributes was written over in place");
+    assert_eq!(mode(&attributes), 0o640, "the .gitattributes' permissions");
+}
+
 /// Only where a name can hold a `\` (on Windows these names are paths).
 #[cfg(unix)]
 #[test]

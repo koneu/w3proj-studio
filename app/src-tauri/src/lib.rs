@@ -280,8 +280,18 @@ fn walk_project(root: &Path, skip_unreadable: bool) -> CmdResult<(Vec<FileInfo>,
 
 /// Imports a map into `dir` (new project) or re-syncs an existing one. `refuse_deletes`: write nothing when
 /// files under map/ or maps/ would be deleted, and fail with `WOULD_DELETE: <JSON list>` (so the app asks first).
+/// `replaces`: with `refuse_deletes`, the project `dir` will take the place of (see `UnpackOptions::replaces`).
 #[tauri::command]
-async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomplete: bool, install: Option<String>, refuse_deletes: Option<bool>) -> CmdResult<Value> {
+#[allow(clippy::too_many_arguments)]
+async fn project_unpack(
+    app: AppHandle,
+    map: String,
+    dir: String,
+    allow_incomplete: bool,
+    install: Option<String>,
+    refuse_deletes: Option<bool>,
+    replaces: Option<String>,
+) -> CmdResult<Value> {
     let user_formats = user_format_dirs(&app)?;
     // The game's file names, for files a map has replaced (asked only when names are missing).
     let install = install.filter(|i| !i.is_empty());
@@ -315,7 +325,12 @@ async fn project_unpack(app: AppHandle, map: String, dir: String, allow_incomple
         }) as w3proj::codec::TriggerDataSource
     }));
     tauri::async_runtime::spawn_blocking(move || {
-        let opts = UnpackOptions { allow_incomplete, more_names, refuse_deletes: refuse_deletes.unwrap_or(false) };
+        let opts = UnpackOptions {
+            allow_incomplete,
+            more_names,
+            refuse_deletes: refuse_deletes.unwrap_or(false),
+            replaces: replaces.map(PathBuf::from),
+        };
         let mut codecs = Registry::for_project(Path::new(&dir), &user_formats).map_err(err)?;
         if let Some(source) = trigger_data {
             codecs.set_trigger_data(source);

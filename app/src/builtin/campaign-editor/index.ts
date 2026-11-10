@@ -11,6 +11,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { keyOf } from "../../lib/keys";
 import { joinPath } from "../../lib/paths";
+import { replaceQuestion, wouldDelete } from "../../lib/syncdeletes";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
@@ -371,9 +372,14 @@ class CampaignView {
     const name = src.split(/[\\/]/).pop()!;
     if (this.campaignMaps().some((m) => m.name.toLowerCase() === name.toLowerCase())) throw new Error(`${name} is already in the campaign.`);
     const dir = joinPath(this.w3.workspace.project()!.root, "maps", toProjectPath(name));
+    // A folder of that name left under maps/ (not a chapter: no w3proj.toml) isn't written over.
     await this.w3.window.withProgress(`Adding ${name}`, () => this.w3.backend.invoke("project_unpack", {
-      map: src, dir, allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir"),
-    }));
+      map: src, dir, allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir"), refuseDeletes: true,
+    })).catch((e) => {
+      const gone = wouldDelete(e);
+      if (!gone) throw e;
+      throw new Error(`Nothing was added: maps/${toProjectPath(name)} already holds files the map doesn't have (${gone.slice(0, 3).join(", ")}${gone.length > 3 ? " …" : ""}). Move it away first.`);
+    });
     await this.w3.workspace.refresh();
     this.change(() => {
       this.selected = addChapter(this.info, name, name.replace(/\.w3[mx]$/i, ""));
@@ -409,7 +415,12 @@ class CampaignView {
     return {
       exists: (p) => this.w3.backend.invoke<boolean>("fs_exists", { path: joinPath(root, p) }),
       rename: (from, to) => ws.rename(from, to),
-      unpack: async (src, dir) => { await this.w3.backend.invoke("project_unpack", { map: src, dir: joinPath(root, dir), allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir") }); },
+      unpack: async (src, dir, replaces) => {
+        await this.w3.backend.invoke("project_unpack", {
+          map: src, dir: joinPath(root, dir), allowIncomplete: false, install: this.w3.settings.get<string>("game.installDir"),
+          ...(replaces === undefined ? {} : { refuseDeletes: true, replaces: joinPath(root, replaces) }),
+        });
+      },
       copy: (from, to) => ws.copy(from, to),
       pack: async (dir, output) => { await this.w3.backend.invoke("project_pack", { root: joinPath(root, dir), output }); },
     };
@@ -447,7 +458,17 @@ class CampaignView {
       src = await this.w3.window.pickFile({ title: `Replace ${map} with`, filters: [{ name: "Warcraft III map", extensions: ["w3x", "w3m"] }] });
       return !!src;
     }, async (m) => {
-      const files = await this.w3.window.withProgress(`Replacing ${m.name}`, () => replaceMap(this.campaignFs(), m.name, m.project, src!));
+      const root = this.w3.workspace.project()?.root;
+      const name = src!.split(/[\\/]/).pop()!;
+      // Files of the chapter's project the new map doesn't have: asked about first, as a sync does.
+      const askLoss = async (gone: string[]) => {
+        const q = replaceQuestion(gone, m.name, name);
+        const ok = (await this.w3.window.showWarning(q.message, ...q.actions)) === q.actions[0];
+        // During the question the editor may have closed or another project opened: then nothing happens.
+        return ok && !this.disposed && this.w3.workspace.project()?.root === root;
+      };
+      const files = await this.w3.window.withProgress(`Replacing ${m.name}`, () => replaceMap(this.campaignFs(), m.name, m.project, src!, askLoss));
+      if (!files) return;
       this.change(() => {}, true, files);
       void this.w3.window.showInfo(`${m.name} now holds ${src!.split(/[\\/]/).pop()}. Ctrl+Z puts the old map back.`);
     });

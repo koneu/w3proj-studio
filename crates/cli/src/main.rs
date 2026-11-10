@@ -319,6 +319,10 @@ enum Cmd {
         /// Write the project even if some files can't be read or named.
         #[arg(long)]
         allow_incomplete: bool,
+        /// Re-syncing, delete the files under map/ and maps/ the map doesn't have (files you added
+        /// there). Without it such a sync writes nothing and lists them.
+        #[arg(long)]
+        allow_deletes: bool,
         /// Game install folder: its TriggerData.txt reads GUI triggers (war3map.wtg as JSON), its
         /// file names are tried when a map's names are missing (protected maps, files replacing
         /// the game's). "none" to skip both.
@@ -431,6 +435,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             map,
             project,
             allow_incomplete,
+            allow_deletes,
             game,
             trigger_data,
         } => {
@@ -439,7 +444,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let opts = UnpackOptions {
                 allow_incomplete,
                 more_names: game_names(&game),
-                refuse_deletes: false,
+                refuse_deletes: !allow_deletes,
+                replaces: None,
             };
             let codecs = with_trigger_data(Registry::for_project(&project, &extra)?, &game, &trigger_data);
             let report = match w3proj::unpack(&map, &project, &codecs, &opts) {
@@ -453,6 +459,18 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     anyhow::bail!(
                         "map could not be fully unpacked; pass --allow-incomplete to write it anyway \
                          (unnamed/unreadable files will be missing from packed builds)"
+                    );
+                }
+                Err(w3proj::Error::WouldDelete(gone)) => {
+                    for f in &gone {
+                        eprintln!("  would delete {f}");
+                    }
+                    anyhow::bail!(
+                        "nothing was written: the sync would delete {} file{} or folder{} the map doesn't have; \
+                         move them away, or pass --allow-deletes to delete them",
+                        gone.len(),
+                        if gone.len() == 1 { "" } else { "s" },
+                        if gone.len() == 1 { "" } else { "s" }
                     );
                 }
                 r => r.with_context(|| format!("unpacking {}", map.display()))?,

@@ -166,6 +166,8 @@ On Linux:
 
 ```sh
 w3proj unpack MyMap.w3x MyMap/      # create or re-sync a project
+                                    # (a re-sync that would delete files you added lists them and writes
+                                    #  nothing; --allow-deletes deletes them)
 w3proj pack MyMap/ [-o out.w3x]     # release build (default: MyMap/build/MyMap.w3x)
 w3proj verify *.w3x                 # unpack→pack in memory, compare every file
 w3proj ls MyMap.w3x                 # sizes, stored sizes, flags, table sizes

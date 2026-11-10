@@ -3,7 +3,7 @@ import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/service
 import { gameProgram, joinPath, onWindows } from "../../lib/paths";
 import { testMapArgs, testMapOptions } from "./testmap";
 import { checkOpenedProject, offerStrayMoves } from "./strays";
-import { deleteQuestion, wouldDelete } from "./syncdeletes";
+import { deleteQuestion, wouldDelete } from "../../lib/syncdeletes";
 
 interface UnpackReport {
   files: { archive_name: string; codec?: string; note?: string }[];

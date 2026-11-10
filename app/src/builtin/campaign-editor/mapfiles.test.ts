@@ -16,8 +16,13 @@ function memoryFs(entries: Record<string, string>, opts: { badSource?: string } 
       if (!moving.length) throw new Error(`no ${from}`);
       for (const k of moving) { files.set(to + k.slice(from.length), files.get(k)!); files.delete(k); }
     },
-    unpack: async (src, dir) => {
+    unpack: async (src, dir, replaces) => {
       if (src === opts.badSource) throw new Error(`can't read ${src}`);
+      // As the backend: the files under map/ of the project it replaces that the map doesn't have refuse it.
+      if (replaces !== undefined) {
+        const gone = under(`${replaces}/map`).map((k) => k.slice(replaces.length + 1)).filter((k) => k !== "map/war3map.w3i.json");
+        if (gone.length) throw new Error(`WOULD_DELETE: ${JSON.stringify(gone)}`);
+      }
       files.set(`${dir}/w3proj.toml`, `from ${src}`);
       files.set(`${dir}/map/war3map.w3i.json`, `info of ${src}`);
     },
@@ -32,6 +37,9 @@ function memoryFs(entries: Record<string, string>, opts: { badSource?: string } 
   const visible = () => [...files.keys()].filter((k) => !k.startsWith(`${HOLD}/`)).sort();
   return { fs, files, out, visible };
 }
+
+/** The question about files the new map lacks, which these tests mustn't reach. */
+const never = async (gone: string[]): Promise<boolean> => { throw new Error(`asked about ${gone.join(", ")}`); };
 
 const PROJECT = { "maps/One.w3x/w3proj.toml": "one", "maps/One.w3x/map/war3map.w3i.json": "info one", "map/Two.w3m": "two", "map/war3campaign.w3f.json": "{}" };
 
@@ -60,28 +68,47 @@ test("Remove map: the map leaves the campaign, kept in build/ for undo; redo tak
 
 test("Replace map: new content at the same place, the old one back with undo", async () => {
   const m = memoryFs(PROJECT);
-  const step = await replaceMap(m.fs, "One.w3x", true, "/disk/Other.w3x");
+  const step = await replaceMap(m.fs, "One.w3x", true, "/disk/Other.w3x", never);
   assert.equal(m.files.get("maps/One.w3x/w3proj.toml"), "from /disk/Other.w3x");
   assert.equal(m.files.get("maps/One.w3x/map/war3map.w3i.json"), "info of /disk/Other.w3x");
   assert.deepEqual(m.visible(), Object.keys(PROJECT).sort());
+  assert.ok(step);
   await step.undo();
   assert.equal(m.files.get("maps/One.w3x/map/war3map.w3i.json"), "info one");
   await step.redo();
   assert.equal(m.files.get("maps/One.w3x/map/war3map.w3i.json"), "info of /disk/Other.w3x");
   // A packed map: the file is copied in.
-  await replaceMap(m.fs, "Two.w3m", false, "/disk/New.w3m");
+  await replaceMap(m.fs, "Two.w3m", false, "/disk/New.w3m", never);
   assert.equal(m.files.get("map/Two.w3m"), "bytes of /disk/New.w3m");
+});
+
+test("Replace map: files of the old project the new map lacks are asked about first; no changes nothing", async () => {
+  const m = memoryFs({ ...PROJECT, "maps/One.w3x/map/Imports/mine.txt": "mine" });
+  const asked: string[][] = [];
+  const answer = (yes: boolean) => async (gone: string[]) => { asked.push(gone); return yes; };
+  assert.equal(await replaceMap(m.fs, "One.w3x", true, "/disk/Other.w3x", answer(false)), null);
+  assert.deepEqual(asked, [["maps/One.w3x/map/Imports/mine.txt"]]);
+  assert.deepEqual([...m.files.keys()].sort(), [...Object.keys(PROJECT), "maps/One.w3x/map/Imports/mine.txt"].sort(), "nothing was written");
+  // Yes: replaced; the file goes out with the old map, and undo brings it back.
+  const step = await replaceMap(m.fs, "One.w3x", true, "/disk/Other.w3x", answer(true));
+  assert.ok(step);
+  assert.equal(asked.length, 2);
+  assert.equal(m.files.get("maps/One.w3x/w3proj.toml"), "from /disk/Other.w3x");
+  assert.equal(m.files.has("maps/One.w3x/map/Imports/mine.txt"), false);
+  assert.equal([...m.files.values()].filter((v) => v === "mine").length, 1, "kept below build/");
+  await step.undo();
+  assert.equal(m.files.get("maps/One.w3x/map/Imports/mine.txt"), "mine");
 });
 
 test("Replace map: a map that can't be read changes nothing", async () => {
   const m = memoryFs(PROJECT, { badSource: "/disk/broken.w3x" });
-  await assert.rejects(replaceMap(m.fs, "One.w3x", true, "/disk/broken.w3x"), /can't read/);
-  await assert.rejects(replaceMap(m.fs, "Two.w3m", false, "/disk/broken.w3x"), /can't read/);
+  await assert.rejects(replaceMap(m.fs, "One.w3x", true, "/disk/broken.w3x", never), /can't read/);
+  await assert.rejects(replaceMap(m.fs, "Two.w3m", false, "/disk/broken.w3x", never), /can't read/);
   assert.deepEqual(m.visible(), Object.keys(PROJECT).sort());
   assert.equal(m.files.get("maps/One.w3x/map/war3map.w3i.json"), "info one");
   assert.equal(m.files.get("map/Two.w3m"), "two");
   // A map that isn't there is refused before anything is read.
-  await assert.rejects(replaceMap(m.fs, "Gone.w3x", true, "/disk/Other.w3x"), /isn't there/);
+  await assert.rejects(replaceMap(m.fs, "Gone.w3x", true, "/disk/Other.w3x", never), /isn't there/);
 });
 
 test("undo of a removed map is refused when something took its place since", async () => {

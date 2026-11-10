@@ -74,3 +74,29 @@ fn what_a_sync_would_delete_is_known_before_and_nothing_is_written() {
     // Nothing to delete: no refusal.
     w3proj::unpack(&built, &root, &codecs, &opts).unwrap();
 }
+
+/// Unpacking into a new folder that will take an old project's place (the Campaign Editor's Replace Map): what the
+/// old one has that the map doesn't is what would go, and nothing is written until it is allowed.
+#[test]
+fn an_unpack_that_replaces_a_project_names_what_the_old_one_loses() {
+    let dir = workdir("replaces");
+    let old = new_project(&dir);
+    let codecs = Registry::with_formats(&[]).unwrap();
+    let built = dir.join("built.w3x");
+    w3proj::pack(&old, Some(&built), &codecs).unwrap();
+    let incoming = dir.join("incoming");
+    let opts = UnpackOptions { refuse_deletes: true, replaces: Some(old.clone()), ..Default::default() };
+    // Control: the old project has nothing the map doesn't: unpacked.
+    w3proj::unpack(&built, &incoming, &codecs, &opts).unwrap();
+    assert!(incoming.join(MANIFEST).exists());
+    fs::remove_dir_all(&incoming).unwrap();
+    fs::write(old.join("map").join("added.txt"), b"mine").unwrap();
+    match w3proj::unpack(&built, &incoming, &codecs, &opts) {
+        Err(w3proj::Error::WouldDelete(gone)) => assert_eq!(gone, ["map/added.txt"]),
+        other => panic!("expected WouldDelete, got {:?}", other.map(|r| r.deleted)),
+    }
+    assert!(!incoming.exists(), "nothing was written");
+    assert!(old.join("map").join("added.txt").exists());
+    // Without `replaces` the new folder is what is compared: nothing in it goes.
+    w3proj::unpack(&built, &incoming, &codecs, &UnpackOptions { refuse_deletes: true, ..Default::default() }).unwrap();
+}

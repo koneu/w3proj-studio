@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deleteQuestion, wouldDelete } from "./syncdeletes";
+import { deleteQuestion, replaceQuestion, wouldDelete } from "./syncdeletes";
 
 test("the list is read from the backend's refusal, as a string or an Error", () => {
   const list = ["map/Imports/a.txt", "maps/Old.w3x/"];
@@ -24,4 +24,11 @@ test("the question names the files, and its first answer deletes", () => {
   const many = deleteQuestion(["map/a", "map/b", "map/c", "map/d", "map/e"], "My Map");
   assert.match(many.message, /map\/a, map\/b, map\/c and 2 more/);
   assert.match(many.message, /Remove them and sync\?/);
+});
+
+test("Replace Map's question names the files, says where they go, and its first answer replaces", () => {
+  const q = replaceQuestion(["maps/One.w3x/map/a.txt", "maps/One.w3x/map/b", "maps/One.w3x/map/c", "maps/One.w3x/map/d"], "One.w3x", "Other.w3x");
+  assert.match(q.message, /^Other\.w3x doesn't have 4 files of One\.w3x's project: maps\/One\.w3x\/map\/a\.txt, .* and 1 more\./);
+  assert.match(q.message, /build\/campaign-maps/);
+  assert.deepEqual(q.actions, ["Replace", "Cancel"]);
 });

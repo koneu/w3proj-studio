@@ -498,6 +498,13 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
+        // The new file is made with default permissions: the old file's go over to it (a manifest the
+        // user made private stays private). Unix only: on Windows the only one is read-only, which a
+        // rename over the file would fail on anyway.
+        #[cfg(unix)]
+        if let Ok(old) = fs::metadata(path) {
+            fs::set_permissions(&tmp, old.permissions())?;
+        }
         fs::rename(&tmp, path)
     })();
     if let Err(e) = done {
@@ -604,13 +611,23 @@ pub fn would_delete(project: &Path, ex: &Extracted, codecs: &Registry) -> Result
             .map(|p| format!("{MAP_DIR}/{p}")),
     );
     let maps_dir = project.join(MAPS_DIR);
+    // As write_project decides (the folders as its renames leave them); a folder renamed to the new
+    // case keeps what it holds.
+    let mut folders = subfolders(&maps_dir)?;
     for old in nested_projects(&maps_dir)? {
-        match ex.nested.iter().find(|(k, _)| k.eq_ignore_ascii_case(&old)) {
-            Some((_, inner)) => out.extend(
-                would_delete(&maps_dir.join(&old), inner, codecs)?.into_iter().map(|p| format!("{MAPS_DIR}/{old}/{p}")),
+        let target = chapter_for(&maps_dir, &folders, &old, ex.nested.keys());
+        if let ChapterFolder::Rename(new) = &target {
+            folders.remove(&old);
+            folders.insert(new.clone());
+        }
+        match target {
+            ChapterFolder::Same(k) | ChapterFolder::Rename(k) => out.extend(
+                would_delete(&maps_dir.join(&old), &ex.nested[&k], codecs)?
+                    .into_iter()
+                    .map(|p| format!("{MAPS_DIR}/{old}/{p}")),
             ),
-            None if !holds_strays(&maps_dir.join(&old))? => out.push(format!("{MAPS_DIR}/{old}/")),
-            None => {}
+            ChapterFolder::Gone if !holds_strays(&maps_dir.join(&old))? => out.push(format!("{MAPS_DIR}/{old}/")),
+            ChapterFolder::Gone => {}
         }
     }
     Ok(out)
@@ -696,22 +713,25 @@ pub fn write_files(project: &Path, ex: Extracted) -> Result<UnpackReport> {
     write_project(project, ex, true)
 }
 
+/// The manifest a sync into `project` keeps the pack settings of; None when there is none. One that is
+/// there but can't be read stops the sync: written anew, it would lose the pack settings (output, raw
+/// files) the user put in it.
+fn old_manifest(project: &Path) -> Result<Option<Manifest>> {
+    if !there(&project.join(MANIFEST))? {
+        return Ok(None);
+    }
+    Manifest::load(project).map(Some).map_err(|e| {
+        Error::Project(format!(
+            "{e}. Nothing was written: {} is kept as it is; fix it (or move it away) and sync again",
+            project.join(MANIFEST).display()
+        ))
+    })
+}
+
 /// `top`: the project itself (gets git files), not a chapter map inside a campaign.
 fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackReport> {
     fs::create_dir_all(project)?;
-    // A manifest that is there but can't be read stops the sync: written anew, it would lose the
-    // pack settings (output, raw files) the user put in it.
-    let old = if there(&project.join(MANIFEST))? {
-        Some(Manifest::load(project).map_err(|e| {
-            Error::Project(format!(
-                "{e}. Nothing was written: {} is kept as it is; fix it (or move it away) and sync again",
-                project.join(MANIFEST).display()
-            ))
-        })?)
-    } else {
-        None
-    };
-    if let Some(old) = old {
+    if let Some(old) = old_manifest(project)? {
         let mut raw = old.pack.raw;
         raw.extend(ex.manifest.pack.raw);
         raw.sort();
@@ -737,7 +757,7 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
         }
         let outdated = name == ".gitattributes" && fs::read(&p).is_ok_and(|old| old == GITATTRIBUTES_V1.as_bytes());
         if !there(&p)? || outdated {
-            fs::write(p, text)?;
+            write_atomic(&p, text.as_bytes())?;
         }
     }
     let mut report = ex.report;
@@ -745,8 +765,21 @@ fn write_project(project: &Path, mut ex: Extracted, top: bool) -> Result<UnpackR
     // Chapter maps: one project each; ones no longer in the campaign are removed (unless a stray is
     // in one: then it stays as it is).
     let maps_dir = project.join(MAPS_DIR);
+    let mut folders = subfolders(&maps_dir)?;
     for old in nested_projects(&maps_dir)? {
-        if !ex.nested.keys().any(|k| k.eq_ignore_ascii_case(&old)) {
+        let keep = match chapter_for(&maps_dir, &folders, &old, ex.nested.keys()) {
+            ChapterFolder::Same(_) => true,
+            // Its name in another case, on a file system that tells them apart: renamed, so what else the
+            // folder holds (its manifest, build/) stays, and the sync below sees what it had.
+            ChapterFolder::Rename(new) => {
+                fs::rename(maps_dir.join(&old), maps_dir.join(&new))?;
+                folders.remove(&old);
+                folders.insert(new);
+                true
+            }
+            ChapterFolder::Gone => false,
+        };
+        if !keep {
             if holds_strays(&maps_dir.join(&old))? {
                 report.strays.push(format!("{MAPS_DIR}/{old}/"));
             } else {
@@ -786,6 +819,10 @@ pub struct UnpackOptions {
     /// Write nothing and return `Error::WouldDelete` when the sync would delete files under `map/`
     /// or `maps/` (`would_delete`), so the caller can ask first.
     pub refuse_deletes: bool,
+    /// With `refuse_deletes`: the project the written one takes the place of (the Campaign Editor's
+    /// Replace Map unpacks into a new folder, then swaps it in). What would be deleted is what that
+    /// one has that the map doesn't, from its root.
+    pub replaces: Option<PathBuf>,
 }
 
 /// Extracts, asking `more_names` for candidates if files are left unnamed.
@@ -817,7 +854,10 @@ pub fn unpack(map: &Path, project: &Path, codecs: &Registry, opts: &UnpackOption
         return Err(Error::Incomplete(Box::new(ex.report)));
     }
     if opts.refuse_deletes {
-        let gone = would_delete(project, &ex, codecs)?;
+        // An unreadable manifest stops the sync anyway (write_project): said first, not after a question
+        // about deleting.
+        old_manifest(project)?;
+        let gone = would_delete(opts.replaces.as_deref().unwrap_or(project), &ex, codecs)?;
         if !gone.is_empty() {
             return Err(Error::WouldDelete(gone));
         }
@@ -862,7 +902,7 @@ pub fn create(project: &Path, header: Option<MapHeader>) -> Result<()> {
     };
     manifest.save(project)?;
     for (name, text) in [(".gitattributes", GITATTRIBUTES), (".gitignore", GITIGNORE)] {
-        fs::write(project.join(name), text)?;
+        write_atomic(&project.join(name), text.as_bytes())?;
     }
     Ok(())
 }
@@ -968,6 +1008,56 @@ fn nested_projects(maps_dir: &Path) -> Result<Vec<String>> {
     }
     out.sort();
     Ok(out)
+}
+
+/// The names of all folders in `dir` (none when it isn't there).
+fn subfolders(dir: &Path) -> Result<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    if is_folder(dir)? {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                out.insert(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// What a sync does with an existing chapter folder (see `chapter_for`).
+#[derive(Debug, PartialEq)]
+enum ChapterFolder {
+    /// It is the folder of this chapter the sync brings: synced in place.
+    Same(String),
+    /// A chapter the sync brings has its name in another case, on a file system that tells cases
+    /// apart, and no folder of its own yet: the folder is renamed to it.
+    Rename(String),
+    /// No chapter the sync brings is in it: it goes.
+    Gone,
+}
+
+/// What becomes of the chapter folder `existing` under `maps_dir` on a sync bringing the chapters
+/// `wanted`; `folders`: every folder there. Like `extra_files` for files: a wanted name is it
+/// exactly, or opens it in another case (a file system that ignores case: the wanted name isn't among
+/// `folders` itself, yet opens a folder). On one that doesn't, a wanted name in another case with no
+/// folder of its own gets this one; one that has its own folder leaves this one to go.
+fn chapter_for<'a>(
+    maps_dir: &Path,
+    folders: &BTreeSet<String>,
+    existing: &str,
+    wanted: impl Iterator<Item = &'a String>,
+) -> ChapterFolder {
+    let others: Vec<&String> = wanted.filter(|w| w.eq_ignore_ascii_case(existing)).collect();
+    if let Some(w) = others.iter().find(|w| **w == existing) {
+        return ChapterFolder::Same((*w).clone());
+    }
+    for w in others {
+        if folders.contains(w.as_str()) {
+            continue;
+        }
+        return if maps_dir.join(w).is_dir() { ChapterFolder::Same(w.clone()) } else { ChapterFolder::Rename(w.clone()) };
+    }
+    ChapterFolder::Gone
 }
 
 /// Builds a project's archive (chapter maps under `maps/` are packed into it first).

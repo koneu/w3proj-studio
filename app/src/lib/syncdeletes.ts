@@ -26,3 +26,16 @@ export function deleteQuestion(gone: string[], map: string): { message: string; 
     actions: ["Remove and sync", "Show list", "Cancel"],
   };
 }
+
+/** The question before the Campaign Editor's Replace Map leaves out files of the chapter's project that the new map
+ *  doesn't have (`gone`, from the campaign's root); the first action replaces. They aren't deleted: they move into
+ *  build/ with the old map, which git ignores. */
+export function replaceQuestion(gone: string[], map: string, src: string): { message: string; actions: string[] } {
+  const n = gone.length;
+  const shown = gone.slice(0, 3).join(", ") + (n > 3 ? ` and ${n - 3} more` : "");
+  return {
+    message: `${src} doesn't have ${n} ${n === 1 ? "file" : "files"} of ${map}'s project: ${shown}. Replacing moves ${n === 1 ? "it" : "them"}`
+      + " out of the project with the old map, into build/campaign-maps (which git ignores); Ctrl+Z puts the old map back while Studio stays open. Replace anyway?",
+    actions: ["Replace", "Cancel"],
+  };
+}
