@@ -90,7 +90,8 @@ export class Hands {
           return e.tagName.toLowerCase() + cls + ' "' + (e.textContent || "").trim().slice(0, 100) + '"';
         };
         const toast = hit.closest(".toast");
-        const asks = toast && [...toast.querySelectorAll(".toast-actions button")].some((b) => !b.classList.contains("toast-close") && !b.classList.contains("copy-error"));
+        // A toast asks when it offers a choice (data-asks); a note with one optional action ("Packed … / Reveal") doesn't.
+        const asks = toast && toast.hasAttribute("data-asks");
         if (toast && !asks && toast.querySelector(".toast-close")) { toast.querySelector(".toast-close").click(); return { closed: tell(toast) }; }
         return { covered: tell(toast || hit) };
       })(${at.x}, ${at.y})`);

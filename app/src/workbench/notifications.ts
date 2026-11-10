@@ -51,7 +51,9 @@ export class Notifications {
       };
       const toast = h(
         `div.toast.${severity}`,
-        {},
+        // A toast offering a choice (two answers, or one taken by a key) asks something. A note with one optional action
+        // ("Reveal") doesn't: closing it is a fine answer, so tests may close it when it's in their way.
+        actions.length > 1 || byKey ? { "data-asks": "" } : {},
         h("span.toast-icon", {}, severity === "error" ? "✕" : severity === "warning" ? "!" : "i"),
         h("div.toast-body", {}, message),
         h(
