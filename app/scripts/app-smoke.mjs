@@ -5120,7 +5120,8 @@ async function chapterObjects(page, found) {
  *  click on it opens the trigger with the parameter marked, while the valid triggers report nothing; renaming a trigger
  *  rewrites its gg_trg_ references and, after the question, its InitTrig_ in its text, as one undo step; renaming a region
  *  rewrites gg_rct_ in GUI parameters and script, once with the Trigger Editor closed (the files) and once with it open
- *  (its state, saved at once), and References in triggers stays empty; Add To Map writes Scripts\<name>.ai and its one
+ *  (its GUI parameters at once, undone and redone with the rename, the script asked about and both saved with the
+ *  terrain editor); a sound renamed in the Sound Editor rewrites gg_snd_ on save, and References in triggers stays empty; Add To Map writes Scripts\<name>.ai and its one
  *  import entry, the map packs and verifies; custom data goes in from a unit file, comes out as a .w3o, and undo takes it
  *  out again; a missing loading screen model opens Map Properties at Loading Screen. */
 async function triggersAndAi(page, found) {
@@ -5245,7 +5246,8 @@ async function triggersAndAi(page, found) {
 
     // ---- Renaming a region with the Trigger Editor closed: the files follow ---------------------------------------------
     await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);
-    const renameRegion = async (from, to) => {
+    /** Renames the region in the Regions tab's name box, then saves the terrain editor unless `save` is false. */
+    const renameRegion = async (from, to, save = true) => {
       await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
       await sleep(300);
       await k.tab("Regions");
@@ -5258,8 +5260,10 @@ async function triggersAndAi(page, found) {
         const i = document.querySelector(".terrain-region-name");
         if (!i) return "no name box for ${from}";
         i.value = ${JSON.stringify(to)}; i.dispatchEvent(new Event("change"));
-        await w3.commands.execute("workbench.save");
-        await new Promise((r) => setTimeout(r, 800));
+        if (${save}) {
+          await w3.commands.execute("workbench.save");
+          await new Promise((r) => setTimeout(r, 800));
+        }
         return null;
       })()`);
     };
@@ -5273,15 +5277,67 @@ async function triggersAndAi(page, found) {
     list = await listProblems();
     if (refsProblems(list).length) fail(`after renaming the region, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
 
-    // ---- The same with the Trigger Editor open and nothing unsaved in it: its state follows and is saved ------------------
+    // ---- The same with the Trigger Editor open and nothing unsaved in it: its GUI parameters follow at once, undo and
+    // redo in the terrain editor take them along, and the save asks about the script and saves both ------------------------
     await page.evaluate(`w3.commands.execute("w3.triggers.open")`);
     await sleep(500);
-    const r2 = await renameRegion("Smoke Door", "Smoke Arch");
+    const held = () => page.evaluate(`(async () => JSON.stringify((await w3.services.get("w3.triggers")).liveTriggers()))()`);
+    const trigDirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
+    const holds = async (name, when) => {
+      const now = await held();
+      const other = name === "Smoke_Arch" ? "Smoke_Door" : "Smoke_Arch";
+      if ((now.match(new RegExp(`gg_rct_${name}`, "g")) ?? []).length !== 2 || now.includes(`gg_rct_${other}`)) fail(`${when}, the open Trigger Editor doesn't hold gg_rct_${name} in its two parameters`);
+    };
+    const r2 = await renameRegion("Smoke Door", "Smoke Arch", false);
     if (r2) fail(r2);
-    await warned();
-    if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("the open Trigger Editor wasn't saved after taking the region's new name");
+    await sleep(300);
+    await holds("Smoke_Arch", "right after the region's rename");
+    if (!(await trigDirty())) fail("the Trigger Editor's follow of the region's new name isn't an unsaved change");
+    if ((await warned()).length) fail("renaming the region asked before the save");
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await sleep(300);
+    await holds("Smoke_Door", "after undoing the region's rename");
+    if (await trigDirty()) fail("undoing the region's rename left the Trigger Editor unsaved (its follow wasn't taken back)");
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await sleep(300);
+    await holds("Smoke_Arch", "after redoing the region's rename");
+    await page.evaluate(`(async () => { await w3.editors.open("map/war3map.w3e.txt"); await w3.commands.execute("workbench.save"); })()`);
+    await sleep(800);
+    const askedOpen = await warned();
+    if (askedOpen.length !== 1 || !/gg_rct_Smoke_Door appears 2 times in custom script/.test(askedOpen[0] ?? "")) fail(`saving the renamed region with the Trigger Editor open asked ${JSON.stringify(askedOpen)}`);
+    if (await trigDirty()) fail("the open Trigger Editor wasn't saved after taking the region's new name");
     const archWtg = JSON.stringify(wtgFile());
     if ((archWtg.match(/gg_rct_Smoke_Arch/g) ?? []).length !== 2 || /RemoveRect\(gg_rct_Smoke_Door\)/.test(wct())) fail("the region's references didn't follow its new name through the open Trigger Editor");
+    await page.evaluate(`w3.editors.closeAll()`);
+
+    // ---- A sound renamed in the Sound Editor: saved, its gg_snd_ parameter and script uses follow (w3.triggers.renameGlobals)
+    const bell = {
+      name: "gg_snd_Smoke_Bell", file: "war3mapImported\\smokebell.wav", eaxEffect: "DefaultEAXON", flags: 16, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_Smoke_Bell", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.w3s.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [bell] }))}); await w3.workspace.refresh(); })()`);
+    await k.tool("create_script_trigger", { name: "Bell Script", script: "function InitTrig_Bell_Script takes nothing returns nothing\n    call StartSound(gg_snd_Smoke_Bell)\nendfunction\n" });
+    const bellWtg = wtgFile();
+    bellWtg.items.find((i) => i.name === "Gate Watch").ecas.push(line(2, "PlaySoundBJ", [p1("gg_snd_Smoke_Bell")]));
+    await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify(bellWtg, null, 2))})`);
+    const soundRenamed = await page.evaluate(`(async () => {
+      const done = await w3.commands.execute("w3.sounds.soundAction", "gg_snd_Smoke_Bell", "rename", "Smoke_Gong");
+      if (done !== true) return "the Sound Editor didn't rename gg_snd_Smoke_Bell";
+      if (w3.editors.activePath() !== "map/war3map.w3s.json") return "the Sound Editor isn't the active editor: " + w3.editors.activePath();
+      await w3.commands.execute("workbench.save");
+      await new Promise((r) => setTimeout(r, 800));
+      return null;
+    })()`);
+    if (soundRenamed) fail(soundRenamed);
+    const askedSound = await warned();
+    if (askedSound.length !== 1 || !/gg_snd_Smoke_Bell appears 1 time in custom script/.test(askedSound[0] ?? "")) fail(`renaming the sound asked ${JSON.stringify(askedSound)}`);
+    const gongWtg = JSON.stringify(wtgFile());
+    if (!gongWtg.includes("gg_snd_Smoke_Gong") || gongWtg.includes("gg_snd_Smoke_Bell")) fail("the sound's GUI parameter didn't follow its new name");
+    if (!/StartSound\(gg_snd_Smoke_Gong\)/.test(wct()) || /gg_snd_Smoke_Bell/.test(wct())) fail("the sound's script use didn't follow its new name");
+    list = await listProblems();
+    if (refsProblems(list).length) fail(`after renaming the sound, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Problems' Map Properties link: the loading screen's section ---------------------------------------------------

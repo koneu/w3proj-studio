@@ -327,6 +327,18 @@ export interface TriggersService {
   liveTriggers(): import("../lib/triggers/wtg").TriggerFile | null;
   /** After every edit, undo and redo in the open Trigger Editor, and when it closes. */
   onDidEdit(listener: () => void): { dispose(): void };
+  /** Objects renamed in another editor (`kind` "rct", "cam", …; `pairs` [old name, new name]) in the open Trigger
+   *  Editor's GUI parameters at once, as an unsaved undo step there (`label`); script text waits for the objects'
+   *  save (w3.triggers.renameGlobals asks about it then). The handle's undo and redo go with the other editor's:
+   *  they take the step back or do it again, as a new step when the Trigger Editor was edited since. null when no
+   *  changeable Trigger Editor is open or no GUI parameter names the old names. */
+  followRenames(kind: string, pairs: [string, string][], label: string): FollowedRenames | null;
+}
+
+/** See TriggersService.followRenames. Does nothing once that Trigger Editor has closed. */
+export interface FollowedRenames {
+  undo(): void;
+  redo(): void;
 }
 
 export const TRIGGERS_SERVICE = "w3.triggers";

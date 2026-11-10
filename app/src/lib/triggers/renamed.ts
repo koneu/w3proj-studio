@@ -1,5 +1,6 @@
 // Objects that triggers name by a generated global (regions gg_rct_, cameras gg_cam_), renamed in an editor:
-// which were renamed since the last save, and the triggers following the saved names.
+// which one edit renamed (the open Trigger Editor follows at once, and with the edit's undo), which were renamed
+// since the last save, and the triggers following the saved names.
 
 import type { W3Api } from "../../extensions/api";
 
@@ -23,6 +24,17 @@ export class SavedNames<T extends { name: string }> {
   /** `list` is what was saved (or read). */
   saved(list: readonly T[]) {
     this.names = new Map(list.map((o) => [this.key(o), o.name]));
+  }
+  /** [name before, name after] of the objects in `after` that are in `before` (as themselves or an edited copy)
+   *  under another name: what one edit renamed. */
+  renamedBetween(before: readonly T[], after: readonly T[]): [string, string][] {
+    const was = new Map(before.map((o) => [this.key(o), o.name]));
+    const out: [string, string][] = [];
+    for (const o of after) {
+      const name = was.get(this.key(o));
+      if (name !== undefined && name !== o.name) out.push([name, o.name]);
+    }
+    return out;
   }
   /** [saved name, name now] of the objects in `list` renamed since. */
   renamed(list: readonly T[]): [string, string][] {

@@ -8,7 +8,7 @@
 // The file goes through the format engine ("cameras" definition).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView } from "../../extensions/services";
+import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView, type TriggersService } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
 import { keyOf } from "../../lib/keys";
 import { listKey, moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
@@ -85,6 +85,10 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
 
   /** The names as saved, for the gg_cam_ references in the triggers of cameras renamed since. */
   const names = new SavedNames<Camera>();
+  /** The Trigger Editor's service, for following renames at once (TriggersService.followRenames). */
+  let triggerService: TriggersService | null = null;
+  void w3.services.get<TriggersService>(TRIGGERS_SERVICE).then((s) => { triggerService = s; }, () => {});
+  const follow = (renamed: [string, string][]) => (renamed.length && triggerService ? triggerService.followRenames("cam", renamed, "Rename cameras in triggers") : null);
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
@@ -140,9 +144,15 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   const commit = (before: Camera[], after: Camera[], chosen: Camera[]) => {
     const set = (v: Camera[], sel: Camera[]) => { doc.cameras = v; select(sel); unsaved = true; renderPanel(); render(); };
     set(after, chosen);
+    // An open Trigger Editor takes renamed cameras' gg_cam_ names at once, and back with undo.
+    const triggers = follow(names.renamedBetween(before, after));
     const at = chosen.map((c) => after.indexOf(c));
     const pick = (list: Camera[]) => at.map((i) => list[i]).filter((c): c is Camera => !!c);
-    ed.pushEdit({ undo: () => set(before, pick(before)), redo: () => set(after, pick(after)), terrain: false, objects: false });
+    ed.pushEdit({
+      undo: () => { set(before, pick(before)); triggers?.undo(); },
+      redo: () => { set(after, pick(after)); triggers?.redo(); },
+      terrain: false, objects: false,
+    });
   };
   /** Changes cameras (by copy) as one undo step; they stay selected. */
   const updateAll = (cams: Camera[], change: Partial<Camera> | ((c: Camera) => Partial<Camera>)) => {

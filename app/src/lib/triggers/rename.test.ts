@@ -61,3 +61,16 @@ test("renamed since the last save: edited copies count as the object, undo's old
   // Deleted and made again with the same name: a new object, no rename.
   assert.deepEqual(names.renamed([{ name: "B2" }]), []);
 });
+
+test("what one edit renamed: copies of the same object under another name, nothing for new or unchanged ones", () => {
+  type O = { name: string; x?: number };
+  const names = new SavedNames<O>();
+  const a: O = { name: "A" }, b: O = { name: "B" };
+  const moved = names.copy(b, { ...b, x: 1 });
+  assert.deepEqual(names.renamedBetween([a, b], [a, moved]), [], "moved, not renamed");
+  const a2 = names.copy(a, { ...a, name: "A2" });
+  const fresh: O = { name: "A" };
+  assert.deepEqual(names.renamedBetween([a, b], [a2, b, fresh]), [["A", "A2"]], "a new object with the old name isn't the renamed one");
+  assert.deepEqual(names.renamedBetween([a2, b], [a, b]), [["A2", "A"]], "undo is the rename back");
+  assert.deepEqual(names.renamedBetween([a, b], [b]), [], "deleted");
+});
