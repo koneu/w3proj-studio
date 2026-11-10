@@ -196,6 +196,10 @@ It never starts the game itself.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and
   Info Display are checked by default; Sky, Fog Effects, Light Ranges, Bloom, Ambient Occlusion, Grid, Camera Bounds,
   pathing, Regions and Camera Objects aren't. With game view on, these items are greyed and read as unchecked.
+  G goes round the grids: none, large (yellow every 512), medium (white tiles, yellow every 4), small, none; the
+  Grid item reads unchecked whatever is shown. B draws a thin light-blue line on the ground at the camera bounds
+  (HillsbradCreek's west edge, mostly hidden behind trees). `--move` to the view's edge didn't scroll it in this
+  display (checked 2026-11-10, SD).
 - **Time and lighting**: with the day fixed (we-drive's default) the status bar says "Time: 06:00". Measured
   2026-11-08 at the opening view (pic-compare, whole picture), the editor's three states hardly differ: on cliff.w3m
   game view off with View > Lighting on, with it off, and game view on are within a mean absolute difference of

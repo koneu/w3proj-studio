@@ -34,6 +34,8 @@ export interface ViewSet {
   pathing: boolean;
   regions: boolean;
   lightRanges: boolean;
+  /** View > Camera Bounds (B): a line round the map's camera bounds. */
+  cameraBounds: boolean;
   /** View > Info Display (I): the start locations, and a ring round each unit that drops items. */
   info: boolean;
 }
@@ -42,7 +44,7 @@ export interface ViewSet {
 export const GROUND_LAYERS = ["naval", "heights", "cameras", "pathing", "regions"] as const;
 export type GroundLayer = (typeof GROUND_LAYERS)[number];
 /** The layers a View command switches on and off. */
-export type ToggleLayer = GroundLayer | "lightRanges" | "doodads" | "units" | "blight" | "info";
+export type ToggleLayer = GroundLayer | "lightRanges" | "cameraBounds" | "doodads" | "units" | "blight" | "info";
 
 export interface Shown extends ViewSet {
   /** The start locations and the start buildings drawn in their rings (with Info Display). */
@@ -67,7 +69,7 @@ export function shownView(set: ViewSet, gameView: boolean): Shown {
     terrain: "textured", doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true, weather: true,
     lighting: true, fog: true,
     grid: "none", naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false,
-    info: false, starts: false,
+    cameraBounds: false, info: false, starts: false,
   };
 }
 
@@ -120,8 +122,12 @@ export function lightRings(world: ArrayLike<number>, pivot: readonly number[], l
 // ---- keys --------------------------------------------------------------------------------------
 
 /** The World Editor's keys for its View items (its View menu, read by we-drive --view-menu), and the command each
- *  runs here. Only items Studio has; Fog Effects (F) is left out, as F turns the selection to face the pointer. */
+ *  runs here. Only items Studio has. Turning the selection toward the pointer is T (selectionkeys.ts FACE_KEY), as F
+ *  is Fog Effects. */
 export const VIEW_KEYS: readonly { key: string; command: string }[] = [
+  { key: "F", command: "w3.terrain.toggleFogEffects" },
+  { key: "G", command: "w3.terrain.cycleGrid" },
+  { key: "B", command: "w3.terrain.toggleCameraBounds" },
   { key: "V", command: "w3.terrain.toggleGameView" },
   { key: "Ctrl+T", command: "w3.terrain.cycleTerrainDisplay" },
   { key: "Ctrl+D", command: "w3.terrain.toggleDoodads" },
@@ -167,7 +173,7 @@ export type CameraMove = { pan: [number, number] } | { zoom: number } | { turn: 
  * we:center,2200): 53 (at 1/17.5) and 261 (at 4.4 times that) before they were tuned to these; zoom 12.7% at 1.12.
  * Alt with an arrow, Insert, Delete, Page Up and Down, Home and End don't move the camera (with something selected the
  * Page keys, Home and End change it: selectionkeys.ts; so do Ctrl and the arrows, which nudge it). The pointer at the
- * view's edge didn't scroll it in we-drive's display, so Studio has no edge scrolling.
+ * view's edge scrolls it too (edgeScroll, below).
  */
 export const CAMERA_STEPS = { pan: 1 / 19, fast: 3.8, zoom: 1.11, turn: (5 * Math.PI) / 180 };
 
@@ -187,6 +193,49 @@ export function cameraKey(e: Keys & { code?: string }): CameraMove | null {
   }
   const step = CAMERA_STEPS.pan * (e.shiftKey ? CAMERA_STEPS.fast : 1);
   return { pan: [dir[0] * step, dir[1] * step] };
+}
+
+/** Screen-edge scrolling: the pointer within `edge` CSS pixels of the view's side scrolls toward it, `speed` view
+ *  heights a second (about what a held arrow key does). */
+export const EDGE_SCROLL = { edge: 6, speed: 1.5 };
+
+/** Where the pointer at (x, y) in a view of `width` × `height` CSS pixels scrolls it: a direction per axis (x right,
+ *  y up on the screen, each -1, 0 or 1), or null when it's not at an edge or outside the view. */
+export function edgeScroll(x: number, y: number, width: number, height: number, edge = EDGE_SCROLL.edge): [number, number] | null {
+  if (![x, y, width, height].every(Number.isFinite) || width <= edge * 4 || height <= edge * 4) return null;
+  if (x < 0 || y < 0 || x >= width || y >= height) return null;
+  const dx = x < edge ? -1 : x >= width - edge ? 1 : 0;
+  const dy = y < edge ? 1 : y >= height - edge ? -1 : 0;
+  return dx || dy ? [dx, dy] : null;
+}
+
+// ---- camera bounds -----------------------------------------------------------------------------
+
+/** The Camera Bounds line's colour (light blue, as the World Editor's: we-drive, HillsbradCreek's west edge). */
+export const CAMERA_BOUNDS_RGB: [number, number, number] = [150, 200, 255];
+
+/** The corners of a map's camera bounds (war3map.w3i: lower left, upper right, upper left, lower right) in the order
+ *  round, or null when they aren't all numbers. */
+export function cameraBoundsCorners(info: { cameraBounds?: readonly number[] } | null | undefined): [number, number][] | null {
+  const b = info?.cameraBounds;
+  if (!Array.isArray(b) || b.length < 8 || !b.slice(0, 8).every((n) => Number.isFinite(n))) return null;
+  const [x1, y1, x2, y2, x3, y3, x4, y4] = b;
+  return [[x1, y1], [x4, y4], [x2, y2], [x3, y3]];
+}
+
+/** The points of a closed line through `corners` with no two more than `step` apart, so that it can follow the
+ *  ground; at most `max` points (longer steps then). */
+export function lineAlong(corners: readonly (readonly [number, number])[], step = 64, max = 4096): [number, number][] {
+  if (corners.length < 2) return corners.map(([x, y]) => [x, y]);
+  const edges = corners.map((a, i) => [a, corners[(i + 1) % corners.length]] as const);
+  const total = edges.reduce((sum, [a, b]) => sum + Math.hypot(b[0] - a[0], b[1] - a[1]), 0);
+  const s = Math.max(step, total / max);
+  const out: [number, number][] = [];
+  for (const [a, b] of edges) {
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / s));
+    for (let i = 0; i < n; i++) out.push([a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n]);
+  }
+  return out;
 }
 
 /** The key of a command, for its tooltip ("Game view (V)"); undefined for none. */
