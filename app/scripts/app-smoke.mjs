@@ -1506,8 +1506,9 @@ async function itemTablesAccess(page, found) {
  *  on it. The tab groups the creeps into camps, shows the map's item table with its contents and who uses it, and edits:
  *  an item added from the item browser and its chance typed (one undo step each, Ctrl+Z in the tab takes one back), one
  *  creep's drops copied to its whole camp (one step), a set added to each refused for a camp that uses a table (nothing
- *  changes), the table given to a whole camp. Show selects the creep in the terrain editor. Everything stays unsaved until
- *  saved; the saved units file has the drops, the regenerated war3map.j their drop functions, and the packed map verifies. */
+ *  changes), the table given to a whole camp. Each camp shows its level; Ctrl+S in the tab saves the terrain editor; a
+ *  table renamed in Map Properties shows renamed in the tab and the Selection panel before it is saved. Show selects the
+ *  creep in the terrain editor. Everything stays unsaved until saved; the saved units file has the drops, the regenerated war3map.j their drop functions, and the packed map verifies. */
 async function itemDrops(page, found) {
   const fail = (what) => found.push(`item drops: ${what}`);
   const k = await heightKit(page, "ItemDrops");
@@ -1571,6 +1572,9 @@ async function itemDrops(page, found) {
   if (!(await has(T(".drops-obj.on[data-entry=\"nftt@0,0\"]")))) fail("the troll isn't marked in the tab's list");
   const camps = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-group")].map((g) => [g.querySelector("strong").textContent, g.querySelectorAll(".drops-obj").length])`);
   if (JSON.stringify(camps) !== JSON.stringify([["Camp 1", 2], ["Camp 2", 3]])) fail(`the camps: ${JSON.stringify(camps)} (the ogres are north of the trolls)`);
+  // Each camp's level: its creeps' levels added up (ogres and forest trolls are level 3), in the game minimap's bands.
+  const levels = await page.evaluate(`[...document.querySelectorAll(".drops-tab .drops-group")].map((g) => g.querySelector('[data-prop="camp-level"]')?.textContent ?? null)`);
+  if (JSON.stringify(levels) !== JSON.stringify(["Level 6 (weak)", "Level 9 (weak)"])) fail(`the camps' levels: ${JSON.stringify(levels)}`);
   if (!/2 objects drop items · 1 map item table/.test(await text(T("[data-prop=\"drops-count\"]")) ?? "")) fail(`the count: ${await text(T("[data-prop=\"drops-count\"]"))}`);
   const card = await text(T("[data-table-card=\"3\"]")) ?? "";
   if (!/Smoke Loot/.test(card) || !/used by 1/.test(card) || !/Claws of Attack/.test(card) || !/Random item, charged, level 2/.test(card) || !/60%/.test(card)) fail(`the table's card: ${card}`);
@@ -1593,7 +1597,10 @@ async function itemDrops(page, found) {
   await k.hands.click(T(".drops-pane h3"));
   await k.hands.chord("Ctrl+Z");
   await settled();
-  await k.save();
+  // Ctrl+S in the tab saves the terrain editor the drops are in, as Ctrl+S there does; the tab stays in front.
+  await k.hands.chord("Ctrl+S");
+  await until("the terrain saved from the tab", async () => !(await dirty()), 20000).catch(() => fail("Ctrl+S in the Item Drops tab didn't save the terrain editor"));
+  if ((await active()) !== TAB) fail(`after Ctrl+S in the tab, ${await active()} is in front`);
   let sets = troll(0, 0)?.itemSets;
   if (JSON.stringify(sets) !== JSON.stringify([[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 0 }]])) fail(`after the item, two chances and one Ctrl+Z: ${JSON.stringify(sets)}`);
   await page.evaluate(`w3.commands.execute("workbench.redo")`);
@@ -1638,6 +1645,18 @@ async function itemDrops(page, found) {
     if (!/used by 2/.test(await text(T("[data-table-card=\"3\"]")) ?? "")) fail(`the table's card after: ${await text(T("[data-table-card=\"3\"]"))}`);
   }
 
+  // The table renamed in Map Properties, unsaved: the tab shows the new name at once, and says it's unsaved there.
+  const NAME = "[data-anchor=\"item-table-3\"] .techtree-table-head input.form-input";
+  await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "techtree", "item-table-3")`);
+  await until("Map Properties' item table", () => has(NAME), 20000);
+  await retype(k.hands, NAME, "Ogre Loot");
+  if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3i.json")`))) fail("renaming the item table didn't mark Map Properties changed");
+  await page.evaluate(`w3.editors.open(${JSON.stringify(TAB)}, "w3.itemDrops")`);
+  await until("the renamed table in the tab", async () => /Ogre Loot/.test(await text(T("[data-table-card=\"3\"]")) ?? ""), 10000)
+    .catch(async () => fail(`the tab doesn't show Map Properties' unsaved table name: ${await text(T("[data-table-card=\"3\"]"))}`));
+  if (!(await has(T("[data-prop=\"tables-unsaved\"]")))) fail("the tab doesn't say the tables are Map Properties' unsaved ones");
+  if (k.read("war3map.w3i.json").itemTables?.[0]?.name !== "Smoke Loot") fail("showing the renamed table saved war3map.w3i");
+
   // Show: the terrain editor in front with that ogre selected.
   await k.hands.click(T("[data-entry=\"nogr@1472,1280\"] [data-prop=\"show-one\"]"));
   await until("the terrain editor in front", async () => (await active()) === TXT, 20000).catch(() => fail("Show didn't bring the terrain editor to the front"));
@@ -1647,7 +1666,7 @@ async function itemDrops(page, found) {
   }, 20000).catch(() => fail("Show didn't select the ogre"));
   // The panel shows the table by name and what it drops, not only its name.
   const ogreBlock = await text(".terrain-drops") ?? "";
-  if (!/Smoke Loot \(#3\)/.test(ogreBlock) || !/Claws of Attack/.test(ogreBlock) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
+  if (!/Ogre Loot \(#3\)/.test(ogreBlock) || !/Claws of Attack/.test(ogreBlock) || !/Random item, charged, level 2/.test(ogreBlock)) fail(`the ogre's drops block: ${ogreBlock}`);
 
   // The script: the trolls' own drop function with both items, the table's function.
   await k.save();

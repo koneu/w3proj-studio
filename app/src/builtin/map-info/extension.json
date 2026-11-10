@@ -9,6 +9,7 @@
       {"name":"set_map_text","description":"Changes a text of the map's properties. Needs the setting mcp.writeTools; undo_last_edit takes it back.","inputSchema":{"type":"object","required":["field","text"],"properties":{"field":{"type":"string","enum":["name","author","description","suggestedPlayers","loadingTitle","loadingSubtitle","loadingText"]},"text":{"type":"string"}}}},
       { "name": "map_info", "description": "The open map's properties: name, author, description, tileset, size, players, forces, loading screen, script language.", "readOnly": true }
     ],
+    "services": [{ "id": "w3.mapInfo", "description": "The map's properties as the open Map Properties editor holds them (unsaved changes included): liveItemTables, onDidEdit." }],
     "viewContainers": [{ "id": "scenario", "title": "Scenario", "icon": "⚑", "order": 4 }],
     "views": [{ "id": "w3.scenario.sections", "title": "Map Properties", "container": "scenario" }],
     "editors": [{ "id": "w3.mapInfo", "title": "Map Properties", "patterns": ["war3map.w3i.json"] }],

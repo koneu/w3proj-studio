@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bulkDrops, dropsAnything, dropsText, dropsVariants, groupDroppers, itemLabel, setHeading, setShares, tableUse, type DropperRow } from "./dropsview";
+import {
+  bulkDrops, campLevel, campLevelText, creepLevel, dropsAnything, dropsText, dropsVariants, groupDroppers, itemLabel, setHeading, setShares, tableUse, type DropperRow,
+} from "./dropsview";
 import type { Placed } from "./objects";
 import { changeEach, dropsOf, type TypeFacts } from "./unitprops";
 
@@ -80,6 +82,28 @@ test("creeps standing together make a camp; others go by owner", () => {
   const near = (gap: number) => groupDroppers([row(unit("nftt", 0, 0, 24)), row(unit("nftt", gap, 0, 24))], "camp", names).length;
   assert.equal(near(449), 1);
   assert.equal(near(451), 2);
+});
+
+test("a camp's level: its creeps' levels added up, in the game minimap's bands", () => {
+  // A random level-4 creep (the file keeps the level in the first byte), a hero at level 3 (its own level, not its
+  // type's), and creeps of their type's level.
+  const random = unit("YYU4", 0, 0, 24, { randomLevel: "040000" }), hero = unit("Nbrn", 100, 0, 24, { level: 3 }), troll = unit("nftt", 200, 0, 24);
+  assert.equal(creepLevel(random, facts()), 4);
+  assert.equal(creepLevel(hero, { ...facts(), hero: true, level: 1 }), 3);
+  assert.equal(creepLevel(troll, { ...facts(), level: 2 }), 2);
+  assert.equal(creepLevel(troll, facts()), undefined, "a type without a known level");
+  const rows = [row(random), row(hero), row(troll), row(tree(150, 50), "w3b")].map((r, i) => ({ ...r, level: [4, 3, 2, undefined][i] }));
+  const names = { owner: () => "Neutral Hostile", type: (id: string) => id };
+  const [camp] = groupDroppers(rows, "camp", names);
+  // The crate isn't a creep: it adds nothing and isn't "unknown".
+  assert.deepEqual(camp.level, { total: 9, strongest: 4, strength: "weak", unknown: 0 });
+  assert.equal(campLevelText(camp.level!), "Level 9 (weak)");
+  assert.equal(campLevel([5, 5]).strength, "middle");
+  assert.equal(campLevel([9, 9, 1, 1]).strength, "tough");
+  assert.equal(campLevel([19]).strength, "middle");
+  assert.equal(campLevelText(campLevel([6, undefined])), "Level 6 (weak) + 1 unknown");
+  // Groups that aren't camps have no level.
+  assert.equal(groupDroppers([row(unit("hfoo", 0, 0, 0))], "camp", names)[0].level, undefined);
 });
 
 test("by owner and by type", () => {

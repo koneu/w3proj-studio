@@ -60,6 +60,8 @@ export interface TypeFacts {
   maxLevel: number;
   /** HeroAbilityLevelSkip, for skills without their own. */
   levelSkip: number;
+  /** Units: the type's level (ulev, the map's change first), what a creep camp's level adds up; absent when unknown. */
+  level?: number;
 }
 
 export interface DropItem { id: string; chance: number }

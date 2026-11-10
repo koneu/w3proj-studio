@@ -442,6 +442,17 @@ export class EditorService {
     for (const t of this.tabs.filter((t) => pred(t.path))) await this.close(t, true);
   }
 
+  /** Saves the editors of one file that have unsaved changes; resolves with how many were saved. */
+  async saveFile(path: string): Promise<number> {
+    const key = this.key(path);
+    let n = 0;
+    for (const t of this.tabs.filter((x) => this.key(x.path) === key)) {
+      // Closed while an earlier one was saving.
+      if (this.tabs.includes(t) && t.dirty && (await this.saveTab(t))) n++;
+    }
+    return n;
+  }
+
   /** Saves every editor with unsaved changes; resolves with how many were saved. */
   async saveAll(): Promise<number> {
     let n = 0;

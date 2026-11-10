@@ -59,7 +59,7 @@ import { bounds } from "../../lib/model/renderer";
 import type { McpToolHandler } from "../../extensions/api";
 import { isTerrainText, w3eFromText, w3eToText } from "../../lib/terrain/w3etext";
 import { NO_WALK, NO_BUILD } from "../../lib/terrain/pathing";
-import { MCP_EDITS_SERVICE, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
+import { MAP_INFO_SERVICE, MCP_EDITS_SERVICE, type MapInfoService, type McpEditsService, type TerrainOccupancy, type TerrainView } from "../../extensions/services";
 import { CLIFF_SHORE_WAVES, loadMapLighting, ROLLING_SHORE_WAVES, WATER_TINTING, type MapLighting } from "./lighting";
 import { planShoreline, type ShoreModels } from "./shoreline";
 import { loadSplatTable, planSplats, splatTextureFiles, type SplatDef } from "./splats";
@@ -2450,14 +2450,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // ---- properties: hit points, hero, inventory, drops, … (unitprops.ts) ---------------------
         /** The types' facts, read once and again after the object data or gameplay constants are saved. */
         let factsData: Promise<FactsData> | null = null;
-        /** The map's item tables and regions, for the drops and the waygate destination; read again after they're saved. */
-        type MapLists = { tables: ItemTableInfo[] | null; regions: { index: number; name: string }[] };
+        /** The map's item tables and regions, for the drops and the waygate destination; read again after they're saved.
+         *  `tablesLive`: the tables are those of the open Map Properties editor, unsaved changes included. */
+        type MapLists = { tables: ItemTableInfo[] | null; regions: { index: number; name: string }[]; tablesLive?: boolean };
+        /** The lists as saved, read once and again after a save. */
         let mapLists: Promise<MapLists> | null = null;
         /** The lists as last read, for a change that can't wait for them (the Item Drops tab reads them before it shows). */
         let knownLists: MapLists | null = null, listsRead = 0;
-        const loadMapLists = (): Promise<MapLists> => {
-          if (mapLists) return mapLists;
+        /** Map Properties' service, for the item tables as its open editor holds them; null without it (disabled). */
+        let mapInfoService: Promise<MapInfoService | null> | null = null;
+        /** The lists now: the item tables of an open Map Properties editor of this project (unsaved changes included),
+         *  else as saved. */
+        /** This editor's project: Map Properties of another one (opened meanwhile) isn't its. */
+        const listsRoot = w3.workspace.project()?.root ?? "";
+        const loadMapLists = async (): Promise<MapLists> => {
           const read = ++listsRead;
+          const [saved, svc] = await Promise.all([loadSavedLists(), mapInfoService ??= w3.services.get<MapInfoService>(MAP_INFO_SERVICE).catch(() => null)]);
+          const live = svc?.liveItemTables(listsRoot) ?? null;
+          const lists: MapLists = live ? { ...saved, tables: live, tablesLive: true } : saved;
+          // A read overtaken by a newer one (after a save, or an edit in Map Properties) doesn't overwrite its lists.
+          if (read === listsRead) knownLists = lists;
+          return lists;
+        };
+        const loadSavedLists = (): Promise<MapLists> => {
+          if (mapLists) return mapLists;
           return mapLists = (async (): Promise<MapLists> => {
             const text = await mapStrings(w3).catch(() => (v: string) => v);
             // A file that isn't there has no tables or regions; one that can't be read leaves the tables unknown (null):
@@ -2465,10 +2481,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const info = await readMapDocStrict<{ itemTables?: ItemTableInfo[] }>(w3, "map/war3map.w3i.json").then(
               (i) => (i?.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name), sets: Array.isArray(t.sets) ? t.sets : [] })), () => null);
             const regions = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
-            const lists = { tables: info, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
-            // A read overtaken by a save (the lists dropped and read again) doesn't overwrite the newer lists.
-            if (read === listsRead) knownLists = lists;
-            return lists;
+            return { tables: info, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
           })();
         };
         const kindOfEntry = (p: Placed) => {
@@ -2561,7 +2574,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const dropsUi = (items: { entry: Placed; facts: TypeFacts }[], lists: MapLists, ctx: PropContext, still: () => boolean, warn: (m: string) => void): DropsUiHost => {
           const objects = () => w3.services.get<ObjectsService>(OBJECTS_SERVICE);
           return {
-            readOnly: !editable, tables: lists.tables, tablesUnsaved: w3.editors.isDirty("map/war3map.w3i.json"),
+            readOnly: !editable, tables: lists.tables, tablesUnsaved: !lists.tablesLive && w3.editors.isDirty("map/war3map.w3i.json"),
             itemName: (id) => objects().then((s) => s.name(id, ["w3t"])),
             itemIcon: (id) => objects().then((s) => s.icon("w3t", id)),
             pickItem: (title) => objects().then((s) => s.pick(el, { title, kinds: ["w3t"] })).then((o) => o?.id),
@@ -3913,7 +3926,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const [items] = await Promise.all([factsOf(entries), loadMapLists()]);
             return items.filter((it) => fieldsFor(it.entry, it.facts).includes("drops")).map((it) => ({ ...it, kind: it.facts.kind }));
           },
-          tables: () => loadMapLists().then((l) => l.tables),
+          tables: () => loadMapLists().then((l) => ({ list: l.tables, live: !!l.tablesLive })),
+          save: async () => { if (!disposed) await w3.editors.save(doc.path); },
           setDrops: (changes) => changePropsEach(changes.map((c) => ({ entry: c.entry, facts: c.facts, change: { field: "drops", value: c.drops as Drops } })),
             { tables: knownLists?.tables?.map((t) => t.number), regions: knownLists?.regions.map((r) => r.index) }),
           show: async (entries) => {

@@ -141,6 +141,12 @@ const nextNumber = (list: { number: number }[]) => 1 + Math.max(-1, ...list.map(
 export const ITEM_TABLES_ANCHOR = "item-tables";
 export const itemTableAnchor = (number: number) => `item-table-${number}`;
 
+/** The item tables as other modules see them (MapInfoService.liveItemTables): names through `text` (the string
+ *  table), copies, a table without a list of sets has none. A map without item tables (Reign of Chaos) has none. */
+export function itemTablesShown(info: TechInfo, text: (value: string) => string): ItemTable[] {
+  return (info.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name), sets: Array.isArray(t.sets) ? structuredClone(t.sets) : [] }));
+}
+
 /** Adds a new item table (one empty set, named as the World Editor names it) after the others and gives it;
  *  throws for a map whose format has no item tables (Reign of Chaos). */
 export function addItemTable(info: TechInfo): ItemTable {

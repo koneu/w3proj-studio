@@ -588,6 +588,11 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .drops-group.on { border-color: var(--accent-2); }
 .drops-group-head { display: flex; align-items: center; gap: 8px; padding: 5px 8px; flex-wrap: wrap; }
 .drops-group-head button { margin-top: 0; }
+/* A camp's level in the game minimap's camp colours (UI\MiscData.txt MinimapWeak/Middle/ToughCampColor). */
+.drops-camp-level { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; }
+.drops-camp-level.weak { color: rgb(0, 200, 0); }
+.drops-camp-level.middle { color: rgb(255, 128, 0); }
+.drops-camp-level.tough { color: rgb(240, 60, 60); }
 .drops-obj { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.2fr) 24px; gap: 8px; align-items: center; padding: 3px 8px; cursor: pointer; font-size: 12px; border-top: 1px solid var(--border); }
 .drops-obj:hover { background: var(--bg-hover); }
 .drops-obj.on { background: color-mix(in srgb, var(--accent-2) 25%, transparent); }

@@ -88,6 +88,48 @@ export interface DropperRow {
   entry: Placed;
   /** w3u (a unit or building), w3b (a destructable), w3d (a doodad that drops anyway). */
   kind: string;
+  /** A unit's level as a camp counts it (creepLevel); absent when unknown or not a unit. */
+  level?: number;
+}
+
+// ---- creep levels ------------------------------------------------------------------------------
+
+/** The game draws a creep camp on the minimap by its creeps' levels added up: weak (green) below
+ *  MinimapMiddleCampThreshold, middle (orange, bigger) from it, tough (red) from MinimapToughCampThreshold (UI\MiscData.txt:
+ *  10 and 20); the World Editor's minimap has the same camp icons, small and large. */
+export const MIDDLE_CAMP = 10, TOUGH_CAMP = 20;
+export type CampStrength = "weak" | "middle" | "tough";
+
+/** A camp's level: its creeps' levels added up, the strongest creep's, and how many creeps' levels aren't known (not
+ *  counted). */
+export interface CampLevel { total: number; strongest: number; strength: CampStrength; unknown: number }
+
+/** A placed unit's level: a random creep's chosen level, a hero's own level, else its type's (`facts.level`, the
+ *  map's change first); undefined when that isn't known. */
+export function creepLevel(entry: Placed, facts: { hero: boolean; level?: number } | undefined): number | undefined {
+  const e = entry as Placed & { randomLevel?: string; level?: number };
+  // A random unit (Y…): its level is the first byte of the random data the file keeps.
+  if (/^Y/.test(entry.id) && typeof e.randomLevel === "string") {
+    const n = parseInt(e.randomLevel.slice(0, 2), 16);
+    return Number.isInteger(n) && n < 0xff ? n : undefined;
+  }
+  if (facts?.hero && typeof e.level === "number" && e.level >= 1) return e.level;
+  return facts?.level;
+}
+
+/** A camp's level from its creeps' levels (undefined: unknown, left out). */
+export function campLevel(levels: readonly (number | undefined)[]): CampLevel {
+  const known = levels.filter((l): l is number => l !== undefined);
+  const total = known.reduce((a, b) => a + b, 0);
+  return {
+    total, strongest: known.length ? Math.max(...known) : 0, unknown: levels.length - known.length,
+    strength: total >= TOUGH_CAMP ? "tough" : total >= MIDDLE_CAMP ? "middle" : "weak",
+  };
+}
+
+/** "Level 12 (middle)", and the creeps left out when some aren't known. */
+export function campLevelText(c: CampLevel): string {
+  return `Level ${c.total} (${c.strength})${c.unknown ? ` + ${c.unknown} unknown` : ""}`;
 }
 
 export type GroupBy = "camp" | "owner" | "type";
@@ -100,6 +142,8 @@ export interface DropGroup {
   rows: DropperRow[];
   /** The middle of its objects. */
   centre: [number, number];
+  /** A camp with creeps: their levels added up (the rows' `level`). */
+  level?: CampLevel;
 }
 
 const playerOf = (e: Placed) => (e as Placed & { player?: number }).player;
@@ -141,9 +185,12 @@ export function groupDroppers(rows: readonly DropperRow[], by: GroupBy, names: {
     // North first (the top of the map), then west: rows of 1024 so a camp a little lower doesn't jump the queue.
     .sort((a, b) => Math.floor(b.centre[1] / 1024) - Math.floor(a.centre[1] / 1024) || a.centre[0] - b.centre[0]);
   const out = camps.map(({ list, centre }, i): DropGroup => {
-    const creeps = list.filter((r) => playerOf(r.entry) !== undefined).length;
-    const things = list.length === creeps ? counted(list, "creep", "creeps") : counted(list, "object", "objects");
-    return { key: `camp:${i}:${list.map((r) => r.entry.position.join(",")).join(";")}`, title: `Camp ${i + 1}`, detail: `${things} · at ${Math.round(centre[0])}, ${Math.round(centre[1])}`, rows: list, centre };
+    const creeps = list.filter((r) => playerOf(r.entry) !== undefined);
+    const things = list.length === creeps.length ? counted(list, "creep", "creeps") : counted(list, "object", "objects");
+    return {
+      key: `camp:${i}:${list.map((r) => r.entry.position.join(",")).join(";")}`, title: `Camp ${i + 1}`, detail: `${things} · at ${Math.round(centre[0])}, ${Math.round(centre[1])}`, rows: list, centre,
+      ...(creeps.length ? { level: campLevel(creeps.map((r) => r.level)) } : {}),
+    };
   });
   return [...out, ...byOwner(rows.filter((r) => !inCamps.includes(r)))];
 }

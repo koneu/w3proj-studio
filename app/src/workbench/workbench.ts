@@ -257,6 +257,7 @@ export class Workbench {
         closeAll: () => wb.editors.closeAll(),
         closeAllAsking: () => wb.editors.closeAllAsking(),
         saveAll: () => wb.editors.saveAll(),
+        save: (p) => wb.editors.saveFile(p),
         close: (p) => wb.editors.closeWhere((x) => x === p),
       },
       window: {
