@@ -1,6 +1,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { SCRIPT_LANGUAGES_SERVICE, type ScriptLanguage, type ScriptLanguagesService } from "../../extensions/services";
 import { soundDurationMs } from "../../lib/audio/duration";
+import { soundVariants } from "../../lib/audio/variants";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { StringTable } from "../../lib/formats/wts";
 import { isScriptInput, KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_STAMP, sameButPlacingOrder, scriptDecision, scriptHash } from "../../lib/script/guard";
@@ -214,11 +215,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const measured = new Map<string, number>();
     const script = await w3.workspace.readText(path).catch(() => null);
     const old = scriptSoundDurations(script ?? "");
+    /** The first of `variants` that `read` finds. */
+    const first = async (variants: string[], read: (v: string) => Promise<Uint8Array>): Promise<Uint8Array | null> => {
+      for (const v of variants) {
+        const buf = await read(v).catch(() => null);
+        if (buf) return buf;
+      }
+      return null;
+    };
     for (const f of new Set(soundFiles)) {
-      const rel = `map/${f.replace(/\\/g, "/")}`;
-      const buf = await w3.workspace.readBytes(rel)
-        .catch(() => (campaign === undefined ? Promise.reject(new Error("no campaign")) : w3.workspace.readBytes(joinPath(campaign, rel))))
-        .catch(() => w3.game.read(f)).catch(() => null);
+      // Under any of its sound extensions, as the game takes it (soundVariants): its own name first in each place.
+      const variants = soundVariants(f);
+      const rel = (v: string) => `map/${v.replace(/\\/g, "/")}`;
+      const buf = await first(variants, (v) => w3.workspace.readBytes(rel(v)))
+        ?? (campaign === undefined ? null : await first(variants, (v) => w3.workspace.readBytes(joinPath(campaign, rel(v)))))
+        ?? await first(variants, (v) => w3.game.read(v));
       const ms = buf ? soundDurationMs(buf) : null;
       if (ms !== null) measured.set(f, ms);
     }

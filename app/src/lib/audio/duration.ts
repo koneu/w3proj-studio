@@ -42,14 +42,18 @@ const MP3_BITRATES = [
 ];
 const MP3_RATES = [[44100, 48000, 32000], [22050, 24000, 16000], [11025, 12000, 8000]];
 
-/** MP3 (layer III): counts the frames, so variable bitrates come out right. */
+/** MP3 (layer III), as the World Editor measures it (869 mp3s of a campaign's chapter maps, 772 to the
+ *  millisecond): a Xing/Info header's frame count when it has one (the header frame itself isn't audio);
+ *  else the frames counted, plus one, plus one more when bytes follow the last frame (mostly an ID3v1 tag).
+ *  Counting the frames keeps variable bitrates right. Most of the rest are a frame shorter on files whose
+ *  real bitrate is under the header's (no padded frames), as if the editor's estimate went by the bitrate. */
 function mp3DurationMs(buf: Uint8Array): number | null {
   let o = 0;
   // Skip an ID3v2 tag.
   if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) {
     o = 10 + ((buf[6] & 0x7f) << 21 | (buf[7] & 0x7f) << 14 | (buf[8] & 0x7f) << 7 | (buf[9] & 0x7f));
   }
-  let samples = 0, rate = 0;
+  let samples = 0, rate = 0, perFrame = 0, end = 0;
   while (o + 4 <= buf.length) {
     if (buf[o] !== 0xff || (buf[o + 1] & 0xe0) !== 0xe0) { if (samples) break; o++; continue; }
     const version = (buf[o + 1] >> 3) & 3; // 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
@@ -58,10 +62,28 @@ function mp3DurationMs(buf: Uint8Array): number | null {
     if (version === 1 || layer !== 1 || bitrateIdx === 0 || bitrateIdx === 15 || rateIdx === 3) { if (samples) break; o++; continue; }
     const mpeg1 = version === 3;
     rate = MP3_RATES[mpeg1 ? 0 : version === 2 ? 1 : 2][rateIdx];
-    const perFrame = mpeg1 ? 1152 : 576;
+    perFrame = mpeg1 ? 1152 : 576;
     const size = Math.floor(((perFrame / 8) * MP3_BITRATES[mpeg1 ? 0 : 1][bitrateIdx] * 1000) / rate) + padding;
+    if (!samples) {
+      const frames = xingFrames(buf, o, mpeg1, (buf[o + 3] >> 6) === 3, (buf[o + 1] & 1) === 0);
+      if (frames) return rate ? Math.floor((frames * perFrame * 1000) / rate) : null;
+    }
     samples += perFrame;
     o += size;
+    end = o;
   }
-  return samples && rate ? Math.floor((samples * 1000) / rate) : null;
+  if (!samples || !rate) return null;
+  samples += perFrame * (end < buf.length ? 2 : 1);
+  return Math.floor((samples * 1000) / rate);
+}
+
+/** The frame count of a Xing or Info header in the frame at `o` (after the CRC and the side information), null
+ *  without one or without its count. */
+function xingFrames(buf: Uint8Array, o: number, mpeg1: boolean, mono: boolean, crc: boolean): number | null {
+  const at = o + 4 + (crc ? 2 : 0) + (mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17));
+  if (at + 12 > buf.length) return null;
+  const id = String.fromCharCode(buf[at], buf[at + 1], buf[at + 2], buf[at + 3]);
+  if (id !== "Xing" && id !== "Info") return null;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  return dv.getUint32(at + 4) & 1 ? dv.getUint32(at + 8) : null;
 }

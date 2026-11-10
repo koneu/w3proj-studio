@@ -26,8 +26,8 @@ const mod = (field: string, value: unknown, type = "int") => ({ field, type, val
 
 /** A chapter map's project in its campaign, with the app's API around the map script extension. `campaign` holds the
  *  campaign's files by name in its map/ folder (a value of null: there but unreadable). `bytes`: binary files, by
- *  project or absolute path. */
-function chapter(campaign: Record<string, string | null>, own: Record<string, string> = {}, bytes: Record<string, Uint8Array> = {}) {
+ *  project or absolute path; `gameFiles`: the game's, by plain path. */
+function chapter(campaign: Record<string, string | null>, own: Record<string, string> = {}, bytes: Record<string, Uint8Array> = {}, gameFiles: Record<string, Uint8Array> = {}) {
   const info = JSON.parse(fixture("war3map.w3i.json"));
   const unit = JSON.parse(fixture("war3mapUnits.doo.json"));
   const placed = (id: string, editorId: number) => ({ ...unit.units[0], id, skinId: id, editorId, position: [editorId * 128, 0, 0] });
@@ -55,7 +55,7 @@ function chapter(campaign: Record<string, string | null>, own: Record<string, st
     services: { provide: () => none },
     settings: { get: (key: string) => (key === "script.generateOnSave" ? true : undefined) },
     // The game's tables empty: nothing of hfoo's own (no colour, not a building) comes from the game.
-    game: { readText: async () => "", read: async (p: string) => { throw notFound(p); } },
+    game: { readText: async () => "", read: async (p: string) => { if (p in gameFiles) return gameFiles[p]; throw notFound(p); } },
     window: { showInfo: async () => undefined, showWarning: async () => undefined, showError: async () => undefined },
     editors: { isDirty: () => false, registerProvider: () => none, open: async () => {} },
     commands: {
@@ -158,4 +158,23 @@ test("a chapter's sound durations come from its campaign's imported files when t
   const none = chapter(CAMPAIGN, own);
   await none.generate();
   assert.doesNotMatch(none.script(), /SetSoundDuration/);
+});
+
+test("a sound is measured under its other sound extensions too, as the game takes it", async () => {
+  // WC2Orc01 lists Sound\Ambient\DoodadEffects\AshenvaleBrazierLoop1.flac; the game holds only the .ogg, and the
+  // editor wrote the .ogg's length.
+  const sound = { name: "gg_snd_Brazier", file: "Sound\\Brazier.flac", eaxEffect: "DoodadsEAX", flags: 0, fadeInRate: 10, fadeOutRate: 10,
+    volume: 127, pitch: 1, pitchVariance: 0, priority: 0, channel: 0, minDistance: 0, maxDistance: 0, distanceCutoff: 0, coneInside: 0,
+    coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0] };
+  const own = { "map/war3map.w3s.json": JSON.stringify({ sounds: [sound] }) };
+  const game = chapter(CAMPAIGN, own, {}, { "Sound\\Brazier.wav": wav(1520) });
+  await game.generate();
+  assert.match(game.script(), /call SetSoundDuration\( gg_snd_Brazier, 1520 \)/);
+  // The map's own file under another extension comes before the game's; its own name before other extensions.
+  const mine = chapter(CAMPAIGN, own, { "map/Sound/Brazier.ogg": wav(400), "map/Sound/Brazier.flac": wav(300) }, { "Sound\\Brazier.flac": wav(1520) });
+  await mine.generate();
+  assert.match(mine.script(), /call SetSoundDuration\( gg_snd_Brazier, 300 \)/);
+  const other = chapter(CAMPAIGN, own, { "map/Sound/Brazier.ogg": wav(400) }, { "Sound\\Brazier.flac": wav(1520) });
+  await other.generate();
+  assert.match(other.script(), /call SetSoundDuration\( gg_snd_Brazier, 400 \)/);
 });

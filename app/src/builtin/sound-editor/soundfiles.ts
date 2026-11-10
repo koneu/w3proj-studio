@@ -6,10 +6,11 @@
 import type { W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { checkpointIfOn } from "../../lib/checkpoint";
+import { soundVariants } from "../../lib/audio/variants";
 import { SOUND_EXTENSIONS } from "./sounds";
 
 export const SOUND_FILTER = [{ name: "Sound files", extensions: ["flac", "wav", "mp3", "ogg"] }];
-const EXTENSIONS = [".flac", ".ogg", ".mp3", ".wav"];
+export { soundVariants };
 
 /** An import list entry (war3map.imp). */
 export interface ImportEntry { flags: number; path: string }
@@ -21,12 +22,6 @@ const IMPORT_FOLDER = "war3mapImported";
 const extOf = (p: string) => (/\.(\w+)$/.exec(p)?.[1] ?? "").toLowerCase();
 const withExt = (p: string, ext: string) => p.replace(/\.\w+$/, `.${ext}`);
 const projectOf = (archive: string) => `map/${toProjectPath(archive)}`;
-
-/** The path and its forms under the other sound extensions, the path itself first. */
-export function soundVariants(path: string): string[] {
-  const rest = EXTENSIONS.map((e) => path.replace(/\.\w+$/, e)).filter((p) => p.toLowerCase() !== path.toLowerCase());
-  return [path, ...rest];
-}
 
 export interface FoundSound { bytes: Uint8Array; path: string; source: "map" | "game" }
 
