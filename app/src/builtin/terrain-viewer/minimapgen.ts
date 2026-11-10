@@ -11,10 +11,14 @@ import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
 import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { maxPlayers } from "../../lib/terrain/startlocations";
+import { ModeCache } from "../../lib/modecache";
 import type { Terrain } from "../../lib/terrain/w3e";
 
-/** Average colour of the first texture cell, by tile id (textures are shared). */
-const tileColors = new Map<string, Promise<Rgb>>();
+/** Average colour of the first texture cell, by graphics mode and tile id (textures are shared; the modes have their own). */
+const tileColors = new ModeCache<Rgb>();
+
+/** The graphics mode set (game.graphicsMode), which the game's files are read in. */
+export const graphicsMode = (w3: W3Api) => w3.settings.get<string>("game.graphicsMode") ?? "hd";
 
 /** The minimap parameters from the settings (terrain.minimap.*). */
 export function minimapSettings(w3: W3Api): Partial<MinimapParams> {
@@ -48,18 +52,14 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   const colors = new Map<string, Rgb>();
   for (const id of terrain.groundTiles) {
     const row = tileRows.get(id);
-    let c = tileColors.get(id);
-    if (!c) {
-      c = (async (): Promise<Rgb> => {
-        if (!row) return [128, 128, 128];
-        const path = `${row.dir}\\${row.file}.blp`;
-        const mip = decodeImage(await readFile(path), path).mip(0);
-        const cell = mip.height / 4, sum = [0, 0, 0];
-        for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) for (let k = 0; k < 3; k++) sum[k] += mip.rgba[(y * mip.width + x) * 4 + k];
-        return sum.map((s) => s / (cell * cell)) as Rgb;
-      })().catch((): Rgb => [128, 128, 128]);
-      tileColors.set(id, c);
-    }
+    const c = tileColors.get(() => graphicsMode(w3), id, () => (async (): Promise<Rgb> => {
+      if (!row) return [128, 128, 128];
+      const path = `${row.dir}\\${row.file}.blp`;
+      const mip = decodeImage(await readFile(path), path).mip(0);
+      const cell = mip.height / 4, sum = [0, 0, 0];
+      for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) for (let k = 0; k < 3; k++) sum[k] += mip.rgba[(y * mip.width + x) * 4 + k];
+      return sum.map((s) => s / (cell * cell)) as Rgb;
+    })().catch((): Rgb => [128, 128, 128]));
     colors.set(id, await c);
   }
 

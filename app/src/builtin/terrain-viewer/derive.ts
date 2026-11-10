@@ -8,7 +8,7 @@ import type { TerrainToolGroup } from "../../extensions/services";
 import { parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { readTerrainBytes } from "../../lib/terrain/w3etext";
 import { sameIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
-import { buildMinimap, buildMinimapIcons, minimapSettings } from "./minimapgen";
+import { buildMinimap, buildMinimapIcons, graphicsMode, minimapSettings } from "./minimapgen";
 import { buildPathingMap, readMapJson } from "./pathmap";
 import { predictShadows } from "./shadowmap";
 import { updateShadows } from "./shadows";
@@ -86,8 +86,8 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
   // Shadows: only cells whose prediction changed since the last save.
   if (cfg<boolean>("shadows.update")) try {
     const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
-    const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun);
-    const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun);
+    const before = await predictShadows(s.baseTerrain, s.baseDoodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3));
+    const after = await predictShadows(s.now, s.doodads, s.skins, s.baseOf, s.read, sun, undefined, () => graphicsMode(w3));
     const stored = await w3.workspace.readBytes("map/war3map.shd").catch(() => null);
     const shd = updateShadows(stored, before, after);
     if (gone()) return;
@@ -126,7 +126,7 @@ export async function fullShadows(w3: W3Api, opts: {
   const [dooFile, objects] = await Promise.all([loadPlacedFile(w3, "war3map.doo", "doodads"), opts.objects()]);
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const sun = { azimuth: cfg<number>("shadows.sunAzimuth"), elevation: cfg<number>("shadows.sunElevation") };
-  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun);
+  const shd = await predictShadows(now, dooFile?.list ?? [], objects.skins, objects.baseOf, opts.read, sun, undefined, () => graphicsMode(w3));
   const listed = w3.workspace.files().some((f) => f.path.toLowerCase() === "map/war3map.shd");
   const stored = listed ? await w3.workspace.readBytes("map/war3map.shd") : null;
   return { shd, stored };

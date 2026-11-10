@@ -2136,7 +2136,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           predict: editable ? (t, doodads, pause) => {
             const sun = { azimuth: w3.settings.get<number>("terrain.shadows.sunAzimuth") ?? 225, elevation: w3.settings.get<number>("terrain.shadows.sunElevation") ?? 30 };
-            return predictShadows(t, doodads, objCtx?.skins ?? new Map(), (id) => objCtx?.bases.get(id), (p) => readFile(w3, doc, p), sun, pause);
+            return predictShadows(t, doodads, objCtx?.skins ?? new Map(), (id) => objCtx?.bases.get(id), (p) => readFile(w3, doc, p), sun, pause, artMode);
           } : null,
         });
         void artLoad(viewShadows.reloadBaked());
