@@ -8,8 +8,8 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { parseTriggerData } from "../../lib/triggers/triggerdata";
-import { readWtgFile, writeWtgFile, wtgPath, type Param } from "../../lib/triggers/wtg";
+import { renameInTriggers } from "../../lib/triggers/renamed";
+import { ident } from "../../lib/script/names";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { exportSound, replaceSound } from "./soundfiles";
 import { h } from "../../workbench/dom";
@@ -201,7 +201,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   );
 }
 
-/** Renamed sounds in the saved triggers (gg_snd_ parameters) and regions' ambient sounds. */
+/** Renamed sounds in the regions' ambient sounds (the saved file) and in the triggers (w3.triggers.renameGlobals: the
+ *  open Trigger Editor or the files, GUI parameters and, after a question, script text). */
 async function renameReferences(w3: W3Api, renames: Map<string, string>) {
   const out = w3.output.channel("Sound Editor");
   const root = w3.workspace.project()!.root;
@@ -215,19 +216,10 @@ async function renameReferences(w3: W3Api, renames: Map<string, string>) {
       out.append(`renamed sounds in ${n} region${n === 1 ? "" : "s"}`);
     }
   }
-  const wtg = wtgPath(w3.workspace.files());
-  if (wtg) {
-    const file = await readWtgFile(w3.workspace, wtg, async () => parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")));
-    let n = 0;
-    const visit = (p: Param) => { if (p.type === 1 && renames.has(p.value)) { p.value = renames.get(p.value)!; n++; } p.call?.params.forEach(visit); if (p.index) visit(p.index); };
-    type E = { params: Param[]; children: E[] };
-    const walk = (e: E) => { e.params.forEach(visit); e.children.forEach(walk); };
-    for (const it of file.items) if ("ecas" in it) (it.ecas as E[]).forEach(walk);
-    if (n) {
-      await writeWtgFile(w3.workspace, wtg, file);
-      out.append(`renamed sounds in ${n} trigger parameter${n === 1 ? "" : "s"} (an open Trigger Editor reopens, or asks if it has unsaved changes)`);
-    }
-  }
+  // A sound's name is its global (gg_snd_…); the Sound Editor only gives names that stay the same as identifiers.
+  const pairs = [...renames].map(([from, to]) => [from.replace(/^gg_snd_/, ""), to.replace(/^gg_snd_/, "")] as [string, string])
+    .filter(([from, to]) => renames.get(`gg_snd_${from}`) === `gg_snd_${to}` && ident(from) === from && ident(to) === to);
+  if (pairs.length) await renameInTriggers(w3, "snd", pairs, "sounds");
 }
 
 class SoundEditor {
