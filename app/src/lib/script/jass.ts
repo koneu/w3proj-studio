@@ -63,6 +63,8 @@ export interface ScriptInput {
   /** Whether a custom unit type is a gold mine or a waygate (lib/script/objects). */
   goldMine?: (id: string) => boolean;
   waygate?: (id: string) => boolean;
+  /** Whether a unit type allows a custom team colour (lib/script/objects customColorTypes). */
+  customColor?: (id: string) => boolean;
   /** The orders that turn an ability's autocast on and off. */
   autocastOrders?: (ability: string) => { on: string; off?: string } | undefined;
   /** Whether an ability is a hero ability (lib/script/objects heroAbilities). */
@@ -473,7 +475,7 @@ function unitCreation(i: ScriptInput): string {
   const regions = i.regions ?? [];
   const body = unitsSection({
     itemTables: tableNumbers(i),
-    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, heroAbility: i.heroAbility, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate,
+    units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true), autocastOrders: i.autocastOrders, heroAbility: i.heroAbility, teamColor: i.teamColor, goldMine: i.goldMine, waygate: i.waygate, customColor: i.customColor,
     regionName: (n) => { const r = regions.find((x) => x.index === n); return r ? `gg_rct_${ident(r.name)}` : undefined; },
   });
   return body ? banner("Unit Creation") + body : "";

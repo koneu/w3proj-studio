@@ -195,8 +195,9 @@ export interface TerrainEditorHandle {
    *  how many models were in it. For tests and measuring. */
   waterDepth(): { drawn: boolean; models: number };
   /** Where the placed units' models are drawn now (a flyer at its flying height, a ship on the water), by their
-   *  placement's id and position. For tests and measuring. */
-  drawnUnits(): { id: string; x: number; y: number; z: number }[];
+   *  placement's id and position, with the team colour they're drawn in and their model ("" for a checkered cube).
+   *  For tests and measuring. */
+  drawnUnits(): { id: string; x: number; y: number; z: number; team: number; model: string }[];
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
   /** Commits a finished terrain stroke as one undo step: `undo`/`redo` restore

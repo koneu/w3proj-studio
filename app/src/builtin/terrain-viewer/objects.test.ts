@@ -210,6 +210,24 @@ test("a unit type's own team colour wins over its owner's: the tavern's roof is 
   assert.equal(drawnTeam(out.get("nmr2")!, 7), 7);
 });
 
+test("a placed waygate is drawn in its own colour; a type that doesn't allow one in its owner's", async () => {
+  // World Editor 2.0 (we-drive, 2026-11-10, a copy of cliff.w3m): a waygate with colour 4 yellow, one with 2 teal, a
+  // waygate type with utcc 0 and colour 4 in Neutral Passive's, a footman type with utcc 1 and colour 6 green, a plain
+  // footman with colour 6 red (its owner's).
+  const files = { ...gameTables(), "Units\\UnitSkin.txt": "[hfoo]\r\nfile=Units\\Footman\r\ncustomTeamColor=0\r\n[nwgt]\r\nfile=buildings\\other\\WayGate\\WayGate\r\nteamColor=-1\r\ncustomTeamColor=1\r\n" };
+  const skins = await loadSkins(fakeGame(files, { "game.installDir": "/custom-colour", "game.graphicsMode": "hd" }));
+  assert.equal(skins.get("nwgt")?.customColor, true);
+  assert.equal(skins.get("hfoo")?.customColor, undefined);
+  assert.equal(drawnTeam(skins.get("nwgt")!, 27, 4), 4);
+  assert.equal(drawnTeam(skins.get("nwgt")!, 27, 2), 2);
+  assert.equal(drawnTeam(skins.get("nwgt")!, 27, -1), 27, "no colour of its own: the owner's");
+  assert.equal(drawnTeam(skins.get("nwgt")!, 27, 24), 27, "not a player colour");
+  assert.equal(drawnTeam(skins.get("hfoo")!, 0, 6), 0, "a footman's stored colour isn't drawn");
+  const out = withObjectArt(skins, [{ kind: "w3u", custom: [{ id: "h001", base: "hfoo", mods: [{ field: "utcc", value: 1 }] }, { id: "n000", base: "nwgt", mods: [{ field: "utcc", value: 0 }] }] }]);
+  assert.equal(drawnTeam(out.get("h001")!, 0, 6), 6);
+  assert.equal(drawnTeam(out.get("n000")!, 27, 4), 27);
+});
+
 test("the skins are parsed once per install and graphics mode, and come out alike each time", async () => {
   const files = gameTables(), settings = { "game.installDir": "/cache-a", "game.graphicsMode": "hd" };
   const w3 = fakeGame(files, settings);

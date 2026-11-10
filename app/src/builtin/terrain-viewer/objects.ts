@@ -69,6 +69,9 @@ export interface Skin {
   /** Units: a team colour of the type's own (UnitSkin.txt `teamColor`, field `utco`; the tavern and the mercenary
    *  camps), drawn whoever owns it; absent: the owner's. */
   teamColor?: number;
+  /** Units: a placed one's own colour (war3mapUnits.doo `color`) is drawn (UnitSkin.txt `customTeamColor`, field `utcc`,
+   *  Allow Custom Team Color: the waygate's). */
+  customColor?: boolean;
   /** Doodads: the World Editor draws its click helper by the model (Doodads.slk `useClickHelper`, field `duch`: fires,
    *  traps, flies, dust, …, whose models are mostly particles; see CLICK_HELPER). */
   clickHelper?: boolean;
@@ -91,8 +94,15 @@ export function addClickHelpers(skins: Map<string, Skin>, rows: readonly Record<
   }
 }
 
-/** The team colour a placed object of this type is drawn in: the type's own (Skin.teamColor), else its owner's. */
-export const drawnTeam = (skin: Skin, owner: number): number => skin.teamColor ?? owner;
+/** Player colours a placed object can be drawn in (0 Red … 23 Peanut). */
+const PLAYER_COLORS = 24;
+
+/** The team colour a placed object of this type is drawn in: its own colour (`color`, 0–23) where the type allows one
+ *  (Skin.customColor: a waygate's Custom Color), else the type's own (Skin.teamColor), else its owner's. As the World
+ *  Editor draws them (we-drive, 2026-11-10): a waygate in its colour, one of a type without utcc and a footman with a
+ *  stored colour in the owner's. */
+export const drawnTeam = (skin: Skin, owner: number, color?: number): number =>
+  skin.customColor && color !== undefined && Number.isInteger(color) && color >= 0 && color < PLAYER_COLORS ? color : skin.teamColor ?? owner;
 
 /** Random unit, building and item (war3mapUnits.doo) and the object kind each is placed as. */
 export const RANDOM_KINDS: readonly (readonly [string, string])[] = [["uDNR", "w3u"], ["bDNR", "w3u"], ["iDNR", "w3t"]];
@@ -180,6 +190,7 @@ function shadowFields(get: (k: string) => string | undefined, kind: string): Par
   if (building) out.buildingShadow = building;
   const team = Number(get("teamcolor"));
   if (get("teamcolor")?.trim() && Number.isInteger(team) && team >= 0) out.teamColor = team;
+  if (get("customteamcolor")?.trim() === "1") out.customColor = true;
   return out;
 }
 
@@ -232,6 +243,7 @@ const ART_FIELDS: Record<string, Partial<Record<keyof Skin, string>>> = {
   w3u: {
     file: "umdl", modelScale: "usca", uberSplat: "uubs", animProps: "uani", moveType: "umvt", moveHeight: "umvh",
     unitShadow: "ushu", shadowX: "ushx", shadowY: "ushy", shadowW: "ushw", shadowH: "ushh", buildingShadow: "ushb", teamColor: "utco",
+    customColor: "utcc",
   },
   w3t: { file: "ifil", modelScale: "isca" },
   w3d: { file: "dfil", numVar: "dvar", minScale: "dmis", maxScale: "dmas", randScale: "dcpr", fixedRot: "dfxr", bakesShadow: "dshd", clickHelper: "duch" },
@@ -268,6 +280,7 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
         else if (key === "randScale") skin.randScale = n === 1;
         else if (key === "bakesShadow") skin.bakesShadow = n !== 0;
         else if (key === "clickHelper") { if (n === 1) skin.clickHelper = true; else delete skin.clickHelper; }
+        else if (key === "customColor") { if (n === 1) skin.customColor = true; else delete skin.customColor; }
         else if (key === "fixedRot") skin.fixedRot = n >= 0 ? n : null;
         else if (key === "teamColor") { if (Number.isInteger(n) && n >= 0) skin.teamColor = n; else delete skin.teamColor; }
         else if ((key === "numVar" || key === "texId" || key === "modelScale" || key === "minScale" || key === "maxScale"
@@ -576,7 +589,7 @@ export class ObjectLoader {
       entry.items.push(p);
       const range = scaleRange(skin);
       entry.req.instances.push({
-        world: placement(p, skin.modelScale, heightOf?.(p, skin), range), team: drawnTeam(skin, teamOf(p)),
+        world: placement(p, skin.modelScale, heightOf?.(p, skin), range), team: drawnTeam(skin, teamOf(p), (p as Placed & { color?: number }).color),
         pick: { kind: skin.kind, id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index, placed: p, model: path, extraScale: skin.modelScale, ...(range ? { scaleRange: range } : {}) },
       });
     }

@@ -75,7 +75,7 @@ import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from 
 import { pictureTarget } from "./picturetarget";
 import { applyAllyPriorities, firstStart, startLocations, syncPlayers, syncWithStarts, type PlayerInfo } from "../../lib/terrain/startlocations";
 import { clampShift, pushMoveEdit } from "./moveedit";
-import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
+import { changeAllOf, changeEach, commonFields, fieldsFor, notOffered, propChangesOf, propSnapshot, restoreProps, skinOfEntry, type Drops, type PropChange, type PropContext, type TypeFacts } from "./unitprops";
 import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
 import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
@@ -647,6 +647,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return entry;
   };
 
+  /** What the AI tools check placed objects' properties against, as the panel: regions (by name for a waygate) and random
+   *  groups (by name too) with their names; a war3map.w3i that can't be read leaves the item tables and groups unchecked. */
+  const propLists = async () => {
+    const text = await mapStrings(w3).catch(() => (v: string) => v);
+    const regionDoc = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
+    const regions = (regionDoc?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) }));
+    const info = await readMapDocStrict<{ itemTables?: { number: number }[]; unitTables?: RandomGroup[] }>(w3, "map/war3map.w3i.json").then((i) => i ?? {}, () => null);
+    const groups = info ? (info.unitTables ?? []).map((g) => ({ ...g, name: text(g.name), positions: Array.isArray(g.positions) ? g.positions : [] })) : null;
+    const ctx: PropContext = { tables: info ? (info.itemTables ?? []).map((t) => t.number) : undefined, regions: regions.map((x) => x.index), groups: groups ?? undefined };
+    return { lists: { regions, groups: groups ?? [] }, ctx };
+  };
+  /** The object kind of a placed type in a placement file (units: w3u or w3t; doodads: w3b or w3d), as the panel has it. */
+  const placedKindOf = (handle: TerrainEditorHandle, key: "units" | "doodads") => (id: string) => {
+    const t = handle.objects.type(id)?.kind;
+    return key === "units" ? (t === "w3t" ? "w3t" : "w3u") : (t === "w3b" ? "w3b" : "w3d");
+  };
+
   /** Doodads past the playable map carry a flag: every one on ladder maps does, and no others. */
   const markBackdrop = (entry: Placed, x: number, y: number, edge: Area | null) => {
     if (edge && !inArea(x, y, edge)) (entry as Placed & { flags?: number }).flags = ((entry as Placed & { flags?: number }).flags ?? 2) | OUTSIDE_PLAYABLE;
@@ -980,7 +997,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.mcp.registerTool("place_objects", placeObjects = async ({ kind, objects, ignoreRoom, nearest, dryRun, seed, ownPieces, mirror }) => {
       if (!Array.isArray(objects) || !objects.length || objects.length > 3000) throw new Error("objects must list 1 to 3000 things to place.");
-      const wanted = objects as ({ id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number } & UnitChoices)[];
+      const wanted = objects as ({ id: unknown; x: unknown; y: unknown; player?: unknown; facing?: number; scale?: number; variation?: number; properties?: unknown } & UnitChoices)[];
+      const { root } = requireProject(w3);
       const { handle } = await liveEditor();
       const files = new Set(wanted.map((o) => (typeof o.id === "string" ? fileOfType(handle, o.id, kind) : null)).filter(Boolean));
       if (files.size > 1) throw new Error("objects mixes units and doodads: place each in its own call.");
@@ -992,6 +1010,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (key === "doodads" && (o.camp !== undefined || o.gold !== undefined || o.drops !== undefined)) throw new Error(`objects[${i}]: camp, gold and drops are for units.`);
         try { setUnitChoices(o); } catch (e) { throw new Error(`objects[${i}]: ${(e as Error).message}`); }
       }
+      // Properties as set_object_properties takes them (the Properties panel's), made on each new object in the same edit:
+      // one an object doesn't have, or out of range, refuses the whole call.
+      const asked = wanted.some((o) => o.properties !== undefined) ? await propLists() : null;
+      const propChanges = wanted.map((o, i) => {
+        if (o.properties === undefined || !asked) return null;
+        if (!o.properties || typeof o.properties !== "object" || Array.isArray(o.properties)) throw new Error(`objects[${i}]: properties must be an object, like { hp: 50 }.`);
+        try { return propChangesOf(o.properties as Record<string, unknown>, asked.lists.regions, asked.lists.groups); } catch (e) { throw new Error(`objects[${i}]: ${(e as Error).message}`); }
+      });
+      const factsData = asked ? await loadFactsData(w3) : null;
+      if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was placed.");
+      const kindOfPlaced = placedKindOf(handle, key);
+      const giveProps = (entry: Placed, i: number) => {
+        const changes = propChanges[i];
+        if (!changes?.length || !factsData || !asked) return;
+        const one = [{ entry, facts: typeFacts(entry.id, kindOfPlaced(entry.id), factsData) }];
+        const why = notOffered(one, changes);
+        if (why) throw new Error(`Nothing was placed: objects[${i}]: ${why}`);
+        const r = changeAllOf(one, changes, asked.ctx);
+        if ("error" in r) throw new Error(`Nothing was placed: objects[${i}]: ${r.error}`);
+      };
       const edge = await playable().catch(() => null);
       const whole = wholeMap(handle);
       const pathing = await handle.pathing();
@@ -1053,6 +1091,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const entry = add(f, handle, o.id as string, atX, atY, key === "units" ? owners[i] : undefined, { ...o, facing }, key === "doodads", random);
           if (key === "units") setUnitChoices(o, entry as unknown as Parameters<typeof setUnitChoices>[1]);
           else markBackdrop(entry, x, y, edge);
+          giveProps(entry, i);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
       }, (id) => handle.objects.type(id)?.kind === "w3t");
@@ -1159,20 +1198,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const key = fileKey(kind);
       const { root } = requireProject(w3);
       const { handle } = await liveEditor();
-      // As the panel: regions by name for a waygate; a war3map.w3i that can't be read leaves the item tables unchecked.
-      const text = await mapStrings(w3).catch(() => (v: string) => v);
-      const regionDoc = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
-      const regions = (regionDoc?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) }));
-      const tables = await readMapDocStrict<{ itemTables?: { number: number }[] }>(w3, "map/war3map.w3i.json").then((i) => (i?.itemTables ?? []).map((t) => t.number), () => undefined);
-      const changes = propChangesOf(properties as Record<string, unknown>, regions);
+      const { lists, ctx } = await propLists();
+      const changes = propChangesOf(properties as Record<string, unknown>, lists.regions, lists.groups);
       if (!changes.length) throw new Error("properties names nothing to change.");
       const data = await loadFactsData(w3);
       // The types, regions and tables were read from this project: another one opened meanwhile isn't changed by them.
       if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was changed.");
-      const kindOf = (id: string) => {
-        const t = handle.objects.type(id)?.kind;
-        return key === "units" ? (t === "w3t" ? "w3t" : "w3u") : (t === "w3b" ? "w3b" : "w3d");
-      };
+      const kindOf = placedKindOf(handle, key);
       let changed = 0;
       await editPlaced(`Set properties of ${listed.length} object${listed.length === 1 ? "" : "s"}`, key, (f) => {
         const entries = [...new Set(listed.map((it) => {
@@ -1183,7 +1215,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const objects = entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOf(entry.id), data) }));
         const why = notOffered(objects, changes);
         if (why) throw new Error(`Nothing was changed: ${why}`);
-        const r = changeAllOf(objects, changes, { tables, regions: regions.map((x) => x.index) });
+        const r = changeAllOf(objects, changes, ctx);
         if ("error" in r) throw new Error(`Nothing was changed: ${r.error}`);
         changed = r.changed.length;
       });
@@ -2009,7 +2041,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
          *  and again after war3map.w3i is saved. A view setting: nothing in the map changes. */
         let groupCycle = 0;
         let randomGroups: RandomGroup[] = [];
-        const shownAs = (p: Placed) => (groupCycle > 0 ? cycledId(p as Placed & { randomType?: number }, randomGroups, groupCycle - 1) : undefined);
+        /** What a placed unit or item is drawn as: a random group's line while cycling, else its skin (the World Editor
+         *  draws a footman with a knight's skin as the knight: we-drive, 2026-11-10), else its own type. */
+        const shownAs = (p: Placed) => (groupCycle > 0 ? cycledId(p as Placed & { randomType?: number }, randomGroups, groupCycle - 1) : undefined)
+          ?? (skinOfEntry(p) !== p.id ? skinOfEntry(p) : undefined);
         const marker =(p: Placed, rgb: Vec3): Marker => ({ x: p.position[0], y: p.position[1], z: drawnZ(p), rgb });
         // Units take their player's colour; neutral players (24+) show as Coal.
         const team = (p: Placed) => (p.player !== undefined && p.player < TEAM_COLORS.length ? p.player : NEUTRAL);
@@ -2462,7 +2497,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let factsData: Promise<FactsData> | null = null;
         /** The map's item tables and regions, for the drops and the waygate destination; read again after they're saved.
          *  `tablesLive`: the tables are those of the open Map Properties editor, unsaved changes included. */
-        type MapLists = { tables: ItemTableInfo[] | null; regions: { index: number; name: string }[]; tablesLive?: boolean };
+        type MapLists = { tables: ItemTableInfo[] | null; regions: { index: number; name: string }[]; tablesLive?: boolean;
+          /** Map Properties' random groups as saved (names resolved); null when war3map.w3i can't be read. */
+          groups: RandomGroup[] | null };
         /** The lists as saved, read once and again after a save. */
         let mapLists: Promise<MapLists> | null = null;
         /** The lists as last read, for a change that can't wait for them (the Item Drops tab reads them before it shows). */
@@ -2488,10 +2525,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const text = await mapStrings(w3).catch(() => (v: string) => v);
             // A file that isn't there has no tables or regions; one that can't be read leaves the tables unknown (null):
             // then nothing is refused for naming a table, and nothing is offered either.
-            const info = await readMapDocStrict<{ itemTables?: ItemTableInfo[] }>(w3, "map/war3map.w3i.json").then(
-              (i) => (i?.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name), sets: Array.isArray(t.sets) ? t.sets : [] })), () => null);
+            const doc = await readMapDocStrict<{ itemTables?: ItemTableInfo[]; unitTables?: RandomGroup[] }>(w3, "map/war3map.w3i.json").then((i) => i ?? {}, () => null);
+            const info = doc && (doc.itemTables ?? []).map((t) => ({ number: t.number, name: text(t.name), sets: Array.isArray(t.sets) ? t.sets : [] }));
+            const groups = doc && (doc.unitTables ?? []).map((g) => ({ ...g, name: text(g.name), positions: Array.isArray(g.positions) ? g.positions : [] }));
             const regions = await readMapDoc<{ regions?: { index: number; name: string }[] }>(w3, "map/war3map.w3r.json").catch(() => null);
-            return { tables: info, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
+            return { tables: info, groups, regions: (regions?.regions ?? []).map((r) => ({ index: r.index, name: text(r.name) })) };
           })();
         };
         const kindOfEntry = (p: Placed) => {
@@ -2521,7 +2559,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if ("error" in r) return r.error;
           if (!r.changed.length) return null;
           const after = items.map((it) => propSnapshot(it.entry));
-          const set = (v: Record<string, unknown>[]) => items.forEach((it, i) => Object.assign(it.entry, structuredClone(v[i])));
+          const set = (v: Record<string, unknown>[]) => items.forEach((it, i) => restoreProps(it.entry, v[i]));
           pushEdit({ undo: () => set(before), redo: () => set(after), terrain: false, objects: true });
           objectsTouched = true;
           void rebuildObjects();
@@ -2534,11 +2572,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
           void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
             if (!stillShown()) return;
-            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
+            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
             const show = () => { const panel = propsPanel(host); slot.replaceChildren(...(panel ? [panel] : [])); };
             const host: Parameters<typeof propsPanel>[0] = {
-              items, regions: lists.regions, readOnly: !editable,
+              items, regions: lists.regions, groups: lists.groups, readOnly: !editable,
               change: (c) => changeProps(items, c, ctx),
+              editGroups: () => void w3.commands.execute("w3.mapInfo.open", "techtree").catch((e) => w3.window.showError(String((e as Error).message ?? e))),
               name: (id, kinds) => w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.name(id, kinds)),
               pick: (title, kinds) => w3.services.get<ObjectsService>(OBJECTS_SERVICE).then((s) => s.pick(el, { title, kinds })).then((o) => o?.id),
               colorName: (n) => TEAM_COLORS[n]?.[0] ?? `#${n}`,
@@ -2606,7 +2645,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const stillShown = () => slot.isConnected && JSON.stringify(selectedEntries().map((p) => fileOf(p)?.list.indexOf(p))) === JSON.stringify(entries.map((p) => fileOf(p)?.list.indexOf(p)));
           void Promise.all([factsOf(entries), loadMapLists()]).then(([items, lists]) => {
             if (!stillShown() || !commonFields(items).includes("drops")) return;
-            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
+            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
             const show = () => slot.replaceChildren(dropsBlock(ui, entries, () => void w3.commands.execute("w3.terrain.itemDrops", "selection").catch((e) => w3.window.showError(String((e as Error).message ?? e)))));
             const ui = dropsUi(items, lists, ctx, () => stillShown(), (m) => {
               void w3.window.showWarning(m);
@@ -3830,7 +3869,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           waterDepth: () => ({ ...renderer.waterDepthState }),
           drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
-            return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14] }] : [];
+            return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];
           })),
         };
         const viewKey = `${w3.workspace.project()?.root}|${doc.path}`;
@@ -3957,7 +3996,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redo: () => redo(),
           createItemTable: async (entries) => {
             const [items, lists] = await Promise.all([factsOf([...entries]), loadMapLists()]);
-            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index) };
+            const ctx: PropContext = { tables: lists.tables?.map((t) => t.number), regions: lists.regions.map((r) => r.index), groups: lists.groups ?? undefined };
             await createTableFor(items, lists, ctx, () => entries.every((p) => fileOf(p)), (m) => void w3.window.showWarning(m));
           },
           ownerName,

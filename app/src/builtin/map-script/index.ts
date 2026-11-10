@@ -18,7 +18,7 @@ import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, scriptSoundDurations, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { dayNightModels } from "../../lib/script/setup";
-import { abilityOrders, buildingTypes, customIdsOf, destructableTints, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
+import { abilityOrders, autocastOrdersOf, buildingTypes, customColorTypes, customIdsOf, destructableTints, gameCustomColors, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
@@ -60,6 +60,8 @@ interface GameTables {
   heroAbilities: Set<string>;
   orders: Map<string, AbilityOrders>;
   unitColors: Map<string, number>;
+  /** The game's unit types that allow a custom team colour (lib/script/objects gameCustomColors). */
+  customColors: Set<string>;
   worldEdit: Map<string, Map<string, string>>;
 }
 
@@ -83,6 +85,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const balance = parseSlk(await text("Units\\UnitBalance.slk"));
       const orders = abilityOrders(await Promise.all(ABILITY_FUNC.map(async (f) => parseIni(await text(f)))));
       const abilityRows = parseSlk(await text("Units\\AbilityData.slk"));
+      const unitUI = parseSlk(await text("Units\\unitUI.slk"));
       return {
         data: parseTriggerData(await w3.game.readText("UI\\TriggerData.txt")),
         buildings: new Set(balance.filter((r) => r.isbldg === "1").map((r) => r.unitBalanceID)),
@@ -90,7 +93,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         abilities: new Set(abilityRows.map((r) => r.alias)),
         heroAbilities: new Set(abilityRows.filter((r) => r.hero === "1").map((r) => r.alias)),
         orders,
-        unitColors: gameTeamColors(parseSlk(await text("Units\\unitUI.slk"))),
+        unitColors: gameTeamColors(unitUI), customColors: gameCustomColors(unitUI),
         worldEdit: parseIni(await text("UI\\WorldEditData.txt")),
         soundLabels: parseSoundLabels(await Promise.all(SOUND_INFO.map((n) => text(`UI\\SoundInfo\\${n}.slk`)))),
       };
@@ -187,7 +190,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const soundDuration = await soundDurations(sounds.map((s) => s.file), path);
 
     const script = generateScript({
-      info, data: g.data, triggers, custom, kindOf, autocastOrders: (a) => g.orders.get(a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
+      info, data: g.data, triggers, custom, kindOf, autocastOrders: autocastOrdersOf(g.orders, objectFiles.w3a), heroAbility, destructableTint, teamColor: (id) => colors.get(id), goldMine: (id) => special.goldMines.has(id), waygate: (id) => special.waygates.has(id),
+      customColor: customColorTypes(unitFiles, g.customColors),
       lights,
       groundHeight: terrain ? (x, y) => heightAt(terrain, x, y) : undefined,
       units: (await json<{ units: ScriptInput["units"] }>("map/war3mapUnits.doo"))?.units,

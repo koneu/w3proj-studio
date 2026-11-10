@@ -190,7 +190,12 @@ It never starts the game itself.
   answer it.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
-  `--key Right`, `--key Left` lands on Abilities.
+  `--key Right`, `--key Left` lands on Abilities. The Skin button on General opens "Choose Skin", which does draw (a list
+  of the kind's types, filter All/Standard/Custom and a search box); a random unit's second tab is Random Unit (Random
+  Unit Type: Any Neutral Hostile Unit, From Random Group, Use Custom Table with New/Delete/Edit Unit). Found so on copies
+  of cliff.w3m (branch unit-props-2, 2026-11-10): the editor draws a placed unit's skin and its Custom Color only where
+  the type allows a custom team colour (`utcc`, not "is a waygate"), and its script switches a custom ability on by
+  its base's order.
 - **Loading**: big maps (4v4 Mount Hyjal) show a window titled "Progress" ("Loading Units n/300") for several
   seconds; `--wait-ready` waits for it (up to `--timeout`) instead of reporting it as a question.
 - **The View menu** (`--view-menu`): Foliage, Doodads, Units, Water, Blight, Shadows, Lighting (L), Weather and

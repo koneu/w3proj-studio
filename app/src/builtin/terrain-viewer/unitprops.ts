@@ -7,6 +7,7 @@
 // Each change is checked first and refused whole, so several objects are changed all or none.
 
 import type { Placed } from "./objects";
+import { ITEM_CLASSES, MAX_RANDOM_LEVEL, applyRandom, positionsFor, randomWhatOf, type RandomChoice, type RandomGroup, type RandomUnit } from "../../lib/terrain/randomplace";
 
 /** "Default" in the file: the type's own value (hit points, mana), the owner's colour, no table. */
 export const DEFAULT = -1;
@@ -56,6 +57,11 @@ export interface TypeFacts {
   slots: number;
   goldMine: boolean;
   waygate: boolean;
+  /** Allow Custom Team Color (field utcc, UnitUI.slk customTeamColor; of the game's types only the waygate): the World
+   *  Editor's Custom Color, which it then draws and writes into the script. Not for other types, whatever their file
+   *  stores (we-drive, 2026-11-10: a footman type given utcc drawn and created in its colour, a waygate type without
+   *  it in its owner's, a plain footman's stored colour ignored). */
+  customColor: boolean;
   /** The highest hero level (gameplay constant MaxHeroLevel). */
   maxLevel: number;
   /** HeroAbilityLevelSkip, for skills without their own. */
@@ -68,7 +74,7 @@ export interface DropItem { id: string; chance: number }
 /** Items dropped on death: none, one of the map's item tables (by its number), or the object's own sets. */
 export type Drops = { mode: "none" } | { mode: "table"; table: number } | { mode: "custom"; sets: DropItem[][] };
 
-export type PropField = "hp" | "mana" | "gold" | "acquire" | "level" | "attributes" | "skills" | "active" | "inventory" | "drops" | "waygate" | "color" | "life";
+export type PropField = "hp" | "mana" | "gold" | "acquire" | "level" | "attributes" | "skills" | "active" | "inventory" | "drops" | "waygate" | "color" | "life" | "skin" | "random";
 
 /** One edit of the properties panel. */
 export type PropChange =
@@ -84,22 +90,32 @@ export type PropChange =
   | { field: "drops"; value: Drops }
   | { field: "waygate"; value: number }
   | { field: "color"; value: number }
-  | { field: "life"; value: number };
+  | { field: "life"; value: number }
+  /** Another type's look (the World Editor's Skin, BlzCreateUnitWithSkin); null: the type's own. */
+  | { field: "skin"; value: string | null }
+  /** How a Random Unit, Building or Item is chosen (the Random Unit tab). */
+  | { field: "random"; value: RandomChoice };
 
-/** What a change is checked against besides the object: the map's item tables and regions. */
-export interface PropContext { tables?: readonly number[]; regions?: readonly number[] }
+/** What a change is checked against besides the object: the map's item tables, regions and random groups (unknown:
+ *  not checked). */
+export interface PropContext { tables?: readonly number[]; regions?: readonly number[]; groups?: readonly RandomGroup[] }
 
 type Ability = { id: string; autocast: number; level: number };
 type Entry = Placed & {
   hp?: number; mana?: number; gold?: number; targetAcquisition?: number; level?: number;
   strength?: number; agility?: number; intelligence?: number;
   inventory?: { slot: number; id: string }[]; abilities?: Ability[];
-  itemTable?: number; itemSets?: DropItem[][]; waygate?: number; color?: number; life?: number;
+  itemTable?: number; itemSets?: DropItem[][]; waygate?: number; color?: number; life?: number; skinId?: string;
+  randomType?: number; randomLevel?: string; randomClass?: number; randomGroup?: number; randomPosition?: number; randomUnits?: RandomUnit[];
 };
 
 /** Every key of an entry the panel may change: a snapshot of these is an undo step. */
 export const PROP_KEYS = ["hp", "mana", "gold", "targetAcquisition", "level", "strength", "agility", "intelligence",
-  "inventory", "abilities", "itemTable", "itemSets", "waygate", "color", "life"] as const;
+  "inventory", "abilities", "itemTable", "itemSets", "waygate", "color", "life", "skinId",
+  "randomType", "randomLevel", "randomClass", "randomGroup", "randomPosition", "randomUnits"] as const;
+
+/** The most lines a random object's own table takes here. */
+export const MAX_RANDOM_UNITS = 100;
 
 const has = (e: Entry, k: string) => k in e;
 
@@ -122,9 +138,15 @@ export function fieldsFor(entry: Placed, facts: TypeFacts): PropField[] {
     if (has(e, "inventory") && (facts.slots > 0 || (e.inventory?.length ?? 0) > 0)) out.push("inventory");
     if (has(e, "targetAcquisition") && (facts.attacks || e.targetAcquisition !== ACQUIRE_NORMAL)) out.push("acquire");
     if (has(e, "waygate") && facts.waygate) out.push("waygate");
-    // Other units store a colour too (some campaign maps), but the World Editor doesn't show it for them.
-    if (has(e, "color") && facts.waygate) out.push("color");
+    // Other units store a colour too (some campaign maps), but the World Editor doesn't show or use it for them.
+    if (has(e, "color") && facts.customColor) out.push("color");
+    if (has(e, "skinId")) out.push("skin");
+    if (randomWhatOf(e.id) && has(e, "randomType")) out.push("random");
     if (has(e, "itemSets")) out.push("drops");
+  } else if (facts.kind === "w3t") {
+    // Placed items: the World Editor's Skin, and a Random Item's choice.
+    if (has(e, "skinId")) out.push("skin");
+    if (randomWhatOf(e.id) && has(e, "randomType")) out.push("random");
   } else if (facts.kind === "w3b") {
     if (has(e, "life")) out.push("life");
     if (has(e, "itemSets")) out.push("drops");
@@ -146,8 +168,18 @@ export function commonFields(items: readonly { entry: Placed; facts: TypeFacts }
   }
   const oneType = items.every((it) => it.entry.id === items[0].entry.id);
   const sameSlots = items.every((it) => it.facts.slots === items[0].facts.slots);
-  return out.filter((f) => (f === "skills" || f === "attributes" || f === "active" ? oneType : f === "inventory" ? sameSlots : true));
+  const sameKind = items.every((it) => it.facts.kind === items[0].facts.kind);
+  // A random choice only for objects of one id: the World Editor refuses a table for units, buildings and items at
+  // once (WESTRING_UPROPS_RANDOMUNITS_CANTEDITMULTIPLE). A skin is a type of the same kind.
+  return out.filter((f) => (f === "skills" || f === "attributes" || f === "active" || f === "random" ? oneType
+    : f === "inventory" ? sameSlots : f === "skin" ? sameKind : true));
 }
+
+/** The skin a placed object is drawn and created with: its own when it names none (or an empty one). */
+export const skinOfEntry = (entry: Placed): string => {
+  const s = (entry as Entry).skinId;
+  return typeof s === "string" && s !== "" ? s : entry.id;
+};
 
 /** Abilities an object has placed switched on that its type can't switch on (another type's, or the type was changed
  *  since): shown too, so they can be switched off. */
@@ -340,11 +372,47 @@ export function checkChange(entry: Placed, facts: TypeFacts, c: PropChange, ctx:
       if (!facts.waygate) return "Only waygates have a destination.";
       return need("waygate") ?? (c.value === DEFAULT || !ctx.regions || ctx.regions.includes(c.value) ? null : "That region isn't on the map.");
     case "color":
-      if (!facts.waygate) return "Only a waygate's colour is set here (the World Editor's Custom Color).";
+      if (!facts.customColor) return "Only a type that allows a custom team colour (a waygate) takes one: the World Editor's Custom Color, object data Allow Custom Team Color.";
       return need("color") ?? (c.value === DEFAULT || (whole(c.value) && c.value >= 0 && c.value < COLORS) ? null : "A player colour goes from 0 to 23.");
     case "life":
       return need("life") ?? (whole(c.value) && c.value >= 0 && c.value <= 100 ? null : "Life goes from 0 (dead) to 100 percent.");
+    case "skin":
+      if (e.id === "sloc") return "A start location has no skin.";
+      return need("skinId") ?? (c.value === null || (ITEM_ID.test(c.value) && !c.value.startsWith("0x")) ? null : "A skin is an object id of four characters.");
+    case "random":
+      return checkRandom(e, c.value, ctx);
   }
+}
+
+/** Why a random choice can't be given to an object, or null. */
+function checkRandom(e: Entry, v: RandomChoice, ctx: PropContext): string | null {
+  const what = randomWhatOf(e.id);
+  if (!what) return "Only a Random Unit, Building or Item is chosen at random.";
+  if (!has(e, "randomType")) return "This object's file has no randomType.";
+  if (v.by === "level") {
+    if (what === "building") return v.level === -1 ? null : "A Random Building is any neutral passive building: it has no level.";
+    if (!(v.level === -1 || (whole(v.level) && v.level >= 0 && v.level <= MAX_RANDOM_LEVEL))) return `A random level goes from 0 to ${MAX_RANDOM_LEVEL}, or any.`;
+    if (v.itemClass !== undefined && v.itemClass !== 0 && what !== "item") return "Only a Random Item has a class.";
+    if (v.itemClass !== undefined && !(whole(v.itemClass) && v.itemClass >= 0 && v.itemClass < ITEM_CLASSES.length)) return `An item class goes from 0 (any) to ${ITEM_CLASSES.length - 1}.`;
+    return null;
+  }
+  if (v.by === "group") {
+    if (!whole(v.group) || v.group < 0 || !whole(v.position) || v.position < 0) return "A random group and its position are whole numbers.";
+    if (!ctx.groups) return null;
+    const g = ctx.groups.find((x) => x.number === v.group);
+    if (!g) return `The map has no random group #${v.group} (Map Properties › Random Groups).`;
+    const kind = what === "item" ? "items" : `${what}s`;
+    if (!positionsFor(g, what).includes(v.position)) return `Position ${v.position + 1} of ${g.name} isn't one for ${kind}.`;
+    return null;
+  }
+  if (v.units.length > MAX_RANDOM_UNITS) return `A table holds up to ${MAX_RANDOM_UNITS} lines.`;
+  for (const [i, u] of v.units.entries()) {
+    if (!ITEM_ID.test(u.id) || u.id.startsWith("0x")) return `Line ${i + 1}: an object id has four characters.`;
+    if (randomWhatOf(u.id)) return `Line ${i + 1}: a random object can't be one of a table's.`;
+    // A total past 100 is let through, as the drops' (the panel shows it red).
+    if (!whole(u.chance) || u.chance < 0 || u.chance > 100) return `Line ${i + 1}: a chance goes from 0 to 100.`;
+  }
+  return null;
 }
 
 /** Makes a checked change. True when anything is different afterwards. */
@@ -407,6 +475,9 @@ export function applyChange(entry: Placed, facts: TypeFacts, c: PropChange): boo
     case "waygate": e.waygate = c.value; break;
     case "color": e.color = c.value; break;
     case "life": e.life = c.value; break;
+    // As the World Editor stores the type's own look: its id (new placements and replaced types do the same).
+    case "skin": e.skinId = c.value ?? e.id; break;
+    case "random": applyRandom(e as unknown as Record<string, unknown>, { ...structuredClone(c.value), what: randomWhatOf(e.id)! }); break;
   }
   return JSON.stringify(PROP_KEYS.map((k) => e[k])) !== before;
 }
@@ -453,7 +524,7 @@ export function changeAllOf(items: readonly { entry: Placed; facts: TypeFacts }[
   items.forEach((it, i) => {
     const before = JSON.stringify(propSnapshot(it.entry)), after = propSnapshot(trial[i].entry);
     if (JSON.stringify(after) === before) return;
-    Object.assign(it.entry, after);
+    restoreProps(it.entry, after);
     changed.push(it.entry);
   });
   return { changed };
@@ -462,9 +533,10 @@ export function changeAllOf(items: readonly { entry: Placed; facts: TypeFacts }[
 /** The properties an AI tool (MCP set_object_properties, place_objects) gives, as the panel's changes, in the order they
  *  are made. Names and numbers as the tool's description says: hit points in percent, slots and colours from 1, a
  *  waygate's region by name or number. Only the form is checked here; the ranges are the panel's (checkChange). */
-export function propChangesOf(props: Record<string, unknown>, regions: readonly { index: number; name: string }[] = []): PropChange[] {
+export function propChangesOf(props: Record<string, unknown>, regions: readonly { index: number; name: string }[] = [],
+  groups: readonly { number: number; name: string }[] = []): PropChange[] {
   const out: PropChange[] = [];
-  const known = new Set(["hp", "mana", "gold", "acquireRange", "level", "attributes", "skills", "active", "inventory", "drops", "waygate", "color", "life"]);
+  const known = new Set(["hp", "mana", "gold", "acquireRange", "level", "attributes", "skills", "active", "inventory", "drops", "waygate", "color", "life", "skin", "random"]);
   const unknown = Object.keys(props).filter((k) => !known.has(k));
   if (unknown.length) throw new Error(`Unknown properties: ${unknown.join(", ")} (known: ${[...known].join(", ")}).`);
   const number = (k: string, v: unknown, ...words: [string, number][]): number => {
@@ -526,7 +598,41 @@ export function propChangesOf(props: Record<string, unknown>, regions: readonly 
   // Player colours from 1 (Red), as players are counted; "default" is the owner's.
   if (p.color !== undefined) out.push({ field: "color", value: number("color", p.color, ["default", 0]) - 1 });
   if (p.life !== undefined) out.push({ field: "life", value: number("life", p.life) });
+  if (p.skin !== undefined) {
+    if (typeof p.skin !== "string") throw new Error("skin must be an object id, like \"hkni\", or \"default\" (the type's own).");
+    out.push({ field: "skin", value: p.skin === "default" ? null : p.skin });
+  }
+  if (p.random !== undefined) out.push({ field: "random", value: randomChoiceOf(p.random, groups) });
   return out;
+}
+
+/** A random choice as the AI tools give it: { level, itemClass } (level "any" or a number, class from 0), { group,
+ *  position } (a group by number or name, its position from 1) or { units: [{ id, chance }] }. */
+function randomChoiceOf(v: unknown, groups: readonly { number: number; name: string }[]): RandomChoice {
+  const form = "random must be { level, itemClass }, { group, position } (position from 1) or { units: [{ id, chance }] }.";
+  if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(form);
+  const r = v as Record<string, unknown>;
+  const keys = ["level", "group", "units"].filter((k) => r[k] !== undefined);
+  if (keys.length !== 1) throw new Error(form);
+  if (r.level !== undefined) {
+    const level = r.level === "any" ? -1 : r.level;
+    if (typeof level !== "number" || (r.itemClass !== undefined && typeof r.itemClass !== "number")) throw new Error(form);
+    return { by: "level", level, ...(r.itemClass !== undefined ? { itemClass: r.itemClass as number } : {}) };
+  }
+  if (r.group !== undefined) {
+    let group: number;
+    if (typeof r.group === "number") group = r.group;
+    else if (typeof r.group === "string") {
+      const g = groups.find((x) => x.name === r.group);
+      if (!g) throw new Error(`random: the map has no random group called "${r.group}".`);
+      group = g.number;
+    } else throw new Error(form);
+    if (typeof r.position !== "number") throw new Error(form);
+    return { by: "group", group, position: r.position - 1 };
+  }
+  const units = r.units;
+  if (!Array.isArray(units) || !units.every((u) => u && typeof u === "object" && typeof (u as RandomUnit).id === "string" && typeof (u as RandomUnit).chance === "number")) throw new Error(form);
+  return { by: "table", units: (units as RandomUnit[]).map((u) => ({ id: u.id, chance: u.chance })) };
 }
 
 /** The panel's keys of an entry, copied: what an undo step puts back. Keys the entry doesn't have stay out. */
@@ -534,4 +640,14 @@ export function propSnapshot(entry: Placed): Record<string, unknown> {
   const e = entry as Entry, out: Record<string, unknown> = {};
   for (const k of PROP_KEYS) if (k in e) out[k] = structuredClone(e[k]);
   return out;
+}
+
+/** Puts a snapshot (propSnapshot) back: its keys as they were, and a panel key it lacks taken off again (a random
+ *  object's group fields after its level was chosen once more), so undo leaves no field of another layout behind. */
+export function restoreProps(entry: Placed, snap: Record<string, unknown>): void {
+  const e = entry as unknown as Record<string, unknown>;
+  for (const k of PROP_KEYS) {
+    if (k in snap) e[k] = structuredClone(snap[k]);
+    else delete e[k];
+  }
 }
