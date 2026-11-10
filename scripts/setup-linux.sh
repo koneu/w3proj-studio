@@ -4,6 +4,7 @@
 #   scripts/setup-linux.sh               install what's missing (asks for sudo for system packages)
 #   scripts/setup-linux.sh --check       only report what's there and what's missing; changes nothing
 #   scripts/setup-linux.sh --game PATH   use this Warcraft III folder (else the newest install found)
+#   scripts/setup-linux.sh --apt-packages  print the apt packages below, one line (CI installs them)
 #
 # Safe to run again: anything already installed is left alone, and a chosen game folder is kept.
 # What it sets up, and why, is in README.md ("Build & run", Linux).
@@ -12,11 +13,13 @@ set -euo pipefail
 
 CHECK_ONLY=0
 GAME_ARG=""
+PRINT_APT=0
 while (( $# )); do
   case "$1" in
     --check) CHECK_ONLY=1 ;;
     --game) GAME_ARG="${2:?--game needs a folder}"; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    --apt-packages) PRINT_APT=1 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -25,6 +28,7 @@ done
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_MAJOR=22           # Vite 7 needs Node 20.19+ or 22.12+
 NVM_VERSION=v0.40.3
+ACTIONLINT_VERSION=1.7.7
 
 # Tauri's build dependencies on Linux, plus what the app smoke test needs:
 # webkit2gtk-driver (WebKitWebDriver, driven by tauri-driver) and xvfb (an invisible display).
@@ -33,6 +37,8 @@ APT_PACKAGES=(
   libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
   webkit2gtk-driver xvfb
 )
+# The CI workflows (.github/workflows) install the same list through this, so it's kept in one place.
+if (( PRINT_APT )); then echo "${APT_PACKAGES[*]}"; exit 0; fi
 
 missing=()
 ok()   { printf '  \033[32mok\033[0m       %s\n' "$*"; }
@@ -130,6 +136,29 @@ SCCACHE_DIR = "$REPO/target/sccache"
 SCCACHE_CACHE_SIZE = "15G"
 EOF
   ok ".cargo/config.toml (sccache)"
+fi
+
+# --- actionlint ----------------------------------------------------------------------------------
+# Checks the GitHub workflow files (.github/workflows) before a push. Optional, like sccache: a release binary
+# into target/tools/bin, its checksum compared with the release's list.
+step "actionlint (checks the CI workflow files)"
+ACTIONLINT="$REPO/target/tools/bin/actionlint"
+if [[ -x "$ACTIONLINT" ]]; then ok "actionlint"; else
+  miss "actionlint"
+  if (( ! CHECK_ONLY )); then
+    v="$ACTIONLINT_VERSION"; tgz="actionlint_${v}_linux_amd64.tar.gz"
+    url="https://github.com/rhysd/actionlint/releases/download/v$v"
+    tmp="$(mktemp -d)"
+    if curl -sSfL -o "$tmp/$tgz" "$url/$tgz" && curl -sSfL -o "$tmp/sums.txt" "$url/actionlint_${v}_checksums.txt" \
+       && (cd "$tmp" && grep " $tgz\$" sums.txt | sha256sum -c --quiet -); then
+      mkdir -p "$(dirname "$ACTIONLINT")"
+      tar -xzf "$tmp/$tgz" -C "$(dirname "$ACTIONLINT")" actionlint
+      ok "actionlint $v"
+    else
+      echo "  couldn't download or verify actionlint $v; skipped (optional)"
+    fi
+    rm -rf "$tmp"
+  fi
 fi
 
 # --- npm packages ------------------------------------------------------------------------------

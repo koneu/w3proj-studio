@@ -13,6 +13,53 @@ It's a work in progress. Plenty of it hasn't been checked against the game yet.
 This is an unofficial project, not affiliated with or endorsed by Blizzard Entertainment.
 Warcraft is a trademark of Blizzard Entertainment. You need your own installed copy of the game.
 
+## Features
+
+What the World Editor doesn't have:
+
+- **AI integration.** A built-in [MCP](https://modelcontextprotocol.io/) server lets AI clients (Claude Desktop,
+  Claude Code, VS Code, …) read and edit the open map: about 70 tools for terrain, objects, triggers, regions, map
+  properties, checkpoints and problems, plus design guides they can read. Write tools are off until you turn them
+  on (`mcp.writeTools`), every AI edit is one undo step with a checkpoint taken first, and the app can set up the
+  clients it finds. Extensions add their own tools (see [Extensions](#extensions)).
+- **Problems view.** Checks the project like a compiler would: JASS errors in the map script, files that object
+  data uses but nobody has, textures missing from imported models, placed objects of unknown types, imports
+  without their file, triggers nothing runs. Click a problem to jump there; Build runs the checks first.
+
+  ![The Problems view next to the map script, opened at the error](docs/images/problems.png)
+
+- **A map is a folder you can keep in git.** Unpacked projects store object data, map properties, placed objects,
+  regions and the rest as JSON or text, so diffs and merges work; packing to `.w3x` is a release step. Every
+  file is checked to pack back byte for byte. A Source Control view commits, diffs, branches, pushes and pulls,
+  and automatic checkpoints keep packed copies to go back to.
+- **VS Code's way of working.** Activity bar, side views, tabs, a command palette (Ctrl+Shift+P) for every
+  command, quick file open (Ctrl+P), and settings per user or per project (`.w3proj/settings.json`, versioned with
+  the map). Inside the terrain view the World Editor's keys and mouse still apply.
+- **Extensions.** Nearly every editor is an extension on a public API; you can add commands, views, editors,
+  settings, MCP tools and Problems checks, or turn a built-in off and replace it.
+- **Editable binary formats.** The map file layouts are [format definitions](#format-definitions) (JSON), not
+  code: a project can carry its own for a new patch or an unknown field.
+- **Linux.** Runs natively; the game and the World Editor start through Steam's Proton when you test a map.
+- **A command line.** `w3proj` unpacks, packs, verifies and inspects maps and the game's files, for scripts and
+  CI ([CLI](#cli)).
+
+![The terrain editor on Twisted Meadows](docs/images/terrain-editor.png)
+
+## Caveats
+
+- **Formats are partly best guesses.** Blizzard doesn't document them. The codecs come from community work and
+  from samples (676 local maps round-trip byte for byte), but a byte-exact round trip doesn't prove what a field
+  *means*. Where a reading is uncertain the file stays raw instead of being rewritten. Maps from unusual editor
+  versions or patches can still show something wrong.
+- **It depends on Blizzard's game.** Nothing of the game is shipped. Studio reads the installed Warcraft III's
+  files (object tables, models, textures, trigger definitions), so without an install there's little it can
+  show or check, and Test Map needs the game itself. A game patch can change those files under it.
+- **Few users.** It's a small project; many maps and workflows have never been through it. Keep your maps in git
+  or keep backups.
+- **Tested mostly without the game.** Unit and system tests, a headless UI test, the real app driven hidden and a
+  corpus of real maps run on every change. Whether the game and the World Editor accept everything Studio writes
+  is checked by hand, and only for part of it so far. The terrain view's rendering is an approximation.
+
 ## How a map is stored
 
 A `.w3x` is a 512-byte `HM3W` header (name, flags, max players) followed by an
@@ -114,6 +161,19 @@ npx tauri dev                              # run the editor
 npx tauri build                            # installer in target/release/bundle
 ```
 
+**Release packages** come from the *Release* workflow (`.github/workflows/release.yml`, started by hand in
+GitHub Actions): NSIS and MSI installers for Windows, AppImage and deb for Linux, each with the `w3proj` CLI
+next to the app (the MCP bridge needs it there), and the bare CLI binaries, as workflow artifacts and, if asked
+for, on a draft release. The same build locally (Linux shown; on Windows the CLI is `w3proj.exe` and the bundles
+`nsis,msi`):
+
+```sh
+cargo build --release --locked -p w3proj-cli
+mkdir -p app/src-tauri/binaries             # git-ignored
+cp target/release/w3proj "app/src-tauri/binaries/w3proj-$(rustc -vV | sed -n 's/^host: //p')"
+cd app && npx tauri build --bundles deb --config src-tauri/tauri.release.conf.json
+```
+
 ### Linux
 
 On Debian/Ubuntu one script installs everything above, plus what the app smoke test needs on Linux:
@@ -131,8 +191,12 @@ It sets up:
 - **Node 22** through [nvm](https://github.com/nvm-sh/nvm), not apt: Ubuntu's `nodejs` package is too old.
 - **`tauri-driver`** (`cargo install tauri-driver --locked`, into `~/.cargo/bin`, which must be on `PATH`).
 - **`npm ci`** in `app/`.
+
+`scripts/setup-linux.sh --apt-packages` prints the apt package list; the CI workflows install the same list with it.
 - **sccache** (optional): a compiler cache shared by this checkout and its worktrees, installed into
   `target/tools/` and wired up by a local, git-ignored `.cargo/config.toml`. Delete that file to build without it.
+- **actionlint** (optional): checks the GitHub workflow files; a pinned release binary, checksum-verified, into
+  `target/tools/bin/`.
 - **Warcraft III:** finds the installs in Steam (Proton), Lutris/Battle.net and Wine prefixes, shows each one's
   build, and writes the newest to `.game-path` (git-ignored; `--game PATH` picks another). The gate and the test
   scripts read it when `W3PROJ_GAME` isn't set (`tests/gamepath.mjs`); on Windows, without either, they use the
@@ -184,6 +248,12 @@ w3proj game cat Units/UnitMetaData.slk
 ### Tests
 
 [TESTING.md](TESTING.md) has the test process. `node tests/gate.mjs` runs the checks for a commit.
+
+GitHub Actions run them on every push: `ci.yml` on Windows (step by step) and on Linux (the gate itself, with
+the apt packages from `scripts/setup-linux.sh --apt-packages`), without the game or the map corpus. `codeql.yml`
+scans the TypeScript, Rust and workflow code on pushes and pull requests to `master` and `dev`, and weekly.
+[actionlint](https://github.com/rhysd/actionlint) checks the workflow files:
+`target/tools/bin/actionlint .github/workflows/*.yml` (installed by `scripts/setup-linux.sh`).
 
 ### Corpus checks
 
