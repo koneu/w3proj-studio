@@ -4135,6 +4135,69 @@ async function keyChords(page, found) {
   }
 }
 
+/** The command palette (Ctrl+Shift+P) and quick picks by mouse, as VS Code's: the entry under the pointer is
+ *  highlighted, the wheel scrolls the list, a click picks the entry. The user found it unusable with the mouse
+ *  (2026-11-10, Linux). The mouse goes in as WebDriver's pointer on Linux, so WebKitGTK's own events come out. */
+async function paletteMouse(page, found) {
+  const fail = (what) => found.push(`palette mouse: ${what}`);
+  const hands = new Hands(page);
+  const shown = `!document.querySelector(".quick-input").hidden`;
+  const items = `[...document.querySelectorAll(".quick-input-item")]`;
+  const activeIndex = `${items}.findIndex((e) => e.classList.contains("active"))`;
+  // Over a terrain view, as the user had it: its canvas takes the mouse and the keys.
+  await heightKit(page, "Palette");
+  await hands.click(".model-stage canvas");
+  await hands.chord("Ctrl+Shift+P");
+  await until("the command palette", () => page.evaluate(shown), 5000).catch(() => fail("Ctrl+Shift+P didn't show the palette"));
+  try {
+    if (!(await page.evaluate(shown))) return;
+    const count = await page.evaluate(`${items}.length`);
+    if (count < 20) return fail(`only ${count} commands in the palette`);
+    // The pointer over the fourth entry: it is the highlighted one (Enter takes it).
+    const at = await page.evaluate(`(() => { const r = ${items}[3].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await hands.mouse("mouseMoved", at.x, at.y);
+    await until("the entry under the pointer highlighted", async () => (await page.evaluate(activeIndex)) === 3, 3000)
+      .catch(async () => fail(`with the pointer over the fourth entry, entry ${await page.evaluate(activeIndex)} is highlighted`));
+    // The wheel over the list scrolls it.
+    const list = await page.evaluate(`(() => { const l = document.querySelector(".quick-input-list"), r = l.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, room: l.scrollHeight - l.clientHeight }; })()`);
+    if (list.room <= 0) fail("the palette's list doesn't scroll (everything fits)");
+    else {
+      await hands.wheel(list.x, list.y, 300);
+      await until("the list scrolled", async () => (await page.evaluate(`document.querySelector(".quick-input-list").scrollTop`)) > 0, 3000)
+        .catch(() => fail("the mouse wheel over the palette's list didn't scroll it"));
+      if (!(await page.evaluate(shown))) fail("the wheel closed the palette");
+    }
+    // Escape still closes it, with the pointer over it.
+    await hands.chord("Escape");
+    await until("the palette closed", async () => !(await page.evaluate(shown)), 3000).catch(() => fail("Escape didn't close the palette"));
+  } finally {
+    if (await page.evaluate(shown)) await hands.chord("Escape");
+  }
+
+  // A click picks the entry clicked (here a quick pick of its own, whose answer can be read).
+  await page.evaluate(`(() => { window.__smokePick = "waiting"; w3.window.quickPick(Array.from({ length: 40 }, (_, i) => ({ label: "Smoke entry " + i, value: i })), { placeholder: "smoke" }).then((p) => { window.__smokePick = p ? p.value : null; }); })()`);
+  await until("the quick pick", () => page.evaluate(shown), 5000);
+  await hands.click(".quick-input-item", "Smoke entry 5");
+  await until("the clicked entry picked", async () => (await page.evaluate(`window.__smokePick`)) !== "waiting", 3000).catch(() => {});
+  const picked = await page.evaluate(`window.__smokePick`);
+  if (picked !== 5) fail(`clicking "Smoke entry 5" gave ${JSON.stringify(picked)}`);
+  if (await page.evaluate(shown)) { fail("the quick pick stayed open after the click"); await hands.chord("Escape"); }
+
+  // Opened by the mouse alone, from the title bar's search box: the keys are in the palette's input then, to type
+  // and to go up and down (WebKitGTK focuses a clicked button after its handlers ran).
+  await hands.click(".titlebar-search");
+  await until("the palette from the title bar", () => page.evaluate(shown), 5000).catch(() => fail("the title bar's search box didn't show the palette"));
+  await sleep(300);
+  if (!(await page.evaluate(`document.activeElement === document.querySelector(".quick-input-box")`))) {
+    fail(`opened from the title bar, the keys are in ${await page.evaluate(`document.activeElement?.className || document.activeElement?.tagName`)}, not the palette's input`);
+  }
+  await hands.chord("ArrowDown");
+  if ((await page.evaluate(activeIndex)) !== 1) fail(`ArrowDown in the palette opened from the title bar highlighted entry ${await page.evaluate(activeIndex)}`);
+  await hands.chord("Escape");
+  await until("the palette closed", async () => !(await page.evaluate(shown)), 3000).catch(() => fail("Escape didn't close the palette opened from the title bar"));
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
  *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
 /** What the first opening of gameReadsOnce's scene (the mini map with a tree, a goldmine and a footman) took
@@ -6649,6 +6712,7 @@ async function run() {
         objectLayout,
         objectManagerLive,
         objectsWhileOpening,
+        paletteMouse,
         placeObjects,
         placerAndCampaign,
         playerStarts: (p, f) => playerStarts(p, f, project),
@@ -6790,6 +6854,7 @@ async function run() {
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
+    await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));

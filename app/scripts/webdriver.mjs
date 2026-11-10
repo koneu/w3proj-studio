@@ -116,7 +116,11 @@ export class WebDriverPage {
   }
 
   mouse(params) {
-    const move = { type: "pointerMove", origin: "viewport", x: Math.round(params.x), y: Math.round(params.y), duration: 0 };
+    if (params.type === "mouseWheel") {
+      const scroll = { type: "scroll", origin: "viewport", x: Math.round(params.x), y: Math.round(params.y), deltaX: Math.round(params.deltaX ?? 0), deltaY: Math.round(params.deltaY ?? 0), duration: 0 };
+      return this.actions([{ type: "wheel", id: "wheel", actions: [scroll] }]);
+    }
+    const move ={ type: "pointerMove", origin: "viewport", x: Math.round(params.x), y: Math.round(params.y), duration: 0 };
     const steps = params.type === "mousePressed" ? [move, { type: "pointerDown", button: 0 }]
       : params.type === "mouseReleased" ? [move, { type: "pointerUp", button: 0 }]
       : [move];

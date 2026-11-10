@@ -41,6 +41,18 @@ export class QuickInput {
     return new Promise((resolve) => {
       let shown: QuickPickItem<T>[] = [];
       let active = 0;
+      /** Where the pointer last moved over the list: a list scrolled under a pointer that stays (the arrow keys)
+       *  doesn't take the highlight to the entry that came under it. */
+      let pointer = "";
+      /** The entry under the pointer is the highlighted one, as in the menus (Enter takes it). */
+      const hover = (i: number, e: MouseEvent) => {
+        const at = `${e.screenX},${e.screenY}`;
+        if (at === pointer || i === active) { pointer = at; return; }
+        pointer = at;
+        this.list.children[active]?.classList.remove("active");
+        active = i;
+        this.list.children[active]?.classList.add("active");
+      };
       const render = () => {
         const q = this.input.value.trim();
         shown = items
@@ -53,7 +65,12 @@ export class QuickInput {
           ...shown.slice(0, 200).map((it, i) =>
             h(
               `div.quick-input-item${i === active ? ".active" : ""}`,
-              { onmousedown: (e: MouseEvent) => { e.preventDefault(); finish(it); } },
+              {
+                // The keys stay in the input; the click picks (a press moved off the entry before letting go doesn't).
+                onmousedown: (e: MouseEvent) => e.preventDefault(),
+                onclick: () => finish(it),
+                onmousemove: (e: MouseEvent) => hover(i, e),
+              },
               h("span.label", {}, it.label),
               it.description ? h("span.description", {}, it.description) : null,
               it.detail ? h("div.detail", {}, it.detail) : null,
@@ -74,7 +91,8 @@ export class QuickInput {
         else if (key === "Enter") { finish(shown[active]); e.preventDefault(); }
         else if (key === "Escape") { finish(undefined); e.preventDefault(); }
       };
-      const cleanup = this.open(opts.placeholder ?? "", opts.value ?? "", render, onKey, () => finish(undefined));
+      // Typing starts again at the best match, wherever the pointer or the arrows had the highlight.
+      const cleanup = this.open(opts.placeholder ?? "", opts.value ?? "", () => { active = 0; render(); }, onKey, () => finish(undefined));
       render();
     });
   }

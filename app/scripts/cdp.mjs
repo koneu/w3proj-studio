@@ -79,6 +79,11 @@ export class Hands {
     await this.mouse("mouseReleased", x, y, 0, modifiers);
     await sleep(50);
   }
+  /** The mouse wheel turned over a point: `deltaY` pixels down (negative: up). */
+  async wheel(x, y, deltaY) {
+    await this.page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY });
+    await sleep(50);
+  }
   async drag(from, to, steps = 12) {
     await this.mouse("mouseMoved", from.x, from.y);
     await this.mouse("mousePressed", from.x, from.y, 1);
