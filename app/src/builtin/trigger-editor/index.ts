@@ -6,7 +6,7 @@
 // custom script, …). The files round-trip byte-exactly through lib/triggers.
 
 import type { ExtensionContext, MenuItem, W3Api } from "../../extensions/api";
-import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, OBJECTS_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type FollowedRenames, type ObjectsService, type TriggerEditorHandle, type TriggerKind, type TriggerLocation, type TriggersService } from "../../extensions/services";
 import { checkStringIds, compactStringIds, renumberStringRefs, renumberWts, StringTable } from "../../lib/formats/wts";
 import { resetTriggers } from "../../lib/triggers/defaults";
 import { keyOf } from "../../lib/keys";
@@ -54,6 +54,25 @@ class KindRegistry implements TriggersService {
   /** Told by the open editor after each edit, undo and redo, and when it closes. */
   readonly edits = new Listeners();
   onDidEdit(listener: () => void) { return this.edits.add(listener); }
+  followRenames(kind: string, pairs: [string, string][], label: string): FollowedRenames | null {
+    const view = openView;
+    if (!view || !view.editable) return null;
+    const forward = globalRenames(kind, pairs);
+    const back = globalRenames(kind, pairs.map(([a, b]) => [b, a]));
+    const first = view.followGlobals(label, forward);
+    if (first === null) return null;
+    // The step this handle did last and which way it went: on top of the history it's taken back in place, right
+    // after it (undone) it's done again; otherwise the Trigger Editor was edited since, and it's a new step.
+    let last = first, lastForward = true;
+    const go = (toForward: boolean) => {
+      if (openView !== view) return;
+      if (view.isState(last) && lastForward !== toForward) { view.step(-1); return; }
+      if (view.isNext(last) && lastForward === toForward) { view.step(1); return; }
+      const id = view.followGlobals(label, toForward ? forward : back);
+      if (id !== null) { last = id; lastForward = toForward; }
+    };
+    return { undo: () => go(false), redo: () => go(true) };
+  }
 }
 
 /** Copied tree items with their contents, custom text and variables (shared by all maps). */
@@ -381,11 +400,12 @@ async function renameGlobals(w3: W3Api, kind: string, pairs: [string, string][],
     // The editor closed or another project opened during the question: start again with what is there now.
     if (!same()) return null;
     if (openView !== view) return tries < 2 ? renameGlobals(w3, kind, pairs, what, tries + 1) : null;
-    const wasDirty = view.dirty;
+    // What followed the renames at once (followRenames) is saved with them, as is this step.
+    const clean = view.unsavedOnlyFollows();
     const n = view.renameGlobals(label, renames, withScripts);
-    if (n.gui || n.script) {
-      if (!wasDirty) await view.persist();
-      else void w3.window.showInfo(`${label}: changed in the Trigger Editor, which has other unsaved changes too; save it to keep them.`);
+    if (view.dirty) {
+      if (clean) await view.persist();
+      else if (n.gui || n.script) void w3.window.showInfo(`${label}: changed in the Trigger Editor, which has other unsaved changes too; save it to keep them.`);
     }
     return { ...n, inEditor: true };
   }
@@ -757,6 +777,28 @@ class TriggerView {
   /** What renameGlobals would change. */
   countGlobals(renames: ReadonlyMap<string, string>): RenameCount {
     return countRenames(this.file, this.vars.scripts().map((s) => s.get()), renames);
+  }
+  /** Steps that followed objects renamed elsewhere (followGlobals). */
+  private follows = new Set<number>();
+  /** Renamed objects' globals in the GUI parameters only, as one undo step that followed another editor
+   *  (TriggersService.followRenames). The step's id; null when no parameter names them (no step). */
+  followGlobals(label: string, renames: ReadonlyMap<string, string>): number | null {
+    if (!this.handle.editable || this.disposed || !renames.size || !this.countGlobals(renames).gui) return null;
+    this.edit(label, () => { applyRenames(this.file, this.vars.scripts(), renames, false); });
+    this.follows.add(this.state);
+    return this.state;
+  }
+  /** Whether the state now is the one after step `id`. */
+  isState(id: number) { return this.state === id; }
+  /** Whether step `id` is the one redo does next. */
+  isNext(id: number) { return this.at < this.undo.length && this.undo[this.at].id === id; }
+  /** Whether everything unsaved came from followGlobals (or nothing is unsaved): saved with the objects it followed. */
+  unsavedOnlyFollows(): boolean {
+    for (let p = this.at; p >= 0; p--) {
+      if ((p ? this.undo[p - 1].id : 0) === this.savedAt) return true;
+      if (!this.follows.has(this.undo[p - 1]?.id ?? -1)) return false;
+    }
+    return false;
   }
   get editable() { return this.handle.editable; }
   /** Whether there are unsaved changes. */

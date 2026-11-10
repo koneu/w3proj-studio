@@ -4,7 +4,7 @@
 // The file goes through the format engine ("regions" definition).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
+import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TriggersService } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { keyOf } from "../../lib/keys";
 import { weatherName } from "../../lib/terrain/weather";
@@ -114,6 +114,10 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
 
   /** The names as saved, for the gg_rct_ references in the triggers of regions renamed since. */
   const names = new SavedNames<Region>();
+  /** The Trigger Editor's service, for following renames at once (TriggersService.followRenames). */
+  let triggerService: TriggersService | null = null;
+  void w3.services.get<TriggersService>(TRIGGERS_SERVICE).then((s) => { triggerService = s; }, () => {});
+  const follow = (renamed: [string, string][]) => (renamed.length && triggerService ? triggerService.followRenames("rct", renamed, "Rename regions in triggers") : null);
   const read = async () => {
     const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
     const root = w3.workspace.project()?.root;
@@ -177,9 +181,15 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       render();
     };
     set(after, select);
+    // An open Trigger Editor takes renamed regions' gg_rct_ names at once, and back with undo.
+    const triggers = follow(names.renamedBetween(before, after));
     const selName = select?.index;
     const pick = (v: Region[]) => v.find((r) => r.index === selName) ?? null;
-    ed.pushEdit({ undo: () => set(before, pick(before)), redo: () => set(after, pick(after)), terrain: false, objects: false });
+    ed.pushEdit({
+      undo: () => { set(before, pick(before)); triggers?.undo(); },
+      redo: () => { set(after, pick(after)); triggers?.redo(); },
+      terrain: false, objects: false,
+    });
   };
   /** Changes one region (by copy) as an undo step. */
   const update = (r: Region, change: Partial<Region>) => updateAll([r], () => change);

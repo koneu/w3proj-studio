@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseTriggerData } from "./triggerdata";
-import { fits, lineLabel, validateTriggers } from "./validate";
+import { fits, lineLabel, scriptsThatRun, validateTriggers } from "./validate";
 import type { Eca, Param, TriggerFile, TriggerItem } from "./wtg";
 
 // Made up for this test; the layout of UI\TriggerData.txt.
@@ -144,6 +144,52 @@ test("a trigger without events is reported only when nothing runs it", () => {
   assert.deepEqual(kinds([{ ...lonely, runOnInit: true }]), [], "runs at map initialization");
   assert.deepEqual(kinds([lonely], null), [], "the scripts couldn't be read: nobody is called unused");
   assert.equal(validateTriggers(fileOf([lonely]), DATA)[0].severity, "warning");
+});
+
+test("only what the map script has runs a trigger; a trigger that does nothing isn't reported", () => {
+  // Found on the game's campaign maps against the World Editor's own war3map.j: triggers named only in disabled
+  // lines, disabled triggers, Comment lines or script commented out are in no script, so nothing runs them.
+  const lonely = trigger("Lonely Trigger", [eca(2, "KillUnit", [P.variable("Hero")])], { id: 2 });
+  const run = (extra: Partial<Eca> = {}) => eca(2, "KillUnit", [P.variable("gg_trg_Lonely_Trigger")], [], extra);
+  const caller = (ecas: Eca[], extra: Partial<TriggerItem> = {}) => trigger("Caller", [eca(0, "UnitDies", [P.variable("Hero")]), ...ecas], { id: 3, ...extra });
+  const found = (items: TriggerItem[], opts: Parameters<typeof validateTriggers>[2] = { scripts: [] }) =>
+    validateTriggers(fileOf(items), DATA, opts).filter((i) => i.kind === "noEvents").map((i) => `${i.trigger.name}: ${i.message}`);
+  const reported = ["Lonely Trigger: has no events, and no trigger or script runs it"];
+  // Control: an enabled line of an enabled trigger runs it, also nested.
+  assert.deepEqual(found([lonely, caller([run()])]), []);
+  assert.deepEqual(found([lonely, caller([eca(2, "IfThenElseMultiple", [], [run()])])]), [], "nested in an enabled block");
+  assert.deepEqual(found([lonely, caller([run({ enabled: false })])]), reported, "a disabled line");
+  assert.deepEqual(found([lonely, caller([eca(2, "IfThenElseMultiple", [], [run()], { enabled: false })])]), reported, "inside a disabled block");
+  assert.deepEqual(found([lonely, caller([run()], { enabled: false })]), reported, "a disabled trigger");
+  assert.deepEqual(found([lonely, caller([run()], { isComment: 1 })]), reported, "a comment");
+  assert.deepEqual(found([lonely, caller([eca(2, "CommentString", [P.value("then runs gg_trg_Lonely_Trigger")])])]), reported, "a Comment line");
+  // Script text: a call commented out runs nothing; in Lua the comment is --.
+  assert.deepEqual(found([lonely], { scripts: ["call TriggerExecute(gg_trg_Lonely_Trigger) // runs it"] }), []);
+  assert.deepEqual(found([lonely], { scripts: ["//call TriggerExecute(gg_trg_Lonely_Trigger)"] }), reported, "commented out in JASS");
+  assert.deepEqual(found([lonely], { scripts: ["-- TriggerExecute(gg_trg_Lonely_Trigger)"], language: "lua" }), reported, "commented out in Lua");
+  assert.deepEqual(found([lonely], { scripts: ["TriggerExecute(gg_trg_Lonely_Trigger)"], language: "lua" }), []);
+  assert.deepEqual(found([lonely, caller([eca(2, "CustomScriptCode", [P.value("// call TriggerExecute(gg_trg_Lonely_Trigger)")])])]), reported, "a Custom Script line commented out");
+  assert.deepEqual(found([lonely, caller([eca(2, "CustomScriptCode", [P.value("call TriggerExecute(gg_trg_Lonely_Trigger)")])])]), [], "a Custom Script line");
+  // Events that are all disabled are no events.
+  assert.deepEqual(found([{ ...lonely, ecas: [eca(0, "UnitDies", [P.variable("Hero")], [], { enabled: false }), ...lonely.ecas] }]),
+    ["Lonely Trigger: has no enabled events, and no trigger or script runs it"]);
+  // Nothing to run: no actions or conditions, only Comment lines, or only disabled ones (headings and leftovers).
+  for (const ecas of [[], [eca(2, "CommentString", [P.value("Heading")])], [eca(2, "KillUnit", [P.variable("Hero")], [], { enabled: false })]]) {
+    assert.deepEqual(found([{ ...lonely, ecas }]), [], JSON.stringify(ecas.map((e) => e.name)));
+  }
+  assert.deepEqual(found([{ ...lonely, ecas: [eca(1, "IsAlive", [P.variable("Hero")])] }]).length, 1, "a condition alone is something");
+});
+
+test("the script texts that run triggers: the header and enabled custom text triggers", () => {
+  const items = [
+    trigger("Gui", [], { id: 1 }),
+    trigger("Custom", [], { id: 2, isCustom: true }),
+    trigger("Off", [], { id: 3, isCustom: true, enabled: false }),
+    trigger("Note", [], { id: 4, isCustom: true, isComment: 1 }),
+  ];
+  const custom = { reforged: true, version: 1, comment: "", header: "header", texts: ["gui text", "custom text", "off text", "note text"] };
+  assert.deepEqual(scriptsThatRun(fileOf(items), custom), ["header", "custom text"]);
+  assert.deepEqual(scriptsThatRun(fileOf(items), null), []);
 });
 
 test("types fit through their base type and the game's special argument types", () => {
