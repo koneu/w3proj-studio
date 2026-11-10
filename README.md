@@ -21,10 +21,10 @@ What the World Editor doesn't have:
 
   #### Example Forestpath
     > "can you familiarize yourself with warcraft mapping and use the war3-proj konnektor to build a nice forest in region 000, with a path from south to east."
-        ![](docs/images/forestpath-1.png)
+        ![](docs/images/forestpath-1.jpg)
 
     > "can you make the coner section more interesting"
-        ![](docs/images/forestpath-2.png)
+        ![](docs/images/forestpath-2.jpg)
 
 
 - **Problems view.** Checks the project like a compiler would: JASS errors in the map script, files that object
