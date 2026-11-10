@@ -19,8 +19,8 @@
 // from the base before the run is exactly as it was afterwards. Paths are relative to where it's run.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { baseWithTests } from "./rust-test-modules.mjs";
 
@@ -62,7 +62,10 @@ const runTest = (label) => {
 const now = new Map(paths.map((p) => [p, existsSync(p) ? readFileSync(p) : null]));
 const atBase = new Map();
 for (const p of paths) {
-  const rel = relative(top, p).replaceAll("\\", "/");
+  // Both through realpath: on Windows the temp folder can come as a short 8.3 name (RUNNER~1) while git gives the long
+  // one, and the path between them would leave the checkout.
+  const real = (f) => (existsSync(f) ? realpathSync.native(f) : join(realpathSync.native(dirname(f)), basename(f)));
+  const rel = relative(realpathSync.native(top), real(p)).replaceAll("\\", "/");
   const r = spawnSync("git", ["show", `${base}:${rel}`], { cwd: top, maxBuffer: 1 << 28 });
   atBase.set(p, r.status === 0 ? r.stdout : null);
 }
