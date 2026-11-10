@@ -4859,7 +4859,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             base: await minimapBase(w3, terrain, doodads, rf),
             terrain, units,
             pathing: () => handle.pathing({ filtered: true }),
-            regions: async () => (await readMapDoc<{ regions?: { left: number; bottom: number; right: number; top: number; color?: { red: number; green: number; blue: number } }[] }>(w3, "map/war3map.w3r.json"))?.regions ?? [],
+            // The Region Editor's, unsaved edits included, as the Regions layer draws them.
+            regions: async () => [...await regionsNow()],
             iconKind: () => iconKinds(w3),
             iconImage: (type) => minimapIconImage(w3, type, rf),
             params: minimapSettings(w3),
