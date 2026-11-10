@@ -6,11 +6,13 @@
 // until it is saved, as in the Selection panel (the tab's Undo and Redo are that editor's).
 
 import type { EditorInstance, W3Api } from "../../extensions/api";
-import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type MapInfoService, type ObjectsService } from "../../extensions/services";
 import { keyOf } from "../../lib/keys";
 import { h } from "../../workbench/dom";
 import { dropsEditor, tableView, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
-import { bulkDrops, dropsAnything, dropsText, groupDroppers, tableUse, type DropGroup, type DropperRow, type GroupBy } from "./dropsview";
+import {
+  MIDDLE_CAMP, TOUGH_CAMP, bulkDrops, campLevelText, creepLevel, dropsAnything, dropsText, groupDroppers, tableUse, type DropGroup, type DropperRow, type GroupBy,
+} from "./dropsview";
 import type { Placed } from "./objects";
 import type { TerrainToolRegistry } from "./toolhost";
 import { dropsOf, type Drops, type TypeFacts } from "./unitprops";
@@ -27,8 +29,11 @@ export interface DropsSource {
   root: string;
   /** Every placed object whose drops can be set, now (unsaved changes included). */
   droppers(): Promise<DropperInfo[]>;
-  /** The map's item tables with their contents (as saved); null when war3map.w3i couldn't be read. */
-  tables(): Promise<ItemTableInfo[] | null>;
+  /** The map's item tables with their contents: `live` those of the open Map Properties editor (unsaved changes
+   *  included), else as saved; `list` null when war3map.w3i couldn't be read. */
+  tables(): Promise<{ list: ItemTableInfo[] | null; live: boolean }>;
+  /** Saves the terrain editor (its tab's Save, as Ctrl+S there): the placed objects' drops changed here with the rest. */
+  save(): Promise<void>;
   /** Each object its drops, in one undo step; the reason when it's refused (nothing changed then). */
   setDrops(changes: { entry: Placed; facts: TypeFacts; drops: Drops }[]): string | null;
   /** The terrain editor in front, with these objects selected and in view. */
@@ -105,6 +110,8 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
     w3.workspace.onDidSave((p) => { if (/(^|\/)war3map\.(w3i|wts)(\.json)?$/i.test(p)) soon(); }),
     w3.editors.onDidChangeActive((a) => { if (a?.path === ITEM_DROPS_DOC && stale) { stale = false; void render(); } }),
   ];
+  // The item tables as Map Properties holds them: drawn again after each edit there (and when it closes).
+  void w3.services.get<MapInfoService>(MAP_INFO_SERVICE).then((s) => { if (!disposed) subs.push(s.onDidEdit(soon)); }, () => {});
 
   const warn = (m: string) => { void w3.window.showWarning(m); soon(); };
 
@@ -118,9 +125,12 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
         h("button", { "data-prop": "open-terrain", onclick: () => void deps.openTerrain().catch((e) => w3.window.showError(String((e as Error).message ?? e))) }, "Open the terrain editor")));
       return;
     }
-    let all: DropperInfo[], tables: ItemTableInfo[] | null;
+    let all: DropperInfo[], tables: ItemTableInfo[] | null, live: boolean;
     try {
-      [all, tables] = await Promise.all([src.droppers(), src.tables()]);
+      let t: { list: ItemTableInfo[] | null; live: boolean };
+      [all, t] = await Promise.all([src.droppers(), src.tables()]);
+      tables = t.list;
+      live = t.live;
     } catch (e) {
       if (my === seq && !disposed) root.replaceChildren(h("div.drops-empty", {}, h("h2", {}, "Item Drops"), h("p", {}, `The drops couldn't be read: ${(e as Error).message ?? e}`)));
       return;
@@ -141,17 +151,22 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
     const info = new Map(all.map((d) => [d.entry, d]));
     targets = targets.filter((t) => info.has(t));
     if (anchor && !info.has(anchor)) anchor = null;
+    tablesLive = live;
     draw(src, all, info, tables);
   }
+  /** The tables drawn are Map Properties' unsaved ones. */
+  let tablesLive = false;
 
   function draw(src: DropsSource, all: DropperInfo[], info: Map<Placed, DropperInfo>, tables: ItemTableInfo[] | null) {
+    const tablesUnsaved = !tablesLive && w3.editors.isDirty("map/war3map.w3i.json");
     // The panes keep their scroll, and a box that had the keys gets them back.
     const scrolls = [...root.querySelectorAll<HTMLElement>("[data-scroll]")].map((x) => [x.dataset.scroll, x.scrollTop] as const);
     const focused = (document.activeElement as HTMLElement | null)?.closest?.(".drops-tab") === root ? (document.activeElement as HTMLElement).dataset.prop : undefined;
     const names = { table: (n: number) => tables?.find((t) => t.number === n)?.name ?? (tables === null ? `#${n}` : undefined), item: (id: string) => itemNames.get(id) };
     const textOf = (e: Placed) => dropsText(dropsOf(e), names);
     // Units can be given drops; destructables and doodads are many (every tree), so only those that drop are listed.
-    const listed: DropperRow[] = all.filter((d) => d.kind === "w3u" || dropsAnything(dropsOf(d.entry)) || targets.includes(d.entry)).map((d) => ({ entry: d.entry, kind: d.kind }));
+    const listed: DropperRow[] = all.filter((d) => d.kind === "w3u" || dropsAnything(dropsOf(d.entry)) || targets.includes(d.entry))
+      .map((d) => ({ entry: d.entry, kind: d.kind, ...(d.kind === "w3u" ? { level: creepLevel(d.entry, d.facts) } : {}) }));
     const q = query.trim().toLowerCase();
     const matches = (r: DropperRow) => !q || typeName(r.entry.id).toLowerCase().includes(q) || r.entry.id.toLowerCase().includes(q) || textOf(r.entry).toLowerCase().includes(q);
     let groups = groupDroppers(listed, groupBy, { owner: (p) => src.ownerName(p), type: typeName });
@@ -197,7 +212,13 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
       const all2 = entries.length > 0 && entries.every((e) => targets.includes(e));
       return h(`div.drops-group${all2 ? ".on" : ""}`, { "data-group": g.key },
         h("div.drops-group-head", {},
-          h("strong", {}, g.title), h("span.muted", {}, g.detail), h("span.drops-spacer"),
+          h("strong", {}, g.title),
+          ...(g.level ? [h(`span.drops-camp-level.${g.level.strength}`, {
+            "data-prop": "camp-level",
+            title: `The creeps' levels added up${g.level.unknown ? ` (${g.level.unknown} of unknown level left out)` : ""}; the strongest is level ${g.level.strongest}. `
+              + `The game's minimap shows a camp below level ${MIDDLE_CAMP} green, from ${MIDDLE_CAMP} orange and from ${TOUGH_CAMP} red.`,
+          }, campLevelText(g.level))] : []),
+          h("span.muted", {}, g.detail), h("span.drops-spacer"),
           h("button", { "data-prop": "edit-group", title: "Edit the drops of all of these at once", onclick: () => { targets = entries; anchor = entries[0] ?? null; draw(src, all, info, tables); } }, "Edit together"),
           h("button", { "data-prop": "show-group", title: "Select all of these in the terrain editor and show them", onclick: () => showIn(entries) }, "Show")),
         ...g.rows.map((r) => objectRow(r, groupBy === "type")));
@@ -209,7 +230,7 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
       title: "Edit its drops", onclick: () => { targets = [r.entry]; anchor = r.entry; draw(src, all, info, tables); } }, typeName(r.entry.id))),
       ...(rows.length > 12 ? [h("span.muted", {}, `… ${rows.length - 12} more`)] : []));
     const uiBase = (entries: readonly Placed[]): DropsUiHost => ({
-      tables, tablesUnsaved: w3.editors.isDirty("map/war3map.w3i.json"),
+      tables, tablesUnsaved,
       itemName: (id) => objects().then((s) => s.name(id, ["w3t"])).then((n) => { if (n) itemNames.set(id, n); return n; }),
       nameNow: (id) => itemNames.get(id),
       whoOf: (list) => {
@@ -246,7 +267,8 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
       }),
       ...[...use.missing].map(([n, rows]) => h("div.drops-table-card.missing", {},
         h("div.drops-group-head", {}, h("strong.terrain-prop-over", {}, `Item table #${n} isn't in the map`), h("span.muted", {}, `used by ${rows.length}: the script leaves their drops out`)), userList(rows))),
-      ...(w3.editors.isDirty("map/war3map.w3i.json") ? [h("p.muted", {}, "Map Properties has unsaved changes: the tables show as last saved.")] : []));
+      ...(tablesUnsaved ? [h("p.muted", {}, "Map Properties has unsaved changes: the tables show as last saved.")] : []),
+      ...(tablesLive && w3.editors.isDirty("map/war3map.w3i.json") ? [h("p.muted", { "data-prop": "tables-unsaved" }, "As in Map Properties, with its unsaved changes (saved with it).")] : []));
 
     // ---- the right side: what is chosen ----
     const pane = h("div.drops-pane", { "data-scroll": "pane" });
@@ -309,6 +331,8 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
   void render();
   return {
     focus: () => root.focus({ preventScroll: true }),
+    // Ctrl+S here saves what is changed here: the terrain editor the drops are in, as its own Save does.
+    save: async () => { await source()?.save(); },
     undo: () => source()?.undo(),
     redo: () => source()?.redo(),
     dispose: () => {

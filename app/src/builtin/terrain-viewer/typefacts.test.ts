@@ -6,7 +6,8 @@ import { heroConstants, typeFacts, type FactsData } from "./typefacts";
 // a map's own objects: a footman made a hero-less pack animal, a custom waygate ability, a custom inventory.
 const UNITS: Record<string, Record<string, string>> = {
   Hpal: { uhpm: "100", umpm: "0", ustr: "22", uagi: "13", uint: "17", ustp: "2.7", uagp: "1.5", uinp: "1.8", uabi: "AInv", uhab: "AHhb,AHds,AHre,AHad", ubdg: "0", uaen: "1" },
-  hfoo: { uhpm: "420", umpm: "", uabi: "Adef,Aihn", ubdg: "0", uaen: "1", uacq: "500" },
+  hfoo: { uhpm: "420", umpm: "", uabi: "Adef,Aihn", ubdg: "0", uaen: "1", uacq: "500", ulev: "2" },
+  nshe: { uhpm: "15", ulev: "0" },
   hpea: { uhpm: "220", uabi: "Ahar,Arep,Ahrl,Amil", ubdg: "0", uaen: "3" },
   ngol: { uhpm: "150000", uabi: "Agld,Avul", ubdg: "1", uaen: "0" },
   h000: { uhpm: "500", uabi: "A001", ubdg: "0" },
@@ -68,6 +69,13 @@ test("gold mines and waygates by the map's lists or by their abilities; invulner
   assert.deepEqual(["hfoo", "ngol", "Hpal"].map((id) => typeFacts(id, "w3u", data).attacks), [true, false, true]);
   assert.equal(typeFacts("hfoo", "w3u", data).acquireRange, 500);
   assert.equal(typeFacts("LTlt", "w3b", data).maxHp, 50, "a destructable's hit points");
+});
+
+test("a unit type's level, a camp's level adds up: 0 is a level, nothing written is unknown", () => {
+  assert.equal(typeFacts("hfoo", "w3u", data).level, 2);
+  assert.equal(typeFacts("nshe", "w3u", data).level, 0);
+  assert.equal(typeFacts("hpea", "w3u", data).level, undefined);
+  assert.equal(typeFacts("LTlt", "w3b", data).level, undefined);
 });
 
 test("start locations, items, destructables and doodads aren't units", () => {

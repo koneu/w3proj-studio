@@ -53,6 +53,8 @@ export function typeFacts(id: string, kind: string, d: FactsData): TypeFacts {
   // Attacks enabled (weapsOn): the World Editor offers the acquisition range only to units that attack.
   facts.attacks = num(d.unit(id, "uaen")) > 0;
   facts.acquireRange = num(d.unit(id, "uacq"));
+  const level = d.unit(id, "ulev");
+  if (level.trim() !== "" && Number.isFinite(Number(level))) facts.level = Number(level);
   if (codes.some((a) => a.code === INVENTORY_CODE)) facts.slots = INVENTORY_SLOTS;
   // By the ability's own id, as the map script looks up its orders (a map's own ability based on Heal has none there).
   facts.toggles = [...new Set(codes.map((a) => a.id).filter((a) => d.toggleable.has(a)))];
