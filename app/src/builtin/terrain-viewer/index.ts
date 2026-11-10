@@ -383,6 +383,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   }
   /** The open terrain editors by document path: a game map's read-only one is another entry. */
   const openedBy = new Map<string, OpenedEditor>();
+  /** The graphics mode set (game.graphicsMode): the art a terrain editor reads when it opens. */
+  const artMode = () => w3.settings.get<string>("game.graphicsMode") ?? "hd";
+  /** Another graphics mode was chosen: a terrain editor shows the art of the one it opened with (models, ground,
+   *  cliffs, water, the picture's tone), so it opens again in its tab; its camera and selection stay (lastView).
+   *  One with unsaved edits stays as it is, since opening reads the terrain from disk: saving it first is offered. */
+  const reopenForArt = async (path: string) => {
+    if (!(await w3.editors.reopen(path, "w3.terrainViewer"))) return;
+    const name = path.split(/[/:]/).pop();
+    const SAVE = "Save and Reopen";
+    const pick = await w3.window.showInfo(`${name} has unsaved edits, so it still shows the graphics mode it was opened in. Save it to see the new one.`, SAVE);
+    if (pick !== SAVE) return;
+    await w3.editors.save(path);
+    await w3.editors.reopen(path, "w3.terrainViewer");
+  };
   /** Terrain editors (by document path) whose 3D view was lost (a GPU reset): nothing is edited there
    *  until it is opened again, so no edit lands on a view that isn't drawn. Saving still works. */
   const lostViews = new Set<string>();
@@ -1466,10 +1480,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           setTimeout(focus);
         };
         let renderer: TerrainRenderer;
+        // The art and the lighting come in the graphics mode the view opened with; so does the picture's tone. Another
+        // mode opens the editor again (reopenForArt).
+        const openedMode = artMode();
         try {
           renderer = new TerrainRenderer(canvas, terrain);
-          // The art and the lighting come in the graphics mode the view opened with; so does the picture's tone.
-          renderer.tone = toneOf(w3.settings.get<string>("game.graphicsMode"));
+          renderer.tone = toneOf(openedMode);
         } catch (e) {
           el.append(errorView(`WebGL: ${errorText(e)}`));
           return {};
@@ -4497,7 +4513,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
               layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras", "w3.terrain.toggleCameraObjects"),
               layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
-              layerToggle("Bounds line", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
+              layerToggle("Camera bounds", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
               layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
               layerBusy,
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
@@ -4505,7 +4521,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...(editable ? [
                 switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", true),
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
-                switchBox("Camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
+                switchBox("Enforce camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
               ] : []),
               toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
               toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, keyTitle("The map's weather", "w3.terrain.toggleWeather")),
@@ -4999,6 +5015,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return changes;
         };
 
+        const stopArtMode = w3.settings.onDidChange((key) => {
+          if (key === "game.graphicsMode" && artMode() !== openedMode) void reopenForArt(doc.path);
+        });
+        // Changed while it opened: its tab is still loading, and opens again once it's there.
+        if (artMode() !== openedMode) void reopenForArt(doc.path);
+
         const editorApi = {
           undo,
           redo,
@@ -5072,6 +5094,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             stopGroups();
             stopPick();
             stopPickRing();
+            stopArtMode.dispose();
             if (toolGroups.livePlacements === live) toolGroups.livePlacements = null;
             if (toolGroups.liveLists === liveLists) {
               toolGroups.liveLists = null;

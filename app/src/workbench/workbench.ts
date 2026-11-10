@@ -276,6 +276,7 @@ export class Workbench {
         saveAll: () => wb.editors.saveAll(),
         save: (p) => wb.editors.saveFile(p),
         close: (p) => wb.editors.closeWhere((x) => x === p),
+        reopen: (p, providerId) => wb.editors.reopenClean(p, providerId),
       },
       window: {
         showInfo: (m, ...a) => wb.notifications.show("info", m, a),

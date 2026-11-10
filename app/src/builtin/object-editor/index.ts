@@ -17,15 +17,13 @@ import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/for
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
-import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
-import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObjects } from "./objectinfo";
+import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, addCustomObject, copyOf, fieldLevel, fieldValue, negativeRefused, NEGATIVE_REALS_SETTING, objectToEdit, pastedObject, removeObject, setObjectField, type EditFile, type EditObject } from "./objectedit";
-import { jsonPathOf } from "../../lib/formats/mapdoc";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
-import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
+import { isCampaignFiles, registerObjectTools } from "./tools";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -68,7 +66,7 @@ async function emptyFile(w3: W3Api): Promise<ObjectFile> {
   return { format: FORMAT, version, original: [], custom: [] };
 }
 /** Whether the open project is a campaign (it has war3campaign.w3f, as the Campaign Editor decides). */
-const isCampaignProject = (w3: W3Api) => w3.workspace.files().some((f) => /^map\/war3campaign\.w3f(\.json)?$/i.test(f.path.replace(/\\/g, "/")));
+const isCampaignProject = (w3: W3Api) => isCampaignFiles(w3.workspace.files());
 /** The object data file of a kind the Object Editor edits in the open project: a campaign's own (war3campaign.<kind>,
  *  which every chapter map uses, as the World Editor's Campaign Editor edits it), else the map's (war3map.<kind>). */
 const objectDocPath = (w3: W3Api, ext: string) => `map/${isCampaignProject(w3) ? "war3campaign" : "war3map"}.${ext}.json`;
@@ -111,98 +109,8 @@ function parseValue(type: ValueType, text: string, allowNegative: boolean): numb
 let shiftHeld = false;
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
-  /** A tool's `kind` argument: the tables, and what the map has of it. */
-  const toolKind = async (name: unknown) => {
-    requireProject(w3);
-    const kind = OBJECT_KINDS[String(name)];
-    if (!kind) throw new Error(`kind must be one of: ${Object.keys(OBJECT_KINDS).join(", ")}.`);
-    const [data, file, resolve] = await Promise.all([loadKind(w3, kind), readMapDoc<MapObjects>(w3, `map/war3map.${kind}.json`), mapStrings(w3)]);
-    return { data, file: file ?? {}, resolve };
-  };
-  ctx.subscriptions.push(
-    w3.mcp.registerTool("list_objects", async ({ kind, scope, filter, limit, tileset, category, trees }) => {
-      const { data, file, resolve } = await toolKind(kind);
-      const text = typeof filter === "string" ? filter.toLowerCase() : "";
-      const hit = (o: { id: string; name: string; base?: string }) => o.id.toLowerCase().includes(text) || o.name.toLowerCase().includes(text) || data.searchText(o.base ?? o.id).includes(text);
-      const wantTileset = tileset === "map" ? (await terrainFacts(w3))?.tileset : typeof tileset === "string" ? tileset : undefined;
-      const stored = scope === "game" ? modelPacks(await w3.game.list()) : null;
-      const game = () => gameObjectList(data, stripColors, wantTileset, typeof category === "string" ? category : undefined, stored ?? undefined, trees === true);
-      return capped<{ id: string; name: string }>((scope === "game" ? game() : mapObjectList(file, data, resolve)).filter(hit), limit, 200);
-    }),
-    w3.mcp.registerTool("get_object", async ({ kind, id, gameValues }) => {
-      const { data, file, resolve } = await toolKind(kind);
-      const custom = file.custom?.find((o) => o.id === id);
-      const changed = custom ?? file.original?.find((o) => o.base === id);
-      const base = changed?.base ?? String(id);
-      if (!changed && !data.baseIds.includes(base)) throw new Error(`There's no ${String(kind)} object "${String(id)}" in this map or the game.`);
-      return {
-        id, name: objectName(changed ?? { base }, data, resolve), ...(custom ? { base } : {}), custom: !!custom,
-        changes: changed ? changedFields(changed, data, resolve) : [],
-        ...(gameValues === true ? { gameValues: gameFields(base, data) } : {}),
-      };
-    }),
-  );
-  /** One edit of a kind's object data. Files without changes to game objects stay tidy, as the editor keeps them. */
-  const editObjects = async (title: string, kindName: unknown, change: (file: EditFile, kind: string, data: KindData) => void | Promise<void>) => {
-    requireProject(w3);
-    const kind = OBJECT_KINDS[String(kindName)];
-    if (!kind) throw new Error(`kind must be one of: ${Object.keys(OBJECT_KINDS).join(", ")}.`);
-    const path = jsonPathOf(w3, `war3map.${kind}`);
-    const [data, edits] = await Promise.all([loadKind(w3, kind), w3.services.get<McpEditsService>(MCP_EDITS_SERVICE)]);
-    return edits.edit(title, async (read) => {
-      const text = await read(path);
-      const file: EditFile = text === null ? await emptyFile(w3) as EditFile : JSON.parse(text);
-      await change(file, kind, data);
-      const tidy = { ...file, original: file.original.filter((o) => (o.sets ?? [{ mods: o.mods ?? [] }]).some((s) => s.mods.length)) };
-      // Encodes it too: what can't be packed doesn't get written.
-      return [{ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(tidy) }) }];
-    });
-  };
-  ctx.subscriptions.push(
-    w3.mcp.registerTool("set_object_fields", async ({ kind, id, changes }) => {
-      if (!Array.isArray(changes) || !changes.length) throw new Error("changes must list what to change.");
-      const list = changes as { field: string; level?: unknown; value: unknown }[];
-      const allowNegative = w3.settings.get<boolean>(NEGATIVE_REALS_SETTING) === true;
-      const changed = await editObjects(`Set ${list.length} field${list.length === 1 ? "" : "s"} of ${String(id)}`, kind, (file, ext, data) => {
-        const o = objectToEdit(file, String(id), data.baseIds.includes(String(id)));
-        // Runs on a parsed copy: a throw here leaves the file as it was.
-        for (const c of list) {
-          const f = data.fieldsFor(o.base).find((x) => x.id === c.field);
-          if (!f) throw new Error(`${String(c.field)} isn't a field of ${o.base}. get_object with gameValues lists them.`);
-          const at = fieldLevel(f, c.level);
-          setObjectField(o, ext, f, at, c.value === null ? null : fieldValue(f, c.value, { allowNegative }), data.defaultValue(o.base, f, at));
-        }
-      });
-      return changed ? `Changed ${list.length} field${list.length === 1 ? "" : "s"} of ${String(id)}.` : "It already had those values.";
-    }),
-    w3.mcp.registerTool("create_object", async ({ kind, base, name }) => {
-      let made = "";
-      await editObjects(`Create an object from ${String(base)}`, kind, async (file, ext, data) => {
-        const from = String(base);
-        if (!data.baseIds.includes(from)) throw new Error(`There's no game object "${from}" of that kind.`);
-        const taken = new Set([...file.custom.map((o) => o.id ?? ""), ...file.original.map((o) => o.base), ...data.baseIds]);
-        // Ids should be unique over all kinds: scripts name them without saying which.
-        for (const other of Object.values(OBJECT_KINDS).filter((k) => k !== ext)) {
-          const known = await readMapDoc<MapObjects>(w3, `map/war3map.${other}.json`);
-          for (const o of known?.custom ?? []) if (o.id) taken.add(o.id);
-          for (const b of (await loadKind(w3, other)).baseIds) taken.add(b);
-        }
-        made = nextFreeId(ext, from, taken);
-        const o = addCustomObject(file, from, made);
-        if (typeof name === "string" && name) {
-          const f = data.fieldsFor(from).find((x) => /nam$/.test(x.id) && x.valueType === "string");
-          if (f) setObjectField(o, ext, f, f.repeat > 0 ? 1 : 0, name, undefined);
-        }
-      });
-      return { id: made };
-    }),
-    w3.mcp.registerTool("delete_object", async ({ kind, id }) => {
-      await editObjects(`Delete object ${String(id)}`, kind, (file) => {
-        if (!removeObject(file, String(id))) throw new Error(`The map has no object or change "${String(id)}".`);
-      });
-      return `Removed ${String(id)}. Anything placed or using it isn't changed: list_problems shows what's left.`;
-    }),
-  );
+  // The MCP tools over object data (tools.ts): the campaign's own in a campaign project, the map's in a chapter.
+  registerObjectTools(w3, ctx, { loadKind: (kind) => loadKind(w3, kind), emptyFile: async () => (await emptyFile(w3)) as EditFile });
   const icons = iconLoader(w3);
   // Shift held while a new object's base is confirmed: ask for its id.
   const trackShift = (e: KeyboardEvent | MouseEvent) => { shiftHeld = e.shiftKey; };

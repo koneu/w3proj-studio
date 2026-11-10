@@ -25,8 +25,9 @@ const objects = (custom: object[], original: object[] = []) => JSON.stringify({ 
 const mod = (field: string, value: unknown, type = "int") => ({ field, type, value });
 
 /** A chapter map's project in its campaign, with the app's API around the map script extension. `campaign` holds the
- *  campaign's files by name in its map/ folder (a value of null: there but unreadable). */
-function chapter(campaign: Record<string, string | null>, own: Record<string, string> = {}) {
+ *  campaign's files by name in its map/ folder (a value of null: there but unreadable). `bytes`: binary files, by
+ *  project or absolute path. */
+function chapter(campaign: Record<string, string | null>, own: Record<string, string> = {}, bytes: Record<string, Uint8Array> = {}) {
   const info = JSON.parse(fixture("war3map.w3i.json"));
   const unit = JSON.parse(fixture("war3mapUnits.doo.json"));
   const placed = (id: string, editorId: number) => ({ ...unit.units[0], id, skinId: id, editorId, position: [editorId * 128, 0, 0] });
@@ -67,7 +68,7 @@ function chapter(campaign: Record<string, string | null>, own: Record<string, st
       files: () => Object.keys(files).filter((p) => p.startsWith("map/")).map((path) => ({ path, size: 1, modified: 1 })),
       resolve: (p: string) => (p.startsWith("/") ? p : `${CHAPTER}/${p}`),
       readText: read,
-      readBytes: async (p: string) => new TextEncoder().encode(await read(p)),
+      readBytes: async (p: string) => bytes[p] ?? new TextEncoder().encode(await read(p)),
       writeText: async (p: string, t: string) => { written.set(p, t); },
       onDidChange: () => none,
       onDidSave: (f: (path: string) => void) => { saved.push(f); return none; },
@@ -128,4 +129,33 @@ test("a campaign object file that can't be read fails the generation, not passes
   const c = chapter({ ...CAMPAIGN, "war3campaign.w3u.json": null });
   await assert.rejects(c.generate(), /war3campaign\.w3u\.json is there but can't be read/);
   assert.equal(c.written.has("map/war3map.j"), false);
+});
+
+/** A PCM WAV of `ms` milliseconds (8000 bytes a second). */
+function wav(ms: number): Uint8Array {
+  const size = ms * 8, b = new Uint8Array(44 + size), dv = new DataView(b.buffer);
+  const tag = (o: number, s: string) => { for (let i = 0; i < 4; i++) b[o + i] = s.charCodeAt(i); };
+  tag(0, "RIFF"); dv.setUint32(4, 36 + size, true); tag(8, "WAVE");
+  tag(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true);
+  tag(36, "data"); dv.setUint32(40, size, true);
+  return b;
+}
+
+test("a chapter's sound durations come from its campaign's imported files when the map hasn't the file", async () => {
+  const sound = { name: "gg_snd_Horn", file: "Sound\\Horn.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127,
+    pitch: 1, pitchVariance: 0, priority: 0, channel: 0, minDistance: 0, maxDistance: 0, distanceCutoff: 0, coneInside: 0, coneOutside: 0,
+    coneOutsideVolume: 0, coneOrientation: [0, 0, 0] };
+  const own = { "map/war3map.w3s.json": JSON.stringify({ sounds: [sound] }) };
+  const c = chapter(CAMPAIGN, own, { "/camp/map/Sound/Horn.wav": wav(750) });
+  await c.generate();
+  assert.match(c.script(), /call SetSoundDuration\( gg_snd_Horn, 750 \)/);
+  // The map's own file comes first, as the game finds it.
+  const mine = chapter(CAMPAIGN, own, { "/camp/map/Sound/Horn.wav": wav(750), "map/Sound/Horn.wav": wav(250) });
+  await mine.generate();
+  assert.match(mine.script(), /call SetSoundDuration\( gg_snd_Horn, 250 \)/);
+  // Control: neither has it (nor the game), so no length is known.
+  const none = chapter(CAMPAIGN, own);
+  await none.generate();
+  assert.doesNotMatch(none.script(), /SetSoundDuration/);
 });

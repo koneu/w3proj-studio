@@ -555,6 +555,11 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 .terrain-prop-value > .terrain-sel-triple { flex: 1 1 auto; }
 .terrain-prop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
 .terrain-props button { margin-top: 0; }
+/* Buttons in a value keep their one line and sit in the row's middle (.terrain-selection's align-self put them at the top). */
+.terrain-prop-value > button { flex: none; align-self: center; white-space: nowrap; }
+.terrain-prop-value > button.icon-button { min-width: 22px; height: 22px; padding: 0 4px; font-size: 15px; line-height: 1; }
+/* A chance in percent: three digits and the spinner (WebKitGTK's takes about 20 px). */
+.terrain-prop-value > input.terrain-prop-chance { flex: none; width: 62px; }
 .terrain-prop-check { display: inline-flex; align-items: center; gap: 4px; }
 .terrain-prop-over { color: var(--error); }
 /* Drops (dropsedit.ts): the Selection panel's block and the Item Drops tab's editor */

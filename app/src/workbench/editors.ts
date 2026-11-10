@@ -343,6 +343,23 @@ export class EditorService {
     return kept;
   }
 
+  /** Opens the editors of one file (of one provider, if given) again in place, in their tabs: what they show
+   *  depends on more than the file (the graphics mode). Those with unsaved changes are left as they are; one still
+   *  loading opens again once it's there (if it has none then); one not opened yet loads anew anyway. Resolves with
+   *  how many were left for unsaved changes. */
+  async reopenClean(path: string, providerId?: string): Promise<number> {
+    let kept = 0;
+    const key = this.key(path);
+    for (const t of this.tabs.filter((x) => x.provider && this.key(x.path) === key && (!providerId || x.providerId === providerId))) {
+      // Closed while an earlier tab of this loop was opening again.
+      if (!this.tabs.includes(t)) continue;
+      if (t.loading) { t.missed?.add(key); continue; }
+      if (t.dirty) { kept++; continue; }
+      await this.reopen(t);
+    }
+    return kept;
+  }
+
   /** Opens a tab's editor again in place (its file as it is now). */
   private async reopen(t: Tab) {
     t.conflict = undefined;
