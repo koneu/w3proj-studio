@@ -131,6 +131,8 @@ It sets up:
 - **Node 22** through [nvm](https://github.com/nvm-sh/nvm), not apt: Ubuntu's `nodejs` package is too old.
 - **`tauri-driver`** (`cargo install tauri-driver --locked`, into `~/.cargo/bin`, which must be on `PATH`).
 - **`npm ci`** in `app/`.
+- **sccache** (optional): a compiler cache shared by this checkout and its worktrees, installed into
+  `target/tools/` and wired up by a local, git-ignored `.cargo/config.toml`. Delete that file to build without it.
 - **Warcraft III:** finds the installs in Steam (Proton), Lutris/Battle.net and Wine prefixes, shows each one's
   build, and writes the newest to `.game-path` (git-ignored; `--game PATH` picks another). The gate and the test
   scripts read it when `W3PROJ_GAME` isn't set (`tests/gamepath.mjs`); on Windows, without either, they use the

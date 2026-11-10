@@ -107,6 +107,31 @@ case ":$PATH:" in *":$HOME/.cargo/bin:"*) ;; *)
   echo "  note: ~/.cargo/bin isn't on PATH; add it so tauri-driver is found" ;;
 esac
 
+# --- compiler cache (sccache) -------------------------------------------------------------------
+# Every worktree under .worktrees/ builds the Rust code from scratch; sccache shares compiled crates between them.
+# The binary and its cache stay inside this checkout's target/, and the local .cargo/config.toml (git-ignored) points
+# cargo at it; worktrees below this folder read that file too. Optional: without it builds are only slower.
+step "sccache (a compiler cache shared by the worktrees)"
+SCCACHE="$REPO/target/tools/bin/sccache"
+if [[ -x "$SCCACHE" ]]; then ok "sccache"; else
+  miss "sccache"
+  if (( ! CHECK_ONLY )); then cargo install sccache --locked --root "$REPO/target/tools"; fi
+fi
+if [[ -x "$SCCACHE" && ! -f "$REPO/.cargo/config.toml" ]] && (( ! CHECK_ONLY )); then
+  mkdir -p "$REPO/.cargo"
+  cat > "$REPO/.cargo/config.toml" <<EOF
+# Local only (git-ignored), written by scripts/setup-linux.sh: a shared compiler cache for this checkout and every
+# worktree under .worktrees/ (cargo reads this file from the parent folders).
+[build]
+rustc-wrapper = "$SCCACHE"
+
+[env]
+SCCACHE_DIR = "$REPO/target/sccache"
+SCCACHE_CACHE_SIZE = "15G"
+EOF
+  ok ".cargo/config.toml (sccache)"
+fi
+
 # --- npm packages ------------------------------------------------------------------------------
 step "npm packages in app/"
 if [[ -d "$REPO/app/node_modules/.bin" ]]; then ok "app/node_modules"; else
