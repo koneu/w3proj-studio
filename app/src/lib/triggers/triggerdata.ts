@@ -9,6 +9,8 @@
 //   [TriggerParams] preset=version,type,script text,display string
 // Display strings may be WESTRING_ keys (resolved through `strings`).
 
+import { lookupWestring } from "../formats/text";
+
 /** ECA kinds as stored in war3map.wtg; 3 is a call used as a parameter. */
 export const EVENT = 0, CONDITION = 1, ACTION = 2, CALL = 3;
 const SECTIONS = ["TriggerEvents", "TriggerConditions", "TriggerActions", "TriggerCalls"];
@@ -64,17 +66,10 @@ const unquote = (s: string) => (s.startsWith('"') ? s.slice(1, s.length > 1 && s
 
 /** `hints`: UI\TriggerStrings.txt, whose <Name>Hint= entries explain functions. */
 export function parseTriggerData(text: string, strings: Map<string, string> = new Map(), hints = ""): TriggerData {
-  // A string can name another one (WESTRING_TRIGTYPE_attacktype=WESTRING_COD_TYPE_ATTACKTYPE): followed
-  // a few steps, so a loop in the file can't hang.
+  // A string can name another one (WESTRING_TRIGTYPE_attacktype=WESTRING_COD_TYPE_ATTACKTYPE): see lookupWestring.
   const str = (s: string) => {
-    let v = unquote(s);
-    v = strings.get(v.toUpperCase()) ?? v;
-    for (let i = 0; i < 4 && v.startsWith("WESTRING_"); i++) {
-      const next = strings.get(v.toUpperCase());
-      if (next === undefined) break;
-      v = next;
-    }
-    return v;
+    const v = unquote(s);
+    return lookupWestring(strings, v) ?? v;
   };
   const functions = SECTIONS.map(() => new Map<string, TriggerFunction>());
   const categories = new Map<string, { name: string; icon: string; hideName: boolean }>();

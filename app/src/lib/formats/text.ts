@@ -78,10 +78,23 @@ export function listItem(raw: string, i: number): string | undefined {
   return items[i];
 }
 
-export function westring(we: Map<string, string>, s: string): string {
-  // Entries can name another entry (WESTRING_UE_UNITRACE_HUMAN=WESTRING_RACE_HUMAN).
-  let v = s;
-  for (let i = 0; i < 4 && v.startsWith("WESTRING_"); i++) v = we.get(v.toUpperCase()) ?? v;
+/** A World Editor string by key (`strings`: upper-case keys, from WorldEditStrings/WorldEditGameStrings). An entry can
+ *  name another (WESTRING_UE_UNITRACE_HUMAN=WESTRING_RACE_HUMAN, WESTRING_TRIGTYPE_attacktype=WESTRING_COD_TYPE_…):
+ *  followed up to 4 steps, so a loop in the file can't hang; a step to a missing key stops at the name. undefined
+ *  when `key` itself isn't there. */
+export function lookupWestring(strings: ReadonlyMap<string, string>, key: string): string | undefined {
+  let v = strings.get(key.toUpperCase());
+  if (v === undefined) return undefined;
+  for (let i = 0; i < 4 && v.startsWith("WESTRING_"); i++) {
+    const next = strings.get(v.toUpperCase());
+    if (next === undefined) break;
+    v = next;
+  }
+  return v;
+}
+
+export function westring(we: ReadonlyMap<string, string>, s: string): string {
+  const v = s.startsWith("WESTRING_") ? lookupWestring(we, s) ?? s : s;
   // Some labels come twice, the second with its hotkey ("Air,&Air", "Ground, &Ground").
   return v.replace(/&/g, "").replace(/^(.+?),\s*\1$/, "$1");
 }

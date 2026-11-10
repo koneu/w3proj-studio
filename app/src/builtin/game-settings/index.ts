@@ -9,7 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
 import { readIni, setIniValue } from "../../lib/formats/iniedit";
 import { keyOf } from "../../lib/keys";
-import { parseIni, parseSlk, westring } from "../../lib/formats/text";
+import { lookupWestring, parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
 import { settingsFiles, settingsOf } from "./files";
@@ -70,7 +70,7 @@ function loadFields(w3: W3Api, mode: Mode): Promise<Field[]> {
       for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
         for (const sec of parseIni(await text(f)).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
       }
-      const label = (name: string, key: string) => (name.startsWith("WESTRING_") ? strings.get(name.toUpperCase()) ?? key : key).replace(/&/g, "");
+      const label = (name: string, key: string) => (name.startsWith("WESTRING_") ? lookupWestring(strings, name) ?? key : key).replace(/&/g, "");
       const lookup = (ini: Map<string, Map<string, string>>[], section: string, key: string) => {
         for (const m of ini) {
           const sec = [...m].find(([s]) => s.toLowerCase() === section.toLowerCase())?.[1];

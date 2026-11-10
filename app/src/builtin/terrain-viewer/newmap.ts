@@ -9,7 +9,7 @@
 // terrain editor afterwards.
 
 import type { W3Api } from "../../extensions/api";
-import { parseIni, parseSlk } from "../../lib/formats/text";
+import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { isFullPath, joinPath } from "../../lib/paths";
 import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { w3eToText } from "../../lib/terrain/w3etext";
@@ -96,7 +96,7 @@ export async function loadTilesets(w3: W3Api): Promise<TileData> {
   for (const [id, label] of entries) {
     const own = tiles.filter((r) => r.tileID[0] === id).slice(0, 16);
     if (!own.length) continue;
-    out.push({ id, name: (strings.get(label.toUpperCase()) ?? id).replace(/&/g, ""), tiles: own.map(tile), cliffs: cliffsOn(own.map((r) => r.tileID)) });
+    out.push({ id, name: (lookupWestring(strings, label) ?? id).replace(/&/g, ""), tiles: own.map(tile), cliffs: cliffsOn(own.map((r) => r.tileID)) });
   }
   return { sets: out.sort((a, b) => a.name.localeCompare(b.name)), all: tiles.map(tile), cliffsOn };
 }

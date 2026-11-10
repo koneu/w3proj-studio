@@ -12,6 +12,12 @@ test("the list comes from its own section, with the World Editor's names", () =>
   ]);
 });
 
+test("a name that names another string is followed (WESTRING_A=WESTRING_B)", () => {
+  const chained = "[SkyModels]\n00=Environment\\Sky\\Outland\\Outland.mdl,WESTRING_SKYMODEL_SKY01\n";
+  assert.deepEqual(skyList(chained, "WESTRING_SKYMODEL_SKY01=WESTRING_SKY_OUTLAND\nWESTRING_SKY_OUTLAND=\"&Outland Sky\"\n"),
+    [{ path: "Environment\\Sky\\Outland\\Outland.mdl", name: "Outland Sky" }]);
+});
+
 test("no list, no skies", () => {
   assert.deepEqual(skyList("[Other]\n", strings), []);
 });

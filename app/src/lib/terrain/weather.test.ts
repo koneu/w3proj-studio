@@ -13,6 +13,12 @@ test("splashes the game has no name for take their rain's name", () => {
   assert.equal(weatherName("WESTRING_WEATHER_RAINSPLASH", "RAhs", strings), "Rain (Heavy) – splash");
 });
 
+test("a name that names another string is followed (WESTRING_A=WESTRING_B)", () => {
+  const chained = new Map([...strings, ["WESTRING_WEATHER_SNOW", "WESTRING_WEATHER_SNOWHEAVY"], ["WESTRING_WEATHER_SNOWHEAVY", "&Snow (Heavy)"]]);
+  assert.equal(weatherName("WESTRING_WEATHER_SNOW", "SNhs", chained), "Snow (Heavy)");
+  assert.equal(weatherName("WESTRING_WEATHER_SNOWSPLASH", "SNsp", chained), "Snow (Heavy) – splash");
+});
+
 test("never a raw key: the id instead", () => {
   assert.equal(weatherName("WESTRING_WEATHER_OTHER", "XXxx", strings), "XXxx");
   assert.equal(weatherName(undefined, "XXxx", strings), "XXxx");

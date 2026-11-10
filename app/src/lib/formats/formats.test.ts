@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { toArchiveName, toProjectPath } from "./archivepath";
-import { listItem, parseIni, parseSlk, westring } from "./text";
+import { listItem, lookupWestring, parseIni, parseSlk, westring } from "./text";
 import { StringTable } from "./wts";
 
 test("SLK rows are keyed by the header row; the cursor carries over between cells", () => {
@@ -79,4 +79,19 @@ test("westring: references, hotkey marks and doubled labels", () => {
   assert.equal(westring(we, "WESTRING_C"), "Air");
   assert.equal(westring(we, "WESTRING_D"), "Ground");
   assert.equal(westring(we, "WESTRING_E"), "Can't raise, Does decay");
+});
+
+test("lookupWestring: chains followed a few steps, a loop ends, a broken step stops at the name, a missing key is undefined", () => {
+  const we = new Map([
+    ["WESTRING_TRIGTYPE_ATTACKTYPE", "WESTRING_COD_TYPE_ATTACKTYPE"], ["WESTRING_COD_TYPE_ATTACKTYPE", "Attack Type"],
+    ["WESTRING_LOOP_A", "WESTRING_LOOP_B"], ["WESTRING_LOOP_B", "WESTRING_LOOP_A"],
+    ["WESTRING_BROKEN", "WESTRING_GONE"], ["PLAIN", "Plain"],
+  ]);
+  assert.equal(lookupWestring(we, "WESTRING_TRIGTYPE_attacktype"), "Attack Type", "keys in any case");
+  assert.equal(lookupWestring(we, "PLAIN"), "Plain");
+  assert.match(lookupWestring(we, "WESTRING_LOOP_A") ?? "", /^WESTRING_LOOP_/);
+  assert.equal(lookupWestring(we, "WESTRING_BROKEN"), "WESTRING_GONE");
+  assert.equal(lookupWestring(we, "WESTRING_NONE"), undefined);
+  assert.equal(westring(we, "WESTRING_NONE"), "WESTRING_NONE");
+  assert.equal(westring(we, "PLAIN"), "PLAIN", "westring looks up WESTRING_ names only");
 });

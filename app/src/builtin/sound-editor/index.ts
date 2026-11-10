@@ -7,7 +7,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
-import { parseIni, parseSlk } from "../../lib/formats/text";
+import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, writeWtgFile, wtgPath, type Param } from "../../lib/triggers/wtg";
 import { bindUndoKeys, History } from "../../lib/undo";
@@ -47,7 +47,7 @@ function loadGameSounds(w3: W3Api): Promise<GameSounds> {
     }
     const strings = new Map<string, string>();
     for (const sec of parseIni(await text("UI\\WorldEditStrings.txt")).values()) for (const [k, v] of sec) strings.set(k.toUpperCase(), v);
-    const str = (k: string) => strings.get(k.toUpperCase()) ?? k;
+    const str = (k: string) => lookupWestring(strings, k) ?? k;
     const wed = parseIni(await text("UI\\WorldEditData.txt"));
     const channels = [...(wed.get("SoundChannels") ?? new Map())].map(([k, v]): [number, string] => [Number(k), str(v.split(",")[1] ?? k)])
       .filter(([k]) => Number.isFinite(k)).sort((a, b) => a[0] - b[0]);
