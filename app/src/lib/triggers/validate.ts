@@ -8,7 +8,7 @@
 
 import { ident } from "../script/names";
 import { CALL, EVENT, type TriggerData, type TriggerFunction } from "./triggerdata";
-import type { Eca, Param, TriggerFile, TriggerItem } from "./wtg";
+import { textTriggers, type CustomTextFile, type Eca, type Param, type TriggerFile, type TriggerItem } from "./wtg";
 
 export type IssueKind = "unknownFunction" | "frozenThrone" | "paramCount" | "unset" | "unknownPreset" | "typeMismatch" | "badValue" | "arrayIndex" | "noEvents";
 
@@ -80,28 +80,59 @@ function branchName(block: string, group: number): string {
   return "Loop";
 }
 
-/** Whether a gg_trg_ global of `name` is run from anywhere: GUI parameters or script text. */
-function runsFromElsewhere(file: TriggerFile, scripts: (string | null)[], t: TriggerItem): boolean {
+/** Whether a gg_trg_ global of `name` is run from anywhere in the map script: GUI parameters or script text.
+ *  Only what the script has counts: lines and triggers that are disabled, comments (items, Comment lines)
+ *  aren't in it, so naming the trigger there runs nothing. */
+function runsFromElsewhere(file: TriggerFile, scripts: string[], t: TriggerItem, language: "jass" | "lua"): boolean {
   const global = `gg_trg_${ident(t.name)}`;
   const word = new RegExp(`(?<![A-Za-z0-9_])${global}(?![A-Za-z0-9_])`);
-  if (scripts.some((s) => s !== null && word.test(s))) return true;
+  if (scripts.some((s) => word.test(s))) return true;
   let found = false;
   const visit = (p: Param) => {
     if (found) return;
-    if ((p.type === 1 && p.value === global) || (p.type === 3 && word.test(p.value))) { found = true; return; }
+    if ((p.type === 1 && p.value === global) || (p.type === 3 && word.test(withoutComments(p.value, language)))) { found = true; return; }
     p.call?.params.forEach(visit);
     if (p.index) visit(p.index);
   };
-  type E = { params: Param[]; children: E[] };
-  const walk = (e: E) => { e.params.forEach(visit); e.children.forEach(walk); };
-  for (const it of file.items) if ("ecas" in it && it !== t) (it.ecas as E[]).forEach(walk);
+  const walk = (e: Eca) => {
+    if (!e.enabled || e.name === "CommentString") return;
+    e.params.forEach(visit);
+    e.children.forEach(walk);
+  };
+  for (const it of file.items) {
+    if ("ecas" in it && it !== t && it.type !== 16 && !it.isComment && it.enabled) it.ecas.forEach(walk);
+  }
   return found;
+}
+
+/** Script text without its line comments (`//` in JASS, `--` in Lua): a call commented out runs nothing. A comment
+ *  mark inside a string cuts the rest of its line too, which can only make a trigger look uncalled (a warning). */
+export function withoutComments(text: string, language: "jass" | "lua"): string {
+  return text.replace(language === "lua" ? /--[^\n]*/g : /\/\/[^\n]*/g, "");
+}
+
+/** Whether running the trigger would do anything: an enabled condition or action that isn't a comment. A
+ *  trigger without them (a heading or separator in the tree, as campaign maps have) isn't one that's missing
+ *  its caller. */
+function doesSomething(t: TriggerItem): boolean {
+  return t.ecas.some((e) => e.enabled && e.kind !== EVENT && e.name !== "CommentString");
+}
+
+/** The script texts of `custom` that are in the map script, for ValidateOptions.scripts: the map header and the
+ *  texts of enabled custom text triggers (a disabled or comment trigger's text isn't written, nor is a GUI
+ *  trigger's). None without a custom text file. */
+export function scriptsThatRun(file: TriggerFile, custom: CustomTextFile | null): (string | null)[] {
+  if (!custom) return [];
+  const tt = textTriggers(file);
+  return [custom.header, ...custom.texts.filter((_, i) => { const t = tt[i]; return !!t && t.enabled && !t.isComment && t.isCustom; })];
 }
 
 export interface ValidateOptions {
   /** Script texts that can run triggers (map header, custom text triggers): a trigger they name has a
    *  caller. null: they couldn't be read, so no trigger is called one nothing runs. */
   scripts?: (string | null)[] | null;
+  /** The map script's language, for the comments in script text (default JASS). */
+  language?: "jass" | "lua";
 }
 
 /** Every issue of the GUI triggers of `file`, in tree order. */
@@ -113,7 +144,9 @@ export function validateTriggers(file: TriggerFile, data: TriggerData, opts: Val
   const exact = new Map(file.variables.map((v) => [v.name, v]));
   const loose = new Map(file.variables.map((v) => [v.name.toLowerCase(), v]));
   const variables = { get: (name: string) => exact.get(name) ?? loose.get(name.toLowerCase()) };
-  const scripts = opts.scripts === undefined ? [] : opts.scripts;
+  const language = opts.language ?? "jass";
+  const given = opts.scripts === undefined ? [] : opts.scripts;
+  const scripts = given && given.filter((s): s is string => s !== null).map((s) => withoutComments(s, language));
   for (const t of file.items) {
     if (!("ecas" in t) || t.type !== 8 || t.isCustom || t.isComment) continue;
     const severity = t.enabled ? "error" as const : "warning" as const;
@@ -206,8 +239,10 @@ export function validateTriggers(file: TriggerFile, data: TriggerData, opts: Val
       });
     };
     walk(t.ecas, []);
-    if (scripts && t.enabled && !t.runOnInit && !t.ecas.some((e) => e.kind === EVENT) && !runsFromElsewhere(file, scripts, t)) {
-      add({ kind: "noEvents", severity: "warning", message: "has no events, and no trigger or script runs it" });
+    // A disabled event isn't in the script either.
+    if (scripts && t.enabled && !t.runOnInit && !t.ecas.some((e) => e.kind === EVENT && e.enabled) && doesSomething(t) && !runsFromElsewhere(file, scripts, t, language)) {
+      const off = t.ecas.some((e) => e.kind === EVENT);
+      add({ kind: "noEvents", severity: "warning", message: `has no ${off ? "enabled " : ""}events, and no trigger or script runs it` });
     }
   }
   return out;

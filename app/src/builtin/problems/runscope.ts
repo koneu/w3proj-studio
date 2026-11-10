@@ -7,7 +7,7 @@ import type { W3Api } from "../../extensions/api";
 import { readMapDoc, readMapDocStrict } from "../../lib/formats/mapdoc";
 import { parseIni } from "../../lib/formats/text";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
-import { validateTriggers, type TriggerIssue } from "../../lib/triggers/validate";
+import { scriptsThatRun, validateTriggers, type TriggerIssue } from "../../lib/triggers/validate";
 import { readWctFile, readWtgFile, textTriggers, wtgPath, type TriggerFile } from "../../lib/triggers/wtg";
 import { FileLookup } from "./checks";
 
@@ -76,8 +76,10 @@ export class RunScope {
       const data = await this.triggerData();
       // Script texts that can run triggers: none without the file; when it can't be read, which triggers
       // it runs isn't known (null), and none is called unused.
-      const scripts = await readWctFile(this.w3.workspace, textTriggers(file).length).then((c) => (c ? [c.header, ...c.texts] : []), () => null);
-      return validateTriggers(file, data, { scripts });
+      const scripts = await readWctFile(this.w3.workspace, textTriggers(file).length).then((c) => scriptsThatRun(file, c), () => null);
+      // For the comments in script text; other checks read the map info in the same run.
+      const info = await this.doc<{ scriptType?: number }>("map/war3map.w3i.json").catch(() => null);
+      return validateTriggers(file, data, { scripts, language: info?.scriptType === 1 ? "lua" : "jass" });
     };
     if (!this.share) return load();
     return (this.validation ??= load());
