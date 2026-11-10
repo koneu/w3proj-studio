@@ -6,9 +6,8 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TriggersService } from "../../extensions/services";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { keyOf } from "../../lib/keys";
 import { weatherName } from "../../lib/terrain/weather";
-import { listKey, moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
+import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
@@ -398,13 +397,17 @@ function regionEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       updateAll(moved, (r) => now.get(r)!);
     },
     pointerLeave() { hover.textContent = ""; ed.host.style.cursor = ""; },
-    keyDown(e) {
-      const key = keyOf(e);
-      if ((key === "Delete" || key === "Backspace") && selected) { deleteSelected(); return true; }
-      if (key === "Escape" && selected) { selected = null; extra = new Set(); renderPanel(); render(); return true; }
-      const cmd = listKey(e);
-      if (cmd) { const why = listCommand(cmd); if (why) void w3.window.showInfo(why); return true; }
-      return false;
+    // Delete, Escape and the list keys come as the view's commands (their keys are bindings: Delete and Backspace,
+    // Escape, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+Page Up and Down by default).
+    deleteSelection() {
+      if (!selected) return false;
+      deleteSelected();
+      return true;
+    },
+    cancel() {
+      if (!selected) return false;
+      selected = null; extra = new Set(); renderPanel(); render();
+      return true;
     },
     listCommand,
     // The Object Manager's entries: the region selected and shown, then renamed or deleted as with the panel's name

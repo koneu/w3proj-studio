@@ -43,6 +43,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (chord) { search.value = `@key:${chord.replace(/ /g, "_")}`; renderList(); }
           },
         });
+        // Recording, a mouse button or the wheel over the field searches for it.
+        const searchMouse = (e: MouseEvent) => {
+          if (!recordingSearch) return;
+          const chord = kb.mouseChordOf(e);
+          if (!chord) return;
+          e.preventDefault();
+          search.value = `@key:${chord}`;
+          renderList();
+        };
+        search.addEventListener("mousedown", searchMouse);
+        search.addEventListener("wheel", searchMouse, { passive: false });
         const mySetQuery = (q: string) => { search.value = q; renderList(); };
         setQuery = mySetQuery;
         const recordButton = h("button.kb-record-search", {
@@ -71,7 +82,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
         /** The field a new key is pressed into, in place of the row's key. */
         const recorder = (row: Row) => {
-          const input = h("input.kb-record", { readOnly: true, placeholder: "Press the key, then Enter · Esc cancels", "data-all-keys": "" });
+          const input = h("input.kb-record", { readOnly: true, placeholder: "Press the key (or a mouse button here), then Enter · Esc cancels", "data-all-keys": "" });
           const note = h("div.kb-conflicts.muted");
           let chords: string[] = [];
           let finished = false;
@@ -95,12 +106,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!chord) return;
             if (chord === "escape") { void finish(null); return; }
             if (chord === "enter" && chords.length) { void finish(chords.join(" ")); return; }
-            chords = chords.length === 1 && opensSequence(chords[0]) ? [chords[0], chord] : [chord];
+            chords = chords.length === 1 && opensSequence(chords[0]) && kb.normalize(`${chords[0]} ${chord}`) ? [chords[0], chord] : [chord];
             const key = chords.join(" ");
             input.value = kb.label(key);
             const others = kb.conflicts({ key, command: row.item.command, when: editing?.when ?? row.binding?.when });
             note.textContent = others.length ? `Also bound to: ${others.map((o) => `${titleOf(o.command)}${o.when ? ` (when ${o.when})` : ""}`).join(", ")}` : "";
           });
+          // A mouse button pressed or the wheel turned over the field is the key too (the World Editor's Configure Controls
+          // takes them for its mouse controls): a key of its own, never part of two chords.
+          const takeMouse = (e: MouseEvent) => {
+            const chord = kb.mouseChordOf(e);
+            if (!chord) return;
+            e.preventDefault();
+            e.stopPropagation();
+            chords = [chord];
+            input.value = kb.label(chord);
+            const others = kb.conflicts({ key: chord, command: row.item.command, when: editing?.when ?? row.binding?.when });
+            note.textContent = others.length ? `Also bound to: ${others.map((o) => `${titleOf(o.command)}${o.when ? ` (when ${o.when})` : ""}`).join(", ")}` : "";
+          };
+          input.addEventListener("mousedown", takeMouse);
+          input.addEventListener("wheel", takeMouse, { passive: false });
+          input.addEventListener("contextmenu", (e) => e.preventDefault());
           input.addEventListener("blur", () => void finish(null));
           queueMicrotask(() => input.focus());
           return h("div.kb-recorder", {}, input, note);

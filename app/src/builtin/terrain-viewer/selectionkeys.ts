@@ -11,6 +11,7 @@
 // except where Shift is a key of its own (Shift+R).
 
 import type { Turn } from "../../lib/terrain/fragment";
+import { listCommandOf } from "../../lib/terrain/objectlist";
 import { CAMERA_COMMANDS } from "./viewmodes";
 
 export type SelectionKey =
@@ -65,13 +66,49 @@ export const OBJECT_EDITOR_COMMAND = "w3.terrain.selection.viewInObjectEditor";
 export const DELETE_COMMAND = "w3.terrain.selection.delete";
 export const CLIPBOARD_COMMANDS = { copy: "w3.terrain.copy", cut: "w3.terrain.cut", paste: "w3.terrain.paste", selectAll: "w3.terrain.selectAll" } as const;
 
+/** Escape: ends what is going on, the first of these there is: picking a point for a tool, the paste, the area drawn,
+ *  the open tab's own (placing an object, a region or camera selected), facing the pointer; else nothing is selected
+ *  (the World Editor's Other - Cancel Paste and Cancel Select Object Mode). */
+export const CANCEL_COMMAND = "w3.terrain.cancel";
+
 /** The terrain view's own key commands (camera, selection, clipboard): the view runs them as their keys say, in its own
  *  order (index.ts lateKeys, earlyKeys); as commands (the palette, a key bound outside the view) they act on the terrain
  *  editor in front. Any other command bound under terrainFocus (the View keys) the view runs as a command. */
 export const KEY_COMMANDS: ReadonlySet<string> = new Set([
   ...Object.keys(CAMERA_COMMANDS), ...Object.keys(SELECTION_COMMANDS), ...Object.keys(TURN_COMMANDS),
-  FACE_COMMAND, RECALL_COMMAND, OBJECT_EDITOR_COMMAND, DELETE_COMMAND, ...Object.values(CLIPBOARD_COMMANDS),
+  FACE_COMMAND, RECALL_COMMAND, OBJECT_EDITOR_COMMAND, DELETE_COMMAND, CANCEL_COMMAND, ...Object.values(CLIPBOARD_COMMANDS),
 ]);
+
+/** What is done while a mouse button is held over the map (the World Editor's mouse controls in Configure Controls):
+ *  their defaults are the terrain view's mouse bindings, the middle button pans, the right one turns the camera, Alt and
+ *  the left button take the selection to the pointer, Ctrl and the left button turn it toward the pointer. */
+export const MOUSE_CONTROLS = {
+  translate: "w3.terrain.camera.translate",
+  rotate: "w3.terrain.camera.rotate",
+  moveToPointer: "w3.terrain.selection.moveToPointer",
+  rotateToPointer: "w3.terrain.selection.rotateToPointer",
+} as const;
+export type MouseControl = keyof typeof MOUSE_CONTROLS;
+
+/** Held with the left button, a drag selects an area of ground instead of drawing a box (A by default). */
+export const AREA_COMMAND = "w3.terrain.selection.area";
+
+/** Controls that are held, not run: a mouse button's, and the area key's. As commands they only say how they're used. */
+export const HELD_COMMANDS: ReadonlySet<string> = new Set([...Object.values(MOUSE_CONTROLS), AREA_COMMAND]);
+
+/** The mouse control of a button pressed: the first among `commands` (what it's bound to, the winner first) that
+ *  `usable` allows (the selection's need a selection), or null. */
+export function mouseControlOf(commands: readonly string[], usable: (c: MouseControl) => boolean): MouseControl | null {
+  for (const id of commands) {
+    const c = (Object.keys(MOUSE_CONTROLS) as MouseControl[]).find((k) => MOUSE_CONTROLS[k] === id);
+    if (c && usable(c)) return c;
+  }
+  return null;
+}
+
+/** Whether the view runs a command bound under terrainFocus as a command (the View keys, the user's own): not its own
+ *  key commands, held controls or the tabs' list commands, which it handles itself. */
+export const runsAsCommand = (id: string) => !KEY_COMMANDS.has(id) && !HELD_COMMANDS.has(id) && listCommandOf([id]) === null;
 
 /** A scale after a step, never so small the object is gone. */
 export const scaled = (scale: readonly number[], step: readonly number[]): [number, number, number] =>

@@ -122,6 +122,12 @@ export interface TerrainToolGroupInstance {
   pointerLeave?(): void;
   /** Keys while the map has focus; return true when handled. */
   keyDown?(e: KeyboardEvent): boolean;
+  /** Cancel (Escape by default) while the tab is open: ends the tab's own business (placing, a selected region);
+   *  false when it has none, and the view cancels its own. */
+  cancel?(): boolean;
+  /** Delete (Delete, Backspace by default) while the tab is open: deletes the tab's own selection; false when it has
+   *  none, and the view deletes the selected objects. */
+  deleteSelection?(): boolean;
   /** The group's object list (regions, cameras: the World Editor's Edit > Select Next / Previous in List, Move Up / Down
    *  in List): null when done, else why not. */
   listCommand?(cmd: "next" | "previous" | "up" | "down"): string | null;
