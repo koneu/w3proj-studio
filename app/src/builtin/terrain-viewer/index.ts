@@ -17,8 +17,8 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type Whole
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, cameraKey, dropRings, keyOf, lightRings, nextTerrainLook, OWN_CHORDS, shownView, TERRAIN_LOOKS, viewKeyCommand, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraKey, dropRings, EDGE_SCROLL, edgeScroll, keyOf, lightRings, lineAlong, nextTerrainLook, OWN_CHORDS, shownView, TERRAIN_LOOKS, viewKeyCommand, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -45,7 +45,7 @@ import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, t
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee } from "./meleecheck";
-import { borderFlags, FIXED_HEIGHT, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
+import { borderFlags, FACE_KEY, FIXED_HEIGHT, isFaceKey, isObjectEditorKey, isRecallKey, joinSteps, OUTSIDE_PLAYABLE, scaled, selectionKey, turnKey, type SelectionKey } from "./selectionkeys";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
@@ -230,6 +230,9 @@ const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<str
   ["w3.terrain.toggleBlight", (v) => why(v.toggleLayer("blight"))],
   ["w3.terrain.toggleLighting", async (v) => why(await v.toggleSetting("lighting"))],
   ["w3.terrain.toggleWeather", async (v) => why(await v.toggleSetting("weather"))],
+  ["w3.terrain.toggleFogEffects", async (v) => why(await v.toggleSetting("fog"))],
+  ["w3.terrain.toggleCameraBounds", (v) => why(v.toggleLayer("cameraBounds"))],
+  ["w3.terrain.cycleGrid", (v) => why(v.cycleGrid(), GRIDS)],
   ["w3.terrain.cycleTerrainDisplay", (v) => why(v.cycleTerrain(), ["textured", "wireframe", "hidden"])],
   ["w3.terrain.toggleGameView", async (v) => { await v.toggleGameView(); return null; }],
   ["w3.terrain.toggleSmallGrid", (v) => why(v.toggleGrid("small"), GRIDS)],
@@ -1495,6 +1498,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const gameBadge = h("div.terrain-gameview-badge", { hidden: !gameViewOn(), title: "Game view (V): lit and fogged as in the game, without the editor's marks" }, "Game View");
         /** Set with the View commands (below): draws the view again after a setting it depends on changed. */
         let viewChanged = () => {};
+        /** Set with the View commands (below): the Camera Bounds line again, after the bounds or the choice changed. */
+        let showCameraBounds = (_again?: boolean) => {};
         /** Set with the minimap panel (below): its picture again after edits, its outline after the camera moved, and
          *  the panel shown or not after its setting changed. */
         let minimapPanelSoon = (_ms?: number) => {}, minimapOutline = () => {}, minimapSetting = () => {};
@@ -1524,6 +1529,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const info = await readMapDoc<{ cameraComplements?: number[]; cameraBounds?: number[] } & Parameters<typeof fogOf>[0]>(w3, "map/war3map.w3i.json").catch(() => null);
           if (!info) return;
           cameraArea = cameraRect(info);
+          cameraCorners = cameraBoundsCorners(info);
+          showCameraBounds();
           renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
           renderer.setBorder(borderShade(terrain.width - 1, terrain.height - 1, info.cameraComplements), terrain.width - 1, terrain.height - 1);
@@ -1603,6 +1610,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const enforceWater = () => switchedOn(w3, "terrain.enforceWaterLimits", false);
         /** The map's camera bounds as last read; null until then, or when the map has none. */
         let cameraArea: Bounds | null = null;
+        /** The camera bounds' four corners as last read (the Camera Bounds line, B); null until then or without them. */
+        let cameraCorners: [number, number][] | null = null;
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
         /** Where a moved object may stand: the map (the playable part, for units and items) cut by the camera bounds when enforced. */
         const moveBounds = (e: Placed): Bounds => limitTo(dooFile?.list.includes(e) ? wholeMap(handle) : playableEdge ?? wholeMap(handle), heldTo());
@@ -3231,10 +3240,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               h("button", { title: "Move the camera to the object (command: View Selection)", onclick: () => { void viewSelection(); keysToMap(); } }, "View"),
               ...(editable ? [
                 h("button", { title: "Make this type the one the Objects tab places (command: Select In Tool Palette)", onclick: () => void selectInPalette().then((why) => { if (why) void w3.window.showInfo(why); keysToMap(); }) }, "Select in palette"),
-                h("button", { title: "Turn toward the pointer (F); click to apply", onclick: startFacing }, "Face point"), ...turnButtons(), ...heightButtons(),
+                h("button", { title: `Turn toward the pointer (${FACE_KEY}); click to apply`, onclick: startFacing }, "Face point"), ...turnButtons(), ...heightButtons(),
                 h("button", { title: "Delete (Del)", onclick: deleteSelected }, "Delete"),
               ] : [])),
-            ...(editable ? [h("div.muted", {}, "Drag it to move · [ ] to turn · F face point · Del to delete · Ctrl+C, then Ctrl+V to copy")] : []),
+            ...(editable ? [h("div.muted", {}, `Drag it to move · [ ] to turn · ${FACE_KEY} face point · Del to delete · Ctrl+C, then Ctrl+V to copy`)] : []),
           );
           renderer.setSelection(ringOf(inst));
           redraw();
@@ -3387,7 +3396,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               massField("Facing", "facing", help), massField("Scale", "scale", help), massField("Variation", "variation", help),
               h("div.terrain-sel-actions.wrap", {},
                 quick("Select all of these types", "Select every object of the selected types", selectSameTypes),
-                quick("Face point", "Turn every selected object toward the pointer (F); click to apply", startFacing),
+                quick("Face point", `Turn every selected object toward the pointer (${FACE_KEY}); click to apply`, startFacing),
                 ...turnButtons(), ...heightButtons(),
                 quick("Random facing", "A random facing for each object", () => void massEdit(group, "facing", "random(0..360)")),
                 quick("Random variation", "A random model variation for each object", () => applyMass(group, (p) => {
@@ -3402,7 +3411,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 })),
                 quick("Drop to ground", "Set every object's height to the ground under it", () => applyMass(group, (p) => ({ position: [p.position[0], p.position[1], heightAt(terrain, p.position[0], p.position[1])] }))),
                 h("button", { title: "Delete all selected (Del)", onclick: deleteSelected }, `Delete ${group.length}`)),
-              h("div.muted", {}, "Drag one to move all · [ ] turn each · F face point · Del delete · Ctrl+click adds/removes · Shift+box adds"),
+              h("div.muted", {}, `Drag one to move all · [ ] turn each · ${FACE_KEY} face point · Del delete · Ctrl+click adds/removes · Shift+box adds`),
             ] : []),
           );
           redraw();
@@ -4074,7 +4083,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The View items as chosen (the toolbar, the side panel's Doodads and Units, the commands and keys). Lighting,
          *  fog and weather are settings. Game view sets the choice aside without changing it: `shown` is what's drawn. */
         const viewState = {
-          grid: "none" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, info: true,
+          grid: "none" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, cameraBounds: false, info: true,
           terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
         };
         const viewSet = (): ViewSet => ({ ...viewState, lighting: lightOn(),
@@ -4188,6 +4197,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const refreshLayersSoon = () => {
           if (shown.lightRanges) showLightRanges();
           showDropRings();
+          showCameraBounds(true);
           minimapPanelSoon();
           if (!anyGroundLayer(shown)) return;
           clearTimeout(layerTimer);
@@ -4234,6 +4244,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.setRings("drops", rings);
           redraw();
         };
+        /** Camera Bounds (B): a line round the map's camera bounds, following the ground. Made again when the bounds
+         *  were read again (a save of war3map.w3i, a map size change) or the choice changed (boundsKey), and after
+         *  edits (`again`: the ground under it may have moved). */
+        let boundsKey = "";
+        showCameraBounds = (again = false) => {
+          const corners = shown.cameraBounds ? cameraCorners : null;
+          const key = corners ? corners.join(";") : "";
+          if (key === boundsKey && !(again && corners)) return;
+          boundsKey = key;
+          renderer.setRings("cameraBounds", corners ? [{ x: 0, y: 0, r: 0, rgb: CAMERA_BOUNDS_RGB, outline: lineAlong(corners) }] : []);
+          redraw();
+        };
         /** Draws what `shown` says, after the choice or game view changed. */
         const applyView = () => {
           const was = shown;
@@ -4262,6 +4284,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (anyGroundLayer(was) || anyGroundLayer(shown)) void refreshLayers();
           showLightRanges();
           showDropRings();
+          showCameraBounds();
           // A selected start location can't stay selected where it isn't shown.
           if (!shown.starts && selectedEntries().some((p) => p.id === "sloc")) clearSelection();
           viewSyncs.forEach((f) => f());
@@ -4309,13 +4332,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           toggleSetting: async (which) => {
             const no = refusedInGameView();
             if (no) return no;
-            const key = which === "lighting" ? "terrain.lighting.enabled" : "terrain.weather";
+            const key = which === "lighting" ? "terrain.lighting.enabled" : which === "fog" ? "terrain.fog" : "terrain.weather";
             const on = w3.settings.get<boolean>(key, true) === false;
             await w3.settings.set(key, on);
             return on;
           },
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
+          cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
           state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
@@ -4337,7 +4361,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           viewSyncs.push(() => { box.checked = switchedOn(w3, key, standard); if (forced) box.disabled = gameViewOn(); });
           return h("label.model-toggle", { title }, box, ` ${label}`);
         };
-        const gridSelect = h("select", { title: "Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
+        const gridSelect = h("select", { title: withKey("Grid: lines every 32 (small, the pathing cells), 128 (medium, the tiles) or 512 (large) units", "w3.terrain.cycleGrid"), onchange: () => { setGrid(gridSelect.value as GridSize); keysToMap(); } },
           ...(["none", "small", "medium", "large"] as const).map((g) => h("option", { value: g }, g === "none" ? "No grid" : `${g[0].toUpperCase()}${g.slice(1)} grid`)));
         viewSyncs.push(() => { gridSelect.value = viewState.grid; gridSelect.disabled = gameViewOn(); });
         const terrainSelect = h("select", { title: withKey("Terrain: textured, as a wireframe, or hidden", "w3.terrain.cycleTerrainDisplay"), onchange: () => { if (!gameViewOn()) setTerrain(terrainSelect.value as TerrainLook); keysToMap(); } },
@@ -4419,7 +4443,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               layerToggle("Regions", "The map's regions, in their colours", "regions", "w3.terrain.toggleRegions"),
               layerToggle("Camera objects", "The map's cameras: target, eye and field of view", "cameras", "w3.terrain.toggleCameraObjects"),
               layerToggle("Light ranges", "How far the lights of placed objects reach: a ring where each fades out, a fainter one where it starts to", "lightRanges", "w3.terrain.toggleLightRanges"),
-              layerToggle("Info", "Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
+              layerToggle("Bounds line", "Camera Bounds: a line round the map's camera bounds, where the game's camera can go", "cameraBounds", "w3.terrain.toggleCameraBounds"),
+              layerToggle("Info","Info Display: the start locations, and a white ring round each unit that drops items", "info", "w3.terrain.toggleInfoDisplay"),
               layerBusy,
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Minimap", minimapShown, (v) => void w3.settings.set("terrain.minimap.panel", v), false, "The minimap in the view's corner: click or drag on it to move the view there"),
@@ -4428,7 +4453,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
                 switchBox("Camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
               ] : []),
-              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true),
+              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true, withKey("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
               toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, withKey("The map's weather", "w3.terrain.toggleWeather")),
               switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true, true),
               skySelect,
@@ -4621,7 +4646,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!e.repeat) void w3.commands.execute(viewCommand).catch((err) => w3.window.showError(String((err as Error)?.message ?? err)));
             return;
           }
-          if ((key === "f" || key === "F") && !e.ctrlKey && !e.metaKey && !activeGroup) { e.preventDefault(); startFacing(); return; }
+          if (isFaceKey(e) && !activeGroup) { e.preventDefault(); startFacing(); return; }
           if (editable && selectedEntries().length && (key === "Delete" || key === "Backspace")) { e.preventDefault(); deleteSelected(); return; }
           if (editable && selectedEntries().length && (key === "[" || key === "]")) { e.preventDefault(); byKey(e, () => rotateSelected(key === "[" ? 15 : -15)); return; }
           const edit = editable && !activeGroup && selectedEntries().length ? selectionKey(e) : null;
@@ -4692,6 +4717,32 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           renderer.distance = Math.max(200, Math.min(renderer.terrain.width * 300, renderer.distance * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
           redraw();
         }, { passive: false });
+        // Screen-edge scrolling, as the World Editor's (viewmodes.ts edgeScroll): the pointer resting at a side of the
+        // view scrolls it, while the view has the keyboard, the window has the focus and no button is held (a drag pans
+        // or draws a box itself). Only a pointer that moved over the canvas counts: one that left it, or never came,
+        // scrolls nothing.
+        /** The pointer over the canvas (CSS pixels), or null when it's off it or a button is down. */
+        let edgeAt: { x: number; y: number } | null = null;
+        let edgeRaf = 0, edgeLast = 0;
+        const edgeStep = (now: number) => {
+          edgeRaf = 0;
+          const free = edgeAt && !drag && !box && !objDrag && !areaPress && !groupDrag && !glDead && !disposed
+            && document.activeElement === canvas && document.hasFocus();
+          const dir = free ? edgeScroll(edgeAt!.x, edgeAt!.y, canvas.clientWidth, canvas.clientHeight) : null;
+          if (!dir) { edgeLast = 0; return; }
+          // A long gap between frames (the window was hidden) doesn't jump.
+          const dt = edgeLast ? Math.min(0.1, (now - edgeLast) / 1000) : 0;
+          edgeLast = now;
+          if (dt) { const s = EDGE_SCROLL.speed * dt * canvas.clientHeight; pan(-dir[0] * s, dir[1] * s); redraw(); }
+          edgeRaf = requestAnimationFrame(edgeStep);
+        };
+        canvas.addEventListener("mousemove", (e) => {
+          if (e.buttons) { edgeAt = null; return; }
+          const rect = canvas.getBoundingClientRect();
+          edgeAt = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+          if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeStep);
+        });
+        canvas.addEventListener("mouseleave", () => { edgeAt = null; });
 
         /** Names over the map: HTML over the canvas, placed again whenever the view is drawn. */
         const placeLabels = () => {
@@ -4973,6 +5024,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             layerSeq++;
             for (const g of groupInsts.values()) g.dispose?.();
             cancelAnimationFrame(raf);
+            cancelAnimationFrame(edgeRaf);
+            edgeAt = null;
             if (openedBy.get(doc.path) === record) openedBy.delete(doc.path);
             disposed = true;
             lastView = { key: viewKey, view: handle.view(), selection: selectionRefs() };

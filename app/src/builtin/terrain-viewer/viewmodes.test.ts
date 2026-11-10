@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { anyGroundLayer, CAMERA_STEPS, cameraKey, DROP_RING, dropRings, keyOf, lightRings, nextTerrainLook, shownView, VIEW_KEYS, viewKeyCommand, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_STEPS, cameraBoundsCorners, cameraKey, DROP_RING, EDGE_SCROLL, edgeScroll, lineAlong, dropRings, keyOf, lightRings, nextTerrainLook, shownView, VIEW_KEYS, viewKeyCommand, type ViewSet } from "./viewmodes";
 
 const chosen: ViewSet = {
   terrain: "wireframe", doodads: false, units: true, water: false, blight: false, cliffs: false, effects: false, weather: false,
   lighting: false, fog: false, grid: "small", naval: true, heights: true, cameras: true, pathing: true, regions: true, lightRanges: true,
-  info: true,
+  cameraBounds: true, info: true,
 };
 
 test("shownView: without game view, what was chosen, start locations included", () => {
@@ -38,7 +38,7 @@ test("shownView: game view shows the map as the game does, whatever was chosen, 
   for (const k of ["doodads", "units", "water", "blight", "cliffs", "effects", "weather", "lighting", "fog"] as const) assert.equal(game[k], true, k);
   assert.equal(game.terrain, "textured");
   // None of the editor's marks.
-  for (const k of ["naval", "heights", "cameras", "pathing", "regions", "lightRanges", "starts"] as const) assert.equal(game[k], false, k);
+  for (const k of ["naval", "heights", "cameras", "pathing", "regions", "lightRanges", "cameraBounds", "starts"] as const) assert.equal(game[k], false, k);
   assert.equal(game.grid, "none");
   assert.equal(anyGroundLayer(game), false);
   // The same whatever the choice was: the opposite choice gives the same picture.
@@ -71,8 +71,15 @@ test("View keys: the World Editor's, with their modifiers exactly", () => {
   assert.equal(viewKeyCommand(key("l")), "w3.terrain.toggleLighting");
   assert.equal(viewKeyCommand(key("r", { ctrlKey: true })), "w3.terrain.toggleRegions");
   assert.equal(viewKeyCommand(key("p", { altKey: true })), null, "Alt keys aren't View keys");
-  // Studio's own keys stay: F faces the selection, A selects an area, arrows and Page keys move.
-  for (const k of ["f", "a", "ArrowUp", "PageUp", "Home", " "]) assert.equal(viewKeyCommand(key(k)), null, k);
+  // The View menu's F, G and B (we-drive --view-menu, 2026-11-10).
+  assert.equal(viewKeyCommand(key("f")), "w3.terrain.toggleFogEffects");
+  assert.equal(viewKeyCommand(key("f", { ctrlKey: true })), null, "Ctrl+F is Foliage");
+  assert.equal(viewKeyCommand(key("g")), "w3.terrain.cycleGrid");
+  assert.equal(viewKeyCommand(key("G")), "w3.terrain.cycleGrid", "caps lock");
+  assert.equal(viewKeyCommand(key("b")), "w3.terrain.toggleCameraBounds");
+  assert.equal(viewKeyCommand(key("b", { ctrlKey: true })), null);
+  // Studio's own keys stay: T faces the selection, A selects an area, arrows and Page keys move.
+  for (const k of ["t", "a", "ArrowUp", "PageUp", "Home", " "]) assert.equal(viewKeyCommand(key(k)), null, k);
   assert.equal(keyOf("w3.terrain.toggleBlight"), "H");
   assert.equal(keyOf("w3.terrain.viewSelection"), undefined);
 });
@@ -125,4 +132,38 @@ test("View and camera keys the webview calls Unidentified (WebKitGTK) go by the 
   assert.equal(viewKeyCommand(unnamed("KeyL", { ctrlKey: true, shiftKey: true })), "w3.terrain.toggleLightRanges");
   assert.deepEqual(cameraKey(unnamed("ArrowLeft")), { pan: [-CAMERA_STEPS.pan, 0] });
   assert.deepEqual(cameraKey(unnamed("Numpad8")), { pan: [0, CAMERA_STEPS.pan] });
+  assert.equal(viewKeyCommand(unnamed("KeyG")), "w3.terrain.cycleGrid");
+});
+
+test("edgeScroll: the pointer at a side of the view scrolls toward it, corners both ways, inside or outside nothing", () => {
+  const e = EDGE_SCROLL.edge, w = 800, h = 600;
+  assert.deepEqual(edgeScroll(0, 300, w, h), [-1, 0]);
+  assert.deepEqual(edgeScroll(w - 1, 300, w, h), [1, 0]);
+  assert.deepEqual(edgeScroll(400, 0, w, h), [0, 1], "top scrolls up (north)");
+  assert.deepEqual(edgeScroll(400, h - 1, w, h), [0, -1]);
+  assert.deepEqual(edgeScroll(1, 1, w, h), [-1, 1]);
+  assert.deepEqual(edgeScroll(e - 1, 300, w, h), [-1, 0]);
+  assert.equal(edgeScroll(e, 300, w, h), null, "just past the edge band");
+  assert.equal(edgeScroll(400, 300, w, h), null);
+  // Outside the view (the pointer left it), or a view too small to have a middle: nothing.
+  for (const [x, y] of [[-1, 300], [w, 300], [400, -1], [400, h], [NaN, 0]]) assert.equal(edgeScroll(x, y, w, h), null, `${x},${y}`);
+  assert.equal(edgeScroll(0, 0, 10, 10), null);
+});
+
+test("camera bounds: the w3i's four corners in the order round, a line along them that can follow the ground", () => {
+  // HillsbradCreek's: lower left, upper right, upper left, lower right.
+  const corners = cameraBoundsCorners({ cameraBounds: [-7680, -7936, 7680, 7936, -7680, 7936, 7680, -7936] })!;
+  assert.deepEqual(corners, [[-7680, -7936], [7680, -7936], [7680, 7936], [-7680, 7936]]);
+  assert.equal(cameraBoundsCorners({ cameraBounds: [0, 0, 1, 1] }), null, "too few numbers");
+  assert.equal(cameraBoundsCorners({ cameraBounds: [0, 0, 1, 1, 0, 1, NaN, 0] }), null);
+  assert.equal(cameraBoundsCorners(null), null);
+  const line = lineAlong([[0, 0], [256, 0], [256, 128], [0, 128]], 64);
+  assert.equal(line.length, 4 + 2 + 4 + 2);
+  assert.deepEqual(line.slice(0, 5), [[0, 0], [64, 0], [128, 0], [192, 0], [256, 0]]);
+  for (let i = 0; i < line.length; i++) {
+    const [a, b] = [line[i], line[(i + 1) % line.length]];
+    assert.ok(Math.hypot(b[0] - a[0], b[1] - a[1]) <= 64 + 1e-9);
+  }
+  // A huge map stays within the cap.
+  assert.ok(lineAlong(corners, 1, 1000).length <= 1004);
 });

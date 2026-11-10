@@ -353,6 +353,8 @@ export interface Ring {
   rgb: Vec3;
   /** A square outline (half side `r`) instead of a circle. */
   square?: boolean;
+  /** A closed line through these points (x, y; on the ground or at `z`) instead of a circle: `x`, `y`, `r` unused. */
+  outline?: readonly (readonly [number, number])[];
 }
 
 export interface Marker {
@@ -1281,6 +1283,11 @@ export class TerrainRenderer {
 
   private ring(r: Ring, segments = 64): Mesh {
     const data: number[] = [];
+    const [cr, cg, cb] = [r.rgb[0] / 255, r.rgb[1] / 255, r.rgb[2] / 255];
+    if (r.outline) {
+      for (const [x, y] of r.outline) data.push(x, y, (r.z ?? this.groundHeight(x, y)) + 4, cr, cg, cb, 1);
+      return this.colorMesh(data);
+    }
     for (let i = 0; i < segments; i++) {
       const a = (i / segments) * Math.PI * 2;
       let dx = Math.cos(a), dy = Math.sin(a);

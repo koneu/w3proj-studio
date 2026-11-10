@@ -71,6 +71,11 @@ export const GRID_STEP: Record<GridSize, number> = { none: 0, small: 32, medium:
 /** What a "Toggle ... Grid" does: the same size again switches the grid off, another one replaces it. */
 export const toggleGrid = (current: GridSize, size: Exclude<GridSize, "none">): GridSize => (current === size ? "none" : size);
 
+/** The World Editor's Grid key (G) goes round: none, large, medium, small, none (we-drive, five presses on
+ *  HillsbradCreek, 2026-11-10). */
+const GRID_ROUND: readonly GridSize[] = ["none", "large", "medium", "small"];
+export const nextGrid = (current: GridSize): GridSize => GRID_ROUND[(GRID_ROUND.indexOf(current) + 1) % GRID_ROUND.length];
+
 // ---- layers ------------------------------------------------------------------------------
 
 /** Where ships can sail (per pathing cell, rows from the south): deep water strongly, shallow water lightly. */

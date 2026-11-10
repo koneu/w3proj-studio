@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { borderFlags, isObjectEditorKey, isRecallKey, joinSteps, scaled, selectionKey, turnKey } from "./selectionkeys";
+import { borderFlags, FACE_KEY, isFaceKey, isObjectEditorKey, isRecallKey, joinSteps, scaled, selectionKey, turnKey } from "./selectionkeys";
+import { VIEW_KEYS, viewKeyCommand } from "./viewmodes";
 
 const press = (key: string, more: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
   selectionKey({ key, code: more.code ?? "", ctrlKey: false, metaKey: false, altKey: false, ...more });
@@ -43,6 +44,22 @@ test("Space alone recalls the selection", () => {
   assert.equal(isRecallKey({ ...keys, ctrlKey: true }), false);
   assert.equal(isRecallKey({ ...keys, shiftKey: true }), false);
   assert.equal(isRecallKey({ ...keys, key: "a" }), false);
+});
+
+test("T turns the selection toward the pointer; F is the World Editor's Fog Effects, Ctrl+T its Terrain", () => {
+  const keys = { key: "t", code: "KeyT", ctrlKey: false, metaKey: false, altKey: false };
+  assert.equal(FACE_KEY, "T");
+  assert.equal(isFaceKey(keys), true);
+  assert.equal(isFaceKey({ ...keys, key: "T" }), true, "caps lock");
+  assert.equal(isFaceKey({ ...keys, key: "Unidentified" }), true, "WebKitGTK's unnamed key, by its code");
+  assert.equal(isFaceKey({ ...keys, ctrlKey: true }), false);
+  assert.equal(isFaceKey({ ...keys, altKey: true }), false);
+  assert.equal(isFaceKey({ ...keys, key: "f", code: "KeyF" }), false);
+  // No View key and no selection key takes T.
+  assert.equal(viewKeyCommand({ ...keys, shiftKey: false }), null);
+  assert.equal(VIEW_KEYS.some((k) => k.key === FACE_KEY), false);
+  assert.equal(turnKey({ ...keys, shiftKey: false }), null);
+  assert.equal(selectionKey(keys), null);
 });
 
 test("Ctrl+F1 is the Object Editor, plain F1 isn't", () => {

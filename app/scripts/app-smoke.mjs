@@ -961,8 +961,9 @@ async function terrainSelectCameras(page, found) {
  *  start location, the regions and the other editor marks and shows its badge, refuses the layer toggles while on,
  *  stays for the next editor (a setting) and brings the choice back when off; Ctrl+R shows the regions instead of
  *  reloading the window; Ctrl+T goes round the terrain's looks; Ctrl+D, Ctrl+U, P and Ctrl+Shift+L show and hide
- *  doodads, units, ground pathing and light ranges, the toolbar's and the side panel's boxes follow, and none of it is
- *  an edit. Judged on pictures of the view against the plain one (the same view twice is the noise). */
+ *  doodads, units, ground pathing and light ranges, the toolbar's and the side panel's boxes follow; G goes round the
+ *  grids, B draws the camera bounds, F toggles Fog Effects, T turns the selection toward the pointer, the pointer at
+ *  the view's side scrolls it; and none of it is an edit. Judged on pictures of the view against the plain one (the same view twice is the noise). */
 async function viewModes(page, found) {
   const fail = (what) => found.push(`view modes: ${what}`);
   const k = await heightKit(page, "ViewModes");
@@ -1141,6 +1142,63 @@ async function viewModes(page, found) {
   await key("PageUp", "PageUp", 33);
   const c3 = await cam();
   if (c3.distance !== c1.distance || c3.target.join() !== c1.target.join() || c3.yaw !== c1.yaw) fail("Page Up moved the camera with nothing selected");
+
+  // Screen-edge scrolling: the pointer resting in the middle moves nothing, at the left side of the view it scrolls
+  // west, and back in the middle it stops.
+  const view = await k.hands.where(".model-stage canvas");
+  await k.focusMap();
+  await k.hands.mouse("mouseMoved", view.x, view.y);
+  c0 = await cam();
+  await sleep(600);
+  c1 = await cam();
+  if (c1.target.join() !== c0.target.join()) fail(`the pointer in the middle of the view moved the camera: ${c0.target} → ${c1.target}`);
+  await k.hands.mouse("mouseMoved", view.x - view.width / 2 + 2, view.y);
+  await sleep(600);
+  c1 = await cam();
+  await k.hands.mouse("mouseMoved", view.x, view.y);
+  await sleep(200);
+  const c4 = await cam();
+  await sleep(400);
+  const c5 = await cam();
+  if (!(c1.target[0] < c0.target[0] - 50) || Math.abs(c1.target[1] - c0.target[1]) > 1) fail(`the pointer at the view's left side scrolled ${c1.target[0] - c0.target[0]}, ${c1.target[1] - c0.target[1]}`);
+  if (c5.target.join() !== c4.target.join()) fail("the view kept scrolling after the pointer left its side");
+
+  // The View menu's G, B and F (we-drive --view-menu): G goes round none, large, medium, small; B draws a line round
+  // the camera bounds (looked at on their west side); F is Fog Effects, a setting. And T turns the selection toward
+  // the pointer, which F did before.
+  await k.look(start.position[0], start.position[1] + 128);
+  plain = await settledMapPicture(page);
+  noise = await pixelsApart(page, plain, await mapPicture(page));
+  s = await state();
+  const grids = [(await trial("G", "grid", () => key("g", "KeyG", 71), 300)).grid];
+  for (let i = 0; i < 3; i++) { await key("g", "KeyG", 71); grids.push((await state()).grid); }
+  if (grids.join() !== "large,medium,small,none") fail(`G went round ${grids.join(", ")}`);
+  if ((await changed()) > 150) fail("G four times isn't the plain picture");
+  const bounds = k.read("war3map.w3i.json").cameraBounds;
+  await k.look(bounds[0], (bounds[1] + bounds[3]) / 2);
+  plain = await settledMapPicture(page);
+  noise = await pixelsApart(page, plain, await mapPicture(page));
+  s = await state();
+  await trial("B", "cameraBounds", () => key("b", "KeyB", 66), 100);
+  await key("b", "KeyB", 66);
+  if ((await state()).cameraBounds || (await changed()) > 150) fail("B twice isn't the plain picture");
+  const fogBefore = (await state()).shown.fog;
+  await key("f", "KeyF", 70);
+  if ((await state()).shown.fog === fogBefore || (await k.setting("terrain.fog")) !== !fogBefore) fail(`F didn't toggle Fog Effects: ${fogBefore} → ${(await state()).shown.fog}`);
+  if (!/\(F\)/.test(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Fog")?.title ?? ""`))) fail("the Fog box's tooltip doesn't name F");
+  await key("f", "KeyF", 70);
+  if ((await state()).shown.fog !== fogBefore) fail("F twice isn't Fog Effects as before");
+  await page.evaluate(`w3.settings.set("terrain.fog", undefined, "user")`);
+  const facingHint = `[...document.querySelectorAll(".terrain-place-hint")].map((e) => e.textContent).join(" ")`;
+  const footman = k.units().find((u) => u.id === "hfoo");
+  await k.look(footman.position[0], footman.position[1], { id: "hfoo", x: footman.position[0], y: footman.position[1] });
+  await key("f", "KeyF", 70);
+  if (/Facing/.test(await page.evaluate(facingHint))) fail("F still turns the selection toward the pointer");
+  await key("f", "KeyF", 70);
+  await key("t", "KeyT", 84);
+  if (!/Facing/.test(await page.evaluate(facingHint))) fail(`T didn't start turning the selection toward the pointer (hint: "${await page.evaluate(facingHint)}")`);
+  await key("Escape", "Escape", 27);
+  await key("Escape", "Escape", 27);
 
   // The toolbar's box is the same item as the key.
   await k.hands.click(".model-toggle", "Light ranges");

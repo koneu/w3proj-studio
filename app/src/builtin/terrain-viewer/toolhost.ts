@@ -15,17 +15,19 @@ export interface ViewCommands {
   viewSelection(): string | null;
   viewEntireMap(): void;
   selectInPalette(): Promise<string | null>;
-  /** A View item (Pathing - Naval and Ground, Height Map, Camera Objects, Regions, Light Ranges, Doodads, Units,
-   *  Water, Blight): flips it and returns whether it's on now. In game view nothing changes, and the answer is why. */
+  /** A View item (Pathing - Naval and Ground, Height Map, Camera Objects, Camera Bounds, Regions, Light Ranges,
+   *  Doodads, Units, Water, Blight): flips it and returns whether it's on now. In game view nothing changes, and the answer is why. */
   toggleLayer(layer: ToggleLayer | "water"): boolean | string;
-  /** Lighting and Weather, which are settings: as toggleLayer. */
-  toggleSetting(which: "lighting" | "weather"): Promise<boolean | string>;
+  /** Lighting, Weather and Fog Effects, which are settings: as toggleLayer. */
+  toggleSetting(which: "lighting" | "weather" | "fog"): Promise<boolean | string>;
   /** View > Terrain: textured, wireframe, hidden, and round again. Returns what it is now, or why not (game view). */
   cycleTerrain(): TerrainLook | string;
   /** Lock to Game View Settings (V): returns whether game view is on now. */
   toggleGameView(): Promise<boolean>;
   /** Small, Medium or Large Grid Display: the same size again switches the grid off. Returns the grid shown now, or why not (game view). */
   toggleGrid(size: "small" | "medium" | "large"): "none" | "small" | "medium" | "large" | string;
+  /** View > Grid's key (G): none, large, medium, small and round again (viewcmds.ts nextGrid). Answers as toggleGrid. */
+  cycleGrid(): "none" | "small" | "medium" | "large" | string;
   /** Cycle Random Groups - Next (1) or Previous (-1): objects placed from a random group show the unit, building or item
    *  the group's next line puts there, then the question mark again. Says what is shown now. */
   cycleRandomGroups(step: 1 | -1): Promise<string>;

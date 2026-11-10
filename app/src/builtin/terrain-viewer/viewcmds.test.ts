@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, toggleGrid, viewOfBox, type Angle, type Box } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, type Angle, type Box, type GridSize } from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
 /** The oracle: a real perspective projection of a point, written out here from the camera's position. */
@@ -67,6 +67,11 @@ test("grids: the three sizes and what the toggles do", () => {
   assert.equal(toggleGrid("none", "medium"), "medium");
   assert.equal(toggleGrid("medium", "medium"), "none");
   assert.equal(toggleGrid("small", "large"), "large");
+  // G goes round as the World Editor's: none, large, medium, small, none.
+  const seen: string[] = [];
+  let g: GridSize = "none";
+  for (let i = 0; i < 5; i++) seen.push(g = nextGrid(g));
+  assert.deepEqual(seen, ["large", "medium", "small", "none", "large"]);
 });
 
 test("navalColors: water shows, deep stronger than shallow, land and blocked cells don't", () => {

@@ -42,6 +42,12 @@ type PlainKeys = Keys & { shiftKey: boolean };
 /** Space alone: selects the last selected object, or deselects. */
 export const isRecallKey = (e: PlainKeys) => keyOf(e) === " " && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
 
+/** Studio's key for turning the selection toward the pointer ("Face point"). Not F, the World Editor's Fog Effects;
+ *  T is none of its terrain view's keys (its View menu, read by we-drive --view-menu, 2026-11-10). */
+export const FACE_KEY = "T";
+/** T alone (Shift too, for caps lock's sake): the selection turns toward the pointer. Ctrl+T is View > Terrain. */
+export const isFaceKey = (e: Keys) => keyOf(e).toUpperCase() === FACE_KEY && !e.ctrlKey && !e.metaKey && !e.altKey;
+
 /** Ctrl+F1: the selection in the Object Editor. */
 export const isObjectEditorKey = (e: Keys) => keyOf(e) === "F1" && (e.ctrlKey || e.metaKey) && !e.altKey;
 
