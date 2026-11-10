@@ -87,6 +87,72 @@ fn damaged_manifests_never_panic_a_save() {
     }
 }
 
+/// The manifest is replaced in one step (a new file renamed over it), not written over in place: a
+/// crash mid-write can't leave it truncated. Seen through a hard link to the old file: an in-place write
+/// would change what the link shows too.
+#[test]
+fn a_manifest_save_replaces_the_file_in_one_step() {
+    let dir = workdir("manifest-atomic");
+    let root = new_project(&dir);
+    let before = fs::read(root.join(MANIFEST)).unwrap();
+    let link = dir.join("old-manifest");
+    fs::hard_link(root.join(MANIFEST), &link).unwrap();
+    project::write_files(&root, extracted(&root, "Renamed", &[("war3map.j", SCRIPT)])).unwrap();
+    assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Renamed");
+    assert_eq!(fs::read(&link).unwrap(), before, "the old file was written over in place");
+    let mut names: Vec<String> =
+        fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert!(!names.iter().any(|n| n.ends_with(".tmp")), "a temporary file was left: {names:?}");
+    // Saving again over the replaced file works (rename over an existing file, Windows too).
+    let m = Manifest { format: 1, map: Some(header("Again")), archive: Default::default(), pack: Default::default() };
+    m.save(&root).unwrap();
+    assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Again");
+}
+
+/// Whether the file system under `dir` tells names apart by case.
+fn case_sensitive(dir: &std::path::Path) -> bool {
+    let probe = dir.join("CaseProbe");
+    fs::write(&probe, b"").unwrap();
+    let sensitive = !dir.join("caseprobe").exists();
+    fs::remove_file(&probe).unwrap();
+    sensitive
+}
+
+/// A sync that brings a file in another case: on a case-sensitive file system the old name goes (not
+/// both files next to each other), on one that ignores case the file stays, under its old name.
+#[test]
+fn a_sync_with_a_name_in_another_case_leaves_one_file() {
+    let dir = workdir("case");
+    let root = new_project(&dir);
+    let map = root.join("map");
+    fs::write(map.join("Foo.txt"), b"old").unwrap();
+    fs::create_dir_all(map.join("Sub")).unwrap();
+    fs::write(map.join("Sub").join("Bar.txt"), b"old bar").unwrap();
+    let files: &[(&str, &[u8])] = &[("war3map.j", SCRIPT), ("foo.txt", b"new"), ("sub/Bar.txt", b"new bar")];
+    // Nothing is lost by the rename, so the question before deleting doesn't ask about it.
+    let codecs = w3proj::Registry::with_formats(&[]).unwrap();
+    assert_eq!(project::would_delete(&root, &extracted(&root, "Map", files), &codecs).unwrap(), Vec::<String>::new());
+    project::write_files(&root, extracted(&root, "Map", files)).unwrap();
+    let listed = |d: &std::path::Path| {
+        let mut v: Vec<String> = fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    };
+    if case_sensitive(&dir) {
+        assert_eq!(listed(&map), ["foo.txt", "sub", "war3map.j"]);
+        assert_eq!(listed(&map.join("sub")), ["Bar.txt"]);
+    } else {
+        assert_eq!(listed(&map), ["Foo.txt", "Sub", "war3map.j"], "the file keeps its name");
+        assert_eq!(listed(&map.join("Sub")), ["Bar.txt"]);
+    }
+    assert_eq!(fs::read(map.join("foo.txt")).unwrap(), b"new");
+    assert_eq!(fs::read(map.join("sub").join("Bar.txt")).unwrap(), b"new bar");
+    // The same sync again changes nothing.
+    let report = project::write_files(&root, extracted(&root, "Map", files)).unwrap();
+    assert_eq!((report.deleted, report.written), (0, 0));
+}
+
 /// Only where a name can hold a `\` (on Windows these names are paths).
 #[cfg(unix)]
 #[test]

@@ -111,7 +111,9 @@ impl Manifest {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => fresh,
             Err(e) => return Err(kept(e.to_string())),
         };
-        write_if_changed(&path, text.as_bytes())?;
+        if fs::read(&path).ok().as_deref() != Some(text.as_bytes()) {
+            write_atomic(&path, text.as_bytes())?;
+        }
         Ok(())
     }
 
@@ -478,6 +480,33 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<bool> {
     Ok(true)
 }
 
+/// Replaces `path` in one step: the bytes go to a temporary file next to it (same folder, so the same
+/// file system), flushed to disk, then renamed over it. A crash mid-write leaves the old file whole
+/// (and maybe the temporary file), never a truncated one. `fs::rename` replaces an existing file on
+/// Windows too (MoveFileEx with MOVEFILE_REPLACE_EXISTING).
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    fs::create_dir_all(dir)?;
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // One temporary name per process and call, so two writers never share one.
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()));
+    let done = (|| -> std::io::Result<()> {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)
+    })();
+    if let Err(e) = done {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
 fn walk(root: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
     if !there(root)? {
@@ -525,10 +554,26 @@ fn is_stray(rel: &str) -> bool {
 /// The files in `dir` that aren't in `files` (paths relative to `dir`, `/` between folders): the
 /// ones a sync deletes, and the strays it leaves alone.
 fn extra_files(dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<(Vec<String>, Vec<String>)> {
-    let wanted: BTreeSet<String> = files.keys().map(|k| k.to_ascii_lowercase()).collect();
-    let (strays, gone) = walk(dir)?
-        .into_iter()
-        .filter(|existing| !wanted.contains(&existing.to_ascii_lowercase()))
+    let on_disk = walk(dir)?;
+    let listed: BTreeSet<&str> = on_disk.iter().map(String::as_str).collect();
+    let mut wanted: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for k in files.keys() {
+        wanted.entry(k.to_ascii_lowercase()).or_default().push(k);
+    }
+    // A file is kept when it has a wanted name exactly, or when it is the file a wanted name in
+    // another case opens: on a file system that ignores case (Windows, macOS) the wanted name is
+    // there without being listed itself. On one that doesn't (Linux), the wanted name opens nothing
+    // yet, or a file of its own that the walk listed: then the existing one goes.
+    let kept = |existing: &str| match wanted.get(&existing.to_ascii_lowercase()) {
+        None => false,
+        Some(names) => names
+            .iter()
+            .any(|w| *w == existing || (!listed.contains(w) && dir.join(w).is_file())),
+    };
+    let (strays, gone) = on_disk
+        .iter()
+        .filter(|existing| !kept(existing))
+        .cloned()
         .partition(|existing| is_stray(existing));
     Ok((gone, strays))
 }
