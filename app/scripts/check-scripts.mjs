@@ -90,15 +90,20 @@ export function smokeChecks(source) {
   for (const m of after.matchAll(/await (\w+)\(page, found\b/g)) if (m[1] !== "check") run.add(m[1]);
   for (const m of after.matchAll(/for \(const check of \[([^\]]*)\]\) await check\(page, found\b/g)) for (const n of topLevel(m[1])) run.add(n);
   const declared = new Set([...source.matchAll(/^(?:async )?function (\w+)\s*\(/gm)].map((m) => m[1]));
-  return { only, run: [...run], declared };
+  // Two names on one line of the map (`a, b,`): it's kept one per line so parallel branches don't conflict on it.
+  const crowded = map[1].split("\n").filter((l) => /^\s*\w+\s*,\s*\w+/.test(l)).map((l) => l.trim());
+  return { only, run: [...run], declared, crowded };
 }
 
 /** Where app-smoke.mjs's `--only` map and its full run disagree, as messages. */
 export function smokeListProblems(source) {
   const checks = smokeChecks(source);
   if (!checks) return ["app-smoke.mjs: its --only map (`const onlyChecks = { … };`) wasn't found; update check-scripts.mjs with it"];
-  const { only, run, declared } = checks;
+  const { only, run, declared, crowded } = checks;
   const problems = [];
+  if (crowded.length) problems.push(`app-smoke.mjs: the --only map has one check per line; split: ${crowded.join(" | ")}`);
+  const unsorted = only.findIndex((n, i) => i > 0 && only[i - 1].localeCompare(n, "en", { sensitivity: "base" }) > 0);
+  if (unsorted > 0) problems.push(`app-smoke.mjs: the --only map is in alphabetical order; ${only[unsorted]} comes before ${only[unsorted - 1]}`);
   const inOnly = new Set(only);
   const twice = only.filter((n, i) => only.indexOf(n) !== i);
   if (twice.length) problems.push(`app-smoke.mjs: named twice in the --only map: ${[...new Set(twice)].join(", ")}`);

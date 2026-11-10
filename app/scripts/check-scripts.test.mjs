@@ -56,6 +56,13 @@ test("the --only map and the full run must name the same checks", () => {
   // One named in both but declared nowhere.
   const undeclared = smoke.replace("async function viewModes(", "async function viewModesRenamed(");
   assert.match(smokeListProblems(undeclared).join("\n"), /not declared as functions: viewModes/);
+  // Two checks on one line, and one out of alphabetical order: both said (parallel branches then conflict on the line).
+  const crowded = smoke.replace(map, map.replace("        cameraEditing,\n", "").replace("        byHand,", "        byHand, cameraEditing,"));
+  assert.notEqual(crowded, smoke);
+  assert.match(smokeListProblems(crowded).join("\n"), /one check per line; split: byHand, cameraEditing,/);
+  const unsorted = smoke.replace(map, map.replace("        viewModes,\n", "").replace("        byHand,", "        viewModes,\n        byHand,"));
+  assert.notEqual(unsorted, smoke);
+  assert.match(smokeListProblems(unsorted).join("\n"), /alphabetical order; byHand comes before viewModes/);
   // The map itself gone (renamed): said so, not passed.
   assert.match(smokeListProblems(smoke.replace("const onlyChecks = {", "const checks = {")).join("\n"), /wasn't found/);
 });

@@ -6333,7 +6333,46 @@ async function run() {
     // --only=graphics is graphicsModes after the project checks.
     const only = process.argv.find((x) => x.startsWith("--only="))?.slice(7);
     if (only && only !== "graphics") {
-      const onlyChecks = { newMaps, terrainWiring, placeObjects, mcpStartMove, waterPathing, tileTemplate, tilesInPlace, tileCleanup, objectsWhileOpening,
+      // One check per line, in alphabetical order (check-scripts.mjs keeps it so): branches that add checks then touch
+      // different lines and merge without conflicts.
+      const onlyChecks = {
+        byHand,
+        cameraEditing,
+        chapterObjects,
+        configSafety,
+        contextLoss,
+        dataSafety,
+        drawCalls,
+        editorExtras,
+        editorTabRaces: (p, f) => editorTabRaces(p, f, project),
+        flyingHeights,
+        gameReadsOnce,
+        graphicsModes,
+        heightsLimits,
+        heightsPreserve,
+        heightsUniform,
+        itemDrops,
+        itemTablesAccess,
+        keyChords,
+        mcpStartMove,
+        moduleFunctions,
+        newMaps,
+        niceToHaves,
+        objectCopy,
+        objectLayout,
+        objectManagerLive,
+        objectsWhileOpening,
+        placeObjects,
+        placerAndCampaign,
+        playerStarts: (p, f) => playerStarts(p, f, project),
+        realMapSave,
+        resizeUndo,
+        scriptGuard,
+        shouldHaves,
+        staleEditors,
+        syncSafety,
+        terrainSelectCameras,
+        terrainWiring,
         // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
         testMapWithoutGame: async (p, f) => {
           const folder = join(work, "test-map-only");
@@ -6343,7 +6382,15 @@ async function run() {
           await until("the terrain editor", () => p.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
           return testMapWithoutGame(p, f);
         },
-        heightsPreserve, heightsUniform, heightsLimits, realMapSave, flyingHeights, wholeMapGround, cameraEditing, terrainSelectCameras, viewModes, unitProperties, itemTablesAccess, itemDrops, triggersAndAi, staleEditors, scriptGuard, resizeUndo, dataSafety, configSafety, syncSafety, shouldHaves, placerAndCampaign, chapterObjects, editorExtras, objectManagerLive, niceToHaves, byHand, moduleFunctions, objectCopy, objectLayout, graphicsModes, keyChords, gameReadsOnce, editorTabRaces: (p, f) => editorTabRaces(p, f, project), playerStarts: (p, f) => playerStarts(p, f, project), drawCalls, contextLoss };
+        tileCleanup,
+        tilesInPlace,
+        tileTemplate,
+        triggersAndAi,
+        unitProperties,
+        viewModes,
+        waterPathing,
+        wholeMapGround,
+      };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
       found.push(...problems(page.events));
