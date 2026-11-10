@@ -37,6 +37,7 @@
       {
         "id": "w3.objectEditor",
         "title": "Object Editor",
+        "graphicsMode": "reopen",
         "patterns": [
           "*.w3u.json",
           "*.w3t.json",

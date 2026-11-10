@@ -28,7 +28,7 @@
     ],
     "viewContainers": [{ "id": "triggers", "title": "Triggers", "icon": "ϟ", "order": 5 }],
     "views": [{ "id": "w3.triggers.overview", "title": "Triggers", "container": "triggers" }],
-    "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "patterns": ["war3map.wtg", "war3map.wtg.json"] }],
+    "editors": [{ "id": "w3.triggerEditor", "title": "Trigger Editor", "graphicsMode": "reopen", "patterns": ["war3map.wtg", "war3map.wtg.json"] }],
     "commands": [
       { "id": "w3.triggers.export", "when": "project", "title": "Export Triggers…", "category": "Triggers" },
       { "id": "w3.triggers.import", "when": "project", "title": "Import Triggers…", "category": "Triggers" },

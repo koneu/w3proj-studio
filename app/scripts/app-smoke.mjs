@@ -2689,6 +2689,89 @@ async function dataSafety(page, found) {
   }
 }
 
+/** The workbench's own state (branch workbench-polish):
+ *  1. A project's tabs come back with their editors where they were: the text editor's selection and first line in
+ *     sight go into the webview's storage when the tabs close, and come back from there.
+ *  2. The Trigger Editor's tree is as wide as its sash is dragged, remembered for the next Trigger Editor; a double
+ *     click puts the default back.
+ *  3. Another graphics mode opens the model viewer again (its tab, in place), not the text editor beside it. */
+async function workbenchState(page, found) {
+  const fail = (what) => found.push(`workbench state: ${what}`);
+  const k = await heightKit(page, "WorkbenchState");
+  const original = await k.setting("game.graphicsMode");
+  const J = "map/war3map.j";
+  const tabOf = (p) => `w3Workbench.editors.tabs.find((t) => t.path === ${JSON.stringify(p)})`;
+  const storeKey = `(() => { const r = w3.workspace.project().root.replace(/[\\\\/]+$/, ""); return "w3.openEditors:" + (/^[A-Za-z]:/.test(r) ? r.toLowerCase() : r); })()`;
+  try {
+    // ---- 1. The text editor's place, through the storage ----
+    await page.evaluate(`w3.editors.open(${JSON.stringify(J)})`);
+    await until("the script's editor", () => page.evaluate(`!!${tabOf(J)}?.instance?.viewState`), 20000);
+    const lines = await page.evaluate(`document.querySelectorAll(".editor-pane:not([hidden]) .cm-line").length`);
+    if (lines < 5) return fail(`the script shows ${lines} lines`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    const stored = await page.evaluate(`JSON.parse(localStorage.getItem(${storeKey}) ?? "null")`);
+    if (!stored?.tabs?.some((t) => t.path === J && t.view && typeof t.view.anchor === "number")) fail(`closing the tabs didn't keep the script's place: ${JSON.stringify(stored)?.slice(0, 300)}`);
+    // A place further down, as if the last session left it there.
+    const at = { anchor: 40, head: 52, top: 30 };
+    await page.evaluate(`(() => { const s = JSON.parse(localStorage.getItem(${storeKey})); s.tabs = s.tabs.map((t) => t.path === ${JSON.stringify(J)} ? { ...t, view: ${JSON.stringify(at)} } : t); s.active = ${JSON.stringify(J)}; localStorage.setItem(${storeKey}, JSON.stringify(s)); })()`);
+    await page.evaluate(`w3.editors.restore()`);
+    await until("the script back", () => page.evaluate(`!!${tabOf(J)}?.instance?.viewState`), 20000);
+    await sleep(300);
+    const back = await page.evaluate(`${tabOf(J)}.instance.viewState()`);
+    if (back.anchor !== at.anchor || back.head !== at.head) fail(`the selection came back as ${JSON.stringify(back)}, not ${JSON.stringify(at)}`);
+    const scrolled = await page.evaluate(`document.querySelector(".editor-pane:not([hidden]) .cm-scroller")?.scrollTop ?? -1`);
+    if (!(scrolled > 0)) fail(`the script didn't scroll back to line ${at.top} (scrollTop ${scrolled})`);
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== J) fail("the remembered active tab isn't active");
+
+    // ---- 2. The Trigger Editor's sash ----
+    const wtg = await page.evaluate(`w3.workspace.files().map((f) => f.path).find((p) => /war3map\\.wtg(\\.json)?$/i.test(p)) ?? null`);
+    if (!wtg) fail("the new map has no trigger file");
+    else {
+      const width = `(document.querySelector(".editor-pane:not([hidden]) .trig-tree")?.getBoundingClientRect().width ?? -1)`;
+      const sash = `document.querySelector(".editor-pane:not([hidden]) .trig-tree .sash")`;
+      const openWtg = async () => {
+        await page.evaluate(`w3.editors.open(${JSON.stringify(wtg)})`);
+        await until("the Trigger Editor's sash", () => page.evaluate(`!!${sash}`), 20000);
+        await sleep(200);
+      };
+      await openWtg();
+      await page.evaluate(`${sash}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+      const before = await page.evaluate(width);
+      await page.evaluate(`(() => {
+        const s = ${sash}, r = s.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + 50;
+        const ev = (type, cx) => s.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, button: 0, clientX: cx, clientY: y }));
+        ev("pointerdown", x); ev("pointermove", x + 60); ev("pointermove", x + 150); ev("pointerup", x + 150);
+      })()`);
+      const dragged = await page.evaluate(width);
+      if (Math.abs(dragged - before - 150) > 2) fail(`dragging the sash 150px made the tree ${before} → ${dragged} wide`);
+      await page.evaluate(`w3.editors.closeAll()`);
+      await openWtg();
+      const again = await page.evaluate(width);
+      if (Math.abs(again - dragged) > 2) fail(`the next Trigger Editor's tree is ${again} wide, not the ${dragged} it was dragged to`);
+      await page.evaluate(`${sash}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+      if (Math.abs((await page.evaluate(width)) - before) > 2) fail(`a double click didn't put the default width back (${await page.evaluate(width)}, default ${before})`);
+    }
+
+    // ---- 3. Another graphics mode: the model viewer opens again, the text editor doesn't ----
+    if (!game) return fail("the graphics mode part needs W3PROJ_GAME");
+    await page.evaluate(`w3.settings.set("game.graphicsMode", "hd")`);
+    const model = `game:${["Units", "Human", "Footman", "Footman.mdx"].join(String.fromCharCode(92))}`;
+    await page.evaluate(`w3.editors.open(${JSON.stringify(J)})`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(model)}, "w3.modelViewer")`);
+    await until("the model viewer", () => page.evaluate(`!!${tabOf(model)}?.instance`), 30000);
+    await page.evaluate(`(() => { window.__wsModel = ${tabOf(model)}.instance; window.__wsText = ${tabOf(J)}.instance; })()`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", "sd")`);
+    await until("the model viewer opened again", () => page.evaluate(`!!${tabOf(model)}?.instance && ${tabOf(model)}.instance !== window.__wsModel`), 30000)
+      .catch(() => fail("switching to Classic didn't open the model viewer again"));
+    if (!(await page.evaluate(`${tabOf(J)}?.instance === window.__wsText`))) fail("switching the graphics mode opened the text editor again too");
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== model) fail("the model viewer isn't the active tab after the reopen");
+  } finally {
+    await page.evaluate(`window.__wsModel = window.__wsText = null`);
+    await page.evaluate(`w3.settings.set("game.graphicsMode", ${JSON.stringify(original ?? "hd")})`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** What a sync from a map (Sync Project from .w3x, a World Editor save) must not cost (sync-safety), through the command:
  *  1. Files of the project the map doesn't have are removed only after the user said so: Cancel writes nothing.
  *  2. The user's comments and own keys in w3proj.toml stay, byte for byte when nothing Studio owns changed.
@@ -2729,8 +2812,11 @@ async function syncSafety(page, found) {
     if (read(manifestPath) !== manifest) fail("Cancel changed w3proj.toml");
     // ---- 2. Remove and sync: the added file goes; the manifest and the stray stay ----
     await page.evaluate(`window.__answer = "Remove and sync"`);
+    // An open tab comes back after the sync rewrote the files (the sync closes them all first).
+    await page.evaluate(`w3.editors.open("map/war3map.j")`);
     err = await sync();
     if (err) fail(`the sync failed: ${err}`);
+    if ((await page.evaluate(`w3.editors.activePath()`)) !== "map/war3map.j") fail(`after the sync the active tab is ${await page.evaluate(`w3.editors.activePath()`)}, not the script open before it`);
     if (existsSync(added)) fail("the sync the user agreed to didn't remove the added file");
     if (read(manifestPath) !== manifest) fail(`the sync changed w3proj.toml: ${JSON.stringify(read(manifestPath))}`);
     if (unix) {
@@ -6920,6 +7006,7 @@ async function run() {
         viewModes,
         waterPathing,
         wholeMapGround,
+        workbenchState,
       };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
@@ -7022,6 +7109,7 @@ async function run() {
     await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
     await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
     await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
+    await workbenchState(page, found).catch((e) => found.push(`workbench state: ${e.message}`));
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
     await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));

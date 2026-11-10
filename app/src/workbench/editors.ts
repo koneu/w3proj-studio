@@ -1,5 +1,6 @@
 import type { Disposable, EditorContribution, EditorDocument, EditorInstance, EditorProvider } from "../extensions/api";
 import { disposable, errorView, Emitter, globMatch, h } from "./dom";
+import { graphicsModeReopens, keptView } from "./tabmemory";
 import type { Stamp } from "./workspace";
 
 interface Tab {
@@ -26,6 +27,8 @@ interface Tab {
   /** The file's size, time and contents' hash when the editor read it or last wrote it; a save over anything
    *  else asks first. Undefined: not a file on disk, or not known. */
   stamp?: Stamp | null;
+  /** The view state its next editor gets (remembered from the last session, or kept over a reopen in place). */
+  view?: unknown;
 }
 
 /** Size and time alike, and, where both have one, the contents' hash: a same-size write in the same millisecond
@@ -35,7 +38,8 @@ const sameStamp =(a: Stamp | null, b: Stamp | null) => a === b
 
 /** Open tabs as remembered per project (see EditorService.memory). */
 export interface OpenEditors {
-  tabs: { path: string; editor: string }[];
+  /** `view`: what the tab's editor gave as its viewState (see keptView). */
+  tabs: { path: string; editor: string; view?: unknown }[];
   active?: string;
 }
 
@@ -249,6 +253,8 @@ export class EditorService {
       writeText: (text) => this.own(tab, () => this.io.writeText(path, text)),
       writeBytes: (bytes) => this.own(tab, () => this.io.writeBytes(path, bytes)),
       setDirty: (d) => { tab.dirty = d; tab.tabEl.classList.toggle("dirty", d); },
+      // Read when the editor is made: a reopen in place gives the state from just before.
+      get viewState() { return tab.view; },
     };
     tab.doc = doc;
     tab.provider = provider;
@@ -263,9 +269,11 @@ export class EditorService {
     if (!state?.tabs.length) return;
     this.remembering = false;
     try {
-      for (const { path, editor } of state.tabs) {
+      for (const { path, editor, view } of state.tabs) {
         if (this.tabs.some((t) => t.path === path) || !this.contributions.some((c) => c.id === editor) && !this.providers.has(editor)) continue;
-        this.addTab(path, editor).pending = true;
+        const tab = this.addTab(path, editor);
+        tab.pending = true;
+        tab.view = keptView(view);
       }
     } finally {
       this.remembering = true;
@@ -274,9 +282,17 @@ export class EditorService {
     if (active) this.show(active);
   }
 
-  private remember() {
+  /** Stores the open tabs (with their editors' view states) for the project: on every tab change, and before the
+   *  window closes or the tabs close for a project switch. */
+  remember() {
     if (!this.remembering || this.awaitingRestore || !this.memory) return;
-    this.memory.store({ tabs: this.tabs.map((t) => ({ path: t.path, editor: t.providerId })), active: this.active?.path });
+    this.memory.store({ tabs: this.tabs.map((t) => ({ path: t.path, editor: t.providerId, view: this.viewOf(t) })), active: this.active?.path });
+  }
+
+  /** What a tab's editor gives as its view state now; a tab not opened yet keeps the one it came back with. */
+  private viewOf(t: Tab): unknown {
+    if (!t.instance?.viewState) return t.instance ? undefined : t.view;
+    try { return keptView(t.instance.viewState()); } catch { return undefined; }
   }
 
   /** The file's size and time on disk now; undefined when that isn't known. */
@@ -348,20 +364,33 @@ export class EditorService {
    *  loading opens again once it's there (if it has none then); one not opened yet loads anew anyway. Resolves with
    *  how many were left for unsaved changes. */
   async reopenClean(path: string, providerId?: string): Promise<number> {
-    let kept = 0;
     const key = this.key(path);
-    for (const t of this.tabs.filter((x) => x.provider && this.key(x.path) === key && (!providerId || x.providerId === providerId))) {
+    return (await this.reopenCleanWhere((t) => this.key(t.path) === key && (!providerId || t.providerId === providerId))).length;
+  }
+
+  /** reopenClean for the tabs `which` picks; resolves with the paths of those left for unsaved changes. */
+  private async reopenCleanWhere(which: (t: Tab) => boolean): Promise<string[]> {
+    const kept: string[] = [];
+    for (const t of this.tabs.filter((x) => x.provider && which(x))) {
       // Closed while an earlier tab of this loop was opening again.
       if (!this.tabs.includes(t)) continue;
-      if (t.loading) { t.missed?.add(key); continue; }
-      if (t.dirty) { kept++; continue; }
+      if (t.loading) { t.missed?.add(this.key(t.path)); continue; }
+      if (t.dirty) { kept.push(t.path); continue; }
       await this.reopen(t);
     }
     return kept;
   }
 
-  /** Opens a tab's editor again in place (its file as it is now). */
+  /** The graphics mode changed: the tabs showing the mode's art (graphicsModeReopens) open again in place, their
+   *  view states kept. Resolves with the files of those left as they are for unsaved changes. */
+  async followGraphicsMode(): Promise<string[]> {
+    const kept = await this.reopenCleanWhere((t) => graphicsModeReopens(this.contributions.find((c) => c.id === t.providerId), t.path));
+    return [...new Set(kept)];
+  }
+
+  /** Opens a tab's editor again in place (its file as it is now), where it was (its view state). */
   private async reopen(t: Tab) {
+    if (t.instance) t.view = this.viewOf(t);
     t.conflict = undefined;
     t.instance?.dispose?.();
     t.instance = undefined;
@@ -500,6 +529,8 @@ export class EditorService {
 
   /** Closes every editor (e.g. for a project switch: the project's tabs stay remembered). */
   async closeAll() {
+    // Where each editor was, before they go.
+    this.remember();
     this.remembering = false;
     try {
       for (const t of [...this.tabs]) await this.close(t, true);

@@ -1,6 +1,7 @@
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { adoptOldTabKeys, tabsKey } from "./tabmemory";
 import { timeLimit } from "./timelimit";
+import { followGraphicsMode } from "./graphicsmode";
 import type { CommandContribution, W3Api } from "../extensions/api";
 import { ExtensionHost, type ExtensionRecord } from "../extensions/host";
 import { McpTools } from "../extensions/mcp";
@@ -106,7 +107,7 @@ export class Workbench {
     this.menuBar = new MenuBar(() => menuTree(this.commands.all().map((c) => ({ ...c, keybinding: this.keybindings.primaryKey(c.id) }))), (c) => this.run(c),
       (when) => whyBlocked(when, { project: !!this.workspace.project(), editor: !!this.editors.activePath(), save: this.editors.canSave(), undo: this.editors.canUndo() }));
     this.titleBar = new TitleBar(this.menuBar.root, () => this.run("workbench.commandPalette"));
-    this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking());
+    this.titleBar.guardClose(() => this.editors.unsavedPaths().length, () => this.editors.closeAllAsking(), () => this.editors.remember());
     this.workspace.onDidChange.on(() => this.titleBar.show(this.workspace.project()?.name ?? null));
     root.append(this.titleBar.root, main, this.statusBar.root);
     this.notifications = new Notifications(root);
@@ -126,6 +127,9 @@ export class Workbench {
     this.editors.activate = fire;
     this.views.run = (c) => this.run(c);
     this.editors.confirm = (m, ...a) => this.notifications.show("warning", m, a);
+    followGraphicsMode({ get: () => this.settings.get<string>("game.graphicsMode"), onDidChange: (l) => this.settings.onDidChange(l),
+      follow: () => this.editors.followGraphicsMode(), save: (p) => this.editors.saveFile(p), reopen: (p) => this.editors.reopenClean(p),
+      ask: (m, ...a) => this.notifications.show("info", m, a) });
     this.editors.whyUnavailable = (id) => {
       const e = this.host.extensions.find((x) => x.manifest.id === id);
       if (!e) return undefined;
@@ -277,6 +281,7 @@ export class Workbench {
         save: (p) => wb.editors.saveFile(p),
         close: (p) => wb.editors.closeWhere((x) => x === p),
         reopen: (p, providerId) => wb.editors.reopenClean(p, providerId),
+        restore: () => wb.editors.restore(),
       },
       window: {
         showInfo: (m, ...a) => wb.notifications.show("info", m, a),

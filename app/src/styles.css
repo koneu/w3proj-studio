@@ -114,6 +114,10 @@ code { font-family: var(--mono); font-size: 12px; }
 .tab-close { width: 18px; text-align: center; border-radius: 3px; visibility: hidden; }
 .tab:hover .tab-close, .tab.active .tab-close { visibility: visible; }
 .tab-close:hover { background: var(--bg-hover); }
+/* A sash (dom.ts widthSash): over the pane's right edge, shown while hovered or dragged. */
+.sash { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 5; touch-action: none; }
+.sash:hover, .sash.active { background: var(--accent-2); transition: background 0.1s 0.3s; }
+.sash.active { transition: none; }
 .tab.dirty .tab-close { visibility: visible; font-size: 0; }
 .tab.dirty .tab-close::after { content: "●"; font-size: 11px; }
 .tab.dirty .tab-close:hover { font-size: 13px; }
@@ -672,9 +676,10 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .newmap-tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); max-height: 180px; overflow-y: auto;
   border: 1px solid var(--border); padding: 4px 6px; }
 .newmap-tile { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.trig-editor { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; height: 100%; overflow: hidden; }
+/* The tree's width is the sash's (--trig-tree-width), leaving the trigger at least 240px. */
+.trig-editor { display: grid; grid-template-columns: clamp(180px, var(--trig-tree-width, 300px), calc(100% - 240px)) minmax(0, 1fr); height: 100%; overflow: hidden; }
 .trig-loading { padding: 16px; }
-.trig-tree { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--border); user-select: none; }
+.trig-tree { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--border); user-select: none; }
 .trig-tree-rows { flex: 1; overflow: auto; padding: 4px 0; }
 /* The buttons wrap inside the column rather than run into the right pane. */
 .trig-toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); }

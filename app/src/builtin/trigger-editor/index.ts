@@ -24,7 +24,7 @@ import {
   allocItemId, parseWct, parseWctText, parseWtg, parseWtgJson, readWctFile, readWtgFile, textTriggers, TYPE_INDEX, WCT_RAW, WCT_TEXT, WTG_JSON, writeWct, writeWctFile, writeWtg, writeWctText, writeWtgFile, writeWtgJson, wtgPath,
   type CustomTextFile, type Eca, type Item, type Param, type TriggerFile, type TriggerItem, type Variable,
 } from "../../lib/triggers/wtg";
-import { copyText, errorView, h } from "../../workbench/dom";
+import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
@@ -33,6 +33,7 @@ import { deleteVariable, newVariable, renameVariable, variableParams, variablesT
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
 import { Listeners } from "../../lib/listeners";
+import { ModeCache } from "../../lib/modecache";
 
 /** A trigger of events, conditions and actions (not custom text, a script item or a comment). */
 const isGuiTrigger = (it: Item): it is TriggerItem => "ecas" in it && it.type === 8 && !it.isCustom && !it.isComment;
@@ -345,6 +346,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           openView = view;
           view.edited = () => { if (openView === view) kinds.edits.fire(); };
         }
+        // Asked for (Variables, a trigger to show), else where it was when the tab was last open.
+        const askedWhere = startWithVariables || !!startWithTrigger;
         if (startWithVariables) { startWithVariables = false; view.showVariables(); }
         if (startWithTrigger) {
           const { name, at } = startWithTrigger;
@@ -352,6 +355,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           startWithTrigger = null;
           if (it) view.revealItem(it, at);
         }
+        if (!askedWhere) view.applyViewState(doc.viewState);
         const save = async () => {
           // What is saved is the state at the start; an edit made meanwhile stays unsaved.
           const at = view.mark();
@@ -363,6 +367,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         return {
           undo: () => view.step(-1),
           redo: () => view.step(1),
+          viewState: () => view.viewState(),
           save,
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
@@ -543,24 +548,19 @@ async function objectNames(w3: W3Api, file: TriggerFile): Promise<Map<string, st
   return out;
 }
 
-/** Game images (category icons) as data URLs. */
-const iconCache = new Map<string, Promise<string | null>>();
+/** Game images (category icons) as data URLs, by graphics mode and path (the modes have their own icons). */
+const iconCache = new ModeCache<string | null>();
 function icon(w3: W3Api, path: string): Promise<string | null> {
   if (!path) return Promise.resolve(null);
-  let p = iconCache.get(path.toLowerCase());
-  if (!p) {
-    p = (async () => {
-      const file = /\.\w+$/.test(path) ? path : `${path}.blp`;
-      const mip = decodeImage(await w3.game.read(file), file).mip(0);
-      const canvas = document.createElement("canvas");
-      canvas.width = mip.width;
-      canvas.height = mip.height;
-      canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(mip.rgba), mip.width, mip.height), 0, 0);
-      return canvas.toDataURL();
-    })().catch(() => null);
-    iconCache.set(path.toLowerCase(), p);
-  }
-  return p;
+  return iconCache.get(() => w3.settings.get<string>("game.graphicsMode") ?? "hd", path.toLowerCase(), () => (async () => {
+    const file = /\.\w+$/.test(path) ? path : `${path}.blp`;
+    const mip = decodeImage(await w3.game.read(file), file).mip(0);
+    const canvas = document.createElement("canvas");
+    canvas.width = mip.width;
+    canvas.height = mip.height;
+    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(mip.rgba), mip.width, mip.height), 0, 0);
+    return canvas.toDataURL();
+  })().catch(() => null));
 }
 
 type Selection = { kind: "header" } | { kind: "variables" } | { kind: "item"; type: number; id: number };
@@ -640,8 +640,13 @@ class TriggerView {
     };
     el.tabIndex = -1;
     el.addEventListener("keydown", this.keydown);
-    el.append(h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, this.searchBox, editable ? this.toolbar() : null, this.tree), this.detail);
+    const treePane = h("div.trig-tree", { onmousedown: () => { this.area = "tree"; } }, this.modeBar, this.searchBox, editable ? this.toolbar() : null, this.tree);
+    el.append(treePane, this.detail);
+    // The tree's width, dragged at its edge (remembered for every Trigger Editor); the CSS leaves the trigger 240px.
+    widthSash({ key: "triggerEditor.tree", pane: treePane, initial: 300, min: 180, max: () => Math.max(180, el.clientWidth - 240),
+      apply: (px) => el.style.setProperty("--trig-tree-width", `${px}px`) });
     this.detail.addEventListener("mousedown", () => { this.area = "detail"; });
+    this.tree.addEventListener("scroll", () => { if (this.tree.clientHeight > 0) this.treeTop = this.tree.scrollTop; });
     this.unsubscribe = kinds.onChange(() => this.renderDetail());
     this.renderTree();
     this.renderDetail();
@@ -852,6 +857,33 @@ class TriggerView {
 
   /** Selects the variables table. */
   showVariables() { this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
+
+  /** The tree's scroll position as last seen while shown (a hidden tab's reads 0). */
+  private treeTop = 0;
+  /** Where the editor is, kept with the project's open tabs: the tree's mode, the selection, the tree's scroll. */
+  viewState(): { mode: string; selected: Selection; top: number } {
+    return { mode: this.mode, selected: this.selected, top: this.treeTop };
+  }
+  /** Back where viewState() was; what the file no longer has (an item deleted meanwhile) is left out. */
+  applyViewState(v: unknown) {
+    if (!v || typeof v !== "object") return;
+    const { mode, selected, top } = v as { mode?: unknown; selected?: Partial<Record<string, unknown>>; top?: unknown };
+    if (mode === "triggers" || mode === "variables" || mode === "all") this.mode = mode;
+    if (selected?.kind === "header" || selected?.kind === "variables") this.selected = { kind: selected.kind };
+    else if (selected?.kind === "item" && typeof selected.type === "number" && typeof selected.id === "number") {
+      const sel: Selection = { kind: "item", type: selected.type, id: selected.id };
+      if (this.find(sel)) this.selected = sel;
+    }
+    this.renderTree();
+    this.renderDetail();
+    if (typeof top === "number" && Number.isFinite(top) && top > 0) {
+      this.treeTop = top;
+      const scroll = () => { this.tree.scrollTop = top; };
+      scroll();
+      // Laid out only once shown.
+      requestAnimationFrame(scroll);
+    }
+  }
 
   /** What the tree lists: triggers and comments, variables, or both (as stored, Reforged files
    *  keep variables in the categories). Categories show in every mode. */

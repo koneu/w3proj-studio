@@ -5,14 +5,15 @@
 import { decodeImage } from "../../lib/image/index.ts";
 import { parseMdx } from "../../lib/model/mdx";
 import { neverStoredLast } from "../../lib/model/texpath";
+import { ModeCache } from "../../lib/modecache";
 import type { loadSkins, Placed } from "./objects";
 import { alphaTexturePaths, castShadow, shadowMesh, terrainShadows, terrainShadowsInSteps, type AlphaMap, type ShadowMesh, type Sun } from "./shadows";
 import type { Terrain } from "../../lib/terrain/w3e";
 
 type Skins = Awaited<ReturnType<typeof loadSkins>>;
 
-/** Casting triangles by model path (shared by all editors). */
-const meshes = new Map<string, Promise<ShadowMesh | null>>();
+/** Casting triangles by graphics mode and model path (shared by all editors; HD and Classic models share paths). */
+const meshes = new ModeCache<ShadowMesh | null>();
 
 async function alphaMap(path: string, readFile: (path: string) => Promise<Uint8Array>): Promise<AlphaMap | null> {
   // Reforged names .tif/.blp sources the game ships as .dds; a .tif is never there, so last.
@@ -27,25 +28,20 @@ async function alphaMap(path: string, readFile: (path: string) => Promise<Uint8A
   return null;
 }
 
-function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>): Promise<ShadowMesh | null> {
-  const key = path.toLowerCase();
-  let m = meshes.get(key);
-  if (!m) {
-    m = (async () => {
-      const model = parseMdx(await readFile(path));
-      const maps = new Map<string, AlphaMap | null>();
-      for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
-      return shadowMesh(model, (p) => maps.get(p) ?? null);
-    })().catch(() => null);
-    meshes.set(key, m);
-  }
-  return m;
+function modelMesh(path: string, readFile: (path: string) => Promise<Uint8Array>, artMode: () => string): Promise<ShadowMesh | null> {
+  return meshes.get(artMode, path.toLowerCase(), () => (async () => {
+    const model = parseMdx(await readFile(path));
+    const maps = new Map<string, AlphaMap | null>();
+    for (const p of alphaTexturePaths(model)) maps.set(p, await alphaMap(p, readFile));
+    return shadowMesh(model, (p) => maps.get(p) ?? null);
+  })().catch(() => null));
 }
 
 /** `pause`: the terrain's part is done a few rows at a time, waiting for it in between (the terrain view, where it
- *  would hold up the page for a second or two on a big map); it returning false stops the work (rejects). */
+ *  would hold up the page for a second or two on a big map); it returning false stops the work (rejects).
+ *  `artMode`: the graphics mode `readFile` reads in (game.graphicsMode), which the models' meshes are kept by. */
 export async function predictShadows(terrain: Terrain, doodads: Placed[], skins: Skins, baseOf: (id: string) => string | undefined,
-  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun, pause?: () => Promise<boolean>): Promise<Uint8Array> {
+  readFile: (path: string) => Promise<Uint8Array>, sun?: Sun, pause?: () => Promise<boolean>, artMode: () => string = () => ""): Promise<Uint8Array> {
   const out = pause ? await terrainShadowsInSteps(terrain, sun, pause) : terrainShadows(terrain, sun);
   let since = performance.now();
   for (const d of doodads) {
@@ -57,7 +53,7 @@ export async function predictShadows(terrain: Terrain, doodads: Placed[], skins:
     // Doodads whose table says shadow=0 (corn, flowers, …) aren't in the World Editor's war3map.shd.
     if (!skin || skin.kind !== "w3d" || skin.bakesShadow === false) continue;
     const path = `${skin.file.replace(/\.(mdl|mdx)$/i, "")}${skin.numVar > 1 ? d.variation : ""}.mdx`;
-    const mesh = await modelMesh(path, readFile);
+    const mesh = await modelMesh(path, readFile, artMode);
     if (mesh) castShadow(out, terrain, { mesh, x: d.position[0], y: d.position[1], z: d.position[2], angle: d.angle, scale: d.scale }, sun);
   }
   return out;

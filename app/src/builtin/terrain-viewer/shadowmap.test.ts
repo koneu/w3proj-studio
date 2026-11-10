@@ -65,3 +65,34 @@ test("doodads the skin table says cast no shadow (shadow=0, as corn) stay out of
   assert.deepEqual(await predict("D000"), rock, "corn whose object data turns its shadow on casts");
   assert.equal(shadowed(await predict("D001")), 0, "a rock whose object data turns it off doesn't");
 });
+
+test("a model's casting triangles are kept per graphics mode: another mode reads its own model of the same path", async () => {
+  const files: Record<string, string> = {
+    "Doodads\\DoodadSkins.txt": "[LOpi]\nfile=Doodads\\ModePillar\nshadow=1",
+    "Units\\DestructableSkin.txt": "", "Units\\UnitSkin.txt": "", "Units\\ItemSkin.txt": "", "Units\\UnitData.slk": "ID;P\nE",
+  };
+  const w3 = { settings: { get: () => "hd" }, game: { readText: async (p: string) => files[p] ?? "" } } as unknown as W3Api;
+  const skins = await loadSkins(w3);
+  const terrain = newTerrain({ width: 32, height: 32, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], baseTile: "Ldrt", layer: 2, water: "none", noise: false, customTiles: false } as unknown as NewMapOptions);
+  // HD has a tower under the path; Classic has no model there (nothing casts).
+  let mode = "hd";
+  const tower = towerModel();
+  let reads = 0;
+  const read = async (p: string) => {
+    if (/\.mdx$/i.test(p)) reads++;
+    if (/ModePillar\.mdx$/i.test(p) && mode === "hd") return tower;
+    throw new Error(`no ${p} in ${mode}`);
+  };
+  const at: Placed = { id: "LOpi", variation: 0, position: [terrain.offsetX + 16 * 128, terrain.offsetY + 16 * 128, 0], angle: 0, scale: [1, 1, 1] };
+  const ground = terrainShadows(terrain);
+  const shadowed = (m: Uint8Array) => m.reduce((n, v, i) => n + (v !== ground[i] ? 1 : 0), 0);
+  const predict = () => predictShadows(terrain, [at], skins, () => undefined, read, undefined, undefined, () => mode);
+
+  assert.ok(shadowed(await predict()) > 10, "HD's tower casts (the control)");
+  mode = "sd";
+  assert.equal(shadowed(await predict()), 0, "in Classic, which has no model there, nothing casts: HD's mesh isn't used");
+  mode = "hd";
+  const before = reads;
+  assert.ok(shadowed(await predict()) > 10, "back in HD the tower casts again");
+  assert.equal(reads, before, "from the kept mesh: the model isn't read again");
+});

@@ -21,6 +21,25 @@ const leaf = (path: string) => {
  *  project on an offline share would hold the project open up. */
 export const mayBeSameFolder = (oldPath: string, root: string) => leaf(oldPath) === leaf(root) || leaf(oldPath).includes("~");
 
+/** An editor's view state is kept only up to this many characters of JSON: the tabs of every project share the
+ *  webview's storage (a few MB). */
+export const VIEW_STATE_LIMIT = 4096;
+
+/** A view state as it is kept: a copy through JSON, or undefined for none, one that isn't JSON or one too big. */
+export function keptView(view: unknown): unknown {
+  if (view === undefined) return undefined;
+  let json: string | undefined;
+  try { json = JSON.stringify(view); } catch { return undefined; }
+  return json === undefined || json.length > VIEW_STATE_LIMIT ? undefined : JSON.parse(json);
+}
+
+/** Whether a tab opens again when the graphics mode changes (EditorContribution.graphicsMode): an editor of the
+ *  mode's art does, one that follows by itself doesn't, others for game files only (read in the mode). */
+export function graphicsModeReopens(contribution: { graphicsMode?: "reopen" | "self" } | undefined, path: string): boolean {
+  if (contribution?.graphicsMode === "self") return false;
+  return contribution?.graphicsMode === "reopen" || path.startsWith("game:");
+}
+
 export interface KeyValueStore { readonly length: number; key(i: number): string | null; getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
 
 /** Tab state saved before the root was normalised sits under another spelling of the same folder

@@ -18,6 +18,7 @@ import { symbolTools } from "./jasstools";
 import { linter } from "./lint";
 import { errorView, h } from "../../workbench/dom";
 import { jass } from "./jass";
+import { textViewIn, type TextViewState } from "./viewstate";
 
 function language(path: string): Extension {
   const ext = path.split(".").pop()?.toLowerCase();
@@ -88,6 +89,16 @@ function reveal(view: EditorView, name: string | number) {
     view.focus();
     return;
   }
+}
+
+/** The number of the first line in sight. */
+const topLineOf = (view: EditorView) => view.state.doc.lineAt(view.lineBlockAtHeight(view.scrollDOM.scrollTop).from).number;
+
+/** Puts the selection and the scroll position back as they were when the tab was last open (see textViewIn). */
+function restoreTextView(view: EditorView, state: unknown) {
+  const v = textViewIn(state, view.state.doc.length, view.state.doc.lines);
+  if (!v) return;
+  view.dispatch({ selection: { anchor: v.anchor, head: v.head }, effects: EditorView.scrollIntoView(view.state.doc.line(v.top).from, { y: "start" }) });
 }
 
 /** Go to definition outside the text: game scripts here, the rest by the editor's owner. */
@@ -235,8 +246,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         openViews.set(doc.path, view);
         const want = pendingReveal.get(doc.path);
         if (want) { pendingReveal.delete(doc.path); requestAnimationFrame(() => reveal(view, want)); }
+        else restoreTextView(view, doc.viewState);
+        // The first line in sight, as last seen while shown: a hidden tab's scroller reads 0.
+        let topLine = topLineOf(view);
+        const onScroll = () => { if (view.scrollDOM.clientHeight > 0) topLine = topLineOf(view); };
+        view.scrollDOM.addEventListener("scroll", onScroll);
         if (lint) { el.append(problems); lint.start(view); }
         return {
+          viewState: (): TextViewState => ({ anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, top: topLine }),
           undo: () => { undo(view); },
           redo: () => { redo(view); },
           async save() {
@@ -261,6 +278,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           focus: () => view.focus(),
           dispose: () => {
             if (openViews.get(doc.path) === view) openViews.delete(doc.path);
+            view.scrollDOM.removeEventListener("scroll", onScroll);
             lint?.stop();
             activeSub.dispose();
             view.destroy();

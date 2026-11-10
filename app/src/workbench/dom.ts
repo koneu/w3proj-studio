@@ -164,3 +164,63 @@ export function copyButton(text: string | (() => string), cls = "copy-error"): H
 export function errorView(message: string, ...extra: (Node | string | null | undefined | false)[]): HTMLDivElement {
   return h("div.editor-error", {}, `${message} `, ...extra, copyButton(message));
 }
+
+/** The prefix of the remembered widths of sashes in the webview's storage (this machine, not a project). */
+export const SASH_PREFIX = "w3.sash:";
+
+/** A width dragged to: `start` moved by `dx`, kept within min and max (min wins when the room is smaller). */
+export function sashWidth(start: number, dx: number, min: number, max: number): number {
+  return Math.round(Math.max(min, Math.min(max, start + dx)));
+}
+
+/** A width as remembered, or null for none (absent, or not a positive number). */
+export function storedSashWidth(text: string | null): number | null {
+  const n = text === null ? NaN : Number(text);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+interface StorageLike { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
+
+/** A sash, as in VS Code: a handle on the right edge of `pane` (which it goes into, so `pane` needs a position)
+ *  that sets the pane's width by dragging; a double click puts `initial` back. `apply` sets the width (a CSS
+ *  variable, so the layout can still limit it); the width is remembered under `key`, for every editor of the kind.
+ *  `max`: the most it may be now (the room beside it). */
+export function widthSash(opts: { key: string; pane: HTMLElement; apply: (px: number) => void; initial: number; min: number; max: () => number },
+  storage: StorageLike | undefined = globalThis.localStorage): HTMLElement {
+  const key = SASH_PREFIX + opts.key;
+  const read = () => { try { return storage?.getItem(key) ?? null; } catch { return null; } };
+  /** The width last set: what is remembered, even where the layout shows less (a narrow window). */
+  let width = 0;
+  const set = (px: number) => { width = px; opts.apply(px); };
+  set(Math.max(opts.min, storedSashWidth(read()) ?? opts.initial));
+  let drag: { x: number; width: number; id: number } | null = null;
+  const sash = h("div.sash", {
+    title: "Drag to resize; double-click for the default width",
+    onpointerdown: (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      drag = { x: e.clientX, width: opts.pane.getBoundingClientRect().width, id: e.pointerId };
+      // A pointer the browser doesn't know (a made-up event) can't be captured: the drag still works over the sash.
+      try { sash.setPointerCapture(e.pointerId); } catch { /* not captured */ }
+      sash.classList.add("active");
+    },
+    onpointermove: (e: PointerEvent) => {
+      if (drag?.id === e.pointerId) set(sashWidth(drag.width, e.clientX - drag.x, opts.min, opts.max()));
+    },
+    onpointerup: (e: PointerEvent) => end(e),
+    onpointercancel: (e: PointerEvent) => end(e),
+    ondblclick: () => {
+      try { storage?.removeItem(key); } catch { /* not remembered */ }
+      set(opts.initial);
+    },
+  });
+  const end = (e: PointerEvent) => {
+    if (drag?.id !== e.pointerId) return;
+    drag = null;
+    sash.classList.remove("active");
+    if (sash.hasPointerCapture(e.pointerId)) sash.releasePointerCapture(e.pointerId);
+    try { storage?.setItem(key, String(width)); } catch { /* not remembered */ }
+  };
+  opts.pane.append(sash);
+  return sash;
+}

@@ -329,8 +329,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           names: new Map(file.custom.flatMap((o): [string, string][] => { const n = o.id ? nameOf(o) : ""; return n ? [[o.id!, n]] : []; })),
         });
 
+        /** The object the tab had selected when it was last open (its viewState), if the file still has it. */
+        const remembered = ((): Obj | undefined => {
+          const v = doc.viewState as { custom?: unknown; original?: unknown } | null | undefined;
+          if (typeof v?.custom === "string") return file.custom.find((c) => c.id === v.custom);
+          if (typeof v?.original === "string") return file.original.find((c) => c.base === v.original);
+          return undefined;
+        })();
         /** The anchor (single selection, Shift+click range start). */
-        let selected: Obj | null = file.custom[0] ?? file.original[0] ?? null;
+        let selected: Obj | null = remembered ?? file.custom[0] ?? file.original[0] ?? null;
         /** All selected objects; Ctrl+click toggles, Shift+click selects a range. */
         let selection = new Set<Obj>(selected ? [selected] : []);
         const select = (o: Obj | null) => {
@@ -1506,6 +1513,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             });
           },
           focus: () => search.focus(),
+          // The selected object, kept with the project's open tabs.
+          viewState: () => (selected ? (file.custom.includes(selected) ? { custom: selected.id } : { original: selected.base }) : null),
           dispose: () => {
             closed = true; focusers.delete(doc.path); actors.delete(doc.path); preview?.dispose(); sounds.stop(); for (const s of limitSubs) s.dispose();
             // Closed: the saved file is what there is again.

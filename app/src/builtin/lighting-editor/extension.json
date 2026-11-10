@@ -6,7 +6,7 @@
   "contributes": {
     "viewContainers": [{ "id": "lighting", "title": "Lighting", "icon": "☀", "order": 4.5 }],
     "views": [{ "id": "w3.lighting.overview", "title": "Lighting", "container": "lighting" }],
-    "editors": [{ "id": "w3.lightingEditor", "title": "Lighting Editor", "patterns": ["*.mdl"] }],
+    "editors": [{ "id": "w3.lightingEditor", "title": "Lighting Editor", "graphicsMode": "reopen", "patterns": ["*.mdl"] }],
     "commands": [{ "id": "w3.lighting.show", "when": "project", "menu": "Module:2:3", "title": "Lighting", "category": "Module" }]
   }
 }
