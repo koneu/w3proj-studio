@@ -258,6 +258,9 @@ export interface W3Api {
     onDidChangeActive(listener: (active: { path: string; editor: string } | null) => void): Disposable;
     /** Saves every editor with unsaved changes (e.g. before packing); resolves with how many. */
     saveAll(): Promise<number>;
+    /** Saves the editors of one file that have unsaved changes, as their tab's Save does (asking first when the file
+     *  changed on disk); resolves with how many were saved. */
+    save(path: string): Promise<number>;
     /** Asks once about unsaved changes (save all / don't save / cancel), then closes every
      *  editor; false when cancelled. Use before switching projects. */
     closeAllAsking(): Promise<boolean>;

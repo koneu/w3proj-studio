@@ -342,6 +342,19 @@ export interface SoundsService {
 
 export const SOUNDS_SERVICE = "w3.sounds";
 
+/** "w3.mapInfo", provided by Map Properties: the map's properties as the open editor holds them. */
+export interface MapInfoService {
+  /** The map item tables of the project at `root` as its open Map Properties editor holds them now (unsaved changes
+   *  included), names as shown there (string table references resolved); null when no editor of that project is open
+   *  (the saved war3map.w3i is what there is then). A copy: changing it changes nothing. */
+  liveItemTables(root: string): LiveItemTable[] | null;
+  /** After every edit, undo and redo in an open Map Properties editor, and when one closes. */
+  onDidEdit(listener: () => void): { dispose(): void };
+}
+export interface LiveItemTable { number: number; name: string; sets: { id: string; chance: number }[][] }
+
+export const MAP_INFO_SERVICE = "w3.mapInfo";
+
 /** Code editors (CodeMirror with the app's languages and theme) for other extensions' views. */
 export const CODE_EDITOR_SERVICE = "w3.codeEditor";
 export interface CodeEditorService {

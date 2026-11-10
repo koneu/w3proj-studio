@@ -3,13 +3,14 @@ import { h } from "../../workbench/dom";
 import { parseIni, parseSlk, westring } from "../../lib/formats/text";
 import { askWtsCuts, importStrings, StringTable, WtsCutError } from "../../lib/formats/wts";
 import { bindUndoKeys, History } from "../../lib/undo";
-import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
+import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type LiveItemTable, type MapInfoService, type ObjectsService } from "../../extensions/services";
+import { Listeners } from "../../lib/listeners";
 import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
 import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
-import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, renderTechtree, type TechInfo } from "./techtree";
+import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
   addPlayer, applyAllyPriorities, autoAllyPriorities, editorAllyPriorities, maxPlayers, MODIFY_ALLY_PRIORITIES, removePlayer, startLocations, type PlayerInfo,
 } from "../../lib/terrain/startlocations";
@@ -141,13 +142,20 @@ let requestedAnchor: string | null = null;
 /** Section shown last (an editor opened again after another save keeps it). */
 let lastSection: SectionId = "description";
 /** An open Map Properties editor: its project, showing a section (scrolled to an anchor), adding an item table. */
-interface OpenEditor { root: string; show(s: SectionId, anchor?: string): void; createItemTable(): { number: number; name: string } }
+interface OpenEditor { root: string; show(s: SectionId, anchor?: string): void; createItemTable(): { number: number; name: string }; itemTables(): LiveItemTable[] }
 const openEditors = new Set<OpenEditor>();
+/** MapInfoService.onDidEdit's listeners. */
+const edits = new Listeners();
 const isSection = (s: unknown): s is SectionId => SECTIONS.some((x) => x.id === s);
 
 const STRINGS = "map/war3map.wts";
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
+  const service: MapInfoService = {
+    liveItemTables: (root) => [...openEditors].filter((e) => e.root === root).at(-1)?.itemTables() ?? null,
+    onDidEdit: (listener) => edits.add(listener),
+  };
+  ctx.subscriptions.push(w3.services.provide(MAP_INFO_SERVICE, service));
   ctx.subscriptions.push(w3.mcp.registerTool("map_info", async () => {
     requireProject(w3);
     const info = await readMapDoc<Parameters<typeof mapSummary>[0]>(w3, PATH);
@@ -297,9 +305,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           for (const [n, t] of s.texts) strings!.set(n, t);
           doc.setDirty(history.dirty);
           show(section);
+          edits.fire();
         });
         /** After every change; `group` keeps typing in one field one undo step. */
-        const update = (group?: unknown) => { history.commit(group); doc.setDirty(history.dirty); };
+        const update = (group?: unknown) => { history.commit(group); doc.setDirty(history.dirty); edits.fire(); };
         let section: SectionId = requestedSection ?? lastSection;
         const firstAnchor = requestedSection ? requestedAnchor : null;
         requestedSection = requestedAnchor = null;
@@ -625,6 +634,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             show("techtree", itemTableAnchor(table.number), true);
             return { number: table.number, name: table.name };
           },
+          itemTables: () => itemTablesShown(info as unknown as TechInfo, (value) => {
+            const ref = StringTable.ref(value);
+            return ref !== null && strings?.has(ref) ? strings.get(ref)! : value;
+          }),
         };
         openEditors.add(controller);
         // The game's labels come in later. The techtree doesn't use them: drawn again, it would lose what was scrolled to.
@@ -657,7 +670,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             history.markSaved();
             doc.setDirty(false);
           },
-          dispose: () => { openEditors.delete(controller); unbindKeys(); },
+          // Closed: the saved file is what there is again.
+          dispose: () => { openEditors.delete(controller); unbindKeys(); edits.fire(); },
           // Strings shown here, and the start locations behind the player list.
           watches: ["map/war3map.wts", "map/war3mapUnits.doo.json", "map/war3mapUnits.doo", "map/war3map.w3e", "map/war3map.w3e.txt"],
         };
