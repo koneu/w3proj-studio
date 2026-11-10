@@ -19,7 +19,7 @@ import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, ty
 import { ModelPreview } from "../../lib/model/preview";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
-import { mergeSkin } from "./w3o";
+import { convertVersion, describeConversion, mergeSkin } from "./w3o";
 import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
@@ -1337,11 +1337,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const importFile = async () => {
           const path = await w3.window.pickFile({ title: `Import ${kindInfo?.label ?? kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });
           if (!path) return;
-          const incoming = JSON.parse(await w3.backend.invoke<string>("objects_import", { name: `war3map.${kind}`, path })) as ObjectFile;
-          const { added, replaced } = mergeObjects(file as unknown as EditFile, incoming as unknown as EditFile);
+          const read = JSON.parse(await w3.backend.invoke<string>("objects_import", { name: `war3map.${kind}`, path })) as EditFile;
+          // Another object data version is converted to this file's: merged as it is, it couldn't be saved.
+          const { file: incoming, conversion } = convertVersion(read, file.version);
+          const { added, replaced } = mergeObjects(file as unknown as EditFile, incoming);
           markDirty();
           renderDetail();
-          void w3.window.showInfo(`Imported: ${added} new, ${replaced} replaced. Ctrl+Z takes it back.`);
+          void w3.window.showInfo(`Imported: ${added} new, ${replaced} replaced.${conversion ? describeConversion(kind, conversion) : ""} Ctrl+Z takes it back.`);
         };
         const failed = (e: unknown) => void w3.window.showError(String((e as Error).message ?? e));
         const focusObject = (id: string) => {

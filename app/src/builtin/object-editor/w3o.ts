@@ -92,6 +92,8 @@ export interface ImportPlan {
   /** Each kind's Skin file with the fields the import sets taken out of the objects it replaces or adds
    *  (else the old values stay and probably win), only for kinds where that changes something. */
   skins: { kind: string; file: EditFile; dropped: number }[];
+  /** Kinds whose objects were converted to the map's object data version first. */
+  conversions: ({ kind: string } & Conversion)[];
 }
 
 /** A Skin file without the fields `incoming` sets, for the objects it holds (custom by id, game objects
@@ -116,20 +118,62 @@ export function pruneSkin(skin: EditFile, incoming: Pick<EditFile, "original" | 
   return { file, dropped };
 }
 
-/** Merges a .w3o's kinds into the map's files. Throws, writing nothing, when a kind can't be merged:
- *  object data of another version than the map's (version 3 objects carry level sets older ones
- *  can't hold) is not converted. */
+/** What converting object data to another version left out (see convertVersion). */
+export interface Conversion { from: number; to: number; /** Fields of flagged sets dropped. */ dropped: number; /** Objects that lost some. */ objects: string[] }
+
+/** Object data in another version of the codec's (1–3, crates/w3proj/src/objdata.rs). Versions 1 and 2 have the same
+ *  layout; version 3 gives every object a list of flagged sets of fields, which the binary file writes even for one
+ *  set of flag 0 (the JSON then keeps plain `mods`). Up to 3 nothing is lost. Down from 3 an object keeps the fields
+ *  of its flag-0 set; those of other sets can't be held and are counted in `dropped`. Objects of a version-1 or -2
+ *  file repeat their id as the end token after every field (the game's own files do), so one without is given it. */
+export function convertVersion(file: EditFile, to: number): { file: EditFile; conversion: Conversion | null } {
+  if (file.version === to) return { file, conversion: null };
+  if (!Number.isInteger(to) || to < 1 || to > 3) throw new Error(`Object data version ${to} isn't one this app knows (1 to 3).`);
+  if (!Number.isInteger(file.version) || file.version < 1 || file.version > 3) throw new Error(`Object data version ${file.version} isn't one this app knows (1 to 3).`);
+  const out = structuredClone(file);
+  out.version = to;
+  const conversion: Conversion = { from: file.version, to, dropped: 0, objects: [] };
+  if (to < 3) {
+    for (const o of [...out.custom, ...out.original]) {
+      if (o.sets) {
+        const kept = o.sets.find((s) => s.flag === 0);
+        const lost = o.sets.reduce((n, s) => n + (s === kept ? 0 : s.mods.length), 0);
+        if (lost) { conversion.dropped += lost; conversion.objects.push(o.id ?? o.base); }
+        o.mods = kept ? kept.mods : [];
+        delete o.sets;
+      }
+      o.end ??= o.id ?? o.base;
+    }
+  }
+  return { file: out, conversion };
+}
+
+/** What the question says about a conversion: the versions, and the fields that couldn't be carried. */
+export function describeConversion(kind: string, c: Conversion): string {
+  const what = KIND_NAMES[kind] ?? kind;
+  const lost = c.dropped
+    ? ` ${c.dropped} field${c.dropped === 1 ? "" : "s"} of flagged sets (Reforged's) can't be held in version ${c.to} and ${c.dropped === 1 ? "is" : "are"} left out: ${c.objects.slice(0, 6).join(", ")}${c.objects.length > 6 ? ` and ${c.objects.length - 6} more` : ""}.`
+    : "";
+  return ` The file's ${what} are object data version ${c.from}, converted to the map's version ${c.to}.${lost}`;
+}
+
+/** Merges a .w3o's kinds into the map's files. Object data of another version than the map's is converted to the
+ *  map's first (convertVersion), what can't be carried listed in `conversions`. */
 export function planImport(existing: Record<string, EditFile | null>, incoming: { kind: string; file: EditFile }[], skins: Record<string, EditFile | null> = {}): ImportPlan {
   const writes: ImportPlan["writes"] = [];
   const conflicts: ImportPlan["conflicts"] = [];
   const skinWrites: ImportPlan["skins"] = [];
-  for (const { kind, file: add } of incoming) {
+  const conversions: ImportPlan["conversions"] = [];
+  for (const { kind, file: given } of incoming) {
     const have = existing[kind];
-    let base: EditFile;
+    let base: EditFile, add = given;
     if (!have || count(have) === 0) base = { format: add.format, version: add.version, original: [], custom: [] };
-    else if (have.version !== add.version) {
-      throw new Error(`The map's ${KIND_NAMES[kind] ?? kind} are object data version ${have.version}, the file's version ${add.version}. They can't be mixed; nothing was imported.`);
-    } else base = structuredClone(have);
+    else {
+      const converted = convertVersion(given, have.version);
+      add = converted.file;
+      if (converted.conversion) conversions.push({ kind, ...converted.conversion });
+      base = structuredClone(have);
+    }
     for (const o of add.custom ?? []) {
       const old = base.custom.find((x) => x.id === o.id);
       if (old && old.base !== o.base) conflicts.push({ kind, id: o.id ?? "", had: old.base, has: o.base });
@@ -142,7 +186,7 @@ export function planImport(existing: Record<string, EditFile | null>, incoming: 
       if (pruned.dropped) skinWrites.push({ kind, ...pruned });
     }
   }
-  return { writes, conflicts, skins: skinWrites };
+  return { writes, conflicts, skins: skinWrites, conversions };
 }
 
 export function describeImport(plan: ImportPlan): string {
