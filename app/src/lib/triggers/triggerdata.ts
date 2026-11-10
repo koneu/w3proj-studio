@@ -64,7 +64,18 @@ const unquote = (s: string) => (s.startsWith('"') ? s.slice(1, s.length > 1 && s
 
 /** `hints`: UI\TriggerStrings.txt, whose <Name>Hint= entries explain functions. */
 export function parseTriggerData(text: string, strings: Map<string, string> = new Map(), hints = ""): TriggerData {
-  const str = (s: string) => { const u = unquote(s); return strings.get(u.toUpperCase()) ?? u; };
+  // A string can name another one (WESTRING_TRIGTYPE_attacktype=WESTRING_COD_TYPE_ATTACKTYPE): followed
+  // a few steps, so a loop in the file can't hang.
+  const str = (s: string) => {
+    let v = unquote(s);
+    v = strings.get(v.toUpperCase()) ?? v;
+    for (let i = 0; i < 4 && v.startsWith("WESTRING_"); i++) {
+      const next = strings.get(v.toUpperCase());
+      if (next === undefined) break;
+      v = next;
+    }
+    return v;
+  };
   const functions = SECTIONS.map(() => new Map<string, TriggerFunction>());
   const categories = new Map<string, { name: string; icon: string; hideName: boolean }>();
   const types = new Map<string, { name: string; base?: string; global: boolean }>();
