@@ -156,10 +156,10 @@ function unitLines(i: UnitsInput, u: UnitJson): string[] {
 
 /** The "Items" section body: items placed on the map (war3mapUnits.doo), or "". */
 export function itemsSection(i: UnitsInput): string {
-  // Items are created by type id (character codes), then by creation number (not exact for
-  // every map).
+  // Items are created by type id (character codes), then in the order war3mapUnits.doo lists them, which isn't
+  // always by creation number (OrcX01_05: shwd 2, 1, 6, …, 13, 9 in both). The sort is stable.
   const items = i.units.filter((u) => isItem(i, u))
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.editorId - b.editorId));
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (!items.length) return "";
   const global = (it: UnitJson) => `gg_item_${it.id}_${String(it.editorId).padStart(4, "0")}`;
   // Editors from 7000 on colour every placed item, from 7003 with BlzSetItemColor, whatever colour and owner the

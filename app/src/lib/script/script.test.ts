@@ -453,10 +453,11 @@ test("code that doesn't compile needs no assignment: a disabled trigger's unit s
 
 const items = (list: UnitJson[], editorVersion = 0) => itemsSection({ units: list, kindOf: () => "item", referenced: new Set(), editorVersion });
 
-test("items are created by type, then by number", () => {
+test("items are created by type, then in the file's order, not by number", () => {
+  // As the World Editor's CreateAllItems in OrcX01_05: shwd 2 before shwd 1, as war3mapUnits.doo lists them.
   const s = items([unit({ id: "zzzz", editorId: 1 }), unit({ id: "ratc", editorId: 9 }), unit({ id: "ratc", editorId: 2, position: [7, 0, 0] })]);
-  assert.ok(s.indexOf("'ratc', 7.0") < s.indexOf("'ratc', 100.0"));
-  assert.ok(s.indexOf("'ratc', 100.0") < s.indexOf("'zzzz'"));
+  assert.ok(s.indexOf("'ratc', 100.0") < s.indexOf("'ratc', 7.0"));
+  assert.ok(s.indexOf("'ratc', 7.0") < s.indexOf("'zzzz'"));
   has(s, "    call BlzCreateItemWithSkin( 'zzzz', 100.0, 200.0, 'zzzz' )");
 });
 
