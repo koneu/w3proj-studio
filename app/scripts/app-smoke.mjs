@@ -4064,6 +4064,99 @@ async function keyChords(page, found) {
   }
 }
 
+/** Keyboard Shortcuts (builtin/keybindings-editor, lib/keybindings.ts), the World Editor's Configure Controls: Ctrl+K
+ *  Ctrl+S opens the editor; H, bound to two commands in the terrain view, shows as a conflict; the terrain view's G (Grid
+ *  Display) rebound there by pressing J works in the map at once, G does nothing any more, the grid box's tooltip names
+ *  J, and keybindings.json says so; Reset puts G back; keybindings.json edited outside the app applies when the window
+ *  comes back. The file (in the smoke app's own settings folder) is put back as it was. */
+async function keybindings(page, found) {
+  const fail = (what) => found.push(`keybindings: ${what}`);
+  const k = await heightKit(page, "Keybindings");
+  const TXT = "map/war3map.w3e.txt";
+  const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(${JSON.stringify(TXT)})?.state() ?? null)()`);
+  const grid = async () => (await state())?.grid;
+  const press = async (chord) => { await k.focusMap(); await k.hands.chord(chord); await sleep(300); };
+  const file = await page.evaluate(`w3Workbench.keybindings.filePath()`);
+  if (!file) return fail("the app doesn't know where keybindings.json goes");
+  const original = existsSync(file) ? readFileSync(file, "utf8") : null;
+  const writeFile = (text) => page.evaluate(`w3.backend.invoke("fs_write_text", { path: ${JSON.stringify(file)}, text: ${JSON.stringify(text)} }).then(() => w3Workbench.keybindings.load())`);
+  const rules = () => (existsSync(file) ? JSON.parse(readFileSync(file, "utf8") || "[]") : []);
+  const openShortcuts = async (query) => {
+    await page.evaluate(`w3.commands.execute("w3.keybindings.open", ${JSON.stringify(query)})`);
+    await until(`the rows for ${query}`, () => page.evaluate(`document.querySelectorAll(".kb-row[data-command]").length > 0`), 10000);
+  };
+  const backToMap = async () => {
+    await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
+    await until("the terrain editor in front", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 10000);
+    await sleep(300);
+  };
+  try {
+    await writeFile("[]\n");
+    await until("the terrain view's state", async () => (await state()) !== null, 20000);
+    await k.tab("Select");
+    // G as the World Editor's: no grid, then the large one.
+    const g0 = await grid();
+    await press("G");
+    const g1 = await grid();
+    if (g0 !== "none" || g1 !== "large") fail(`G before it was rebound: ${g0} → ${g1}`);
+
+    // Ctrl+K Ctrl+S, from the map.
+    await press("Ctrl+K");
+    await k.hands.chord("Ctrl+S");
+    await until("Keyboard Shortcuts by Ctrl+K Ctrl+S", () => page.evaluate(`w3.editors.activePath() === "w3:keybindings"`), 10000)
+      .catch(async () => fail(`Ctrl+K Ctrl+S didn't open Keyboard Shortcuts (in front: ${JSON.stringify(await page.evaluate(`w3.editors.activePath()`))})`));
+    // H is the terrain view's Blight and its Mirror: both rows say so.
+    await openShortcuts("@key:h");
+    const h = await page.evaluate(`[...document.querySelectorAll(".kb-row[data-command]")].map((r) => [r.dataset.command, r.querySelector(".kb-conflict")?.textContent ?? ""])`);
+    if (!h.some(([c, t]) => c === "w3.terrain.toggleBlight" && /2 commands/.test(t)) || !h.some(([c]) => c === "w3.terrain.selection.mirrorX")) fail(`H's conflict isn't shown: ${JSON.stringify(h)}`);
+
+    // Grid Display: Change, J, Enter.
+    await openShortcuts("@command:w3.terrain.cycleGrid");
+    const row = `.kb-row[data-command="w3.terrain.cycleGrid"]`;
+    if ((await page.evaluate(`document.querySelector(${JSON.stringify(row)})?.dataset.key`)) !== "g") fail("Grid Display isn't listed with G");
+    await k.hands.click(`${row} .kb-change`);
+    await until("the key field", () => page.evaluate(`document.activeElement?.classList.contains("kb-record")`), 5000).catch(() => fail("Change didn't open a field to press the key into"));
+    await k.hands.chord("J");
+    const shown = await page.evaluate(`document.querySelector(".kb-record")?.value`);
+    if (shown !== "J") fail(`the key field shows ${JSON.stringify(shown)} after J`);
+    await k.hands.chord("Enter");
+    const wanted = [{ key: "g", command: "-w3.terrain.cycleGrid", when: "terrainFocus" }, { key: "j", command: "w3.terrain.cycleGrid", when: "terrainFocus" }];
+    await until("keybindings.json", () => JSON.stringify(rules()) === JSON.stringify(wanted), 5000)
+      .catch(() => fail(`keybindings.json after J: ${JSON.stringify(rules())}`));
+    if ((await page.evaluate(`document.querySelector(${JSON.stringify(row)})?.dataset.key`)) !== "j") fail("the row doesn't show J");
+
+    // In the map: J goes round the grids, G does nothing; the tooltip names J.
+    await backToMap();
+    await press("J");
+    const g2 = await grid();
+    await press("G");
+    const g3 = await grid();
+    if (g2 !== "medium" || g3 !== "medium") fail(`after rebinding, J: large → ${g2}, then G: → ${g3}`);
+    const tip = await page.evaluate(`document.querySelector('select[data-key-command="w3.terrain.cycleGrid"]')?.title ?? ""`);
+    if (!tip.endsWith("(J)")) fail(`the grid box's tooltip: ${JSON.stringify(tip)}`);
+
+    // Reset: G again, J nothing; keybindings.json says nothing of the command.
+    await openShortcuts("@command:w3.terrain.cycleGrid");
+    await k.hands.click(`${row} .kb-reset`);
+    await until("the reset in keybindings.json", () => rules().length === 0, 5000).catch(() => fail(`keybindings.json after Reset: ${JSON.stringify(rules())}`));
+    await backToMap();
+    await press("G");
+    const g4 = await grid();
+    await press("J");
+    const g5 = await grid();
+    if (g4 !== "small" || g5 !== "small") fail(`after Reset, G: medium → ${g4}, then J: → ${g5}`);
+
+    // Edited by hand in another program: applies when the window comes back.
+    await page.evaluate(`w3.backend.invoke("fs_write_text", { path: ${JSON.stringify(file)}, text: ${JSON.stringify(JSON.stringify([{ key: "g", command: "-w3.terrain.cycleGrid", when: "terrainFocus" }]))} })`);
+    await page.evaluate(`window.dispatchEvent(new Event("focus"))`);
+    await until("the hand edit read", () => page.evaluate(`w3Workbench.keybindings.userRules().length === 1`), 5000).catch(() => fail("keybindings.json edited outside wasn't read when the window came back"));
+    await press("G");
+    if ((await grid()) !== "small") fail("G still goes round after keybindings.json took it away");
+  } finally {
+    await writeFile(original ?? "[]\n").catch((e) => fail(`putting keybindings.json back: ${e.message}`));
+  }
+}
+
 /** Game files are read once a session: opening a map's terrain again, with its doodads, units,
  *  cliffs and water, asks the backend for no game file at all. Counts, not times, so it isn't flaky. */
 /** What the first opening of gameReadsOnce's scene (the mini map with a tree, a goldmine and a footman) took
@@ -6568,6 +6661,7 @@ async function run() {
         heightsUniform,
         itemDrops,
         itemTablesAccess,
+        keybindings,
         keyChords,
         mcpStartMove,
         moduleFunctions,
@@ -6717,6 +6811,7 @@ async function run() {
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
     await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
+    await keybindings(page, found).catch((e) => found.push(`keybindings: ${e.message}`));
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
