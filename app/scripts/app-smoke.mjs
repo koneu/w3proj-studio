@@ -4284,16 +4284,9 @@ async function keybindings(page, found) {
     await page.evaluate(`w3.commands.execute("w3.keybindings.open", ${JSON.stringify(query)})`);
     await until(`the rows for ${query}`, () => page.evaluate(`document.querySelectorAll(".kb-row[data-command]").length > 0`), 10000);
   };
-  /** Clicks an element of the editor's rows as a person would: earlier checks' toasts (bottom right, where the rows'
-   *  buttons are) are cleared first, and what is under the pointer must be that element, else the click would land on
-   *  something else and the check says what covers it. */
-  const clickRow = async (selector) => {
-    await k.clearToasts();
-    const at = await k.hands.where(selector);
-    const hit = await page.evaluate(`(() => { const e = document.elementFromPoint(${at.x}, ${at.y}); const want = document.querySelector(${JSON.stringify(selector)}); return e && want && (e === want || want.contains(e)) ? null : (e ? e.outerHTML.slice(0, 160) : "nothing"); })()`);
-    if (hit) throw new Error(`${selector} is covered by ${hit}`);
-    await k.hands.click(selector);
-  };
+  // The rows' buttons are where earlier checks' toasts are (bottom right): Hands.click closes those that only tell
+  // something, and fails naming anything else on top (cdp.mjs reach).
+  const clickRow = (selector) => k.hands.click(selector);
   const backToMap = async () => {
     await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
     await until("the terrain editor in front", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 10000);
@@ -4361,6 +4354,74 @@ async function keybindings(page, found) {
     await until("the hand edit read", () => page.evaluate(`w3Workbench.keybindings.userRules().length === 1`), 5000).catch(() => fail("keybindings.json edited outside wasn't read when the window came back"));
     await press("G");
     if ((await grid()) !== "small") fail("G still goes round after keybindings.json took it away");
+
+    // Undo, Escape and the wheel are bindings too: Ctrl+U undoes in place of Ctrl+Z, Q cancels in place of Escape, Wheel
+    // Up goes round the grids in place of zooming in (Wheel Down still zooms out).
+    await writeFile(JSON.stringify([
+      { key: "ctrl+z", command: "-workbench.undo" }, { key: "ctrl+u", command: "workbench.undo", when: "undoKeys" },
+      { key: "escape", command: "-w3.terrain.cancel" }, { key: "q", command: "w3.terrain.cancel", when: "terrainFocus" },
+      { key: "wheelup", command: "-w3.terrain.camera.zoomIn" }, { key: "wheelup", command: "w3.terrain.cycleGrid", when: "terrainFocus" },
+    ]));
+    await k.tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }], ignoreRoom: true });
+    await k.save();
+    const trees = () => k.doodads().filter((d) => d.id === "LTlt").length;
+    const selected = () => page.evaluate(`document.querySelectorAll(".terrain-sel-triple input").length > 0`);
+    await k.look(0, 0, { id: "LTlt", x: 0, y: 0 });
+    await press("Escape");
+    if (!(await selected())) fail("Escape still cancels after keybindings.json took it away");
+    await press("Q");
+    if (await selected()) fail("Q (bound to Cancel) didn't clear the selection");
+    await k.look(0, 0, { id: "LTlt", x: 0, y: 0 });
+    await press("Delete");
+    await k.save();
+    const deleted = trees();
+    await press("Ctrl+Z");
+    await k.save();
+    const afterZ = trees();
+    await press("Ctrl+U");
+    await k.save();
+    const afterU = trees();
+    if (deleted !== 0 || afterZ !== 0 || afterU !== 1) fail(`trees after Delete, Ctrl+Z (taken away), Ctrl+U (Undo): ${deleted}, ${afterZ}, ${afterU}`);
+    const view = await k.hands.where(".model-stage canvas");
+    const before = await state();
+    await k.hands.wheel(view.x, view.y, -120);
+    await sleep(300);
+    const up = await state();
+    await k.hands.wheel(view.x, view.y, 120);
+    await sleep(300);
+    const down = await state();
+    if (up.grid === before.grid || up.camera.distance !== before.camera.distance) fail(`Wheel Up bound to Grid Display: grid ${before.grid} → ${up.grid}, distance ${before.camera.distance} → ${up.camera.distance}`);
+    if (!(down.camera.distance > up.camera.distance)) fail(`Wheel Down didn't zoom out: ${up.camera.distance} → ${down.camera.distance}`);
+
+    // The shared click (cdp.mjs Hands.reach): a toast that only tells something over the target is closed and the click
+    // lands; one that asks something makes the click fail, naming it. A button of the test's own, under the toasts.
+    await k.clearToasts();
+    await page.evaluate(`(() => { const b = document.createElement("button"); b.id = "smoke-under-toast"; b.textContent = "under"; b.onclick = () => { window.__smokeUnder = (window.__smokeUnder ?? 0) + 1; }; b.style.position = "fixed"; document.querySelector(".notifications").before(b); })()`);
+    // The button goes under the middle of the toast's text.
+    const underToast = (text) => page.evaluate(`(() => {
+      const t = [...document.querySelectorAll(".toast")].find((e) => e.textContent.includes(${JSON.stringify(text)}));
+      const b = document.getElementById("smoke-under-toast");
+      if (!t || !b) return false;
+      const r = t.querySelector(".toast-body").getBoundingClientRect();
+      Object.assign(b.style, { left: (r.left + r.width / 2 - b.offsetWidth / 2) + "px", top: (r.top + r.height / 2 - b.offsetHeight / 2) + "px" });
+      return true;
+    })()`);
+    try {
+      await page.evaluate(`void w3.window.showInfo("Smoke: a note over the button")`);
+      await sleep(200);
+      if (!(await underToast("Smoke: a note"))) fail("the note to click under didn't show");
+      await k.hands.click("#smoke-under-toast").catch((e) => fail(`a click under a note: ${e.message}`));
+      if ((await page.evaluate(`window.__smokeUnder ?? 0`)) !== 1) fail("the click under a note didn't reach the button");
+      if (await page.evaluate(`[...document.querySelectorAll(".toast")].some((e) => e.textContent.includes("Smoke: a note"))`)) fail("the note over the button wasn't closed");
+      await page.evaluate(`void w3.window.showWarning("Smoke: a question over the button", "Smoke answer")`);
+      await sleep(200);
+      if (!(await underToast("Smoke: a question"))) fail("the question to click under didn't show");
+      const refused = await k.hands.click("#smoke-under-toast").then(() => null, (e) => e.message);
+      if (!refused || !/covered/.test(refused) || !refused.includes("Smoke: a question")) fail(`a click under a question: ${refused ?? "it went through"}`);
+      if ((await page.evaluate(`window.__smokeUnder ?? 0`)) !== 1) fail("the click under a question reached the button");
+    } finally {
+      await page.evaluate(`(() => { document.getElementById("smoke-under-toast")?.remove(); [...document.querySelectorAll(".toast")].forEach((t) => t.querySelector(".toast-actions button")?.click()); })()`);
+    }
   } finally {
     await writeFile(original ?? "[]\n").catch((e) => fail(`putting keybindings.json back: ${e.message}`));
   }
