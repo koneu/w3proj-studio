@@ -1,5 +1,6 @@
 # Checks on every push and pull request: the same steps as `node tests/gate.mjs` (TESTING.md):
 # types, module boundaries, unit and system tests, clippy, and the app starting in headless Edge.
+# Windows runs the steps one by one; Linux runs the gate itself.
 # Nothing here needs the game: tests that read game files or the map corpus stay local.
 name: CI
 
@@ -46,3 +47,43 @@ jobs:
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # The commit gate itself on Linux (WebKitGTK build of the Tauri crate, headless Chrome for the UI smoke test).
+  # No game and no map corpus here: the tests that need them skip as they do locally without them.
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      # The same packages scripts/setup-linux.sh installs on a developer machine.
+      - name: System packages
+        run: |
+          sudo apt-get update
+          read -ra packages <<< "$(scripts/setup-linux.sh --apt-packages)"
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: App dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+
+      # The runner's Google Chrome is what ui-smoke finds first (/usr/bin/google-chrome).
+      - name: Commit gate
+        run: node tests/gate.mjs
+      - name: Gate logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-logs-linux
+          path: target/gate-logs/
+          if-no-files-found: ignore
