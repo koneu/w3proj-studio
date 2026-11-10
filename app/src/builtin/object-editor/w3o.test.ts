@@ -351,7 +351,7 @@ test("Import drops the stale Skin fields in the same write, and says so in the q
   await importObjectData(calm.w3);
   assert.deepEqual(calm.log.filter((l) => l.startsWith("write")), ["write map/war3map.w3u.json"]);
   assert.doesNotMatch(calm.asked[0], /Skin/);
-  assert.equal(describeSkin({ writes: [], conflicts: [], skins: [] }), "");
+  assert.equal(describeSkin({ writes: [], conflicts: [], skins: [], conversions: [] }), "");
 });
 
 test("a corrupt Skin file refuses the import and nothing is written", async () => {
