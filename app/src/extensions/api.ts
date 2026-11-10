@@ -370,8 +370,14 @@ export interface W3Api {
     /** The commands a key event is bound to where its `when` holds (for the element the event went to), the winner
      *  first. For a view that handles its own keys (`data-key-context`). */
     commandsFor(e: KeyboardEvent): string[];
+    /** The commands a mouse button pressed or the wheel turned is bound to ("middlebutton", "alt+leftbutton",
+     *  "wheelup"), for the element under the pointer, the winner first. A button held with more modifiers than its
+     *  bindings name still matches them (the ones naming the most modifiers first). */
+    mouseCommandsFor(e: MouseEvent): string[];
     /** The chord of a key event ("ctrl+shift+l"), null for a modifier alone. */
     chordOf(e: KeyboardEvent): string | null;
+    /** The chord of a mouse button or wheel event ("ctrl+rightbutton", "wheeldown"), null for other buttons. */
+    mouseChordOf(e: MouseEvent): string | null;
     /** A key in its one written form, or null when it isn't one. */
     normalize(key: string): string | null;
     /** "ctrl+k ctrl+s" as people read it: "Ctrl+K Ctrl+S". */

@@ -7,7 +7,7 @@
 
 import type { EditorInstance, W3Api } from "../../extensions/api";
 import { MAP_INFO_SERVICE, OBJECTS_SERVICE, type MapInfoService, type ObjectsService } from "../../extensions/services";
-import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { h } from "../../workbench/dom";
 import { dropsEditor, tableView, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import {
@@ -67,11 +67,11 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
   const root = h("div.drops-tab", { tabindex: "-1", onkeydown: (e: KeyboardEvent) => {
     // The boxes keep their own keys (Ctrl+Z there takes back what was typed).
     if ((e.target as HTMLElement).closest("input, textarea, select")) return;
-    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-    const k = keyOf(e).toLowerCase();
-    if (k === "z" && !e.shiftKey) { e.preventDefault(); source()?.undo(); }
-    else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); source()?.redo(); }
+    const step = undoStepOf(w3.keybindings.commandsFor(e));
+    if (step === "undo") { e.preventDefault(); source()?.undo(); }
+    else if (step === "redo") { e.preventDefault(); source()?.redo(); }
   } });
+  addKeyContext(root, UNDO_CONTEXT);
   el.append(root);
   /** What the right side edits. */
   let targets: Placed[] = [];

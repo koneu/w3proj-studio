@@ -9,7 +9,7 @@
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
-import { keyOf } from "../../lib/keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { joinPath } from "../../lib/paths";
 import { replaceQuestion, wouldDelete } from "../../lib/syncdeletes";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
@@ -208,6 +208,7 @@ class CampaignView {
     private editable: boolean, private setDirty: (dirty: boolean) => void, private save: () => Promise<void>) {
     el.classList.add("camp-editor");
     el.tabIndex = -1;
+    addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => this.keyDown(e));
     this.render();
   }
@@ -280,10 +281,9 @@ class CampaignView {
   private keyDown(e: KeyboardEvent) {
     const t = e.target as HTMLElement;
     if ((t instanceof HTMLInputElement && t.type !== "checkbox") || t instanceof HTMLTextAreaElement) return;
-    if (!(e.ctrlKey || e.metaKey)) return;
-    const k = keyOf(e).toLowerCase();
-    if (k === "z" && !e.shiftKey) { this.undo(); e.preventDefault(); }
-    else if (k === "y" || (k === "z" && e.shiftKey)) { this.redo(); e.preventDefault(); }
+    const step = undoStepOf(this.w3.keybindings.commandsFor(e));
+    if (step === "undo") { this.undo(); e.preventDefault(); }
+    else if (step === "redo") { this.redo(); e.preventDefault(); }
   }
 
   // ---- strings -------------------------------------------------------------------------

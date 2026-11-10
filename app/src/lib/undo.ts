@@ -5,7 +5,7 @@
 // Consecutive commits with the same `group` (typing in one field) stay one step. Dirty is
 // "differs from the saved snapshot", so undoing back to the saved state is clean again.
 
-import { keyOf } from "./keys";
+import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "./keybindings";
 
 export class History {
   private undoStack: string[] = [];
@@ -50,17 +50,18 @@ export class History {
   get canRedo(): boolean { return this.redoStack.length > 0; }
 }
 
-/** Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z anywhere in `el` run `undo`/`redo`, also in form fields (in a
- *  form the focus is nearly always in one): the focused field is blurred first, so a value typed
- *  but not yet committed becomes a step of its own. Code editors (contenteditable) keep their own
- *  undo. Returns the listener's remover. */
-export function bindUndoKeys(el: HTMLElement, undo: () => void, redo: () => void): () => void {
+/** The keys of Undo and Redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z by default: lib/keybindings.ts UNDO_BINDINGS) anywhere in
+ *  `el` run `undo`/`redo`, also in form fields (in a form the focus is nearly always in one): the focused field is
+ *  blurred first, so a value typed but not yet committed becomes a step of its own. Code editors (contenteditable) keep
+ *  their own undo. `commandsFor` is what a key is bound to (w3.keybindings.commandsFor). Returns the listener's
+ *  remover. */
+export function bindUndoKeys(el: HTMLElement, undo: () => void, redo: () => void, commandsFor: (e: KeyboardEvent) => readonly string[]): () => void {
   if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
+  addKeyContext(el, UNDO_CONTEXT);
   const onKey = (e: KeyboardEvent) => {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-    const k = keyOf(e).toLowerCase();
-    const isUndo = k === "z" && !e.shiftKey, isRedo = k === "y" || (k === "z" && e.shiftKey);
-    if (!isUndo && !isRedo) return;
+    const step = undoStepOf(commandsFor(e));
+    if (!step) return;
+    const isUndo = step === "undo";
     const t = e.target as HTMLElement;
     if (t.isContentEditable) return;
     e.preventDefault();
