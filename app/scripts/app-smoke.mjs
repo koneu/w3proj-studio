@@ -970,6 +970,8 @@ async function viewModes(page, found) {
   const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
   const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await sleep(400); };
   const CTRL = 2, SHIFT = 8;
+  /** The camera's distance for a close look at one object (Ctrl+Up until it is this near). */
+  const ZOOMED_IN = 2000;
   // A tree and a lit brazier (LObz: a light reaching 200) west of the start location, a footman east of it, a region north.
   await k.tool("place_objects", { objects: [{ id: "LTlt", x: -384, y: 0 }, { id: "LObz", x: -384, y: -384 }], ignoreRoom: true });
   await k.tool("place_objects", { objects: [{ id: "hfoo", x: 384, y: 0, player: 1 }], ignoreRoom: true });
@@ -980,11 +982,18 @@ async function viewModes(page, found) {
   regions.regions = [{ left: -256, bottom: 256, right: 256, top: 640, name: "Smoke Region", index: 0, weather: "0x00000000", sound: "", color: { red: 255, green: 60, blue: 60, alpha: 255 }, ...(regions.version >= 7 ? { trailer: [0, 0] } : {}) }];
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${JSON.stringify(JSON.stringify(regions))})`);
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
-  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
+  /** Water and Effects off, by their boxes: the brazier's flames are particles, new ones at random places every frame,
+   *  which made two pictures of the same view differ (and the view draw without end). The boxes are greyed in game
+   *  view, where a click does nothing: called with game view off, and the state says it took. */
+  const stillView = async () => {
+    await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
+    await until("Water and Effects off", async () => { const v = await state(); return v && !v.water && !v.effects; }, 5000)
+      .catch(async () => { const v = await state(); fail(`Water and Effects didn't go off by their boxes: ${JSON.stringify(v && { water: v.water, effects: v.effects, gameView: v.gameView })}`); });
+  };
+  await stillView();
   await k.tab("Select");
   await k.look(start.position[0], start.position[1] + 128);
   await k.clearToasts();
-  await sleep(1500);
   await countFrames(page);
   // The pictures compared are taken once the view stands still: on a busy machine a redraw after a key, or the end of a
   // camera move, can come later than a fixed wait (Ctrl+D measured a handful of pixels in a full run now and then).
@@ -997,6 +1006,7 @@ async function viewModes(page, found) {
   // Game view by its key: the start location and its town hall go, the badge shows, the boxes grey out.
   await key("v", "KeyV", 86);
   let s = await state();
+  await until("game view on", async () => (s = await state())?.gameView, 5000).catch(() => {});
   if (!s?.gameView || s.shown.starts || !s.shown.lighting || !s.shown.fog) fail(`V didn't turn game view on: ${JSON.stringify(s && { gameView: s.gameView, shown: s.shown })}`);
   if ((await k.setting("terrain.gameView")) !== true) fail("game view isn't kept as the setting terrain.gameView");
   if (!(await page.evaluate(`!document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("no Game View badge over the view");
@@ -1015,16 +1025,17 @@ async function viewModes(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
   await page.evaluate(`w3.commands.execute("w3.terrain.open")`);
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 20000);
-  await sleep(500);
-  s = await state();
+  // Its view commands come with its view.
+  await until("the new editor's view", async () => (s = await state()) !== null, 20000).catch(() => {});
   if (!s?.gameView || s.shown.starts) fail("a terrain editor opened again isn't in game view");
-  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
   await k.tab("Select");
   await k.look(start.position[0], start.position[1] + 128);
   await key("v", "KeyV", 86);
-  s = await state();
+  await until("game view off", async () => (s = await state()) && !s.gameView, 5000).catch(() => {});
   if (s.gameView || !s.shown.starts || (await k.setting("terrain.gameView")) !== false) fail("V again didn't turn game view off");
   if (!(await page.evaluate(`document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("the badge stays after game view");
+  // The new editor's view as the first one's was (its boxes were greyed until now).
+  await stillView();
   await k.clearToasts();
   if ((await changed()) > 150) fail("after game view the picture isn't the plain one again");
 
@@ -1032,10 +1043,11 @@ async function viewModes(page, found) {
   const trial = async (label, field, press, least) => {
     const before = await framesDrawn(page);
     await press();
-    // The view draws what the key changed before the picture is judged.
-    await until(`a frame after ${label}`, async () => (await framesDrawn(page)) > before, 5000).catch(() => {});
-    const on = await state();
+    // The key's change in the state (a busy machine can take longer than key's pause), and a frame drawn after it.
+    let on = await state();
+    await until(`${label} in the state`, async () => (on = await state())[field] !== s[field], 5000).catch(() => {});
     if (on[field] === s[field]) fail(`${label} didn't change ${field} (${JSON.stringify(on[field])})`);
+    await until(`a frame after ${label}`, async () => (await framesDrawn(page)) > before, 5000).catch(() => {});
     const diff = await changed();
     if (diff < least) fail(`${label} changed ${diff} pixels`);
     return on;
@@ -1073,16 +1085,20 @@ async function viewModes(page, found) {
   for (const [label, field, press, least, at] of [
     ["Ctrl+U", "units", () => key("u", "KeyU", 85, CTRL), 300],
     // The tree in the middle of the view and zoomed in: seen from the start location it was under a hundred pixels, as
-    // near the noise as the threshold was (round 4). Close up the tree and its shadow image make about 670.
+    // near the noise as the threshold was (round 4). Three Ctrl+Up from the new map's distance (about 7400) left it at
+    // 5400, where the tree, its shadows and the brazier made 290-480 pixels by run (the shadow's edge on the ground,
+    // whose tiles a new map picks at random, and the flames before Effects really went off): too near the 300.
+    // At ZOOMED_IN they made 3600-6500 in seven runs (three beside a CPU hog), and two pictures of the view 0 apart.
     ["Ctrl+D", "doodads", () => key("d", "KeyD", 68, CTRL), 300, [-384, 0]],
     ["P", "pathing", () => key("p", "KeyP", 80), 300],
     // Info Display: the start location and its town hall go (the World Editor's I).
     ["I", "info", () => key("i", "KeyI", 73), 300],
     ["Ctrl+Shift+L", "lightRanges", () => key("L", "KeyL", 76, CTRL | SHIFT), 100],
   ]) {
+    let zooms = 0;
     if (at) {
       await k.look(at[0], at[1]);
-      for (let i = 0; i < 3; i++) await key("ArrowUp", "ArrowUp", 38, CTRL);
+      while ((await state()).camera.distance > ZOOMED_IN && zooms < 30) { await key("ArrowUp", "ArrowUp", 38, CTRL); zooms++; }
       plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
     }
@@ -1094,7 +1110,7 @@ async function viewModes(page, found) {
     await press();
     if ((await changed()) > 150) fail(`${label} twice isn't the plain picture`);
     if (at) {
-      for (let i = 0; i < 3; i++) await key("ArrowDown", "ArrowDown", 40, CTRL);
+      for (let i = 0; i < zooms; i++) await key("ArrowDown", "ArrowDown", 40, CTRL);
       await k.look(start.position[0], start.position[1] + 128);
       plain = await settledMapPicture(page);
       noise = await pixelsApart(page, plain, await mapPicture(page));
@@ -1346,10 +1362,18 @@ async function itemTablesAccess(page, found) {
   const dirty = (path) => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
   const toTerrain = async () => { await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`); await until("the terrain editor in front", async () => (await active()) === TXT, 20000); };
   const footman = () => k.units().find((u) => u.id === "hfoo");
-  /** Map Properties in front, at Techtree & Tables, with the item tables (or one of them) scrolled into its view. */
-  const atItemTables = async (how, anchor = "item-tables") => {
+  /** Map Properties in front, at Techtree & Tables, with the item tables (or one of them) scrolled into its view (and,
+   *  with `focused`, its first box having the keys). Waited for: the editor comes to the front before the command that
+   *  opened it has shown the section, scrolled and focused (Create an item table makes the table after that). */
+  const atItemTables = async (how, anchor = "item-tables", focused = false) => {
     await until(`Map Properties in front (${how})`, async () => (await active()) === W3I, 20000).catch((e) => fail(e.message));
-    const where = await page.evaluate(`(() => {
+    const there = (w) => w.section === "Techtree & Tables" && w.target && w.inView && (!focused || w.focused);
+    let where = await whereInMapInfo(anchor);
+    await until(`Map Properties at ${anchor} (${how})`, async () => there(where = await whereInMapInfo(anchor)), 10000).catch(() => {});
+    if (where.section !== "Techtree & Tables" || !where.target || !where.inView) fail(`${how}: Map Properties isn't at ${anchor} (${JSON.stringify(where)})`);
+    return where;
+  };
+  const whereInMapInfo = (anchor) => page.evaluate(`(() => {
       const pane = [...document.querySelectorAll(".editor-pane")].find((p) => !p.hidden && p.querySelector(".map-info"));
       const section = pane?.querySelector(".form-nav-item.active")?.textContent ?? null;
       const target = pane ? [...pane.querySelectorAll("[data-anchor]")].find((x) => x.dataset.anchor === ${JSON.stringify(anchor)}) : null;
@@ -1359,9 +1383,6 @@ async function itemTablesAccess(page, found) {
       const r = target.getBoundingClientRect(), v = (box ?? document.documentElement).getBoundingClientRect();
       return { section, target: true, inView: r.top >= v.top - 2 && r.top < v.bottom, focused: target.contains(document.activeElement) };
     })()`);
-    if (where.section !== "Techtree & Tables" || !where.target || !where.inView) fail(`${how}: Map Properties isn't at ${anchor} (${JSON.stringify(where)})`);
-    return where;
-  };
 
   // The unit file of a new map: if it has the older layout, "Map item table" isn't offered, and the panel says why.
   await k.tab("Select");
@@ -1402,11 +1423,11 @@ async function itemTablesAccess(page, found) {
   // No tables yet: choosing one offers to make one, and changes nothing by itself.
   if (await shown("table-offer")) fail("the offer to make an item table shows before \"Map item table\" was chosen");
   await choose("drops-mode", "table");
-  if (!(await shown("table-offer"))) return fail("choosing \"Map item table\" with no tables doesn't offer to make one");
+  if (!(await soon(() => shown("table-offer")))) return fail("choosing \"Map item table\" with no tables doesn't offer to make one");
   if ((await value("drops-mode")) !== "none") fail(`with no table made the drops show ${await value("drops-mode")}`);
   if (await dirty(TXT)) fail("choosing \"Map item table\" with no tables changed the map");
   await k.hands.click(at("create-table"));
-  const made = await atItemTables("Create an item table", "item-table-0");
+  const made = await atItemTables("Create an item table", "item-table-0", true);
   if (!made.focused) fail("the new item table isn't open for editing (its name box hasn't the keys)");
   if (!(await dirty(W3I))) fail("making an item table didn't leave Map Properties changed");
   await until("the footman to drop from the new table", () => dirty(TXT), 10000).catch(() => fail("the footman wasn't given the new table (the terrain editor is unchanged)"));
@@ -1414,11 +1435,9 @@ async function itemTablesAccess(page, found) {
   // (Before saving: a save of the terrain opens Map Properties again, as it does for the start locations it shows.)
   const tableShown = () => page.evaluate(`[...document.querySelectorAll(".map-info [data-anchor]")].some((x) => x.dataset.anchor === "item-table-0")`);
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
-  if (await tableShown() || await dirty(W3I)) fail(`one undo in Map Properties after Create: the table ${await tableShown() ? "is still there" : "went"}, the editor ${await dirty(W3I) ? "is" : "isn't"} changed`);
+  if (!(await soon(async () => !(await tableShown()) && !(await dirty(W3I))))) fail(`one undo in Map Properties after Create: the table ${await tableShown() ? "is still there" : "went"}, the editor ${await dirty(W3I) ? "is" : "isn't"} changed`);
   await page.evaluate(`w3.commands.execute("workbench.redo")`);
-  await sleep(300);
-  if (!(await tableShown()) || !(await dirty(W3I))) fail("a redo in Map Properties didn't bring the new table back");
+  if (!(await soon(async () => (await tableShown()) && (await dirty(W3I))))) fail("a redo in Map Properties didn't bring the new table back");
   await k.save();
   const table = k.read("war3map.w3i.json").itemTables;
   if (JSON.stringify(table) !== JSON.stringify([{ number: 0, name: "Item Table", sets: [[]] }])) fail(`the map's item tables after Create: ${JSON.stringify(table)}`);
@@ -1426,8 +1445,8 @@ async function itemTablesAccess(page, found) {
 
   // Back in the terrain editor the footman shows the table by name, with the button that edits the tables.
   await toTerrain();
-  await settled();
-  if ((await value("drops-mode")) !== "table" || (await value("drops-table")) !== "0") fail(`the panel after Create: ${await value("drops-mode")} ${await value("drops-table")}`);
+  await panel();
+  if (!(await soon(async () => (await value("drops-mode")) === "table" && (await value("drops-table")) === "0"))) fail(`the panel after Create: ${await value("drops-mode")} ${await value("drops-table")}`);
   if (!/Item Table \(#0\)/.test(await page.evaluate(`document.querySelector(${JSON.stringify(`${at("drops-table")} option:checked`)})?.textContent ?? ""`))) fail("the footman's table isn't shown by its name");
   if (!(await shown("edit-tables"))) fail("no \"Edit item tables…\" next to the map item table");
   else {
@@ -1459,8 +1478,8 @@ async function itemTablesAccess(page, found) {
   await toTerrain();
   await settled();
   await choose("drops-mode", "custom");
-  await settled();
-  if (!(await shown("use-map-table"))) fail("own sets show no \"or use a map item table…\"");
+  await panel();
+  if (!(await soon(() => shown("use-map-table")))) fail("own sets show no \"or use a map item table…\"");
   else {
     await toTerrain();
     await k.hands.click(at("use-map-table"));
@@ -2596,9 +2615,22 @@ function framesDrawn(page) {
   return page.evaluate(`(() => { const c = ${SHOWN_CANVAS}; return c ? window.__glFrames?.get(c) ?? 0 : -1; })()`);
 }
 
-/** The map's picture once it stands still: pictures until two in a row are no more than `still` pixels apart (a camera
- *  move or a redraw that a busy machine delays is over then), at most `tries` of them. */
+/** Whether `check` comes true within `timeout` (polled): for what an action brings about a moment later, instead of a
+ *  fixed pause before looking once. Only for a state the action has to reach; one it must not reach is looked at once. */
+function soon(check, timeout = 10000) {
+  return until("a condition", check, timeout).then(() => true, () => false);
+}
+
+/** Waits until no file of the game is being read or queued and no view says "Working…" (as app-drive's --settle). */
+function viewIdle(page, timeout = 60000) {
+  return until("the game's files read and the view's layers done", () => page.evaluate(`w3Workbench.game.readsPending === 0 && ![...document.querySelectorAll("span.muted")].some((e) => !e.hidden && e.textContent === "Working…")`), timeout);
+}
+
+/** The map's picture once it stands still: the game's files read (a model or texture still loading is drawn later,
+ *  however long a busy machine takes), then pictures until two in a row are no more than `still` pixels apart (a
+ *  camera move or a redraw that a busy machine delays is over then), at most `tries` of them. */
 async function settledMapPicture(page, still = 100, tries = 8) {
+  await viewIdle(page);
   let prev = await mapPicture(page);
   for (let i = 1; i < tries; i++) {
     const next = await mapPicture(page);
@@ -5588,21 +5620,22 @@ async function objectManagerLive(page, found) {
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
     await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
     await k.tab("Regions");
-    const chosen = await page.evaluate(`(() => {
+    // The list is filled once the editor has the map's regions, which a busy machine gives later than the tab.
+    const chosen = await soon(() => page.evaluate(`(() => {
       const s = [...document.querySelectorAll("select")].find((e) => e.options[0]?.textContent === "Go to region…" && e.offsetParent !== null);
       const o = s && [...s.options].find((x) => x.textContent === "Om Live Region");
       if (!o) return false;
       s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
-    })()`);
-    if (!chosen) fail("the Regions tab's Go to region list has no Om Live Region");
+    })()`), 20000);
+    if (!chosen) fail(`the Regions tab's Go to region list has no Om Live Region: ${JSON.stringify(await page.evaluate(`[...document.querySelectorAll("select")].filter((e) => e.options[0]?.textContent === "Go to region…").map((e) => [e.offsetParent !== null, [...e.options].map((o) => o.textContent)])`))}`);
     else if (!(await until("the region's name box", () => page.evaluate(`document.querySelector("input.terrain-region-name")?.value === "Om Live Region"`), 10000).then(() => true, () => false))) fail("choosing Om Live Region in the Regions tab shows no name box with its name");
     else {
       await k.hands.click("input.terrain-region-name");
       await k.hands.key("a", "KeyA", 65, 2);
       await k.hands.type("Om Live Typed");
       await k.hands.key("Enter", "Enter", 13);
-      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("typing a region's name and Enter left the terrain editor without the change");
+      if (!(await soon(() => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)))) fail("typing a region's name and Enter left the terrain editor without the change");
       if (await rows("Om Live", "Om Live Typed", true, "after a region was renamed by typing in the Regions tab (unsaved) the Object Manager doesn't show the new name")) {
         await rows("Om Live", "Om Live Region", false, "after a region was renamed by typing in the Regions tab (unsaved) the Object Manager still shows the old name");
       }
@@ -5618,7 +5651,7 @@ async function objectManagerLive(page, found) {
     if (await omHas(`${unit} ←`, "Om Live Unit")) {
       const why = await contextMenuItem(page, ".om-row", "Om Live Unit", "Rename Object");
       if (why) fail(`Rename Object (custom unit): ${why}`);
-      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("Rename Object (custom unit) left the Object Editor without the change");
+      if (!(await soon(() => page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)))) fail("Rename Object (custom unit) left the Object Editor without the change");
       await rows(`${unit} ←`, "Om Live Renamed", true, "after Rename Object (custom unit, unsaved) the Object Manager doesn't show the new name");
       const del = await run("w3.objectEditor.objectAction", "w3u", unit, "delete");
       if (del.e || del.r !== true) fail(`deleting the custom unit in the Object Editor: ${JSON.stringify(del)}`);
@@ -5688,8 +5721,9 @@ async function editorExtras(page, found) {
   const step = async (what, f) => { const why = await f(); if (why) fail(`${what}: ${why}`); };
   // The answers a user gives, and the clipboard and the speaker, recorded.
   await page.evaluate(`(() => {
-    window.__extrasKept = { pick: w3.window.pickFile, save: w3.window.pickSaveFile, input: w3.window.inputBox, ask: w3.window.askDelete, warn: w3.window.showWarning, confirm: w3.window.confirm, play: HTMLMediaElement.prototype.play };
-    window.__clip = []; window.__played = [];
+    window.__extrasKept = { pick: w3.window.pickFile, save: w3.window.pickSaveFile, input: w3.window.inputBox, ask: w3.window.askDelete, warn: w3.window.showWarning, confirm: w3.window.confirm, error: w3.window.showError, play: HTMLMediaElement.prototype.play };
+    window.__clip = []; window.__played = []; window.__errors = [];
+    w3.window.showError = (m, ...rest) => { window.__errors.push(String(m)); return window.__extrasKept.error(m, ...rest); };
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t) => { window.__clip.push(t); } } });
     HTMLMediaElement.prototype.play = function () { window.__played.push(this.src); return Promise.resolve(); };
     w3.window.askDelete = async () => true;
@@ -5788,22 +5822,32 @@ async function editorExtras(page, found) {
     // Closed before undo and redo: closing a tab while the workbench reopens it for a write elsewhere throws in fileSaved.
     await page.evaluate(`w3.editors.close(${JSON.stringify(FILE)})`);
     await run("w3.imports.open");
-    await sleep(300);
+    await until("the Import Manager", () => page.evaluate(`[...document.querySelectorAll("tr.imp-row")].some((r) => r.offsetParent !== null)`), 20000).catch(() => fail("the Import Manager didn't open again"));
     // Ctrl+Z and Ctrl+Y in the Import Manager (its Replace button says Ctrl+Z takes it back), keys through the window.
     const impHands = new Hands(page);
     const impKey = async (key, code, vk, modifiers) => {
       await page.evaluate(`document.querySelector(".imp-editor:not([hidden])")?.focus()`);
       await impHands.key(key, code, vk, modifiers);
     };
-    await impKey("z", "KeyZ", 90, 2);
-    await until("the old content", () => readFileSync(onDisk, "utf8") === "old words\n", 10000).catch(() => fail(`Ctrl+Z in the Import Manager after Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
-    await impKey("y", "KeyY", 89, 2);
-    await until("the new content again", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail("Ctrl+Y in the Import Manager didn't bring the new content back"));
+    const holds = (text) => readFileSync(onDisk, "utf8") === text;
+    /** `act` until the file holds `text`: a step that comes while the last one is still being written (whose file is
+     *  already there, its answer not yet) is refused with "still being written", and is given again. Any other
+     *  outcome is the answer. */
+    const impStep = async (act, text) => {
+      const refused = () => page.evaluate(`window.__errors.some((m) => /still being written/.test(m))`);
+      for (let n = 0; n < 20; n++) {
+        await page.evaluate(`window.__errors.length = 0`);
+        await act();
+        await soon(async () => holds(text) || (await refused()), 10000);
+        if (holds(text) || !(await refused())) return holds(text);
+      }
+      return false;
+    };
+    if (!(await impStep(() => impKey("z", "KeyZ", 90, 2), "old words\n"))) fail(`Ctrl+Z in the Import Manager after Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`);
+    if (!(await impStep(() => impKey("y", "KeyY", 89, 2), "new words\n"))) fail("Ctrl+Y in the Import Manager didn't bring the new content back");
     // The title bar's undo and redo do the same.
-    await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await until("the old content", () => readFileSync(onDisk, "utf8") === "old words\n", 10000).catch(() => fail(`one undo of Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`));
-    await page.evaluate(`w3.commands.execute("workbench.redo")`);
-    await until("the new content again", () => readFileSync(onDisk, "utf8") === "new words\n", 10000).catch(() => fail("redo of Replace File didn't bring the new content back"));
+    if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "old words\n"))) fail(`one undo of Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`);
+    if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.redo")`), "new words\n"))) fail("redo of Replace File didn't bring the new content back");
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------
@@ -5835,7 +5879,7 @@ async function editorExtras(page, found) {
     if (!(await omFind(`${unit} ←`))) fail(`the Object Manager has no row for ${unit}`);
     else {
       await step("Rename Object (custom unit)", () => menu(".om-row", `${unit} ←`, "Rename Object"));
-      if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("Rename Object left the Object Editor without the change");
+      if (!(await soon(() => page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)))) fail("Rename Object left the Object Editor without the change");
       await k.save();
       if (modOf("unam") !== "Smoke Renamed") fail(`after Rename Object the unit's name is ${JSON.stringify(modOf("unam"))}`);
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
@@ -5978,10 +6022,16 @@ async function editorExtras(page, found) {
     const width = () => (existsSync(chapterInfo) ? JSON.parse(readFileSync(chapterInfo, "utf8")).playableWidth : null);
     if (width() !== twoWidth || readFileSync(chapterInfo, "utf8") === infoBefore) fail(`after Replace map the chapter's playable width is ${width()}, not the second map's ${twoWidth}`);
     if (readdirSync(join(camp, "maps")).join() !== "One.w3x") fail(`after Replace map maps/ holds ${readdirSync(join(camp, "maps")).join(", ")}`);
+    // The undo is over when the editor's step is, not when the files are back: the editor takes no redo while its files
+    // still move (a redo then is dropped), and the step ends after the last move's answer. The campaign was saved
+    // before Replace, so the end of the undo is the editor clean again; of the redo, changed again.
+    const campaignDirty = () => page.evaluate(`w3.editors.isDirty("map/war3campaign.w3f.json")`);
+    if (!(await campaignDirty())) fail("Replace map didn't leave the campaign changed (one undo step)");
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await until("the first map back", () => existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore, 10000).catch(() => fail("one undo of Replace map didn't put the first map back"));
+    await until("the first map back", async () => existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore && !(await campaignDirty()), 10000)
+      .catch(async () => fail(`one undo of Replace map didn't put the first map back (${existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore ? "the files are back" : "the files aren't back"}, the campaign ${await campaignDirty() ? "is" : "isn't"} changed)`));
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
-    await until("the second map again", () => width() === twoWidth, 10000).catch(() => fail("redo of Replace map didn't bring the second map back"));
+    await until("the second map again", async () => width() === twoWidth && (await campaignDirty()), 10000).catch(() => fail("redo of Replace map didn't bring the second map back"));
     // Remove Button, answered "and map": both go in one step; undo brings both back.
     await page.evaluate(`w3.window.showWarning = async (m) => (/Remove the map from the campaign too/.test(m) ? "Remove button and map" : undefined)`);
     await page.evaluate(`document.querySelector("tr.camp-row")?.click()`);
@@ -6007,7 +6057,7 @@ async function editorExtras(page, found) {
     else if (!spawnSync(cli, ["ls", w3n], { encoding: "utf8" }).stdout.includes("One.w3x")) fail("the packed campaign has no One.w3x");
   } finally {
     await page.evaluate(`(() => { const k = window.__extrasKept; if (!k) return; w3.window.pickFile = k.pick; w3.window.pickSaveFile = k.save; w3.window.inputBox = k.input; w3.window.askDelete = k.ask;
-      w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; HTMLMediaElement.prototype.play = k.play; delete navigator.clipboard; })()`).catch(() => {});
+      w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; w3.window.showError = k.error; HTMLMediaElement.prototype.play = k.play; delete navigator.clipboard; })()`).catch(() => {});
     await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", undefined)`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }

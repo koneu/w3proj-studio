@@ -10,8 +10,10 @@
 //   --base REF     what "without the fix" is (default: dev)
 //   --run CMD      the command to run instead of `npm test -- <test file>`, e.g. a Rust test:
 //                  --run "cargo test -p w3proj-studio --lib an_unreadable_subfolder"
-//   --keep-rust-tests  for Rust files whose tests are in the file itself (`#[cfg(test)] mod tests` at its end):
-//                  the code before that comes from the base, the tests stay the new ones
+//   --keep-rust-tests  for Rust files whose tests are in the file itself: every module that is only compiled for
+//                  tests (`#[cfg(test)] mod tests { … }`, `#[cfg(all(test, unix))] mod fs_tests { … }`, any name, at
+//                  any place, also nested: rust-test-modules.mjs) stays as it is now, the rest of the file comes
+//                  from the base
 //
 // Exit 0 only for pass-then-fail; 3 when the test without the fix merely doesn't build (weak evidence). The files are put back on every way out (also Ctrl+C); a file that differed
 // from the base before the run is exactly as it was afterwards. Paths are relative to where it's run.
@@ -20,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseWithTests } from "./rust-test-modules.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 
@@ -65,12 +68,15 @@ for (const p of paths) {
 }
 // The base's code with the file's own tests as they are now.
 if (keepRustTests) {
-  const TESTS = /^#\[cfg\(test\)\]\s*\nmod tests\b/m;
   for (const p of paths.filter((p) => p.endsWith(".rs"))) {
     const old = atBase.get(p)?.toString("utf8"), cur = now.get(p)?.toString("utf8");
-    const [o, c] = [old?.search(TESTS) ?? -1, cur?.search(TESTS) ?? -1];
-    if (o < 0 || c < 0) { console.error(`${relative(process.cwd(), p)}: no "#[cfg(test)] mod tests" ${c < 0 ? "now" : `on ${base}`} to keep the tests of`); process.exit(2); }
-    atBase.set(p, Buffer.from(old.slice(0, o) + cur.slice(c), "utf8"));
+    const kept = old === undefined || cur === undefined ? null : baseWithTests(old, cur);
+    if (kept === null) {
+      const why = cur === undefined ? "isn't there now" : old === undefined ? `isn't on ${base}` : "has no test module (#[cfg(test)] mod … { … })";
+      console.error(`${relative(process.cwd(), p)} ${why}: no tests of it to keep`);
+      process.exit(2);
+    }
+    atBase.set(p, Buffer.from(kept, "utf8"));
   }
 }
 const same = paths.filter((p) => (now.get(p) === null && atBase.get(p) === null) || (now.get(p) !== null && atBase.get(p) !== null && now.get(p).equals(atBase.get(p))));
