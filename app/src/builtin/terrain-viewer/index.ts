@@ -84,6 +84,7 @@ import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
+import { PendingWork } from "../../lib/settle";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
@@ -328,6 +329,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.terrain.settle", async () => {
       clearTimeout(rebuildTimer);
       await runRebuild();
+    }),
+    // Part of the workbench's settled(): every open terrain editor's view at rest (objects, models, a frame drawn).
+    w3.commands.register("w3.terrain.settleViews", async () => {
+      await Promise.all([...toolGroups.settleView.values()].map((settle) => settle()));
     }),
     // Calculate Shadows (the World Editor's Calculate Shadows and Save Map): everything unsaved is saved, then
     // war3map.shd is made again in whole from the saved terrain and doodads (edits only update the cells they change).
@@ -1554,6 +1559,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           restored: () => {},
         });
         let dirty = true, loadDirty = false;
+        /** What the view does after a file was saved (lighting, weather, bounds, races read again): settleView waits for it. */
+        const viewWork = new PendingWork();
         const redraw = () => { dirty = true; };
         /** A texture or other art came in: drawn with the next frame the load lets through (see tick). */
         const loadRedraw = () => { loadDirty = true; };
@@ -1666,7 +1673,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         renderer.showWeather = w3.settings.get<boolean>("terrain.weather", true) !== false;
         void loadWeather();
         const stopWeatherWatch = w3.workspace.onDidChange(() => void loadWeather());
-        const stopWeatherSaves = w3.workspace.onDidSave((path) => { if (/war3map\.w3[ir]\.json$/i.test(path)) void loadWeather(); if (/war3map\.w3i\.json$/i.test(path)) void loadBorder(); });
+        const stopWeatherSaves = w3.workspace.onDidSave((path) => { if (/war3map\.w3[ir]\.json$/i.test(path)) void viewWork.track(loadWeather()); if (/war3map\.w3i\.json$/i.test(path)) void viewWork.track(loadBorder()); });
         const stopLightSettings = w3.settings.onDidChange((key) => {
           if (key === "terrain.boundary") { renderer.showBorder = showBoundary(); void loadBorder(); }
           if (key === "terrain.minimap.panel") minimapSetting();
@@ -1678,14 +1685,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
         });
         renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false);
-        const reloadLighting = () => void loadMapLighting(w3, terrain.tileset).then((l) => {
+        const reloadLighting = () => void viewWork.track(loadMapLighting(w3, terrain.tileset).then((l) => {
           lighting = l;
           lightBox.title = `The map's day/night lighting (${l.source}); off: an even light`;
           lightSelect.title = "Time of day";
           applyLight();
           // The map's wave flags decide where shoreline foam goes.
           void replanShore();
-        }, () => {});
+        }, () => {}));
         // Saved lighting, map properties (light environment) or lighting models change the light.
         const stopLightWatch = w3.workspace.onDidSave((p) => { if (/war3map\.w3[li](\.json)?$|\.mdl$/i.test(p)) reloadLighting(); });
         reloadLighting();
@@ -2196,7 +2203,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }, SHADOW_EDIT_DELAY);
         };
         // Saving (or a rebuild after a tool's edit) wrote the shadow map: it's what's stored now.
-        const stopShadowSaves = w3.workspace.onDidSave((path) => { if (path.toLowerCase() === "map/war3map.shd") void viewShadows.reloadBaked(); });
+        const stopShadowSaves = w3.workspace.onDidSave((path) => { if (path.toLowerCase() === "map/war3map.shd") void viewWork.track(viewShadows.reloadBaked()); });
         const stopShadowSetting = w3.settings.onDidChange((key) => {
           if (key !== "terrain.shadows.visible") return;
           renderer.showShadows = switchedOn(w3, "terrain.shadows.visible", true);
@@ -2372,8 +2379,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         },(e) => void w3.window.showError(`The placed objects couldn't be loaded again after the save: ${(e as Error).message ?? e}`));
         const stopObjectWatch = w3.workspace.onDidSave((p) => {
-          if (projectObjects && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void reloadRaces();
-          if (projectObjects && groupCycle > 0 && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void readRandomGroups().then((g) => { if (g && !disposed) { randomGroups = g; void rebuildObjects(); } });
+          if (projectObjects && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void viewWork.track(reloadRaces());
+          if (projectObjects && groupCycle > 0 && /(^|\/)war3map\.w3i(\.json)?$/i.test(p)) void viewWork.track(readRandomGroups().then((g) => { if (g && !disposed) { randomGroups = g; return rebuildObjects(); } }));
           // The properties panel reads its lists and the types' facts anew.
           if (/(^|\/)war3map(\.w3[ir]|\.wts)(\.json)?$/i.test(p)) mapLists = null;
           if (/(^|\/)war3map(Skin)?\.w3[ua](\.json)?$|(^|\/)war3mapMisc\.txt$/i.test(p)) factsData = null;
@@ -4287,7 +4294,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let layerSeq = 0, layerTimer: ReturnType<typeof setTimeout> | undefined;
         /** Shown while a layer is being worked out (the pathing of a big map takes seconds). */
         const layerBusy = h("span.muted", { hidden: true }, "Working…");
-        const refreshLayers = async () => {
+        /** The last refresh of the layers, for settleView (a newer one makes the older one's result moot). */
+        let layersRunning: Promise<void> = Promise.resolve();
+        const refreshLayers = () => (layersRunning = refreshLayersNow());
+        const refreshLayersNow = async () => {
           const seq = ++layerSeq;
           const latest = () => seq === layerSeq;
           // A layer that throws at once (not by rejecting) still ends with the label hidden and its error shown.
@@ -4342,7 +4352,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           minimapPanelSoon();
           if (!anyGroundLayer(shown)) return;
           clearTimeout(layerTimer);
-          layerTimer = setTimeout(() => void refreshLayers(), 400);
+          layersDue = true;
+          layerTimer = setTimeout(() => { layersDue = false; void refreshLayers(); }, 400);
+        };
+        /** settleView: layers due are worked out now, and the last refresh is waited for. */
+        let layersDue = false;
+        const settleLayers = async () => {
+          if (layersDue) { clearTimeout(layerTimer); layersDue = false; void refreshLayers(); }
+          await layersRunning;
         };
         const applyGrid = () => {
           // The tile grid is the ground's own mesh, so it follows cliffs and ramps; the others are lines per pixel.
@@ -4976,6 +4993,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         const ready = () => Promise.all([objectsPlaced.catch(() => {}), objectReload.settled()]).then(() => {});
+        /** The view at rest: the objects placed and reloaded after saves, the models and textures asked for loaded, and a
+         *  frame drawn with no change left to draw (a view that can't draw, hidden or lost, doesn't hold it up). */
+        const settleView = async () => {
+          await viewWork.idle();
+          await ready();
+          await settleLayers();
+          await loader.settled();
+          await artSettled();
+          // A frame, or a tenth of a second where the browser holds frames back.
+          const frame = () => new Promise<void>((done) => {
+            const timer = setTimeout(done, 100);
+            requestAnimationFrame(() => { clearTimeout(timer); done(); });
+          });
+          const drawing = () => !disposed && !glDead && !document.hidden && canvas.clientWidth > 0;
+          // Five seconds of frames at most: a redraw asked for every frame (edge scrolling) never ends by itself.
+          for (let i = 0; i < 300 && dirty && drawing(); i++) await frame();
+          // The drawn frame on screen: one frame later it has been shown.
+          if (drawing()) await frame();
+        };
+        toolGroups.settleView.set(doc.path, settleView);
         /** What Export Minimap and the minimap panel draw, as the editor has it now (unsaved edits included). */
         const exportSource = async (): Promise<ExportSource> => {
           await ready();
@@ -5209,6 +5246,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (toolGroups.resetVariations.get(doc.path) === resetGround) toolGroups.resetVariations.delete(doc.path);
             if (toolGroups.wholeMapGround.get(doc.path) === wholeGroundCmds) toolGroups.wholeMapGround.delete(doc.path);
             if (toolGroups.viewCommands.get(doc.path) === viewCommands) toolGroups.viewCommands.delete(doc.path);
+            if (toolGroups.settleView.get(doc.path) === settleView) toolGroups.settleView.delete(doc.path);
             if (toolGroups.heightCommands.get(doc.path) === heightCommands) toolGroups.heightCommands.delete(doc.path);
             if (toolGroups.replaceTypes.get(doc.path) === replaceTypes) toolGroups.replaceTypes.delete(doc.path);
             clearTimeout(layerTimer);

@@ -2,6 +2,7 @@ import type { Disposable, EditorContribution, EditorDocument, EditorInstance, Ed
 import { disposable, errorView, Emitter, globMatch, h } from "./dom";
 import { graphicsModeReopens, keptView } from "./tabmemory";
 import type { Stamp } from "./workspace";
+import { PendingWork } from "../lib/settle";
 
 interface Tab {
   path: string;
@@ -104,7 +105,8 @@ export class EditorService {
     this.awaitingRestore = true;
   }
 
-  constructor(private io: DocumentIO) {
+  /** `pending`: where saves and the reloads after them are counted, for the workbench's settled(). */
+  constructor(private io: DocumentIO, readonly pending = new PendingWork()) {
     this.content.append(this.empty);
     this.tabActions.hidden = true;
     this.root.append(h("div.tabs-row", {}, this.tabsEl, this.tabActions), this.content);
@@ -458,12 +460,19 @@ export class EditorService {
 
   /** Runs one of a tab's own writes (or its save): saves meanwhile aren't another writer's. What
    *  the file is afterwards is the editor's own. */
-  private async own<T>(tab: Tab, f: () => Promise<T>): Promise<T> {
-    tab.writing++;
-    let r: T;
-    try { r = await f(); } finally { tab.writing--; }
-    if (tab.stamp !== undefined) tab.stamp = await this.stampOf(tab.path);
-    return r;
+  private own<T>(tab: Tab, f: () => Promise<T>): Promise<T> {
+    return this.pending.track((async () => {
+      tab.writing++;
+      let r: T;
+      try { r = await f(); } finally { tab.writing--; }
+      if (tab.stamp !== undefined) tab.stamp = await this.stampOf(tab.path);
+      return r;
+    })());
+  }
+
+  /** Every editor commits what it holds back (a debounced edit, a field being typed in), as before a save. */
+  flushAll() {
+    for (const t of this.tabs) this.flush(t);
   }
 
   /** Whether a tab may save: when its file changed on disk since the editor read or last wrote it

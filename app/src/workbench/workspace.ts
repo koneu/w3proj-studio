@@ -2,6 +2,7 @@ import type { ConfigurationProperty, FileInfo, ProjectInfo, SettingInfo, Setting
 import { invoke, isAbsolutePath, joinPath, readBytes, readText, writeBytes, writeText } from "./backend";
 import { fileKey, isWindowsPath, onWindows } from "../lib/paths";
 import { Emitter } from "./dom";
+import { PendingWork } from "../lib/settle";
 
 /** A file's size and last write (ms) as the backend reports them. */
 /** A file's size and last write (ms); `hash`: of its contents, where asked for (`statHashed`). */
@@ -31,7 +32,8 @@ export class WorkspaceService {
   /** A project file was written (its path as given, with forward slashes). */
   readonly onDidSave = new Emitter<string>();
 
-  constructor(private settings: SettingsService) {}
+  /** `pending`: where the writes of project files are counted, for the workbench's settled(). */
+  constructor(private settings: SettingsService, readonly pending = new PendingWork()) {}
 
   project() {
     return this.info;
@@ -205,8 +207,11 @@ export class WorkspaceService {
    *  Of overlapping writes to one file the one that started last has the last word. A file the list
    *  doesn't have yet (an export into map/Scripts/) is added to it at once, alone: nothing else is
    *  re-read, so what others changed stays to be noticed. A write that ends after a project switch
-   *  is not noted. `size`: what the file will be, for the list until the answer comes. */
-  async tracked(p: string, size: number, write: (target: string) => Promise<Stamp | void>): Promise<void> {
+   *  is not noted. `size`: what the file will be, for the list until the answer comes. Counted in `pending`. */
+  tracked(p: string, size: number, write: (target: string) => Promise<Stamp | void>): Promise<void> {
+    return this.pending.track(this.trackedWrite(p, size, write));
+  }
+  private async trackedWrite(p: string, size: number, write: (target: string) => Promise<Stamp | void>): Promise<void> {
     const root = this.info?.root, target = this.resolve(p), at = this.keyOf(target, root);
     if (!at) { await write(target); return; }
     const seq = ++this.writeSeq;

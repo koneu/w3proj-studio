@@ -32,6 +32,11 @@ export class CommandService {
     return (await handler(...args)) as T;
   }
 
+  /** Whether a handler is there now (execute would activate an extension for it first). */
+  registered(id: string): boolean {
+    return this.handlers.has(id);
+  }
+
   info(id: string): CommandInfo | undefined {
     return this.contributed.get(id);
   }

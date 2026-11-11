@@ -22,6 +22,7 @@ import { StatusBar } from "./statusbar";
 import { ViewService } from "./views";
 import { PROJECT_SETTINGS, SettingsService, WorkspaceService } from "./workspace";
 import { isFullPath, joinPath, separatorOf } from "../lib/paths";
+import { settleRounds } from "../lib/settle";
 
 /** Shows the mouse pointer before a native dialog (see ui_show_cursor in the backend). */
 const showCursor = () => invoke("ui_show_cursor").catch(() => {});
@@ -98,7 +99,7 @@ export class Workbench {
         if (project && (p === PROJECT_SETTINGS || p === this.settings.projectSettingsPath())) await this.settings.loadProject(project.root);
       },
       key: (p) => this.workspace.key(p),
-    });
+    }, this.workspace.pending);
     this.statusBar = new StatusBar((c) => this.run(c));
     this.progress = new Progress(this.statusBar.progress);
 
@@ -186,7 +187,7 @@ export class Workbench {
     await this.views.showContainer("explorer");
 
     // A file saved inside the app reopens (or flags) other editors showing it.
-    this.workspace.onDidSave.on((p) => void this.editors.fileSaved(p));
+    this.workspace.onDidSave.on((p) => void this.workspace.pending.track(this.editors.fileSaved(p)).catch(() => {}));
 
     // Files changed outside the app (git checkout, another editor) are noticed when the window
     // gets the focus back: the file list refreshes and their open editors reload.
@@ -235,6 +236,29 @@ export class Workbench {
     };
     this.workspace.onDidChange.on(projectChanged);
     void projectChanged();
+  }
+
+  /**
+   * Resolves once the app is at rest, for tests and scripts to wait on instead of a fixed pause. In rounds, until a
+   * round starts no new work (a save that sets off a script, whose write sets off a reload):
+   *  - every editor commits what it holds back (`flush`: a debounced edit, a field being typed in);
+   *  - saves of editors, writes of project files and the editors' reloads after a write have ended;
+   *  - the map script due after a save is written now (w3.script.settle), and so are pathing, shadows and the
+   *    minimap due after a terrain edit (w3.terrain.settle): work on a timer is done at once, not waited for;
+   *  - every open terrain view has placed its objects, loaded what it asked for and drawn a frame with nothing left
+   *    to draw (w3.terrain.settleViews).
+   * Not waited for: a question on screen (a save asking about a file changed on disk counts once answered), and
+   * reads of the game's files nobody waits on (`game.readsPending`). Resolves with the number of rounds; throws when
+   * work keeps starting more work. A step whose extension is off is left out.
+   */
+  settled(): Promise<number> {
+    const command = (id: string) => () => (this.commands.registered(id) ? this.commands.execute(id) : undefined);
+    return settleRounds([
+      () => this.editors.flushAll(),
+      command("w3.script.settle"),
+      command("w3.terrain.settle"),
+      command("w3.terrain.settleViews"),
+    ], this.workspace.pending);
   }
 
   run(command: string, ...args: unknown[]) {
