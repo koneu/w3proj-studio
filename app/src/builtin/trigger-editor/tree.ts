@@ -15,6 +15,25 @@ function container(file: TriggerFile, id: number): Item | undefined {
   return file.items.find((i) => i.id === id && (isCategory(i) || i.type === 1));
 }
 
+/** The categories the file has closed (each category's `expanded`): how the tree opens. */
+export function collapsedOf(file: TriggerFile): Set<number> {
+  const out = new Set<number>();
+  for (const it of file.items) if (isCategory(it) && "expanded" in it && !it.expanded) out.add(it.id);
+  return out;
+}
+
+/** The tree's open and closed categories written into `file` (changed in place), as the World Editor saves them.
+ *  Only a flag that disagrees with the tree changes, so a file whose tree wasn't toggled keeps its bytes (an
+ *  `expanded` other than 0 or 1 too). Classic files don't store it. */
+export function applyExpanded(file: TriggerFile, collapsed: ReadonlySet<number>): void {
+  if (!file.reforged) return;
+  for (const it of file.items) {
+    if (!isCategory(it) || !("expanded" in it)) continue;
+    if (collapsed.has(it.id)) { if (it.expanded) it.expanded = 0; }
+    else if (!it.expanded) it.expanded = 1;
+  }
+}
+
 /** An item and everything inside it, in file order. */
 export function subtree(file: TriggerFile, it: Item): Item[] {
   if (!isCategory(it)) return [it];
