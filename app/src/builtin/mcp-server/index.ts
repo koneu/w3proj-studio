@@ -79,8 +79,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   const failed = (work: () => Promise<void>) => () => void work().catch((e) => w3.window.showError(String(e)));
 
   const guideList = h("div");
+  /** The latest listing: an older one that finishes later doesn't replace it. */
+  let guidesRun = 0;
   const showGuides = async () => {
-    const rows = await Promise.all(Object.keys(GUIDES).map(async (topic) => {
+    const run = ++guidesRun;
+    const rows =await Promise.all(Object.keys(GUIDES).map(async (topic) => {
       const own = hasRules(await readRules(topic));
       const edit = async () => {
         const path = await rulesPath(topic);
@@ -120,6 +123,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const { user_guides: folder } = await w3.backend.invoke<{ user_guides: string }>("app_paths");
       await w3.window.showInfo(`Guides are .md files in ${folder}`);
     });
+    if (run !== guidesRun) return;
     guideList.replaceChildren(h("div.ext-section-title", {}, "GUIDES"),
       h("div.ext-desc.ext-formats-hint", {}, "Guides tell the AI how to do a job well. Your rules are added to a guide, and win where they disagree."), ...rows, ...ownRows,
       h("div.ext-item", {}, h("div.ext-actions", {}, h("button", { onclick: add }, "New guide"), h("button", { onclick: openFolder }, "Where are they?"))));
@@ -215,6 +219,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         w3.backend.invoke<ClientInfo[]>("mcp_clients").then((list) => clients.replaceChildren(...list.map(clientRow)),
           (e) => clients.replaceChildren(h("div.view-error", {}, String(e))));
       },
+      // A guide dropped into the folder by another program shows when the view is shown again.
+      shown: () => void showGuides().catch(() => {}),
     }),
     w3.services.provide<McpEditsService>(MCP_EDITS_SERVICE, { edit: (title, change, follow) => log.edit(title, change, follow) }),
     w3.workspace.onDidChange(() => {
@@ -285,6 +291,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // Rules are saved outside the project too; a saved file is the cue to look.
     w3.workspace.onDidSave((path) => { if (/\.md$/i.test(path)) void showGuides().catch(() => {}); }),
+    // ... and so is the window coming back: a guide written by another program (the folder is outside the project,
+    // so no file event tells).
+    (() => {
+      const onFocus = () => { if (guideList.isConnected) void showGuides().catch(() => {}); };
+      window.addEventListener("focus", onFocus);
+      return { dispose: () => window.removeEventListener("focus", onFocus) };
+    })(),
     w3.settings.onDidChange((key) => {
       if (key === "mcp.enabled") void apply();
       if (key.startsWith("mcp.")) w3.views.refresh("w3.mcp.status");

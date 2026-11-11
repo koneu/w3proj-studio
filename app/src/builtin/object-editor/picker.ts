@@ -5,6 +5,7 @@
 import { focusAfterClick, h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
+import { shownValue, type EditorType } from "./fields";
 import { compare, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, resolveField, type FieldFilter } from "./filters";
 
 const MAX_ROWS = 300;
@@ -23,7 +24,7 @@ interface Entry {
 export function pickBaseObject(
   host: HTMLElement,
   kd: KindData,
-  opts: { title: string; pinned?: string; iconOf?: PickOptions["iconOf"] },
+  opts: { title: string; pinned?: string; iconOf?: PickOptions["iconOf"]; editorTypes?: PickOptions["editorTypes"] },
 ): Promise<string | undefined> {
   return pickObject(host, kd, opts).then((r) => (r && "id" in r ? r.id : undefined));
 }
@@ -41,6 +42,8 @@ export interface PickOptions {
   query?: string;
   /** Icon (data URL) of an entry, loaded as rows are shown. */
   iconOf?: (id: string, base?: string) => Promise<string | null>;
+  /** UnitEditorData's value types: a field filter on a choice/list/flags field matches its labels too. */
+  editorTypes?: Map<string, EditorType> | null;
 }
 
 export type PickResult = { id: string } | { tab: number; query: string } | undefined;
@@ -93,7 +96,8 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       }
       for (const f of filters) {
         if (!f.field) continue; // unknown field: shown as an error chip, ignored
-        if (!compare(fieldValue(f.field, e.base ?? e.id), f.op, f.value)) return false;
+        const value = fieldValue(f.field, e.base ?? e.id);
+        if (!compare(value, f.op, f.value, shownValue(opts.editorTypes?.get(f.field.type), value))) return false;
       }
       return true;
     };

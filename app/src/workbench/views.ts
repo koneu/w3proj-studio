@@ -79,6 +79,8 @@ export class ViewService {
     this.renderActivityBar();
     for (const v of views) {
       if (!v.provider) await this.activate(`onView:${v.contribution.id}`);
+      // Rendered when it was registered: an extension's mistake here mustn't stop the other views.
+      else try { v.provider.shown?.(); } catch (e) { console.error(`view ${v.contribution.id}: ${e}`); }
     }
   }
 
