@@ -826,7 +826,10 @@ async function heightsPreserve(page, found) {
   const fresh = () => k.doodads().filter((d) => !known.has(JSON.stringify(d.position)));
   await k.hands.key("c", "KeyC", 67, 2);
 
-  if ((await k.setting("terrain.preserveCopiedHeight")) === false || (await k.box("Keep pasted height")) !== true) fail("Preserve Copied Object Height isn't on by default");
+  // Off by default, as in the World Editor; the toggle command switches it on and the toolbar box follows.
+  if ((await k.setting("terrain.preserveCopiedHeight")) === true || (await k.box("Keep pasted height")) !== false) fail("Preserve Copied Object Height is on by default");
+  await k.run("w3.terrain.togglePreserveCopiedHeight");
+  if ((await k.setting("terrain.preserveCopiedHeight")) !== true || (await k.box("Keep pasted height")) !== true) fail("the toggle command didn't switch Preserve Copied Object Height on, or the toolbar box didn't follow");
   await k.look(-1024, 0);
   await sleep(400);
   await k.focusMap();
@@ -872,9 +875,17 @@ async function heightsUniform(page, found) {
   await k.save();
   const start = k.doodads(), footman = k.units().find((u) => u.id === "hfoo");
   if (start.length !== 3 || !footman) return fail(`the map has ${start.length} doodads and ${footman ? "a" : "no"} footman`);
-  const ground = start[0].position[2], hash0 = k.docHash();
+  const ground = start[0].position[2];
   if (start.some((d) => d.flags & k.FIXED)) fail("a doodad is placed with a fixed height");
   await k.tab("Select");
+  // One doodad 64 higher (four PageUp), so the selection's mean isn't any one doodad's height.
+  await k.look(256, 0, { id: "LTlt", x: 256, y: 0 });
+  await sleep(500);
+  await k.focusMap();
+  for (let i = 0; i < 4; i++) await k.hands.key("PageUp", "PageUp", 33, 2);
+  await k.save();
+  if (k.doodads().find((d) => d.position[0] === 256)?.position[2] !== ground + 64) return fail(`the raised doodad (control): ${JSON.stringify(k.doodads().map((d) => d.position))}`);
+  const hash0 = k.docHash();
   await k.focusMap();
   await k.hands.key("a", "KeyA", 65, 2);
   await sleep(300);
@@ -883,7 +894,16 @@ async function heightsUniform(page, found) {
   await k.run("w3.terrain.setUniformDoodadHeights");
   await k.save();
   if (k.docHash() !== hash0) fail("a height that isn't a number changed the doodads");
-  await page.evaluate(`window.__typed = "150"`);
+  // The start value taken as it is: every doodad at the selection's mean height, as the World Editor sets them.
+  await page.evaluate(`w3.window.inputBox = async (o) => o.value`);
+  await k.run("w3.terrain.setUniformDoodadHeights");
+  await k.save();
+  const mean = ground + 64 / 3;
+  if (k.doodads().some((d) => Math.abs(d.position[2] - mean) > 0.01 || !(d.flags & k.FIXED))) fail(`the start height isn't the mean ${mean}: ${k.doodads().map((d) => `${d.position[2]}/${d.flags}`).join(" ")}`);
+  await k.run("workbench.undo");
+  await k.save();
+  if (k.docHash() !== hash0) fail("one undo didn't take the mean height back");
+  await page.evaluate(`(() => { window.__typed = "150"; w3.window.inputBox = async () => window.__typed; })()`);
   const err = await k.run("w3.terrain.setUniformDoodadHeights");
   if (err) fail(`Set Uniform Doodad Heights: ${err}`);
   await k.save();
@@ -1215,15 +1235,19 @@ async function viewModes(page, found) {
   plain = await settledMapPicture(page);
   noise = await pixelsApart(page, plain, await mapPicture(page));
   s = await state();
+  const enforced = await k.setting("terrain.enforceCameraBounds");
   await trial("B", "cameraBounds", () => key("b", "KeyB", 66), 100);
   // One toolbar box shows the line (the World Editor's Camera Bounds) and follows B; the other is Enforce Camera Bounds,
   // a setting B leaves alone, named so the two aren't taken for each other.
   const boundsBoxes = await page.evaluate(`[...document.querySelectorAll(".model-toggle")].map((l) => l.textContent.trim()).filter((t) => /bounds/i.test(t))`);
   if (boundsBoxes.join() !== "Camera bounds,Enforce camera bounds") fail(`the toolbar's bounds boxes: ${JSON.stringify(boundsBoxes)}`);
-  if ((await k.box("Camera bounds")) !== true || (await k.box("Enforce camera bounds")) !== false || (await k.setting("terrain.enforceCameraBounds")) === true)
-    fail(`after B the Camera bounds box is ${await k.box("Camera bounds")}, Enforce camera bounds ${await k.box("Enforce camera bounds")}`);
+  // Enforce Camera Bounds is on by default, as in the World Editor: B shows the line and leaves the setting as it was.
+  if (enforced === false) fail("Enforce Camera Bounds isn't on by default");
+  if ((await k.box("Camera bounds")) !== true || (await k.box("Enforce camera bounds")) !== (enforced !== false) || (await k.setting("terrain.enforceCameraBounds")) !== enforced)
+    fail(`after B the Camera bounds box is ${await k.box("Camera bounds")}, Enforce camera bounds ${await k.box("Enforce camera bounds")} (setting ${enforced} before)`);
   await key("b", "KeyB", 66);
   if ((await k.box("Camera bounds")) !== false) fail("the Camera bounds box didn't follow B off");
+  if ((await k.box("Enforce camera bounds")) !== (enforced !== false)) fail("B off changed the Enforce camera bounds box");
   if ((await state()).cameraBounds || (await changed()) > 150) fail("B twice isn't the plain picture");
   const fogBefore = (await state()).shown.fog;
   // Off by default, as the World Editor's Fog Effects (the user's decision, 2026-11-11).
@@ -2223,6 +2247,9 @@ async function heightsLimits(page, found) {
   const fail = (what) => found.push(`height tools (limits): ${what}`);
   const k = await heightKit(page, "Limits");
   const { hands } = k;
+  // On by default, as in the World Editor; the toggles below start from off.
+  if ((await k.setting("terrain.enforceCameraBounds")) === false || (await k.box("Enforce camera bounds")) !== true) fail("Enforce Camera Bounds isn't on by default");
+  await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
   const bounds = k.read("war3map.w3i.json").cameraBounds;
   const [bl, bb, br, bt] = bounds;
   if (!(bl < br && bb < bt)) return fail(`camera bounds ${bounds}`);
@@ -2498,6 +2525,9 @@ async function resizeUndoChecks(page, found) {
   await editorUp();
   const grown = await settledState();
   if (size() <= baseSize || !differ(base, grown).includes("war3map.w3e.txt")) { fail("the resize changed nothing (control)"); return; }
+  // A new map has no camera zoom (0, 0, 0); Map Size gives it the World Editor's 1250 for each.
+  const zoom = JSON.parse(readFileSync(join(root, "map", "war3map.w3i.json"), "utf8")).cameraZoom;
+  if (JSON.stringify(zoom) !== JSON.stringify({ default: 1250, max: 1250, min: 1250 })) fail(`the camera zoom after Map Size: ${JSON.stringify(zoom)}`);
   await ctrl("z", "KeyZ", 90, false);
   if (await reaches(base, "undo of the larger map by Ctrl+Z")) {
     await ctrl("z", "KeyZ", 90, true);
