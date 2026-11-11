@@ -473,6 +473,11 @@ Each of these comes from a test on this project that looked fine and wasn't.
   `lib/jass/mini-game.fixture.ts` is a small handwritten stand-in for the game's script API.
 - **Real maps are read-only.** Work on copies in a scratch folder.
 - **A flaky test is a bug.** Fix it or remove it; don't rerun until green.
+- **Wait for the condition, not the clock.** A fixed pause after an action is too long on an idle machine and too short
+  under load. In app-smoke wait with `until(…)` on what the action brings about, or with `settled(page)`
+  (`w3Workbench.settled()`: saves and writes ended, debounced work done, terrain views drawn; workbench.ts says what
+  it covers). A pause stays only where time itself is tested (something must *not* happen, edge scrolling), with a
+  comment saying so.
 
 ## What's still unproven
 

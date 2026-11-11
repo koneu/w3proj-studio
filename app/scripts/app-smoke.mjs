@@ -83,6 +83,21 @@ function mcpTool(page) {
   };
 }
 
+/** The app at rest (w3Workbench.settled, workbench.ts: saves and writes ended, the editors' reloads after them done,
+ *  the script, pathing, shadows and minimap due after an edit written, every terrain view's objects placed and a frame
+ *  drawn with nothing left to draw): what a check waits for after an action instead of a fixed pause. */
+async function settled(page, timeout = 60000) {
+  let timer;
+  try {
+    await Promise.race([
+      page.evaluate(`w3Workbench.settled()`),
+      new Promise((_, no) => { timer = setTimeout(() => no(new Error(`the app wasn't settled after ${timeout / 1000} s`)), timeout); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Creates maps as a user would, through the app, and holds what comes out against the tools. */
 async function newMaps(page, found) {
   const folder = join(work, "new");
@@ -246,19 +261,21 @@ async function terrainWiring(page, found) {
   const state = gate.state;
   const hold = gate.hold, release = gate.release;
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
-  await sleep(300);
+  await until("the ground tiles", () => page.evaluate(`document.querySelectorAll(".terrain-tex-thumb").length > 1`), 10000);
   // A new map is the tileset's first tile (Dirt): paint the second, so the stroke changes the ground.
   await page.evaluate(`document.querySelectorAll(".terrain-tex-thumb")[1]?.click()`);
-  await sleep(100);
+  await until("the second tile chosen", () => page.evaluate(`!!document.querySelectorAll(".terrain-tex-thumb")[1]?.classList.contains("on")`), 5000);
   const canvas = await hands.where(".terrain-view canvas, canvas");
   let row = 0;
-  const paint = async () => {
+  /** A stroke, then the app at rest; while a write is held only the view (settled() would wait for the write). */
+  const paint = async (writeHeld = false) => {
     row += 1;
     await hands.drag({ x: canvas.x - 60, y: canvas.y - 120 + row * 40 }, { x: canvas.x + 60, y: canvas.y - 120 + row * 40 });
-    await sleep(200);
+    if (writeHeld) await page.evaluate(`w3.commands.execute("w3.terrain.settleViews")`);
+    else await settled(page);
   };
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const base = hash(ground);
   await paint();
   if (!(await state()).dirty) { fail("painting didn't mark the ground as changed"); return; }
@@ -268,15 +285,15 @@ async function terrainWiring(page, found) {
     await hold();
     await page.evaluate(`void (window.__save = w3.editors.saveAll())`);
     await until("the write", async () => (await state()).inflight === 1, 5000);
-    await paint();
+    await paint(true);
     await release();
     await page.evaluate(`window.__save`);
-    await sleep(300);
+    await settled(page);
     const afterFirst = hash(ground);
     if (afterFirst === base) fail("the save wrote nothing");
     if (!(await state()).dirty) fail("an edit made during a save was marked as saved");
     await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
+    await settled(page);
     if ((await state()).dirty) fail("the next save left the ground marked as changed");
     if (hash(ground) === afterFirst) fail("an edit made during a save was lost: the next save wrote the same file");
 
@@ -286,14 +303,15 @@ async function terrainWiring(page, found) {
     await hold();
     await page.evaluate(`void (window.__save = w3.editors.saveAll())`);
     await until("the write", async () => (await state()).inflight === 1, 5000);
-    await paint();
+    await paint(true);
     await page.evaluate(`void (window.__save2 = w3.editors.saveAll())`);
+    // Time for a second write that must not start: nothing to wait for.
     await sleep(500);
     const during = await state();
     if (during.writes - writesBefore !== 1 || during.inflight !== 1) fail(`a second save started while the first wrote: ${during.writes - writesBefore} writes, ${during.inflight} in flight`);
     await release();
     await page.evaluate(`Promise.all([window.__save, window.__save2])`);
-    await sleep(300);
+    await settled(page);
     const end = await state();
     if (end.max > 1) fail(`${end.max} writes of the ground ran at once`);
     if (end.writes - writesBefore !== 2) fail(`${end.writes - writesBefore} writes for two saves`);
@@ -319,7 +337,7 @@ async function terrainWiring(page, found) {
   await retype(hands, ".obj-table .obj-value-cell input", "First Name");
   if (!(await dirtyObjects())) fail("changing a map string didn't mark the object file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   if (!readFileSync(strings, "utf8").includes("First Name")) fail("a changed map string wasn't saved into war3map.wts");
   if (await dirtyObjects()) fail("the object file is still marked as changed after saving");
   try {
@@ -330,10 +348,10 @@ async function terrainWiring(page, found) {
     await retype(hands, ".obj-table .obj-value-cell input", "Third Name");
     await gated.release();
     await page.evaluate(`window.__save`);
-    await sleep(300);
+    await settled(page);
     if (!(await dirtyObjects())) fail("a string typed while war3map.wts was written was marked as saved");
     await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
+    await settled(page);
     if (await dirtyObjects()) fail("the next save left the object file marked as changed");
     const text = readFileSync(strings, "utf8");
     if (!text.includes("Third Name") || text.includes("Second Name")) fail("a string typed during a save was lost");
@@ -772,7 +790,8 @@ async function heightKit(page, name) {
   const kit = {
     tool, hands, root, FIXED: 4,
     run: (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then(() => null, (e) => String(e))`),
-    save: async () => { await page.evaluate(`w3.editors.saveAll()`); await sleep(500); },
+    /** The app at rest first (an edit by a click or key may still be landing), then saved, then at rest again. */
+    save: async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); },
     read: (file) => JSON.parse(readFileSync(join(root, "map", file), "utf8")),
     doodads: () => kit.read("war3map.doo.json").doodads,
     units: () => kit.read("war3mapUnits.doo.json").units,
@@ -785,8 +804,14 @@ async function heightKit(page, name) {
         await until(`${ref.id} at ${ref.x}, ${ref.y} selected`, async () => { const p = await page.evaluate(at); return p && Math.abs(p[0] - ref.x) <= 32 && Math.abs(p[1] - ref.y) <= 32; }, 20000)
           .catch(async (e) => { throw new Error(`${e.message} (the position boxes say ${JSON.stringify(await page.evaluate(at))})`); });
       }
+      // The view drawn where it looks now: a click or key that follows lands on what is shown there.
+      await settled(page);
     },
-    tab: async (label) => { await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(label)}).click()`); await sleep(300); },
+    tab: async (label) => {
+      await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
+      await until(`the ${label} tab`, () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === ${JSON.stringify(label)}`), 5000);
+      await settled(page);
+    },
     focusMap: () => page.evaluate(`document.querySelector(".model-stage canvas").focus()`),
     setting: (key) => page.evaluate(`w3.settings.get(${JSON.stringify(key)})`),
     box: (label) => page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === ${JSON.stringify(label)})?.querySelector("input")?.checked`),
@@ -824,7 +849,6 @@ async function heightsPreserve(page, found) {
   const ground = k.doodads()[0].position[2];
   await k.tab("Select");
   await k.look(256, 0, { id: "LTlt", x: 256, y: 0 });
-  await sleep(500);
   await k.focusMap();
   for (let i = 0; i < 4; i++) await k.hands.key("PageUp", "PageUp", 33, 2);
   await k.save();
@@ -839,7 +863,6 @@ async function heightsPreserve(page, found) {
   await k.run("w3.terrain.togglePreserveCopiedHeight");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== true || (await k.box("Keep pasted height")) !== true) fail("the toggle command didn't switch Preserve Copied Object Height on, or the toolbar box didn't follow");
   await k.look(-1024, 0);
-  await sleep(400);
   await k.focusMap();
   await k.hands.key("v", "KeyV", 86, 2);
   await k.clickMiddle();
@@ -850,7 +873,6 @@ async function heightsPreserve(page, found) {
   await k.run("w3.terrain.togglePreserveCopiedHeight");
   if ((await k.setting("terrain.preserveCopiedHeight")) !== false || (await k.box("Keep pasted height")) !== false) fail("the toggle command didn't switch Preserve Copied Object Height off, or the toolbar box didn't follow");
   await k.look(-1024, 512);
-  await sleep(400);
   await k.clickMiddle();
   await k.save();
   const loose = fresh().filter((d) => JSON.stringify(d.position) !== JSON.stringify(kept[0]?.position));
@@ -888,7 +910,6 @@ async function heightsUniform(page, found) {
   await k.tab("Select");
   // One doodad 64 higher (four PageUp), so the selection's mean isn't any one doodad's height.
   await k.look(256, 0, { id: "LTlt", x: 256, y: 0 });
-  await sleep(500);
   await k.focusMap();
   for (let i = 0; i < 4; i++) await k.hands.key("PageUp", "PageUp", 33, 2);
   await k.save();
@@ -896,7 +917,7 @@ async function heightsUniform(page, found) {
   const hash0 = k.docHash();
   await k.focusMap();
   await k.hands.key("a", "KeyA", 65, 2);
-  await sleep(300);
+  await settled(page);
 
   await page.evaluate(`(() => { window.__typed = "abc"; w3.window.inputBox = async () => window.__typed; })()`);
   await k.run("w3.terrain.setUniformDoodadHeights");
@@ -1033,7 +1054,7 @@ async function viewModes(page, found) {
   const k = await heightKit(page, "ViewModes");
   const TXT = "map/war3map.w3e.txt";
   const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
-  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await sleep(400); };
+  const key = async (name, code, vk, modifiers = 0) => { await k.focusMap(); await k.hands.key(name, code, vk, modifiers); await settled(page); };
   const CTRL = 2, SHIFT = 8;
   /** The camera's distance for a close look at one object (Ctrl+Up until it is this near). */
   const ZOOMED_IN = 2000;
@@ -1084,7 +1105,7 @@ async function viewModes(page, found) {
   // The start location can't be picked where it isn't drawn.
   await k.look(start.position[0], start.position[1]);
   await k.clickMiddle();
-  await sleep(300);
+  await settled(page);
   if (await page.evaluate(`document.querySelector(".terrain-sel-name")?.textContent === "Start location"`)) fail("the hidden start location was selected by a click");
   // Remembered: the next editor opens in game view.
   await page.evaluate(`w3.editors.closeAll()`);
@@ -1213,6 +1234,8 @@ async function viewModes(page, found) {
   await k.focusMap();
   await k.hands.mouse("mouseMoved", view.x, view.y);
   c0 = await cam();
+  // Edge scrolling goes by time: these pauses are the time the pointer rests (in the middle it must not move the
+  // camera; at the side it scrolls for that long; back in the middle it must stop).
   await sleep(600);
   c1 = await cam();
   if (c1.target.join() !== c0.target.join()) fail(`the pointer in the middle of the view moved the camera: ${c0.target} → ${c1.target}`);
@@ -1282,7 +1305,7 @@ async function viewModes(page, found) {
   if (!(await state()).lightRanges) fail("the Light ranges box didn't turn them on");
   await k.hands.click(".model-toggle", "Light ranges");
   // Looking isn't editing.
-  await sleep(300);
+  await settled(page);
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("the View keys left unsaved changes");
   await page.evaluate(`w3.settings.set("terrain.gameView", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
@@ -1340,15 +1363,15 @@ async function unitProperties(page, found) {
   const shown = (prop) => page.evaluate(`!!document.querySelector(${JSON.stringify(at(prop))})`);
   const panel = () => until("the properties panel", () => page.evaluate(`!!document.querySelector(".terrain-props")`), 20000);
   /** After a change the objects are drawn again and the panel made anew. */
-  const settled = async () => { await sleep(700); await panel(); };
+  const redrawn = async () => { await settled(page); await panel(); };
   const select = async (ref) => { await k.look(ref.x, ref.y, ref); await panel(); };
-  const typeInto = async (prop, text) => { await retype(k.hands, at(prop), text); await settled(); };
+  const typeInto = async (prop, text) => { await retype(k.hands, at(prop), text); await redrawn(); };
   const choose = async (prop, v) => {
     await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(at(prop))}); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event("change")); })()`);
-    await settled();
+    await redrawn();
   };
   const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)})`);
-  const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(); };
+  const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await redrawn(); };
   const unit = (id) => k.units().find((u) => u.id === id);
   /** The sizes of the properties row holding the × button `prop` (side view's inner width, row, ×, Choose…, number box). */
   const rowLayout = (prop) => page.evaluate(`(() => {
@@ -1379,7 +1402,7 @@ async function unitProperties(page, found) {
   await typeInto("level", "3");
   await typeInto("skill-AHhb", "2");
   await k.hands.click(at("attr-default"));
-  await settled();
+  await redrawn();
   await typeInto("attr-0", "30");
   await k.save();
   let h = unit("Hpal");
@@ -1392,9 +1415,10 @@ async function unitProperties(page, found) {
   await until("the item browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
   await k.hands.click("input.picker-search");
   await k.hands.type("ankh");
-  await sleep(300);
+  // The list filtered with the Ankh first, the row Enter picks.
+  await soon(() => page.evaluate(`document.querySelector(".picker-rows > .picker-row code")?.textContent === "ankh"`), 5000);
   await k.hands.key("Enter", "Enter", 13);
-  await settled();
+  await redrawn();
   await k.save();
   if (JSON.stringify(unit("Hpal").inventory) !== JSON.stringify([{ slot: 0, id: "ankh" }])) fail(`the Paladin's inventory: ${JSON.stringify(unit("Hpal").inventory)}`);
   // One undo takes the item back, and only that.
@@ -1449,7 +1473,7 @@ async function unitProperties(page, found) {
     await until("the knight in the browser", () => page.evaluate(`!!${knightRow}`), 10000).catch((e) => fail(e.message));
     await page.evaluate(`${knightRow}?.setAttribute("data-smoke-pick", "")`);
     await k.hands.click('[data-smoke-pick]');
-    await settled();
+    await redrawn();
     await k.save();
     if (unit("hfoo").skinId !== "hkni") fail(`the footman's skin: ${unit("hfoo").skinId}`);
     await until("the footman drawn as a knight", async () => /knight/i.test((await drawn("hfoo"))?.model ?? ""), 20000)
@@ -1464,7 +1488,7 @@ async function unitProperties(page, found) {
     if (skinRow.rowHeight > 30 || skinRow.chooseHeight > 28 || skinRow.buttonHeight < 20 || Math.abs(skinRow.buttonMid - skinRow.rowMid) > 2 || !/hkni/.test(skinRow.nameText) || skinRow.nameTitle !== skinRow.nameText)
       fail(`the Skin row in a side view ${skinRow.sideWidth} px wide: ${JSON.stringify(skinRow)}`);
     await k.hands.click(at("skin-own"));
-    await settled();
+    await redrawn();
     await k.save();
     if (unit("hfoo").skinId !== "hfoo") fail(`the footman's skin back to its own: ${unit("hfoo").skinId} (${await shown("skin-own") ? "the button is there" : "no button"}; ${await k.toasts()})`);
   }
@@ -1503,7 +1527,7 @@ async function unitProperties(page, found) {
   if (!(await shown("active-Adef"))) fail("the footman's Defend has no Active box");
   else {
     await k.hands.click(at("active-Adef"));
-    await settled();
+    await redrawn();
     await k.save();
     if (JSON.stringify(unit("hfoo").abilities) !== JSON.stringify([{ id: "Adef", autocast: 1, level: 0 }])) fail(`the footman's Defend switched on: ${JSON.stringify(unit("hfoo").abilities)}`);
     if (!(await page.evaluate(`document.querySelector(${JSON.stringify(at("active-Adef"))})?.checked`))) fail("the Active box isn't ticked after the change");
@@ -2276,13 +2300,11 @@ async function heightsLimits(page, found) {
   const nearEdge = () => k.doodads().find((d) => d.position[1] === 0 && d.position[0] > br - 100 && d.position[0] < br + 400);
   await k.tab("Select");
   await k.look(0, 0, { id: "LTlt", x: 0, y: 0 });
-  await sleep(500);
   await k.focusMap();
   await hands.key("c", "KeyC", 67, 2);
 
   // A nudge: the doodad 40 inside the bound moves right.
   await k.look(br - 40, 0, { id: "LTlt", x: br - 40, y: 0 });
-  await sleep(500);
   await k.focusMap();
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   if ((await k.setting("terrain.enforceCameraBounds")) !== true || (await k.box("Enforce camera bounds")) !== true) fail("the toggle command didn't switch Enforce Camera Bounds on");
@@ -2297,7 +2319,6 @@ async function heightsLimits(page, found) {
   // A paste outside the bounds.
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await k.look(br + 400, 0);
-  await sleep(400);
   await k.clearToasts();
   const n0 = count();
   await k.focusMap();
@@ -2317,30 +2338,24 @@ async function heightsLimits(page, found) {
   // A placement from the Objects tab: inside the bounds it works (control), outside it's refused.
   const edgeX = nearEdge().position[0];
   await k.look(edgeX, 0, { id: "LTlt", x: edgeX, y: 0 });
-  await sleep(400);
   await k.run("w3.terrain.selectInPalette");
-  await sleep(300);
+  await soon(() => page.evaluate(`/Placing/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000);
   const hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
   if (!/Placing/.test(hint ?? "")) return fail(`the Objects tab says "${hint}" after Select In Tool Palette`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await k.look(br - 1200, 256);
-  await sleep(400);
   const n1 = count();
   await hands.click(".model-stage canvas");
-  await sleep(500);
   await k.save();
   if (count() !== n1 + 1) fail(`a placement inside the camera bounds placed ${count() - n1} doodads (${await k.toasts()})`);
   await k.look(br + 600, 256);
-  await sleep(400);
   await k.clearToasts();
   await hands.click(".model-stage canvas");
-  await sleep(500);
   await k.save();
   if (count() !== n1 + 1) fail("a placement outside the camera bounds worked with Enforce Camera Bounds on");
   if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused placement: "${await k.toasts()}"`);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await hands.click(".model-stage canvas");
-  await sleep(500);
   await k.save();
   if (count() !== n1 + 2) fail(`the same placement with Enforce Camera Bounds off placed ${count() - n1 - 1} doodads (${await k.toasts()})`);
   await k.tab("Select");
@@ -2349,21 +2364,21 @@ async function heightsLimits(page, found) {
   // editor has to read them again) the same kind of number is refused with a word, and the box shows the real position again.
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   const at = (x) => k.doodads().some((d) => d.position[0] === x && d.position[1] === 0);
-  const typeX = async (x) => { await k.look(...(x.from)); await sleep(500); await k.clearToasts(); await retype(hands, ".terrain-sel-triple input", String(x.to)); await k.save(); };
+  const typeX = async (x) => { await k.look(...(x.from)); await k.clearToasts(); await retype(hands, ".terrain-sel-triple input", String(x.to)); await k.save(); };
   await typeX({ from: [0, 0, { id: "LTlt", x: 0, y: 0 }], to: br - 300 });
   if (!at(br - 300)) fail("a typed X inside the camera bounds wasn't taken");
   const w3i = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
   const narrow = JSON.parse(w3i);
   narrow.cameraBounds[2] = br - 400; narrow.cameraBounds[6] = br - 400;
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(narrow))})`);
-  await sleep(800);
+  await settled(page);
   await typeX({ from: [br - 300, 0, { id: "LTlt", x: br - 300, y: 0 }], to: br - 100 });
   if (at(br - 100) || !at(br - 300)) fail("a typed X past the narrowed camera bounds was taken: the editor still has the old bounds");
   if (!/camera bounds/.test(await k.toasts())) fail(`no word on the refused position: "${await k.toasts()}"`);
   const shown = await page.evaluate(`document.querySelector(".terrain-sel-triple input")?.value`);
   if (Number(shown) !== br - 300) fail(`the position box kept the refused text: "${shown}"`);
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(w3i)})`);
-  await sleep(800);
+  await settled(page);
   await k.run("w3.terrain.toggleEnforceCameraBounds");
   await k.save();
 
@@ -2381,10 +2396,8 @@ async function heightsLimits(page, found) {
   // starts a little below it, on the upper slope, which is above 2048 as well. `down` is how far, in pixels.
   const stroke = async (x, y, down = 0) => {
     await k.look(x, y);
-    await sleep(600);
     const c = await hands.where(".model-stage canvas");
     await hands.drag({ x: c.x - (down ? 6 : 40), y: c.y + down }, { x: c.x + (down ? 6 : 40), y: c.y + down });
-    await sleep(500);
     await k.save();
   };
   await hands.click(".model-toggle", "Water limits");
@@ -2410,7 +2423,6 @@ async function heightsLimits(page, found) {
   await k.clearToasts();
   await hands.click(".chip", "Area");
   await k.look(1280, 1280);
-  await sleep(700);
   const c = await hands.where(".model-stage canvas");
   await hands.drag({ x: c.x - 15, y: c.y + 45 }, { x: c.x + 15, y: c.y + 75 });
   const areaShown = () => page.evaluate(`/\\d+ × \\d+ tiles/.test(document.querySelector(".terrain-selection")?.textContent ?? "")`);
@@ -2432,7 +2444,7 @@ async function heightsLimits(page, found) {
   })()`);
   await until("the removal's question", () => page.evaluate(`!!document.querySelector(".terrain-tilemgr-row.removing")`), 5000);
   await page.evaluate(`[...document.querySelectorAll(".terrain-tilemgr-row.removing button")].find((b) => b.textContent === "Remove").click()`);
-  await sleep(300);
+  await settled(page);
   await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
   await k.save();
   const groundLine = () => /^ground (.*)$/m.exec(readFileSync(w3e, "utf8"))?.[1].trim().split(" ") ?? [];
@@ -2440,7 +2452,6 @@ async function heightsLimits(page, found) {
   if (!goneId || groundLine().includes(goneId)) fail(`the tile ${gone} wasn't taken out of the map's list (control): ${groundLine().join(" ")}`);
   await k.tab("Select");
   await k.look(1024, -1536);
-  await sleep(500);
   await k.run("w3.terrain.toggleEnforceWaterLimits");
   if ((await k.setting("terrain.enforceWaterLimits")) !== true) fail("Enforce Water Height Limits wasn't switched on again");
   const w3eNow = hash(w3e), treesNow = count();
@@ -2453,7 +2464,7 @@ async function heightsLimits(page, found) {
   if (count() !== treesNow) fail("a paste whose ground was refused still placed its objects");
   if (!/water/i.test(await k.toasts())) fail(`no word on the refused paste: "${await k.toasts()}"`);
   // The side list: its rows and count are the map's tiles, without the one the refused paste added and took out again.
-  await sleep(500);
+  await settled(page);
   const side = await page.evaluate(`(() => {
     const head = [...document.querySelectorAll(".model-side h4")].find((e) => e.textContent.startsWith("Ground textures"));
     return { head: head.textContent, rows: [...head.nextElementSibling.querySelectorAll(".model-row")].map((r) => r.children[1].textContent.trim()) };
@@ -2513,13 +2524,15 @@ async function resizeUndoChecks(page, found) {
   };
   const differ = (a, b) => [...new Set([...a.keys(), ...b.keys()])].filter((k) => a.get(k) !== b.get(k));
   const size = () => { const w3e = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8"); return w3e.length; };
-  /** The editor on the file is open again and drawn. */
+  /** The editor on the file is open again and drawn. The one seen last is marked: a stage without the mark is the
+   *  editor opened since (each resize, undo and redo closes the editor and opens it again). */
+  const markEditor = () => page.evaluate(`(() => { const s = document.querySelector(".model-stage"); if (s) s.dataset.smokeSeen = "1"; })()`);
   const editorUp = async () => {
-    await sleep(800);
-    await until("the editor to open again", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
-    await sleep(1500);
+    await until("the editor to open again", () => page.evaluate(`(() => { const s = document.querySelector(".model-stage"); return w3.editors.activePath() === "map/war3map.w3e.txt" && !!s && !s.dataset.smokeSeen && !!s.querySelector("canvas") && !!document.querySelector(".terrain-tab"); })()`), 30000);
+    await settled(page);
+    await markEditor();
   };
-  const settledState = async () => { await sleep(1500); return state(); };
+  const settledState = async () => { await settled(page); return state(); };
   /** Waits until the files are what `want` is (an undo is asynchronous), then lets them settle and checks again. */
   const reaches = async (want, label) => {
     let last = [];
@@ -2538,7 +2551,9 @@ async function resizeUndoChecks(page, found) {
   // Something in the strip that a shrink from the left will cut off.
   await tool("place_objects", { objects: [{ id: "LPwb", x: -3900, y: 0 }], ignoreRoom: true });
   await tool("save_project");
-  await sleep(500);
+  await until("the map's editor drawn", () => page.evaluate(`!!document.querySelector(".model-stage canvas")`), 30000);
+  await settled(page);
+  await markEditor();
   if (!doodadIds().includes("LPwb")) { fail("the doodad wasn't placed (control)"); return; }
   const base = await settledState();
   const baseSize = size();
@@ -2562,6 +2577,7 @@ async function resizeUndoChecks(page, found) {
   if (err) fail(`Undo Resize: ${err}`);
   if (await reaches(base, "undo of the larger map by the command")) {
     await ctrl("z", "KeyZ", 90, false);
+    // Time for a change that must not come: nothing to wait for.
     await sleep(1500);
     const still = differ(state(), base);
     if (still.length) fail(`Ctrl+Z with no resize to undo changed ${still.join(", ")}`);
@@ -2573,9 +2589,9 @@ async function resizeUndoChecks(page, found) {
   // Smaller, by the Map Size tab: it names what is cut off, and the shrink is undone.
   await page.evaluate(`window.__warned.length = 0`);
   await hands.click(".terrain-tab", "Map Size");
-  await sleep(500);
+  await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
   await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[0]; i.value = "-32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
-  await sleep(200);
+  await settled(page);
   await hands.click(".mapsize-buttons button.primary");
   await until("the question", () => page.evaluate(`window.__warned.length > 0`), 10000).catch(() => fail("the Map Size tab asked nothing"));
   const question = await page.evaluate(`window.__warned[0] ?? ""`);
@@ -2598,9 +2614,9 @@ async function resizeUndoChecks(page, found) {
   // to the old terrain afterwards (the three grids all have the size of the terrain).
   // (Through the Map Size tab, which makes no checkpoint for a larger map: a checkpoint settles the rebuild too.)
   await hands.click(".terrain-tab", "Map Size");
-  await sleep(500);
+  await until("the Map Size tab", () => page.evaluate(`document.querySelectorAll(".mapsize-num").length > 1`), 10000);
   await page.evaluate(`(() => { const i = document.querySelectorAll(".mapsize-num")[1]; i.value = "32"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
-  await sleep(200);
+  await settled(page);
   await tool("place_objects", { objects: [{ id: "LPwb", x: 1500, y: 1500 }], ignoreRoom: true });
   // The rebuild is due three seconds after the edit: Apply is pressed when it is about to start.
   await sleep(2700);
@@ -3087,9 +3103,9 @@ async function settledMapPicture(page, still = 100, tries = 8) {
   return prev;
 }
 
-/** The map's part of the window, as PNG data (base64), once the view has had a moment to draw. */
+/** The map's part of the window, as PNG data (base64), once the app is at rest (the view drawn with nothing left to draw). */
 async function mapPicture(page) {
-  await sleep(700);
+  await settled(page);
   const r = await page.evaluate(`(() => { const b = document.querySelector(".model-stage canvas").getBoundingClientRect(); return { x: b.left, y: b.top, width: b.width, height: b.height, scale: 1 }; })()`);
   const shot = await page.send("Page.captureScreenshot", { format: "png", clip: r });
   return shot.data;
