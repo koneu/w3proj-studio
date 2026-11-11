@@ -97,6 +97,22 @@ function toPath(p: Point, path: readonly Point[]) {
   return best;
 }
 
+/** A unit type's level (MeleeFacts.level): the map's object data first (its `ulev`, for a custom or a modified
+ *  standard unit), else the game's UnitBalance.slk row of the type, else of a custom type's base. `balance` is that
+ *  table's rows, `mods` the map's war3map.w3u by object id (pathmap.ts objectMods), `baseOf` a custom type's base
+ *  for types `mods` doesn't hold (the map's other object files). */
+export function unitLevels(balance: readonly Record<string, string>[], mods: ReadonlyMap<string, { base: string; mods: ReadonlyMap<string, unknown> }>,
+  baseOf: (id: string) => string | undefined = () => undefined): (id: string) => number | undefined {
+  const number = (v: unknown) => (v === undefined || v === null || String(v).trim() === "" || !Number.isFinite(Number(v)) ? undefined : Number(v));
+  const game = new Map<string, number>();
+  for (const r of balance) { const n = number(r.level); if (r.unitBalanceID && n !== undefined) game.set(r.unitBalanceID, n); }
+  return (id) => {
+    const own = mods.get(id);
+    const base = own?.base ?? baseOf(id);
+    return number(own?.mods.get("ulev")) ?? game.get(id) ?? (base ? game.get(base) : undefined);
+  };
+}
+
 interface Camp { centre: [number, number]; creeps: MeleeUnit[]; level: number; strongest: number }
 
 /** Neutral hostile units in groups: each within reach of another of the group. */
@@ -282,7 +298,7 @@ export function checkMelee(f: MeleeFacts) {
     "Routes are the shortest ways on this app's pathing grid, for one size of unit, not the paths the game picks. Players also walk elsewhere; a route passing clear says nothing about the rest of the map.",
     "Widths and narrow strips come from this app's pathing grid, in steps of 64, with every tree and doodad as it stands. A wide way can still be a long detour.",
     "Camps are worked out by distance: creeps within 450 of each other count as one, and a camp within 750 of an expansion's mine counts as its guard.",
-    "Levels and ranges of map-made units come from the unit they're based on, so changes to those aren't seen.",
+    "Levels follow the map's saved unit data. Sight ranges of map-made units come from the unit they're based on, so the map's changes to those aren't seen.",
   );
   if (unknown.length) notes.push(`These types' levels weren't found, so they count as 0: ${unknown.join(", ")}.`);
   if (unknownSight.length) notes.push(`These types' sight wasn't found, so they count as 600: ${unknownSight.join(", ")}.`);
