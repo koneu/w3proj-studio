@@ -69,22 +69,42 @@ export const MAX_PITCH = Math.PI / 2 - 0.002;
 /** North up: the eye south of the target. */
 export const NORTH_UP_YAW = -Math.PI / 2;
 
+/** View Entire Map in the World Editor's 1184x844 view (we-drive, new maps of 64x64, 128x64 and 64x128 and map 03,
+ *  2026-11-11): the playable part's larger side spans this share of the view's width, */
+const WE_MAP_SIDE = 932.6 / 1184;
+/** the playable part's middle shows this far down the view (the point the editor zooms around), */
+const WE_MAP_ROW = 221.9 / 844;
+/** and the editor draws with a 4:3 projection stretched over its wider view: up and down, the ground shows at
+ *  (4/3) / (1184/844) = 0.95 of its scale across (a 128x64 map's playable 52 rows were 397 pixels, its 116 columns 932). */
+const WE_PROJECTION_ASPECT = 4 / 3;
+
 /**
- * View Entire Map as the World Editor shows it (we-drive, a 64x64 map in its 1184x844 view, 2026-11-11): looking
- * straight down with north up, the map's whole width across the view (18 pixels left over at each side), and its
- * southern edge kept in view at 87% of the height (735 of 844) when the map is too tall to fit, so that its north is
- * what's cut off. A map that fits in height sits in the middle. `fov` is vertical, `aspect` width / height.
- * Exact for the camera's pitch (MAX_PITCH, a hair short of straight down) over ground at the target's height.
+ * View Entire Map as the World Editor shows it: looking straight down with north up, the playable part's larger side
+ * across 79% of the view's width whatever the map's shape, its middle at 26% of the view's height. So the map's
+ * south edge shows at 87% of the height on a 64x64 map (734 of 844, the sides at 18 and 1165), at 53% on a 128x64 one
+ * (450; 77 and 1106) and at 82% on a 64x128 one (696; 334 and 849), and a map's north is cut off unless it is much
+ * wider than tall. Studio's projection isn't stretched: the map's sides and its south edge show where the editor's
+ * do, the rest of it 5% further north. `map` is the whole map, `playable` its playable part (the whole map if
+ * unknown), `fov` vertical, `aspect` the view's width / height. Exact for the camera's pitch (MAX_PITCH, a hair short
+ * of straight down) over ground at the target's height.
  */
-export function viewOfMap(box: Box, fov: number, aspect: number) {
-  const margin = 1184 / 1148, south = (735 - 422) / 422;
+export function viewOfMap(map: Box, playable: Box | null, fov: number, aspect: number) {
+  const p = playable ?? map;
+  const side = Math.max(p.maxX - p.minX, p.maxY - p.minY, 1);
   const tanY = Math.tan(fov / 2), tanX = tanY * Math.max(0.1, aspect), cp = Math.cos(MAX_PITCH), sp = Math.sin(MAX_PITCH);
-  // Seen from the eye (north up), a ground point `dy` north of the target lies `distance + dy * cp` deep, at
-  // `dx / depth / tanX` across and `dy * sp / depth / tanY` up. The southern edge is the nearest, so the widest.
-  const depthSouth = ((box.maxX - box.minX) / 2) * margin / tanX;
-  const southOfTarget = Math.min((box.maxY - box.minY) / 2, south * depthSouth * tanY / sp);
-  const target: [number, number, number] = [(box.minX + box.maxX) / 2, box.minY + southOfTarget, (box.minZ + box.maxZ) / 2];
-  return { target, distance: depthSouth + southOfTarget * cp, yaw: NORTH_UP_YAW, pitch: MAX_PITCH };
+  // At the target's depth the view is 2 * distance * tanX wide.
+  const distance = side / (2 * WE_MAP_SIDE * tanX);
+  const middleY = (p.minY + p.maxY) / 2;
+  // Where the editor shows the map's south edge, as a share of the view's height from its top: the middle's row plus
+  // the distance to it at the editor's scale up and down (its scale across, the share of the width per unit, times
+  // its view's width / height, times the squash 4/3 / its aspect: the aspects cancel).
+  const southRow = WE_MAP_ROW + WE_MAP_SIDE * WE_PROJECTION_ASPECT * (middleY - map.minY) / side;
+  // Seen from the eye (north up), a ground point `dy` north of the target lies `distance + dy * cp` deep, and shows
+  // `dy * sp / depth / tanY` up from the view's middle (as a share of half its height).
+  const up = 1 - 2 * southRow;
+  const dy = up * tanY * distance / (sp - up * tanY * cp);
+  const target: [number, number, number] = [(p.minX + p.maxX) / 2, map.minY - dy, (map.minZ + map.maxZ) / 2];
+  return { target, distance, yaw: NORTH_UP_YAW, pitch: MAX_PITCH };
 }
 
 // ---- grids -------------------------------------------------------------------------------
@@ -106,12 +126,26 @@ export const nextGrid = (current: GridSize): GridSize => GRID_ROUND[(GRID_ROUND.
 /** The World Editor's naval pathing colour: a half-transparent light red. Measured from its N view against the same
  *  view without it (we-drive, 2026-11-11): over land each channel came out as half the ground plus (255, 128, 128) / 2. */
 export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
+/** Over the map's edge (past the playable part) its naval view is a flat brown instead, the ground's texture and the
+ *  edge's dark gone under it (we-drive, map 03's west edge, 2026-11-11: 108, 55, 15 all over; the darkened playable
+ *  ground just inside came out as half of it plus half the light red, as anywhere else). */
+export const NAVAL_EDGE: readonly number[] = [108, 55, 15, 255];
+
+/** The playable part in pathing cells of a `width` wide grid: columns `x0` to `x1` and rows `y0` to `y1`, ends excluded. */
+export interface CellRect { width: number; x0: number; y0: number; x1: number; y1: number }
 
 /** Where ships can't sail (per pathing cell, rows from the south), as the World Editor shows it: red over every cell
- *  without water for ships (land, the map's edge, what blocks them), nothing over water they sail, shallow or deep. */
-export function navalColors(cells: ArrayLike<number>): Uint8Array {
+ *  without water for ships (land, what blocks them), nothing over water they sail, shallow or deep, and the map's
+ *  edge (the cells outside `playable`, when given) brown. */
+export function navalColors(cells: ArrayLike<number>, playable?: CellRect | null): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
-  for (let i = 0; i < cells.length; i++) if (cells[i] & NO_WATER) rgba.set(NAVAL_BLOCKED, i * 4);
+  for (let i = 0; i < cells.length; i++) {
+    if (playable && playable.width > 0) {
+      const x = i % playable.width, y = Math.floor(i / playable.width);
+      if (x < playable.x0 || x >= playable.x1 || y < playable.y0 || y >= playable.y1) { rgba.set(NAVAL_EDGE, i * 4); continue; }
+    }
+    if (cells[i] & NO_WATER) rgba.set(NAVAL_BLOCKED, i * 4);
+  }
   return rgba;
 }
 
