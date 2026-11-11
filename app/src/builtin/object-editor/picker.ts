@@ -42,16 +42,22 @@ export interface PickOptions {
   query?: string;
   /** Icon (data URL) of an entry, loaded as rows are shown. */
   iconOf?: (id: string, base?: string) => Promise<string | null>;
-  /** UnitEditorData's value types: a field filter on a choice/list/flags field matches its labels too. */
-  editorTypes?: Map<string, EditorType> | null;
+  /** UnitEditorData's value types: a field filter on a choice/list/flags field matches its labels too, and
+   *  a row shows them. A promise (types still loading): raw values until it settles, then the labels. */
+  editorTypes?: Map<string, EditorType> | null | Promise<Map<string, EditorType> | null>;
 }
 
 export type PickResult = { id: string } | { tab: number; query: string } | undefined;
 
-/** The object browser: resolves with the chosen id, a tab switch, or
- *  undefined when cancelled. */
-export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): Promise<PickResult> {
-  const strip = (s: string) => s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
+const strip = (s: string) => s.replace(/\|c[0-9a-f]{8}|\|r/gi, "");
+
+/** The browser's entries and what matches, without the DOM. `onTypes` runs when editor types given
+ *  as a promise arrive (not when it fails), so the shown list can be filtered and drawn again. */
+export function pickerList(kd: KindData, opts: Pick<PickOptions, "custom" | "pinned" | "editorTypes">, onTypes?: () => void) {
+  let types = opts.editorTypes instanceof Promise ? null : (opts.editorTypes ?? null);
+  if (opts.editorTypes instanceof Promise) {
+    opts.editorTypes.then((t) => { if (!t) return; types = t; onTypes?.(); }, () => {});
+  }
   const entry = (id: string, name: string, base?: string, campaign?: boolean): Entry => {
     const facets = kd.facets(base ?? id);
     return { id, base, campaign, name, facets, haystack: `${name} ${id} ${base ?? ""} ${Object.values(facets).join(" ")} ${kd.searchText(base ?? id)}`.toLowerCase() };
@@ -74,33 +80,54 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
     return m.get(id);
   };
 
-  const chosen = new Map<string, Set<string>>(kd.facetDefs.map((f) => [f.id, new Set()]));
-  let words: string[] = [];
-  let filters: FieldFilter[] = [];
+  const list = {
+    entries,
+    /** Facet id → the chosen values (none: all). */
+    chosen: new Map<string, Set<string>>(kd.facetDefs.map((f) => [f.id, new Set()])),
+    words: [] as string[],
+    filters: [] as FieldFilter[],
+    setQuery(text: string) { ({ words: list.words, filters: list.filters } = parseFilters(text, kd.fields)); },
+    matches(e: Entry, skipFacet?: string) {
+      if (!list.words.every((t) => e.haystack.includes(t))) return false;
+      for (const [fid, values] of list.chosen) {
+        if (fid === skipFacet || !values.size) continue;
+        if (!values.has(e.facets[fid])) return false;
+      }
+      for (const f of list.filters) {
+        if (!f.field) continue; // unknown field: shown as an error chip, ignored
+        const value = fieldValue(f.field, e.base ?? e.id);
+        if (!compare(value, f.op, f.value, shownValue(types?.get(f.field.type), value))) return false;
+      }
+      return true;
+    },
+    /** A row's value of a filtered field, as its label when the field's type has one ("Race: Night Elf"). */
+    valueText(f: FieldMeta, e: Entry) {
+      const value = fieldValue(f, e.base ?? e.id);
+      return `${f.label}: ${strip(shownValue(types?.get(f.type), value) ?? value ?? "—")}`;
+    },
+  };
+  return list;
+}
+
+/** The object browser: resolves with the chosen id, a tab switch, or
+ *  undefined when cancelled. */
+export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): Promise<PickResult> {
   let shown: Entry[] = [];
   let active = 0;
 
   return new Promise((resolve) => {
+    // Types that arrive while the browser is open filter and label it from then on.
+    const list = pickerList(kd, opts, () => {
+      if (overlay.isConnected) render();
+    });
+    const { entries, chosen } = list;
     const finish = (id: string | undefined) => {
       overlay.remove();
       resolve(id === undefined ? undefined : { id });
     };
 
-    const parseQuery = () => { ({ words, filters } = parseFilters(search.value, kd.fields)); };
-
-    const matches = (e: Entry, skipFacet?: string) => {
-      if (!words.every((t) => e.haystack.includes(t))) return false;
-      for (const [fid, values] of chosen) {
-        if (fid === skipFacet || !values.size) continue;
-        if (!values.has(e.facets[fid])) return false;
-      }
-      for (const f of filters) {
-        if (!f.field) continue; // unknown field: shown as an error chip, ignored
-        const value = fieldValue(f.field, e.base ?? e.id);
-        if (!compare(value, f.op, f.value, shownValue(opts.editorTypes?.get(f.field.type), value))) return false;
-      }
-      return true;
-    };
+    const parseQuery = () => list.setQuery(search.value);
+    const matches = list.matches;
 
     const search = h("input.picker-search", {
       value: opts.query ?? "",
@@ -154,7 +181,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
 
     const renderFilterChips = () => {
       filterChips.replaceChildren(
-        ...filters.map((f) =>
+        ...list.filters.map((f) =>
           h(`span.filter-chip${f.field ? "" : ".error"}`, { title: f.field ? `${f.field.id} · ${f.field.type}` : "No field matches this name" },
             f.field ? `${f.field.label} ${OP_LABEL[f.op]} ${filterValue(f.value)}` : `unknown field "${f.key}"`,
             h("button.icon-button", {
@@ -200,7 +227,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
     };
 
     const renderRows = () => {
-      const shownFields = filters.filter((f) => f.field).map((f) => f.field!);
+      const shownFields = list.filters.filter((f) => f.field).map((f) => f.field!);
       rowsEl.replaceChildren(...shown.slice(0, MAX_ROWS).map((e, i) =>
         h(`div.picker-row${i === active ? ".active" : ""}`, {
           // Keep focus in the search box, but choose on the completed click:
@@ -216,7 +243,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
           e.id === opts.pinned ? h("span.badge", {}, "base of selected") : null,
           e.base ? (e.campaign ? h("span.badge.picker-campaign", { title: "Custom object of the campaign (war3campaign.*): edited in the campaign" }, `campaign · ${e.base}`)
             : h("span.badge", { title: "Custom object of this map" }, `custom · ${e.base}`)) : null,
-          ...shownFields.map((f) => h("span.picker-value", { title: f.label }, `${f.label}: ${strip(fieldValue(f, e.base ?? e.id) ?? "—")}`)),
+          ...shownFields.map((f) => h("span.picker-value", { title: f.label }, list.valueText(f, e))),
           h("span.picker-tags", {}, Object.values(e.facets).join(" · ")),
         )));
       rowsEl.children[active]?.scrollIntoView({ block: "nearest" });
@@ -225,6 +252,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
     const render = () => {
       parseQuery();
       shown = entries.filter((e) => matches(e));
+      active = Math.max(0, Math.min(active, shown.length - 1));
       countEl.textContent = shown.length > MAX_ROWS ? `${shown.length} matches — showing ${MAX_ROWS}, refine to see more` : `${shown.length} matches`;
       renderFilterChips();
       renderFacets();
