@@ -4311,6 +4311,16 @@ async function keybindings(page, found) {
     await openShortcuts("@key:h");
     const h = await page.evaluate(`[...document.querySelectorAll(".kb-row[data-command]")].map((r) => [r.dataset.command, r.querySelector(".kb-conflict")?.textContent ?? ""])`);
     if (!h.some(([c, t]) => c === "w3.terrain.toggleBlight" && /2 commands/.test(t)) || !h.some(([c]) => c === "w3.terrain.selection.mirrorX")) fail(`H's conflict isn't shown: ${JSON.stringify(h)}`);
+    // The column headers stand over their columns: every row's cells have the header cells' x and width (once the
+    // last column was each row's own "auto", the header's empty one made the others wider than the rows').
+    const columns = await page.evaluate(`(() => {
+      const cells = (r) => [...r.children].map((c) => { const b = c.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.width)]; });
+      const head = document.querySelector(".kb-row.kb-head");
+      return { head: head ? cells(head) : null, rows: [...document.querySelectorAll(".kb-row[data-command]")].map((r) => [r.dataset.command, cells(r)]) };
+    })()`);
+    const off = columns.head && columns.rows.find(([, c]) => c.length !== columns.head.length || c.some(([x, w], i) => Math.abs(x - columns.head[i][0]) > 1 || Math.abs(w - columns.head[i][1]) > 1));
+    if (!columns.head || columns.head.length !== 5 || columns.head.slice(0, 4).some(([, w]) => w <= 0)) fail(`the Keyboard Shortcuts header's cells: ${JSON.stringify(columns.head)}`);
+    else if (off) fail(`the column headers [x, width] ${JSON.stringify(columns.head)} don't line up with ${off[0]}'s cells ${JSON.stringify(off[1])}`);
 
     // Grid Display: Change, J, Enter.
     await openShortcuts("@command:w3.terrain.cycleGrid");
