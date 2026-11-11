@@ -56,6 +56,26 @@ export function loadEditorTypes(w3: W3Api): Promise<Map<string, EditorType>> {
   return typesPromise;
 }
 
+/** What a value of an editor type (a choice, a comma list, bit flags) shows as: its labels ("nightelf" →
+ *  "Night Elf", "giant,undead" → "Giant, Undead"), or undefined when it has none. The object browser's
+ *  field filters match it as well as the stored value. */
+export function shownValue(t: EditorType | undefined, raw: string | undefined): string | undefined {
+  if (!t || raw === undefined) return undefined;
+  const labelOf = (v: string) => {
+    const l = v.toLowerCase();
+    return t.entries.find((e) => e.value.toLowerCase() === l || e.alts.some((a) => a.toLowerCase() === l))?.label;
+  };
+  let labels: (string | undefined)[];
+  if (t.shape === "flags") {
+    const bits = Number(raw) || 0;
+    labels = t.entries.filter((e) => (bits & (1 << Number(e.value))) !== 0).map((e) => e.label);
+  } else if (t.shape === "list") {
+    labels = listItems(raw).map((s) => labelOf(s) ?? s);
+  } else labels = [labelOf(raw.trim())];
+  if (!labels.length || labels.some((l) => l === undefined)) return undefined;
+  return labels.join(", ");
+}
+
 /** Several selected objects whose values differ: `each` changes each object's own value. */
 export interface MixedValues { values: string[]; each(change: (old: string) => number | string): void }
 

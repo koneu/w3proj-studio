@@ -4,7 +4,7 @@
 import type { W3Api } from "../../extensions/api";
 import type { ObjectsService, PickedObject } from "../../extensions/services";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
-import { objectEditor } from "./fields";
+import { loadEditorTypes, objectEditor } from "./fields";
 import { pickFile, pickLabel } from "./filepicker";
 import { pickObject } from "./picker";
 import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
@@ -183,8 +183,9 @@ export function objectsService(w3: W3Api, copying: Pick<ObjectsService, "typesFo
         const kind = opts.kinds[tab];
         const kd = await loadKind(w3, kind);
         const custom = await customOf(kind, kd);
+        const editorTypes = await loadEditorTypes(w3).catch(() => null);
         const r = await pickObject(host, kd, {
-          title: opts.title, custom, query,
+          title: opts.title, custom, query, editorTypes,
           iconOf: (id, base) => icons(kd, kind, id, base, custom.find((c) => c.id === id)?.icon),
           tabs: opts.kinds.length > 1 ? { labels: opts.kinds.map((k) => KIND_LABELS[k] ?? k), active: tab } : undefined,
         });

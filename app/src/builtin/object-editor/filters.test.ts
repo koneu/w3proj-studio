@@ -90,4 +90,20 @@ test("the filter builder's underscores are spaces", () => {
 test("a field the object doesn't have only passes \"not\"", () => {
   assert.ok(compare(undefined, "!=", "1"));
   for (const op of [">", ">=", "<", "<=", "=", ":"] as const) assert.ok(!compare(undefined, op, "1"), op);
+  assert.ok(compare(undefined, "!=", "1", "x"), "with a label too");
+  assert.ok(!compare(undefined, "=", "1", "1"));
+});
+
+test("a choice field's filter matches the stored value or the label it shows", () => {
+  // The builder writes "Night Elf" as urac:Night_Elf; the game stores "nightelf".
+  assert.ok(compare("nightelf", ":", "Night_Elf", "Night Elf"), "the label, spaces as underscores");
+  assert.ok(compare("nightelf", "=", "night elf", "Night Elf"), "the label, in any case");
+  assert.ok(compare("nightelf", ":", "nightelf", "Night Elf"), "the stored value still");
+  assert.ok(compare("nightelf", "=", "NIGHTELF", "Night Elf"));
+  assert.ok(!compare("nightelf", ":", "Orc", "Night Elf"));
+  assert.ok(!compare("nightelf", "!=", "Night_Elf", "Night Elf"), "not: neither may be equal");
+  assert.ok(!compare("nightelf", "!=", "nightelf", "Night Elf"));
+  assert.ok(compare("nightelf", "!=", "orc", "Night Elf"));
+  assert.ok(compare("3", ">", "2", "Night Elf"), "an order compares the stored value");
+  assert.ok(!compare("x", ">", "0", "5"), "never the label");
 });

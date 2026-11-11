@@ -53,7 +53,15 @@ export const filterValue = (value: string) => value.replace(/_/g, " ");
 /** Underscores count as spaces on both sides: the game's own values have them too ("nightelf_a"). */
 const comparable = (text: string) => filterValue(text).toLowerCase();
 
-export function compare(actual: string | undefined, op: Op, expected: string): boolean {
+/** A field filter on a value: the stored value or, when given, the label it shows (`shown`, see
+ *  shownValue: "race:Night_Elf" finds what's stored as "nightelf"). A "≠" holds when neither is equal. */
+export function compare(actual: string | undefined, op: Op, expected: string, shown?: string): boolean {
+  if (shown === undefined || actual === undefined) return compareText(actual, op, expected);
+  if (op === "!=") return compareText(actual, op, expected) && compareText(shown, op, expected);
+  return compareText(actual, op, expected) || ((op === "=" || op === ":") && compareText(shown, op, expected));
+}
+
+function compareText(actual: string | undefined, op: Op, expected: string): boolean {
   if (actual === undefined) return op === "!=";
   const a = Number(actual), e = Number(expected);
   const numeric = actual.trim() !== "" && expected.trim() !== "" && Number.isFinite(a) && Number.isFinite(e);

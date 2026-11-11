@@ -1208,7 +1208,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!kd) return w3.window.inputBox({ prompt: "Base object id (e.g. hfoo)" });
           const pinned = selected && kd.baseIds.includes(selected.base) ? selected.base : undefined;
           const k = kd;
-          return pickBaseObject(el, kd, { title: placeholder, pinned, iconOf: (id) => icons(k, kind, id) });
+          return pickBaseObject(el, kd, { title: placeholder, pinned, iconOf: (id) => icons(k, kind, id), editorTypes });
         };
 
         /** Where an id is in use in the other object types ("a custom item of this map"), or null. */
