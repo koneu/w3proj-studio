@@ -3,7 +3,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
-import { decodeImage } from "../../lib/image/index.ts";
+import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapParams, type Rgb } from "./minimap";
 import type { Placed } from "./objects";
@@ -14,8 +14,24 @@ import { maxPlayers } from "../../lib/terrain/startlocations";
 import { ModeCache } from "../../lib/modecache";
 import type { Terrain } from "../../lib/terrain/w3e";
 
-/** Average colour of the first texture cell, by graphics mode and tile id (textures are shared; the modes have their own). */
-const tileColors = new ModeCache<Rgb>();
+/** Colour of a ground tile's or cliff's texture (smallestMipColor), by graphics mode and tile or cliff id (textures
+ *  are shared; the modes have their own). */
+const tileColors = new ModeCache<Rgb | null>();
+
+/** The colour the World Editor's minimap gives a texture: its smallest mip level as the file stores it (1×1 in a
+ *  full chain, which is not the plain average of the full-size picture), averaged by alpha where it is bigger; null
+ *  when it is all transparent. */
+export function smallestMipColor(image: DecodedImage): Rgb | null {
+  const mip = image.mip(image.mipCount - 1);
+  const sum = [0, 0, 0];
+  let weight = 0;
+  for (let i = 0; i < mip.width * mip.height; i++) {
+    const a = mip.rgba[i * 4 + 3];
+    for (let k = 0; k < 3; k++) sum[k] += mip.rgba[i * 4 + k] * a;
+    weight += a;
+  }
+  return weight > 0 ? sum.map((s) => s / weight) as Rgb : null;
+}
 
 /** The graphics mode set (game.graphicsMode), which the game's files are read in. */
 export const graphicsMode = (w3: W3Api) => w3.settings.get<string>("game.graphicsMode") ?? "hd";
@@ -25,6 +41,7 @@ export function minimapSettings(w3: W3Api): Partial<MinimapParams> {
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.minimap.${key}`);
   return {
     groundBrightness: cfg<number>("groundBrightness"),
+    groundNoise: cfg<number>("groundNoise"),
     waterShallowColor: cfg<Rgb>("waterShallowColor"),
     waterDeepColor: cfg<Rgb>("waterDeepColor"),
     waterOpacityShallow: cfg<number>("waterOpacityShallow"),
@@ -48,19 +65,21 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
 
+  /** A texture's colour, null when there is none or it can't be read. */
+  const textureColor = (key: string, path: string | null) => (path ? tileColors.get(() => graphicsMode(w3), key, () => (async () =>
+    smallestMipColor(decodeImage(await readFile(path), path)))().catch(() => null)) : Promise.resolve(null));
   const tileRows = new Map(parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk")).map((r) => [r.tileID, r]));
   const colors = new Map<string, Rgb>();
   for (const id of terrain.groundTiles) {
     const row = tileRows.get(id);
-    const c = tileColors.get(() => graphicsMode(w3), id, () => (async (): Promise<Rgb> => {
-      if (!row) return [128, 128, 128];
-      const path = `${row.dir}\\${row.file}.blp`;
-      const mip = decodeImage(await readFile(path), path).mip(0);
-      const cell = mip.height / 4, sum = [0, 0, 0];
-      for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) for (let k = 0; k < 3; k++) sum[k] += mip.rgba[(y * mip.width + x) * 4 + k];
-      return sum.map((s) => s / (cell * cell)) as Rgb;
-    })().catch((): Rgb => [128, 128, 128]));
-    colors.set(id, await c);
+    colors.set(id, await textureColor(id, row ? `${row.dir}\\${row.file}.blp` : null) ?? [128, 128, 128]);
+  }
+  // A cliff whose colour isn't known shows its ground's.
+  const cliffRows = new Map(parseSlk(await w3.game.readText("TerrainArt\\CliffTypes.slk")).map((r) => [r.cliffID, r]));
+  const cliffColors = new Map<string, Rgb | null>();
+  for (const id of terrain.cliffTiles) {
+    const row = cliffRows.get(id);
+    cliffColors.set(id, await textureColor(`cliff:${id}`, row ? `${row.texDir}\\${row.texFile}.blp` : null));
   }
 
   const water = parseSlk(await w3.game.readText("TerrainArt\\Water.slk"));
@@ -79,7 +98,11 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     if (r?.showInMM === "1" && r.useMMColor === "1") objects.push({ x: d.position[0], y: d.position[1], rgb: [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] });
   }
 
-  return { terrain, margins: [m[0], m[1], m[2], m[3]], tileColor: (id) => colors.get(id) ?? [128, 128, 128], waterColor, objects };
+  return {
+    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, objects,
+    tileColor: (id) => colors.get(id) ?? [128, 128, 128],
+    cliffColor: (id) => cliffColors.get(id) ?? null,
+  };
 }
 
 /** WorldEditData.txt's keys for the preview icons: gold mine, neutral building, start location. */

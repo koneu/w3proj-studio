@@ -1,8 +1,17 @@
-// war3mapMap.blp: the 256×256 minimap picture. The World Editor renders the
-// playable area (inside the camera margins) top-down, scaled to fit with its
-// aspect ratio kept, centred on black. We approximate that render; the
-// constants were fitted against 61 sample maps (mean colour error ≈ 15/255
-// per channel, against the JPEG-compressed originals).
+// war3mapMap.blp: the 256×256 minimap picture. The World Editor draws the
+// playable area (inside the camera margins), scaled to fit with its aspect
+// ratio kept, centred on black. The rules, measured on its pictures of
+// cliff.w3m (2026-11-11: Export Minimap's TGA and the war3mapMap.blp of its
+// saves; heights, slopes and texture variations change nothing):
+// - every tile point colours the tile to its north-east, in one flat colour:
+//   its ground texture's smallest mip level (1×1 in the game's files, which
+//   differs from the full-size picture's plain average);
+// - a tile point next to a cliff (the layers around it differ) takes its cliff
+//   type's texture's smallest mip instead: cliffs and the ground just around
+//   them show lighter than grass;
+// - every pixel's brightness is scattered by up to ±10 % (the editor's grain,
+//   white noise, uniform, the same factor on all three channels).
+// Water and the doodads' dots are the older fit (61 sample maps).
 
 import type { Terrain } from "../../lib/terrain/w3e";
 
@@ -12,8 +21,11 @@ export interface MinimapInput {
   terrain: Terrain;
   /** Unplayable border in tiles: left, right, bottom, top (w3i). */
   margins: [number, number, number, number];
-  /** Average colour of a ground tile type's texture. */
+  /** Colour of a ground tile type: its texture's smallest mip level. */
   tileColor: (tileId: string) => Rgb;
+  /** Colour of a cliff type (CliffTypes.slk id): its texture's smallest mip level; null when it isn't known. Left
+   *  out or null, cliffs show their ground's colour. */
+  cliffColor?: (cliffId: string) => Rgb | null;
   /** The tileset's minimap water colour (Water.slk mmRed/Green/Blue). */
   waterColor: Rgb;
   /** Doodads/destructables shown on the minimap, in their minimap colour. */
@@ -41,8 +53,10 @@ export interface MinimapInput {
 export const ICON_SIZE = 16;
 
 export interface MinimapParams {
-  /** Ground colours relative to the texture average. */
+  /** Ground colours relative to the texture's smallest mip level. */
   groundBrightness: number;
+  /** How far the grain scatters a pixel's brightness (0.1: ±10 %), 0 for flat colours. */
+  groundNoise: number;
   /** Water colour over the ground, shallow and at full depth (fitted for
    *  Lordaeron water; other tilesets shift the hue toward their minimap colour). */
   waterShallowColor: Rgb;
@@ -56,9 +70,10 @@ export interface MinimapParams {
   blurPasses: number;
 }
 
-/** Fitted against 61 sample maps. */
+/** The ground as the World Editor draws it (see the top); water and objects fitted against 61 sample maps. */
 export const DEFAULT_MINIMAP: MinimapParams = {
-  groundBrightness: 0.9,
+  groundBrightness: 1,
+  groundNoise: 0.1,
   waterShallowColor: [57, 55, 115],
   waterDeepColor: [32, 38, 148],
   waterOpacityShallow: 0.5,
@@ -87,6 +102,36 @@ export function minimapFrame(t: Pick<Terrain, "width" | "height" | "offsetX" | "
   };
 }
 
+/** The flat colour every tile point gives the tile to its north-east (RGB per point, rows from the south): its ground
+ *  texture's, or next to a cliff (the layers of the points around it differ) its cliff type's, where it has one. */
+export function groundColors(t: Pick<Terrain, "width" | "height" | "corners" | "groundTiles" | "cliffTiles">,
+  tileColor: (tileId: string) => Rgb, cliffColor?: (cliffId: string) => Rgb | null): Float32Array {
+  const { width, height, corners } = t;
+  const out = new Float32Array(width * height * 3);
+  const layer = (x: number, y: number) => corners[Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))].layer;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const c = corners[y * width + x];
+      let nearCliff = false;
+      for (let j = -1; j <= 1 && !nearCliff; j++) for (let i = -1; i <= 1; i++) if (layer(x + i, y + j) !== c.layer) { nearCliff = true; break; }
+      const cliff = nearCliff ? t.cliffTiles?.[c.cliffTexture] : undefined;
+      const color = cliff !== undefined ? cliffColor?.(cliff) : null;
+      out.set(color ?? tileColor(t.groundTiles[c.texture]), (y * width + x) * 3);
+    }
+  }
+  return out;
+}
+
+/** The grain of pixel (x, y): 0–1, evenly spread, the same on every drawing (a saved minimap doesn't change by
+ *  itself). */
+export function grainAt(x: number, y: number): number {
+  let h = (Math.imul(y, 65536) + x) ^ 0x9e3779b9;
+  h ^= h >>> 16; h = Math.imul(h, 0x7feb352d);
+  h ^= h >>> 15; h = Math.imul(h, 0x846ca68b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
 /** RGBA pixels, rows top to bottom (north up). */
 export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const { terrain: t, tileColor, waterColor } = input;
@@ -98,9 +143,13 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const pw = t.width - 1 - ml - mr, ph = t.height - 1 - mb - mt;
   const scale = N / Math.max(pw, ph); // pixels per tile
   const ox = (N - pw * scale) / 2, oy = (N - ph * scale) / 2;
-  const C = (x: number, y: number) => t.corners[Math.min(t.height - 1, Math.max(0, y)) * t.width + Math.min(t.width - 1, Math.max(0, x))];
+  const clampX = (x: number) => Math.min(t.width - 1, Math.max(0, x)), clampY = (y: number) => Math.min(t.height - 1, Math.max(0, y));
+  const C = (x: number, y: number) => t.corners[clampY(y) * t.width + clampX(x)];
   const hue = [0, 1, 2].map((k) => (waterColor[k] + HUE_OFFSET) / (LORDAERON_WATER[k] + HUE_OFFSET));
   const img = new Float32Array(N * N * 3);
+  /** Where the ground is drawn (the grain goes there, not on the black around it or on dots and squares). */
+  const grain = new Uint8Array(N * N);
+  const ground = showGround ? groundColors(t, tileColor, input.cliffColor) : null;
 
   for (let py = 0; py < N; py++) {
     for (let px = 0; px < N; px++) {
@@ -112,14 +161,14 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       const q = [C(x0, y0), C(x0 + 1, y0), C(x0, y0 + 1), C(x0 + 1, y0 + 1)];
       const w = [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v];
       const col = [0, 0, 0];
+      if (ground) {
+        // The tile's south-west point colours the whole tile.
+        const g = (clampY(y0) * t.width + clampX(x0)) * 3;
+        for (let k = 0; k < 3; k++) col[k] = ground[g + k] * P.groundBrightness;
+      }
+      grain[py * N + px] = 1;
       let depth = 0;
-      q.forEach((c, i) => {
-        if (showGround) {
-          const tc = tileColor(t.groundTiles[c.texture]);
-          for (let k = 0; k < 3; k++) col[k] += tc[k] * w[i] * P.groundBrightness;
-        }
-        depth += (c.hasWater ? c.water - c.height : -64) * w[i];
-      });
+      q.forEach((c, i) => { depth += (c.hasWater ? c.water - c.height : -64) * w[i]; });
       if (showWater && depth > 0) {
         const f = Math.min(1, depth / P.waterFullDepth);
         const a = P.waterOpacityShallow + (P.waterOpacityDeep - P.waterOpacityShallow) * f;
@@ -148,6 +197,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
         if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rad) continue;
         img.set(o.rgb, (y * N + x) * 3);
+        grain[y * N + x] = 0;
       }
     }
   }
@@ -156,7 +206,9 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   for (const u of input.units ?? []) {
     const [cx, cy] = at(u.x, u.y);
     for (let y = Math.floor(cy - half); y < Math.ceil(cy + half); y++) {
-      for (let x = Math.floor(cx - half); x < Math.ceil(cx + half); x++) if (x >= 0 && y >= 0 && x < N && y < N) img.set(u.rgb, (y * N + x) * 3);
+      for (let x = Math.floor(cx - half); x < Math.ceil(cx + half); x++) {
+        if (x >= 0 && y >= 0 && x < N && y < N) { img.set(u.rgb, (y * N + x) * 3); grain[y * N + x] = 0; }
+      }
     }
   }
 
@@ -179,6 +231,15 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
           img[(y * N + x) * 3 + k] = sum / weight;
         }
       }
+    }
+  }
+
+  // The grain: over the smoothed picture, as the editor's isn't softened.
+  if (P.groundNoise > 0) {
+    for (let i = 0; i < N * N; i++) {
+      if (!grain[i]) continue;
+      const f = 1 + P.groundNoise * (2 * grainAt(i % N, Math.floor(i / N)) - 1);
+      for (let k = 0; k < 3; k++) img[i * 3 + k] *= f;
     }
   }
 
