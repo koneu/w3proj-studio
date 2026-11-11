@@ -795,7 +795,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const grows = change.some((n) => n > 0);
       const result = {
         width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed,
-        ...(grows ? { note: "New ground continues the map's edge: the same tile and height as far as it reaches, and the tiles repeat. Paint it afterwards to hide that." } : {}),
+        ...(grows ? { note: "New ground is flat, on cliff level 2, with the tileset's first tile (as the World Editor adds it). Paint and shape it afterwards." } : {}),
       };
       if (dryRun === true) return result;
       refuseLostView(projectTerrain(w3));
