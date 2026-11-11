@@ -17,14 +17,14 @@ Warcraft is a trademark of Blizzard Entertainment. You need your own installed c
 
 What the World Editor doesn't have:
 
-- **AI integration.** Performance and cost heavily depend on provided guides and used models. Examples where done witth buildin guides and Claude Opus 5.5.
+- **AI integration.** Performance and cost heavily depend on provided guides and used models. Examples were done with built-in guides and Claude Opus 5.5.
 
-  #### Example Forestpath
-    > "can you familiarize yourself with warcraft mapping and use the war3-proj konnektor to build a nice forest in region 000, with a path from south to east."
-        ![](docs/images/forestpath-1.jpg)
+    **Example Forestpath:**
 
-    > "can you make the coner section more interesting"
-        ![](docs/images/forestpath-2.jpg)
+    | Image 1 | Image 2 | Image 3 |
+    | :---: | :---: | :---: |
+    | "can you familiarize yourself with warcraft mapping and use the war3-proj konnektor to build a nice forest in region 000, with a path from south to east." ~10min | "can you make the coner section more interesting" ~5min | "can you make a nice farm in region 001 and add a transition between it and the forest?" ~10min  |
+    | ![](docs/images/forestpath-1.jpg) | ![](docs/images/forestpath-2.jpg) | ![](docs/images/forestpath-3.jpg) |
 
 
 - **Problems view.** Checks the project like a compiler would: JASS errors in the map script, files that object
