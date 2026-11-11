@@ -840,9 +840,18 @@ fn reveal_command(path: &str) -> Command {
 // ---------------------------------------------------------------- settings & extensions
 
 fn config_dir(app: &AppHandle) -> CmdResult<PathBuf> {
-    let dir = app.path().app_config_dir().map_err(err)?;
+    let dir = chosen_config_dir(std::env::var_os("W3PROJ_CONFIG_DIR"), || app.path().app_config_dir().map_err(err))?;
     std::fs::create_dir_all(dir.join("extensions")).map_err(err)?;
     Ok(dir)
+}
+
+/// The settings folder: W3PROJ_CONFIG_DIR when set (two smoke-test apps of one build run side by side, each with its
+/// own settings: app-smoke.mjs --part), else the system's folder for the app's identifier.
+fn chosen_config_dir(over: Option<std::ffi::OsString>, system: impl FnOnce() -> CmdResult<PathBuf>) -> CmdResult<PathBuf> {
+    match over {
+        Some(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
+        _ => system(),
+    }
 }
 
 #[derive(Serialize)]
@@ -1762,6 +1771,20 @@ mod program_tests {
         assert_eq!(cmd.get_program(), tool.join("proton").as_os_str());
         assert_eq!(args[0], "runinprefix", "proton run's steam.exe waits for every program in the prefix, Battle.net too");
         assert_eq!(args[1..], [exe.to_string_lossy().into_owned(), "-launch".into(), "-loadfile".into(), r"Z:\m\a.w3x".into()]);
+    }
+}
+
+#[cfg(test)]
+mod config_dir_tests {
+    use super::chosen_config_dir;
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_variable_wins_when_set_and_not_empty() {
+        let system = || Ok(PathBuf::from("system"));
+        assert_eq!(chosen_config_dir(Some("smoke/config".into()), system).unwrap(), PathBuf::from("smoke/config"));
+        assert_eq!(chosen_config_dir(Some("".into()), system).unwrap(), PathBuf::from("system"));
+        assert_eq!(chosen_config_dir(None, system).unwrap(), PathBuf::from("system"));
     }
 }
 
