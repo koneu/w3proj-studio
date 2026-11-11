@@ -106,6 +106,8 @@ export class TerrainToolRegistry implements TerrainService {
   readonly resetVariations = new Map<string, () => boolean>();
   /** Set by each open terrain editor, by its file: Reset Height Field and Adjust Cliff Levels. */
   readonly wholeMapGround = new Map<string, WholeMapGround>();
+  /** Set by each open terrain editor, by its file: resolves once its view is at rest (w3.terrain.settleViews). */
+  readonly settleView = new Map<string, () => Promise<void>>();
   /** Set by each open terrain editor, by its file: the View commands (command palette) on that editor. */
   readonly viewCommands = new Map<string, ViewCommands>();
   /** Set by each open terrain editor, by its file: Set Uniform Doodad Heights and Reset Fixed Object Heights. */
