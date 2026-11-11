@@ -3601,7 +3601,7 @@ async function typedFieldSave(page, found) {
     await hands.type("999");
     await page.evaluate(`(() => { const ed = w3Workbench.editors; window.__closeAsked = []; window.__closeConfirm = ed.confirm; ed.confirm = async (m) => { window.__closeAsked.push(m); return "Don't Save"; }; })()`);
     try {
-      await page.evaluate(`w3.editors.closeActive()`);
+      await page.evaluate(`w3Workbench.editors.closeActive()`);
       await sleep(300);
       const asked = await page.evaluate(`window.__closeAsked`);
       if (!asked.some((m) => /Save changes/.test(m))) fail(`closing Map Properties right after typing didn't ask to save: ${JSON.stringify(asked)}`);
