@@ -1519,7 +1519,9 @@ export class TerrainRenderer {
 
     // What lies on the ground goes with it when the terrain is hidden.
     const onGround = this.groundLook !== "hidden";
-    for (const layer of onGround ? [this.viewLayer, this.overlay, textured && this.showBorder ? this.border : null] : []) {
+    // The border's dark first: the View layers and the tools' marks go over it, as the World Editor's naval view
+    // lies over the map's edge.
+    for (const layer of onGround ? [textured && this.showBorder ? this.border : null, this.viewLayer, this.overlay] : []) {
       if (!layer || !this.overlayProg) continue;
       const t = this.terrain;
       gl.useProgram(this.overlayProg);
