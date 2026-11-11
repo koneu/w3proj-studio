@@ -5,7 +5,7 @@
 // 4 tiles inside the unplayable border horizontally and 2 vertically (also
 // all 116 maps).
 
-import { randomVariation, type Corner, type Terrain } from "./w3e";
+import { randomVariation, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -41,21 +41,29 @@ export function resizedCameraZoom(zoom: { default: number; max: number; min?: nu
   return { default: 1250, max: 1250, ...(zoom.min !== undefined ? { min: 1250 } : {}) };
 }
 
-/** The terrain with `change` applied: new corners continue the nearest edge (same ground and
- *  height, no ramps, a ground and a cliff variation of their own: copied ones repeat the edge in
- *  stripes), removed ones are dropped; world positions stay. */
+/** A corner Map Size adds, as the World Editor makes it (we-drive, 2026-11-11, cliff.w3m grown by 8 tiles left and
+ *  bottom: all 1104 new corners): the tileset's first ground tile (texture 0, not the neighbouring one), flat ground on
+ *  level 2 (height word 0x2000), water word 0x2000, no flags, cliff type nibble 15, a ground and a cliff variation of
+ *  its own. The map edge bit of the water word comes after, from the playable area (markMapEdge). */
+export function newCorner(random: () => number = Math.random): Corner {
+  return {
+    height: 0, water: -WATER_OFFSET, texture: 0, variation: randomVariation(random), cliffVariation: newCliffVariation(random),
+    cliffTexture: 15, layer: 2, ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0,
+  };
+}
+
+/** The terrain with `change` applied: new corners are the World Editor's (newCorner), removed ones are dropped; world
+ *  positions stay. The caller marks the map edge for the new playable area (markMapEdge). */
 export function resizeTerrain(t: Terrain, change: Sides, random: () => number = Math.random): Terrain {
   const [l, , b] = change;
   const [w, h] = resizedSize(t, change);
   const corners: Corner[] = new Array((w + 1) * (h + 1));
   for (let y = 0; y <= h; y++) {
-    const oy = Math.min(Math.max(y - b, 0), t.height - 1);
+    const oy = y - b;
     for (let x = 0; x <= w; x++) {
-      const ox = Math.min(Math.max(x - l, 0), t.width - 1);
-      const src = t.corners[oy * t.width + ox];
-      const inside = x - l === ox && y - b === oy;
-      corners[y * (w + 1) + x] = inside ? { ...src }
-        : { ...src, ramp: false, blight: false, variation: randomVariation(random), cliffVariation: newCliffVariation(random) };
+      const ox = x - l;
+      const inside = ox >= 0 && oy >= 0 && ox < t.width && oy < t.height;
+      corners[y * (w + 1) + x] = inside ? { ...t.corners[oy * t.width + ox] } : newCorner(random);
     }
   }
   return { ...t, width: w + 1, height: h + 1, offsetX: t.offsetX - l * 128, offsetY: t.offsetY - b * 128, corners };

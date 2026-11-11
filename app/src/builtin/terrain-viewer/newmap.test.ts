@@ -20,10 +20,11 @@ test("a name is enough next to an open project, with the dialog's defaults", () 
   assert.deepEqual(o.groundTiles, ["Ldrt", "Lgrs", "Lgrd"]);
   assert.deepEqual(o.cliffTiles, ["CLdi"]);
   assert.equal(o.customTiles, false);
-  assert.equal(o.baseTile, "Lgrs", "exactly Grass, before Grassy Dirt");
+  // The World Editor's "Initial Tile: <tileset> - Dirt": ground index 0, though the tileset has Grass.
+  assert.equal(o.baseTile, "Ldrt", "the tileset's first ground tile, not Grass");
 });
 
-test("a tileset without grass starts on its first tile", () => {
+test("every tileset starts on its first tile", () => {
   assert.equal(mapChoices({ name: "Crypt", tileset: "D" }, data, folder).baseTile, "Ddrt");
 });
 

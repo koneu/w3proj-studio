@@ -106,9 +106,10 @@ export async function loadTilesets(w3: W3Api): Promise<TileData> {
 
 /** The folder a map of this name gets. */
 const folderName = (name: string) => name.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled";
-/** Grass where the list has one (as the World Editor's default), else the first tile. */
-const defaultBase = (tiles: string[], nameOf: (id: string) => string) =>
-  tiles.find((x) => /^grass$/i.test(nameOf(x))) ?? tiles.find((x) => /grass/i.test(nameOf(x))) ?? tiles[0];
+/** The tileset's first ground tile, as the World Editor's default: its New Map dialog reads "Initial Tile: <tileset> -
+ *  Dirt" in every tileset (we-drive, 2026-11-11: Summer, Ashenvale, Barrens, Cityscape, Winter, Northrend, Village),
+ *  ground index 0, and every tileset's list starts with its Dirt. */
+const defaultBase = (tiles: string[]) => tiles[0];
 
 /** The choices of a new map from a tool's arguments, with the dialog's defaults. Throws what's
  *  wrong. Tiles aren't chosen here: the tileset's own, and painting adds others. */
@@ -128,7 +129,7 @@ export function mapChoices(a: Record<string, unknown>, data: Pick<TileData, "set
   if (!set) throw new Error(`"${String(tileset)}" isn't a tileset. They are: ${data.sets.map((s) => `${s.id} (${s.name})`).join(", ")}.`);
   const tiles = set.tiles.map((t) => t.id);
   const nameOf = (id: string) => data.all.find((x) => x.id === id)?.name ?? id;
-  const baseTile = a.baseTile === undefined ? defaultBase(tiles, nameOf) : a.baseTile;
+  const baseTile = a.baseTile === undefined ? defaultBase(tiles) : a.baseTile;
   if (typeof baseTile !== "string" || !tiles.includes(baseTile)) throw new Error(`${set.name} has no ground tile "${String(baseTile)}". It has: ${tiles.map((t) => `${t} (${nameOf(t)})`).join(", ")}. Paint others on afterwards.`);
   const layer = a.cliffLevel === undefined ? 2 : a.cliffLevel;
   if (!Number.isInteger(layer) || (layer as number) < 0 || (layer as number) > 14) throw new Error("cliffLevel must be a whole number from 0 to 14.");
@@ -181,7 +182,7 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
     const fillTiles = () => {
       if (!custom) tiles = current().tiles.map((x) => x.id);
       const keep = tiles.includes(base.value) ? base.value : null;
-      const pick = keep ?? defaultBase(tiles, tileName);
+      const pick = keep ?? defaultBase(tiles);
       base.replaceChildren(...tiles.map((x) => h("option", { value: x, selected: x === pick }, `${tileName(x)} (${x})`)));
       tilesSummary.textContent = `${tiles.length} tiles${custom ? " (custom)" : ""} `;
     };
