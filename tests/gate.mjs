@@ -17,8 +17,9 @@
 // Steps that don't need each other run side by side. What one needs from another is written down
 // as `after` (the release CLI before everything that runs it) and as locks, held for the whole
 // step: "cargo" (one cargo command in the target folder at a time), "dist" (app/dist is read by
-// every build of the Tauri crate, and rebuilt by the smoke tests: they take turns; the app smoke
-// test only needs it for its first minute, the build, and says so in its log). Steps queue for a
+// every build of the Tauri crate, and rebuilt by the smoke tests: they take turns; part 1 of the app
+// smoke test only needs it for its first minute, the build, and says so in its log; part 2 starts then,
+// on that build, without the lock). Steps queue for a
 // lock in the order they became ready, so a step waiting for "dist" alone isn't passed by later
 // readers (tests/gate-scheduler.mjs, tested in app/scripts/gate-scheduler.test.mjs). A
 // step whose `after` step failed fails without running. Each step writes its output to its own
@@ -265,6 +266,7 @@ const bin = join(repo, "target", "release", `w3proj${exe}`);
 // different worktrees don't share it (two gates in one worktree share target/ anyway). The same
 // name each run, so no new folder is left in the user's settings per run.
 const smokeId = process.env.W3_SMOKE_ID ?? `dev.w3proj.studio.smoke.${basename(repo).replace(/[^A-Za-z0-9-]+/g, "-")}`;
+const smokeEnv = { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId };
 const hasGame = join(game, ".build.info");
 const update = args.includes("--update-floor") ? " --update-floor" : "";
 
@@ -272,22 +274,33 @@ const update = args.includes("--update-floor") ? " --update-floor" : "";
 // busy. `tier`: the tiers it belongs to. The table at the end is in the order of `table`.
 const steps = [
   { id: "cli", name: "release CLI", tier: "corpus", weight: 6, locks: [["cargo", "w"]], run: shell("cargo build --release --locked -p w3proj-cli") },
-  { id: "appsmoke", name: "the real app on a scratch project", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin, W3_SMOKE_ID: smokeId } }) },
+  // The real app's smoke test in two halves, two apps of one build side by side (app-smoke.mjs --part): part 1 builds
+  // it, part 2 starts once that build is done and runs what part 1 built.
+  { id: "appsmoke1", name: "the real app on a scratch project (part 1/2)", tier: "corpus", weight: 4, after: ["cli"], locks: [["dist", "w"]], built: "Built application at", run: shell("node scripts/app-smoke.mjs --part=1/2", { cwd: app, env: smokeEnv }) },
+  { id: "appsmoke2", name: "the real app on a scratch project (part 2/2)", tier: "corpus", weight: 4, after: ["cli", "appsmoke1#built"], run: async (ctx) => {
+    // "#built" only orders (it is done also when part 1 failed before its build): without a build there is
+    // nothing of this tree's to run.
+    if (!done.get("appsmoke1#built")?.ok) {
+      ctx.say("not run: part 1's build of the app failed");
+      return false;
+    }
+    return ctx.sh("node scripts/app-smoke.mjs --part=2/2 --no-build", { cwd: app, env: smokeEnv });
+  } },
   { id: "corpus", name: "corpus round trip and codec baseline", tier: "corpus", weight: 10, after: ["cli"], run: needs(corpus, "the map corpus", shell(`"${bin}" verify -q "${corpus}" --baseline tests/corpus-baseline.tsv --game "${game}"`)) },
   { id: "hostile", name: "hostile input, 20000 rounds", tier: "corpus", weight: 10, run: hostileRounds },
   { id: "seeds", name: "hostile input on the game's own files", tier: "corpus", weight: 2, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/hostile-seeds.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   { id: "script", name: "generated scripts against the World Editor's", tier: "corpus", weight: 8, after: ["cli"], run: needs(hasGame, "the game", shell("node scripts/script-check/run.mjs", { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
   { id: "twin", name: "Rust and TypeScript codecs agree", tier: "corpus", weight: 2, after: ["cli"], run: needs(corpus, "the map corpus", shell(`node scripts/twin-check.mjs "${corpus}"`, { cwd: app, env: { W3PROJ_GAME: game, W3PROJ_BIN: bin } })) },
-  { id: "rustcov", name: "Rust coverage floors", tier: "coverage", weight: 8, after: ["appsmoke#built"], locks: [["dist", "r"]], run: rustCoverage },
-  { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, after: ["appsmoke#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
-  { id: "clippy", name: "clippy", tier: "commit", weight: 4, after: ["appsmoke#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
-  { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke#built"], locks: [["dist", "w"]], run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
+  { id: "rustcov", name: "Rust coverage floors", tier: "coverage", weight: 8, after: ["appsmoke1#built"], locks: [["dist", "r"]], run: rustCoverage },
+  { id: "rust", name: "Rust unit and system tests", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo test --workspace --locked --quiet") },
+  { id: "clippy", name: "clippy", tier: "commit", weight: 4, after: ["appsmoke1#built"], locks: [["cargo", "w"], ["dist", "r"]], run: shell("cargo clippy --workspace --all-targets --locked --quiet -- -D warnings") },
+  { id: "ui", name: "UI smoke (headless)", tier: "commit", weight: 2, after: ["appsmoke1#built"], locks: [["dist", "w"]], run: shell("node scripts/ui-smoke.mjs --build", { cwd: app }) },
   { id: "tsc", name: "types, module boundaries, scripts load", tier: "commit", weight: 2, run: shell("npm run --silent check", { cwd: app }) },
   { id: "tstest", name: "TypeScript unit tests", tier: "commit", weight: 2, run: shell("npm test --silent -- --test-reporter=dot", { cwd: app }) },
   { id: "tscov", name: "TypeScript coverage floors", tier: "coverage", weight: 3, run: shell(`npm run --silent coverage -- --check${update}`, { cwd: app }) },
 ];
 // The table: the order the steps always had.
-const table = ["tsc", "tstest", "rust", "clippy", "ui", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke", "script"];
+const table = ["tsc", "tstest", "rust", "clippy", "ui", "tscov", "rustcov", "cli", "hostile", "seeds", "corpus", "twin", "appsmoke1", "appsmoke2", "script"];
 
 const tiers = {
   commit: ["commit"],

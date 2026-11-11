@@ -49,7 +49,7 @@ real maps and game files can't go into the repository.
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
 node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov)
-node tests/gate.mjs corpus     # real maps and the game: about 15 minutes (the full app smoke test sets the pace)
+node tests/gate.mjs corpus     # real maps and the game: some minutes (the app smoke test's two halves set the pace)
 node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
 ```
@@ -69,7 +69,23 @@ smoke test builds first, and the rest of the gate waits for that build, not for 
 queue for a lock in the order they became ready: once the UI smoke test waits to rebuild `app/dist`,
 no step that comes later starts building against it first (`tests/gate-scheduler.mjs`, with its
 tests in `app/scripts/gate-scheduler.test.mjs`). A step whose prerequisite
-failed fails without running. Each step's output goes to `target/gate-logs/<tier>-<pid>/<step>.log`; the
+failed fails without running.
+
+**The real-app smoke test runs as two apps at once** in the corpus tier: `app-smoke.mjs --part=1/2` builds the app,
+then runs the project checks and the first half of the full run's checks (`firstHalf`, newMaps to viewModes);
+`--part=2/2 --no-build` starts once that build is done (part 1's `Built application at`) and runs the second half
+(`secondHalf`, unitProperties to contextLoss) on the same build. Each part has its own folder
+(`target/app-smoke-part<n>`, or `W3_SMOKE_DIR` with `-part<n>`), its settings in it (the app reads
+`W3PROJ_CONFIG_DIR`, since both have the build's identifier; app-smoke stops when the app doesn't say it listened),
+and its own Xvfb display and WebDriver ports (Linux; a driver that loses the race for a display starts again) or
+DevTools port and WebView2 folder (Windows). The halves keep the full run's order, so a check that relies on what an
+earlier one left stays behind it (testMapWithoutGame on the map objectsWhileOpening left open); every check of the
+second half also runs alone (`--only`). They are balanced by the times each check prints (`took X s: <check>`):
+about 6 minutes each once built. To run one half by hand: `node scripts/app-smoke.mjs --part=1/2` (in `app/`), or
+`--part=2/2` (it builds unless `--no-build`: not while part 1 builds). A plain `node scripts/app-smoke.mjs` still
+runs everything in one app.
+
+Each step's output goes to `target/gate-logs/<tier>-<pid>/<step>.log`; the
 gate prints it, or its end and the path, when the step finishes. Times in the table are wall time,
 so they grow when steps compete for the cores.
 
@@ -110,7 +126,7 @@ falls short, rather than copying their insides into a scratch file.
 | show a test fails without the fix | `node scripts/fails-without.mjs <test> <changed source files…>` (in `app/`): passes as is, fails with those files as on `dev` (`--base`), files put back. Exit 3 means the old code merely didn't build: weak evidence. Rust: `--run "cargo test -p <crate> <name>"`, and `--keep-rust-tests` when the tests are in the changed file (every `#[cfg(…test…)] mod <name>` stays the new one) |
 | look at the app, ask it something | `node scripts/app-drive.mjs <steps>` (in `app/`): the hidden smoke app (Xvfb on Linux), `--map`/`--project` (a copy), `--terrain`, `--camera game`, `--camera we[:x,y,…]` (the World Editor's view), `--view-size 1184x844`, `--compare-ready lit\|unlit`, `--look x,y`, `--shot file.png`, `--mcp tool={…}`, `--command id`, `--eval "…"` (an expression, statements, or statements that `return`), `--key Ctrl+Shift+Z` (a chord into the page: over WebDriver on Linux, so WebKitGTK's own key events come out), `--frame-cost ms` (CPU time per terrain frame: all, poses, particles, HD water's depth picture). Steps run in order; the list is at the top of the file |
 | compare two pictures | `node scripts/pic-compare.mjs a.png b.png` (in `app/`): mean colour per region in both, their difference, the mean absolute difference of the pixels; `--region [name=]x,y,w,h`, `--sample` (whole and a 3x3 grid), `--diff d.png`, `--tolerance T` (exit 1 when a region's difference is above it, 2 when the pictures can't be compared). Plain JavaScript, no Pillow |
-| run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too |
+| run the real-app smoke test, or one check of it | `node scripts/app-smoke.mjs [--only=<check>]` (in `app/`): builds what it needs, the release CLI too; `--part=1/2` / `--part=2/2` runs one half (see "Running it") |
 | read the game's files | `w3proj game cat Units/UnitData.slk`, `game ls <filter>`, `game resolve <path>` |
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
 | see how the open points burn down | `node scripts/openpoints-burndown.mjs` (repo root): reads `openpoints/*.md` (an open point is a `- [ ] ` line plus its indented lines), writes `openpoints/openpoints.json` (every point with file, section, text, a stable id), adds an entry to `openpoints/burndown.json` and writes `openpoints/burndown.html` (the chart, data inside, opens from disk). `--dry-run` prints the counts, `--no-entry` refreshes without an entry. The open points stay local; only the script is in git |

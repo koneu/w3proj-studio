@@ -79,7 +79,7 @@ function topLevel(text) {
 /**
  * app-smoke.mjs's checks: the names in its `--only` map (`const onlyChecks = { a, b: (p, f) => b(p, f, x) };`), the
  * checks its full run calls after it (`await name(page, found…` and `for (const check of [a, b]) await check(page,
- * found…`), and the functions it declares.
+ * found…`; not its pieces projectChecks, firstHalf and secondHalf), and the functions it declares.
  */
 export function smokeChecks(source) {
   const map = /const onlyChecks = \{([\s\S]*?)\};/.exec(source);
@@ -87,7 +87,9 @@ export function smokeChecks(source) {
   const only = topLevel(map[1]).map((p) => /^(\w+)/.exec(p)?.[1]).filter(Boolean);
   const after = source.slice(map.index + map[0].length);
   const run = new Set();
-  for (const m of after.matchAll(/await (\w+)\(page, found\b/g)) if (m[1] !== "check") run.add(m[1]);
+  // The full run's own pieces (the project checks, and the halves the gate runs as two apps: --part) hold the checks.
+  const pieces = new Set(["check", "projectChecks", "firstHalf", "secondHalf"]);
+  for (const m of after.matchAll(/await (\w+)\(page, found\b/g)) if (!pieces.has(m[1])) run.add(m[1]);
   for (const m of after.matchAll(/for \(const check of \[([^\]]*)\]\) await check\(page, found\b/g)) for (const n of topLevel(m[1])) run.add(n);
   const declared = new Set([...source.matchAll(/^(?:async )?function (\w+)\s*\(/gm)].map((m) => m[1]));
   // Two names on one line of the map (`a, b,`): it's kept one per line so parallel branches don't conflict on it.

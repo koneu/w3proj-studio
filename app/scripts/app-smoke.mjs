@@ -12,7 +12,16 @@
 //   node scripts/app-smoke.mjs            builds if needed, then runs
 //   node scripts/app-smoke.mjs --no-build runs what was built last
 //   node scripts/app-smoke.mjs --break    breaks a file on purpose: this run has to fail
+//   node scripts/app-smoke.mjs --part=1/2 the project checks and the first half of the full run's checks
+//   node scripts/app-smoke.mjs --part=2/2 the second half (with --no-build while part 1 builds: they run side by side)
 //   --verbose shows what each editor put on screen
+//
+// The two parts are two apps of one build at once: each has its own folder (target/app-smoke-part<n>, or W3_SMOKE_DIR
+// with -part<n>), its settings in it (W3PROJ_CONFIG_DIR: the build's identifier is the same), its own Xvfb display and
+// WebDriver ports on Linux (webdriver.mjs) or DevTools port and WebView2 folder on Windows. The full run is
+// firstHalf, then secondHalf (part 1 runs the project checks and firstHalf, part 2 secondHalf): each keeps the checks'
+// order, so a check that relies on what an earlier one left (testMapWithoutGame on the map objectsWhileOpening left
+// open) stays behind it.
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -30,8 +39,15 @@ const LINUX = process.platform === "linux";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
+// --part=<n>/2: one half of the full run (null: all of it).
+const partArg = process.argv.find((x) => x.startsWith("--part="))?.slice(7);
+const part = partArg === undefined ? null : ({ "1/2": 1, "2/2": 2 })[partArg];
+if (part === undefined || (part && process.argv.some((x) => x.startsWith("--only=")))) {
+  console.error(`FAIL --part takes 1/2 or 2/2, and not with --only: ${process.argv.slice(2).join(" ")}`);
+  process.exit(2);
+}
 // W3_SMOKE_DIR: another folder, when this one has a project someone opened to try out.
-const work = process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke");
+const work = (process.env.W3_SMOKE_DIR ?? join(repo, "target", "app-smoke")) + (part ? `-part${part}` : "");
 const exeName = process.platform === "win32" ? ".exe" : "";
 const exe = join(repo, "target", "debug", `w3proj-studio${exeName}`);
 let cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exeName}`);
@@ -7495,7 +7511,10 @@ async function run() {
   if (process.argv.includes("--break")) writeFileSync(join(project, "map", "war3map.w3r.json"), "{ not json");
   const before = snapshot(project);
 
-  const configDir = join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
+  // A part's settings are in its own folder (both parts' apps have the build's identifier); the app is told where
+  // its settings are in either case, and asked below whether it listened.
+  const configDir = part ? join(work, "config") : join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
+  const configEnv = { W3PROJ_CONFIG_DIR: configDir };
   rmSync(configDir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
   // AI clients on this machine would connect to a server of this build. Automatic checkpoints come by the clock
@@ -7520,13 +7539,13 @@ async function run() {
   try {
     let page;
     if (LINUX) {
-      const launched = await launch(exe, { W3PROJ_TRIGGERDATA: triggerData });
+      const launched = await launch(exe, { W3PROJ_TRIGGERDATA: triggerData, ...configEnv });
       ({ page, stop, exited } = launched);
     } else {
       const port = await freePort();
       const child = spawn(exe, [], {
         stdio: "ignore",
-        env: { ...process.env, W3PROJ_TRIGGERDATA: triggerData, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
+        env: { ...process.env, W3PROJ_TRIGGERDATA: triggerData, ...configEnv, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, WEBVIEW2_USER_DATA_FOLDER: join(work, "webview") },
       });
       let code = null;
       child.on("exit", (c) => { code = c; });
@@ -7536,8 +7555,10 @@ async function run() {
     }
     await until("the app to start", () => page.evaluate(`!!window.w3 && document.querySelectorAll("button.activity").length > 0`));
     await sleep(500);
+    // An app built before W3PROJ_CONFIG_DIR would share its settings with the other part's.
+    const settingsAt = (await page.evaluate(`w3.backend.invoke("app_paths")`)).config_dir;
+    if (resolve(settingsAt) !== resolve(configDir)) throw new Error(`the app keeps its settings in ${settingsAt}, not in ${configDir}: build it again (run without --no-build)`);
     const found = [];
-    const path = JSON.stringify(project);
     // --only=<check> runs one of the checks below on its own, for working on it. Every check of the full run below is
     // named here too (`npm run check` holds the two lists against each other: scripts/check-scripts.mjs).
     // --only=graphics is graphicsModes after the project checks.
@@ -7613,189 +7634,218 @@ async function run() {
       return found;
     }
 
-    // The real backend reads the project.
-    await page.evaluate(`w3.workspace.open(${path})`);
-    await until("the project", () => page.evaluate(`w3.workspace.project()?.root != null`));
-    const info = await page.evaluate(`(() => { const p = w3.workspace.project(); return { name: p.name, root: p.root, files: w3.workspace.files().map((f) => f.path) }; })()`);
-    const onDisk = [...before.keys()].filter((f) => f.startsWith("map/"));
-    const listed = new Set(info.files);
-    for (const f of onDisk) if (!listed.has(f)) found.push(`the app doesn't list ${f}`);
-
-    // Every file in the editor the app picks for it.
-    const opened = {};
-    for (const file of onDisk) {
-      const r = await page.evaluate(`(async () => {
-        const path = ${JSON.stringify(file)};
-        try {
-          await w3.editors.open(path);
-          await new Promise((r) => setTimeout(r, 200));
-          const area = document.querySelector(".editor-area, .editors, main") ?? document.body;
-          const text = area.innerText;
-          return { active: w3.editors.activePath(), error: /Could not|couldn't open|Failed to|Error:/.test(text) ? text.slice(0, 200) : null, size: text.length, canvas: area.querySelectorAll("canvas").length, inputs: area.querySelectorAll("input, select, textarea, .cm-content").length, tab: document.querySelector(".tab.active")?.textContent ?? null };
-        } catch (e) { return { failed: String(e) }; }
-      })()`);
-      opened[file] = r;
-      if (r.failed) found.push(`${file}: ${r.failed}`);
-      else if (r.error) found.push(`${file} shows an error: ${r.error}`);
-      else if (r.active !== file) found.push(`${file} didn't open (active: ${r.active})`);
+    // Part 2 has no project checks: they and the first half of the checks are part 1's.
+    let summary = null;
+    if (part !== 2) {
+      const { info, onDisk, opened } = await projectChecks(page, found, { project, before, wanted, packed });
+      if (process.argv.includes("--only=graphics")) {
+        await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
+        found.push(...problems(page.events));
+        page.ws.close();
+        return found;
+      }
+      console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start, build and the project checks`);
+      checkEnded = Date.now();
+      const made = await firstHalf(page, found);
+      summary = `${info.files.length} files in "${info.name}", ${onDisk.length} opened, ${made} new maps`;
+      if (process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${JSON.stringify(r)}`);
+    } else {
+      console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start (part 2 of 2)`);
+      checkEnded = Date.now();
     }
-
-    // Nothing was changed, so saving changes nothing.
-    await page.evaluate(`w3.editors.saveAll()`);
-    await page.evaluate(`w3.editors.closeAll()`);
-    await sleep(300);
-    const after = snapshot(project);
-    for (const [f, h] of before) {
-      if (after.get(f) === undefined) found.push(`${f} is gone`);
-      else if (after.get(f) !== h) found.push(`${f} changed without an edit`);
-    }
-
-    // What the app packs is what the command line packs.
-    await page.evaluate(`w3.backend.invoke("project_pack", { root: ${path}, output: ${JSON.stringify(packed)} })`);
-    await until("the pack", () => existsSync(packed));
-    if (hash(packed) !== hash(wanted)) found.push("the app's map differs from the CLI's");
-
-    // A change goes through the app into the map.
-    const regions = "map/war3map.w3r.json";
-    await page.evaluate(`(async () => {
-      const text = await w3.workspace.readText(${JSON.stringify(regions)});
-      await w3.workspace.writeText(${JSON.stringify(regions)}, text.replace("Middle", "Edited"));
-    })()`);
-    const edited = join(work, "edited.w3x");
-    await page.evaluate(`w3.backend.invoke("project_pack", { root: ${path}, output: ${JSON.stringify(edited)} })`);
-    const inMap = spawnSync(cli, ["cat", edited, "war3map.w3r"]);
-    if (inMap.status !== 0 || !inMap.stdout.includes("Edited")) found.push("the edit didn't reach the map");
-
-    // The app unpacks a map into what it came from.
-    const unpacked = join(work, "unpacked");
-    await page.evaluate(`w3.backend.invoke("project_unpack", { map: ${JSON.stringify(wanted)}, dir: ${JSON.stringify(unpacked)}, allowIncomplete: false, install: "none" })`);
-    const again = snapshot(join(unpacked, "map"));
-    for (const [f, h] of snapshot(join(FIXTURE, "map"))) if (again.get(f) !== h) found.push(`unpacking changed ${f}`);
-
-    const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
-    if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
-
-    if (process.argv.includes("--only=graphics")) {
-      await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
-      found.push(...problems(page.events));
-      page.ws.close();
-      return found;
-    }
-    console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start, build and the project checks`);
-    checkEnded = Date.now();
-    const made = await newMaps(page, found);
-    await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
-    await leftOpen(page, "terrainWiring");
-    await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
-    await leftOpen(page, "placeObjects");
-    await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
-    await leftOpen(page, "mcpStartMove");
-    await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
-    await leftOpen(page, "mcpGuides");
-    await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
-    await leftOpen(page, "waterPathing");
-    await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
-    await leftOpen(page, "tileTemplate");
-    await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
-    await leftOpen(page, "tilesInPlace");
-    await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
-    await leftOpen(page, "tileCleanup");
-    await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
-    await leftOpen(page, "objectsWhileOpening");
-    await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
-    await leftOpen(page, "testMapWithoutGame");
-    for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
-    await leftOpen(page, "height tools");
-    await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
-    await leftOpen(page, "flyingHeights");
-    await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
-    await leftOpen(page, "artModeReload");
-    await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
-    await leftOpen(page, "wholeMapGround");
-    await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
-    await leftOpen(page, "cameraEditing");
-    await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
-    await leftOpen(page, "terrainSelectCameras");
-    await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
-    await leftOpen(page, "viewModes");
-    await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
-    await leftOpen(page, "unitProperties");
-    await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
-    await leftOpen(page, "itemTablesAccess");
-    await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
-    await leftOpen(page, "itemDrops");
-    await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
-    await leftOpen(page, "triggersAndAi");
-    await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
-    await leftOpen(page, "staleEditors");
-    await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
-    await leftOpen(page, "scriptGuard");
-    await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
-    await leftOpen(page, "resizeUndo");
-    await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
-    await leftOpen(page, "dataSafety");
-    await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
-    await leftOpen(page, "configSafety");
-    await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
-    await leftOpen(page, "syncSafety");
-    await workbenchState(page, found).catch((e) => found.push(`workbench state: ${e.message}`));
-    await leftOpen(page, "workbenchState");
-    await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
-    await leftOpen(page, "shouldHaves");
-    await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
-    await leftOpen(page, "placerAndCampaign");
-    await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
-    await leftOpen(page, "chapterObjects");
-    await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
-    await leftOpen(page, "editorExtras");
-    await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
-    await leftOpen(page, "objectManagerLive");
-    await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
-    await leftOpen(page, "niceToHaves");
-    await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
-    await leftOpen(page, "byHand");
-    await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
-    await leftOpen(page, "typedFieldSave");
-    await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
-    await leftOpen(page, "moduleFunctions");
-    await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
-    await leftOpen(page, "objectCopy");
-    await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
-    await leftOpen(page, "graphicsModes");
-    await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
-    await leftOpen(page, "keyChords");
-    await keybindings(page, found).catch((e) => found.push(`keybindings: ${e.message}`));
-    await leftOpen(page, "keybindings");
-    await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
-    await leftOpen(page, "paletteMouse");
-    await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
-    await leftOpen(page, "gameReadsOnce");
-    await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
-    await leftOpen(page, "editorTabRaces");
-    await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
-    await leftOpen(page, "playerStarts");
-    await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
-    await leftOpen(page, "objectLayout");
-    await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
-    await leftOpen(page, "realMapSave");
-    await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
-    await leftOpen(page, "drawCalls");
-    await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
-    await leftOpen(page, "contextLoss");
+    if (part !== 1) await secondHalf(page, found, project);
     found.push(...problems(page.events));
     if (exited() !== null) found.push(`the app exited with ${exited()}`);
 
     const shot = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     if (shot) writeFileSync(join(work, "screen.png"), Buffer.from(shot.data, "base64"));
     page.ws.close();
-    console.log(`${info.files.length} files in "${info.name}", ${onDisk.length} opened, ${made} new maps`);
-    if (process.argv.includes("--verbose")) for (const [file, r] of Object.entries(opened)) console.log(`  ${file}: ${JSON.stringify(r)}`);
+    console.log(summary ?? `part ${part} of 2: the project checks and the first half are part 1's`);
     return found;
   } finally {
     await stop();
     await sleep(300);
     rmSync(configDir, { recursive: true, force: true });
   }
+}
+
+/** The project checks: the mini map's project opened, every file in its editor, saved unchanged, packed as the CLI
+ *  packs it, an edit packed, the map unpacked as it came. */
+async function projectChecks(page, found, { project, before, wanted, packed }) {
+  const path = JSON.stringify(project);
+  // The real backend reads the project.
+  await page.evaluate(`w3.workspace.open(${path})`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root != null`));
+  const info = await page.evaluate(`(() => { const p = w3.workspace.project(); return { name: p.name, root: p.root, files: w3.workspace.files().map((f) => f.path) }; })()`);
+  const onDisk = [...before.keys()].filter((f) => f.startsWith("map/"));
+  const listed = new Set(info.files);
+  for (const f of onDisk) if (!listed.has(f)) found.push(`the app doesn't list ${f}`);
+
+  // Every file in the editor the app picks for it.
+  const opened = {};
+  for (const file of onDisk) {
+    const r = await page.evaluate(`(async () => {
+      const path = ${JSON.stringify(file)};
+      try {
+        await w3.editors.open(path);
+        await new Promise((r) => setTimeout(r, 200));
+        const area = document.querySelector(".editor-area, .editors, main") ?? document.body;
+        const text = area.innerText;
+        return { active: w3.editors.activePath(), error: /Could not|couldn't open|Failed to|Error:/.test(text) ? text.slice(0, 200) : null, size: text.length, canvas: area.querySelectorAll("canvas").length, inputs: area.querySelectorAll("input, select, textarea, .cm-content").length, tab: document.querySelector(".tab.active")?.textContent ?? null };
+      } catch (e) { return { failed: String(e) }; }
+    })()`);
+    opened[file] = r;
+    if (r.failed) found.push(`${file}: ${r.failed}`);
+    else if (r.error) found.push(`${file} shows an error: ${r.error}`);
+    else if (r.active !== file) found.push(`${file} didn't open (active: ${r.active})`);
+  }
+
+  // Nothing was changed, so saving changes nothing.
+  await page.evaluate(`w3.editors.saveAll()`);
+  await page.evaluate(`w3.editors.closeAll()`);
+  await sleep(300);
+  const after = snapshot(project);
+  for (const [f, h] of before) {
+    if (after.get(f) === undefined) found.push(`${f} is gone`);
+    else if (after.get(f) !== h) found.push(`${f} changed without an edit`);
+  }
+
+  // What the app packs is what the command line packs.
+  await page.evaluate(`w3.backend.invoke("project_pack", { root: ${path}, output: ${JSON.stringify(packed)} })`);
+  await until("the pack", () => existsSync(packed));
+  if (hash(packed) !== hash(wanted)) found.push("the app's map differs from the CLI's");
+
+  // A change goes through the app into the map.
+  const regions = "map/war3map.w3r.json";
+  await page.evaluate(`(async () => {
+    const text = await w3.workspace.readText(${JSON.stringify(regions)});
+    await w3.workspace.writeText(${JSON.stringify(regions)}, text.replace("Middle", "Edited"));
+  })()`);
+  const edited = join(work, "edited.w3x");
+  await page.evaluate(`w3.backend.invoke("project_pack", { root: ${path}, output: ${JSON.stringify(edited)} })`);
+  const inMap = spawnSync(cli, ["cat", edited, "war3map.w3r"]);
+  if (inMap.status !== 0 || !inMap.stdout.includes("Edited")) found.push("the edit didn't reach the map");
+
+  // The app unpacks a map into what it came from.
+  const unpacked = join(work, "unpacked");
+  await page.evaluate(`w3.backend.invoke("project_unpack", { map: ${JSON.stringify(wanted)}, dir: ${JSON.stringify(unpacked)}, allowIncomplete: false, install: "none" })`);
+  const again = snapshot(join(unpacked, "map"));
+  for (const [f, h] of snapshot(join(FIXTURE, "map"))) if (again.get(f) !== h) found.push(`unpacking changed ${f}`);
+
+  const unsaved = await page.evaluate(`w3.editors.unsavedPaths()`);
+  if (unsaved.length) found.push(`unsaved after saving: ${unsaved.join(", ")}`);
+  return { info, onDisk, opened };
+}
+
+/** The full run's checks, part 1 of 2 (after the project checks); returns how many new maps newMaps made. Split from
+ *  part 2 by the measured times: about 6 of the full run's 13 minutes on each side once part 1 has built. */
+async function firstHalf(page, found) {
+  const made = await newMaps(page, found);
+  await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
+  await leftOpen(page, "terrainWiring");
+  await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
+  await leftOpen(page, "placeObjects");
+  await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
+  await leftOpen(page, "mcpStartMove");
+  await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
+  await leftOpen(page, "mcpGuides");
+  await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
+  await leftOpen(page, "waterPathing");
+  await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
+  await leftOpen(page, "tileTemplate");
+  await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
+  await leftOpen(page, "tilesInPlace");
+  await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
+  await leftOpen(page, "tileCleanup");
+  await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
+  await leftOpen(page, "objectsWhileOpening");
+  // Test Map needs a map it could start: the one objectsWhileOpening left open.
+  await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
+  await leftOpen(page, "testMapWithoutGame");
+  for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+  await leftOpen(page, "height tools");
+  await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
+  await leftOpen(page, "flyingHeights");
+  await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
+  await leftOpen(page, "artModeReload");
+  await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
+  await leftOpen(page, "wholeMapGround");
+  await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
+  await leftOpen(page, "cameraEditing");
+  await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
+  await leftOpen(page, "terrainSelectCameras");
+  await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
+  await leftOpen(page, "viewModes");
+  return made;
+}
+
+/** The full run's checks, part 2 of 2: from unitProperties on, in a second app when the run is split. None of them
+ *  needs what part 1 left: each runs alone with --only too, and they keep their order. */
+async function secondHalf(page, found, project) {
+  await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
+  await leftOpen(page, "unitProperties");
+  await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
+  await leftOpen(page, "itemTablesAccess");
+  await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
+  await leftOpen(page, "itemDrops");
+  await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
+  await leftOpen(page, "triggersAndAi");
+  await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
+  await leftOpen(page, "staleEditors");
+  await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
+  await leftOpen(page, "scriptGuard");
+  await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
+  await leftOpen(page, "resizeUndo");
+  await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
+  await leftOpen(page, "dataSafety");
+  await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
+  await leftOpen(page, "configSafety");
+  await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
+  await leftOpen(page, "syncSafety");
+  await workbenchState(page, found).catch((e) => found.push(`workbench state: ${e.message}`));
+  await leftOpen(page, "workbenchState");
+  await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
+  await leftOpen(page, "shouldHaves");
+  await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
+  await leftOpen(page, "placerAndCampaign");
+  await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
+  await leftOpen(page, "chapterObjects");
+  await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
+  await leftOpen(page, "editorExtras");
+  await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
+  await leftOpen(page, "objectManagerLive");
+  await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
+  await leftOpen(page, "niceToHaves");
+  await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
+  await leftOpen(page, "byHand");
+  await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
+  await leftOpen(page, "typedFieldSave");
+  await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
+  await leftOpen(page, "moduleFunctions");
+  await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
+  await leftOpen(page, "objectCopy");
+  await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
+  await leftOpen(page, "graphicsModes");
+  await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
+  await leftOpen(page, "keyChords");
+  await keybindings(page, found).catch((e) => found.push(`keybindings: ${e.message}`));
+  await leftOpen(page, "keybindings");
+  await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
+  await leftOpen(page, "paletteMouse");
+  await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
+  await leftOpen(page, "gameReadsOnce");
+  await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
+  await leftOpen(page, "editorTabRaces");
+  await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
+  await leftOpen(page, "playerStarts");
+  await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
+  await leftOpen(page, "objectLayout");
+  await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
+  await leftOpen(page, "realMapSave");
+  await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
+  await leftOpen(page, "drawCalls");
+  await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
+  await leftOpen(page, "contextLoss");
 }
 
 try {

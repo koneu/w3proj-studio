@@ -41,7 +41,7 @@ test("a broken copy of app-smoke.mjs doesn't load", async (t) => {
 test("the --only map and the full run must name the same checks", () => {
   assert.deepEqual(smokeListProblems(smoke), []);
   // A check added to the full run only.
-  const runOnly = smoke.replace("    await viewModes(page, found).catch(", "    await brandNew(page, found).catch(() => {});\n    await viewModes(page, found).catch(") + "\nasync function brandNew() {}\n";
+  const runOnly = smoke.replace("  await viewModes(page, found).catch(", "  await brandNew(page, found).catch(() => {});\n  await viewModes(page, found).catch(") + "\nasync function brandNew() {}\n";
   assert.notEqual(runOnly, smoke);
   assert.match(smokeListProblems(runOnly).join("\n"), /--only can't run.*brandNew/);
   // One taken out of the --only map.
