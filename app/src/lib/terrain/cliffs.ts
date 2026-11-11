@@ -1,6 +1,6 @@
 // Cliff types and ramps: what the terrain brushes and the AI tools share.
 
-import { setLayer, setWaterLevel, type Corner, type Terrain } from "./w3e";
+import { setLayer, type Corner, type Terrain } from "./w3e";
 
 /** What these functions report the corners they're about to change to. */
 export interface CornerLog {
@@ -19,8 +19,9 @@ export class CornerUndo implements CornerLog {
   }
 }
 
-/** Moves a block of corners `by` cliff levels, so its shape stays: what's on it comes along, its water too.
- *  A ramp the block cuts through is gone, as it needs the levels it was built on. */
+/** Moves a block of corners `by` cliff levels, so its shape stays: what's on it comes along. The water stays where it
+ *  is (its stored level and flag untouched), as the World Editor's Adjust Cliff Levels leaves it (adjustCliffLevels):
+ *  the depth follows from the new ground. A ramp the block cuts through is gone, as it needs the levels it was built on. */
 export function adjustLevels(t: Terrain, a: { x0: number; y0: number; x1: number; y1: number }, by: number, cliffGround: string[], log: CornerLog) {
   const W = t.width;
   const inside = (i: number) => { const x = i % W, y = Math.floor(i / W); return x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1; };
@@ -44,13 +45,9 @@ export function adjustLevels(t: Terrain, a: { x0: number; y0: number; x1: number
     log.touch(t, i);
     const c = t.corners[i];
     setLayer(c, c.layer + by);
-    if (c.hasWater) setWaterLevel(c, Math.max(0, Math.min(0x3fff, (c.rawWater & 0x3fff) + by * WATER_PER_LEVEL)));
   }
   matchCliffTypes(t, block, cliffGround, log);
 }
-
-/** One cliff level in the stored water word: 128 world units at four steps each. */
-const WATER_PER_LEVEL = 512;
 
 /** Corners of cliff tiles get the cliff type `fixed` (a cliff type number, as chosen in the World
  *  Editor's cliff palette), or without it the cliff type of their ground tile where it has one,

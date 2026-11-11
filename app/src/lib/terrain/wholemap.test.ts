@@ -43,7 +43,7 @@ test("Reset Height Field flattens every corner over its cliff level and leaves t
   assert.equal(resetHeightField(t, new CornerUndo()), 0, "flat already: nothing to do");
 });
 
-test("Adjust Cliff Levels moves every corner and every water word by the levels, as the World Editor writes it", () => {
+test("Adjust Cliff Levels moves every corner by the levels and leaves the water where it is, as the World Editor does", () => {
   const before = make(), t = make(), undo = new CornerUndo();
   assert.equal(adjustCliffLevels(t, 1, undo), 8);
   t.corners.forEach((c, i) => {
@@ -51,10 +51,9 @@ test("Adjust Cliff Levels moves every corner and every water word by the levels,
     assert.equal(c.layer, b.layer + 1);
     assert.equal(c.rawHeight, b.rawHeight, "the ground over its level stays");
     assert.equal(c.height, b.height + 128);
-    // we-drive, map 03 by +1: every water word 512 higher, the dry corners' 0 (8192 stored) too.
-    assert.equal(c.rawWater & 0x3fff, (b.rawWater & 0x3fff) + 512);
-    assert.equal(c.rawWater & 0xc000, b.rawWater & 0xc000, "the word's high bits stay");
-    assert.equal(c.water, b.water + 128);
+    // we-drive, 4v4_SnowareBay by +1 (2026-11-11): every water word and water flag as it was.
+    assert.equal(c.rawWater, b.rawWater, "the stored water level stays, high bits and all");
+    assert.equal(c.water, b.water, "the surface stays");
     assert.equal(c.hasWater, b.hasWater);
     assert.equal(c.ramp, b.ramp);
   });
@@ -87,12 +86,12 @@ test("Adjust Cliff Levels refuses what would take a corner past level 0 or the t
   assert.equal(Math.max(...t.corners.map((c) => c.layer)), TOP_LEVEL);
 });
 
-test("the water words limit the shift too", () => {
+test("the water words don't limit the shift, as they don't move", () => {
   const t = make();
-  // A wet corner stored near the top of the 14 bits: one more level would wrap it.
   setWaterLevel(t.corners[2], 0x3fff - 300);
-  assert.equal(cliffShiftRange(t).max, 0);
-  assert.equal(typeof adjustCliffLevels(t, 1, new CornerUndo()), "string");
+  assert.equal(cliffShiftRange(t).max, TOP_LEVEL - 4);
+  assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), 8);
+  assert.equal(t.corners[2].rawWater & 0x3fff, 0x3fff - 300, "a water word near the top of its 14 bits stays");
   setWaterLevel(t.corners[2], 400);
-  assert.equal(cliffShiftRange(t).min, 0, "and near the bottom");
+  assert.equal(cliffShiftRange(t).min, -3, "nor near the bottom");
 });

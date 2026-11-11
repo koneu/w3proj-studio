@@ -6,8 +6,6 @@ import { setGroundHeight, setLayer, type Terrain } from "./w3e";
 
 /** The stored ground height of flat ground: 0 over its cliff level. */
 const FLAT = 0x2000;
-/** One cliff level in the stored water word: 128 world units at four steps each. */
-const WATER_PER_LEVEL = 512;
 /** The highest cliff level Adjust Cliff Levels goes to: the World Editor shifts a map by at most as much as takes its
  *  highest corner to 14 (we-drive, 2026-11-09, map 03 with levels 2 and 4: +9 gave 11 and 13, +10 and +12 both
  *  12 and 14). */
@@ -28,28 +26,24 @@ export function resetHeightField(t: Terrain, log: CornerLog): number {
 }
 
 /** How far Adjust Cliff Levels can shift this map: down to level 0 for its lowest corner, up to TOP_LEVEL for its
- *  highest; the water word of every corner has to stay in its 14 bits. */
+ *  highest. */
 export function cliffShiftRange(t: Terrain): { min: number; max: number } {
-  let low = Infinity, high = -Infinity, wLow = Infinity, wHigh = -Infinity;
+  let low = Infinity, high = -Infinity;
   for (const c of t.corners) {
     low = Math.min(low, c.layer);
     high = Math.max(high, c.layer);
-    const w = c.rawWater & 0x3fff;
-    wLow = Math.min(wLow, w);
-    wHigh = Math.max(wHigh, w);
   }
   if (!t.corners.length) return { min: 0, max: 0 };
-  return {
-    min: 0 - Math.min(low, Math.floor(wLow / WATER_PER_LEVEL)) || 0,
-    max: Math.max(0, Math.min(TOP_LEVEL - high, Math.floor((0x3fff - wHigh) / WATER_PER_LEVEL))),
-  };
+  return { min: 0 - low || 0, max: Math.max(0, TOP_LEVEL - high) };
 }
 
-/** Adjust Cliff Levels: every corner `by` cliff levels up (or down), its water level with it (every corner's, dry or
- *  not, as the World Editor writes it: 512 per level in the stored word), so the map keeps its shape. Refused, with
- *  nothing changed, when a corner would leave the levels the map can have (cliffShiftRange): the World Editor squeezes
- *  the corners against level 0 instead (map 03 by -3: level 4 went to 1, the lake's 2 to 0), which loses the shape.
- *  Returns how many corners changed, or why it was refused. */
+/** Adjust Cliff Levels: every corner `by` cliff levels up (or down), 128 per level, ramps kept. The water stays where
+ *  it is: no corner's stored water level or water flag changes, so the depth follows from the new ground (we-drive,
+ *  2026-11-11, 4v4_SnowareBay by +1: all 25921 corners a level and 128 higher, every water word and flag as it was;
+ *  an earlier note, 2026-11-09 on map 03, had the water words 512 higher). Refused, with nothing changed, when a corner
+ *  would leave the levels the map can have (cliffShiftRange): the World Editor squeezes the corners against level 0
+ *  instead (map 03 by -3: level 4 went to 1, the lake's 2 to 0), which loses the shape. Returns how many corners
+ *  changed, or why it was refused. */
 export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog): number | string {
   if (!Number.isInteger(by)) return "The adjustment is a whole number of cliff levels.";
   if (by === 0 || !t.corners.length) return 0;
@@ -60,10 +54,6 @@ export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog): numbe
   t.corners.forEach((c, i) => {
     log.touch(t, i);
     setLayer(c, c.layer + by);
-    const level = (c.rawWater & 0x3fff) + by * WATER_PER_LEVEL;
-    // The stored level moves for dry corners too, and keeps the word's high bits; the drawn surface only where wet.
-    c.rawWater = (c.rawWater & 0xc000) | level;
-    c.water += by * 128;
   });
   return t.corners.length;
 }
