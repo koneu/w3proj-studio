@@ -62,6 +62,31 @@ export function viewOfBox(box: Box, angle: Angle, aspect: number, opts: { margin
   return { target, distance: Math.min(maxDistance, Math.max(minDistance, need * margin)) };
 }
 
+/** How far down the camera can look (radians from level): a tenth of a degree short of straight down, where the view's
+ *  sideways axis would have no direction; the map's sides look upright, as in the World Editor's View Entire Map.
+ *  Rotating with the mouse stops here too. */
+export const MAX_PITCH = Math.PI / 2 - 0.002;
+/** North up: the eye south of the target. */
+export const NORTH_UP_YAW = -Math.PI / 2;
+
+/**
+ * View Entire Map as the World Editor shows it (we-drive, a 64x64 map in its 1184x844 view, 2026-11-11): looking
+ * straight down with north up, the map's whole width across the view (18 pixels left over at each side), and its
+ * southern edge kept in view at 87% of the height (735 of 844) when the map is too tall to fit, so that its north is
+ * what's cut off. A map that fits in height sits in the middle. `fov` is vertical, `aspect` width / height.
+ * Exact for the camera's pitch (MAX_PITCH, a hair short of straight down) over ground at the target's height.
+ */
+export function viewOfMap(box: Box, fov: number, aspect: number) {
+  const margin = 1184 / 1148, south = (735 - 422) / 422;
+  const tanY = Math.tan(fov / 2), tanX = tanY * Math.max(0.1, aspect), cp = Math.cos(MAX_PITCH), sp = Math.sin(MAX_PITCH);
+  // Seen from the eye (north up), a ground point `dy` north of the target lies `distance + dy * cp` deep, at
+  // `dx / depth / tanX` across and `dy * sp / depth / tanY` up. The southern edge is the nearest, so the widest.
+  const depthSouth = ((box.maxX - box.minX) / 2) * margin / tanX;
+  const southOfTarget = Math.min((box.maxY - box.minY) / 2, south * depthSouth * tanY / sp);
+  const target: [number, number, number] = [(box.minX + box.maxX) / 2, box.minY + southOfTarget, (box.minZ + box.maxZ) / 2];
+  return { target, distance: depthSouth + southOfTarget * cp, yaw: NORTH_UP_YAW, pitch: MAX_PITCH };
+}
+
 // ---- grids -------------------------------------------------------------------------------
 
 export type GridSize = "none" | "small" | "medium" | "large";
@@ -78,14 +103,15 @@ export const nextGrid = (current: GridSize): GridSize => GRID_ROUND[(GRID_ROUND.
 
 // ---- layers ------------------------------------------------------------------------------
 
-/** Where ships can sail (per pathing cell, rows from the south): deep water strongly, shallow water lightly. */
+/** The World Editor's naval pathing colour: a half-transparent light red. Measured from its N view against the same
+ *  view without it (we-drive, 2026-11-11): over land each channel came out as half the ground plus (255, 128, 128) / 2. */
+export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
+
+/** Where ships can't sail (per pathing cell, rows from the south), as the World Editor shows it: red over every cell
+ *  without water for ships (land, the map's edge, what blocks them), nothing over water they sail, shallow or deep. */
 export function navalColors(cells: ArrayLike<number>): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
-  for (let i = 0; i < cells.length; i++) {
-    const c = cells[i];
-    if (c & NO_WATER) continue;
-    rgba.set(c & 0x02 ? [20, 70, 255, 200] : [90, 220, 255, 150], i * 4);
-  }
+  for (let i = 0; i < cells.length; i++) if (cells[i] & NO_WATER) rgba.set(NAVAL_BLOCKED, i * 4);
   return rgba;
 }
 

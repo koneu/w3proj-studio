@@ -120,7 +120,7 @@ async function newMaps(page, found) {
         throw new Error(`no map at ${map}: ${await page.evaluate(`[...document.querySelectorAll(".notification, .toast, .notifications *")].map((e) => e.textContent).join(" | ").slice(0, 300)`)}`);
       }
       await sleep(300);
-      if (args.water === "deep") await viewCommands(page, fail, join(work, "view-shots"));
+      if (args.water === "deep") await viewCommands(page, fail, join(work, "view-shots"), size);
       const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
 
@@ -3092,10 +3092,23 @@ function pixelsApart(page, a, b) {
   })()`);
 }
 
+/** The mean colour [r, g, b] of a picture in a box given as fractions of its size [x0, y0, x1, y1]. */
+function meanColour(page, data, box) {
+  return page.evaluate(`(async () => {
+    const i = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + ${JSON.stringify(data)}; });
+    const c = document.createElement("canvas"); c.width = i.width; c.height = i.height;
+    const g = c.getContext("2d"); g.drawImage(i, 0, 0);
+    const [x0, y0, x1, y1] = ${JSON.stringify(box)}.map((f, k) => Math.round(f * (k % 2 ? i.height : i.width)));
+    const p = g.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data, sum = [0, 0, 0];
+    for (let k = 0; k < p.length; k += 4) for (let ch = 0; ch < 3; ch++) sum[ch] += p[k + ch];
+    return sum.map((s) => s / (p.length / 4));
+  })()`);
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
-async function viewCommands(page, fail, shots) {
+async function viewCommands(page, fail, shots, size) {
   const bad = (what) => fail(`view commands: ${what}`);
   mkdirSync(shots, { recursive: true });
   const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}).then(() => null, (e) => String(e))`);
@@ -3106,6 +3119,24 @@ async function viewCommands(page, fail, shots) {
     return data;
   };
   const differ = (a, b) => pixelsApart(page, a, b);
+  /** View Entire Map as the World Editor's: straight down (nearly), north up, the map's sides just inside the view's
+   *  (18 of 1184 pixels in the editor's picture) and its south in view. The map (`size` tiles) lies around the origin. */
+  const entireMap = (s, when) => {
+    const c = s.camera, [w, h] = size.map((n) => n * 64);
+    const eye = [c.target[0] + c.distance * Math.cos(c.pitch) * Math.cos(c.yaw), c.target[1] + c.distance * Math.cos(c.pitch) * Math.sin(c.yaw), c.target[2] + c.distance * Math.sin(c.pitch)];
+    const f = c.target.map((v, i) => v - eye[i]), fl = Math.hypot(...f), fw = f.map((v) => v / fl);
+    const rl = Math.hypot(fw[0], fw[1]), right = [fw[1] / rl, -fw[0] / rl, 0];
+    const up = [right[1] * fw[2] - right[2] * fw[1], right[2] * fw[0] - right[0] * fw[2], right[0] * fw[1] - right[1] * fw[0]];
+    const t = Math.tan(c.fov / 2);
+    /** Where a ground point shows, as fractions of the view from its top left. */
+    const at = (x, y) => {
+      const d = [x - eye[0], y - eye[1], c.target[2] - eye[2]], dot = (v) => d[0] * v[0] + d[1] * v[1] + d[2] * v[2], depth = dot(fw);
+      return { x: (dot(right) / depth / (t * c.aspect) + 1) / 2, y: (1 - dot(up) / depth / t) / 2 };
+    };
+    const sw = at(-w, -h), se = at(w, -h);
+    const fine = c.pitch > 1.5 && Math.abs(c.yaw + Math.PI / 2) < 1e-6 && Math.abs(sw.x - 18 / 1184) < 0.005 && Math.abs(1 - se.x - 18 / 1184) < 0.005 && sw.y < 0.95;
+    if (!fine) bad(`View Entire Map ${when}: pitch ${c.pitch}, yaw ${c.yaw}, the map's south-west at ${JSON.stringify(sw)}, south-east at ${JSON.stringify(se)}`);
+  };
   // No water (it ripples) and no animation, so that the same view is the same picture.
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
@@ -3143,8 +3174,22 @@ async function viewCommands(page, fail, shots) {
 
   // The whole map, water and all: the layers that cover ground.
   await run("w3.terrain.viewEntireMap");
+  entireMap(await state(), "at first");
   const far = await settle("plain");
   await trial(far.plain, far.noise, "w3.terrain.toggleNavalPathing", "naval", "naval", 2000);
+  // As the World Editor's: light red where ships can't sail (here the map's edge, just inside the view's left side),
+  // and the sailable water left as it is.
+  await run("w3.terrain.toggleNavalPathing");
+  await sleep(1500);
+  const naval = await picture("naval-colours");
+  await run("w3.terrain.toggleNavalPathing");
+  const edgeBox = [0.025, 0.4, 0.045, 0.6], waterBox = [0.25, 0.4, 0.35, 0.6];
+  const [edge0, edge1] = [await meanColour(page, far.plain, edgeBox), await meanColour(page, naval, edgeBox)];
+  const [water0, water1] = [await meanColour(page, far.plain, waterBox), await meanColour(page, naval, waterBox)];
+  const round = (c) => c.map(Math.round).join(",");
+  // Half the ground plus half of (255, 128, 128), darkened with the rest of the edge: red rises, and most.
+  if (!(edge1[0] - edge0[0] > 30 && edge1[0] - edge1[1] > edge0[0] - edge0[1] + 30)) bad(`the naval layer over the map's edge isn't light red: ${round(edge0)} became ${round(edge1)}`);
+  if (water0.some((v, i) => Math.abs(v - water1[i]) > 6)) bad(`the naval layer covers sailable water: ${round(water0)} became ${round(water1)}`);
   await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
 
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
@@ -3282,11 +3327,19 @@ async function viewCommands(page, fail, shots) {
   await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select").click()`);
   await sleep(300);
 
-  // The whole map is in view from further away than an object, and centred (new maps lie around the origin).
+  // The whole map is in view from further away than an object, as the World Editor shows it (after the camera was
+  // moved by View Selection and turned), and the camera keys go on from there.
+  await run("w3.terrain.camera.rotateLeft");
+  await run("w3.terrain.camera.rotateLeft");
   const err = await run("w3.terrain.viewEntireMap");
   if (err) bad(`View Entire Map: ${err}`);
   const whole = await state();
-  if (Math.hypot(whole.camera.target[0], whole.camera.target[1]) > 200) bad(`View Entire Map looks at ${whole.camera.target}`);
+  entireMap(whole, "after turning");
+  await run("w3.terrain.camera.zoomIn");
+  await run("w3.terrain.camera.rotateLeft");
+  const moved = (await state()).camera;
+  if (!(moved.distance < whole.camera.distance * 0.95) || Math.abs(moved.yaw - whole.camera.yaw) < 0.05) bad(`zoom and turn after View Entire Map: ${JSON.stringify(moved)}`);
+  await run("w3.terrain.viewEntireMap");
   if (!(near.camera.distance < whole.camera.distance / 2)) bad(`View Selection stays far away (${near.camera.distance} against ${whole.camera.distance})`);
   await picture("entire-map");
   // Select In Tool Palette (the unit is selected again: deleting it took the selection away): the Objects tab opens, with the unit's type chosen.
