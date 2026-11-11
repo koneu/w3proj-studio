@@ -2474,7 +2474,13 @@ async function heightsLimits(page, found) {
 /** A question a check left on screen (a toast asking something, which stays until answered) would cover the next
  *  checks' clicks. Each check of the full run is followed by this: it closes such questions, as dismissing them by ×
  *  would, and names the check, so the one that left it can answer it itself. */
+/** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
+let checkEnded = Date.now();
 async function leftOpen(page, check) {
+  // How long each check took, so the gate's log shows where the run's minutes go.
+  const now = Date.now();
+  console.log(`  took ${((now - checkEnded) / 1000).toFixed(1)} s: ${check}`);
+  checkEnded = now;
   const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
   for (const text of left) console.log(`  left open after ${check}: ${text}`);
 }
@@ -7555,6 +7561,8 @@ async function run() {
       page.ws.close();
       return found;
     }
+    console.log(`  took ${((Date.now() - checkEnded) / 1000).toFixed(1)} s: start, build and the project checks`);
+    checkEnded = Date.now();
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
     await leftOpen(page, "terrainWiring");
