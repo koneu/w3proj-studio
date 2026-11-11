@@ -103,8 +103,14 @@ impl Manifest {
         let text = match fs::read(&path) {
             Ok(bytes) => {
                 let old = String::from_utf8(bytes).map_err(|_| kept("not UTF-8 text".into()))?;
-                match crate::manifest_text::merge(&old, &fresh).map_err(kept)? {
-                    Some(text) => text,
+                // A byte order mark (Notepad's) stays where it is: the TOML parser skips it, its
+                // output wouldn't have it.
+                let (bom, old) = match old.strip_prefix('\u{feff}') {
+                    Some(rest) => ("\u{feff}", rest),
+                    None => ("", old.as_str()),
+                };
+                match crate::manifest_text::merge(old, &fresh).map_err(kept)? {
+                    Some(text) => format!("{bom}{text}"),
                     None => return Ok(()),
                 }
             }

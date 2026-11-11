@@ -50,6 +50,26 @@ fn a_manifest_that_isnt_toml_is_not_written_over() {
     assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Map");
 }
 
+/// A manifest saved with a UTF-8 byte order mark (Windows Notepad, some editors) is read as the
+/// same manifest: it loads, a sync that changes nothing leaves it byte for byte, and one that changes
+/// a key keeps the mark, the comments and the user's keys.
+#[test]
+fn a_manifest_with_a_byte_order_mark_is_read_and_kept() {
+    let dir = workdir("manifest-bom");
+    let root = new_project(&dir);
+    let text = format!("\u{feff}{}", commented(&root));
+    fs::write(root.join(MANIFEST), &text).unwrap();
+    assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Map");
+    project::write_files(&root, extracted(&root, "Map", &[("war3map.j", SCRIPT)])).unwrap();
+    assert_eq!(fs::read_to_string(root.join(MANIFEST)).unwrap(), text);
+    project::write_files(&root, extracted(&root, "Renamed", &[("war3map.j", SCRIPT)])).unwrap();
+    let after = fs::read_to_string(root.join(MANIFEST)).unwrap();
+    assert_eq!(after, text.replace("name = \"Map\"", "name = \"Renamed\""), "only the name changed, the mark kept");
+    assert_eq!(Manifest::load(&root).unwrap().map.unwrap().name, "Renamed");
+    // A project with such a manifest packs too.
+    assert!(project::read_project(&root).is_ok());
+}
+
 /// Manifests damaged in many seeded ways: saving never panics, a refused save leaves the file as it
 /// was, and what a save writes still loads.
 #[test]
