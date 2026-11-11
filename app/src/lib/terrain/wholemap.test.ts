@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { CornerUndo } from "./cliffs";
 import { adjustCliffLevels, cliffShiftRange, resetHeightField, TOP_LEVEL } from "./wholemap";
@@ -65,25 +68,74 @@ test("Adjust Cliff Levels moves every corner by the levels and leaves the water 
   assert.deepEqual(t.corners, before.corners, "one step undoes it all");
 });
 
-test("Adjust Cliff Levels refuses what would take a corner past level 0 or the top, and changes nothing", () => {
-  const t = make();
-  // Levels 2 and 4: down to -2, up to TOP_LEVEL - 4.
-  assert.deepEqual(cliffShiftRange(t), { min: -2, max: TOP_LEVEL - 4 });
-  for (const by of [-3, TOP_LEVEL - 3, 100]) {
-    const was = structuredClone(t.corners), undo = new CornerUndo();
-    const r = adjustCliffLevels(t, by, undo);
-    assert.equal(typeof r, "string", `by ${by}`);
-    assert.match(String(r), /-2 to \+10/);
-    assert.deepEqual(t.corners, was, `by ${by}: nothing changed`);
-    assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
-  }
+test("Adjust Cliff Levels stops corners at level 0 and cuts a raise at +10 or the top, as the World Editor does", () => {
+  // Levels 2 and 4: down to -2 without squeezing, up to +10, the dialog's most (TOP_LEVEL - 4 is as much).
+  assert.deepEqual(cliffShiftRange(make()), { min: -2, max: Math.min(10, TOP_LEVEL - 4) });
+  // map 03 by -3 (we-drive, 2026-11-09): level 4 went to 1, the lake's 2 to 0.
+  let t = make(), before = make(), undo = new CornerUndo();
+  assert.equal(adjustCliffLevels(t, -3, undo), 8);
+  t.corners.forEach((c, i) => {
+    assert.equal(c.layer, Math.max(0, before.corners[i].layer - 3), `corner ${i}`);
+    assert.equal(c.rawHeight, before.corners[i].rawHeight);
+    assert.equal(c.rawWater, before.corners[i].rawWater);
+  });
+  undo.step(t).undo();
+  assert.deepEqual(t.corners, before.corners, "one step undoes the squeeze");
+  // Far down: all at 0. Once there, nothing more changes.
+  assert.equal(adjustCliffLevels(t, -20, new CornerUndo()), 8);
+  assert.ok(t.corners.every((c) => c.layer === 0));
+  undo = new CornerUndo();
+  assert.equal(adjustCliffLevels(t, -1, undo), 0, "nothing left to lower");
+  assert.equal(undo.step(t).corners.length, 0, "and nothing logged");
+  // Up: +12 is +10, as the dialog caps it (map 03, levels 2 and 4: +10 and +12 both gave 12 and 14).
+  t = make();
+  assert.equal(adjustCliffLevels(t, 12, new CornerUndo()), 8);
+  assert.deepEqual([...new Set(t.corners.map((c) => c.layer))].sort((a, b) => a - b), [12, 14]);
+  assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), 0, "the top corner is at the top: nothing moves");
   assert.equal(typeof adjustCliffLevels(t, 1.5, new CornerUndo()), "string", "half a level isn't one");
   assert.equal(typeof adjustCliffLevels(t, Number.NaN, new CornerUndo()), "string");
   assert.equal(adjustCliffLevels(t, 0, new CornerUndo()), 0, "nothing to do");
-  assert.equal(adjustCliffLevels(t, -2, new CornerUndo()), 8, "to the bottom exactly");
-  assert.equal(Math.min(...t.corners.map((c) => c.layer)), 0);
-  assert.equal(adjustCliffLevels(t, TOP_LEVEL - 2, new CornerUndo()), 8, "to the top exactly");
-  assert.equal(Math.max(...t.corners.map((c) => c.layer)), TOP_LEVEL);
+});
+
+/** The w3e of a real map, through the release CLI; null when the map or the CLI isn't there. */
+function realW3e(name: string): Uint8Array | null {
+  // The test runs bundled elsewhere (scripts/test.mjs), so the checkout is found from where it was started.
+  const git = (arg: string) => { const r = spawnSync("git", ["rev-parse", arg], { encoding: "utf8" }); return r.status === 0 ? r.stdout.trim() : null; };
+  const repo = git("--show-toplevel"), common = git("--git-common-dir");
+  if (!repo) return null;
+  const main = common ? dirname(resolve(common)) : repo;
+  const exe = `w3proj${process.platform === "win32" ? ".exe" : ""}`;
+  const bin = [process.env.W3PROJ_BIN, join(repo, "target", "release", exe), join(main, "target", "release", exe)].find((p) => p && existsSync(p));
+  const map = join(process.env.W3PROJ_CORPUS ?? join(main, "smoketest_maps"), name);
+  if (!bin || !existsSync(map)) return null;
+  const r = spawnSync(bin, ["cat", map, "war3map.w3e"], { maxBuffer: 1 << 26 });
+  return r.status === 0 ? new Uint8Array(r.stdout) : null;
+}
+
+test("Adjust Cliff Levels on real maps: +1 changes only each corner's layer nibble, -1 then gives the file back", (ctx) => {
+  const maps = ["cliff.w3m", "4v4_SnowareBay_w3c_260125_1357_5658.w3x", "6_w3c_251104_0950_TwistedMeadows_v1.9.w3x"];
+  let tried = 0;
+  for (const name of maps) {
+    const original = realW3e(name);
+    if (!original) continue;
+    tried++;
+    const t = parseW3e(original);
+    const per = t.version === 12 ? 8 : 7, head = original.length - t.trailer.length - t.corners.length * per;
+    assert.ok(cliffShiftRange(t).max >= 1, `${name} has room to go up`);
+    assert.equal(adjustCliffLevels(t, 1, new CornerUndo()), t.corners.length, name);
+    const up = writeW3e(t);
+    assert.equal(up.length, original.length, name);
+    for (let p = 0; p < original.length; p++) {
+      const k = p - head;
+      const layerByte = k >= 0 && p < head + t.corners.length * per && k % per === per - 1;
+      if (!layerByte) { if (up[p] !== original[p]) assert.fail(`${name}: byte ${p} changed (${original[p]} to ${up[p]})`); continue; }
+      if ((up[p] & 0xf0) !== (original[p] & 0xf0) || (up[p] & 0xf) !== (original[p] & 0xf) + 1) assert.fail(`${name}: corner ${k / per | 0}'s byte ${original[p]} became ${up[p]}`);
+    }
+    const back = parseW3e(up);
+    assert.equal(adjustCliffLevels(back, -1, new CornerUndo()), back.corners.length);
+    assert.deepEqual(writeW3e(back), original, `${name}: -1 after +1 gives the original file`);
+  }
+  if (!tried) ctx.skip("no real map or release CLI (smoketest_maps, target/release/w3proj)");
 });
 
 test("the water words don't limit the shift, as they don't move", () => {
