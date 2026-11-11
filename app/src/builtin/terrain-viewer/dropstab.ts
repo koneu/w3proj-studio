@@ -32,7 +32,8 @@ export interface DropsSource {
   /** The map's item tables with their contents: `live` those of the open Map Properties editor (unsaved changes
    *  included), else as saved; `list` null when war3map.w3i couldn't be read. */
   tables(): Promise<{ list: ItemTableInfo[] | null; live: boolean }>;
-  /** Saves the terrain editor (its tab's Save, as Ctrl+S there): the placed objects' drops changed here with the rest. */
+  /** Saves the terrain editor (its tab's Save, as Ctrl+S there): the placed objects' drops changed here with the rest;
+   *  and Map Properties when the tab shows its item tables with unsaved changes. */
   save(): Promise<void>;
   /** Each object its drops, in one undo step; the reason when it's refused (nothing changed then). */
   setDrops(changes: { entry: Placed; facts: TypeFacts; drops: Drops }[]): string | null;
@@ -331,7 +332,8 @@ export function itemDropsEditor(w3: W3Api, el: HTMLElement, deps: ItemDropsDeps)
   void render();
   return {
     focus: () => root.focus({ preventScroll: true }),
-    // Ctrl+S here saves what is changed here: the terrain editor the drops are in, as its own Save does.
+    // Ctrl+S here saves what is changed here: the terrain editor the drops are in, as its own Save does, and Map
+    // Properties' unsaved item tables shown here.
     save: async () => { await source()?.save(); },
     undo: () => source()?.undo(),
     redo: () => source()?.redo(),

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  bulkDrops, campLevel, campLevelText, creepLevel, dropsAnything, dropsText, dropsVariants, groupDroppers, itemLabel, setHeading, setShares, tableUse, type DropperRow,
+  bulkDrops, campLevel, campLevelText, creepLevel, dropsAnything, dropsText, dropsVariants, groupDroppers, itemLabel, itemTablesDiffer, setHeading, setShares, tableUse, type DropperRow,
 } from "./dropsview";
 import type { Placed } from "./objects";
 import { changeEach, dropsOf, type TypeFacts } from "./unitprops";
@@ -174,4 +174,17 @@ test("copying a map item table to an object whose file has no table field change
   const made = changeEach(targets.map((entry, i) => ({ entry, facts: facts(), change: { field: "drops" as const, value: r.drops[i] } })), { tables: [4] });
   assert.ok("error" in made && /nftt: .*older layout/.test(made.error));
   assert.equal(JSON.stringify(targets), before);
+});
+
+test("Map Properties' item tables differ from the saved ones by name, number, item or chance, not by how they're written", () => {
+  const saved = [{ number: 3, name: "Loot", sets: [[{ chance: 60, id: "ratf" }, { chance: 40, id: "YjI2" }]] }];
+  const same = [{ number: 3, name: "Loot", sets: [[{ id: "ratf", chance: 60 }, { id: "YjI2", chance: 40 }]] }];
+  assert.equal(itemTablesDiffer(same, saved), false);
+  assert.equal(itemTablesDiffer([{ ...same[0], name: "Ogre Loot" }], saved), true);
+  assert.equal(itemTablesDiffer([{ ...same[0], number: 4 }], saved), true);
+  assert.equal(itemTablesDiffer([{ ...same[0], sets: [[{ id: "ratf", chance: 61 }, { id: "YjI2", chance: 40 }]] }], saved), true);
+  assert.equal(itemTablesDiffer([...same, { number: 4, name: "New", sets: [] }], saved), true);
+  assert.equal(itemTablesDiffer([], []), false);
+  // A war3map.w3i that couldn't be read: whatever Map Properties holds is unsaved.
+  assert.equal(itemTablesDiffer(same, null), true);
 });

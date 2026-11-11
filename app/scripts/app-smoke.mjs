@@ -1660,7 +1660,8 @@ async function itemTablesAccess(page, found) {
  *  an item added from the item browser and its chance typed (one undo step each, Ctrl+Z in the tab takes one back), one
  *  creep's drops copied to its whole camp (one step), a set added to each refused for a camp that uses a table (nothing
  *  changes), the table given to a whole camp. Each camp shows its level; Ctrl+S in the tab saves the terrain editor; a
- *  table renamed in Map Properties shows renamed in the tab and the Selection panel before it is saved. Show selects the
+ *  table renamed in Map Properties shows renamed in the tab and the Selection panel before it is saved, and Ctrl+S in the
+ *  tab then saves that table with the drops changed there. Show selects the
  *  creep in the terrain editor. Everything stays unsaved until saved; the saved units file has the drops, the regenerated war3map.j their drop functions, and the packed map verifies. */
 async function itemDrops(page, found) {
   const fail = (what) => found.push(`item drops: ${what}`);
@@ -1809,6 +1810,21 @@ async function itemDrops(page, found) {
     .catch(async () => fail(`the tab doesn't show Map Properties' unsaved table name: ${await text(T("[data-table-card=\"3\"]"))}`));
   if (!(await has(T("[data-prop=\"tables-unsaved\"]")))) fail("the tab doesn't say the tables are Map Properties' unsaved ones");
   if (k.read("war3map.w3i.json").itemTables?.[0]?.name !== "Smoke Loot") fail("showing the renamed table saved war3map.w3i");
+  // A drop changed in the tab while it shows those tables: Ctrl+S there saves the terrain editor and Map Properties together.
+  await k.hands.click(T("[data-entry=\"nftt@192,0\"] .drops-obj-name"));
+  await settled();
+  if (!/Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`the click on the second troll edits ${await text(T("[data-prop=\"pane-title\"]"))}`);
+  await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(T(".drops-pane [data-prop=\"drops-mode\"]"))}); s.value = "table"; s.dispatchEvent(new Event("change")); })()`);
+  await settled();
+  if (!(await dirty())) fail("giving the troll the table in the tab didn't mark the terrain changed");
+  await k.hands.click(T(".drops-pane h3"));
+  await k.hands.chord("Ctrl+S");
+  const infoDirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.w3i.json")`);
+  await until("the terrain and Map Properties saved from the tab", async () => !(await dirty()) && !(await infoDirty()), 20000)
+    .catch(async () => fail(`Ctrl+S in the tab with Map Properties' unsaved tables shown left ${(await dirty()) ? "the terrain " : ""}${(await infoDirty()) ? "Map Properties " : ""}unsaved`));
+  if ((await active()) !== TAB) fail(`after Ctrl+S in the tab, ${await active()} is in front`);
+  if (troll(192, 0)?.itemTable !== 3) fail(`the saved troll's drops after Ctrl+S in the tab: ${JSON.stringify([troll(192, 0)?.itemTable, troll(192, 0)?.itemSets])}`);
+  if (k.read("war3map.w3i.json").itemTables?.[0]?.name !== "Ogre Loot") fail(`the saved item table after Ctrl+S in the tab: ${JSON.stringify(k.read("war3map.w3i.json").itemTables)}`);
 
   // Show: the terrain editor in front with that ogre selected.
   await k.hands.click(T("[data-entry=\"nogr@1472,1280\"] [data-prop=\"show-one\"]"));

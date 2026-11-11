@@ -37,14 +37,14 @@ import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
-import { buildPathingMap, loadPathingData, type PathingData } from "./pathmap";
+import { buildPathingMap, loadPathingData, objectMods, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
-import { campsOf, checkMelee } from "./meleecheck";
+import { campsOf, checkMelee, unitLevels } from "./meleecheck";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
 import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
@@ -81,7 +81,7 @@ import { loadFactsData, typeFacts, type FactsData } from "./typefacts";
 import { propsPanel } from "./propspanel";
 import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
-import { bulkDrops } from "./dropsview";
+import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
@@ -101,6 +101,8 @@ const SETTLE_LIMIT = 5 * 60_000;
 const projectTerrain = (w3: W3Api) => terrainPath(w3.workspace.files().map((f) => f.path));
 /** TEAM_COLORS index used for neutral players. */
 const NEUTRAL = 20;
+/** Map Properties' file (its editor's document). */
+const MAP_INFO_DOC = "map/war3map.w3i.json";
 /** While objects load: the shortest time between two frames the load or animation asks for. */
 const LOADING_FRAME_MS = 250;
 /** How long a picture waits for models and textures at most: a backend call that never answers
@@ -622,11 +624,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** What the melee tools go by: units, trees, routes, and how wide things are. */
   const meleeFacts = async (size: number) => {
     const { handle } = await liveEditor("read");
-    const [balance, weapons, destructables, game, data, grid] = await Promise.all([
+    const [balance, weapons, destructables, game, data, grid, unitMods] = await Promise.all([
       w3.game.readText("Units\\UnitBalance.slk"), w3.game.readText("Units\\UnitWeapons.slk"), w3.game.readText("Units\\DestructableData.slk"),
-      w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle),
+      w3.game.readText("Units\\MiscGame.txt"), w3.game.readText("Units\\MiscData.txt"), walkGrid(handle), objectMods(w3, "war3map.w3u"),
     ]);
-    const levels = new Map(parseSlk(balance).map((r) => [r.unitBalanceID, Number(r.level)]));
+    // The map's own levels (ulev in its unit object data) over the game's.
+    const level = unitLevels(parseSlk(balance), unitMods, (id) => handle.objects.baseOf(id));
     const sights = new Map(parseSlk(weapons).map((r) => [r.unitWeaponID, Number(r.acquire)]));
     const isTree = new Set(parseSlk(destructables).filter((r) => r.targType === "tree").map((r) => r.DestructableID));
     const lookup = <T,>(map: Map<string, T>, id: string) => map.get(id) ?? map.get(handle.objects.baseOf(id) ?? "");
@@ -658,7 +661,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     for (const c of t.corners) if (!c.boundary) counts.set(c.layer, (counts.get(c.layer) ?? 0) + 1);
     const commonLevel = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
     const levelAt = (x: number, y: number) => t.corners[Math.round((y - t.offsetY) / 128) * t.width + Math.round((x - t.offsetX) / 128)]?.layer ?? 0;
-    return { handle, grid, widest, units, trees, routes, levelAt, commonLevel, levels: (id: string) => lookup(levels, id), sights: (id: string) => lookup(sights, id), number, game, data };
+    return { handle, grid, widest, units, trees, routes, levelAt, commonLevel, levels: level, sights: (id: string) => lookup(sights, id), number, game, data };
   };
 
   let placeObjects: McpToolHandler = () => undefined;
@@ -4044,7 +4047,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             return items.filter((it) => fieldsFor(it.entry, it.facts).includes("drops")).map((it) => ({ ...it, kind: it.facts.kind }));
           },
           tables: () => loadMapLists().then((l) => ({ list: l.tables, live: !!l.tablesLive })),
-          save: async () => { if (!disposed) await w3.editors.save(doc.path); },
+          save: async () => {
+            if (disposed) return;
+            // The tab shows Map Properties' item tables with their unsaved changes: one Ctrl+S saves those too. Decided
+            // before the terrain's save (which reads the saved lists anew), Map Properties saved after it.
+            const [svc, saved] = await Promise.all([mapInfoService ??= w3.services.get<MapInfoService>(MAP_INFO_SERVICE).catch(() => null), loadSavedLists().catch(() => null)]);
+            if (disposed) return;
+            const live = svc?.liveItemTables(listsRoot) ?? null;
+            const tablesToo = !!live && w3.editors.isDirty(MAP_INFO_DOC) && itemTablesDiffer(live, saved?.tables ?? null);
+            await w3.editors.save(doc.path);
+            // Another project opened meanwhile: its Map Properties isn't this tab's.
+            if (tablesToo && w3.workspace.project()?.root === listsRoot) await w3.editors.save(MAP_INFO_DOC);
+          },
           setDrops: (changes) => changePropsEach(changes.map((c) => ({ entry: c.entry, facts: c.facts, change: { field: "drops", value: c.drops as Drops } })),
             { tables: knownLists?.tables?.map((t) => t.number), regions: knownLists?.regions.map((r) => r.index) }),
           show: async (entries) => {

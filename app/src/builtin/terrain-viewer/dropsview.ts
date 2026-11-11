@@ -209,6 +209,15 @@ export function tableUse(rows: readonly DropperRow[], tables: readonly { number:
   return { used, missing };
 }
 
+type TableLike = { number: number; name: string; sets: readonly (readonly { id: string; chance: number }[])[] };
+/** Whether the item tables an open Map Properties editor holds (`live`) differ from the saved ones (`saved`; null when
+ *  war3map.w3i couldn't be read, which counts as different): number, name, and each set's items and chances, in order. */
+export function itemTablesDiffer(live: readonly TableLike[], saved: readonly TableLike[] | null): boolean {
+  if (!saved) return true;
+  const key = (ts: readonly TableLike[]) => JSON.stringify(ts.map((t) => [t.number, t.name, (Array.isArray(t.sets) ? t.sets : []).map((s) => (Array.isArray(s) ? s : []).map((it) => [it?.id, it?.chance]))]));
+  return key(live) !== key(saved);
+}
+
 // ---- edits over several objects ----------------------------------------------------------------
 
 /** What happens to several objects' drops in one step: the same for all, or a set added to each one's own sets. */
