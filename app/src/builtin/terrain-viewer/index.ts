@@ -17,7 +17,7 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type Whole
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, lightRings, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
@@ -4230,7 +4230,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const viewEntireMap = () => {
           const [lo, hi] = cornerHeights(0, 0, terrain.width, terrain.height);
-          frameBox({ minX: terrain.offsetX, maxX: terrain.offsetX + (terrain.width - 1) * 128, minY: terrain.offsetY, maxY: terrain.offsetY + (terrain.height - 1) * 128, minZ: lo, maxZ: hi }, { margin: 1.05, minDistance: 200 });
+          const v = viewOfMap({ minX: terrain.offsetX, maxX: terrain.offsetX + (terrain.width - 1) * 128, minY: terrain.offsetY, maxY: terrain.offsetY + (terrain.height - 1) * 128, minZ: lo, maxZ: hi },
+            renderer.fov, canvas.clientWidth / Math.max(1, canvas.clientHeight));
+          Object.assign(renderer, { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: Math.max(200, Math.min(maxDistance(), v.distance)) });
+          redraw();
         };
         /** The camera moves to what's selected: the selected objects, else the area drawn on the ground. */
         const viewSelection = (): string | null => {
@@ -4463,7 +4466,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           cycleTerrain: () => refusedInGameView() ?? (setTerrain(nextTerrainLook(viewState.terrain)), viewState.terrain),
           toggleGrid: (size) => refusedInGameView() ?? (setGrid(toggleGrid(viewState.grid, size)), viewState.grid),
           cycleGrid: () => refusedInGameView() ?? (setGrid(nextGrid(viewState.grid)), viewState.grid),
-          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state() }),
+          state: () => ({ ...viewState, ...byTabNow(), gameView: gameViewOn(), shown: { ...shown, ...byTabNow() }, camera: { target: [...renderer.target] as [number, number, number], distance: renderer.distance, yaw: renderer.yaw, pitch: renderer.pitch, fov: renderer.fov, aspect: canvas.clientWidth / Math.max(1, canvas.clientHeight) }, sunShadows: { ...renderer.sunShadowState }, shadowImages: viewShadows.stampCount, minimap: minimapPanel.state() }),
         };
         const setTerrain = (t: TerrainLook) => { viewState.terrain = t; applyView(); };
         toolGroups.viewCommands.set(doc.path, viewCommands);
@@ -4831,7 +4834,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             pan(dx, dy);
           } else {
             renderer.yaw -= dx * 0.01;
-            renderer.pitch = Math.max(0.15, Math.min(1.55, renderer.pitch + dy * 0.01));
+            renderer.pitch = Math.max(0.15, Math.min(MAX_PITCH, renderer.pitch + dy * 0.01));
           }
           redraw();
         };

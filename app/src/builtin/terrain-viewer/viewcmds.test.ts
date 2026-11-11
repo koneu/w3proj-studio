@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, type Angle, type Box, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
 /** The oracle: a real perspective projection of a point, written out here from the camera's position. */
@@ -55,6 +55,27 @@ test("viewOfBox: a wider window needs less distance for a wide box, and a point 
   assert.equal(viewOfBox(wide, a, 1, { maxDistance: 1000 }).distance, 1000);
 });
 
+test("viewOfMap: as the World Editor, straight down, north up, the map's width across the view, its south kept", () => {
+  // The World Editor's picture: a 64x64 map in its 1184x844 view, the map's sides at x 18 and 1166, its south at y 735.
+  const W = 1184, H = 844, aspect = W / H, fov = Math.PI / 4;
+  const px = (q: { x: number; y: number }) => ({ x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H });
+  const square: Box = { minX: -4096, maxX: 4096, minY: -4096, maxY: 4096, minZ: 0, maxZ: 0 };
+  const v = viewOfMap(square, fov, aspect);
+  assert.ok(v.pitch >= MAX_PITCH && v.pitch < Math.PI / 2, "looks (almost) straight down, within what the mouse can rotate to");
+  assert.equal(v.yaw, -Math.PI / 2, "north up");
+  const at = (x: number, y: number) => px(project([x, y, 0], v.target, v.distance, { ...v, fov }, aspect)!);
+  const sw = at(square.minX, square.minY), se = at(square.maxX, square.minY), nw = at(square.minX, square.maxY);
+  assert.ok(Math.abs(sw.x - 18) < 1 && Math.abs(se.x - 1166) < 1, `the sides at 18 and 1166: ${sw.x}, ${se.x}`);
+  assert.ok(Math.abs(sw.y - 735) < 1 && Math.abs(se.y - 735) < 1, `the south at 735: ${sw.y}`);
+  assert.ok(nw.y < 0, "the north is cut off");
+  const top = at(square.minX, v.target[1] + (v.target[1] - square.minY) * 0.9);
+  assert.ok(Math.abs(top.x - sw.x) < 1, `the sides stay upright: ${top.x} at the top, ${sw.x} at the south`);
+  // A map that fits in height sits in the middle; the target is always the map's middle across.
+  const wide: Box = { minX: 0, maxX: 32768, minY: 0, maxY: 8192, minZ: 100, maxZ: 300 };
+  const w = viewOfMap(wide, fov, aspect);
+  assert.deepEqual(w.target, [16384, 4096, 200]);
+});
+
 test("boxOf: the points' extent plus the padding; nothing and non-numbers give null", () => {
   assert.deepEqual(boxOf([[0, 10, 1], [100, -20, 7]], 5), { minX: -5, maxX: 105, minY: -25, maxY: 15, minZ: 1, maxZ: 7 });
   assert.equal(boxOf([]), null);
@@ -74,14 +95,15 @@ test("grids: the three sizes and what the toggles do", () => {
   assert.deepEqual(seen, ["large", "medium", "small", "none", "large"]);
 });
 
-test("navalColors: water shows, deep stronger than shallow, land and blocked cells don't", () => {
-  const land = 0x40 | 0x08, shallow = 0, deep = 0x02, border = 0x80 | 0x40 | 0x02;
+test("navalColors: as the World Editor, red where ships can't sail (land, the edge), water clear, shallow or deep", () => {
+  const land = 0x40 | 0x08, shallow = 0x08, deep = 0x08 | 0x02, border = 0x80 | 0x40 | 0x08 | 0x04 | 0x02;
   const rgba = navalColors([land, shallow, deep, border]);
   const px = (i: number) => [...rgba.subarray(i * 4, i * 4 + 4)];
-  assert.equal(px(0)[3], 0);
-  assert.equal(px(3)[3], 0);
-  assert.ok(px(1)[3] > 0 && px(2)[3] > px(1)[3]);
-  assert.notDeepEqual(px(1).slice(0, 3), px(2).slice(0, 3));
+  // Half-transparent light red: over ground g, each channel comes out as (g + (255, 128, 128)) / 2, as measured.
+  assert.deepEqual(px(0), [255, 128, 128, 128]);
+  assert.deepEqual(px(3), [255, 128, 128, 128]);
+  assert.deepEqual(px(1), [0, 0, 0, 0]);
+  assert.deepEqual(px(2), [0, 0, 0, 0]);
 });
 
 test("composeLayers: the later layer lies over the earlier; none gives null; one stays as it is", () => {
