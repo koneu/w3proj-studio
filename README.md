@@ -219,7 +219,7 @@ On Linux:
   Steam itself starts. (Steam can't pass a map to a game it starts itself, so Studio doesn't go through the Steam
   client. `proton run` isn't used: its steam.exe stays until every other program in the prefix, Battle.net
   included, has ended.) The programs follow `game.installDir` unless `game.path` / `worldEditor.path` are set.
-- **The MCP server** uses a Unix socket in `$XDG_RUNTIME_DIR` (only you can reach it) instead of the Windows
+- **The MCP server** uses a Unix socket in `$XDG_RUNTIME_DIR`, or `/run/user/<uid>` when a launcher leaves the variable out (only you can reach it), instead of the Windows
   named pipe; `w3proj mcp` connects to it the same way. "Try to set up for …" looks for clients in `~/.config`
   and the home folder.
 - **Reveal in File Explorer** opens the file's folder with `xdg-open`.

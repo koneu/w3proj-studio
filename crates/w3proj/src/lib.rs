@@ -36,15 +36,28 @@ pub fn mcp_pipe_name() -> String {
     }
 }
 
-/// The folder the MCP socket is in: the user's runtime folder (XDG_RUNTIME_DIR, the user's own, mode 0700), or
-/// else `w3proj-studio-<uid>` in the temp folder, which the app makes with mode 0700. A temp folder is shared
-/// with other users, so the socket never sits in it directly: a name there could be taken by someone else first.
+/// The folder the MCP socket is in: the user's runtime folder (XDG_RUNTIME_DIR, the user's own, mode 0700); without
+/// that variable `/run/user/<uid>` when it is this user's alone (a launcher such as the Claude app starts the `w3proj
+/// mcp` bridge with little more than HOME set, while the app runs in a session that has the variable); or else
+/// `w3proj-studio-<uid>` in the temp folder, which the app makes with mode 0700. A temp folder is shared with other
+/// users, so the socket never sits in it directly: a name there could be taken by someone else first.
 #[cfg(unix)]
 pub fn mcp_socket_dir() -> std::path::PathBuf {
-    match std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
-        Some(dir) => std::path::PathBuf::from(dir),
-        None => std::env::temp_dir().join(format!("w3proj-studio-{}", own_uid().map(|u| u.to_string()).unwrap_or_default())),
+    pick_socket_dir(std::env::var_os("XDG_RUNTIME_DIR"), std::path::Path::new("/run/user"), &std::env::temp_dir(), own_uid())
+}
+
+#[cfg(unix)]
+fn pick_socket_dir(xdg: Option<std::ffi::OsString>, run_user: &std::path::Path, temp: &std::path::Path, uid: Option<u32>) -> std::path::PathBuf {
+    if let Some(dir) = xdg.filter(|d| !d.is_empty()) {
+        return std::path::PathBuf::from(dir);
     }
+    if let Some(uid) = uid {
+        let run = run_user.join(uid.to_string());
+        if private_dir(&run).is_ok() {
+            return run;
+        }
+    }
+    temp.join(format!("w3proj-studio-{}", uid.map(|u| u.to_string()).unwrap_or_default()))
 }
 
 /// This process's user id: the owner of /proc/self on Linux, else of the home folder.
@@ -98,3 +111,31 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(all(test, unix))]
+mod socket_dir_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn runtime_folder_without_the_variable() {
+        let base = std::env::temp_dir().join(format!("w3proj-sockdir-{}", std::process::id()));
+        let uid = own_uid().unwrap();
+        let run = base.join("run");
+        let mine = run.join(uid.to_string());
+        std::fs::create_dir_all(&mine).unwrap();
+        let temp = base.join("tmp");
+        let fallback = temp.join(format!("w3proj-studio-{uid}"));
+        // The variable wins.
+        assert_eq!(pick_socket_dir(Some("/x".into()), &run, &temp, Some(uid)), std::path::PathBuf::from("/x"));
+        // Without it, the user's own /run/user/<uid>, as the app's session has it.
+        std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(pick_socket_dir(None, &run, &temp, Some(uid)), mine);
+        assert_eq!(pick_socket_dir(Some("".into()), &run, &temp, Some(uid)), mine);
+        // Not when others can open it, nor when it's missing: the temp folder's private one.
+        std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(pick_socket_dir(None, &run, &temp, Some(uid)), fallback);
+        std::fs::remove_dir_all(&base).unwrap();
+        assert_eq!(pick_socket_dir(None, &run, &temp, Some(uid)), fallback);
+    }
+}
