@@ -273,7 +273,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const view = await theView();
       const path = await w3.window.pickSaveFile({ title: "Export triggers", defaultPath: "triggers.wtg", filters: [{ name: "Triggers (.wtg)", extensions: ["wtg"] }] });
       if (!path) return;
-      await w3.backend.writeBytes(path, writeWtg(exportedTriggers(view.file, mapFileName(w3.workspace.project()?.default_output))));
+      // With the tree's open and closed categories, as a save writes them.
+      await w3.backend.writeBytes(path, writeWtg(exportedTriggers(view.mark().file, mapFileName(w3.workspace.project()?.default_output))));
       await w3.backend.writeBytes(path.replace(/\.wtg$/i, "") + ".wct", writeWct(view.customFile()));
       void w3.window.showInfo(`Exported ${textTriggers(view.file).length} triggers and ${view.file.variables.length} variables, with their .wct beside them.`);
     }),
