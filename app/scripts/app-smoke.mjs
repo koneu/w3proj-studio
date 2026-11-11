@@ -2377,11 +2377,20 @@ async function heightsLimits(page, found) {
  *  each undone with Ctrl+Z in the reopened editor (and the command), then redone, with every file of the map byte for byte
  *  what it was before the resize / after it. A shrink names what it cuts off and makes a checkpoint. */
 async function resizeUndo(page, found) {
+  // Every warning is answered "Apply" for this check only: the later checks of a full run get the real questions.
+  await page.evaluate(`(() => { window.__resizeKept = { warn: w3.window.showWarning, confirm: w3.window.confirm }; w3.window.confirm = async () => true; window.__warned = []; w3.window.showWarning = async (m) => { window.__warned.push(m); return "Apply"; }; })()`);
+  try {
+    await resizeUndoChecks(page, found);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__resizeKept; if (k) { w3.window.showWarning = k.warn; w3.window.confirm = k.confirm; } delete window.__resizeKept; })()`).catch(() => {});
+  }
+}
+
+async function resizeUndoChecks(page, found) {
   const fail = (what) => found.push(`resize undo: ${what}`);
   const tool = mcpTool(page), hands = new Hands(page);
   const folder = join(work, "resize-undo");
   mkdirSync(folder, { recursive: true });
-  await page.evaluate(`(() => { w3.window.confirm = async () => true; window.__warned = []; w3.window.showWarning = async (m) => { window.__warned.push(m); return "Apply"; }; })()`);
   await tool("new_map", { name: "ResizeUndo", width: 64, height: 64, folder });
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   const root = await page.evaluate(`w3.workspace.project()?.root`);
@@ -4423,7 +4432,7 @@ async function keybindings(page, found) {
       await k.hands.click("#smoke-under-toast").catch((e) => fail(`a click under a note: ${e.message}`));
       if ((await page.evaluate(`window.__smokeUnder ?? 0`)) !== 1) fail("the click under a note didn't reach the button");
       if (await page.evaluate(`[...document.querySelectorAll(".toast")].some((e) => e.textContent.includes("Smoke: a note"))`)) fail("the note over the button wasn't closed");
-      // Straight to the toasts: an earlier check (resizeUndo) leaves w3.window.showWarning stubbed in the full run.
+      // Straight to the toasts, so a check that stubs w3.window.showWarning and fails to put it back can't hide the question.
       await page.evaluate(`void w3Workbench.notifications.show("warning", "Smoke: a question over the button", ["Smoke yes", "Smoke no"])`);
       await sleep(200);
       if (!(await underToast("Smoke: a question"))) fail("the question to click under didn't show");
