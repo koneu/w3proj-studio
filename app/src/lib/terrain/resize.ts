@@ -29,10 +29,22 @@ export function resizeProblem(t: Terrain, change: Sides, complements: Sides): st
   return null;
 }
 
+/** The cliff variation the World Editor gives a corner Map Size adds: 0, 1 or 2 at random (we-drive, 2026-11-11: 812
+ *  new corners had 294, 290 and 228, not the edge's 0). */
+export const newCliffVariation = (random: () => number = Math.random) => Math.min(2, Math.floor(random() * 3));
+
+/** The camera zoom (war3map.w3i, the game's default, highest and lowest camera distance) a map has after Map Size:
+ *  one that has none (all 0) gets 1250 for each, as the World Editor writes it (we-drive, 2026-11-11: cliff.w3m grown
+ *  went from 0, 0, 0 to 1250, 1250, 1250); one set already keeps its values. Null when nothing changes. */
+export function resizedCameraZoom(zoom: { default: number; max: number; min?: number } | undefined): { default: number; max: number; min?: number } | null {
+  if (!zoom || zoom.default !== 0 || zoom.max !== 0 || (zoom.min ?? 0) !== 0) return null;
+  return { default: 1250, max: 1250, ...(zoom.min !== undefined ? { min: 1250 } : {}) };
+}
+
 /** The terrain with `change` applied: new corners continue the nearest edge (same ground and
- *  height, no ramps, a variation of their own: copied ones repeat the edge in stripes), removed
- *  ones are dropped; world positions stay. */
-export function resizeTerrain(t: Terrain, change: Sides): Terrain {
+ *  height, no ramps, a ground and a cliff variation of their own: copied ones repeat the edge in
+ *  stripes), removed ones are dropped; world positions stay. */
+export function resizeTerrain(t: Terrain, change: Sides, random: () => number = Math.random): Terrain {
   const [l, , b] = change;
   const [w, h] = resizedSize(t, change);
   const corners: Corner[] = new Array((w + 1) * (h + 1));
@@ -42,7 +54,8 @@ export function resizeTerrain(t: Terrain, change: Sides): Terrain {
       const ox = Math.min(Math.max(x - l, 0), t.width - 1);
       const src = t.corners[oy * t.width + ox];
       const inside = x - l === ox && y - b === oy;
-      corners[y * (w + 1) + x] = inside ? { ...src } : { ...src, ramp: false, blight: false, variation: randomVariation() };
+      corners[y * (w + 1) + x] = inside ? { ...src }
+        : { ...src, ramp: false, blight: false, variation: randomVariation(random), cliffVariation: newCliffVariation(random) };
     }
   }
   return { ...t, width: w + 1, height: h + 1, offsetX: t.offsetX - l * 128, offsetY: t.offsetY - b * 128, corners };

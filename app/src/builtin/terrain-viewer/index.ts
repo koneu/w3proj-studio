@@ -14,7 +14,8 @@ import { joinPath } from "../../lib/paths";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { SWITCH_DEFAULTS } from "./switches";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -83,7 +84,7 @@ import { dropsBlock, type DropsUiHost, type ItemTableInfo } from "./dropsedit";
 import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
-import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -1320,13 +1321,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (!view) throw new Error("Switch to a terrain editor first.");
       let height = typeof given === "number" ? given : undefined;
       if (height === undefined) {
-        const first = view.firstDoodadHeight();
-        if (first === null) { void w3.window.showInfo("No doodads are selected: select doodads or destructables first."); return; }
-        const typed = await w3.window.inputBox({ prompt: "Height for every selected doodad (world units, over the map's zero)", value: String(Math.round(first * 100) / 100) });
+        const mean = view.uniformDefaultHeight();
+        if (mean === null) { void w3.window.showInfo("No doodads are selected: select doodads or destructables first."); return; }
+        const shown = String(Math.round(mean * 100) / 100);
+        const typed = await w3.window.inputBox({ prompt: "Height for every selected doodad (world units, over the map's zero; the selection's mean height to start with)", value: shown });
         if (typed === undefined) return;
         const n = parseHeight(typed);
         if (n === null) { void w3.window.showWarning(`"${typed}" isn't a height: type a number.`); return; }
-        height = n;
+        // The start value left as it was is the exact mean, not its rounded text.
+        height = typed.trim() === shown ? mean : n;
       }
       const why = await view.setUniformHeights(height);
       if (why) void w3.window.showInfo(why);
@@ -1338,7 +1341,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (why) void w3.window.showInfo(why);
     }),
     // The Advanced switches are settings, so they hold for every terrain editor and stay for the next session.
-    ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", true], ["w3.terrain.toggleEnforceWaterLimits", "terrain.enforceWaterLimits", false], ["w3.terrain.toggleEnforceCameraBounds", "terrain.enforceCameraBounds", false],
+    ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]],
+      ["w3.terrain.toggleEnforceWaterLimits", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]],
+      ["w3.terrain.toggleEnforceCameraBounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]],
       // View > Shadows: a view setting, also for every terrain editor.
       ["w3.terrain.toggleShadows", "terrain.shadows.visible", true]] as const)
       .map(([id, key, standard]) => w3.commands.register(id, () => setSwitch(w3, key, !switchedOn(w3, key, standard)))),
@@ -1347,7 +1352,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const reset = path ? toolGroups.resetVariations.get(path) : undefined;
       if (!reset) throw new Error("Switch to a terrain editor first.");
       refuseLostView(path);
-      if (!reset()) void w3.window.showInfo("Every ground tile is plain already.");
+      if (!reset()) void w3.window.showInfo("The map has no ground tiles to reset.");
     }),
     // Reset Height Field and Adjust Cliff Levels (the World Editor's Advanced menu): the terrain editor in front. Unlike
     // the World Editor's, each is one undo step, so neither asks first.
@@ -1687,8 +1692,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // ---- editing ------------------------------------------------------------------
         const editable = !doc.readOnly;
         // The World Editor's Advanced switches for this kind of work; the settings are shared by every terrain editor.
-        const preserveHeight = () => switchedOn(w3, "terrain.preserveCopiedHeight", true);
-        const enforceWater = () => switchedOn(w3, "terrain.enforceWaterLimits", false);
+        const preserveHeight = () => switchedOn(w3, "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]);
+        const enforceWater = () => switchedOn(w3, "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]);
         /** The map's camera bounds as last read; null until then, or when the map has none. */
         let cameraArea: Bounds | null = null;
         /** The camera bounds' four corners as last read (the Camera Bounds line, B); null until then or without them. */
@@ -1696,7 +1701,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
         /** Where a moved object may stand: the map (the playable part, for units and items) cut by the camera bounds when enforced. */
         const moveBounds = (e: Placed): Bounds => limitTo(dooFile?.list.includes(e) ? wholeMap(handle) : playableEdge ?? wholeMap(handle), heldTo());
-        const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", false) ? cameraArea : null);
+        const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]) ? cameraArea : null);
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
         /** Undo history; `at` edits are applied, `mark` knows which position the files match. */
@@ -2864,13 +2869,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // ---- heights: Set Uniform Doodad Heights, Reset Fixed Object Heights ---------------------
         const selectedDoodads = () => selectedEntries().filter((p) => dooFile?.list.includes(p));
         const heightCommands: HeightCommands = {
-          firstDoodadHeight: () => selectedDoodads()[0]?.position[2] ?? null,
+          uniformDefaultHeight: () => uniformDefaultHeight(selectedDoodads()),
           setUniformHeights: async (height) => {
             if (!editable) return "This terrain is read-only.";
             if (glDead) return VIEW_LOST;
             const doodads = selectedDoodads();
             if (!doodads.length) return "No doodads are selected: select doodads or destructables first.";
-            const z = height ?? doodads[0].position[2];
+            const z = height ?? uniformDefaultHeight(doodads)!;
             if (!Number.isFinite(z)) return "That isn't a height.";
             const steps = history.length, atBefore = at;
             applyMass(doodads, (p) => uniformHeight({ position: p.position, flags: flagsOf(p) }, z));
@@ -3713,6 +3718,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             info.cameraComplements = [...complements];
             info.cameraBounds = cameraBounds(next, complements);
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
+            const zoom = resizedCameraZoom(info.cameraZoom as Parameters<typeof resizedCameraZoom>[0]);
+            if (zoom) info.cameraZoom = zoom;
             for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) if (!inside(pl.start[0], pl.start[1])) [pl.start[0], pl.start[1]] = clamp(pl.start[0], pl.start[1]);
           });
           void loadBorder();
@@ -4574,9 +4581,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Boundary", showBoundary, (v) => void w3.settings.set("terrain.boundary", v)),
               toggle("Minimap", minimapShown, (v) => void w3.settings.set("terrain.minimap.panel", v), false, "The minimap in the view's corner: click or drag on it to move the view there"),
               ...(editable ? [
-                switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", true),
-                switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
-                switchBox("Enforce camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
+                switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]),
+                switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
+                switchBox("Enforce camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]),
               ] : []),
               toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", false) === true, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
               toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, keyTitle("The map's weather", "w3.terrain.toggleWeather")),

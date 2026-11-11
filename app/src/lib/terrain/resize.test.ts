@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resizeTerrain } from "./resize";
+import { newCliffVariation, resizedCameraZoom, resizeTerrain } from "./resize";
 import type { Corner, Terrain } from "./w3e";
 
 function terrain(w: number, h: number): Terrain {
@@ -10,20 +10,43 @@ function terrain(w: number, h: number): Terrain {
 
 test("corners that stay are untouched; new ones continue the edge with a variation of their own", () => {
   const t = terrain(3, 2);
-  const random = Math.random;
-  Math.random = () => 0.7; // randomVariation: 17, never the 5 of the old corners
-  try {
-    const r = resizeTerrain(t, [0, 2, 0, 0]);
-    assert.equal(r.width, 5);
-    assert.equal(r.corners.length, 10);
-    assert.deepEqual(r.corners[1], t.corners[1]);
-    const added = r.corners[3], edge = t.corners[2];
-    assert.equal(added.texture, edge.texture);
-    assert.equal(added.height, edge.height);
-    assert.equal(added.variation, 17);
-    assert.equal(added.ramp, false);
-    assert.equal(added.blight, false);
-  } finally { Math.random = random; }
+  const r = resizeTerrain(t, [0, 2, 0, 0], () => 0.99); // randomVariation: 17, never the 5 of the old corners
+  assert.equal(r.width, 5);
+  assert.equal(r.corners.length, 10);
+  assert.deepEqual(r.corners[1], t.corners[1]);
+  const added = r.corners[3], edge = t.corners[2];
+  assert.equal(added.texture, edge.texture);
+  assert.equal(added.height, edge.height);
+  assert.equal(added.variation, 17);
+  assert.equal(added.ramp, false);
+  assert.equal(added.blight, false);
+});
+
+test("new corners get a cliff variation of 0, 1 or 2 at random, as the World Editor gives them; old ones keep theirs", () => {
+  const t = terrain(3, 3);
+  t.corners[4].cliffVariation = 5;
+  let n = 0;
+  const random = () => [0.1, 0.5, 0.9][n++ % 3];
+  const r = resizeTerrain(t, [0, 30, 0, 30], random);
+  const added = r.corners.filter((_, i) => i % r.width >= 3 || Math.floor(i / r.width) >= 3);
+  const counts = [0, 1, 2].map((v) => added.filter((c) => c.cliffVariation === v).length);
+  assert.ok(counts.every((c) => c > added.length / 6), `each of 0, 1 and 2 is given: ${counts}`);
+  assert.equal(counts.reduce((a, b) => a + b, 0), added.length, "nothing else");
+  assert.equal(r.corners[1 * r.width + 1].cliffVariation, 5, "a corner that stays keeps its cliff variation");
+});
+
+test("newCliffVariation covers 0 to 2 and nothing past", () => {
+  assert.equal(newCliffVariation(() => 0), 0);
+  assert.equal(newCliffVariation(() => 0.5), 1);
+  assert.equal(newCliffVariation(() => 0.999999), 2);
+});
+
+test("Map Size gives a map without a camera zoom the World Editor's 1250; one set keeps its own", () => {
+  assert.deepEqual(resizedCameraZoom({ default: 0, max: 0, min: 0 }), { default: 1250, max: 1250, min: 1250 });
+  assert.deepEqual(resizedCameraZoom({ default: 0, max: 0 }), { default: 1250, max: 1250 }, "a file without the minimum gets none");
+  assert.equal(resizedCameraZoom({ default: 1650, max: 3000, min: 0 }), null);
+  assert.equal(resizedCameraZoom({ default: 0, max: 0, min: 400 }), null);
+  assert.equal(resizedCameraZoom(undefined), null, "an older w3i has no camera zoom");
 });
 
 test("adding on the left and bottom moves the offset, not the world position", () => {

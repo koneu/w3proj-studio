@@ -124,14 +124,21 @@ export function parseW3e(buf: Uint8Array): Terrain {
   return { version, tileset, customTilesets, customTilesetsRaw, groundTiles, cliffTiles, width, height, offsetX, offsetY, corners, trailer };
 }
 
-/** Ground variation for freshly painted (or new) corners: mostly the plain full tiles
- *  (16, 17+), sometimes one of the extended variations (0–15). Textures that
- *  have no extended part show plain tiles for all of these. */
+/** How often the World Editor gives each ground variation (0–17) to a corner it randomises, out of VARIATION_TOTAL:
+ *  85 each for 0, 4, 8, 12, 16 and 17, and after each of 0, 4, 8 and 12 the next three at 10, 4 and 1. Fitted to what
+ *  the World Editor wrote (we-drive, 2026-11-11): 9262 corners from Reset Texture Variations, Map Size growth and a
+ *  map it made, e.g. 0 15.2 %, 1 1.8 %, 2 0.7 %, 3 0.2 %, 16 14.8 %, 17 14.2 % (these give 14.9, 1.75, 0.70, 0.18). */
+export const VARIATION_WEIGHTS: readonly number[] = [85, 10, 4, 1, 85, 10, 4, 1, 85, 10, 4, 1, 85, 10, 4, 1, 85, 85];
+const VARIATION_TOTAL = VARIATION_WEIGHTS.reduce((a, b) => a + b, 0);
+
+/** Ground variation for freshly painted, new or reset corners, with the World Editor's spread (VARIATION_WEIGHTS). */
 export function randomVariation(random: () => number = Math.random): number {
-  const r = random();
-  if (r < 0.6) return 16;
-  if (r < 0.85) return 17;
-  return Math.floor(random() * 16);
+  let r = Math.floor(random() * VARIATION_TOTAL);
+  for (let v = 0; v < VARIATION_WEIGHTS.length; v++) {
+    r -= VARIATION_WEIGHTS[v];
+    if (r < 0) return v;
+  }
+  return VARIATION_WEIGHTS.length - 1;
 }
 
 /** Sets a corner's ground height (world units, without the cliff layer). */

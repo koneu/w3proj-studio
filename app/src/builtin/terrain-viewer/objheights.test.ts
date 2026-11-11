@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformHeight, unitDrawHeight } from "./objheights";
+import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
 
 test("ships float on the water surface, whatever height the placement file gives them", () => {
@@ -67,6 +67,13 @@ test("uniform heights give every doodad the one height and a fixed flag", () => 
   assert.equal(noFlags?.flags, 2 | FIXED_HEIGHT, "a doodad read without flags is a placed one");
   assert.equal(uniformHeight({ position: [1, 2, 64], flags: 2 | FIXED_HEIGHT }, 64), null, "already there");
   assert.deepEqual(uniformHeight({ position: [1, 2, 64], flags: 2 }, 64)?.flags, 2 | FIXED_HEIGHT, "same z, but it followed the ground: now it holds");
+});
+
+test("uniform heights default to the selection's mean height, as the World Editor sets them", () => {
+  const at = (z: number) => ({ position: [0, 0, z] });
+  assert.equal(uniformDefaultHeight([at(100), at(150), at(170.9375)]), 140.3125, "the mean, not the first doodad's height");
+  assert.equal(uniformDefaultHeight([at(-32)]), -32);
+  assert.equal(uniformDefaultHeight([]), null, "nothing selected");
 });
 
 test("resetting a fixed height puts the object on the ground and lets it follow again", () => {

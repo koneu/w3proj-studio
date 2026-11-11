@@ -255,11 +255,18 @@ test("a ramp inside the block comes along, one it cuts through is gone", () => {
   assert.deepEqual(ramps(cut), ["....", "....", "...."]);
 });
 
-test("water rises with the ground, by a level's worth", () => {
-  const t = land(["22", "22"]);
-  t.corners[0].hasWater = true;
-  t.corners[0].rawWater = 0x4000 | 0x2100;
-  adjustLevels(t, block(0, 0, 1, 1), 1, [], log);
-  assert.equal(t.corners[0].rawWater, 0x4000 | 0x2300, "the map edge bit stays");
-  assert.equal(t.corners[1].hasWater, undefined);
+test("the water stays where it is while the ground moves, as the World Editor's Adjust Cliff Levels leaves it", () => {
+  for (const by of [1, -1]) {
+    const t = land(["33", "33"]);
+    t.corners[0].hasWater = true;
+    t.corners[0].rawWater = 0x4000 | 0x2100;
+    t.corners[0].water = (0x2100 - 0x2000) / 4 - 89.6;
+    const height = t.corners[0].height;
+    adjustLevels(t, block(0, 0, 1, 1), by, [], log);
+    assert.equal(t.corners[0].height, height + by * 128, `by ${by}: the ground moves a level`);
+    assert.equal(t.corners[0].rawWater, 0x4000 | 0x2100, `by ${by}: the stored water level and its high bits stay`);
+    assert.equal(t.corners[0].water, (0x2100 - 0x2000) / 4 - 89.6, `by ${by}: the surface stays`);
+    assert.equal(t.corners[0].hasWater, true);
+    assert.equal(t.corners[1].hasWater, undefined, "a dry corner gets no water");
+  }
 });

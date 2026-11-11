@@ -73,6 +73,15 @@ export function parseHeight(text: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** The height Set Uniform Doodad Heights gives a selection when none is typed: the mean of the doodads' heights, as
+ *  the World Editor does (we-drive, 2026-11-11: three doodads went to 140.3125, their mean). Null for none. */
+export function uniformDefaultHeight(doodads: readonly HeightHolder[]): number | null {
+  if (!doodads.length) return null;
+  let sum = 0;
+  for (const p of doodads) sum += p.position[2];
+  return sum / doodads.length;
+}
+
 /** Set Uniform Doodad Heights for one doodad: it stands at `z` with a height of its own. Null when it
  *  does so already. */
 export function uniformHeight(p: HeightHolder, z: number): HeightChange | null {

@@ -49,12 +49,12 @@ export interface ViewCommands {
 
 /** The object height commands of one open terrain editor, on what is selected there. Each returns what to tell the person, or null when it was done. */
 export interface HeightCommands {
-  /** Set Uniform Doodad Heights: the selected doodads to one height (world units; the first one's height when none is given). */
+  /** Set Uniform Doodad Heights: the selected doodads to one height (world units; their mean height when none is given, as the World Editor does). */
   setUniformHeights(height?: number): Promise<string | null>;
   /** Reset Fixed Object Heights: the selected objects with a height of their own back onto the ground. */
   resetFixedHeights(): string | null;
-  /** The height the first selected doodad stands at, for a prompt's start value; null with none selected. */
-  firstDoodadHeight(): number | null;
+  /** The selected doodads' mean height (uniformDefaultHeight), for a prompt's start value; null with none selected. */
+  uniformDefaultHeight(): number | null;
 }
 
 /** Reset Height Field and Adjust Cliff Levels on one open terrain editor's whole map, each one undo step: how many
