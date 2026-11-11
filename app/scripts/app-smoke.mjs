@@ -4407,13 +4407,14 @@ async function keybindings(page, found) {
       return true;
     })()`);
     try {
-      await page.evaluate(`void w3.window.showInfo("Smoke: a note over the button", "Reveal")`);
+      await page.evaluate(`void w3Workbench.notifications.show("info", "Smoke: a note over the button", ["Reveal"])`);
       await sleep(200);
       if (!(await underToast("Smoke: a note"))) fail("the note to click under didn't show");
       await k.hands.click("#smoke-under-toast").catch((e) => fail(`a click under a note: ${e.message}`));
       if ((await page.evaluate(`window.__smokeUnder ?? 0`)) !== 1) fail("the click under a note didn't reach the button");
       if (await page.evaluate(`[...document.querySelectorAll(".toast")].some((e) => e.textContent.includes("Smoke: a note"))`)) fail("the note over the button wasn't closed");
-      await page.evaluate(`void w3.window.showWarning("Smoke: a question over the button", "Smoke yes", "Smoke no")`);
+      // Straight to the toasts: an earlier check (resizeUndo) leaves w3.window.showWarning stubbed in the full run.
+      await page.evaluate(`void w3Workbench.notifications.show("warning", "Smoke: a question over the button", ["Smoke yes", "Smoke no"])`);
       await sleep(200);
       if (!(await underToast("Smoke: a question"))) fail("the question to click under didn't show");
       const refused = await k.hands.click("#smoke-under-toast").then(() => null, (e) => e.message);
