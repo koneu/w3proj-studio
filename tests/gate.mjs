@@ -3,6 +3,7 @@
 //   node tests/gate.mjs            the commit gate: types, unit and system tests, clippy, UI smoke
 //   node tests/gate.mjs coverage   the commit gate's tests, measured against tests/coverage-floor.json
 //   node tests/gate.mjs corpus     real maps and the installed game (local only, some minutes)
+//   node tests/gate.mjs batch      commit and corpus in one run (a merge batch: they overlap)
 //   node tests/gate.mjs all        all of the above
 //
 //   --serial       one step at a time, in the order of the table (to compare, or to read one log)
@@ -292,6 +293,8 @@ const tiers = {
   commit: ["commit"],
   coverage: ["coverage"],
   corpus: ["corpus"],
+  // A merge batch's check: both tiers in one run, so the Rust tests and clippy overlap the app smoke test.
+  batch: ["commit", "corpus"],
   all: ["commit", "coverage", "corpus"],
 };
 const tier = args.find((a) => !a.startsWith("--")) ?? "commit";

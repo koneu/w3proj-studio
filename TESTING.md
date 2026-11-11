@@ -49,7 +49,8 @@ real maps and game files can't go into the repository.
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
 node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov)
-node tests/gate.mjs corpus     # real maps and the game: about 6 minutes
+node tests/gate.mjs corpus     # real maps and the game: about 15 minutes (the full app smoke test sets the pace)
+node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
 ```
 
