@@ -195,11 +195,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           );
         };
 
-        root.append(h("div.settings-top", {}, h("h1", {}, "Keyboard Shortcuts"), h("div.kb-search-line", {}, search, recordButton), fileLine), list);
+        const top = h("div.settings-top", {}, h("h1", {}, "Keyboard Shortcuts"), h("div.kb-search-line", {}, search, recordButton), fileLine);
+        root.append(top, list);
+        // The column headers stick just below the sticky title and search, whose height changes with the
+        // keybindings.json problem lines.
+        const topSize = new ResizeObserver(() => root.style.setProperty("--kb-head-top", `${top.getBoundingClientRect().height}px`));
+        topSize.observe(top);
         renderFile();
         renderList();
         const subs = [kb.onDidChange(() => { renderFile(); if (!editing) renderList(); })];
-        return { focus: () => search.focus(), dispose: () => { subs.forEach((s) => s.dispose()); if (setQuery === mySetQuery) setQuery = null; } };
+        return { focus: () => search.focus(), dispose: () => { subs.forEach((s) => s.dispose()); topSize.disconnect(); if (setQuery === mySetQuery) setQuery = null; } };
       },
     }),
   );
