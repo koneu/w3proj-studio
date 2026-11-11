@@ -6867,9 +6867,33 @@ async function niceToHaves(page, found) {
     const cat = k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization");
     if (cat?.isComment !== 1) fail(`Category is Comment saved ${JSON.stringify(cat)}`);
     if (!/InitTrig_Melee_Initialization/.test(readFileSync(join(k.root, "map", "war3map.j"), "utf8"))) fail("a trigger in a comment category left war3map.j (the World Editor keeps it)");
-    const before = k.read("war3map.wtg.json");
     /** The caret of the tree's Initialization category: "▸" closed, "▾" open. */
     const initCaret = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.textContent ?? null`);
+    const toggleInit = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.click()`);
+    const initExpanded = () => k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization")?.expanded;
+    const wtgDirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
+    // Opening or closing a category is saved (the World Editor's `expanded`): unsaved, but not an undo step of its own.
+    if (await initCaret() !== "▸" || initExpanded() !== 0) fail(`a new map's Initialization shows ${await initCaret()}, saved ${initExpanded()} (collapsed)`);
+    await toggleInit();
+    if (await initCaret() !== "▾") fail(`a click on the caret left Initialization ${await initCaret()}`);
+    if (!(await wtgDirty())) fail("opening a category left the Trigger Editor saved (it's kept in the file)");
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await sleep(200);
+    if (await page.evaluate(`!!document.querySelector(".trig-row.trig-cat-comment")`)) fail("undo after opening a category took that instead of Category is Comment");
+    if (await initCaret() !== "▾") fail(`undo of Category is Comment closed the category opened after it (${await initCaret()})`);
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    await k.save();
+    if (initExpanded() !== 1 || k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization")?.isComment !== 1) fail(`opened Initialization saved ${JSON.stringify(k.read("war3map.wtg.json").items.find((i) => i.type === 4 && i.name === "Initialization"))}`);
+    if (await wtgDirty()) fail("the Trigger Editor is unsaved after saving an opened category");
+    // Collapse, save, reopen: still collapsed.
+    await toggleInit();
+    await k.save();
+    if (initExpanded() !== 0) fail(`collapsed Initialization saved expanded ${initExpanded()}`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await run("w3.triggers.open");
+    await until("the trigger tree after reopening", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
+    if (await initCaret() !== "▸") fail(`collapsed, saved and reopened, Initialization shows ${await initCaret()}`);
+    const before = k.read("war3map.wtg.json");
     // A new map's Initialization is saved collapsed (the control); Reset Triggers saves it expanded, and the tree follows.
     if (await initCaret() !== "▸") fail(`a new map's Initialization shows ${await initCaret()} (saved collapsed)`);
     const resetT = await run("w3.triggers.reset");
@@ -6882,8 +6906,14 @@ async function niceToHaves(page, found) {
     const names2 = (f) => f.items.filter((i) => i.type === 8 || i.type === 32).map((i) => i.name);
     if (JSON.stringify(names2(after)) !== JSON.stringify(["Melee Initialization"])) fail(`after Reset Triggers: ${names2(after).join(", ")}`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    // The tree follows the file put back, and forth.
+    if (await initCaret() !== "▸") fail(`undo of Reset Triggers shows Initialization ${await initCaret()} (it was collapsed)`);
+    await page.evaluate(`w3.commands.execute("workbench.redo")`);
+    if (await initCaret() !== "▾") fail(`redo of Reset Triggers shows Initialization ${await initCaret()}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
     if (JSON.stringify(names2(k.read("war3map.wtg.json"))) !== JSON.stringify(names2(before))) fail(`one undo of Reset Triggers gave ${names2(k.read("war3map.wtg.json")).join(", ")}`);
+    if (initExpanded() !== 0) fail(`undone Reset Triggers saved Initialization expanded ${initExpanded()}`);
     // Reset again, save and reopen: the saved expanded Initialization opens expanded.
     await run("w3.triggers.reset");
     await k.save();

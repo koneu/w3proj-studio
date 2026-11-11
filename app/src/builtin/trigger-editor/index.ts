@@ -29,7 +29,7 @@ import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
-import { dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
+import { applyExpanded, collapsedOf, dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, newVariable, renameVariable, variableParams, variablesTable, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
@@ -362,7 +362,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const at = view.mark();
           await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, at.file);
           await writeWctFile(w3.workspace, at.custom, textTriggers(at.file).map((t) => t.name));
-          view.markSaved(at.step);
+          view.markSaved(at.step, at.toggles);
         };
         view.persist = save;
         return {
@@ -576,13 +576,18 @@ class TriggerView {
   private texts = new Map<TriggerItem, string | null>();
   private header: string | null;
   /** `id`: the state after the step, unique, so a saved state is known again after undo and redo. */
-  private undo: { label: string; before: Snapshot; after: Snapshot; id: number }[] = [];
+  private undo: { label: string; before: Snapshot; after: Snapshot; id: number; replaces?: boolean }[] = [];
   private nextId = 1;
   /** The state now: the id of the last step done, 0 for the state the editor opened with. */
   private get state() { return this.at ? this.undo[this.at - 1].id : 0; }
   private at = 0;
   /** The state last saved (see `state`). */
   private savedAt = 0;
+  /** Categories expanded or collapsed by hand so far, and how many of those the last save had: a toggle is view state
+   *  the file keeps (each category's `expanded`, as the World Editor saves it), so it makes the editor unsaved without
+   *  being an undo step. */
+  private toggles = 0;
+  private savedToggles = 0;
   private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean } | void = undefined;
   private handle: TriggerEditorHandle;
   private vars: VariableHost;
@@ -808,7 +813,7 @@ class TriggerView {
   }
   get editable() { return this.handle.editable; }
   /** Whether there are unsaved changes. */
-  get dirty() { return this.state !== this.savedAt; }
+  get dirty() { return this.state !== this.savedAt || this.toggles !== this.savedToggles; }
   /** Saves the editor (set by its provider). */
   persist: () => Promise<void> = async () => {};
 
@@ -829,7 +834,7 @@ class TriggerView {
       this.texts = new Map(textTriggers(r.file).map((t, i) => [t, r.custom.texts[i] ?? null]));
       this.selected = { kind: "header" };
       this.followExpanded();
-    });
+    }, { replaces: true });
   }
 
   /** Every trigger and variable from elsewhere, as one undo step. */
@@ -841,15 +846,14 @@ class TriggerView {
       this.header = custom?.header ?? null;
       this.texts = new Map(textTriggers(file).map((t, i) => [t, custom?.texts[i] ?? null]));
       this.followExpanded();
-    });
+    }, { replaces: true });
   }
 
   /** The tree's open and closed categories as the file has them (each category's `expanded`). On opening and when the
-   *  whole file is replaced (Reset Triggers, Import): a new file's ids reuse the old ones, so the old view state would
-   *  show e.g. a reset's expanded Initialization closed. */
+   *  whole file is replaced (Reset Triggers, Import, and their undo and redo): a new file's ids reuse the old ones, so
+   *  the old view state would show e.g. a reset's expanded Initialization closed. */
   private followExpanded() {
-    this.collapsed.clear();
-    for (const it of this.file.items) if ((it.type === 2 || it.type === 4) && !it.expanded) this.collapsed.add(it.id);
+    this.collapsed = collapsedOf(this.file);
   }
 
   customFile(): CustomTextFile {
@@ -859,12 +863,15 @@ class TriggerView {
       : { reforged: this.file.reforged, version: 1, comment: "", header: this.header, texts };
   }
 
-  /** What a save writes, taken at once: the triggers, the custom texts and the undo step they're at. */
-  mark(): { file: TriggerFile; custom: CustomTextFile; step: number } {
-    return { file: structuredClone(this.file), custom: this.customFile(), step: this.state };
+  /** What a save writes, taken at once: the triggers (with the tree's open and closed categories), the custom texts,
+   *  and the undo step and toggles they're at. */
+  mark(): { file: TriggerFile; custom: CustomTextFile; step: number; toggles: number } {
+    const file = structuredClone(this.file);
+    applyExpanded(file, this.collapsed);
+    return { file, custom: this.customFile(), step: this.state, toggles: this.toggles };
   }
-  /** The state `step` (from mark) was saved; edits after it stay unsaved. */
-  markSaved(step = this.state) { this.savedAt = step; this.setDirty(this.dirty); }
+  /** The state `step` and `toggles` (from mark) were saved; edits and toggles after it stay unsaved. */
+  markSaved(step = this.state, toggles = this.toggles) { this.savedAt = step; this.savedToggles = toggles; this.setDirty(this.dirty); }
 
   /** Selects the variables table. */
   showVariables() { this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
@@ -914,20 +921,26 @@ class TriggerView {
   refresh() { this.renderDetail(); }
 
   // ---- undo -------------------------------------------------------------------------
+  // A snapshot holds the tree's open and closed categories as they were. Undo and redo keep the tree as it is, except
+  // across a step that replaced the whole file (`replaces`): there the tree follows the file put back, and the side
+  // left takes the tree as it is now, so going back and forth keeps the toggles on each side.
   private snapshot(): Snapshot {
-    return { file: structuredClone(this.file), texts: textTriggers(this.file).map((t) => this.texts.get(t) ?? null), header: this.header };
+    const file = structuredClone(this.file);
+    applyExpanded(file, this.collapsed);
+    return { file, texts: textTriggers(this.file).map((t) => this.texts.get(t) ?? null), header: this.header };
   }
-  private restore(s: Snapshot) {
+  private restore(s: Snapshot, followExpanded = false) {
     this.file = structuredClone(s.file);
     this.texts = new Map(textTriggers(this.file).map((t, i) => [t, s.texts[i]]));
     this.header = s.header;
+    if (followExpanded) this.followExpanded();
     this.renderTree();
     this.renderDetail();
   }
-  private edit(label: string, change: () => void, opts: { keepView?: boolean } = {}) {
+  private edit(label: string, change: () => void, opts: { keepView?: boolean; replaces?: boolean } = {}) {
     const before = this.snapshot();
     change();
-    this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot(), id: this.nextId++ });
+    this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot(), id: this.nextId++, ...(opts.replaces ? { replaces: true } : {}) });
     this.at = this.undo.length;
     this.setDirty(this.dirty);
     this.renderTree();
@@ -935,9 +948,15 @@ class TriggerView {
     this.edited();
   }
   step(dir: -1 | 1) {
-    if (dir < 0 && this.at > 0) this.restore(this.undo[--this.at].before);
-    else if (dir > 0 && this.at < this.undo.length) this.restore(this.undo[this.at++].after);
-    else return;
+    if (dir < 0 && this.at > 0) {
+      const s = this.undo[--this.at];
+      if (s.replaces) applyExpanded(s.after.file, this.collapsed);
+      this.restore(s.before, s.replaces);
+    } else if (dir > 0 && this.at < this.undo.length) {
+      const s = this.undo[this.at++];
+      if (s.replaces) applyExpanded(s.before.file, this.collapsed);
+      this.restore(s.after, s.replaces);
+    } else return;
     this.setDirty(this.dirty);
     this.edited();
   }
@@ -1197,8 +1216,11 @@ class TriggerView {
     if (items.length) this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, items);
   }
 
+  /** Opens or closes a category: view state, but saved (see `toggles`). */
   private toggle(id: number) {
     if (this.collapsed.has(id)) this.collapsed.delete(id); else this.collapsed.add(id);
+    // Classic files don't store it; a read-only file isn't saved.
+    if (this.handle.editable && this.file.reforged) { this.toggles++; this.setDirty(this.dirty); }
     this.renderTree();
   }
   private renderTree() {
