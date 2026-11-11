@@ -163,6 +163,9 @@ export interface EditorInstance {
    *  characters as JSON isn't kept): kept with the project's open tabs and given back as `EditorDocument.viewState`. */
   viewState?(): unknown;
   save?(): Promise<void>;
+  /** Applies edits still waiting (text committed after a pause in typing) and marks them unsaved: the workbench
+   *  calls it before it saves the editor or asks whether it has unsaved changes (closing, reloading, Save All). */
+  flush?(): void;
   focus?(): void;
   dispose?(): void;
   /** The editor's undo and redo, for the Edit commands and the buttons by the tabs: they work

@@ -131,14 +131,25 @@ export class EditorService {
     return this.contributions;
   }
 
+  /** Whether the tab has unsaved changes, counting edits its editor still holds back (EditorInstance.flush):
+   *  typed a moment ago, they would otherwise be lost to a close or a reload that thinks the tab is clean. */
+  private unsaved(t: Tab): boolean {
+    this.flush(t);
+    return t.dirty;
+  }
+  /** Applies the tab's held-back edits (EditorInstance.flush); one that fails leaves the tab as it was. */
+  private flush(t: Tab) {
+    try { t.instance?.flush?.(); } catch (e) { console.error(`flushing ${t.path}:`, e); }
+  }
+
   /** Whether an editor of the file has unsaved changes. */
   unsavedPaths(): string[] {
-    return [...new Set(this.tabs.filter((t) => t.dirty).map((t) => t.path))];
+    return [...new Set(this.tabs.filter((t) => this.unsaved(t)).map((t) => t.path))];
   }
 
   isDirty(path: string): boolean {
     const key = this.key(path);
-    return this.tabs.some((t) => this.key(t.path) === key && t.dirty);
+    return this.tabs.some((t) => this.key(t.path) === key && this.unsaved(t));
   }
 
   /** Undoes in the active editor, wherever the focus is, and leaves the focus in it. False: it can't. */
@@ -335,7 +346,7 @@ export class EditorService {
     tab.missed = undefined;
     if (!this.tabs.includes(tab)) return;
     if (tab.failed ? missed.includes(this.key(tab.path)) : missed.some((k) => this.shows(tab, k))) {
-      if (!tab.dirty) await this.reopen(tab);
+      if (!this.unsaved(tab)) await this.reopen(tab);
       else this.flagConflict(tab);
     }
   }
@@ -348,7 +359,7 @@ export class EditorService {
     for (const t of this.tabs.filter((x) => x.provider)) {
       if (t.loading) { for (const k of paths) t.missed?.add(k); continue; }
       if (![...paths].some((k) => this.shows(t, k)) && !(t.failed && paths.has(this.key(t.path)))) continue;
-      if (t.dirty) { kept.push(t.path); continue; }
+      if (this.unsaved(t)) { kept.push(t.path); continue; }
       const own = paths.has(this.key(t.path));
       const inPlace = !own && t.instance?.reloadFile
         ? (await Promise.all([...paths].filter((k) => this.shows(t, k)).map((k) => t.instance!.reloadFile!(k.toLowerCase()).catch(() => false)))).every(Boolean)
@@ -375,7 +386,7 @@ export class EditorService {
       // Closed while an earlier tab of this loop was opening again.
       if (!this.tabs.includes(t)) continue;
       if (t.loading) { t.missed?.add(this.key(t.path)); continue; }
-      if (t.dirty) { kept.push(t.path); continue; }
+      if (this.unsaved(t)) { kept.push(t.path); continue; }
       await this.reopen(t);
     }
     return kept;
@@ -422,7 +433,13 @@ export class EditorService {
 
   /** Saves a tab (asking first if its file changed on disk meanwhile). False: not saved. */
   private async saveTab(t: Tab): Promise<boolean> {
-    if (!t.instance?.save || !(await this.mayOverwrite(t))) return false;
+    if (!t.instance?.save) return false;
+    // What was typed a moment ago is saved with the rest (and isn't left unsaved after the save).
+    this.flush(t);
+    if (!(await this.mayOverwrite(t))) return false;
+    // Typed while the question about the file on disk was open.
+    this.flush(t);
+    if (!t.instance?.save) return false;
     await this.own(t, () => t.instance!.save!());
     this.resolved(t);
     return true;
@@ -442,7 +459,7 @@ export class EditorService {
       // Its editor couldn't be created, perhaps because the file wasn't there yet: it is now.
       if (!t.instance) { if (own && t.failed) await this.reopen(t); continue; }
       if (!this.shows(t, key)) continue;
-      if (!t.dirty) {
+      if (!this.unsaved(t)) {
         const inPlace = await t.instance!.reloadFile?.(key.toLowerCase()).catch(() => false);
         if (inPlace) t.stamp = await this.stampOf(t.path);
         else if (t.instance) await this.reopen(t);
@@ -494,7 +511,7 @@ export class EditorService {
     let n = 0;
     for (const t of this.tabs.filter((x) => this.key(x.path) === key)) {
       // Closed while an earlier one was saving.
-      if (this.tabs.includes(t) && t.dirty && (await this.saveTab(t))) n++;
+      if (this.tabs.includes(t) && this.unsaved(t) && (await this.saveTab(t))) n++;
     }
     return n;
   }
@@ -503,7 +520,7 @@ export class EditorService {
   async saveAll(): Promise<number> {
     let n = 0;
     for (const t of [...this.tabs]) {
-      if (t.dirty && (await this.saveTab(t))) n++;
+      if (this.unsaved(t) && (await this.saveTab(t))) n++;
     }
     return n;
   }
@@ -511,7 +528,7 @@ export class EditorService {
   /** Before switching projects: asks once about unsaved changes (save all, discard, cancel),
    *  then closes every editor. False when cancelled (nothing closed). */
   async closeAllAsking(): Promise<boolean> {
-    const dirty = this.tabs.filter((t) => t.dirty);
+    const dirty = this.tabs.filter((t) => this.unsaved(t));
     if (dirty.length) {
       const names = dirty.map((t) => t.path.split(/[/:]/).pop()).join(", ");
       const r = await this.confirm(`Unsaved changes in ${dirty.length === 1 ? names : `${dirty.length} files (${names})`}. Save before closing?`,
@@ -542,7 +559,7 @@ export class EditorService {
   /** True when the tab is gone (closed here or meanwhile), false when closing it was cancelled. */
   private async close(tab: Tab, force = false): Promise<boolean> {
     if (!this.tabs.includes(tab)) return true;
-    if (tab.dirty && !force) {
+    if (!force && this.unsaved(tab)) {
       const r = await this.confirm(`Save changes to ${tab.path}?`, "Save", "Don't Save");
       if (r === "Save" && tab.instance?.save) { if (!(await this.saveTab(tab))) return false; }
       else if (r !== "Don't Save") return false;

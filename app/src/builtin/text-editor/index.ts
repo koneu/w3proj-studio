@@ -161,6 +161,7 @@ const codeEditors: CodeEditorService = {
     return {
       value: () => view.state.sliceDoc(),
       focus: () => view.focus(),
+      flush: commit,
       dispose: () => { commit(); lint?.stop(); view.destroy(); problems.remove(); },
     };
   },

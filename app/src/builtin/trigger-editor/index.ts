@@ -68,6 +68,8 @@ class KindRegistry implements TriggersService {
     let last = first, lastForward = true;
     const go = (toForward: boolean) => {
       if (openView !== view) return;
+      // Text typed a moment ago becomes its step first: else the checks below look at the step before it.
+      view.flush();
       if (view.isState(last) && lastForward !== toForward) { view.step(-1); return; }
       if (view.isNext(last) && lastForward === toForward) { view.step(1); return; }
       const id = view.followGlobals(label, toForward ? forward : back);
@@ -370,6 +372,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => view.step(-1),
           redo: () => view.step(1),
           viewState: () => view.viewState(),
+          flush: () => view.flush(),
           save,
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
@@ -589,7 +592,7 @@ class TriggerView {
    *  being an undo step. */
   private toggles = 0;
   private savedToggles = 0;
-  private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean } | void = undefined;
+  private body: { dispose?(): void; keyDown?(e: KeyboardEvent): boolean; flush?(): void } | void = undefined;
   private handle: TriggerEditorHandle;
   private vars: VariableHost;
   private unsubscribe: () => void;
@@ -660,6 +663,23 @@ class TriggerView {
   }
 
   private disposed = false;
+  private flushing = false;
+  /** Text typed but not committed yet becomes its undo step now: a code editor's change waiting for the pause in
+   *  typing, and the focused text box's (they commit when they lose the focus). Called before a save reads the state
+   *  (mark), before other edits, undo and redo, and when the selection changes, so nothing typed a moment ago is
+   *  left out of a save or put back after them. */
+  flush() {
+    if (this.flushing || this.disposed) return;
+    this.flushing = true;
+    try {
+      this.body?.flush?.();
+      // Their change handlers do nothing when the text is what the trigger already has.
+      const a = document.activeElement;
+      if (a instanceof HTMLTextAreaElement && this.detail.contains(a)) a.dispatchEvent(new Event("change"));
+    } finally {
+      this.flushing = false;
+    }
+  }
   dispose() { this.disposed = true; this.body?.dispose?.(); this.unsubscribe(); this.el.removeEventListener("keydown", this.keydown); }
 
   /** The World Editor's Convert to Custom Text: the selected GUI trigger becomes the script the map script
@@ -718,6 +738,7 @@ class TriggerView {
    *  selected in its contents when `lines` says so (unset: when its contents were clicked last). Throws when
    *  there's nothing of the kind to copy. */
   copyText(as: "text" | "script", lines?: boolean): { text: string; what: string } {
+    this.flush();
     const it = this.find(this.selected);
     if (!it || !("ecas" in it) || it.type === 16 || it.isComment) throw new Error("Select a trigger to copy.");
     const kind = this.kinds.all().find((k) => k.matches(it, this.handle));
@@ -806,6 +827,7 @@ class TriggerView {
   isNext(id: number) { return this.at < this.undo.length && this.undo[this.at].id === id; }
   /** Whether everything unsaved came from followGlobals (or nothing is unsaved): saved with the objects it followed. */
   unsavedOnlyFollows(): boolean {
+    this.flush();
     for (let p = this.at; p >= 0; p--) {
       if ((p ? this.undo[p - 1].id : 0) === this.savedAt) return true;
       if (!this.follows.has(this.undo[p - 1]?.id ?? -1)) return false;
@@ -867,6 +889,7 @@ class TriggerView {
   /** What a save writes, taken at once: the triggers (with the tree's open and closed categories), the custom texts,
    *  and the undo step and toggles they're at. */
   mark(): { file: TriggerFile; custom: CustomTextFile; step: number; toggles: number } {
+    this.flush();
     const file = structuredClone(this.file);
     applyExpanded(file, this.collapsed);
     return { file, custom: this.customFile(), step: this.state, toggles: this.toggles };
@@ -875,7 +898,7 @@ class TriggerView {
   markSaved(step = this.state, toggles = this.toggles) { this.savedAt = step; this.savedToggles = toggles; this.setDirty(this.dirty); }
 
   /** Selects the variables table. */
-  showVariables() { this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
+  showVariables() { this.flush(); this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
 
   /** The tree's scroll position as last seen while shown (a hidden tab's reads 0). */
   private treeTop = 0;
@@ -910,6 +933,7 @@ class TriggerView {
   private modeBar = h("div.trig-modes");
   setMode(m: "triggers" | "variables" | "all") {
     if (m === this.mode) return;
+    this.flush();
     this.mode = m;
     const s = this.find(this.selected);
     // A selection the tree no longer shows goes back to the map header.
@@ -939,6 +963,8 @@ class TriggerView {
     this.renderDetail();
   }
   private edit(label: string, change: () => void, opts: { keepView?: boolean; replaces?: boolean } = {}) {
+    // Text typed a moment ago is its own step, before this one (and not put back over it afterwards).
+    this.flush();
     const before = this.snapshot();
     change();
     this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot(), id: this.nextId++, ...(opts.replaces ? { replaces: true } : {}) });
@@ -949,6 +975,8 @@ class TriggerView {
     this.edited();
   }
   step(dir: -1 | 1) {
+    // Undo takes back what was typed a moment ago, rather than redrawing it away.
+    this.flush();
     if (dir < 0 && this.at > 0) {
       const s = this.undo[--this.at];
       if (s.replaces) applyExpanded(s.after.file, this.collapsed);
@@ -1176,7 +1204,7 @@ class TriggerView {
       : h("span.trig-caret");
     return h(`div.trig-row.${cls}${active ? ".active" : ""}${opts.off ? ".off" : ""}`, {
       style: { paddingLeft: `${6 + depth * 14}px` }, title: opts.title ?? "",
-      onclick: () => { this.selected = sel; this.renderTree(); this.renderDetail(); this.el.focus(); },
+      onclick: () => { this.flush(); this.selected = sel; this.renderTree(); this.renderDetail(); this.el.focus(); },
       ondblclick: () => { if (opts.toggle !== undefined) this.toggle(opts.toggle); },
       oncontextmenu: (e: MouseEvent) => this.menu(e, sel, opts.toggle),
       ...this.dragHandlers(sel),
@@ -1185,6 +1213,7 @@ class TriggerView {
   /** Right-click in the tree: selects the row, then offers new items, moving and deleting. */
   private menu(e: MouseEvent, sel: Selection, category?: number) {
     e.preventDefault();
+    this.flush();
     this.selected = sel;
     this.renderTree();
     this.renderDetail();
@@ -1295,6 +1324,7 @@ class TriggerView {
   /** Selects a trigger (from a gg_trg_ reference elsewhere); `at.path`: also the line in it, and the
    *  parameter `at.param` there (a found problem), through the trigger's kind. */
   revealItem(it: Item, at?: Partial<TriggerLocation>) {
+    this.flush();
     if (at?.path && "ecas" in it) this.kinds.all().find((k) => k.matches(it, this.handle))?.reveal?.(it, { path: at.path, ...(at.param ? { param: at.param } : {}) });
     if (this.query) { this.query = ""; this.searchBox.value = ""; }
     if ("ecas" in it && this.mode === "variables") this.mode = "triggers";
@@ -1332,13 +1362,13 @@ class TriggerView {
           openLocation: (loc) => { if (loc.startsWith("trigger:")) this.handle.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => this.edit("Edit map script", () => { this.header = v || (this.header === null ? null : ""); }, { keepView: true }),
         });
-        this.body = { dispose: () => ed.dispose() };
+        this.body = { dispose: () => ed.dispose(), flush: () => ed.flush() };
         return;
       }
       const area = h("textarea.trig-code-edit", {
         spellcheck: false, readOnly: !editable, rows: 16, value: this.header ?? "",
         placeholder: `Map-specific ${this.handle.language === "lua" ? "Lua" : "JASS"} code, placed in the map script before the triggers.`,
-        onchange: () => this.edit("Edit map script", () => { this.header = area.value || (this.header === null ? null : ""); }),
+        onchange: () => { if (area.value !== (this.header ?? "")) this.edit("Edit map script", () => { this.header = area.value || (this.header === null ? null : ""); }); },
       });
       this.detail.replaceChildren(h("h2", {}, "Map script header"),
         ...(this.custom?.comment ? [h("p.trig-desc", {}, this.custom.comment)] : []), area);
@@ -1368,7 +1398,7 @@ class TriggerView {
     };
     const desc = h("textarea.trig-desc-edit", {
       rows: 2, value: it.description, readOnly: !editable, placeholder: it.type === 16 ? "Comment" : it.type === 32 ? "Script comment" : "Trigger comment",
-      onchange: () => this.edit("Edit comment", () => { it.description = desc.value; }),
+      onchange: () => { if (desc.value !== it.description) this.edit("Edit comment", () => { it.description = desc.value; }); },
     });
     const head = h("div.trig-head", {}, name,
       ...(it.type === 16 ? [] : [

@@ -6954,6 +6954,33 @@ async function niceToHaves(page, found) {
     await run("w3.triggers.open");
     await until("the trigger tree after reopening", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
     if (await initCaret() !== "▾") fail(`reopened after Reset Triggers, Initialization shows ${await initCaret()}`);
+    // Ctrl+S right after typing (within the code editor's pause before it commits, and in a text box that commits when
+    // it loses the focus): the save has the text and leaves the tab saved. It used to save without it and stay unsaved.
+    const wctPath = join(k.root, "map", "war3map.wct.txt");
+    await k.hands.click(".trig-row.trig-map");
+    await until("the map header's code editor", () => page.evaluate(`!!document.querySelector(".trig-code .cm-content")`), 10000)
+      .then(async () => {
+        await k.hands.click(".trig-code .cm-content");
+        await k.hands.chord("Ctrl+End");
+        await k.hands.type("// nice typed header");
+        await k.hands.chord("Ctrl+S");
+        await until("the typed header saved", () => readFileSync(wctPath, "utf8").includes("// nice typed header"), 5000)
+          .catch(() => fail("Ctrl+S right after typing in the map header saved without the typed text"));
+        await sleep(1000);
+        if (await wtgDirty()) fail("Ctrl+S right after typing in the map header left the Trigger Editor unsaved");
+      }, () => fail("the map header shows no code editor"));
+    await k.hands.click(".trig-row.trig-gui", "Melee Initialization");
+    await until("the trigger's comment box", () => page.evaluate(`!!document.querySelector(".trig-desc-edit")`), 10000)
+      .then(async () => {
+        await k.hands.click(".trig-desc-edit");
+        await k.hands.chord("Ctrl+End");
+        await k.hands.type(" nice typed comment");
+        await k.hands.chord("Ctrl+S");
+        await until("the typed comment saved", () => k.read("war3map.wtg.json").items.some((i) => i.name === "Melee Initialization" && i.description?.endsWith(" nice typed comment")), 5000)
+          .catch(() => fail("Ctrl+S right after typing a trigger's comment saved without the typed text"));
+        await sleep(300);
+        if (await wtgDirty()) fail("Ctrl+S right after typing a trigger's comment left the Trigger Editor unsaved");
+      }, () => fail("Melee Initialization shows no comment box"));
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Adjust Map String IDs: string 1 becomes 10, its references follow; undo puts every file back ---------------------

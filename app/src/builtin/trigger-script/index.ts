@@ -43,11 +43,12 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
         });
-        return { dispose: () => editor.dispose() };
+        return { dispose: () => editor.dispose(), flush: () => editor.flush() };
       }
       const area = h("textarea.trig-code-edit", {
         spellcheck: false, readOnly: !ed.editable, rows: 24, value: ed.customText(t) ?? "",
-        onchange: () => ed.edit("Edit script", () => ed.setCustomText(t, area.value)),
+        // Also called by the host before a save (TriggerKind.render's flush): nothing when the text is unchanged.
+        onchange: () => { if (area.value !== (ed.customText(t) ?? "")) ed.edit("Edit script", () => ed.setCustomText(t, area.value)); },
       });
       el.append(area, hint);
     };

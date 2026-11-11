@@ -460,6 +460,9 @@ export interface CodeSymbol {
 export interface CodeEditorHandle {
   value(): string;
   focus(): void;
+  /** Hands a change still waiting for the pause (see `debounce`) to onChange now; nothing when there is none.
+   *  Called before anything reads what the editor's owner holds for a save. */
+  flush(): void;
   dispose(): void;
 }
 
@@ -474,7 +477,10 @@ export interface TriggerKind {
   matches(trigger: TriggerItem, editor: TriggerEditorHandle): boolean;
   /** Fills `el` with the trigger's body (below the host's name, flags and comment). */
   render(el: HTMLElement, trigger: TriggerItem, editor: TriggerEditorHandle):
-    { dispose?(): void; /** Return true if the key was handled (before the host's shortcuts). */ keyDown?(e: KeyboardEvent): boolean } | void;
+    { dispose?(): void; /** Return true if the key was handled (before the host's shortcuts). */ keyDown?(e: KeyboardEvent): boolean;
+      /** Applies text still waiting to be committed (a code editor's pause): the host calls it before a save, an
+       *  undo or any other edit, so the save has it and its undo step comes first. */
+      flush?(): void } | void;
   /** Sets up a new trigger of this kind (flags, ECAs, custom text). Omitted: can't be created. */
   init?(trigger: TriggerItem, editor: TriggerEditorHandle): void;
   /** What a new one is: 8 a trigger (default), 32 a script item (Reforged files: code in the
