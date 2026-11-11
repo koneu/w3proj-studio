@@ -74,8 +74,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** Unpacks, asking before writing an incomplete (protected) map, and with `askDeletes` before deleting files of the
-   *  project the map doesn't have (the backend then writes nothing until the answer). */
-  const unpack = async (map: string, dir: string, title: string, askDeletes = false): Promise<UnpackReport | null> => {
+   *  project the map doesn't have (the backend then writes nothing until the answer). `stale`: true when an answer
+   *  no longer counts (another project opened while the question waited); then nothing is written. */
+  const unpack = async (map: string, dir: string, title: string, askDeletes = false, stale = () => false): Promise<UnpackReport | null> => {
     let allowIncomplete = false, refuseDeletes = askDeletes;
     for (;;) {
       try {
@@ -92,6 +93,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const choice = await w3.window.showWarning(q.message, ...q.actions);
           if (choice === "Show list") out.show();
           if (choice !== q.actions[0]) return null;
+          if (stale()) { out.append(`not synced from ${map}: ${dir} is no longer the open project`); return null; }
           refuseDeletes = false;
         } else if (msg.startsWith("INCOMPLETE") && !allowIncomplete) {
           const choice = await w3.window.showWarning(
@@ -100,6 +102,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             "Cancel",
           );
           if (choice !== "Continue") return null;
+          if (stale()) { out.append(`not synced from ${map}: ${dir} is no longer the open project`); return null; }
           allowIncomplete = true;
         } else throw e;
       }
@@ -132,23 +135,38 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** `askDeletes`: ask before removing files the map doesn't have (not when the user agreed to replace them already,
-   *  as for restoring a checkpoint). */
-  const sync = async (map: string, askDeletes = true) => {
-    const dir = root();
-    const r = await unpack(map, dir, "Syncing from map", askDeletes);
+   *  as for restoring a checkpoint). `dir`: the project the map belongs to, which must still be the open one; the
+   *  tabs, the file list and the script are those of the open project, so none of that is touched once another
+   *  project is open (a switch while the backend unpacks, or while a question waits). */
+  const sync = async (map: string, askDeletes = true, dir = root()) => {
+    const elsewhere = () => w3.workspace.project()?.root !== dir;
+    /** Checked after every wait: true (and said) once another project is open. */
+    const moved = (what = `the sync from ${map} finished`) => {
+      if (!elsewhere()) return false;
+      out.append(`${what} for ${dir}, which is no longer the open project: its tabs, files and script are left alone`);
+      return true;
+    };
+    if (moved(`not synced from ${map}`)) return;
+    const r = await unpack(map, dir, "Syncing from map", askDeletes, elsewhere);
     if (!r) return;
     logReport(`synced from ${map}`, r);
+    if (moved()) return;
     const rewritten = r.written + r.deleted > 0;
     if (rewritten) await w3.editors.closeAll();
+    if (moved()) return;
     await w3.workspace.refresh();
     // The tabs come back with the files as synced (those of files the map doesn't have stay away); not into another
     // project opened meanwhile, whose own tabs come back as it opens.
-    if (rewritten && w3.workspace.project()?.root === dir) await w3.editors.restore().catch((e) => out.append(`could not open the tabs again: ${e}`));
+    if (moved()) return;
+    if (rewritten) await w3.editors.restore().catch((e) => out.append(`could not open the tabs again: ${e}`));
     // A script the map brought that Studio would write the same is Studio's: saves go on regenerating it. (The
     // extension can be off.)
+    if (moved()) return;
     await w3.commands.execute("w3.script.adopt").catch(() => {});
+    if (moved()) return;
     w3.window.showInfo(r.written + r.deleted ? `Project synced: ${r.written} files updated, ${r.deleted} removed.` : "Project already up to date.");
-    // Files with a "\" in their name the sync left alone: offered to be moved where they belong.
+    // Files with a "\" in their name the sync left alone: offered to be moved where they belong (it checks the
+    // open project itself).
     if (r.strays?.length) await offerStrayMoves(w3, dir, out);
   };
 
@@ -237,9 +255,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // `file`: the map to sync from (else asked for). `opts.replace`: the user agreed already that the project's map
     // files are replaced (restoring a checkpoint), so files the map doesn't have are removed without asking.
     w3.commands.register("w3.project.syncFromMap", async (file?: string, opts?: { replace?: boolean }) => {
-      root();
+      const dir = root();
       const map = typeof file === "string" && file ? file : await w3.window.pickFile({ title: "Sync project from map", filters: MAP_FILTERS });
-      if (map) await sync(map, opts?.replace !== true);
+      if (map) await sync(map, opts?.replace !== true, dir);
     }),
 
     w3.commands.register("w3.project.pack", async () => {
@@ -316,7 +334,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (c === "Always") await w3.settings.set("project.syncOnWorldEditorSave", "always");
         if (c !== "Sync" && c !== "Always") return;
       }
-      await sync(map).catch((e) => w3.window.showError(`Sync failed: ${e}`));
+      // Into the project the World Editor saved for, which the question may have outlasted.
+      await sync(map, true, r).catch((e) => w3.window.showError(`Sync failed: ${e}`));
     })
     .then((d) => ctx.subscriptions.push(d));
   w3.backend
