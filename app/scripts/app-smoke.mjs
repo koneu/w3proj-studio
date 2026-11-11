@@ -247,6 +247,9 @@ async function terrainWiring(page, found) {
   const hold = gate.hold, release = gate.release;
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
   await sleep(300);
+  // A new map is the tileset's first tile (Dirt): paint the second, so the stroke changes the ground.
+  await page.evaluate(`document.querySelectorAll(".terrain-tex-thumb")[1]?.click()`);
+  await sleep(100);
   const canvas = await hands.where(".terrain-view canvas, canvas");
   let row = 0;
   const paint = async () => {
@@ -3452,6 +3455,9 @@ async function byHand(page, found) {
   await sleep(500);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain").click()`);
   await sleep(300);
+  // A new map is the tileset's first tile (Dirt): paint the second, so the stroke changes the ground.
+  await page.evaluate(`document.querySelectorAll(".terrain-tex-thumb")[1]?.click()`);
+  await sleep(100);
   const canvas = await hands.where(".terrain-view canvas, canvas");
   await hands.drag({ x: canvas.x - 60, y: canvas.y + 20 }, { x: canvas.x + 60, y: canvas.y + 20 });
   await sleep(300);
