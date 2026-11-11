@@ -33,6 +33,15 @@ interface Tab {
 
 /** Size and time alike, and, where both have one, the contents' hash: a same-size write in the same millisecond
  *  leaves the first two as they were. */
+/** A field text is typed into (commitField): a text area or an input that isn't a box, a button or a picker. */
+function isTextField(e: Element | null): e is HTMLInputElement | HTMLTextAreaElement {
+  return e instanceof HTMLTextAreaElement
+    || (e instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "file", "color", "range", "image"].includes(e.type));
+}
+const textFields = (root: HTMLElement) => [...root.querySelectorAll("input, textarea")].filter(isTextField);
+/** What tells two fields apart when an editor draws them again: their kind and classes. */
+const fieldShape = (e: HTMLInputElement | HTMLTextAreaElement) => `${e.tagName}.${e instanceof HTMLInputElement ? e.type : ""}.${e.className}`;
+
 const sameStamp =(a: Stamp | null, b: Stamp | null) => a === b
   || (!!a && !!b && a.size === b.size && a.modified === b.modified && (a.hash === undefined || b.hash === undefined || a.hash === b.hash));
 
@@ -146,24 +155,37 @@ export class EditorService {
    *  with the focus in the tab commits what was typed into it, as leaving it would. Most editors take a field's text
    *  on its `change` event, which a key like Ctrl+S doesn't cause. The field loses the focus and gets it back with the
    *  caret where it was, so the browser fires `change` only when the text differs from what it last committed, and the
-   *  editor's own handler checks it as it does any other time. An editor with its own `flush` commits its fields
+   *  editor's own handler checks it as it does any other time; one that draws its fields again in the handler gets
+   *  the focus back in the same field of the new ones. An editor with its own `flush` commits its fields
    *  itself (the Trigger Editor leaves names out: a rename asks questions). */
   private commitField(t: Tab) {
     if (t.instance?.flush) return;
     const a = document.activeElement;
-    const text = a instanceof HTMLTextAreaElement
-      || (a instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "file", "color", "range", "image"].includes(a.type));
-    if (!text || !t.el.contains(a) || a.readOnly || a.disabled) return;
+    if (!isTextField(a) || !t.el.contains(a) || a.readOnly || a.disabled) return;
     // Null for inputs without a caret (number fields): their text is all there is to keep.
     let caret: [number, number, "forward" | "backward" | "none"] | null = null;
     try { caret = a.selectionStart === null || a.selectionEnd === null ? null : [a.selectionStart, a.selectionEnd, a.selectionDirection ?? "none"]; } catch { /* no caret */ }
+    // Where the field is among the tab's fields, to find it again if the editor draws its fields anew.
+    const before = textFields(t.el);
+    const at = before.indexOf(a);
     try {
       a.blur();
     } catch (e) { console.error(`committing the field of ${t.path}:`, e); }
-    // The editor may have drawn the field again in its handler; then the new one is the editor's business.
-    if (!a.isConnected || (document.activeElement !== document.body && document.activeElement !== null)) return;
-    a.focus({ preventScroll: true });
-    if (caret) try { a.setSelectionRange(...caret); } catch { /* no caret */ }
+    const now = document.activeElement;
+    let back: HTMLInputElement | HTMLTextAreaElement | null = a;
+    if (!a.isConnected) {
+      // The editor drew its fields again in its handler (the AI and Campaign Editors' number fields do): the focus
+      // goes to the same place among the new ones, unless the editor put it into a field or a dialog itself, or the
+      // fields are no longer the same (then the edit changed what is there, and no field is the same one). The new
+      // field shows what was typed, else it may be another one at that place (a list sorted again).
+      const after = textFields(t.el);
+      const same = after.length === before.length && after.every((f, i) => fieldShape(f) === fieldShape(before[i])) && after[at].value === a.value;
+      const handled = now !== null && now !== document.body && (isTextField(now) || !t.el.contains(now));
+      back = same && !handled ? after[at] : null;
+    } else if (now !== document.body && now !== null) back = null;
+    if (!back) return;
+    back.focus({ preventScroll: true });
+    if (caret) try { back.setSelectionRange(...caret); } catch { /* no caret */ }
   }
 
   /** Whether an editor of the file has unsaved changes. */

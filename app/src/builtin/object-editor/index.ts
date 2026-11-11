@@ -1204,13 +1204,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
 
         /** Asks for a game object; the selected object's base is offered first. */
+        let waitingForData = false;
         const pickBase = async (placeholder: string): Promise<string | undefined> => {
-          if (!kd) return w3.window.inputBox({ prompt: "Base object id (e.g. hfoo)" });
-          const pinned = selected && kd.baseIds.includes(selected.base) ? selected.base : undefined;
-          const k = kd;
+          // Asked for right after opening, before the game data is there: the browser opens once it is (the load is
+          // the one already running). Only game data that can't be read leaves a bare id to type.
+          // A second click meanwhile opens no second browser.
+          if (!kd && waitingForData) return undefined;
+          let k = kd;
+          if (!k) {
+            waitingForData = true;
+            try { k = await loadKind(w3, kind).catch(() => null); } finally { waitingForData = false; }
+          }
+          if (closed) return undefined;
+          if (!k) return w3.window.inputBox({ prompt: "Base object id (e.g. hfoo)" });
+          const pinned = selected && k.baseIds.includes(selected.base) ? selected.base : undefined;
           // Types still loading: the browser opens now and uses them once they're there.
           const types = editorTypes ?? loadEditorTypes(w3).catch(() => null);
-          return pickBaseObject(el, kd, { title: placeholder, pinned, iconOf: (id) => icons(k, kind, id), editorTypes: types });
+          return pickBaseObject(el, k, { title: placeholder, pinned, iconOf: (id) => icons(k, kind, id), editorTypes: types });
         };
 
         /** Where an id is in use in the other object types ("a custom item of this map"), or null. */
