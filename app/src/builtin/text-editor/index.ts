@@ -213,9 +213,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // and its checker. Else JASS files are checked against the game's common.j and Blizzard.j
         // (and themselves, in order); AI scripts (.ai) also use common.ai, which isn't loaded.
         const claim = claimOf(doc.path, text);
-        const jass = claim ? claim.base === "jass" : /\.j$/i.test(doc.path);
+        const base = claim ? await claim.baseOf?.(doc.path).catch(() => claim.base) ?? claim.base : null;
+        const jass = base ? base === "jass" : /\.j$/i.test(doc.path);
         const problems = h("div.cm-diag-list", { hidden: true });
-        const lua = !claim && /\.lua$/i.test(doc.path);
+        const lua = base ? base === "lua" : /\.lua$/i.test(doc.path);
         const check = claim ? claim.check : jass ? async (t: string) => checkJass(t, envWithout(await gameJassEnv((p) => w3.game.readText(p)), t))
           : lua ? (t: string) => checkLua(t).map((d) => ({ ...d, severity: "error" as const })) : undefined;
         const lint = check ? linter(check, problems) : null;
@@ -226,7 +227,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             doc: text,
             extensions: [
               EditorState.lineSeparator.of(eol),
-              ...basics(language(claim ? `x.${claim.base === "jass" ? "j" : claim.base}` : doc.path), doc.readOnly),
+              ...basics(language(base ? `x.${base === "jass" ? "j" : base}` : doc.path), doc.readOnly),
               ...(lint ? [lint.extension] : []),
               ...(jass ? [symbolTools(async (t) => {
                 const env = await gameJassEnv((p) => w3.game.readText(p));

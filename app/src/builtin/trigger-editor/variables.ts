@@ -24,6 +24,31 @@ export interface VariableHost {
   scripts(): { get(): string | null; set(text: string): void }[];
 }
 
+/** A name field (a trigger's, a category's, a variable's). Committing it renames, which can ask a question (the name in
+ *  custom script), so the editor's flush leaves it out; instead a save commits it first (TriggerView.commitName) and
+ *  the tab counts as unsaved while the focused field holds text that isn't the name yet. */
+export interface NameField {
+  /** The name it shows when nothing is typed. */
+  name(): string;
+  /** Renames to what is typed, or puts the name back (nothing or the same typed, the rename refused). One at a time:
+   *  a call while one runs (the field's `change` as a save's question takes the focus) gets that one. */
+  commit(): Promise<void>;
+}
+export const nameFields = new WeakMap<HTMLInputElement, NameField>();
+
+/** Makes `input` a name field: `rename` on its `change`, and for a save (see NameField). */
+export function nameField(input: HTMLInputElement, name: () => string, rename: (to: string) => Promise<boolean>): HTMLInputElement {
+  let running: Promise<void> | null = null;
+  const run = async () => {
+    const to = input.value.trim();
+    if (!to || to === name() || !(await rename(to))) { if (input.isConnected) input.value = name(); }
+  };
+  const commit = () => (running ??= run().finally(() => { running = null; }));
+  input.addEventListener("change", () => void commit());
+  nameFields.set(input, { name, commit });
+  return input;
+}
+
 /** udg_<name> as a whole identifier. */
 const scriptRef = (name: string) => new RegExp(`(?<![A-Za-z0-9_])udg_${name}(?![A-Za-z0-9_])`, "g");
 
@@ -173,9 +198,8 @@ function editRow(w3: W3Api, host: VariableHost, data: TriggerData, v: Variable):
   const ed = host.handle;
   const used = () => variableParams(ed.file, v.name).length;
 
-  const name = h("input.trig-var-name", { type: "text", value: v.name, title: `udg_${v.name} in the script`, onchange: async () => {
-    if (!(await renameVariable(w3, host, v, name.value.trim()))) name.value = v.name;
-  } });
+  const name = nameField(h("input.trig-var-name", { type: "text", value: v.name, title: `udg_${v.name} in the script` }),
+    () => v.name, (to) => renameVariable(w3, host, v, to));
 
   const globalTypes = [...data.types].filter(([, t]) => t.global);
   if (!data.types.get(v.type)?.global) globalTypes.unshift([v.type, { name: v.type, global: true }]);

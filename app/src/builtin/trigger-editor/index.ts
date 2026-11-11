@@ -30,7 +30,7 @@ import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
 import { applyExpanded, collapsedOf, dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
-import { deleteVariable, newVariable, renameVariable, variableParams, variablesTable, type VariableHost } from "./variables";
+import { deleteVariable, nameField, nameFields, newVariable, renameVariable, variableParams, variablesTable, type NameField, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
 import { Listeners } from "../../lib/listeners";
@@ -187,10 +187,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   );
   const kinds = new KindRegistry();
   const open = () => w3.commands.execute("w3.triggers.open").catch((e) => w3.window.showError(String(e)));
-  // war3map.wct.txt (every trigger's text in one file) in the text editor: highlighted, not checked
-  // (its texts use the map's generated globals and each other).
+  // war3map.wct.txt (every trigger's text in one file) in the text editor: highlighted in the map's script language,
+  // with its functions listed, not checked (its texts use the map's generated globals and each other).
   void w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).then((code) => {
-    ctx.subscriptions.push(code.registerFileLanguage({ id: "wct", title: "Custom script texts", base: "jass", extensions: [".wct.txt"] }));
+    ctx.subscriptions.push(code.registerFileLanguage({ id: "wct", title: "Custom script texts", base: "jass", baseOf: () => scriptLanguage(w3), extensions: [".wct.txt"] }));
   }).catch(() => {});
   ctx.subscriptions.push(
     w3.services.provide(TRIGGERS_SERVICE, kinds),
@@ -342,7 +342,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return names.get(id);
         };
         const display: DisplayContext = { data, string: (v) => strings?.resolve(v) ?? v, objectName };
-        const lua = await w3.workspace.readText("map/war3map.w3i.json").then((t) => JSON.parse(t).scriptType === 1).catch(() => false);
+        const lua = (await scriptLanguage(w3)) === "lua";
         el.replaceChildren();
         const code = await w3.services.get<CodeEditorService>(CODE_EDITOR_SERVICE).catch(() => null);
         const view = new TriggerView(w3, el, kinds, file, custom, data, display, !doc.readOnly, lua ? "lua" : "jass", (d) => doc.setDirty(d), code);
@@ -360,14 +360,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (it) view.revealItem(it, at);
         }
         if (!askedWhere) view.applyViewState(doc.viewState);
-        const save = async () => {
+        const write = async () => {
           // What is saved is the state at the start; an edit made meanwhile stays unsaved.
           const at = view.mark();
           await writeWtgFile({ writeText: (_, t) => doc.writeText(t), writeBytes: (_, b) => doc.writeBytes(b) }, doc.path, at.file);
           await writeWctFile(w3.workspace, at.custom, textTriggers(at.file).map((t) => t.name));
           view.markSaved(at.step, at.toggles);
         };
-        view.persist = save;
+        // The user's save (Ctrl+S, Save All, Save on closing): a name typed into the focused name field is part of it,
+        // after the rename's question if it asks one (the workbench's commitField leaves editors with a flush alone).
+        const save = async () => {
+          await view.commitName();
+          // Closed while the question was open: the close decided about the unsaved changes.
+          if (view.closed) throw new Error("The Trigger Editor was closed before it saved.");
+          await write();
+        };
+        // A save the user didn't ask for (renamed objects followed): it doesn't rename what is being typed.
+        view.persist = write;
         return {
           undo: () => view.step(-1),
           redo: () => view.step(1),
@@ -385,6 +394,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
   );
+}
+
+/** The map's script language (war3map.w3i scriptType 1 is Lua); JASS when the map info isn't there or can't be read. */
+function scriptLanguage(w3: W3Api): Promise<"jass" | "lua"> {
+  return w3.workspace.readText("map/war3map.w3i.json").then((t) => (JSON.parse(t).scriptType === 1 ? "lua" as const : "jass" as const)).catch(() => "jass" as const);
 }
 
 /** Asks whether script text changes too; dismissing it keeps the scripts as they are. */
@@ -656,6 +670,11 @@ class TriggerView {
     widthSash({ key: "triggerEditor.tree", pane: treePane, initial: 300, min: 180, max: () => Math.max(180, el.clientWidth - 240),
       apply: (px) => el.style.setProperty("--trig-tree-width", `${px}px`) });
     this.detail.addEventListener("mousedown", () => { this.area = "detail"; });
+    // A name typed but not committed makes the tab unsaved, and leaving the field (committed or put back) settles it.
+    this.detail.addEventListener("input", (e) => { if (e.target instanceof HTMLInputElement && nameFields.has(e.target)) this.report(); });
+    this.detail.addEventListener("focusout", (e) => {
+      if (e.target instanceof HTMLInputElement && nameFields.has(e.target)) setTimeout(() => { if (!this.disposed) this.report(); });
+    });
     this.tree.addEventListener("scroll", () => { if (this.tree.clientHeight > 0) this.treeTop = this.tree.scrollTop; });
     this.unsubscribe = kinds.onChange(() => this.renderDetail());
     this.renderTree();
@@ -837,6 +856,26 @@ class TriggerView {
   get editable() { return this.handle.editable; }
   /** Whether there are unsaved changes. */
   get dirty() { return this.state !== this.savedAt || this.toggles !== this.savedToggles; }
+  get closed() { return this.disposed; }
+  /** Tells the tab whether it's unsaved: changes, or a name typed into the focused name field and not committed yet
+   *  (a close then asks, and a save commits it: commitName). */
+  private report() { this.setDirty(this.dirty || !!this.pendingName()); }
+  /** The focused name field (NameField) when what it holds isn't the name. */
+  private pendingName(): NameField | null {
+    const a = document.activeElement;
+    if (this.disposed || !(a instanceof HTMLInputElement) || a.readOnly || !this.detail.contains(a)) return null;
+    const field = nameFields.get(a);
+    return field && a.value.trim() !== field.name() ? field : null;
+  }
+  /** Before a save: the name typed into the focused name field is committed, as leaving the field would (flush leaves
+   *  names out). A rename may ask about custom script first: this waits for the answer. A refused rename puts the
+   *  name back and the save goes on without it. */
+  async commitName() {
+    const field = this.pendingName();
+    if (!field) return;
+    await field.commit();
+    if (!this.disposed) this.report();
+  }
   /** Saves the editor (set by its provider). */
   persist: () => Promise<void> = async () => {};
 
@@ -895,7 +934,7 @@ class TriggerView {
     return { file, custom: this.customFile(), step: this.state, toggles: this.toggles };
   }
   /** The state `step` and `toggles` (from mark) were saved; edits and toggles after it stay unsaved. */
-  markSaved(step = this.state, toggles = this.toggles) { this.savedAt = step; this.savedToggles = toggles; this.setDirty(this.dirty); }
+  markSaved(step = this.state, toggles = this.toggles) { this.savedAt = step; this.savedToggles = toggles; this.report(); }
 
   /** Selects the variables table. */
   showVariables() { this.flush(); this.mode = "variables"; this.selected = { kind: "variables" }; this.renderTree(); this.renderDetail(); }
@@ -969,7 +1008,7 @@ class TriggerView {
     change();
     this.undo.splice(this.at, this.undo.length, { label, before, after: this.snapshot(), id: this.nextId++, ...(opts.replaces ? { replaces: true } : {}) });
     this.at = this.undo.length;
-    this.setDirty(this.dirty);
+    this.report();
     this.renderTree();
     if (!opts.keepView) this.renderDetail();
     this.edited();
@@ -986,7 +1025,7 @@ class TriggerView {
       if (s.replaces) applyExpanded(s.before.file, this.collapsed);
       this.restore(s.after, s.replaces);
     } else return;
-    this.setDirty(this.dirty);
+    this.report();
     this.edited();
   }
   /** After each edit, undo and redo (TriggersService.onDidEdit; set by the provider). */
@@ -1250,7 +1289,7 @@ class TriggerView {
   private toggle(id: number) {
     if (this.collapsed.has(id)) this.collapsed.delete(id); else this.collapsed.add(id);
     // Classic files don't store it; a read-only file isn't saved.
-    if (this.handle.editable && this.file.reforged) { this.toggles++; this.setDirty(this.dirty); }
+    if (this.handle.editable && this.file.reforged) { this.toggles++; this.report(); }
     this.renderTree();
   }
   private renderTree() {
@@ -1377,11 +1416,7 @@ class TriggerView {
     if (s.kind === "variables") { this.detail.replaceChildren(h("h2", {}, "Variables"), variablesTable(this.w3, this.vars, this.file.variables)); return; }
     const it = this.find(s);
     if (!it) { this.detail.replaceChildren(h("p.muted", {}, "Nothing selected.")); return; }
-    const name = h("input.trig-name", { type: "text", value: it.name, readOnly: !editable, onchange: () => {
-      const v = name.value.trim();
-      if (v && v !== it.name) void this.rename(it, v).then((done) => { if (!done && name.isConnected) name.value = it.name; });
-      else name.value = it.name;
-    } });
+    const name = nameField(h("input.trig-name", { type: "text", value: it.name, readOnly: !editable }), () => it.name, (to) => this.rename(it, to));
     if (it.type === 64) {
       const v = this.file.variables.find((x) => x.id === it.id);
       this.detail.replaceChildren(h("h2", {}, "Variable"), v ? variablesTable(this.w3, this.vars, [v]) : h("p.muted", {}, "Variable not found."));
