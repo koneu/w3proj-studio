@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import * as melee from "./meleecheck";
 import { campsOf, checkMelee, type MeleeFacts, type MeleeUnit } from "./meleecheck";
 
 type Point = [number, number];
@@ -210,4 +211,28 @@ test("types the game doesn't know are named, not guessed at silently", () => {
 test("creeps group by reach, and random ones count by their level", () => {
   const camps = campsOf([unit("nogr", 0, 0), unit("nogr", 400, 0), unit("nogr", 800, 0), unit("nogr", 3000, 0), unit("YYU3", 3100, 0, { randomLevel: 3 })], { level: (id) => (id === "nogr" ? 3 : undefined) });
   assert.deepEqual(camps.map((c) => c.level).sort((a, b) => a - b), [6, 9]);
+});
+
+test("a unit's level is the map's own (ulev) where it sets one, else the game's, else its base's", () => {
+  // (Through the module: the melee tools had no level of the map's to give before.)
+  assert.equal(typeof melee.unitLevels, "function", "the melee check's unit levels don't take the map's object data");
+  const balance = [{ unitBalanceID: "nogr", level: "3" }, { unitBalanceID: "nftt", level: "3" }, { unitBalanceID: "hfoo", level: "2" }, { unitBalanceID: "nbad", level: "-" }];
+  const mods = new Map([
+    ["nogr", { base: "nogr", mods: new Map<string, unknown>([["ulev", 7]]) }],
+    ["n000", { base: "nftt", mods: new Map<string, unknown>([["ulev", 1]]) }],
+    ["n001", { base: "nftt", mods: new Map<string, unknown>([["unam", "Troll"]]) }],
+    ["hfoo", { base: "hfoo", mods: new Map<string, unknown>([["ulev", ""]]) }],
+  ]);
+  const level = melee.unitLevels(balance, mods, (id) => (id === "n002" ? "nogr" : undefined));
+  assert.equal(level("nogr"), 7, "a modified standard unit's ulev");
+  assert.equal(level("n000"), 1, "a custom unit's ulev");
+  assert.equal(level("n001"), 3, "a custom unit without one: its base's");
+  assert.equal(level("hfoo"), 2, "an empty value: the game's");
+  assert.equal(level("nftt"), 3, "unchanged: the game's");
+  assert.equal(level("n002"), 3, "a custom unit only another file names: its base's, as the game has it");
+  assert.equal(level("nbad"), undefined, "what isn't a number");
+  assert.equal(level("zzzz"), undefined);
+  // A camp counts by the map's levels: two changed ogres and a custom troll.
+  const camps = campsOf([unit("nogr", 0, 0), unit("nogr", 200, 0), unit("n000", 0, 200)], { level });
+  assert.deepEqual(camps.map((c) => [c.level, c.strongest]), [[15, 7]]);
 });
