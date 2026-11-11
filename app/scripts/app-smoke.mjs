@@ -3594,6 +3594,21 @@ async function typedFieldSave(page, found) {
     await until("the typed Start Z saved", () => fog() === 1234, 5000).catch(() => fail(`Ctrl+S right after typing 1234 as Start Z saved ${JSON.stringify(fog())}`));
     await sleep(300);
     if (await dirty(w3i)) fail("Ctrl+S right after typing in Map Properties left it unsaved");
+    // Closing the tab right after typing asks to save what was typed (it closed without asking, dropping it).
+    await until("the fog's Start Z again", () => mark(startZ), 5000);
+    await hands.click("[data-smoke=typed]");
+    await hands.chord("Ctrl+A");
+    await hands.type("999");
+    await page.evaluate(`(() => { const ed = w3Workbench.editors; window.__closeAsked = []; window.__closeConfirm = ed.confirm; ed.confirm = async (m) => { window.__closeAsked.push(m); return "Don't Save"; }; })()`);
+    try {
+      await page.evaluate(`w3.editors.closeActive()`);
+      await sleep(300);
+      const asked = await page.evaluate(`window.__closeAsked`);
+      if (!asked.some((m) => /Save changes/.test(m))) fail(`closing Map Properties right after typing didn't ask to save: ${JSON.stringify(asked)}`);
+      if (fog() !== 1234) fail(`"Don't Save" on closing still wrote Start Z ${JSON.stringify(fog())}`);
+    } finally {
+      await page.evaluate(`(() => { if (window.__closeConfirm) w3Workbench.editors.confirm = window.__closeConfirm; delete window.__closeConfirm; })()`);
+    }
 
     // ---- Gameplay Constants: Max Unit Speed ----
     await page.evaluate(`w3.editors.closeAll()`);

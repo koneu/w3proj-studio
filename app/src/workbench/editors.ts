@@ -142,7 +142,7 @@ export class EditorService {
     try { t.instance?.flush?.(); } catch (e) { console.error(`flushing ${t.path}:`, e); }
   }
 
-  /** Before a save only (it moves the focus, so never where unsaved changes are merely asked about): the text field
+  /** Before a save or a close only (it moves the focus, so never where unsaved changes are merely asked about): the text field
    *  with the focus in the tab commits what was typed into it, as leaving it would. Most editors take a field's text
    *  on its `change` event, which a key like Ctrl+S doesn't cause. The field loses the focus and gets it back with the
    *  caret where it was, so the browser fires `change` only when the text differs from what it last committed, and the
@@ -557,6 +557,7 @@ export class EditorService {
   /** Before switching projects: asks once about unsaved changes (save all, discard, cancel),
    *  then closes every editor. False when cancelled (nothing closed). */
   async closeAllAsking(): Promise<boolean> {
+    for (const t of this.tabs) this.commitField(t);
     const dirty = this.tabs.filter((t) => this.unsaved(t));
     if (dirty.length) {
       const names = dirty.map((t) => t.path.split(/[/:]/).pop()).join(", ");
@@ -588,6 +589,9 @@ export class EditorService {
   /** True when the tab is gone (closed here or meanwhile), false when closing it was cancelled. */
   private async close(tab: Tab, force = false): Promise<boolean> {
     if (!this.tabs.includes(tab)) return true;
+    // A field still being typed in counts as a change: closing would drop it without asking (the focus leaving
+    // doesn't matter here, the tab goes away).
+    if (!force) this.commitField(tab);
     if (!force && this.unsaved(tab)) {
       const r = await this.confirm(`Save changes to ${tab.path}?`, "Save", "Don't Save");
       if (r === "Save" && tab.instance?.save) { if (!(await this.saveTab(tab))) return false; }
