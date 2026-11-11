@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
+import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
-import { minimapFrame, renderMinimap, type MinimapInput } from "./minimap";
+import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type Rgb } from "./minimap";
+import { smallestMipColor } from "./minimapgen";
 import { viewOutline } from "./minimappanel";
 
 /** A made-up 33×25 corner map: two ground tiles in stripes, a lake in the middle, hills. */
@@ -43,8 +45,53 @@ test("minimapFrame: a unit drawn at a world point is at its pixel, and the pixel
 });
 
 test("war3mapMap.blp's picture: what the map's minimap was before the export options came", () => {
-  // Taken from renderMinimap before Export Minimap had options; the saved minimap must not change with them.
-  assert.equal(digest(renderMinimap(base())), "192897112b637406");
+  // Taken from renderMinimap before Export Minimap had options; the saved minimap must not change with them. Taken
+  // again when the ground got the World Editor's colours, cliffs and grain (2026-11-11).
+  assert.equal(digest(renderMinimap(base())), "08855e9a893ec8e8");
+});
+
+test("groundColors: a tile point colours its tile, a point next to a cliff its cliff type, no cliff type its ground", () => {
+  // 4 × 3 points: texture 1 in the east column, layer 3 at point (1, 1), cliff type 0 except at point (2, 0) (none)
+  // and (0, 2) (type 1, whose colour isn't known).
+  const width = 4, height = 3;
+  const corners = Array.from({ length: width * height }, (_, i) => {
+    const x = i % width, y = Math.floor(i / width);
+    return { texture: x === 3 ? 1 : 0, layer: x === 1 && y === 1 ? 3 : 2, cliffTexture: x === 2 && y === 0 ? 15 : x === 0 && y === 2 ? 1 : 0 };
+  });
+  const t = { width, height, corners, groundTiles: ["Ldrt", "Lgrs"], cliffTiles: ["CLdi", "CLgr"] } as unknown as Terrain;
+  const tile = (id: string): Rgb => (id === "Ldrt" ? [1, 1, 1] : [2, 2, 2]);
+  const colors = groundColors(t, tile, (id) => (id === "CLdi" ? [9, 9, 9] : null));
+  const at = (x: number, y: number) => colors[(y * width + x) * 3];
+  // Every point within one of (1, 1) is next to the cliff; (2, 0) and (0, 2) keep their ground.
+  assert.deepEqual([0, 1, 2].map((y) => [0, 1, 2, 3].map((x) => at(x, y))), [[9, 9, 1, 2], [9, 9, 9, 2], [1, 9, 9, 2]]);
+  // Without cliff colours (as before them) every point shows its ground.
+  const plain = groundColors(t, tile);
+  assert.deepEqual([...Array(width * height).keys()].map((i) => plain[i * 3]), corners.map((c) => (c.texture ? 2 : 1)));
+});
+
+test("the grain: even between 0 and 1, the same on every drawing, different from pixel to pixel", () => {
+  const values = [...Array(256 * 64).keys()].map((i) => grainAt(i % 256, Math.floor(i / 256)));
+  assert.ok(values.every((v) => v >= 0 && v < 1));
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  assert.ok(Math.abs(mean - 0.5) < 0.01, String(mean));
+  const low = values.filter((v) => v < 0.1).length / values.length;
+  assert.ok(Math.abs(low - 0.1) < 0.01, String(low));
+  assert.equal(grainAt(17, 33), grainAt(17, 33));
+  assert.ok(new Set(values.slice(0, 1000)).size > 990);
+  // Two drawings of a map are the same picture (a saved minimap doesn't change without an edit).
+  assert.equal(digest(renderMinimap(base())), digest(renderMinimap(base())));
+});
+
+test("smallestMipColor: the file's smallest mip level, averaged by alpha, not the full-size picture's average", () => {
+  const level = (w: number, h: number, px: number[][]) => ({ width: w, height: h, rgba: Uint8ClampedArray.from(px.flat()) });
+  const mips = [level(2, 1, [[0, 0, 0, 255], [100, 100, 100, 255]]), level(1, 1, [[40, 108, 27, 200]])];
+  const image = { mipCount: 2, mip: (l: number) => mips[l] } as unknown as DecodedImage;
+  assert.deepEqual(smallestMipColor(image), [40, 108, 27]);
+  // A file whose smallest level isn't 1 × 1: averaged, transparent pixels left out; all transparent: none.
+  const two = { mipCount: 1, mip: () => level(2, 1, [[10, 20, 30, 255], [250, 250, 250, 0]]) } as unknown as DecodedImage;
+  assert.deepEqual(smallestMipColor(two), [10, 20, 30]);
+  const clear = { mipCount: 1, mip: () => level(1, 1, [[10, 20, 30, 0]]) } as unknown as DecodedImage;
+  assert.equal(smallestMipColor(clear), null);
 });
 
 test("viewOutline: the view's corners on the ground, and far along a ray over the horizon", () => {
