@@ -175,7 +175,7 @@ export class WebDriverPage {
  * `env` goes to tauri-driver, which passes it on to the app. Returns the page and a `stop` that ends
  * the session, then tauri-driver, WebKitWebDriver and Xvfb (one process group).
  */
-export async function launch(exe, env = {}) {
+export async function launch(exe, env = {}, attempt = 1) {
   const missing = missingTools();
   if (missing.length) throw new Error(`missing for the Linux smoke test: ${missing.join(", ")} (run scripts/setup-linux.sh)`);
   const port = await freePort(), nativePort = await freePort();
@@ -218,7 +218,15 @@ export async function launch(exe, env = {}) {
     await page.request("POST", "/timeouts", { script: 15 * 60 * 1000 });
     return { page, stop: () => stop(page), exited: () => exited };
   } catch (e) {
+    const gone = exited !== null;
     await stop();
+    // Two runs started at once (app-smoke's two parts) can pick the same Xvfb display (xvfb-run -a takes the first
+    // free number it sees) or the same free port: the loser's driver exits at once. It starts again, on another.
+    if (gone && attempt < 3) {
+      process.stderr.write(`tauri-driver exited at its start (${e.message.slice(0, 200)}); starting again\n`);
+      await sleep(500 + Math.random() * 1500);
+      return launch(exe, env, attempt + 1);
+    }
     throw e;
   }
 }
