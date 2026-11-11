@@ -25,8 +25,11 @@ export function resetHeightField(t: Terrain, log: CornerLog): number {
   return n;
 }
 
-/** How far Adjust Cliff Levels can shift this map: down to level 0 for its lowest corner, up to TOP_LEVEL for its
- *  highest. */
+/** The most levels the World Editor's Adjust Cliff Levels dialog takes upwards (we-drive, 2026-11-11). */
+export const MAX_RAISE = 10;
+
+/** How far Adjust Cliff Levels shifts this map without squeezing it: down to level 0 for its lowest corner, up to
+ *  MAX_RAISE or TOP_LEVEL for its highest, whichever comes first. Further down still works: the corners stop at 0. */
 export function cliffShiftRange(t: Terrain): { min: number; max: number } {
   let low = Infinity, high = -Infinity;
   for (const c of t.corners) {
@@ -34,26 +37,27 @@ export function cliffShiftRange(t: Terrain): { min: number; max: number } {
     high = Math.max(high, c.layer);
   }
   if (!t.corners.length) return { min: 0, max: 0 };
-  return { min: 0 - low || 0, max: Math.max(0, TOP_LEVEL - high) };
+  return { min: 0 - low || 0, max: Math.max(0, Math.min(MAX_RAISE, TOP_LEVEL - high)) };
 }
 
-/** Adjust Cliff Levels: every corner `by` cliff levels up (or down), 128 per level, ramps kept. The water stays where
- *  it is: no corner's stored water level or water flag changes, so the depth follows from the new ground (we-drive,
- *  2026-11-11, 4v4_SnowareBay by +1: all 25921 corners a level and 128 higher, every water word and flag as it was;
- *  an earlier note, 2026-11-09 on map 03, had the water words 512 higher). Refused, with nothing changed, when a corner
- *  would leave the levels the map can have (cliffShiftRange): the World Editor squeezes the corners against level 0
- *  instead (map 03 by -3: level 4 went to 1, the lake's 2 to 0), which loses the shape. Returns how many corners
- *  changed, or why it was refused. */
+/** Adjust Cliff Levels: every corner's cliff level `by` up (or down), and nothing else. As the World Editor does it
+ *  (we-drive, 2026-11-11, map 03 by +1: only the layer nibble of each corner changed, 0xF4 to 0xF5; height words,
+ *  water words and flags byte for byte as they were, and -1 afterwards gave the original file back; 4v4_SnowareBay by
+ *  +1 the same): the ground over its level stays, so it rises 128 per level, and the water stays where it is.
+ *  Downwards the corners stop at level 0, so a deep shift squeezes the low ones together (map 03 by -6: all at 0).
+ *  Upwards the shift goes as far as cliffShiftRange's max (a bigger one is cut to it, as the dialog caps it at +10).
+ *  Returns how many corners changed, or why nothing could be done. */
 export function adjustCliffLevels(t: Terrain, by: number, log: CornerLog): number | string {
   if (!Number.isInteger(by)) return "The adjustment is a whole number of cliff levels.";
   if (by === 0 || !t.corners.length) return 0;
-  const range = cliffShiftRange(t);
-  if (by < range.min || by > range.max) {
-    return `Not done: this map's cliff levels can move from ${range.min} to +${range.max} (its corners have to stay between level 0 and ${TOP_LEVEL}).`;
-  }
+  const shift = Math.min(by, cliffShiftRange(t).max);
+  let n = 0;
   t.corners.forEach((c, i) => {
+    const layer = Math.max(0, c.layer + shift);
+    if (layer === c.layer) return;
     log.touch(t, i);
-    setLayer(c, c.layer + by);
+    setLayer(c, layer);
+    n++;
   });
-  return t.corners.length;
+  return n;
 }

@@ -1373,7 +1373,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       let by = typeof given === "number" ? given : undefined;
       if (by === undefined) {
         const { min, max } = ground.range();
-        const typed = await w3.window.inputBox({ prompt: `Cliff levels to move the whole map by (${min} to +${max}; negative is down)`, value: "0" });
+        const typed = await w3.window.inputBox({ prompt: `Cliff levels to move the whole map by (up to +${max}; negative is down: below ${min} the lowest corners stop at level 0)`, value: "0" });
         if (typed === undefined) return;
         const t = typed.trim();
         by = /^[+-]?\d+$/.test(t) ? Number(t) : Number.NaN;
@@ -1383,6 +1383,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       }
       const r = ground.adjustCliffLevels(by);
       if (typeof r === "string") void w3.window.showWarning(r);
+      else if (r === 0 && by !== 0) void w3.window.showInfo(by > 0 ? "The cliff levels are as high as they go already." : "The cliff levels are at level 0 already.");
     }),
     // Replace Cliff Type, Tiles, Doodads, Units: the dialog, or `req` as given (scripts and tests). How many changed.
     ...([["w3.terrain.replaceCliffType", "cliffs"], ["w3.terrain.replaceTiles", "tiles"], ["w3.terrain.replaceDoodads", "doodads"], ["w3.terrain.replaceUnits", "units"]] as const)

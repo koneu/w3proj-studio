@@ -1,25 +1,53 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { newCliffVariation, resizedCameraZoom, resizeTerrain } from "./resize";
-import type { Corner, Terrain } from "./w3e";
+import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
+
+/** The header fields of a w3e, for terrains that get written. */
+const base = { version: 12, tileset: "L", customTilesets: false, customTilesetsRaw: 0, groundTiles: ["Ldrt", "Lgrs", "Lgrd"], cliffTiles: ["CLdi"], trailer: new Uint8Array() };
 
 function terrain(w: number, h: number): Terrain {
   const corner = (i: number): Corner => ({ height: i, water: 0, texture: i % 3, variation: 5, cliffVariation: 0, cliffTexture: 15, layer: 2, ramp: true, blight: true, hasWater: false, boundary: false, rawHeight: 0, rawWater: 0, texExtra: 0 });
   return { width: w, height: h, offsetX: -64, offsetY: -64, corners: Array.from({ length: w * h }, (_, i) => corner(i)) } as unknown as Terrain;
 }
 
-test("corners that stay are untouched; new ones continue the edge with a variation of their own", () => {
+test("corners that stay are untouched; new ones are the World Editor's, not copies of the edge", () => {
   const t = terrain(3, 2);
+  t.corners.forEach((c) => Object.assign(c, { texture: 2, layer: 4, rawHeight: 0x2100, rawWater: 0x2400, hasWater: true, boundary: true, cliffTexture: 1 }));
   const r = resizeTerrain(t, [0, 2, 0, 0], () => 0.99); // randomVariation: 17, never the 5 of the old corners
   assert.equal(r.width, 5);
   assert.equal(r.corners.length, 10);
   assert.deepEqual(r.corners[1], t.corners[1]);
-  const added = r.corners[3], edge = t.corners[2];
-  assert.equal(added.texture, edge.texture);
-  assert.equal(added.height, edge.height);
+  // we-drive, 2026-11-11, cliff.w3m grown: all 1104 new corners tex 0, height word 0x2000, water word 0x2000, layer 2,
+  // flags 0, cliff type nibble 15.
+  const added = r.corners[3];
+  assert.deepEqual(
+    [added.texture, added.rawHeight, added.height, added.rawWater, added.layer, added.ramp, added.blight, added.hasWater, added.boundary, added.cliffTexture, added.texExtra],
+    [0, 0x2000, 0, 0x2000, 2, false, false, false, false, 15, 0],
+  );
   assert.equal(added.variation, 17);
-  assert.equal(added.ramp, false);
-  assert.equal(added.blight, false);
+  const back = parseW3e(writeW3e({ ...base, ...r }));
+  assert.deepEqual(back.corners[3], added, "it reads back as made");
+});
+
+test("Map Size growth on the left and bottom, playable area grown: edge bits as the World Editor sets them", () => {
+  // cliff.w3m (64x64 tiles, borders 6 6 4 8) grown by 8 tiles left and bottom with Modify Camera Bounds on: 72x72,
+  // borders 6 6 4 8 again, 60x60 playable (we-drive, 2026-11-11).
+  const t: Terrain = { ...base, width: 65, height: 65, offsetX: -4096, offsetY: -4096, corners: terrain(65, 65).corners };
+  markMapEdge(t, [6, 6, 4, 8]);
+  const r = resizeTerrain(t, [8, 0, 8, 0]);
+  markMapEdge(r, [6, 6, 4, 8]);
+  assert.deepEqual([r.width, r.height, r.offsetX, r.offsetY], [73, 73, -5120, -5120]);
+  const edge = (x: number, y: number) => (r.corners[y * 73 + x].rawWater & 0x4000) !== 0;
+  for (let y = 0; y < 73; y++) for (let x = 0; x < 73; x++) {
+    const want = x < 72 && y < 72 && (y <= 3 || y >= 64 || x <= 5 || x >= 66);
+    if (edge(x, y) !== want) assert.fail(`corner ${x},${y}: edge ${edge(x, y)}`);
+  }
+  // Old corners that were edge and are inside now lose the bit: the WE's 544 (old rows 0-3 and cols 0-5, within the
+  // new playable area).
+  let lost = 0;
+  for (let y = 0; y < 65; y++) for (let x = 0; x < 65; x++) if ((t.corners[y * 65 + x].rawWater & 0x4000) && !edge(x + 8, y + 8)) lost++;
+  assert.equal(lost, 544);
 });
 
 test("new corners get a cliff variation of 0, 1 or 2 at random, as the World Editor gives them; old ones keep theirs", () => {
