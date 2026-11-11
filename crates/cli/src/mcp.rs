@@ -132,6 +132,9 @@ pub fn run() -> anyhow::Result<()> {
         let _ = writeln!(out, "{line}").and_then(|()| out.flush());
     };
     let mut watching = false;
+    // Requests still being answered: at the end of the input they're waited for, so a client that closes stdin after
+    // its last request (`echo … | w3proj mcp`) still gets every answer.
+    let mut answering: Vec<std::thread::JoinHandle<()>> = Vec::new();
     for line in io::stdin().lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -154,11 +157,15 @@ pub fn run() -> anyhow::Result<()> {
         }
         // A slow tool doesn't hold up the next request.
         let (send, out) = (send.clone(), out.clone());
-        std::thread::spawn(move || {
+        answering.retain(|h| !h.is_finished());
+        answering.push(std::thread::spawn(move || {
             if let Some(reply) = respond(&line, &*send) {
                 print(&out, &reply);
             }
-        });
+        }));
+    }
+    for h in answering {
+        let _ = h.join();
     }
     Ok(())
 }
