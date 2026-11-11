@@ -3654,12 +3654,24 @@ async function triggerByHand(page, hands, root, fail) {
  *  Properties (a number field), Gameplay Constants and the Sound Editor (the workbench's step before a save, EditorService.commitField). */
 async function typedFieldSave(page, found) {
   const fail = (what) => found.push(`typed field save: ${what}`);
-  const k = await heightKit(page, "TypedField");
+  // The buffs' game data is held back from the start (the Object Manager loads every kind as a project opens) until
+  // released below, so that "+ New" comes while it loads. A run that loaded it before can't hold it.
+  await page.evaluate(`(() => {
+    const g = w3Workbench.game, read = (g.__read ??= g.readText);
+    const held = window.__heldBuffs = { reads: 0 };
+    held.hold = new Promise((r) => { held.release = r; setTimeout(r, 120000); });
+    g.readText = async function (p, ...rest) { if (/AbilityBuff/i.test(String(p))) { held.reads++; await held.hold; } return read.call(this, p, ...rest); };
+  })()`);
+  const k = await heightKit(page, "TypedField").catch(async (e) => {
+    await page.evaluate(`(() => { window.__heldBuffs?.release(); const g = w3Workbench.game; if (g.__read) g.readText = g.__read; })()`);
+    throw e;
+  });
   const { hands, root } = k;
   const dirty = (path) => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
   const mark = (expr) => page.evaluate(`(() => { const e = ${expr}; if (e) e.dataset.smoke = "typed"; return !!e; })()`);
-  /** Types over the text of the field `expr` finds (once the editor has stopped drawing it again), then Ctrl+S at once. */
-  const typeAndSave = async (what, expr, text) => {
+  /** Types over the text of the field `expr` finds (once the editor has stopped drawing it again), then Ctrl+S at once.
+   *  `unsaved`: the tab of that file must count as unsaved before the save (what was typed is a change). */
+  const typeAndSave = async (what, expr, text, unsaved) => {
     await until(what, () => mark(expr), 20000);
     await sleep(500);
     await until(what, () => mark(expr), 5000);
@@ -3669,9 +3681,40 @@ async function typedFieldSave(page, found) {
     // Control: still in the field and not committed yet, as Ctrl+S finds it.
     const before = await page.evaluate(`document.activeElement?.dataset.smoke === "typed"`);
     if (!before) fail(`the field didn't have the focus when ${text} was typed (control)`);
+    if (unsaved && !(await dirty(unsaved))) fail(`with ${text} typed into ${what} and not committed yet, the tab says it has no unsaved changes`);
     await hands.chord("Ctrl+S");
   };
   try {
+    // ---- The Object Editor right after opening: "+ New" waits for the game data and shows the browser (it asked for
+    // a bare id while the data was loading) ----
+    const w3h = "map/war3map.w3h.json";
+    await page.evaluate(`w3.editors.closeAll()`);
+    if (!existsSync(join(root, w3h))) await page.evaluate(`w3.workspace.writeText(${JSON.stringify(w3h)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
+    await page.evaluate(`(() => { window.__typedBox = { kept: w3.window.inputBox, asked: [] }; w3.window.inputBox = async (o) => { window.__typedBox.asked.push(o?.prompt ?? ""); return undefined; }; })()`);
+    try {
+      await page.evaluate(`w3.editors.open(${JSON.stringify(w3h)})`);
+      await until("the buff list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
+      // The click comes at once (a script's click, not the slower WebDriver one), while the data still loads.
+      const loading = await page.evaluate(`(() => {
+        const loading = document.querySelector(".obj-status")?.textContent === "Loading game data…";
+        [...document.querySelectorAll(".obj-toolbar-buttons button")].find((b) => b.textContent === "+ New").click();
+        return loading;
+      })()`);
+      await sleep(800);
+      const asked = await page.evaluate(`window.__typedBox.asked`);
+      if (asked.length) fail(`"+ New" right after opening the Object Editor, with the game data still loading, asked ${JSON.stringify(asked)} instead of showing the object browser`);
+      await page.evaluate(`window.__heldBuffs.release()`);
+      await until("the object browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 30000)
+        .catch(() => fail(`"+ New" right after opening the Object Editor didn't show the object browser once the game data was there`));
+      if (!loading) console.log("  typed field save: the buffs' game data was there already, so \"+ New\" right after opening proved nothing this time");
+      await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    } finally {
+      await page.evaluate(`(() => {
+        if (window.__typedBox) w3.window.inputBox = window.__typedBox.kept; delete window.__typedBox;
+        window.__heldBuffs?.release(); const g = w3Workbench.game; if (g.__read) g.readText = g.__read;
+      })()`);
+    }
+
     // ---- The Object Editor: the Footman's hit points ----
     const w3u = "map/war3map.w3u.json";
     await page.evaluate(`w3.editors.closeAll()`);
@@ -3752,6 +3795,68 @@ async function typedFieldSave(page, found) {
     await until("the typed volume saved", () => volume() === 77, 5000).catch(() => fail(`Ctrl+S right after typing 77 as the volume saved ${JSON.stringify(volume())}`));
     await sleep(300);
     if (await dirty(w3s)) fail("Ctrl+S right after typing in the Sound Editor left it unsaved");
+
+    // ---- The Trigger Editor: a trigger's name and a variable's name ----
+    // Its flush leaves names out (a rename can ask about custom script), so the text typed there was neither saved nor
+    // counted as unsaved. The save commits it now, waiting for the rename's question (answered a moment later here).
+    const wtgPath = "map/war3map.wtg.json";
+    const wtgFile = () => JSON.parse(readFileSync(join(root, "map", "war3map.wtg.json"), "utf8"));
+    const wctText = () => readFileSync(join(root, "map", "war3map.wct.txt"), "utf8");
+    await page.evaluate(`w3.editors.closeAll()`);
+    await k.tool("create_script_trigger", { name: "Typed Trigger", script: "" });
+    await k.tool("set_script_header", { script: "// gg_trg_Typed_Trigger\n" });
+    await k.tool("add_trigger_variable", { name: "TypedVar", type: "integer" });
+    await page.evaluate(`(() => {
+      window.__typedWarn = { kept: w3.window.showWarning, asked: [] };
+      w3.window.showWarning = async (m, ...buttons) => {
+        window.__typedWarn.asked.push(m);
+        await new Promise((r) => setTimeout(r, 400));
+        return buttons.includes("Rename in script too") ? "Rename in script too" : undefined;
+      };
+    })()`);
+    try {
+      await page.evaluate(`w3.commands.execute("w3.triggers.reveal", "Typed Trigger")`);
+      await typeAndSave("the trigger's name", `(() => { const e = document.querySelector("input.trig-name"); return e?.value === "Typed Trigger" ? e : null; })()`, "Saved Trigger", wtgPath);
+      await until("the typed trigger name saved", () => wtgFile().items.some((i) => i.name === "Saved Trigger"), 8000)
+        .catch(() => fail(`Ctrl+S right after typing a trigger's name saved the names ${JSON.stringify(wtgFile().items.map((i) => i.name))}`));
+      await sleep(300);
+      const asked = await page.evaluate(`window.__typedWarn.asked`);
+      if (!asked.some((m) => /gg_trg_Typed_Trigger.* in custom script/.test(m))) fail(`the save's rename didn't ask about the name in custom script: ${JSON.stringify(asked)}`);
+      if (!wctText().includes("gg_trg_Saved_Trigger")) fail("the save's rename, answered \"Rename in script too\", didn't rename the trigger in the map script header");
+      if (await dirty(wtgPath)) fail("Ctrl+S right after typing a trigger's name left the Trigger Editor unsaved");
+
+      await page.evaluate(`w3.commands.execute("w3.triggers.variables")`);
+      await typeAndSave("the variable's name", `[...document.querySelectorAll("input.trig-var-name")].find((e) => e.value === "TypedVar")`, "SavedVar", wtgPath);
+      await until("the typed variable name saved", () => wtgFile().variables.some((v) => v.name === "SavedVar"), 8000)
+        .catch(() => fail(`Ctrl+S right after typing a variable's name saved the variables ${JSON.stringify(wtgFile().variables.map((v) => v.name))}`));
+      await sleep(300);
+      if (await dirty(wtgPath)) fail("Ctrl+S right after typing a variable's name left the Trigger Editor unsaved");
+    } finally {
+      await page.evaluate(`(() => { if (window.__typedWarn) w3.window.showWarning = window.__typedWarn.kept; delete window.__typedWarn; })()`);
+    }
+
+    // ---- The AI Editor: a number field keeps the focus after Ctrl+S ----
+    // The editor draws its fields again on a change: the focus went to the editor's pane.
+    const wai = join(root, "..", "Typed Raider.wai");
+    rmSync(wai, { force: true });
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(async () => { window.__typedSave = w3.window.pickSaveFile; w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+    try {
+      const aiNum = `[...document.querySelectorAll("input.ai-num")].filter((e) => !e.disabled)`;
+      // The Attacking tab: Initial Delay and Repeat Waves.
+      await until("the AI Editor", () => page.evaluate(`(() => { const b = [...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "Attacking"); b?.click(); return !!b; })()`), 20000);
+      await until("the AI Editor's number fields", () => page.evaluate(`${aiNum}.length > 0`), 20000);
+      const index = 0, old = await page.evaluate(`${aiNum}[0].value`);
+      const typed = old === "13" ? "14" : "13";
+      await typeAndSave("an AI number field", `${aiNum}[${index}]`, typed);
+      const aiPath = await page.evaluate(`w3.editors.activePath()`);
+      await until("the AI saved", async () => !(await dirty(aiPath)), 5000).catch(() => fail("Ctrl+S right after typing an AI number left the AI Editor unsaved"));
+      await sleep(300);
+      const focus = await page.evaluate(`(() => { const a = document.activeElement; const list = ${aiNum}; return { at: list.indexOf(a), value: a?.value ?? null, tag: a?.tagName ?? null, cls: a?.className ?? null }; })()`);
+      if (focus.at !== index || focus.value !== typed) fail(`after Ctrl+S in an AI number field the focus is on ${JSON.stringify(focus)}, not the field (number ${index}, ${typed})`);
+    } finally {
+      await page.evaluate(`(() => { if (window.__typedSave) w3.window.pickSaveFile = window.__typedSave; delete window.__typedSave; })()`);
+    }
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
@@ -6241,6 +6346,21 @@ async function triggersAndAi(page, found) {
     await page.evaluate(`w3.editors.saveAll()`);
     await sleep(300);
     if (!readFileSync(wai).includes(Buffer.from("units.w3u"))) fail("the saved AI doesn't carry the custom data");
+
+    // ---- war3map.wct.txt as text in a Lua map: Lua, its functions listed (it was always JASS) -----------------------------
+    await page.evaluate(`w3.editors.closeAll()`);
+    const infoNow = await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`);
+    try {
+      await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify({ ...JSON.parse(infoNow), scriptType: 1 }, null, 2))})`);
+      await k.tool("create_script_trigger", { name: "Lua Probe", script: "function Lua_Probe_Actions()\n  print(\"probe\")\nend\n" });
+      await page.evaluate(`w3.editors.open("map/war3map.wct.txt", "w3.textEditor")`);
+      const outline = () => page.evaluate(`(() => { const s = document.querySelector("select.cm-outline"); return s ? [...s.options].map((o) => o.textContent.trim()) : null; })()`);
+      await until("the text's functions", async () => (await outline())?.includes("Lua_Probe_Actions"), 10000)
+        .catch(async () => fail(`war3map.wct.txt of a Lua map lists ${JSON.stringify(await outline())}, not its Lua function`));
+    } finally {
+      await page.evaluate(`w3.editors.closeAll()`);
+      await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoNow)})`);
+    }
   } finally {
     await page.evaluate(`(() => { const k = window.__kept; if (k) { w3.window.showWarning = k.warn; w3.window.pickFile = k.pick; w3.window.pickSaveFile = k.save; } })()`);
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
