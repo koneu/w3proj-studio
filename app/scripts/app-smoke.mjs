@@ -2373,6 +2373,14 @@ async function heightsLimits(page, found) {
   await k.reset();
 }
 
+/** A question a check left on screen (a toast asking something, which stays until answered) would cover the next
+ *  checks' clicks. Each check of the full run is followed by this: it closes such questions, as dismissing them by ×
+ *  would, and names the check, so the one that left it can answer it itself. */
+async function leftOpen(page, check) {
+  const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
+  for (const text of left) console.log(`  left open after ${check}: ${text}`);
+}
+
 /** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
  *  each undone with Ctrl+Z in the reopened editor (and the command), then redone, with every file of the map byte for byte
  *  what it was before the resize / after it. A shrink names what it cuts off and makes a checkpoint. */
@@ -7225,52 +7233,99 @@ async function run() {
     }
     const made = await newMaps(page, found);
     await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
+    await leftOpen(page, "terrainWiring");
     await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
+    await leftOpen(page, "placeObjects");
     await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
+    await leftOpen(page, "mcpStartMove");
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
+    await leftOpen(page, "waterPathing");
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
+    await leftOpen(page, "tileTemplate");
     await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
+    await leftOpen(page, "tilesInPlace");
     await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
+    await leftOpen(page, "tileCleanup");
     await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
+    await leftOpen(page, "objectsWhileOpening");
     await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
+    await leftOpen(page, "testMapWithoutGame");
     for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
+    await leftOpen(page, "height tools");
     await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
+    await leftOpen(page, "flyingHeights");
     await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
+    await leftOpen(page, "artModeReload");
     await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
+    await leftOpen(page, "wholeMapGround");
     await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
+    await leftOpen(page, "cameraEditing");
     await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
+    await leftOpen(page, "terrainSelectCameras");
     await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
+    await leftOpen(page, "viewModes");
     await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
+    await leftOpen(page, "unitProperties");
     await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
+    await leftOpen(page, "itemTablesAccess");
     await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
+    await leftOpen(page, "itemDrops");
     await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
+    await leftOpen(page, "triggersAndAi");
     await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
+    await leftOpen(page, "staleEditors");
     await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
+    await leftOpen(page, "scriptGuard");
     await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
+    await leftOpen(page, "resizeUndo");
     await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
+    await leftOpen(page, "dataSafety");
     await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
+    await leftOpen(page, "configSafety");
     await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
+    await leftOpen(page, "syncSafety");
     await workbenchState(page, found).catch((e) => found.push(`workbench state: ${e.message}`));
+    await leftOpen(page, "workbenchState");
     await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
+    await leftOpen(page, "shouldHaves");
     await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
+    await leftOpen(page, "placerAndCampaign");
     await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
+    await leftOpen(page, "chapterObjects");
     await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
+    await leftOpen(page, "editorExtras");
     await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
+    await leftOpen(page, "objectManagerLive");
     await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
+    await leftOpen(page, "niceToHaves");
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
+    await leftOpen(page, "byHand");
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
+    await leftOpen(page, "moduleFunctions");
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
+    await leftOpen(page, "objectCopy");
     await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
+    await leftOpen(page, "graphicsModes");
     await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
+    await leftOpen(page, "keyChords");
     await keybindings(page, found).catch((e) => found.push(`keybindings: ${e.message}`));
+    await leftOpen(page, "keybindings");
     await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
+    await leftOpen(page, "paletteMouse");
     await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
+    await leftOpen(page, "gameReadsOnce");
     await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
+    await leftOpen(page, "editorTabRaces");
     await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
+    await leftOpen(page, "playerStarts");
     await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
+    await leftOpen(page, "objectLayout");
     await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
+    await leftOpen(page, "realMapSave");
     await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
+    await leftOpen(page, "drawCalls");
     await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
+    await leftOpen(page, "contextLoss");
     found.push(...problems(page.events));
     if (exited() !== null) found.push(`the app exited with ${exited()}`);
 
