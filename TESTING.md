@@ -49,7 +49,7 @@ real maps and game files can't go into the repository.
 ```sh
 node tests/gate.mjs            # before every commit: about 30 s once built
 node tests/gate.mjs coverage   # against the floors (needs cargo-llvm-cov)
-node tests/gate.mjs corpus     # real maps and the game: some minutes (the app smoke test's two halves set the pace)
+node tests/gate.mjs corpus     # real maps and the game: about 8 minutes (the app smoke test's two halves set the pace)
 node tests/gate.mjs batch      # commit and corpus in one run, for a merge batch: they overlap
 node tests/gate.mjs all        # all of it: before merging to master
 ```
@@ -81,7 +81,7 @@ and its own Xvfb display and WebDriver ports (Linux; a driver that loses the rac
 DevTools port and WebView2 folder (Windows). The halves keep the full run's order, so a check that relies on what an
 earlier one left stays behind it (testMapWithoutGame on the map objectsWhileOpening left open); every check of the
 second half also runs alone (`--only`). They are balanced by the times each check prints (`took X s: <check>`):
-about 6 minutes each once built. To run one half by hand: `node scripts/app-smoke.mjs --part=1/2` (in `app/`), or
+about 6 minutes each once built (the batch tier went from about 15 minutes to 8 on an idle machine). To run one half by hand: `node scripts/app-smoke.mjs --part=1/2` (in `app/`), or
 `--part=2/2` (it builds unless `--no-build`: not while part 1 builds). A plain `node scripts/app-smoke.mjs` still
 runs everything in one app.
 
