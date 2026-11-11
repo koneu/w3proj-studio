@@ -9,6 +9,7 @@ import { formatBytes, h } from "../../workbench/dom";
 import { findPathRefs, updatePathRefs } from "./references";
 import { clickSelection } from "../../lib/selection";
 import { keyOf } from "../../lib/keys";
+import { BusyQueue } from "../../lib/busyqueue";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
 import type { FileInfo } from "../../extensions/api";
@@ -90,13 +91,17 @@ class ImportView {
   /** Replace File steps, for undo and redo; `at` of them are done. */
   private history: ReplaceStep[] = [];
   private at = 0;
-  /** A replace, undo or redo is writing: another waits for it to finish (refused). */
-  private busy = false;
-  /** The editor closed: a replace that was waiting for a file choice stops. */
+  /** A replace, undo or redo is writing: another replace is refused meanwhile, undo and redo wait for it (in order;
+   *  dropped when the editor closes or another project opens). */
+  private queue = new BusyQueue(() => !this.disposed && this.w3.workspace.project()?.root === this.root);
+  private get busy() { return this.queue.busy; }
+  private readonly root: string | undefined;
+  /** The editor closed: a replace that was waiting for a file choice stops, waiting undo and redo steps too. */
   disposed = false;
 
   constructor(private w3: W3Api, private el: HTMLElement, private list: ImportsDoc, private write: () => Promise<void>, private editable: boolean,
     private folder: string) {
+    this.root = w3.workspace.project()?.root;
     el.classList.add("imp-editor");
     el.tabIndex = -1;
     addKeyContext(el, UNDO_CONTEXT);
@@ -137,9 +142,12 @@ class ImportView {
   private taken(path: string) {
     return this.list.files.some((f) => samePath(f.path, path)) || this.files().has(projectPath(path).toLowerCase());
   }
-  private async run(label: string, f: () => Promise<void>) {
-    try { await f(); } catch (e) { void this.w3.window.showError(`${label}: ${(e as Error).message ?? e}`); }
+  /** False when `f` failed (its error is shown). */
+  private async run(label: string, f: () => Promise<void>): Promise<boolean> {
+    let ok = true;
+    try { await f(); } catch (e) { ok = false; void this.w3.window.showError(`${label}: ${(e as Error).message ?? e}`); }
     this.render();
+    return ok;
   }
 
   // ---- actions ----------------------------------------------------------------------
@@ -283,12 +291,11 @@ class ImportView {
       const size = this.files().get(file.toLowerCase())?.size ?? 0;
       if (size > UNDO_LIMIT && !(await this.w3.window.confirm(`${e.path} is too large to keep for undo: replacing it can't be taken back.`, "Replace", 60000))) return;
       if (this.disposed || this.w3.workspace.project()?.root !== root || this.busy) return;
-      this.busy = true;
-      try {
+      await this.queue.hold(async () => {
         const step = await this.w3.window.withProgress(`Replacing ${e.path}`, () => replaceFile(this.replaceFs(), file, src));
         this.history.splice(this.at, this.history.length, step);
         this.at = this.history.length;
-      } finally { this.busy = false; }
+      });
       this.preview_ = null;
       void this.w3.window.showInfo(`Replaced ${e.path}.`);
     });
@@ -301,18 +308,16 @@ class ImportView {
     if (!f) throw new Error(`${sel[0].path} isn't in the project's map folder.`);
     this.replace(sel[0], f.path);
   }
-  /** Undo (-1) or redo (1) of Replace File. */
+  /** Undo (-1) or redo (1) of Replace File; pressed while a replace (or another step) is writing, it runs after that. */
   step(dir: -1 | 1) {
-    const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
-    if (!step) return;
-    void this.run(dir < 0 ? "Undo Replace File" : "Redo Replace File", async () => {
-      if (this.busy) throw new Error("A replace is still being written.");
-      this.busy = true;
-      try {
+    this.queue.step(() => {
+      const step = dir < 0 ? this.history[this.at - 1] : this.history[this.at];
+      if (!step) return;
+      return this.run(dir < 0 ? "Undo Replace File" : "Redo Replace File", async () => {
         await stepReplace(this.replaceFs(), step, dir);
         this.at += dir;
-      } finally { this.busy = false; }
-      this.preview_ = null;
+        this.preview_ = null;
+      });
     });
   }
 

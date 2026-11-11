@@ -6198,9 +6198,9 @@ async function staleEditors(page, found) {
  *  (a trigger from the tree's menu and a line from its own menu, onto the clipboard, the text as the editor shows its
  *  lines); Allow negative real values (an unreal field refuses -5 from a tool and typed until the setting is on); the
  *  Import Manager's Replace File (same path and entry, an open editor of the file shows the new content, one undo step,
- *  Ctrl+Z and Ctrl+Y there); the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger, a
+ *  Ctrl+Z and Ctrl+Y there, undo and redo pressed during a step's file write waiting for it); the Object Manager's Map Summary, Rename and Delete Object (a custom object, a trigger, a
  *  region), Rename (a sound) and Play Sound, done by the owning editors, and a group's menu; the Campaign Editor's Export, Replace and Remove of a chapter's map (the export is
- *  the CLI's pack, replace and remove are one undo step each) and Remove Button asking whether the map goes too. */
+ *  the CLI's pack, replace and remove are one undo step each; undo twice and redo twice at once during the moves run in order) and Remove Button asking whether the map goes too. */
 /** Right-clicks the first element of `selector` whose text has `text`, then the menu item starting with `item`. Null when
  *  done, else what went wrong. */
 async function contextMenuItem(page, selector, text, item) {
@@ -6498,24 +6498,28 @@ async function editorExtras(page, found) {
       await impHands.key(key, code, vk, modifiers);
     };
     const holds = (text) => readFileSync(onDisk, "utf8") === text;
-    /** `act` until the file holds `text`: a step that comes while the last one is still being written (whose file is
-     *  already there, its answer not yet) is refused with "still being written", and is given again. Any other
-     *  outcome is the answer. */
+    /** `act`, then the file holds `text` and no error was shown. A step that comes while the last one is still being
+     *  written (its file already there, its answer not yet) waits for it. */
     const impStep = async (act, text) => {
-      const refused = () => page.evaluate(`window.__errors.some((m) => /still being written/.test(m))`);
-      for (let n = 0; n < 20; n++) {
-        await page.evaluate(`window.__errors.length = 0`);
-        await act();
-        await soon(async () => holds(text) || (await refused()), 10000);
-        if (holds(text) || !(await refused())) return holds(text);
-      }
-      return false;
+      await page.evaluate(`window.__errors.length = 0`);
+      await act();
+      await soon(() => holds(text), 10000);
+      const errors = await page.evaluate(`window.__errors.slice()`);
+      if (errors.length) fail(`undo or redo of Replace File showed ${JSON.stringify(errors)}`);
+      return holds(text);
     };
     if (!(await impStep(() => impKey("z", "KeyZ", 90, 2), "old words\n"))) fail(`Ctrl+Z in the Import Manager after Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`);
     if (!(await impStep(() => impKey("y", "KeyY", 89, 2), "new words\n"))) fail("Ctrl+Y in the Import Manager didn't bring the new content back");
     // The title bar's undo and redo do the same.
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "old words\n"))) fail(`one undo of Replace File left ${JSON.stringify(readFileSync(onDisk, "utf8"))}`);
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.redo")`), "new words\n"))) fail("redo of Replace File didn't bring the new content back");
+    // Undo and redo pressed at once: the redo waits for the undo's file move (not refused, not lost), then runs. The
+    // end (the new words) differs from the undo's, so it is reached only once both ran in order.
+    if (!(await impStep(() => page.evaluate(`(() => { for (const c of ["workbench.undo", "workbench.redo"]) void w3.commands.execute(c); })()`), "new words\n"))) {
+      fail(`undo and redo pressed at once left ${JSON.stringify(readFileSync(onDisk, "utf8"))}, not the new words`);
+    }
+    // Then one undo: the history has the one step in its place (none done twice or skipped).
+    if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "old words\n"))) fail("after the queued steps, undo didn't bring the old content back");
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------
@@ -6717,6 +6721,19 @@ async function editorExtras(page, found) {
     if (!existsSync(lacking) || readFileSync(lacking, "utf8") !== "mine") fail("undo of Replace map didn't bring back the file the new map lacks");
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
     await until("the second map again", async () => width() === twoWidth && (await campaignDirty()), 10000).catch(() => fail("redo of Replace map didn't bring the second map back"));
+    // Undo pressed twice at once: the second (Add map's step, no files) waits for the first's file moves instead of
+    // being dropped. The end (the first map, no button, the campaign changed against its save) is neither the start
+    // nor the state after one undo. Redo twice at once then brings the button and the second map back, in order.
+    const campRows = () => page.evaluate(`document.querySelectorAll(".camp-editor:not([hidden]) tr.camp-row").length`);
+    await page.evaluate(`window.__errors.length = 0`);
+    await page.evaluate(`(() => { for (const c of ["workbench.undo", "workbench.undo"]) void w3.commands.execute(c); })()`);
+    await until("both undos done", async () => existsSync(chapterInfo) && readFileSync(chapterInfo, "utf8") === infoBefore && (await campRows()) === 0 && (await campaignDirty()), 10000)
+      .catch(async () => fail(`undo pressed twice at once during Replace map's file moves left the chapter's playable width ${width()}, ${await campRows()} buttons, the campaign ${await campaignDirty() ? "changed" : "as saved"}`));
+    await page.evaluate(`(() => { for (const c of ["workbench.redo", "workbench.redo"]) void w3.commands.execute(c); })()`);
+    await until("both redos done", async () => width() === twoWidth && (await campRows()) === 1 && (await campaignDirty()), 10000)
+      .catch(async () => fail(`redo pressed twice at once left the chapter's playable width ${width()} (the second map's is ${twoWidth}), ${await campRows()} buttons`));
+    const campErrors = await page.evaluate(`window.__errors.slice()`);
+    if (campErrors.length) fail(`undo and redo of Replace map pressed at once showed ${JSON.stringify(campErrors)}`);
     // Remove Button, answered "and map": both go in one step; undo brings both back.
     await page.evaluate(`w3.window.showWarning = async (m) => (/Remove the map from the campaign too/.test(m) ? "Remove button and map" : undefined)`);
     await page.evaluate(`document.querySelector("tr.camp-row")?.click()`);
