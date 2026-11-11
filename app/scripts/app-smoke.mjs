@@ -367,6 +367,42 @@ async function placeObjects(page, found) {
   }
 }
 
+/** The MCP panel's GUIDES list shows a guide another program put into the guides folder (outside the project: no file
+ *  event tells) once the panel is shown again, and while it's showing, once the window gets the focus back. The guide
+ *  files are written and removed here, in the smoke app's own settings folder. */
+async function mcpGuides(page, found) {
+  const fail = (what) => found.push(`MCP guides: ${what}`);
+  const folder = (await page.evaluate(`w3.backend.invoke("app_paths")`)).user_guides;
+  const topics = ["smoke dropped shown", "smoke dropped focus"];
+  const files = topics.map((t) => join(folder, `${t}.md`));
+  const listed = () => page.evaluate(`[...document.querySelectorAll(".ext-desc")].map((d) => d.textContent).filter((t) => / yours$/.test(t))`);
+  const write = (file, topic) => { mkdirSync(folder, { recursive: true }); writeFileSync(file, `# ${topic}\n\nA guide written by another program.\n`); };
+  const before = await page.evaluate(`w3Workbench.views.active`);
+  try {
+    await page.evaluate(`w3.views.show("mcp")`);
+    await until("the GUIDES section", () => page.evaluate(`[...document.querySelectorAll(".ext-section-title")].some((t) => t.textContent === "GUIDES")`), 10000);
+    await sleep(500);
+    if ((await listed()).some((t) => t.startsWith("smoke dropped"))) fail(`listed before it was written (control): ${JSON.stringify(await listed())}`);
+    // Written while another view is shown, then the MCP panel shown again.
+    await page.evaluate(`w3.views.show("explorer")`);
+    write(files[0], topics[0]);
+    const served = await mcpTool(page)("read_guide", {});
+    if (!served.includes(topics[0])) fail(`read_guide doesn't list the dropped guide (control): ${served.slice(0, 300)}`);
+    await page.evaluate(`w3.views.show("mcp")`);
+    await until("the dropped guide in the panel", async () => (await listed()).includes(`${topics[0]}: yours`), 5000)
+      .catch(async () => fail(`showing the panel again doesn't list the guide dropped into the folder: ${JSON.stringify(await listed())}`));
+    // Written while the panel is showing: listed when the window comes back.
+    write(files[1], topics[1]);
+    await page.evaluate(`window.dispatchEvent(new Event("focus"))`);
+    await until("the second dropped guide in the panel", async () => (await listed()).includes(`${topics[1]}: yours`), 5000)
+      .catch(async () => fail(`the window coming back doesn't list the guide dropped into the folder: ${JSON.stringify(await listed())}`));
+  } finally {
+    for (const f of files) rmSync(f, { force: true });
+    await page.evaluate(`window.dispatchEvent(new Event("focus"))`).catch(() => {});
+    if (before) await page.evaluate(`w3.views.show(${JSON.stringify(before)})`).catch(() => {});
+  }
+}
+
 /** move_object on a start location moves the player's start in war3map.w3i too, in the same edit: one undo takes both
  *  back. (The terrain editor's own save does this for its moves; a tool's edit reloads the editor, so its save never did.) */
 async function mcpStartMove(page, found) {
@@ -4354,6 +4390,28 @@ async function keybindings(page, found) {
     const off = columns.head && columns.rows.find(([, c]) => c.length !== columns.head.length || c.some(([x, w], i) => Math.abs(x - columns.head[i][0]) > 1 || Math.abs(w - columns.head[i][1]) > 1));
     if (!columns.head || columns.head.length !== 5 || columns.head.slice(0, 4).some(([, w]) => w <= 0)) fail(`the Keyboard Shortcuts header's cells: ${JSON.stringify(columns.head)}`);
     else if (off) fail(`the column headers [x, width] ${JSON.stringify(columns.head)} don't line up with ${off[0]}'s cells ${JSON.stringify(off[1])}`);
+    // Scrolled down the whole list, the sticky column headers stand just below the sticky title and search,
+    // not over them (both stuck at the top cut the title in half).
+    await openShortcuts("");
+    const stuck = await page.evaluate(`(async () => {
+      const head = document.querySelector(".kb-row.kb-head"), top = document.querySelector(".kb .settings-top");
+      if (!head || !top) return { missing: true };
+      let scroller = head.parentElement;
+      while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+      if (!scroller) return { noScroll: true };
+      scroller.scrollTop = Math.min(600, scroller.scrollHeight - scroller.clientHeight);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const h = head.getBoundingClientRect(), t = top.getBoundingClientRect(), s = scroller.getBoundingClientRect();
+      const title = top.querySelector("h1").getBoundingClientRect();
+      const r = (b) => [Math.round(b.top), Math.round(b.bottom)];
+      const scrolled = scroller.scrollTop;
+      scroller.scrollTop = 0;
+      return { scrolled, head: r(h), top: r(t), title: r(title), scroller: r(s) };
+    })()`);
+    if (stuck.missing || stuck.noScroll) fail(`can't scroll the Keyboard Shortcuts list: ${JSON.stringify(stuck)}`);
+    else if (stuck.scrolled < 100) fail(`the Keyboard Shortcuts list scrolled only ${stuck.scrolled}px`);
+    else if (stuck.top[0] > stuck.scroller[0] + 1) fail(`the title and search didn't stay at the top when scrolled: ${JSON.stringify(stuck)}`);
+    else if (stuck.head[0] < stuck.top[1] - 1 || stuck.head[0] > stuck.top[1] + 2) fail(`scrolled, the column headers ${JSON.stringify(stuck.head)} aren't just below the title and search ${JSON.stringify(stuck.top)} (title ${JSON.stringify(stuck.title)})`);
 
     // Grid Display: Change, J, Enter.
     await openShortcuts("@command:w3.terrain.cycleGrid");
@@ -7134,6 +7192,7 @@ async function run() {
         itemTablesAccess,
         keybindings,
         keyChords,
+        mcpGuides,
         mcpStartMove,
         moduleFunctions,
         newMaps,
@@ -7254,6 +7313,8 @@ async function run() {
     await leftOpen(page, "placeObjects");
     await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
     await leftOpen(page, "mcpStartMove");
+    await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
+    await leftOpen(page, "mcpGuides");
     await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
     await leftOpen(page, "waterPathing");
     await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));

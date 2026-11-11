@@ -136,6 +136,9 @@ export interface KeybindingInfo { key: string; command: string; when?: string; s
 
 export interface ViewProvider {
   render(container: HTMLElement): void | Disposable;
+  /** Its side bar container was shown again (the view stays rendered while another one is shown): the cue to
+   *  look again at what can change outside the app. */
+  shown?(): void;
   /** Buttons in the view header. */
   actions?: { icon: string; title: string; command: string }[];
 }
