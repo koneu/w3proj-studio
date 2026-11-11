@@ -611,7 +611,7 @@ class TriggerView {
     const tt = textTriggers(file);
     tt.forEach((t, i) => this.texts.set(t, custom?.texts[i] ?? null));
     this.header = custom?.header ?? null;
-    for (const it of file.items) if ((it.type === 2 || it.type === 4) && !it.expanded) this.collapsed.add(it.id);
+    this.followExpanded();
     const view = this;
     this.handle = {
       get file() { return view.file; }, data, display, editable, language,
@@ -828,6 +828,7 @@ class TriggerView {
       this.header = r.custom.header;
       this.texts = new Map(textTriggers(r.file).map((t, i) => [t, r.custom.texts[i] ?? null]));
       this.selected = { kind: "header" };
+      this.followExpanded();
     });
   }
 
@@ -839,7 +840,16 @@ class TriggerView {
       this.custom = custom;
       this.header = custom?.header ?? null;
       this.texts = new Map(textTriggers(file).map((t, i) => [t, custom?.texts[i] ?? null]));
+      this.followExpanded();
     });
+  }
+
+  /** The tree's open and closed categories as the file has them (each category's `expanded`). On opening and when the
+   *  whole file is replaced (Reset Triggers, Import): a new file's ids reuse the old ones, so the old view state would
+   *  show e.g. a reset's expanded Initialization closed. */
+  private followExpanded() {
+    this.collapsed.clear();
+    for (const it of this.file.items) if ((it.type === 2 || it.type === 4) && !it.expanded) this.collapsed.add(it.id);
   }
 
   customFile(): CustomTextFile {

@@ -6841,16 +6841,29 @@ async function niceToHaves(page, found) {
     if (cat?.isComment !== 1) fail(`Category is Comment saved ${JSON.stringify(cat)}`);
     if (!/InitTrig_Melee_Initialization/.test(readFileSync(join(k.root, "map", "war3map.j"), "utf8"))) fail("a trigger in a comment category left war3map.j (the World Editor keeps it)");
     const before = k.read("war3map.wtg.json");
+    /** The caret of the tree's Initialization category: "▸" closed, "▾" open. */
+    const initCaret = () => page.evaluate(`[...document.querySelectorAll(".trig-tree-rows .trig-label")].find((e) => e.textContent === "Initialization")?.parentElement.querySelector(".trig-caret")?.textContent ?? null`);
+    // A new map's Initialization is saved collapsed (the control); Reset Triggers saves it expanded, and the tree follows.
+    if (await initCaret() !== "▸") fail(`a new map's Initialization shows ${await initCaret()} (saved collapsed)`);
     const resetT = await run("w3.triggers.reset");
     if (resetT.e || resetT.r !== true) fail(`Reset Triggers: ${resetT.e ?? JSON.stringify(resetT.r)}`);
     if (!(await asked()).some((m) => /Clear all triggers and reset to default/.test(m))) fail("Reset Triggers didn't ask first");
+    if (await initCaret() !== "▾") fail(`after Reset Triggers Initialization shows ${await initCaret()} (the reset saves it expanded)`);
     await k.save();
     const after = k.read("war3map.wtg.json");
+    if (after.items.find((i) => i.type === 4 && i.name === "Initialization")?.expanded !== 1) fail("Reset Triggers didn't save Initialization expanded");
     const names2 = (f) => f.items.filter((i) => i.type === 8 || i.type === 32).map((i) => i.name);
     if (JSON.stringify(names2(after)) !== JSON.stringify(["Melee Initialization"])) fail(`after Reset Triggers: ${names2(after).join(", ")}`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
     await k.save();
     if (JSON.stringify(names2(k.read("war3map.wtg.json"))) !== JSON.stringify(names2(before))) fail(`one undo of Reset Triggers gave ${names2(k.read("war3map.wtg.json")).join(", ")}`);
+    // Reset again, save and reopen: the saved expanded Initialization opens expanded.
+    await run("w3.triggers.reset");
+    await k.save();
+    await page.evaluate(`w3.editors.closeAll()`);
+    await run("w3.triggers.open");
+    await until("the trigger tree after reopening", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
+    if (await initCaret() !== "▾") fail(`reopened after Reset Triggers, Initialization shows ${await initCaret()}`);
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Adjust Map String IDs: string 1 becomes 10, its references follow; undo puts every file back ---------------------
