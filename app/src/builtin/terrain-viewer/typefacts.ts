@@ -103,7 +103,7 @@ export async function loadFactsData(w3: W3Api): Promise<FactsData> {
   const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
   const mapMisc = files.has("map/war3mapmisc.txt") ? await w3.workspace.readText("map/war3mapMisc.txt").catch(() => null) : null;
   const codes = new Map(abilityRows.map((r) => [r.alias, r.code || r.alias]));
-  const mods = new Map([...unitMods, ...skinMods]);
+  const mods = mergeMods(unitMods, skinMods);
   const value = (kind: typeof units, own: typeof mods, id: string, field: string, level: number) => {
     const v = own.get(id)?.mods.get(field);
     if (v !== undefined) return String(v);
@@ -120,4 +120,16 @@ export async function loadFactsData(w3: W3Api): Promise<FactsData> {
     goldMines: special.goldMines, waygates: special.waygates, toggleable: new Set(orders.keys()),
     ...heroConstants(gameMisc, mapMisc),
   };
+}
+
+type Mods = Map<string, { base: string; mods: Map<string, unknown> }>;
+/** A type's changes from war3map.w3u and war3mapSkin.w3u together: a type in both keeps the fields of each, the skin
+ *  file's winning where both set one (a plain merge of the two maps dropped the w3u's fields, e.g. ulev and uhpm). */
+export function mergeMods(main: Mods, skin: Mods): Mods {
+  const out: Mods = new Map(main);
+  for (const [id, s] of skin) {
+    const m = out.get(id);
+    out.set(id, m ? { base: m.base, mods: new Map([...m.mods, ...s.mods]) } : s);
+  }
+  return out;
 }

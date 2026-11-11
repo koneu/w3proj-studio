@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { heroConstants, typeFacts, type FactsData } from "./typefacts";
+import { heroConstants, mergeMods, typeFacts, type FactsData } from "./typefacts";
 
 // Rows as the game's tables have them (Units\UnitBalance.slk, UnitAbilities.slk, AbilityData.slk), with a few of
 // a map's own objects: a footman made a hero-less pack animal, a custom waygate ability, a custom inventory.
@@ -108,4 +108,18 @@ test("the map's gameplay constants win over the game's", () => {
   assert.deepEqual(heroConstants(game, "[Misc]\nMaxHeroLevel=25\nStrHitPointBonus=30.5\n"), { ...base, maxHeroLevel: 25, hpPerStr: 30.5 });
   assert.deepEqual(heroConstants("", "[Misc]\nHeroAbilityLevelSkip=1\n"), { ...base, levelSkip: 1 });
   assert.deepEqual(heroConstants("[Misc]\nMaxHeroLevel=junk\n", null), base, "what can't be read is the game's default");
+});
+
+test("a type changed in both war3map.w3u and war3mapSkin.w3u keeps the fields of each", () => {
+  const main = new Map([["h001", { base: "hfoo", mods: new Map<string, unknown>([["ulev", 5], ["unam", "Main"]]) }]]);
+  const skin = new Map([
+    ["h001", { base: "hfoo", mods: new Map<string, unknown>([["umdl", "x.mdl"], ["unam", "Skin"]]) }],
+    ["h002", { base: "hkni", mods: new Map<string, unknown>([["umdl", "y.mdl"]]) }],
+  ]);
+  const m = mergeMods(main, skin);
+  assert.equal(m.get("h001")?.mods.get("ulev"), 5);
+  assert.equal(m.get("h001")?.mods.get("umdl"), "x.mdl");
+  assert.equal(m.get("h001")?.mods.get("unam"), "Skin");
+  assert.equal(m.get("h002")?.base, "hkni");
+  assert.equal(main.get("h001")?.mods.has("umdl"), false, "the inputs aren't changed");
 });
