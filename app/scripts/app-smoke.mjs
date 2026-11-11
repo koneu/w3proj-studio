@@ -3133,10 +3133,22 @@ async function viewCommands(page, fail, shots, size) {
     return data;
   };
   const differ = (a, b) => pixelsApart(page, a, b);
-  /** View Entire Map as the World Editor's: straight down (nearly), north up, the map's sides just inside the view's
-   *  (18 of 1184 pixels in the editor's picture) and its south in view. The map (`size` tiles) lies around the origin. */
+  // The map (`size` tiles) lies around the origin, its playable part inside the border of the map's info.
+  const [bl, br, bb, bt] = JSON.parse(await page.evaluate(`w3.workspace.readText("map/war3map.w3i.json")`)).cameraComplements;
+  const [w, h] = size.map((n) => n * 64);
+  const side = Math.max((size[0] - bl - br) * 128, (size[1] - bb - bt) * 128);
+  /** Where the World Editor shows the map with View Entire Map, as fractions of the view from its top left: the
+   *  playable part's larger side across 932.6 of its 1184 pixels, the playable middle 221.9 of 844 down, and its
+   *  4:3 projection squashing up and down by (4/3) / (1184/844) (viewcmds.ts viewOfMap). */
+  const weMap = {
+    left: 0.5 - (932.6 / 1184) * w / side, right: 0.5 + (932.6 / 1184) * w / side,
+    south: 221.9 / 844 + (932.6 / 1184) * (4 / 3) * (bb * 128 + ((size[1] - bb - bt) * 128) / 2) / side,
+    edge: (932.6 / 1184) * bl * 128 / side,
+  };
+  /** View Entire Map as the World Editor's: straight down (nearly), north up, the map's sides and its south edge where
+   *  the editor shows them (within 6 of 1184 pixels). */
   const entireMap = (s, when) => {
-    const c = s.camera, [w, h] = size.map((n) => n * 64);
+    const c = s.camera;
     const eye = [c.target[0] + c.distance * Math.cos(c.pitch) * Math.cos(c.yaw), c.target[1] + c.distance * Math.cos(c.pitch) * Math.sin(c.yaw), c.target[2] + c.distance * Math.sin(c.pitch)];
     const f = c.target.map((v, i) => v - eye[i]), fl = Math.hypot(...f), fw = f.map((v) => v / fl);
     const rl = Math.hypot(fw[0], fw[1]), right = [fw[1] / rl, -fw[0] / rl, 0];
@@ -3148,8 +3160,9 @@ async function viewCommands(page, fail, shots, size) {
       return { x: (dot(right) / depth / (t * c.aspect) + 1) / 2, y: (1 - dot(up) / depth / t) / 2 };
     };
     const sw = at(-w, -h), se = at(w, -h);
-    const fine = c.pitch > 1.5 && Math.abs(c.yaw + Math.PI / 2) < 1e-6 && Math.abs(sw.x - 18 / 1184) < 0.005 && Math.abs(1 - se.x - 18 / 1184) < 0.005 && sw.y < 0.95;
-    if (!fine) bad(`View Entire Map ${when}: pitch ${c.pitch}, yaw ${c.yaw}, the map's south-west at ${JSON.stringify(sw)}, south-east at ${JSON.stringify(se)}`);
+    const fine = c.pitch > 1.5 && Math.abs(c.yaw + Math.PI / 2) < 1e-6 && Math.abs(sw.x - weMap.left) < 0.005 && Math.abs(se.x - weMap.right) < 0.005 &&
+      Math.abs(sw.y - weMap.south) < 0.007 && Math.abs(se.y - weMap.south) < 0.007;
+    if (!fine) bad(`View Entire Map ${when}: pitch ${c.pitch}, yaw ${c.yaw}, the map's south-west at ${JSON.stringify(sw)}, south-east at ${JSON.stringify(se)} (the editor's: ${JSON.stringify(weMap)})`);
   };
   // No water (it ripples) and no animation, so that the same view is the same picture.
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
@@ -3191,18 +3204,18 @@ async function viewCommands(page, fail, shots, size) {
   entireMap(await state(), "at first");
   const far = await settle("plain");
   await trial(far.plain, far.noise, "w3.terrain.toggleNavalPathing", "naval", "naval", 2000);
-  // As the World Editor's: light red where ships can't sail (here the map's edge, just inside the view's left side),
+  // As the World Editor's: the map's edge (the west one, inside the view's left side) flat brown over its dark,
   // and the sailable water left as it is.
   await run("w3.terrain.toggleNavalPathing");
   await sleep(1500);
   const naval = await picture("naval-colours");
   await run("w3.terrain.toggleNavalPathing");
-  const edgeBox = [0.025, 0.4, 0.045, 0.6], waterBox = [0.25, 0.4, 0.35, 0.6];
+  const edgeBox = [weMap.left + weMap.edge * 0.2, 0.4, weMap.left + weMap.edge * 0.8, 0.6], waterBox = [0.25, 0.4, 0.35, 0.6];
   const [edge0, edge1] = [await meanColour(page, far.plain, edgeBox), await meanColour(page, naval, edgeBox)];
   const [water0, water1] = [await meanColour(page, far.plain, waterBox), await meanColour(page, naval, waterBox)];
   const round = (c) => c.map(Math.round).join(",");
-  // Half the ground plus half of (255, 128, 128), darkened with the rest of the edge: red rises, and most.
-  if (!(edge1[0] - edge0[0] > 30 && edge1[0] - edge1[1] > edge0[0] - edge0[1] + 30)) bad(`the naval layer over the map's edge isn't light red: ${round(edge0)} became ${round(edge1)}`);
+  // The editor's 108, 55, 15 (viewcmds.ts NAVAL_EDGE), drawn over the edge's dark, not under it.
+  if (edge1.some((v, i) => Math.abs(v - [108, 55, 15][i]) > 12) || edge0[0] > 80) bad(`the naval layer over the map's edge isn't the editor's flat brown: ${round(edge0)} became ${round(edge1)}`);
   if (water0.some((v, i) => Math.abs(v - water1[i]) > 6)) bad(`the naval layer covers sailable water: ${round(water0)} became ${round(water1)}`);
   await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
 

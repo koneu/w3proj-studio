@@ -4237,8 +4237,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         const viewEntireMap = () => {
-          const [lo, hi] = cornerHeights(0, 0, terrain.width, terrain.height);
-          const v = viewOfMap({ minX: terrain.offsetX, maxX: terrain.offsetX + (terrain.width - 1) * 128, minY: terrain.offsetY, maxY: terrain.offsetY + (terrain.height - 1) * 128, minZ: lo, maxZ: hi },
+          const p = playableEdge && playableEdge.right > playableEdge.left && playableEdge.top > playableEdge.bottom ? playableEdge : null;
+          // Framed over the ground in the playable part's middle, as the World Editor frames map 03 (its lake lower
+          // down doesn't bring the camera closer).
+          const mx = p ? Math.round(((p.left + p.right) / 2 - terrain.offsetX) / 128) : (terrain.width - 1) >> 1;
+          const my = p ? Math.round(((p.bottom + p.top) / 2 - terrain.offsetY) / 128) : (terrain.height - 1) >> 1;
+          const [z] = cornerHeights(mx, my, mx, my);
+          const v = viewOfMap({ minX: terrain.offsetX, maxX: terrain.offsetX + (terrain.width - 1) * 128, minY: terrain.offsetY, maxY: terrain.offsetY + (terrain.height - 1) * 128, minZ: z, maxZ: z },
+            p ? { minX: p.left, maxX: p.right, minY: p.bottom, maxY: p.top, minZ: z, maxZ: z } : null,
             renderer.fov, canvas.clientWidth / Math.max(1, canvas.clientHeight));
           Object.assign(renderer, { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: Math.max(200, Math.min(maxDistance(), v.distance)) });
           redraw();
@@ -4305,7 +4311,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
                 parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
-                parts[3] = fits && on.naval ? navalColors(p.cells) : null;
+                const e = playableEdge, cell = (v: number) => Math.round(v / 32);
+                const inside = e ? { width: W, x0: cell(e.left - terrain.offsetX), x1: cell(e.right - terrain.offsetX), y0: cell(e.bottom - terrain.offsetY), y1: cell(e.top - terrain.offsetY) } : null;
+                parts[3] = fits && on.naval ? navalColors(p.cells, inside) : null;
                 show();
               }));
             }

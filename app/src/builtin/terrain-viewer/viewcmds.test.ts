@@ -55,25 +55,43 @@ test("viewOfBox: a wider window needs less distance for a wide box, and a point 
   assert.equal(viewOfBox(wide, a, 1, { maxDistance: 1000 }).distance, 1000);
 });
 
-test("viewOfMap: as the World Editor, straight down, north up, the map's width across the view, its south kept", () => {
-  // The World Editor's picture: a 64x64 map in its 1184x844 view, the map's sides at x 18 and 1166, its south at y 735.
-  const W = 1184, H = 844, aspect = W / H, fov = Math.PI / 4;
-  const px = (q: { x: number; y: number }) => ({ x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H });
-  const square: Box = { minX: -4096, maxX: 4096, minY: -4096, maxY: 4096, minZ: 0, maxZ: 0 };
-  const v = viewOfMap(square, fov, aspect);
-  assert.ok(v.pitch >= MAX_PITCH && v.pitch < Math.PI / 2, "looks (almost) straight down, within what the mouse can rotate to");
-  assert.equal(v.yaw, -Math.PI / 2, "north up");
-  const at = (x: number, y: number) => px(project([x, y, 0], v.target, v.distance, { ...v, fov }, aspect)!);
-  const sw = at(square.minX, square.minY), se = at(square.maxX, square.minY), nw = at(square.minX, square.maxY);
-  assert.ok(Math.abs(sw.x - 18) < 1 && Math.abs(se.x - 1166) < 1, `the sides at 18 and 1166: ${sw.x}, ${se.x}`);
-  assert.ok(Math.abs(sw.y - 735) < 1 && Math.abs(se.y - 735) < 1, `the south at 735: ${sw.y}`);
-  assert.ok(nw.y < 0, "the north is cut off");
-  const top = at(square.minX, v.target[1] + (v.target[1] - square.minY) * 0.9);
-  assert.ok(Math.abs(top.x - sw.x) < 1, `the sides stay upright: ${top.x} at the top, ${sw.x} at the south`);
-  // A map that fits in height sits in the middle; the target is always the map's middle across.
+test("viewOfMap: as the World Editor, straight down, north up, framed by the playable part's larger side, its south kept", () => {
+  // The World Editor's pictures in its 1184x844 view (we-drive, 2026-11-11), new maps with the usual border (6 tiles
+  // left and right, 4 below, 8 above): the whole map's sides and its south edge, in pixels.
+  const W = 1184, H = 844, aspect = W / H;
+  const seen = [
+    { tiles: [64, 64], left: 18, right: 1165, south: 734 },
+    { tiles: [128, 64], left: 77, right: 1106, south: 450 },
+    { tiles: [64, 128], left: 334, right: 849, south: 696 },
+  ];
+  for (const fov of [Math.PI / 4, 1.2]) {
+    for (const { tiles: [tw, th], left, right, south } of seen) {
+      const map: Box = { minX: -tw * 64, maxX: tw * 64, minY: -th * 64, maxY: th * 64, minZ: 0, maxZ: 0 };
+      const playable: Box = { minX: map.minX + 6 * 128, maxX: map.maxX - 6 * 128, minY: map.minY + 4 * 128, maxY: map.maxY - 8 * 128, minZ: 0, maxZ: 0 };
+      const v = viewOfMap(map, playable, fov, aspect);
+      const name = `${tw}x${th} (fov ${fov.toFixed(2)})`;
+      assert.ok(v.pitch >= MAX_PITCH && v.pitch < Math.PI / 2, "looks (almost) straight down, within what the mouse can rotate to");
+      assert.equal(v.yaw, -Math.PI / 2, "north up");
+      const at = (x: number, y: number) => {
+        const q = project([x, y, 0], v.target, v.distance, { ...v, fov }, aspect)!;
+        return { x: (q.x + 1) / 2 * W, y: (1 - q.y) / 2 * H };
+      };
+      const sw = at(map.minX, map.minY), se = at(map.maxX, map.minY), nw = at(map.minX, map.maxY);
+      assert.ok(Math.abs(sw.x - left) < 2 && Math.abs(se.x - right) < 2, `${name}: the sides at ${left} and ${right}: ${sw.x}, ${se.x}`);
+      assert.ok(Math.abs(sw.y - south) < 2 && Math.abs(se.y - south) < 2, `${name}: the south at ${south}: ${sw.y}`);
+      assert.ok(nw.y < 0, `${name}: the north is cut off (${nw.y})`);
+      const top = at(map.minX, 0);
+      assert.ok(Math.abs(top.x - sw.x) < 1.5, `${name}: the sides stay upright: ${top.x} in the middle, ${sw.x} at the south`);
+    }
+  }
+  // Without a playable part the whole map is framed; the target is the playable part's middle across.
   const wide: Box = { minX: 0, maxX: 32768, minY: 0, maxY: 8192, minZ: 100, maxZ: 300 };
-  const w = viewOfMap(wide, fov, aspect);
-  assert.deepEqual(w.target, [16384, 4096, 200]);
+  const whole = viewOfMap(wide, null, 1, aspect), same = viewOfMap(wide, wide, 1, aspect);
+  assert.deepEqual(whole, same);
+  assert.equal(whole.target[0], 16384);
+  assert.equal(whole.target[2], 200);
+  const offCentre = viewOfMap(wide, { ...wide, minX: 1024 }, 1, aspect);
+  assert.equal(offCentre.target[0], (1024 + 32768) / 2);
 });
 
 test("boxOf: the points' extent plus the padding; nothing and non-numbers give null", () => {
@@ -104,6 +122,14 @@ test("navalColors: as the World Editor, red where ships can't sail (land, the ed
   assert.deepEqual(px(3), [255, 128, 128, 128]);
   assert.deepEqual(px(1), [0, 0, 0, 0]);
   assert.deepEqual(px(2), [0, 0, 0, 0]);
+  // The map's edge, past the playable part: flat brown over everything, water or land (a 4x3 grid, its middle 2x1 playable).
+  const grid = [land, shallow, deep, border, land, shallow, deep, border, land, shallow, deep, border];
+  const edged = navalColors(grid, { width: 4, x0: 1, x1: 3, y0: 1, y1: 2 });
+  const at = (x: number, y: number) => [...edged.subarray((y * 4 + x) * 4, (y * 4 + x) * 4 + 4)];
+  assert.deepEqual(at(1, 1), [0, 0, 0, 0], "sailable water inside stays clear");
+  assert.deepEqual(at(2, 1), [0, 0, 0, 0]);
+  for (const [x, y] of [[0, 0], [1, 0], [2, 0], [3, 1], [0, 1], [1, 2], [3, 2]]) assert.deepEqual(at(x, y), [108, 55, 15, 255], `edge cell ${x},${y}`);
+  assert.deepEqual([...navalColors(grid, null)], [...navalColors(grid)], "no playable part: no edge");
 });
 
 test("composeLayers: the later layer lies over the earlier; none gives null; one stays as it is", () => {
