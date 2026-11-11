@@ -100,4 +100,7 @@ test("the World Editor's melee rules, as far as war3map.w3i and the units tell",
   // The flag goes off for each, and only it.
   assert.equal(meleeFlagsAfter({ ...base, flags: 0x2fc14 | 0x40 }, sloc), 0x2fc10 | 0x40);
   assert.equal(meleeFlagsAfter({ ...base, flags: 0x2fc14 }, sloc), 0x2fc14);
+  // A start in an invalid position (World Editor 7003's new maps on water, 2026-11-11) only when the caller tells.
+  assert.deepEqual(meleeBlockers(base, sloc, true), ["Start locations are in invalid positions"]);
+  assert.equal(meleeFlagsAfter({ ...base, flags: 0x2fc14 }, sloc, true), 0x2fc10);
 });

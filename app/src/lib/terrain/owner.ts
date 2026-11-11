@@ -40,10 +40,12 @@ export interface MeleeInfo {
  * Its other reasons aren't here: custom object data, gameplay constants or interface, triggers other than the default
  * Melee Initialization (renaming it, dropping an action or disabling it counted; its description and the custom script
  * header didn't), and start locations "in invalid positions" (trees about 200 from a start made it one; a start 250 from
- * a tavern also took the flag off).
+ * a tavern also took the flag off). That one counts only when the caller tells (`startsInvalid`): a start under water is
+ * one (World Editor 7003's new maps on shallow or deep water, we-drive 2026-11-11), the rest Studio can't tell.
  */
-export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: string })[]): string[] {
+export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: string })[], startsInvalid = false): string[] {
   const out: string[] = [];
+  if (startsInvalid) out.push("Start locations are in invalid positions");
   if (hasPlayerUnits(placed)) out.push("Player-owned units have been placed");
   if (info.flags & 0x0001) out.push("'Hide minimap' option has been turned on");
   if (!(info.flags & 0x0010)) out.push("'Partially visible masked areas' option has been turned off");
@@ -59,8 +61,8 @@ export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: s
 /** The map's flags after a save: Melee goes off when one of meleeBlockers applies, as the World Editor's save does.
  *  Studio never turns it back on: the editor does when none of its reasons applies, but two of those (start locations
  *  in invalid positions, custom triggers) Studio can't tell (see meleeBlockers); the editor's next save does it. */
-export function meleeFlagsAfter(info: MeleeInfo, placed: readonly (Owned & { id: string })[]): number {
-  return info.flags & MELEE_MAP && meleeBlockers(info, placed).length ? info.flags & ~MELEE_MAP : info.flags;
+export function meleeFlagsAfter(info: MeleeInfo, placed: readonly (Owned & { id: string })[], startsInvalid = false): number {
+  return info.flags & MELEE_MAP && meleeBlockers(info, placed, startsInvalid).length ? info.flags & ~MELEE_MAP : info.flags;
 }
 
 /** The player field's bit for an Ancient placed uprooted. */

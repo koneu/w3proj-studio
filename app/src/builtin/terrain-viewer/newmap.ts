@@ -11,7 +11,8 @@
 import type { W3Api } from "../../extensions/api";
 import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { isFullPath, joinPath } from "../../lib/paths";
-import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, WATER_OFFSET, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { heightAt, markMapEdge, randomVariation, setGroundHeight, setWaterLevel, waterLevelAt, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { meleeFlagsAfter } from "../../lib/terrain/owner";
 import { w3eToText } from "../../lib/terrain/w3etext";
 import { SCRIPT_STAMP, scriptHash } from "../../lib/script/guard";
 import { parseWct, textTriggers, writeWctFile, writeWtgJson, WTG_JSON } from "../../lib/triggers/wtg";
@@ -42,16 +43,18 @@ export interface NewMapOptions {
   baseTile: string;
   /** Cliff level of the ground (0–15; the World Editor starts at 2). */
   layer: number;
-  /** Water over the whole map, as the painter's water tools make it: the ground one level
-   *  (shallow) or two (deep) below `layer`, the surface just under `layer`'s ground. */
+  /** Water over the whole map, as the World Editor's dialog makes it: the ground stays at `layer`, the surface
+   *  WATER_DEPTH above it. */
   water: "none" | "shallow" | "deep";
-  /** Gentle random hills. */
+  /** The World Editor's "Random height field": uneven ground, about ±50. */
   noise: boolean;
   lua: boolean;
 }
 
-/** Levels the ground goes down for water. */
-const WATER_DROP = { none: 0, shallow: 1, deep: 2 } as const;
+/** How far the water surface of a new map stands above its ground. World Editor 7003's new maps (we-drive saves,
+ *  2026-11-11): flat ground at the chosen cliff level, the stored water level 0x2200 (shallow) and 0x2400 (deep) at
+ *  level 2, 0x2800 deep at level 4, every corner flagged as water. */
+export const WATER_DEPTH = { shallow: 38.4, deep: 166.4 } as const;
 
 /** Camera margins (tiles): left, right, bottom, top, as the World Editor sets them. */
 const MARGINS = [6, 6, 4, 8] as const;
@@ -131,7 +134,6 @@ export function mapChoices(a: Record<string, unknown>, data: Pick<TileData, "set
   if (!Number.isInteger(layer) || (layer as number) < 0 || (layer as number) > 14) throw new Error("cliffLevel must be a whole number from 0 to 14.");
   const water = a.water === undefined ? "none" : a.water;
   if (water !== "none" && water !== "shallow" && water !== "deep") throw new Error("water must be none, shallow or deep.");
-  if ((layer as number) < WATER_DROP[water]) throw new Error(`${water === "deep" ? "Deep" : "Shallow"} water needs cliffLevel ${WATER_DROP[water]} or higher.`);
   const script = a.script === undefined ? "jass" : a.script;
   if (script !== "jass" && script !== "lua") throw new Error("script must be jass or lua.");
   const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -227,7 +229,6 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
       if (!parent) { error.textContent = "Choose where to create the project."; return; }
       if (!name.value.trim()) { error.textContent = "The map needs a name."; return; }
       const w = water.value as NewMapOptions["water"];
-      if (Number(layer.value) < WATER_DROP[w]) { error.textContent = `${w === "deep" ? "Deep" : "Shallow"} water needs cliff level ${WATER_DROP[w]} or higher.`; return; }
       close({
         dir: target(), name: name.value.trim(), author: author.value.trim(), description: description.value.trim(),
         width: Number(width.value), height: Number(height.value), tileset: tileset.value,
@@ -273,30 +274,26 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
   });
 }
 
-/** Gentle random hills (world units, about ±50): smooth value noise over two grid sizes. */
-function hills(width: number, height: number): (x: number, y: number) => number {
-  const octave = (cell: number, amp: number) => {
-    const gw = Math.ceil(width / cell) + 2, gh = Math.ceil(height / cell) + 2;
-    const g = Float32Array.from({ length: gw * gh }, () => (Math.random() * 2 - 1) * amp);
-    const smooth = (t: number) => t * t * (3 - 2 * t);
-    return (x: number, y: number) => {
-      const fx = x / cell, fy = y / cell, ix = Math.floor(fx), iy = Math.floor(fy);
-      const u = smooth(fx - ix), v = smooth(fy - iy), at = (i: number, j: number) => g[(iy + j) * gw + ix + i];
-      return (at(0, 0) * (1 - u) + at(1, 0) * u) * (1 - v) + (at(0, 1) * (1 - u) + at(1, 1) * u) * v;
-    };
-  };
-  const big = octave(8, 40), small = octave(3, 12);
-  return (x, y) => big(x, y) + small(x, y);
+/** The World Editor's random height field (world units) for corners `width` × `height`: white noise, lightly blurred.
+ *  Fitted to World Editor 7003's (we-drive save of a new 64 × 64 map, 2026-11-11): from -51 to 47.25, standard
+ *  deviation 18.25, a mean step of 16.6 between neighbouring corners, correlation 0.37 with the next corner and none
+ *  three corners on. Each corner is noise of ±1 plus 0.18 of its four neighbours' and 0.12 of its four diagonal ones'. */
+export function hills(width: number, height: number, random: () => number = Math.random): (x: number, y: number) => number {
+  const gw = width + 2;
+  const g = Float32Array.from({ length: gw * (height + 2) }, () => random() * 2 - 1);
+  const at = (x: number, y: number) => g[(y + 1) * gw + x + 1];
+  return (x, y) => 29 * (at(x, y)
+    + 0.18 * (at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1))
+    + 0.12 * (at(x - 1, y - 1) + at(x + 1, y - 1) + at(x - 1, y + 1) + at(x + 1, y + 1)));
 }
 
 /** The terrain of `o.width` × `o.height` tiles, centred on the origin. */
-export function newTerrain(o: NewMapOptions): Terrain {
+export function newTerrain(o: NewMapOptions, random: () => number = Math.random): Terrain {
   const width = o.width + 1, height = o.height + 1;
   const texture = Math.max(0, o.groundTiles.indexOf(o.baseTile));
-  const layer = Math.max(0, Math.min(15, o.layer - WATER_DROP[o.water]));
-  // The surface sits where the painter's water tools put it: the water offset under the ground of `o.layer`.
-  const level = o.water === "none" ? null : waterLevelAt((o.layer - 2) * 128 - WATER_OFFSET);
-  const lift = o.noise ? hills(width, height) : () => 0;
+  const layer = Math.max(0, Math.min(15, o.layer));
+  const level = o.water === "none" ? null : waterLevelAt((layer - 2) * 128 + WATER_DEPTH[o.water]);
+  const lift = o.noise ? hills(width, height, random) : () => 0;
   const corners: Corner[] = Array.from({ length: width * height }, (_, i) => {
     const c: Corner = {
       height: 0, water: -89.6, texture, variation: randomVariation(), cliffVariation: 0, cliffTexture: 15, layer,
@@ -344,7 +341,8 @@ export function mapInfo(o: NewMapOptions, t: Terrain): unknown {
     cameraBounds: [c.left, c.bottom, c.right, c.top, c.left, c.top, c.right, c.bottom],
     cameraComplements: [...MARGINS],
     playableWidth: t.width - 1 - MARGINS[0] - MARGINS[1], playableHeight: t.height - 1 - MARGINS[2] - MARGINS[3],
-    flags: FLAGS, tileset: o.tileset,
+    // A start under water is "in an invalid position": World Editor 7003's new maps on water aren't melee maps.
+    flags: meleeFlagsAfter({ flags: FLAGS }, [], waterSurfaceAt(t, sx, sy) !== null), tileset: o.tileset,
     loadingScreen: { number: -1, crestRace: 64, model: "", text: "", title: "", subtitle: "" },
     gameDataSet: 0xffffffff,
     prologue: { path: "", text: "", title: "", subtitle: "" },
