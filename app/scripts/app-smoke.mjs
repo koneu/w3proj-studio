@@ -3388,14 +3388,8 @@ async function byHand(page, found) {
   if (!/where/.test(await errorText())) fail(`no folder gave "${await errorText()}"`);
   await hands.click(".newmap-dialog button", "Browse…");
   await sleep(100);
-  await page.evaluate(`(() => {
-    const rows = [...document.querySelectorAll(".newmap-row")];
-    const select = (label) => rows.find((r) => r.textContent.startsWith(label)).querySelector("select");
-    const set = (label, value) => { const e = select(label); e.value = value; e.dispatchEvent(new Event("change", { bubbles: true })); e.dispatchEvent(new Event("input", { bubbles: true })); };
-    set("Cliff level", "0"); set("Water", "deep");
-  })()`);
-  await hands.click(".newmap-buttons button", "Create");
-  if (!/Deep water needs/.test(await errorText())) fail(`deep water on level 0 gave "${await errorText()}"`);
+  // Deep water on cliff level 0 is allowed now, as in the World Editor (the ground stays, the water goes on top;
+  // newmap.test.ts pins it), so it's no longer among the refusals.
   if ((await page.evaluate(`w3.workspace.project()?.root`)) !== before) fail("a refused map changed the project");
 
   // Filled in by hand, and created with Enter.
