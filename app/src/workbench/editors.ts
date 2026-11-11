@@ -142,6 +142,30 @@ export class EditorService {
     try { t.instance?.flush?.(); } catch (e) { console.error(`flushing ${t.path}:`, e); }
   }
 
+  /** Before a save only (it moves the focus, so never where unsaved changes are merely asked about): the text field
+   *  with the focus in the tab commits what was typed into it, as leaving it would. Most editors take a field's text
+   *  on its `change` event, which a key like Ctrl+S doesn't cause. The field loses the focus and gets it back with the
+   *  caret where it was, so the browser fires `change` only when the text differs from what it last committed, and the
+   *  editor's own handler checks it as it does any other time. An editor with its own `flush` commits its fields
+   *  itself (the Trigger Editor leaves names out: a rename asks questions). */
+  private commitField(t: Tab) {
+    if (t.instance?.flush) return;
+    const a = document.activeElement;
+    const text = a instanceof HTMLTextAreaElement
+      || (a instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit", "reset", "file", "color", "range", "image"].includes(a.type));
+    if (!text || !t.el.contains(a) || a.readOnly || a.disabled) return;
+    // Null for inputs without a caret (number fields): their text is all there is to keep.
+    let caret: [number, number, "forward" | "backward" | "none"] | null = null;
+    try { caret = a.selectionStart === null || a.selectionEnd === null ? null : [a.selectionStart, a.selectionEnd, a.selectionDirection ?? "none"]; } catch { /* no caret */ }
+    try {
+      a.blur();
+    } catch (e) { console.error(`committing the field of ${t.path}:`, e); }
+    // The editor may have drawn the field again in its handler; then the new one is the editor's business.
+    if (!a.isConnected || (document.activeElement !== document.body && document.activeElement !== null)) return;
+    a.focus({ preventScroll: true });
+    if (caret) try { a.setSelectionRange(...caret); } catch { /* no caret */ }
+  }
+
   /** Whether an editor of the file has unsaved changes. */
   unsavedPaths(): string[] {
     return [...new Set(this.tabs.filter((t) => this.unsaved(t)).map((t) => t.path))];
@@ -435,6 +459,7 @@ export class EditorService {
   private async saveTab(t: Tab): Promise<boolean> {
     if (!t.instance?.save) return false;
     // What was typed a moment ago is saved with the rest (and isn't left unsaved after the save).
+    this.commitField(t);
     this.flush(t);
     if (!(await this.mayOverwrite(t))) return false;
     // Typed while the question about the file on disk was open.
@@ -511,7 +536,9 @@ export class EditorService {
     let n = 0;
     for (const t of this.tabs.filter((x) => this.key(x.path) === key)) {
       // Closed while an earlier one was saving.
-      if (this.tabs.includes(t) && this.unsaved(t) && (await this.saveTab(t))) n++;
+      if (!this.tabs.includes(t)) continue;
+      this.commitField(t);
+      if (this.unsaved(t) && (await this.saveTab(t))) n++;
     }
     return n;
   }
@@ -520,6 +547,8 @@ export class EditorService {
   async saveAll(): Promise<number> {
     let n = 0;
     for (const t of [...this.tabs]) {
+      // A field typed in but not left yet has changes its tab doesn't know of.
+      this.commitField(t);
       if (this.unsaved(t) && (await this.saveTab(t))) n++;
     }
     return n;

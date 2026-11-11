@@ -3500,6 +3500,100 @@ async function triggerByHand(page, hands, root, fail) {
   if (typed()?.isCustom !== false || !typed()?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
 }
 
+/** Ctrl+S with the cursor still in a field of an editor that takes a field's text when the field is left (its `change`
+ *  event): the save has the typed text and leaves the tab saved. A key doesn't leave the field, so the save used to go
+ *  without the text, and the tab stayed saved too until the field was left. The Object Editor (a value cell), Map
+ *  Properties (a number field), Gameplay Constants and the Sound Editor (the workbench's step before a save, EditorService.commitField). */
+async function typedFieldSave(page, found) {
+  const fail = (what) => found.push(`typed field save: ${what}`);
+  const k = await heightKit(page, "TypedField");
+  const { hands, root } = k;
+  const dirty = (path) => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
+  const mark = (expr) => page.evaluate(`(() => { const e = ${expr}; if (e) e.dataset.smoke = "typed"; return !!e; })()`);
+  /** Types over the text of the field `expr` finds (once the editor has stopped drawing it again), then Ctrl+S at once. */
+  const typeAndSave = async (what, expr, text) => {
+    await until(what, () => mark(expr), 20000);
+    await sleep(500);
+    await until(what, () => mark(expr), 5000);
+    await hands.click("[data-smoke=typed]");
+    await hands.chord("Ctrl+A");
+    await hands.type(text);
+    // Control: still in the field and not committed yet, as Ctrl+S finds it.
+    const before = await page.evaluate(`document.activeElement?.dataset.smoke === "typed"`);
+    if (!before) fail(`the field didn't have the focus when ${text} was typed (control)`);
+    await hands.chord("Ctrl+S");
+  };
+  try {
+    // ---- The Object Editor: the Footman's hit points ----
+    const w3u = "map/war3map.w3u.json";
+    await page.evaluate(`w3.editors.closeAll()`);
+    if (!existsSync(join(root, w3u))) await page.evaluate(`w3.workspace.writeText(${JSON.stringify(w3u)}, JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [] }))`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(w3u)})`);
+    await until("the object list", () => page.evaluate(`!!document.querySelector("input.obj-search")`), 30000);
+    await hands.click(".obj-toolbar-buttons button", "Edit standard…");
+    await until("the picker", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 20`), 20000);
+    await hands.click("input.picker-search");
+    await hands.type("hfoo");
+    await sleep(300);
+    await hands.key("Enter", "Enter", 13);
+    await until("its fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 15000);
+    await hands.click("input.obj-field-search");
+    await hands.type("uhpm");
+    await until("the field", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell input").length === 1`), 5000);
+    await typeAndSave("the Footman's hit points", `document.querySelector(".obj-table .obj-value-cell input")`, "555");
+    const hp = () => JSON.parse(readFileSync(join(root, w3u), "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm")?.value;
+    await until("the typed hit points saved", () => hp() === 555, 5000).catch(() => fail(`Ctrl+S right after typing 555 hit points saved ${JSON.stringify(hp())}`));
+    await sleep(300);
+    if (await dirty(w3u)) fail("Ctrl+S right after typing in the Object Editor left it unsaved");
+
+    // ---- Map Properties: the fog's Start Z, a number field ----
+    const w3i = "map/war3map.w3i.json";
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(w3i)})`);
+    await until("Map Properties", () => page.evaluate(`!!document.querySelector(".map-info .form-nav")`), 20000);
+    await page.evaluate(`[...document.querySelectorAll(".map-info .form-nav-item")].find((b) => b.textContent === "Environment")?.click()`);
+    const startZ = `[...document.querySelectorAll(".map-info label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Start Z")?.querySelector("input")`;
+    await typeAndSave("the fog's Start Z", startZ, "1234");
+    const fog = () => JSON.parse(readFileSync(join(root, w3i), "utf8")).fog?.start;
+    await until("the typed Start Z saved", () => fog() === 1234, 5000).catch(() => fail(`Ctrl+S right after typing 1234 as Start Z saved ${JSON.stringify(fog())}`));
+    await sleep(300);
+    if (await dirty(w3i)) fail("Ctrl+S right after typing in Map Properties left it unsaved");
+
+    // ---- Gameplay Constants: Max Unit Speed ----
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.gameplayConstants.open")`);
+    const speed = `[...document.querySelectorAll(".gs-row")].find((r) => r.title.startsWith("Misc › MaxUnitSpeed "))?.querySelector("input.gs-input")`;
+    await until("Max Unit Speed", () => mark(speed), 20000);
+    const miscPath = await page.evaluate(`w3.editors.activePath()`);
+    await typeAndSave("Max Unit Speed", speed, "432");
+    const misc = () => readFileSync(join(root, ...miscPath.split("/")), "utf8");
+    await until("the typed speed saved", () => /^MaxUnitSpeed=432\r?$/m.test(misc()), 5000).catch(() => fail(`Ctrl+S right after typing 432 as Max Unit Speed saved ${JSON.stringify(misc().slice(0, 200))}`));
+    await sleep(300);
+    if (await dirty(miscPath)) fail("Ctrl+S right after typing in Gameplay Constants left it unsaved");
+
+    // ---- The Sound Editor: a sound's volume ----
+    const w3s = "map/war3map.w3s.json";
+    await page.evaluate(`w3.editors.closeAll()`);
+    const bell = {
+      name: "gg_snd_Typed_Bell", file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: "gg_snd_Typed_Bell", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    };
+    await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(w3s)}, ${JSON.stringify(JSON.stringify({ format: "w3proj.sounds/1", version: 3, sounds: [bell] }))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.editors.open(${JSON.stringify(w3s)})`);
+    await until("the sound list", () => page.evaluate(`!!document.querySelector("tr.snd-row")`), 20000);
+    await hands.click("tr.snd-row");
+    await typeAndSave("the sound's volume", `document.querySelector(".snd-num")`, "77");
+    const volume = () => JSON.parse(readFileSync(join(root, w3s), "utf8")).sounds[0]?.volume;
+    await until("the typed volume saved", () => volume() === 77, 5000).catch(() => fail(`Ctrl+S right after typing 77 as the volume saved ${JSON.stringify(volume())}`));
+    await sleep(300);
+    if (await dirty(w3s)) fail("Ctrl+S right after typing in the Sound Editor left it unsaved");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Test Map when the game can't start: the user is told why, whichever way it was asked for, and
  *  nothing is left uncaught in the page (the run's `problems` list would show it). */
 async function testMapWithoutGame(page, found) {
@@ -7194,6 +7288,7 @@ async function run() {
         tilesInPlace,
         tileTemplate,
         triggersAndAi,
+        typedFieldSave,
         unitProperties,
         viewModes,
         waterPathing,
@@ -7343,6 +7438,8 @@ async function run() {
     await leftOpen(page, "niceToHaves");
     await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
     await leftOpen(page, "byHand");
+    await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
+    await leftOpen(page, "typedFieldSave");
     await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
     await leftOpen(page, "moduleFunctions");
     await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));

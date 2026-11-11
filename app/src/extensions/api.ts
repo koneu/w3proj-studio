@@ -164,7 +164,9 @@ export interface EditorInstance {
   viewState?(): unknown;
   save?(): Promise<void>;
   /** Applies edits still waiting (text committed after a pause in typing) and marks them unsaved: the workbench
-   *  calls it before it saves the editor or asks whether it has unsaved changes (closing, reloading, Save All). */
+   *  calls it before it saves the editor or asks whether it has unsaved changes (closing, reloading, Save All).
+   *  Without it, a save first has the focused text field in the editor commit its text (it loses the focus and gets
+   *  it back, which fires its `change` if the text changed); an editor with it commits its fields itself. */
   flush?(): void;
   focus?(): void;
   dispose?(): void;
