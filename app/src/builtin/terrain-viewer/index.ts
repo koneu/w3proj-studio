@@ -1618,7 +1618,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redraw();
         };
         renderer.showBorder = showBoundary();
-        renderer.showFog = w3.settings.get<boolean>("terrain.fog", true) !== false;
+        renderer.showFog = w3.settings.get<boolean>("terrain.fog", false) === true;
         /** The game's skies, for the view: a map doesn't keep one, the World Editor has it as a preference. */
         const skySelect = h("select", { title: "The sky in this view. It isn't part of the map", onchange: () => { void w3.settings.set("terrain.sky", skySelect.value); keysToMap(); } }, h("option", { value: "" }, "No sky"));
         const showSkyChoice = async () => {
@@ -4209,7 +4209,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
         };
         const viewSet = (): ViewSet => ({ ...viewState, lighting: lightOn(),
-          fog: w3.settings.get<boolean>("terrain.fog", true) !== false, weather: w3.settings.get<boolean>("terrain.weather", true) !== false });
+          fog: w3.settings.get<boolean>("terrain.fog", false) === true, weather: w3.settings.get<boolean>("terrain.weather", true) !== false });
         let shown = shownView(viewSet(), gameViewOn());
         /** Redraws the toolbar's boxes after a command changed what they show. */
         const viewSyncs: (() => void)[] = [];
@@ -4578,7 +4578,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", false),
                 switchBox("Enforce camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", false),
               ] : []),
-              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", true) !== false, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
+              toggle("Fog", () => w3.settings.get<boolean>("terrain.fog", false) === true, (v) => { void w3.settings.set("terrain.fog", v); }, true, keyTitle("Fog Effects: the map's fog", "w3.terrain.toggleFogEffects")),
               toggle("Weather", () => w3.settings.get<boolean>("terrain.weather", true) !== false, (v) => { void w3.settings.set("terrain.weather", v); }, true, keyTitle("The map's weather", "w3.terrain.toggleWeather")),
               switchBox("Shadows", "View > Shadows: the map's shadow map (war3map.shd, with unsaved edits predicted), buildings' and trees' shadows, units' shadows", "terrain.shadows.visible", true, true),
               skySelect,

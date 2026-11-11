@@ -1226,6 +1226,8 @@ async function viewModes(page, found) {
   if ((await k.box("Camera bounds")) !== false) fail("the Camera bounds box didn't follow B off");
   if ((await state()).cameraBounds || (await changed()) > 150) fail("B twice isn't the plain picture");
   const fogBefore = (await state()).shown.fog;
+  // Off by default, as the World Editor's Fog Effects (the user's decision, 2026-11-11).
+  if (fogBefore !== false || (await k.setting("terrain.fog")) !== false) fail(`Fog Effects isn't off by default: shown ${fogBefore}, setting ${await k.setting("terrain.fog")}`);
   await key("f", "KeyF", 70);
   if ((await state()).shown.fog === fogBefore || (await k.setting("terrain.fog")) !== !fogBefore) fail(`F didn't toggle Fog Effects: ${fogBefore} → ${(await state()).shown.fog}`);
   if (!/\(F\)/.test(await page.evaluate(`[...document.querySelectorAll(".model-toggle")].find((l) => l.textContent.trim() === "Fog")?.title ?? ""`))) fail("the Fog box's tooltip doesn't name F");

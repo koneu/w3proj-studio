@@ -280,7 +280,7 @@
       "title": "Terrain",
       "properties": {
         "terrain.sky": { "type": "string", "default": "", "description": "Sky model shown in the terrain view, by its path; empty for none. A view setting: it isn't part of the map." },
-        "terrain.fog": { "type": "boolean", "default": true, "description": "Show the map's fog in the terrain view, when the map has it on." },
+        "terrain.fog": { "type": "boolean", "default": false, "description": "Show the map's fog in the terrain view, when the map has it on. Off by default, as the World Editor's Fog Effects (F)." },
         "terrain.gameView": { "type": "boolean", "default": false, "description": "Game view (V in the terrain view, the World Editor's Lock to Game View Settings): the terrain view shows the map as the game does, lit and fogged, without regions, cameras, start locations, pathing, grids or light ranges. The other view settings stay as they are for when it's off." },
         "terrain.preserveCopiedHeight": { "type": "boolean", "default": true, "description": "Preserve Copied Object Height: a pasted doodad with a fixed height keeps its height over the ground; with this off every pasted object sits on the ground." },
         "terrain.enforceWaterLimits": { "type": "boolean", "default": false, "description": "Enforce Water Height Limits: an edit in the terrain view that would push water past the lowest or highest water height the game can store is refused, instead of being cut off at the limit." },
