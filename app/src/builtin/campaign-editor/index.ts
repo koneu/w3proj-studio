@@ -10,6 +10,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
+import { BusyQueue } from "../../lib/busyqueue";
 import { joinPath } from "../../lib/paths";
 import { replaceQuestion, wouldDelete } from "../../lib/syncdeletes";
 import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
@@ -206,6 +207,7 @@ class CampaignView {
 
   constructor(private w3: W3Api, private el: HTMLElement, public info: CampaignInfo, private strings: StringTable | null,
     private editable: boolean, private setDirty: (dirty: boolean) => void, private save: () => Promise<void>) {
+    this.root = w3.workspace.project()?.root;
     el.classList.add("camp-editor");
     el.tabIndex = -1;
     addKeyContext(el, UNDO_CONTEXT);
@@ -253,24 +255,26 @@ class CampaignView {
     this.setDirty(this.undoStack.length !== this.savedAt);
     if (rerender) this.render();
   }
-  /** A map file change (or its undo) is being done: undo, redo and other map changes wait for it (refused). */
-  private busy = false;
-  /** The editor closed: a map change waiting for a question or a file choice stops. */
+  /** A map file change (or its undo) is being done: other map changes are refused meanwhile, undo and redo wait for it
+   *  (in order; dropped when the editor closes or another project opens). */
+  private queue = new BusyQueue(() => !this.disposed && this.w3.workspace.project()?.root === this.root);
+  private get busy() { return this.queue.busy; }
+  private readonly root: string | undefined;
+  /** The editor closed: a map change waiting for a question or a file choice stops, waiting undo and redo steps too. */
   disposed = false;
-  undo() { void this.step(this.undoStack, this.redoStack, -1); }
-  redo() { void this.step(this.redoStack, this.undoStack, 1); }
+  undo() { this.queue.step(() => this.step(this.undoStack, this.redoStack, -1)); }
+  redo() { this.queue.step(() => this.step(this.redoStack, this.undoStack, 1)); }
   private async step(from: State[], to: State[], dir: -1 | 1) {
-    if (this.busy) return;
     const s = from.at(-1);
     if (!s) return;
     if (s.files) {
-      // The files first: if they can't move back (something took their place), the step stays where it is.
-      this.busy = true;
+      // The files first: if they can't move back (something took their place), the step stays where it is
+      // (and the steps waiting after it are dropped).
       try { await (dir < 0 ? s.files.undo() : s.files.redo()); } catch (e) {
         void this.w3.window.showError(`Can't ${dir < 0 ? "undo" : "redo"} the change of the campaign's maps: ${e instanceof Error ? e.message : e}`);
-        return;
-      } finally { this.busy = false; }
-      if (from.at(-1) !== s) return;
+        return false;
+      }
+      if (from.at(-1) !== s) return false;
     }
     from.pop();
     to.push({ ...this.snapshot(), files: s.files });
@@ -437,8 +441,7 @@ class CampaignView {
     const root = this.w3.workspace.project()?.root;
     if (!(await ask())) return;
     if (this.disposed || this.busy || this.w3.workspace.project()?.root !== root) return;
-    this.busy = true;
-    try { await apply(m); } finally { this.busy = false; }
+    await this.queue.hold(() => apply(m));
   }
 
   /** Export Map: the chapter's map as a map file of its own (a project map packed). */
