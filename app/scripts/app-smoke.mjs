@@ -67,7 +67,8 @@ const NEW_MAP_FILES = ["war3map.w3i.json", "war3map.doo.json", "war3mapUnits.doo
 const NEW_MAPS = [
   { args: { name: "Smoke Default" }, size: [96, 96] },
   { args: { name: "Smoke Dungeon", tileset: "D", width: 64, height: 64, hills: true, cliffLevel: 4 }, size: [64, 64] },
-  { args: { name: "Smoke Lua", script: "lua", width: 128, height: 96, water: "deep" }, size: [128, 96] },
+  // On Grass, not the default Dirt: viewCommands' naval colours are judged against grass.
+  { args: { name: "Smoke Lua", script: "lua", width: 128, height: 96, water: "deep", baseTile: "Lgrs" }, size: [128, 96] },
   { args: { name: "Größe 金矿", width: 64, height: 128, water: "shallow" }, size: [64, 128] },
 ];
 
@@ -102,6 +103,10 @@ async function newMaps(page, found) {
       for (const n of [...NEW_MAP_FILES, scriptFile]) if (!names.has(n)) fail(`no ${n}`);
       const active = await page.evaluate(`w3.editors.activePath()`);
       if (active !== "map/war3map.w3e.txt") fail(`the terrain editor didn't open (active: ${active})`);
+      // The World Editor's "Initial Tile: <tileset> - Dirt": the tileset's first ground tile, unless one is chosen.
+      const ground = readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8");
+      const base = args.baseTile ? (/^ground (.*)$/m.exec(ground)?.[1].split(" ") ?? []).indexOf(args.baseTile).toString(36) : "0";
+      if (!new RegExp(`^\\[texture\\] all ${base}$`, "m").test(ground)) fail(`the ground isn't all tile ${base}: ${/^ground .*$/m.exec(ground)?.[0]}, ${/^\[texture\].*$/m.exec(ground)?.[0]}`);
 
       // The first doodad and the first unit: the files start empty.
       await tool("place_objects", { objects: [{ id: "LTlt", x: 0, y: 0 }, { id: "CPct", x: 512, y: 512 }], ignoreRoom: true });
