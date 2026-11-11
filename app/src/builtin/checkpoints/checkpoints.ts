@@ -33,6 +33,20 @@ export function newestFirst(names: string[]): { name: string; time: number }[] {
   }).sort((a, b) => b.time - a.time);
 }
 
+/** The folder below build/checkpoints that stray checkpoints of an older version were moved to (src-tauri strays.rs). */
+export const RECOVERED = "recovered";
+
+/** The recovered checkpoints among `names` (files directly in recovered/, as `names` has them), with the time their
+ *  name carries, null when it carries none (a stray may be named anything): the caller falls back to the file's
+ *  last write. Offered to restore only; newestFirst and toPrune never see them. */
+export function recoveredOf(names: string[]): { name: string; time: number | null }[] {
+  return names.flatMap((name) => {
+    const parts = name.split(/[\\/]/);
+    if (parts.length !== 2 || parts[0] !== RECOVERED || !parts[1]) return [];
+    return [{ name, time: checkpointTime(parts[1]) }];
+  });
+}
+
 /** The checkpoints to delete so that `keep` remain. */
 export function toPrune(names: string[], keep: number): string[] {
   return newestFirst(names).slice(Math.max(1, keep)).map((c) => c.name);

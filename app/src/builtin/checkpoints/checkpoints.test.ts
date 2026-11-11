@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FileInfo } from "../../extensions/api";
-import { checkpointName, checkpointState, checkpointTime, newestFirst, toPrune } from "./checkpoints";
+import { checkpointName, checkpointState, checkpointTime, newestFirst, recoveredOf, toPrune } from "./checkpoints";
 
 test("a checkpoint's name carries its time, for maps and campaigns", () => {
   const at = new Date(2026, 10, 5, 9, 7, 3);
@@ -28,6 +28,17 @@ test("files in a folder below build/checkpoints (recovered/) are no checkpoints:
   const names = ["a 2026-01-01 00-00-00.w3x", "a 2026-03-01 00-00-00.w3x", "recovered/a 2025-01-01 00-00-00.w3x"];
   assert.deepEqual(toPrune(names, 1), ["a 2026-01-01 00-00-00.w3x"]);
   assert.deepEqual(newestFirst(names).map((c) => c.name), ["a 2026-03-01 00-00-00.w3x", "a 2026-01-01 00-00-00.w3x"]);
+});
+
+test("recovered checkpoints: files directly in recovered/, with the time their name carries or none", () => {
+  const names = ["a 2026-01-01 00-00-00.w3x", "recovered/a 2025-01-01 00-00-00.w3x", "recovered\\stray.w3x", "recovered/deeper/b 2025-01-01 00-00-00.w3x", "other/c 2025-01-01 00-00-00.w3x"];
+  assert.deepEqual(recoveredOf(names), [
+    { name: "recovered/a 2025-01-01 00-00-00.w3x", time: new Date(2025, 0, 1).getTime() },
+    { name: "recovered\\stray.w3x", time: null },
+  ]);
+  // Still neither counted nor pruned.
+  assert.deepEqual(newestFirst(names).map((c) => c.name), ["a 2026-01-01 00-00-00.w3x"]);
+  assert.deepEqual(toPrune(names, 0), []);
 });
 
 test("when a checkpoint is due", () => {

@@ -5,7 +5,7 @@
 
 import type { ExtensionContext, ProjectInfo, W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
-import { checkpointName, checkpointState, newestFirst, toPrune } from "./checkpoints";
+import { checkpointName, checkpointState, newestFirst, recoveredOf, toPrune } from "./checkpoints";
 
 const FOLDER = "build/checkpoints";
 /** The checkpoint folder of a project, or a checkpoint in it. */
@@ -161,9 +161,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.checkpoints.restore", async () => {
       const project = w3.workspace.project();
       if (!project) throw new Error("Open or import a project first.");
-      const all = newestFirst(await list(project.root));
-      if (!all.length) { void w3.window.showInfo("This project has no checkpoints yet."); return; }
-      const pick = await w3.window.quickPick(all.map((c) => ({ label: new Date(c.time).toLocaleString(), description: c.name, value: c.name })), { placeholder: "Restore the project to…" });
+      const names = await list(project.root);
+      const all = newestFirst(names);
+      // Recovered ones (strays an older version left) come after, newest first too: when the name carries no time,
+      // the file's last write; one that can't be read about is still offered, at the end.
+      const recovered = (await Promise.all(recoveredOf(names).map(async (c) => {
+        if (c.time !== null) return { name: c.name, time: c.time, known: true };
+        const stamp = await w3.backend.invoke<{ modified: number } | null>("fs_stat", { path: inFolder(project.root, c.name) }).catch(() => null);
+        return stamp ? { name: c.name, time: stamp.modified, known: true } : { name: c.name, time: 0, known: false };
+      }))).sort((a, b) => b.time - a.time);
+      if (!all.length && !recovered.length) { void w3.window.showInfo("This project has no checkpoints yet."); return; }
+      const pick = await w3.window.quickPick([
+        ...all.map((c) => ({ label: new Date(c.time).toLocaleString(), description: c.name, value: c.name })),
+        ...recovered.map((c) => ({
+          label: `${c.known ? new Date(c.time).toLocaleString() : "unknown time"} (recovered)`,
+          description: c.name,
+          detail: "Moved here from a stray file; not counted toward the checkpoints kept, never removed.",
+          value: c.name,
+        })),
+      ], { placeholder: "Restore the project to…" });
       if (!pick?.value) return;
       const c = await w3.window.showWarning(`Restore the project to ${pick.label}? Its map files are replaced by that version; a checkpoint of what's there now is made first. Unsaved edits are asked about.`, "Restore", "Cancel");
       if (c !== "Restore") return;

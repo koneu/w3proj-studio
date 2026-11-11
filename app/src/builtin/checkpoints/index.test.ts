@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext, FileInfo, ProjectInfo, W3Api } from "../../extensions/api";
+import { joinPath } from "../../lib/paths";
 import { activate } from "./index";
 
 type Gate = { promise: Promise<void>; open: () => void };
@@ -20,14 +21,15 @@ const project = (root: string) => ({ root, default_output: `${root}\\build\\Map.
 
 /** `existing`: checkpoint files already in C:\one\build\checkpoints. `keep`: the setting. */
 /** `busy`: the map keeps changing and a checkpoint is due at every look (interval 0). */
-function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolean; busy?: boolean } = {}) {
+/** `modified`: last writes fs_stat gives, by name below build/checkpoints (others: no such file). */
+function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolean; busy?: boolean; modified?: Record<string, number> } = {}) {
   let current: ProjectInfo | null = project("C:\\one");
   const files: FileInfo[] = [{ path: "map/war3map.w3e", size: 10, modified: Date.now() + (opts.busy ? 3_600_000 : 0) }];
   const log: string[] = [];
   const commands = new Map<string, (...a: unknown[]) => Promise<unknown>>();
   const tools = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
   /** Checkpoint files on disk, by full path. */
-  const disk = new Set((opts.existing ?? []).map((n) => `C:\\one\\build\\checkpoints\\${n}`));
+  const disk = new Set((opts.existing ?? []).map((n) => joinPath(FOLDER, n)));
   /** project_pack calls wait on these when set, in order. */
   const packGates: Gate[] = [];
   /** listFolder waits on this when set. */
@@ -38,6 +40,8 @@ function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolea
   let duringSync: () => Promise<void> = async () => {};
   /** What the restore picks. */
   let pick = "";
+  /** What the restore offered, at its last quick pick. */
+  let offered: { label: string; description?: string; value: string }[] = [];
   let tick: (() => void) | null = null;
   const none = { dispose() {} };
   const w3 = {
@@ -48,7 +52,7 @@ function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolea
       listFolder: async (folder: string) => {
         const g = listGate;
         if (g) await g.promise;
-        return [...disk].filter((p) => p.startsWith(`${folder}\\`)).map((p) => p.slice(folder.length + 1));
+        return [...disk].filter((p) => p.startsWith(`${folder}\\`)).map((p) => p.slice(folder.length + 1).replace(/\\/g, "/"));
       },
     },
     settings: { get: (key: string) => (key === "checkpoints.keep" ? opts.keep : key === "checkpoints.intervalMinutes" && opts.busy ? 0 : undefined) },
@@ -61,6 +65,11 @@ function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolea
           disk.add(a.output!);
           log.push(`pack done ${a.output}`);
           return null;
+        }
+        if (cmd === "fs_stat") {
+          const name = String(a.path).slice(`${FOLDER}\\`.length);
+          const modified = opts.modified?.[name];
+          return modified === undefined ? null : { size: 1, modified };
         }
         if (cmd === "fs_delete" && opts.failDelete) throw new Error("access denied");
         if (cmd === "fs_delete") disk.delete(a.path!);
@@ -85,7 +94,7 @@ function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolea
     },
     window: {
       showInfo: async () => undefined, showWarning: async () => "Restore", confirm: async () => true,
-      quickPick: async (items: { value: string }[]) => items.find((i) => i.value === pick),
+      quickPick: async (items: typeof offered) => { offered = items; return items.find((i) => i.value === pick); },
     },
   } as unknown as W3Api;
   const ctx = { subscriptions: [] as { dispose(): void }[] } as unknown as ExtensionContext;
@@ -94,6 +103,7 @@ function fakeApp(opts: { existing?: string[]; keep?: number; failDelete?: boolea
   try { activate(w3, ctx); } finally { globalThis.setInterval = realSetInterval; }
   return {
     log, commands, tools, packGates, disk,
+    offered: () => offered,
     setList: (g: Gate | null) => { listGate = g; },
     setPick: (name: string) => { pick = name; },
     onClose: (f: () => void) => { duringClose = f; },
@@ -229,8 +239,42 @@ test("checkpoints recovered from an older version's stray files (build/checkpoin
   assert.ok(app.disk.has(`${FOLDER}\\${RECOVERED}`), `the recovered checkpoint was deleted: ${app.log.join("\n")}`);
   // Control: the checkpoints beyond the one kept go.
   assert.ok(!app.disk.has(`${FOLDER}\\${OLDEST}`) && !app.disk.has(`${FOLDER}\\${NEWER}`), app.log.join("\n"));
-  // Nor are they offered as checkpoints to restore.
+  // Nor are they among the checkpoints the MCP tools list (only the Restore command offers them).
   assert.deepEqual(((await app.tools.get("list_checkpoints")!({})) as { name: string }[]).map((c) => c.name).filter((n) => n.includes("2019")), []);
+  app.dispose();
+});
+
+test("the Restore list offers recovered checkpoints after the others, timed by name or by last write, and restores one like a checkpoint", async () => {
+  // As listFolder gives them: `/` between folders.
+  const NAMED = "recovered/Map 2019-01-01 10-00-00.w3x", STRAY = "recovered/x.w3x", UNREAD = "recovered/y.w3x";
+  const strayTime = new Date(2018, 5, 1, 12, 0, 0).getTime();
+  const app = fakeApp({ existing: [OLDEST, NAMED, STRAY, UNREAD], keep: 2, modified: { [`recovered\\x.w3x`]: strayTime } });
+  app.setPick(STRAY);
+  await app.commands.get("w3.checkpoints.restore")!();
+  const offered = app.offered();
+  assert.deepEqual(offered.map((i) => i.value), [OLDEST, NAMED, STRAY, UNREAD], "checkpoints first, then the recovered ones newest first, the unreadable one last");
+  assert.equal(offered[1].label, `${new Date(2019, 0, 1, 10, 0, 0).toLocaleString()} (recovered)`, "the time its name carries");
+  assert.equal(offered[2].label, `${new Date(strayTime).toLocaleString()} (recovered)`, "a name without a time: the file's last write");
+  assert.equal(offered[3].label, "unknown time (recovered)");
+  // Restored through the same flow: a checkpoint of what's there first, then the files replaced from it.
+  assert.equal(packs(app.log, "done").length, 1, "what was there is kept first");
+  assert.deepEqual(syncs(app.log), [`sync from ${FOLDER}\\recovered\\x.w3x`]);
+  // Not counted: keep = 2 holds OLDEST and the new one, so nothing goes; never pruned.
+  assert.deepEqual(app.log.filter((l) => l.startsWith("fs_delete")), [], app.log.join("\n"));
+  for (const n of [OLDEST, NAMED, STRAY, UNREAD]) assert.ok(app.disk.has(joinPath(FOLDER, n)), `${n} still there`);
+  app.dispose();
+});
+
+test("a project with only recovered checkpoints can still restore one", async () => {
+  const NAMED = "recovered/Map 2019-01-01 10-00-00.w3x";
+  const app = fakeApp({ existing: [NAMED], keep: 1 });
+  app.setPick(NAMED);
+  await app.commands.get("w3.checkpoints.restore")!();
+  assert.deepEqual(syncs(app.log), [`sync from ${FOLDER}\\recovered\\Map 2019-01-01 10-00-00.w3x`]);
+  // Control: the next checkpoint prunes the one made before the restore, not the recovered one.
+  await app.commands.get("w3.checkpoints.create")!({ quiet: true });
+  assert.equal(app.log.filter((l) => l.startsWith("fs_delete")).length, 1, app.log.join("\n"));
+  assert.ok(app.disk.has(joinPath(FOLDER, NAMED)));
   app.dispose();
 });
 
