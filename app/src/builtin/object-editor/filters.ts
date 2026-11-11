@@ -1,5 +1,6 @@
 // Field filters of the object browser: what "gold>100", "hp>=500" or "race=Night_Elf" in the search
-// box mean. A value's spaces are written as underscores, as a token ends at a space.
+// box mean. A value's spaces are written as underscores, as a token ends at a space, or the value is quoted
+// (race:"Night Elf").
 
 import type { FieldMeta } from "../../lib/objects/metadata";
 
@@ -36,15 +37,41 @@ export function resolveField(fields: FieldMeta[], key: string): FieldMeta | null
   );
 }
 
-/** Splits what's typed into filters and plain search words. */
+/** The field the filter builder's field box names: the suggestion format "Label (id)", a bare label or id, or
+ *  "Label id". Nothing typed is no field. */
+export function builderField(kd: { fields: FieldMeta[]; fieldById: ReadonlyMap<string, FieldMeta> }, typed: string): FieldMeta | null {
+  const text = typed.trim();
+  if (!text) return null;
+  const m = /\(([^()]+)\)\s*$/.exec(text);
+  const lastWord = text.split(/\s+/).pop() ?? "";
+  return (m && kd.fieldById.get(m[1])) || kd.fieldById.get(lastWord) || resolveField(kd.fields, text);
+}
+
+/** What's typed, split at spaces outside double quotes: `race:"Night Elf"` is one token (a quote left open runs to
+ *  the end). The tokens keep their quotes, so a token can be found in the text again (a chip's ×). */
+export function tokenize(text: string): string[] {
+  return text.match(/(?:[^\s"]+|"[^"]*"?)+/g) ?? [];
+}
+
+const unquote = (s: string) => s.replace(/"/g, "");
+
+/** Splits what's typed into filters and plain search words. A value or word in double quotes keeps its spaces. */
 export function parseQuery(text: string, fields: FieldMeta[]): { words: string[]; filters: FieldFilter[] } {
   const words: string[] = [], filters: FieldFilter[] = [];
-  for (const token of text.trim().split(/\s+/).filter(Boolean)) {
+  for (const token of tokenize(text)) {
     const m = TOKEN.exec(token);
-    if (m) filters.push({ token, key: m[1], op: m[2] as Op, value: m[3], field: resolveField(fields, m[1]) });
-    else words.push(token.toLowerCase());
+    if (m) filters.push({ token, key: m[1], op: m[2] as Op, value: unquote(m[3]), field: resolveField(fields, m[1]) });
+    else if (unquote(token)) words.push(unquote(token).toLowerCase());
   }
   return { words, filters };
+}
+
+/** The operator a new filter on the field starts with: an order for numbers, equality for on/off fields, "contains"
+ *  for text and choices (a race, a list), where an order finds nothing. */
+export function defaultOp(field: Pick<FieldMeta, "type" | "valueType"> | null): Op {
+  if (!field) return ":";
+  if (field.type === "bool") return "=";
+  return ["int", "real", "unreal"].includes(field.type) ? ">=" : ":";
 }
 
 /** A filter's value as it's meant: what the chip shows. */

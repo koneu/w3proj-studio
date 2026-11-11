@@ -6,7 +6,7 @@ import { focusAfterClick, h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { shownValue, type EditorType } from "./fields";
-import { compare, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, resolveField, type FieldFilter } from "./filters";
+import { builderField, compare, defaultOp, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, tokenize, type FieldFilter } from "./filters";
 
 const MAX_ROWS = 300;
 
@@ -150,14 +150,15 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
     const fieldList = h("datalist", { id: `picker-fields-${Math.random().toString(36).slice(2)}` },
       ...kd.fields.map((f) => h("option", { value: `${f.label} (${f.id})` })));
     const fieldInput = h("input.picker-field-input", { placeholder: "Field, e.g. Gold Cost", list: fieldList.id });
-    const opSelect = h("select", {}, ...OPS.map((op) => h("option", { value: op }, OP_LABEL[op])));
+    // The operator follows the field (contains for text and choices, ≥ for numbers) until one is chosen by hand.
+    let opChosen = false;
+    const opSelect = h("select", { onchange: () => { opChosen = true; } }, ...OPS.map((op) => h("option", { value: op, selected: op === defaultOp(null) }, OP_LABEL[op])));
     const valueInput = h("input.picker-value-input", { placeholder: "value" });
+    const followField = () => { if (!opChosen) opSelect.value = defaultOp(builderField(kd, fieldInput.value)); };
+    fieldInput.addEventListener("input", followField);
+    fieldInput.addEventListener("change", followField);
     const addFilter = () => {
-      // Accepts the suggestion format "Label (id)", a bare label or id, or "Label id".
-      const text = fieldInput.value.trim();
-      const m = /\(([^()]+)\)\s*$/.exec(text);
-      const lastWord = text.split(/\s+/).pop() ?? "";
-      const field = (m && kd.fieldById.get(m[1])) || kd.fieldById.get(lastWord) || resolveField(kd.fields, text);
+      const field = builderField(kd, fieldInput.value);
       if (!field || !valueInput.value.trim()) {
         fieldInput.classList.toggle("invalid", !field);
         valueInput.classList.toggle("invalid", !valueInput.value.trim());
@@ -165,6 +166,8 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
       }
       search.value = `${search.value.trim()} ${field.id}${opSelect.value}${valueInput.value.trim().replace(/\s+/g, "_")}`.trim();
       fieldInput.value = valueInput.value = "";
+      opChosen = false;
+      opSelect.value = defaultOp(null);
       fieldInput.classList.remove("invalid");
       valueInput.classList.remove("invalid");
       builder.hidden = true;
@@ -187,7 +190,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
             h("button.icon-button", {
               title: "Remove filter",
               onclick: () => {
-                search.value = search.value.split(/\s+/).filter((t) => t !== f.token).join(" ");
+                search.value = tokenize(search.value).filter((t) => t !== f.token).join(" ");
                 render();
                 search.focus();
               },

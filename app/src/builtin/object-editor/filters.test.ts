@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { compare, filterValue, parseQuery, resolveField } from "./filters";
+import { builderField, compare, defaultOp, filterValue, parseQuery, resolveField, tokenize } from "./filters";
 
 const field = (id: string, label: string, column = ""): FieldMeta => ({ id, label, field: column } as FieldMeta);
 const fields = [
@@ -106,4 +106,35 @@ test("a choice field's filter matches the stored value or the label it shows", (
   assert.ok(compare("nightelf", "!=", "orc", "Night Elf"));
   assert.ok(compare("3", ">", "2", "Night Elf"), "an order compares the stored value");
   assert.ok(!compare("x", ">", "0", "5"), "never the label");
+});
+
+test("double quotes keep a value's or a word's spaces", () => {
+  const { words, filters } = parseQuery(`race:"Night Elf" "town hall" gold>=100 name:"open`, fields);
+  assert.deepEqual(filters.map((f) => [f.key, f.op, f.value, f.token]), [
+    ["race", ":", "Night Elf", `race:"Night Elf"`], ["gold", ">=", "100", "gold>=100"], ["name", ":", "open", `name:"open`],
+  ]);
+  assert.deepEqual(words, ["town hall"]);
+  assert.deepEqual(tokenize(`a  race:"Night Elf"  b`), ["a", `race:"Night Elf"`, "b"], "a chip's token is found in the text again");
+  assert.deepEqual(parseQuery(`"" x`, fields).words, ["x"], "empty quotes are no word");
+  // Unquoted searches split as they did.
+  assert.deepEqual(parseQuery("race:Night Elf", fields).words, ["elf"]);
+});
+
+test("a new filter's operator fits its field: an order only for numbers", () => {
+  const f = (type: string) => ({ type, valueType: "string" }) as Pick<FieldMeta, "type" | "valueType">;
+  assert.equal(defaultOp(f("unitRace")), ":", "a choice: Race ≥ Night Elf finds nothing");
+  assert.equal(defaultOp(f("string")), ":");
+  assert.equal(defaultOp(f("armorType")), ":");
+  assert.equal(defaultOp(f("bool")), "=");
+  for (const t of ["int", "real", "unreal"]) assert.equal(defaultOp(f(t)), ">=", t);
+  assert.equal(defaultOp(null), ":", "no field yet");
+});
+
+test("the filter builder's field box: a suggestion, an id, a label", () => {
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const race = fields.find((f) => f.id === "urac");
+  assert.equal(builderField({ fields, fieldById: byId }, "Race (urac)"), race);
+  assert.equal(builderField({ fields, fieldById: byId }, "urac"), race);
+  assert.equal(builderField({ fields, fieldById: byId }, "race"), race);
+  assert.equal(builderField({ fields, fieldById: byId }, "  "), null, "nothing typed is no field (not the first one)");
 });

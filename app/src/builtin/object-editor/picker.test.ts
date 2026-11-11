@@ -41,6 +41,17 @@ test("a browser opened before the editor types load uses them once they arrive",
   assert.equal(list.valueText(race, archer(list)), "Race: Night Elf");
 });
 
+test("a quoted value keeps its space: race:\"Night Elf\" is the label, not race:Night and a word Elf", () => {
+  const list = pickerList(kd, { editorTypes: types });
+  const found = (q: string) => { list.setQuery(q); return list.entries.filter((e) => list.matches(e)).map((e) => e.id); };
+  assert.deepEqual(found("race:\"Night Elf\""), ["earc"]);
+  assert.deepEqual(found("race=\"night elf\""), ["earc"], "with = too, in any case");
+  assert.deepEqual(found("race:\"Night Elf\" archer"), ["earc"], "a word after it is still a word");
+  assert.deepEqual(found("race:\"Night Elf\" footman"), [], "and still has to match");
+  // Control: unquoted, the space ends the value as before (Night matches the label, Elf is a word nothing has).
+  assert.deepEqual(found("race:Night Elf"), []);
+});
+
 test("types that fail to load leave the browser on raw values, without a redraw", async () => {
   let redraws = 0;
   const list = pickerList(kd, { editorTypes: Promise.resolve(null) }, () => redraws++);
