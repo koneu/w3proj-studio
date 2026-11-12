@@ -592,6 +592,9 @@ export interface Problem {
   message: string;
   /** Where (file, object), shown next to the message. */
   location?: string;
+  /** What the report is about, stable across edits (a trigger's name): the Problems ignore names a report by its
+   *  check and this. Without it, the location and message stand in. */
+  about?: string;
   /** What a click does: a command with its arguments. */
   reveal?: { command: string; args?: unknown[] };
   /** Ways to fix it, shown as buttons; the checks run again afterwards. */

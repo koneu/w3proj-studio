@@ -1813,6 +1813,84 @@ async function unitProperties(page, found) {
   await page.evaluate(`w3Workbench.game.reload()`);
 }
 
+/** The Problems view's ignore, on a new map with three triggers nothing runs (two of the bonus campaigns' quest library's
+ *  kind, one not): Ignore on a report takes it out of the list and writes .w3proj/problems-ignore.json; "Show ignored"
+ *  brings it back with an Un-ignore button; the one-click quest library rule ignores the two library triggers and not the
+ *  third; list_problems leaves them out and counts them; saved and opened again they are still ignored; Un-ignore reports
+ *  one again and empties the file's entry. */
+async function problemsIgnore(page, found) {
+  const fail = (what) => found.push(`problems ignore: ${what}`);
+  const k = await heightKit(page, "ProblemsIgnore");
+  const FILE = join(k.root, ".w3proj", "problems-ignore.json");
+  const trigger = (id, name) => ({ type: 8, name, description: "", isComment: 0, id, enabled: true, isCustom: false, initiallyOff: false, runOnInit: false, parent: 0,
+    ecas: [{ kind: 2, name: "PauseGame", enabled: true, params: [{ type: 0, value: "ConvertBoolean" }], children: [] }] });
+  const rowOf = (text) => `[...document.querySelectorAll(".problem-row")].find((r) => r.textContent.includes("has no events") && r.textContent.includes(${JSON.stringify(text)}))`;
+  const has = (text) => page.evaluate(`!!${rowOf(text)}`);
+  const press = (text, cls) => page.evaluate(`(() => { const b = ${rowOf(text)}?.querySelector("button.${cls}"); if (!b) return false; b.click(); return true; })()`);
+  const toolbar = (cls) => page.evaluate(`document.querySelector("button.${cls}")?.textContent ?? null`);
+  const click = (cls) => page.evaluate(`(() => { const b = document.querySelector("button.${cls}"); if (!b) return false; b.click(); return true; })()`);
+  const stored = () => (existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : null);
+  const check = async () => { await page.evaluate(`w3.commands.execute("w3.problems.run")`); await settled(page); };
+  const names = ["Quest Smoke Completed", "Quest Smoke Update1", "Orphan Smoke"];
+  try {
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify({
+      reforged: true, version: 7, counts: [], unknown: 2, variables: [], items: names.map((n, i) => trigger(50331649 + i, n)) }))}); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.views.show("problems")`);
+    await check();
+    for (const n of names) await until(`a report of ${n}`, () => has(n), 30000).catch(() => fail(`no "Triggers nothing runs" report for ${n}`));
+    if (await has("Orphan Smoke") && await toolbar("problems-show-ignored")) fail("Show ignored is offered before anything is ignored");
+    if (!(await toolbar("problems-ignore-library"))) fail("the quest library button isn't offered for Quest ... Completed / Update1");
+
+    // Ignore one report.
+    if (!(await press("Orphan Smoke", "problem-ignore"))) fail("a report has no Ignore button");
+    await until("the report gone", async () => !(await has("Orphan Smoke")), 10000).catch(() => fail("Ignore left the report in the list"));
+    await until("the ignore file", async () => !!stored(), 10000).catch(() => fail("Ignore wrote no .w3proj/problems-ignore.json"));
+    if (JSON.stringify(stored()?.items) !== JSON.stringify([{ check: "triggerNoEvents", about: "Orphan Smoke" }])) fail(`the ignore file holds ${JSON.stringify(stored())}`);
+    if (!(await has("Quest Smoke Completed"))) fail("ignoring one report hid the others");
+    if (!/Show ignored \(1\)/.test((await toolbar("problems-show-ignored")) ?? "")) fail(`the toggle says ${JSON.stringify(await toolbar("problems-show-ignored"))}`);
+
+    // Show ignored: it is back, marked, with Un-ignore.
+    await click("problems-show-ignored");
+    await until("the ignored report shown", () => has("Orphan Smoke"), 10000).catch(() => fail("Show ignored didn't list the ignored report"));
+    if (!(await page.evaluate(`${rowOf("Orphan Smoke")}?.classList.contains("ignored")`))) fail("the shown ignored report isn't marked");
+    if (!(await page.evaluate(`!!${rowOf("Orphan Smoke")}?.querySelector("button.problem-unignore")`))) fail("the shown ignored report has no Un-ignore");
+    await click("problems-show-ignored");
+    await until("the ignored report hidden again", async () => !(await has("Orphan Smoke")), 10000).catch(() => fail("Hide ignored left the report"));
+
+    // The quest library in one click; the third trigger is not part of it.
+    if (!(await click("problems-ignore-library"))) fail("no quest library button");
+    await until("the library hidden", async () => !(await has("Quest Smoke Completed")) && !(await has("Quest Smoke Update1")), 10000).catch(() => fail("the quest library button left its reports"));
+    if (!(await toolbar("problems-show-ignored"))?.includes("(3)")) fail(`the toggle says ${JSON.stringify(await toolbar("problems-show-ignored"))} after the library rule`);
+    if (JSON.stringify(stored()?.rules) !== JSON.stringify(["bonusQuestLibrary"])) fail(`the ignore file's rules: ${JSON.stringify(stored())}`);
+
+    // list_problems: none of the three, and a count.
+    const listed = await k.tool("list_problems", {});
+    const text = JSON.stringify(listed);
+    if (names.some((n) => text.includes(`"${n}"`)) || !/3 reports are ignored/.test(text)) fail(`list_problems: ${text.slice(0, 500)}`);
+
+    // Saved and opened again: still ignored.
+    await k.save();
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(k.root)}); })()`);
+    await settled(page);
+    await page.evaluate(`w3.views.show("problems")`);
+    await check();
+    await until("the Problems view's other reports", () => page.evaluate(`!!document.querySelector(".problems-head")`), 30000).catch(() => fail("the Problems view shows nothing after reopening"));
+    if ((await has("Orphan Smoke")) || (await has("Quest Smoke"))) fail("a reopened project reports its ignored triggers again");
+    if (!/Show ignored \(3\)/.test((await toolbar("problems-show-ignored")) ?? "")) fail(`after reopening the toggle says ${JSON.stringify(await toolbar("problems-show-ignored"))}`);
+
+    // Un-ignore the first one (listed through Show ignored).
+    await click("problems-show-ignored");
+    await until("the ignored reports shown", () => has("Orphan Smoke"), 10000).catch(() => fail("Show ignored lists nothing after reopening"));
+    if (!(await press("Orphan Smoke", "problem-unignore"))) fail("no Un-ignore button");
+    await until("Orphan back in the file", async () => stored()?.items?.length === 0, 10000).catch(() => fail(`Un-ignore left ${JSON.stringify(stored())}`));
+    await click("problems-show-ignored");
+    await until("Orphan listed", () => has("Orphan Smoke"), 10000).catch(() => fail("an un-ignored report isn't listed"));
+    if (await has("Quest Smoke")) fail("un-ignoring one report brought the library back");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Map Properties › Techtree & Tables: a random group's positions get random objects by level from their Random… choice
  *  (a level 3 creep, the World Editor's "YYU3"; a permanent level 2 item, "YiI2"), an item table's item a random item, and
  *  the per-player grid makes an object available again to player 1. Saved: war3map.w3i holds the ids, the script picks
@@ -9059,6 +9137,7 @@ async function run() {
         placeObjects,
         placerAndCampaign,
         playerStarts: (p, f) => playerStarts(p, f, project),
+        problemsIgnore,
         realMapSave,
         resizeUndo,
         scriptGuard,
@@ -9268,6 +9347,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "techtreeRandomLevels", found);
   await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
   await leftOpen(page, "triggersAndAi", found);
+  await problemsIgnore(page, found).catch((e) => found.push(`problems ignore: ${e.message}`));
+  await leftOpen(page, "problemsIgnore", found);
   await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
   await leftOpen(page, "staleEditors", found);
   await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
