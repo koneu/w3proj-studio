@@ -13,6 +13,7 @@ import { renameInTriggers } from "../../lib/triggers/renamed";
 import { ident } from "../../lib/script/names";
 import { bindUndoKeys, History } from "../../lib/undo";
 import { exportSound, replaceSound } from "./soundfiles";
+import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
 import { errorText } from "../../lib/oserror";
 import { Listeners } from "../../lib/listeners";
@@ -145,6 +146,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     { dispose: stopPlaying },
     w3.commands.register("w3.sounds.export", () => needEditor().exportCurrent()),
     w3.commands.register("w3.sounds.replace", () => needEditor().replaceCurrent()),
+    // Where a sound is used (triggers, scripts, regions): the given sound, else the selected one.
+    w3.commands.register("w3.sounds.findUsages", async (name?: unknown) => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      const sound = typeof name === "string" ? name : needEditor().selectedName();
+      if (!sound) throw new Error("Select one of the map's sounds first.");
+      return findSoundUsages(w3, sound);
+    }),
+    // Takes the sounds nothing names out of the list, after a question and a checkpoint.
+    w3.commands.register("w3.sounds.removeUnused", async () => {
+      if (!w3.workspace.project()) throw new Error("Open or import a project first.");
+      await w3.commands.execute("w3.sounds.open");
+      const editor = current;
+      if (!editor) throw new Error("The Sound Editor didn't open.");
+      if (!editor.canEdit) throw new Error("This sound list can't be changed here.");
+      return removeUnusedSounds(w3, () => editor.sounds.map((s) => s.name), (names) => { if (current === editor) editor.removeNamed(names); });
+    }),
     w3.editors.registerProvider("w3.soundEditor", {
       async resolve(el, doc) {
         // The raw file goes through the format engine both ways.
@@ -398,6 +415,18 @@ class SoundEditor {
     this.renderDetail();
     return s;
   }
+  /** Removes the sounds called `names` as one undo step. */
+  removeNamed(names: readonly string[]) {
+    const gone = new Set(names);
+    if (!this.doc.sounds.some((s) => gone.has(s.name))) return;
+    this.doc.sounds = this.doc.sounds.filter((s) => !gone.has(s.name));
+    if (this.selected && !this.doc.sounds.includes(this.selected)) this.selected = null;
+    this.changed();
+    this.renderList();
+    this.renderDetail();
+  }
+  /** The selected sound's name (gg_snd_…), if any. */
+  selectedName(): string | null { return this.selected?.name ?? null; }
   get canEdit() { return this.editable; }
   /** The map's sounds as they are here now (SoundsService.liveSounds). */
   get sounds(): readonly Sound[] { return this.doc.sounds; }
@@ -413,6 +442,7 @@ class SoundEditor {
         this.renderDetail();
         this.w3.window.showContextMenu({ x: e.clientX, y: e.clientY }, [
           { label: "Export Sound…", run: () => void this.exportCurrent().catch(this.failed) },
+          { label: "Find Usages…", run: () => void this.w3.commands.execute("w3.sounds.findUsages").catch(this.failed) },
           { label: "Replace Internal Sound…", disabled: !this.editable, run: () => void this.replaceCurrent().catch(this.failed) },
         ]);
       },
@@ -420,7 +450,9 @@ class SoundEditor {
     h("td", {}, s.name.replace(/^gg_snd_/, "")),
     h("td.muted", {}, s.flags & MUSIC ? "music" : [s.flags & THREE_D ? "3D" : "", s.flags & LOOPING ? "loop" : ""].filter(Boolean).join(" · ") || "sound"),
     h("td.snd-path", { title: s.file }, s.file)));
-    this.list.replaceChildren(h("h3", {}, `Sounds in this map (${this.doc.sounds.length})`),
+    this.list.replaceChildren(h("h3", {}, `Sounds in this map (${this.doc.sounds.length})`,
+      ...(this.editable && this.doc.sounds.length ? [h("button.snd-unused", { title: "Take out the sounds no trigger, script or region names",
+        onclick: () => void this.w3.commands.execute("w3.sounds.removeUnused").catch(this.failed) }, "Remove unused…")] : [])),
       this.doc.sounds.length
         ? h("table.snd-table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Kind"), h("th", {}, "File"))), h("tbody", {}, ...rows))
         : h("p.muted", {}, "No sounds yet: pick a file on the left and add it."));
@@ -474,6 +506,7 @@ class SoundEditor {
       h("div.snd-head", {}, h("h3", {}, music ? "Music" : "Sound"),
         h("button", { onclick: () => void this.play(s.file) }, "▶ Play"),
         h("button", { onclick: () => this.stop() }, "■ Stop"),
+        h("button", { title: "Where triggers, scripts and regions use this sound", onclick: () => void this.w3.commands.execute("w3.sounds.findUsages").catch(this.failed) }, "Find usages…"),
         h("button", { title: "Save this sound's file to a file of your own", onclick: () => void this.exportCurrent().catch(this.failed) }, "Export…"),
         ...(this.editable ? [h("button", { title: "Put a sound file from disk in this sound's place in the map", onclick: () => void this.replaceCurrent().catch(this.failed) }, "Replace Internal Sound…"), h("button", { onclick: () => this.remove(s) }, "Delete")] : [])),
       row("Name", "gg_snd_", name),

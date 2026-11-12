@@ -4598,6 +4598,63 @@ async function moduleFunctions(page, found) {
     await page.evaluate(`w3.editors.closeAll()`);
     verify(s, "sounds-after");
   }
+
+  // ---- Sound Editor: Remove Unused Sounds and Find Usages -----------------------------------
+  // Three sounds: one named by a region's ambient sound, one only in the map script's text, one by nothing.
+  const u = join(dir, "unused-sounds");
+  cpSync(FIXTURE, u, { recursive: true });
+  {
+    const sound = (name) => ({
+      name, file: "Sound\\Interface\\GoodJob.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+      channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+      variableName: name, assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+      speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 1,
+    });
+    put(join(u, "map", "war3map.w3s.json"), { format: "w3proj.sounds/1", version: 3, sounds: [sound("gg_snd_ambient"), sound("gg_snd_scripted"), sound("gg_snd_loose")] });
+    const regions = json(join(u, "map", "war3map.w3r.json"));
+    regions.regions[0].sound = "gg_snd_ambient";
+    put(join(u, "map", "war3map.w3r.json"), regions);
+    const script = join(u, "map", "war3map.j");
+    writeFileSync(script, `${readFileSync(script, "utf8")}\nfunction SmokeHonk takes nothing returns nothing\n    call StartSound( gg_snd_scripted )\nendfunction\n`);
+    await openProject(u);
+    const names = () => page.evaluate(`(async () => { const s = await w3.services.get("w3.sounds"); return (s.liveSounds() ?? []).map((x) => x.name).join(); })()`);
+    const stored = () => json(join(u, "map", "war3map.w3s.json")).sounds.map((x) => x.name).join();
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`document.querySelectorAll("tr.snd-row").length === 3`), 20000);
+    // Cancelled: nothing changes and nothing is left open.
+    await page.evaluate(`window.__d.cancel = true; w3.window.confirm = async (m) => { window.__d.asked.push(m); return !window.__d.cancel; }`);
+    await answer({});
+    const err = await run("w3.sounds.removeUnused");
+    if (err) fail(`Remove Unused Sounds: ${err}`);
+    const question = (await asked())[0] ?? "";
+    if (!/Remove 1 unused sound \(loose\)\?/.test(question)) fail(`Remove Unused Sounds asked "${question}"`);
+    if ((await names()) !== "gg_snd_ambient,gg_snd_scripted,gg_snd_loose") fail(`a cancelled Remove Unused Sounds left ${await names()}`);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail("a cancelled Remove Unused Sounds left an unsaved editor");
+    // Answered yes: the unused one goes, as an unsaved step; saved, the file has the other two.
+    await page.evaluate(`window.__d.cancel = false`);
+    await answer({});
+    const err2 = await run("w3.sounds.removeUnused");
+    if (err2) fail(`Remove Unused Sounds (yes): ${err2}`);
+    if ((await names()) !== "gg_snd_ambient,gg_snd_scripted") fail(`Remove Unused Sounds left ${await names()}`);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await until("the sounds saved", () => stored() === "gg_snd_ambient,gg_snd_scripted", 10000).catch(() => fail(`the saved sounds: ${stored()}`));
+    await settled(page);
+    if (await page.evaluate(`w3.editors.unsavedPaths().length`)) fail("Remove Unused Sounds then save left an editor unsaved");
+    if (!existsSync(join(u, "build", "checkpoints"))) fail("Remove Unused Sounds made no checkpoint");
+    // Nothing unused now: no question.
+    await answer({});
+    await run("w3.sounds.removeUnused");
+    if ((await asked()).length) fail("Remove Unused Sounds asked with nothing unused");
+    // Find Usages for a script-only sound names the script line.
+    await page.evaluate(`(() => { const q = w3.window.quickPick; window.__d.picked = null; w3.window.quickPick = async (items, o) => { window.__d.picked = { items: items.map((i) => i.label), placeholder: o?.placeholder }; return undefined; }; })()`);
+    const found3 = await page.evaluate(`w3.commands.execute("w3.sounds.findUsages", "gg_snd_scripted").then((n) => n, (e) => String(e))`);
+    const picked = await page.evaluate(`window.__d.picked`);
+    if (found3 !== 1 || !/^map\/war3map\.j, line \d+$/.test(picked?.items?.[0] ?? "")) fail(`Find Usages of a script-only sound: ${JSON.stringify(found3)} ${JSON.stringify(picked)}`);
+    // The hand-written function in the script makes the save ask about regenerating it: not what is tested here.
+    await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(u, "unused-sounds");
+  }
 }
 
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
