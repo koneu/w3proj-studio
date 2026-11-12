@@ -15,7 +15,9 @@ import { bindUndoKeys, History } from "../../lib/undo";
 import { exportSound, replaceSound } from "./soundfiles";
 import { findSoundUsages, removeUnusedSounds } from "./usage";
 import { h } from "../../workbench/dom";
-import { errorText } from "../../lib/oserror";
+import { errorText, isNotFoundError } from "../../lib/oserror";
+import { askWtsCuts, WtsCutError } from "../../lib/formats/wts";
+import { DialogueStrings, setDialogueString } from "./dialogue";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
@@ -23,7 +25,7 @@ import {
   type Sound, type SoundLabel,
 } from "./sounds";
 
-const RAW = "map/war3map.w3s", FILE = `${RAW}.json`;
+const RAW = "map/war3map.w3s", FILE = `${RAW}.json`, WTS = "map/war3map.wts";
 const SOUND_INFO = ["AbilitySounds", "AmbienceSounds", "AnimSounds", "CinematicSounds", "DialogSounds", "DialogueCreepsBase", "DialogueDemonBase",
   "DialogueHumanBase", "DialogueNagaBase", "DialogueNightElfBase", "DialogueOrcBase", "DialogueUndeadBase", "EnvironmentSounds", "SoundAssetCombat",
   "UISounds", "UnitAckSounds", "UnitCombatSounds"];
@@ -181,18 +183,23 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (i === undefined) { ids.set(x, i = byId.size); byId.set(i, x); }
           return i;
         };
-        const history = new History(() => JSON.stringify(sounds.sounds.map((x) => [idOf(x), x])), (state) => {
-          sounds.sounds = (JSON.parse(state) as [number, Sound][]).map(([i, data]) => {
+        // The dialogue texts and speaker names (war3map.wts): absent is an empty table, there but unreadable shows the keys only.
+        const { strings, error: stringsError } = await readDialogueStrings(w3);
+        const take = () => JSON.stringify([sounds.sounds.map((x) => [idOf(x), x]), strings?.state() ?? []]);
+        const history = new History(take, (state) => {
+          const [list, texts] = JSON.parse(state) as [[number, Sound][], [number, string][]];
+          sounds.sounds = list.map(([i, data]) => {
             const x = byId.get(i)!;
             for (const k of Object.keys(x)) delete (x as unknown as Record<string, unknown>)[k];
             return Object.assign(x, data);
           });
+          strings?.restore(texts);
           doc.setDirty(history.dirty);
           editor.refresh();
           if (current === editor) edits.fire();
         });
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
-        const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly);
+        const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError);
         current = editor;
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
@@ -200,15 +207,30 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           undo: () => { history.undo(); },
           redo: () => { history.redo(); },
           async save() {
-            if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.sounds/1", ...sounds }) });
-            else await doc.writeText(await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: JSON.stringify(sounds) }));
+            // A dialogue text the game would cut: changed (one undo step) after a question, or the save stops.
+            const cuts = strings?.cuts() ?? [];
+            if (cuts.length) {
+              if (!(await askWtsCuts((m, yes, ms) => w3.window.confirm(m, yes, ms), cuts))) throw new WtsCutError(cuts);
+              if (strings!.fixCuts()) { changed(); editor.refresh(); }
+            }
+            // What is written, taken up front: an edit made while the save writes stays unsaved.
+            const taken = take();
+            const body = JSON.stringify(sounds);
+            const text = raw ? null : await w3.backend.invoke<string>("codec_canonicalize", { root, path: doc.path, text: body });
+            // The strings before the sounds that name them: a save that stops between leaves an unused string, not a
+            // sound naming a missing one.
+            if (strings) await saveDialogueStrings(w3, strings);
+            if (raw) await w3.backend.invoke("codec_write", { root, path: doc.path, text: JSON.stringify({ format: "w3proj.sounds/1", ...JSON.parse(body) }) });
+            else await doc.writeText(text!);
             if (isNew) await w3.workspace.refresh();
             const renames = new Map(sounds.sounds.filter((x) => savedName.has(x) && savedName.get(x) !== x.name).map((x) => [savedName.get(x)!, x.name]));
             if (renames.size) await renameReferences(w3, renames);
             for (const x of sounds.sounds) savedName.set(x, x.name);
-            history.markSaved();
-            doc.setDirty(false);
+            history.markSaved(taken);
+            doc.setDirty(history.dirty);
           },
+          // Texts other editors save there show here (opened again when nothing is unsaved).
+          watches: [WTS],
           dispose: () => {
             editor.dispose();
             unbindKeys();
@@ -218,6 +240,37 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
   );
+}
+
+/** war3map.wts for the dialogue texts: a map without one gets an empty table (the file is made on the first dialogue
+ *  text); one that is there but can't be read gives the reason, and the texts aren't edited. */
+async function readDialogueStrings(w3: W3Api): Promise<{ strings: DialogueStrings | null; error: string | null }> {
+  const listed = w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === WTS);
+  try {
+    return { strings: new DialogueStrings(await w3.workspace.readText(WTS)), error: null };
+  } catch (e) {
+    if (!listed && isNotFoundError(e)) return { strings: new DialogueStrings(null), error: null };
+    return { strings: null, error: errorText(e) };
+  }
+}
+
+/** Writes the dialogue strings changed here onto war3map.wts as it is on disk now (see DialogueStrings.merge). */
+async function saveDialogueStrings(w3: W3Api, strings: DialogueStrings) {
+  if (!strings.pending().size) return;
+  let current: string | null;
+  try {
+    current = await w3.workspace.readText(WTS);
+  } catch (e) {
+    if (!isNotFoundError(e)) throw e;
+    current = null;
+  }
+  const merged = strings.merge(current);
+  if (merged === null) return;
+  if (merged !== current) {
+    await w3.workspace.writeText(WTS, merged);
+    if (current === null) await w3.workspace.refresh();
+  }
+  strings.saved(merged);
 }
 
 /** Renamed sounds in the regions' ambient sounds (the saved file) and in the triggers (w3.triggers.renameGlobals: the
@@ -255,7 +308,9 @@ class SoundEditor {
   private tab: "game" | "map" = "game";
   private imported: string[] = [];
 
-  constructor(private w3: W3Api, el: HTMLElement, private doc: SoundsDoc, private changed: () => void, private editable: boolean) {
+  constructor(private w3: W3Api, el: HTMLElement, private doc: SoundsDoc, private changed: () => void, private editable: boolean,
+    /** The dialogue texts (war3map.wts); null with the reason when it can't be read. */
+    private strings: DialogueStrings | null, private stringsError: string | null) {
     el.classList.add("snd-editor");
     el.append(h("div.snd-left", {}, this.browser), h("div.snd-right", {}, this.list, this.detail));
     this.imported = w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"))
@@ -548,12 +603,36 @@ class SoundEditor {
         parts.push(
           h("h4", {}, "Dialogue"),
           row("Speaker unit type", text(s.speakerUnitType ?? "", (v) => set(() => { s.speakerUnitType = v.trim(); }), { maxLength: 4, size: 6 })),
-          row("Text / speaker strings", h("span.muted", {}, `TRIGSTR_${s.dialogueTextKey} · TRIGSTR_${s.speakerNameKey} (edit in war3map.wts)`)),
+          ...this.dialogueRows(s, ro, row),
           row("Facial animation", text(s.facialAnimationLabel ?? "", (v) => set(() => { s.facialAnimationLabel = v; })),
             text(s.facialAnimationGroupLabel ?? "", (v) => set(() => { s.facialAnimationGroupLabel = v; }), { placeholder: "group" })),
         );
       }
     }
     this.detail.replaceChildren(...parts);
+  }
+
+  /** The speaker name and the text: strings of war3map.wts, edited here (one undo step per field visit). A sound
+   *  without keys gets them on the first text typed. */
+  private dialogueRows(s: Sound, ro: boolean, row: (label: string, ...control: (HTMLElement | string)[]) => HTMLElement): HTMLElement[] {
+    const strings = this.strings;
+    const keyNote = (key: number | undefined) => h("small.muted.snd-key", { title: "Stored in war3map.wts" },
+      (key ?? -1) >= 0 ? `string table · TRIGSTR_${key}${strings && !strings.has(key) ? " (not in the table yet)" : ""}` : "string table · made on the first text");
+    if (!strings) {
+      return [row("Speaker name / text", h("span.muted", {}, `TRIGSTR_${s.speakerNameKey} · TRIGSTR_${s.dialogueTextKey}: war3map.wts can't be read (${this.stringsError ?? "unknown"})`))];
+    }
+    const field = (which: "speaker" | "text") => {
+      const key = () => (which === "text" ? s.dialogueTextKey : s.speakerNameKey);
+      const onchange = () => {
+        if (!setDialogueString(s, which, control.value, strings, this.doc.sounds)) return;
+        this.changed();
+        this.renderDetail();
+      };
+      const control: HTMLInputElement | HTMLTextAreaElement = which === "text"
+        ? h("textarea.snd-dialogue-text", { value: strings.text(key()), readOnly: ro, rows: 3, onchange })
+        : h("input.snd-speaker-name", { type: "text", value: strings.text(key()), readOnly: ro, onchange });
+      return h("div.form-stack", {}, control, keyNote(key()));
+    };
+    return [row("Speaker name", field("speaker")), row("Text", field("text"))];
   }
 }

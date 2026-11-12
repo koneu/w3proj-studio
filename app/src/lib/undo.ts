@@ -43,8 +43,9 @@ export class History {
     return true;
   }
 
-  /** The current state is what's on disk now. */
-  markSaved() { this.saved = this.current; this.group = undefined; }
+  /** The current state is what's on disk now; `state`: the one taken when the save began (an edit made while it was
+   *  writing stays unsaved). */
+  markSaved(state?: string) { this.saved = state ?? this.current; this.group = undefined; }
   get dirty(): boolean { return this.current !== this.saved; }
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
