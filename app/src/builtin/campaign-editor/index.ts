@@ -215,7 +215,12 @@ class CampaignView {
     this.render();
   }
 
-  saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+  /** A number typed into its field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
+  private typing = false;
+  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.savedAt); }
+
+  // A number typed during the write stays unsaved.
+  saved() { this.savedAt = this.undoStack.length; this.showDirty(); }
 
   /** Shows a section (and selects a chapter button). */
   show(section: SectionId, chapter?: number) {
@@ -252,7 +257,8 @@ class CampaignView {
     this.redoStack = [];
     if (this.savedAt > this.undoStack.length - 1) this.savedAt = -1;
     fn();
-    this.setDirty(this.undoStack.length !== this.savedAt);
+    this.typing = false;
+    this.showDirty();
     if (rerender) this.render();
   }
   /** A map file change (or its undo) is being done: other map changes are refused meanwhile, undo and redo wait for it
@@ -279,7 +285,8 @@ class CampaignView {
     from.pop();
     to.push({ ...this.snapshot(), files: s.files });
     this.restore(s);
-    this.setDirty(this.undoStack.length !== this.savedAt);
+    this.typing = false;
+    this.showDirty();
     this.render();
   }
   private keyDown(e: KeyboardEvent) {
@@ -325,6 +332,9 @@ class CampaignView {
     const isUnset = opts.unset !== undefined && isUnsetFog(value);
     const input = h("input.form-input.form-num", { type: "number", value: isUnset ? "" : String(value), step: opts.int ? "1" : "any", readOnly: !this.editable,
       placeholder: opts.unset !== undefined ? "not set" : "" });
+    // Typed and not committed yet (`change` commits it as one step): the tab counts as unsaved meanwhile.
+    const drawn = input.value;
+    input.addEventListener("input", () => { this.typing = input.value !== drawn; this.showDirty(); });
     input.addEventListener("change", () => {
       if (input.value === "" && opts.unset !== undefined && !input.validity.badInput) {
         input.classList.remove("invalid");
@@ -518,6 +528,8 @@ class CampaignView {
 
   // ---- view ----------------------------------------------------------------------------
   render() {
+    // The fields are drawn anew: a number typed and not committed is gone with them.
+    if (this.typing) { this.typing = false; this.showDirty(); }
     const scroll = this.el.querySelector(".form-body")?.scrollTop ?? 0;
     const nav = h("nav.form-nav", {}, ...SECTIONS.map(([id, label]) =>
       h(`button.form-nav-item${id === this.section ? ".active" : ""}`, { onclick: () => { this.section = id; this.render(); } }, label)));

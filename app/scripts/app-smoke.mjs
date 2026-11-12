@@ -3918,16 +3918,48 @@ async function typedFieldSave(page, found) {
       await until("the AI Editor's number fields", () => page.evaluate(`${aiNum}.length > 0`), 20000);
       const index = 0, old = await page.evaluate(`${aiNum}[0].value`);
       const typed = old === "13" ? "14" : "13";
-      await typeAndSave("an AI number field", `${aiNum}[${index}]`, typed);
       const aiPath = await page.evaluate(`w3.editors.activePath()`);
+      // Unsaved while typing, before the field commits (it marked the tab only on its change).
+      await typeAndSave("an AI number field", `${aiNum}[${index}]`, typed, aiPath);
       await until("the AI saved", async () => !(await dirty(aiPath)), 5000).catch(() => fail("Ctrl+S right after typing an AI number left the AI Editor unsaved"));
       // The fields drawn again after the save, where the focus goes back to.
       await settled(page);
       const focus = await page.evaluate(`(() => { const a = document.activeElement; const list = ${aiNum}; return { at: list.indexOf(a), value: a?.value ?? null, tag: a?.tagName ?? null, cls: a?.className ?? null }; })()`);
       if (focus.at !== index || focus.value !== typed) fail(`after Ctrl+S in an AI number field the focus is on ${JSON.stringify(focus)}, not the field (number ${index}, ${typed})`);
+      // An AI text field (the AI's name, General tab) too.
+      await page.evaluate(`[...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "General")?.click()`);
+      await typeAndSave("the AI's name", `document.querySelector("input.ai-text")`, "Typed Name", aiPath);
+      await until("the AI saved", async () => !(await dirty(aiPath)), 5000).catch(() => fail("Ctrl+S right after typing the AI's name left the AI Editor unsaved"));
     } finally {
       await page.evaluate(`(() => { if (window.__typedSave) w3.window.pickSaveFile = window.__typedSave; delete window.__typedSave; })()`);
     }
+
+    // ---- The Campaign Editor: a number field (Screen's fog style) marks the tab unsaved while typing ----
+    const camp = join(work, "typed-campaign");
+    rmSync(camp, { recursive: true, force: true });
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Typed Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const w3f = "map/war3campaign.w3f.json";
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Typed Campaign", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 0, backgroundPath: "", minimapPath: "", ambientSound: 0, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = ${JSON.stringify(w3f)};
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    const fogStyle = `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Fog style")?.querySelector("input")`;
+    await until("the Campaign Editor's fog style", () => page.evaluate(`!!(${fogStyle})`), 20000);
+    const campPath = await page.evaluate(`w3.editors.activePath()`);
+    if (campPath !== w3f) fail(`w3.campaign.open opened ${campPath}`);
+    const style = () => JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8")).fogStyle;
+    const newStyle = style() === 1 ? 2 : 1;
+    await typeAndSave("the campaign's fog style", fogStyle, String(newStyle), w3f);
+    await until("the typed fog style saved", () => style() === newStyle, 5000).catch(() => fail(`Ctrl+S right after typing ${newStyle} as the campaign's fog style saved ${JSON.stringify(style())}`));
+    await settled(page);
+    if (await dirty(w3f)) fail("Ctrl+S right after typing in the Campaign Editor left it unsaved");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }

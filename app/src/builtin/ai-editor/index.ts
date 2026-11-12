@@ -193,7 +193,18 @@ class AiView {
     this.render();
   }
 
-  saved() { this.savedAt = this.undoStack.length; this.setDirty(false); }
+  /** Text typed into a field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
+  private typing = false;
+  private showDirty() { this.setDirty(this.typing || this.undoStack.length !== this.savedAt); }
+  /** The tab unsaved while `input` holds other text than it was drawn with (`change` commits it as one step). */
+  private watchTyping(input: HTMLInputElement) {
+    const drawn = input.value;
+    input.addEventListener("input", () => { this.typing = input.value !== drawn; this.showDirty(); });
+    return input;
+  }
+
+  // Typing during the write stays unsaved.
+  saved() { this.savedAt = this.undoStack.length; this.showDirty(); }
 
   /** Runs a button's work; a failure is shown. */
   private act(f: () => Promise<unknown>) { f().catch((e) => this.w3.window.showError(String(e instanceof Error ? e.message : e))); }
@@ -293,7 +304,8 @@ class AiView {
     this.afterChange();
   }
   private afterChange() {
-    this.setDirty(this.undoStack.length !== this.savedAt);
+    this.typing = false;
+    this.showDirty();
     this.render();
   }
   undo() {
@@ -351,20 +363,20 @@ class AiView {
     return h("div.ai-field", {}, h("label", {}, label), h("div", {}, ...control));
   }
   private num(value: number, set: (v: number) => void, opts: { min?: number; max?: number; width?: string } = {}) {
-    return h("input.ai-num", {
+    return this.watchTyping(h("input.ai-num", {
       type: "number", value: String(value), min: opts.min, max: opts.max, disabled: !this.editable,
       onchange: (e: Event) => {
         const v = Math.round(Number((e.target as HTMLInputElement).value));
         if (!Number.isFinite(v) || v === value) return;
         this.change(() => set(Math.max(opts.min ?? -Infinity, Math.min(opts.max ?? Infinity, v))));
       },
-    });
+    }));
   }
   private text(value: string, set: (v: string) => void, cls = "ai-text") {
-    return h(`input.${cls}`, {
+    return this.watchTyping(h(`input.${cls}`, {
       type: "text", value, readOnly: !this.editable,
       onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; if (v !== value) this.change(() => set(v)); },
-    });
+    }));
   }
   private select<T extends number | string>(value: T, options: [T, string][], set: (v: T) => void) {
     return h("select", {
@@ -493,6 +505,8 @@ class AiView {
 
   // ---- view ----------------------------------------------------------------------------
   render() {
+    // The fields are drawn anew: what was typed and not committed is gone with them.
+    if (this.typing) { this.typing = false; this.showDirty(); }
     this.conditionNames();
     const scroll = [...this.el.querySelectorAll(".ai-scroll")].map((e) => e.scrollTop);
     const tabs = ["General", "Heroes", "Building", "Attacking", "Test Configuration"];
