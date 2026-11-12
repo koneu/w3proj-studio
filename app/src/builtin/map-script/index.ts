@@ -261,6 +261,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await write("replaced on request", true, root).catch(() => {});
   };
   const showDifference = (path: string) => w3.editors.open(`${DIFF}${path}`, "w3.scriptDiff");
+  /** Closes the open questions about the project's script when another project (or the same folder again) opens:
+   *  answering one there only says it's no longer about the open project. */
+  let questions = new AbortController();
+  /** Asks what to do with a script that is kept (Replace, Show Difference, Keep), for the open project only. */
+  const ask = (message: string) => w3.window.notify("warning", message, ["Replace the script", "Show Difference", "Keep it"], { signal: questions.signal });
   /** Writes the script; false when it stays as it is. `force`: also over a script that isn't the one this app
    *  wrote last. `onlyFor`: only in that project (else nothing is written). */
   const write = (reason: string, force = false, onlyFor?: string): Promise<boolean> => {
@@ -307,16 +312,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (lost.length) {
             out.append(`${reason}: ${file} not written: it has ${lost.length} functions the triggers don't make (${lost.slice(0, 5).join(", ")}${lost.length > 5 ? ", …" : ""}); the script stays as it is.`);
             if (tell) {
-              void w3.window.showWarning(`${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} that the map's triggers don't make (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""}), ${KEPT_SCRIPT_WORDS} and changed triggers don't reach it. Replacing it deletes that code (a checkpoint keeps it).`,
-                "Replace the script", "Show Difference", "Keep it").then(answer);
+              void ask(`${file} has ${lost.length} function${lost.length === 1 ? "" : "s"} that the map's triggers don't make (${lost.slice(0, 3).join(", ")}${lost.length > 3 ? ", …" : ""}), ${KEPT_SCRIPT_WORDS} and changed triggers don't reach it. Replacing it deletes that code (a checkpoint keeps it).`).then(answer);
             }
             return false;
           }
           const why = current === undefined ? "can't be read as text" : "isn't the script Studio wrote last (it was changed by hand or by another program, or comes from the World Editor and differs from what Studio makes)";
           out.append(`${reason}: ${file} not written: it ${why}; the script stays as it is. "Replace the script" in the warning (Generate Map Script shows it again) replaces it.`);
           if (tell) {
-            void w3.window.showWarning(`${file} ${why}, ${KEPT_SCRIPT_WORDS}: saved changes to triggers, regions, cameras, sounds, placed objects or map info don't reach it. Replacing it writes over its changes (a checkpoint keeps them).`,
-              "Replace the script", "Show Difference", "Keep it").then(answer);
+            void ask(`${file} ${why}, ${KEPT_SCRIPT_WORDS}: saved changes to triggers, regions, cameras, sounds, placed objects or map info don't reach it. Replacing it writes over its changes (a checkpoint keeps them).`).then(answer);
           }
           return false;
         }
@@ -381,6 +384,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const project = w3.workspace.project();
     if (project === openProject) return;
     openProject = project;
+    questions.abort();
+    questions = new AbortController();
     if (project) void adopt("opened").then(() => refreshChapter(project.root));
   };
   /** A chapter map's script that is this app's (stamped) is made again when the project opens: its campaign's object
@@ -486,6 +491,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const written = await write("command");
       if (written && !opts?.quiet) w3.window.showInfo("Map script generated (see the Map Script output).");
     }),
-    { dispose: () => clearTimeout(timer) },
+    { dispose: () => { clearTimeout(timer); questions.abort(); } },
   );
 }

@@ -15,6 +15,7 @@ mod mcpclients;
 #[cfg_attr(windows, allow(dead_code))]
 mod proton;
 mod strays;
+mod toolrun;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -1138,18 +1139,12 @@ fn check_test_map_args(args: &[String]) -> CmdResult<()> {
     Ok(())
 }
 
-/// What an external tool run printed and returned.
-#[derive(Serialize)]
-struct ToolResult {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
 /// Runs an external program (e.g. a script compiler a language extension uses, like the game's
-/// JassHelper) in `cwd` and waits for it; no console window, output captured.
+/// JassHelper) in `cwd` and waits for it to exit; no console window, output captured. What it leaves running
+/// from its own folder is ended then (JassHelper's error window). With a `guard` it is also ended when it goes too
+/// long without progress, or doesn't exit after writing its result (toolrun.rs).
 #[tauri::command]
-async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<ToolResult> {
+async fn tool_run(exe: String, args: Vec<String>, cwd: String, guard: Option<toolrun::Guard>) -> CmdResult<toolrun::ToolResult> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = program(&exe, args)?;
         cmd.current_dir(&cwd);
@@ -1163,23 +1158,10 @@ async fn tool_run(exe: String, args: Vec<String>, cwd: String) -> CmdResult<Tool
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("{exe}: {e}"))?;
-        // Whatever the tool starts ends with it (e.g. JassHelper opens its error dialog in a
-        // second process): the job is closed when the tool has exited.
-        #[cfg(windows)]
-        let job = job::kill_on_close(&child);
-        let out = child.wait_with_output().map_err(|e| format!("{exe}: {e}"))?;
-        #[cfg(windows)]
-        drop(job);
-        Ok(ToolResult {
-            code: out.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        // A program given by its path (not one found on PATH, like git) has a folder its own programs come from.
+        let own = Path::new(&exe);
+        let own = own.is_absolute().then_some(own);
+        toolrun::run(cmd, &exe, Path::new(&cwd), own, guard.as_ref())
     })
     .await
     .map_err(err)?

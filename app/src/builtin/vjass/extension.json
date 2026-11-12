@@ -13,7 +13,8 @@
       "properties": {
         "vjass.jassHelper": { "type": "string", "scope": "user", "default": "", "description": "jasshelper.exe to use. Empty: the one in the game folder (game.installDir\\_retail_\\x86_64\\JassHelper)." },
         "vjass.debug": { "type": "boolean", "default": false, "description": "Debug mode (--debug): keeps debug statements and adds checks, like the World Editor's JassHelper > Enable debug mode." },
-        "vjass.optimize": { "type": "boolean", "default": true, "description": "Optimizer (off: --nooptimize), like the World Editor's JassHelper > Enable optimizer." }
+        "vjass.optimize": { "type": "boolean", "default": true, "description": "Optimizer (off: --nooptimize), like the World Editor's JassHelper > Enable optimizer." },
+        "vjass.timeout": { "type": "number", "default": 60, "description": "Seconds JassHelper may go without progress before it is ended and the compile fails (at least 5)." }
       }
     }
   }

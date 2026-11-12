@@ -124,12 +124,14 @@ export function header(i: ScriptInput): string {
     "//===========================================================================", "", ""].join(EOL);
 }
 
-/** Default value of a global in its declaration (only non-handle types have one). */
+/** Default value of a global in its declaration (only non-handle types have one). JASS declares a string
+ *  without a value and a real as `0`; war3map.lua has `""` and `0.0` (World Editor, 2026-11-12). */
 function declDefault(i: ScriptInput, type: string): string {
   const base = jassType(i.data, type);
   if (base === "boolean") return "false";
-  if (base === "integer" || base === "real") return "0";
-  if (base === "string") return "";
+  if (base === "integer") return "0";
+  if (base === "real") return i.lua ? "0.0" : "0";
+  if (base === "string") return i.lua ? '""' : "";
   return "null";
 }
 
@@ -208,7 +210,8 @@ function initValue(i: ScriptInput, v: Variable): string | null {
     if (preset) return preset.script;
     return literal(data, v.type, v.initialValue);
   }
-  // By the trigger type itself: unitcode is an integer in JASS but has no default.
+  // By the trigger type itself: unitcode is an integer in JASS but has no default. war3map.lua starts reals at 0.0.
+  if (i.lua && v.type === "real") return "0.0";
   const def = TYPE_DEFAULTS[v.type];
   return def ?? null;
 }
@@ -251,10 +254,12 @@ export const HEADER_SECTION = "Custom Script Code (header)";
  *  map's objects (Regions, Cameras) and before the triggers, as the World Editor writes it; the first
  *  banner after the globals stays empty then (all six game maps with a header: War3XBonusCredits,
  *  Human06, WormWar, BomberCommand, AzerothGrandPrix, and the Lua map SilverpineSprint). The text as it
- *  is, its leading empty lines too (BomberCommand). Nothing without code. */
+ *  is, its leading empty lines too (BomberCommand). Nothing for an empty header or one of only line breaks;
+ *  one of spaces is written (war3map.lua, World Editor 2026-11-12: "   " stays a line; no game map has
+ *  such a header, so JASS is taken to do the same). */
 export function mapHeader(i: ScriptInput): string {
   const text = i.custom?.header ?? "";
-  if (!text.trim()) return "";
+  if (!/[^\r\n]/.test(text)) return "";
   return banner("Custom Script Code").slice(0, -EOL.length) + codeLines(i, text);
 }
 

@@ -54,7 +54,13 @@ class TriggerCompiler {
     if (type.startsWith("VarAsString") && p.type === 1) return `"udg_${p.value}"`;
     let out: string;
     switch (p.type) {
-      case 0: out = data.presets.get(p.value)?.script ?? p.value; break;
+      case 0: {
+        const preset = data.presets.get(p.value);
+        out = preset?.script ?? p.value;
+        // A string preset of null (SkyModelNone) is "" in war3map.lua: SetSkyModel("").
+        if (this.i.lua && out === "null" && preset && data.types.get(preset.type)?.base === "string") out = '""';
+        break;
+      }
       case 1: out = this.i.triggers.variables.some((v) => v.name === p.value) ? `udg_${p.value}` : p.value; break;
       case 2: out = p.call ? this.callExpr(p.call, type, path) : p.value; break;
       case 3: out = this.literal(type, p.value); break;
@@ -115,8 +121,9 @@ class TriggerCompiler {
     list.forEach((c) => {
       if (!c.enabled) return;
       const e = this.pre.get(c) ?? this.condExpr(c, `${path}Func${pad3(all.indexOf(c) + 1)}`);
-      // Comparisons get parentheses, calls don't: not ( a == b ), not GetBooleanOr(…).
-      const w = OPERATORS.test(c.name) ? `( ${e} )` : e;
+      // Comparisons get parentheses, calls don't: not ( a == b ), not GetBooleanOr(…). war3map.lua has no
+      // second pair in the Or form: if (a == b) then, where war3map.j has if ( ( a == b ) ) then.
+      const w = OPERATORS.test(c.name) && !(or && this.i.lua) ? `( ${e} )` : e;
       lines.push(or ? `    if ( ${w} ) then` : `    if ( not ${w} ) then`, `        return ${or}`, "    endif");
     });
     lines.push(`    return ${!or}`);
@@ -340,11 +347,11 @@ export function convertToCustom(t: TriggerItem) {
 }
 
 /** Whether RunInitializationTriggers runs `t` (an enabled trigger): Run on Map Initialization, or a Map
- *  Initialization event on a trigger that starts on. The World Editor leaves out an initially off trigger
+ *  Initialization event, on a trigger that starts on. The World Editor leaves out an initially off trigger
  *  with the event (NightElf05's "The Dragons", UndeadX08's "Change the Icon": the only two in the game's
- *  maps). No game map has Run on Map Initialization on an initially off trigger; that still counts. */
+ *  maps), and one with Run on Map Initialization too (none in the game's maps; World Editor 2026-11-12). */
 export function runsAtInit(t: TriggerItem): boolean {
-  return t.runOnInit || (!t.initiallyOff && t.ecas.some((e) => e.enabled && e.kind === EVENT && e.name === "MapInitializationEvent"));
+  return !t.initiallyOff && (t.runOnInit || t.ecas.some((e) => e.enabled && e.kind === EVENT && e.name === "MapInitializationEvent"));
 }
 
 /** The trigger part of war3map.j (after the "Triggers" banner). */

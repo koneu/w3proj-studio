@@ -28,8 +28,10 @@ export class Notifications {
 
   /** `expires`: the question goes away after this many ms, answered with nothing. `byKey`: the action
    *  the Delete key takes; Escape cancels, and so does moving on, by a click elsewhere or another key
-   *  (see deleteQuestionKey). */
-  show(severity: Severity, message: string, actions: string[] = [], expires?: number, byKey?: string): Promise<string | undefined> {
+   *  (see deleteQuestionKey). `signal`: aborting it closes the toast, answered with nothing (a question about one
+   *  project when another opens). */
+  show(severity: Severity, message: string, actions: string[] = [], expires?: number, byKey?: string, signal?: AbortSignal): Promise<string | undefined> {
+    if (signal?.aborted) return Promise.resolve(undefined);
     return new Promise((resolve) => {
       let timer = 0;
       const onKey = (e: KeyboardEvent) => {
@@ -42,10 +44,12 @@ export class Notifications {
         close(answer === "yes" ? byKey : undefined);
       };
       const onPress = (e: MouseEvent) => { if (!toast.contains(e.target as Node)) close(); };
+      const onAbort = () => close();
       const close = (result?: string) => {
         clearTimeout(timer);
         window.removeEventListener("keydown", onKey, true);
         window.removeEventListener("mousedown", onPress, true);
+        signal?.removeEventListener("abort", onAbort);
         toast.remove();
         resolve(result);
       };
@@ -66,6 +70,7 @@ export class Notifications {
         ),
       );
       this.root.append(toast);
+      signal?.addEventListener("abort", onAbort);
       if (byKey) {
         window.addEventListener("keydown", onKey, true);
         window.addEventListener("mousedown", onPress, true);

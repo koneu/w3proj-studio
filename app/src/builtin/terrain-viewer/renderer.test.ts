@@ -130,6 +130,11 @@ test("HD water is the editor's dark teal, not Water.slk's HD ramp colour (we-dri
   within(rgb(hdWaterColor("B", false)), [25, 41, 42], [26, 46, 44], "Barrens");
   // OrcX02_03's city pool (Cityscape, game view, 2026-11-09): blue, not teal.
   within(rgb(hdWaterColor("Y", false)), [50, 61, 121], [50, 61, 121], "Cityscape");
+  // Murgul Oasis (Sunken Ruins, the same HD Water.slk row as Cityscape) in game view, 2026-11-12: blue, not olive teal.
+  const ruins = rgb(hdWaterColor("Z", false));
+  within(ruins, [30, 94, 174], [30, 94, 174], "Sunken Ruins");
+  assert.ok(ruins[2] > ruins[1] && ruins[1] > ruins[0], `Sunken Ruins blue over green over red: ${ruins}`);
+  within(rgb(hdWaterColor("z", false)), ruins, ruins, "the tileset's letter in any case");
   // 03b_Water_Tint (red): the editor's HD water loses Lordaeron's blue instead of turning red.
   within(rgb(hdWaterColor("L", true)), [22, 50, 40], [23, 50, 40], "Lordaeron tinted");
 });

@@ -25,6 +25,8 @@ It also reports what must stay silent on maps the World Editor made: `lib/script
 `sections.mts` also counts whole files that come out identical, `(whole file)`; pass that as the
 section to see where a file whose sections all match still differs. Sound durations come from the
 World Editor's script (`scriptSoundDurations`), as the app takes them when it can't read the sound files.
+Lua maps have no banners: they count only as whole files, `(whole file, Lua)`. `SCRIPT_CHECK_DUMP=<folder>`
+writes both scripts of every map (JASS and Lua) as JSON, to diff them.
 The map's custom script header is the section `Custom Script Code (header)`: the World Editor writes
 it under a second banner after the objects.
 

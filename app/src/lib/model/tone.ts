@@ -3,10 +3,12 @@
 //
 // - Classic (SD): texture × light, the light clamped to 1 per channel, as fixed-function lighting does. The editor's
 //   ground is the same with View > Lighting on, off and in game view, on map 03 (light 0.97) and on cliff.w3m (1.36).
-// - HD (Reforged): the texture taken as sRGB to linear light, multiplied by the light and an exposure, through the
-//   ACES filmic curve (Narkowicz's fit) and back to sRGB. That curve's toe takes grass's red and blue to nearly 0
-//   (Lords_Grass_Diffuse 20, 124, 18 shows as 3, 131, 0) and fits every picture to 4 levels rms; a plain multiply
-//   is 13–16 off. The editor's own light (View > Lighting off) is exposure 0.70 on the texture.
+// - HD (Reforged): the texture taken as sRGB to linear light, multiplied by the light and an exposure, a little more
+//   saturated (HD_SATURATION), through the ACES filmic curve (Narkowicz's fit) with the editor's shoulder, never
+//   darker than the light without the exposure (hdTone), and back to sRGB. The saturation takes grass's red and blue
+//   to nearly 0 (Lords_Grass_Diffuse 20, 124, 18 shows as 3, 131, 0), while dark grey ground keeps its colour; the
+//   fit is 4 levels rms on bright pictures, where a plain multiply is 13–16 off. The editor's own light (View >
+//   Lighting off) is exposure 0.70 on the texture.
 //
 // The lighting models' light reaches the HD picture weaker than it reads (see hdLight).
 
@@ -31,12 +33,47 @@ export const HD_EXPOSURE = 0.7;
  */
 export const HD_SHOULDER = { gain: 46, power: 10.4 };
 
-/** A linear light value (texture × light × exposure) through the HD picture's curve: ACES (Narkowicz's fit) with the
- *  editor's shoulder (HD_SHOULDER), linear 0–1 out. The shaders' `toned` does the same per channel. */
+/**
+ * A linear light value (texture × light × exposure) through the HD picture's curve, linear 0–1 out: ACES (Narkowicz's
+ * fit) with the editor's shoulder (HD_SHOULDER), but never darker than the value without the exposure (x /
+ * HD_EXPOSURE). The two meet at about sRGB 120; above, the curve is as fitted (it is about that value there anyway).
+ * Below, ACES's toe made dark ground far too dark: the editor's HD view with View > Lighting off shows dark textures
+ * as they are (we-drive, 2026-11-12, new flat 64×64 maps: Dungeon's Cave_Dirt_Diffuse, mean 30, 26, 25, as 30, 25,
+ * 24; Icecrown's Ice_Dirt 29, 45, 49 as 27, 46, 49, level by level from sRGB 18 to 59), where the toe gave 13, 9, 8
+ * and 12, 25, 28. The shaders' `toned` does the same per channel.
+ */
 export function hdTone(x: number): number {
   const v = Math.max(0, x);
   const o = Math.min(1, (v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14));
-  return Math.min(1, o + HD_SHOULDER.gain * o ** HD_SHOULDER.power * (1 - o));
+  return Math.min(1, Math.max(o + HD_SHOULDER.gain * o ** HD_SHOULDER.power * (1 - o), v / HD_EXPOSURE));
+}
+
+/**
+ * The HD picture's saturation, of the linear colour before the curve (hdSaturate): what keeps grass's red and blue
+ * near 0 without ACES's toe (hdTone), where a darker curve would also darken grey ground. Fitted on map 03 (grass
+ * 8, 120, 10 as with the toe, which matched the editor) and checked on Mount Hyjal's grass, whose darkest tenth of
+ * red and blue is 0 in the editor's picture as with it (both 2026-11-12). Dark grey ground (Cave_Dirt) is all but
+ * unchanged by it.
+ */
+export const HD_SATURATION = 1.05;
+
+/** Rec. 709 luminance weights of linear light. */
+const LUMA = [0.2126, 0.7152, 0.0722] as const;
+
+/** A linear colour (texture × light × exposure) with the HD picture's saturation (HD_SATURATION), before the curve
+ *  (hdTone). The shaders' `toned` does the same. */
+export function hdSaturate(rgb: readonly number[]): [number, number, number] {
+  const l = LUMA[0] * rgb[0] + LUMA[1] * rgb[1] + LUMA[2] * rgb[2];
+  return [0, 1, 2].map((c) => Math.max(0, l + HD_SATURATION * (rgb[c] - l))) as [number, number, number];
+}
+
+const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const toSrgb = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+
+/** The HD picture's colour (sRGB, 0–1) of a texture colour `base` (sRGB, 0–1) under a light: the shaders' `toned` in HD. */
+export function hdPixel(base: readonly number[], light: readonly number[]): [number, number, number] {
+  const x = hdSaturate([0, 1, 2].map((c) => toLinear(Math.min(1, Math.max(0, base[c]))) * Math.max(0, light[c]) * HD_EXPOSURE));
+  return x.map((v) => toSrgb(hdTone(v))) as [number, number, number];
 }
 
 /** How much a surface of normal `n` gets of a sun from `l`: the cosine, and in HD the lift by the shadow intensity
@@ -152,8 +189,10 @@ vec3 linearToSrgb(vec3 c) {
 vec3 tonedGlow(vec3 base, vec3 light, vec3 glow) {
   if (uTone > 1.5) {
     vec3 x = (srgbToLinear(clamp(base, 0.0, 1.0)) * max(light, vec3(0.0)) + srgbToLinear(clamp(glow, 0.0, 1.0))) * ${HD_EXPOSURE.toFixed(3)};
+    float luma = dot(x, vec3(${LUMA.join(", ")}));
+    x = max(vec3(luma) + ${HD_SATURATION.toFixed(3)} * (x - vec3(luma)), vec3(0.0));
     vec3 o = min((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3(1.0));
-    return linearToSrgb(o + ${glsl(HD_SHOULDER.gain)} * pow(o, vec3(${glsl(HD_SHOULDER.power)})) * (1.0 - o));
+    return linearToSrgb(max(o + ${glsl(HD_SHOULDER.gain)} * pow(o, vec3(${glsl(HD_SHOULDER.power)})) * (1.0 - o), x / ${HD_EXPOSURE.toFixed(3)}));
   }
   if (uTone > 0.5) return base * clamp(light, 0.0, 1.0) + glow;
   return base * light + glow;
