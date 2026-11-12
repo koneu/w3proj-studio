@@ -231,12 +231,13 @@ test("Import changes nothing when declined, cancelled or unsaved; another versio
 
 import { mergeSkin } from "./w3o";
 
-test("mergeSkin puts Skin fields into their objects, main's value first, and adds Skin-only objects when asked", () => {
+test("mergeSkin puts Skin fields into their objects, the Skin file's value winning, and adds Skin-only objects when asked", () => {
   const main = file(3, [std("hfoo", 5)], [{ base: "hfoo", id: "h000", mods: [mod("unam", "Main name"), { field: "uico", type: "string", value: "main.blp" }] }]);
   const skin = file(3, [{ base: "hfoo", mods: [mod("unam", "Skin base name"), { field: "umdl", type: "string", value: "foot.mdx" }] }],
     [{ base: "hfoo", id: "h000", mods: [mod("unam", "Skin name"), { field: "uico", type: "string", value: "skin.blp" }, { field: "utip", type: "string", value: "Tip" }] }, { base: "hpea", id: "h001", mods: [mod("unam", "Only skin")] }]);
   const merged = mergeSkin(main, skin, { addSkinOnly: true });
-  assert.deepEqual(merged.custom[0].mods!.map((m) => [m.field, m.value]), [["unam", "Main name"], ["uico", "main.blp"], ["utip", "Tip"]]);
+  // As the World Editor shows and saves a unit with a name in both files (we-drive, 2026-11-12).
+  assert.deepEqual(merged.custom[0].mods!.map((m) => [m.field, m.value]), [["unam", "Skin name"], ["uico", "skin.blp"], ["utip", "Tip"]]);
   assert.deepEqual(merged.original[0].mods!.map((m) => [m.field, m.value]), [["uhpm", 5], ["unam", "Skin base name"], ["umdl", "foot.mdx"]]);
   assert.deepEqual(merged.custom.map((o) => o.id), ["h000", "h001"]);
   assert.equal(main.custom[0].mods!.length, 2, "main is not changed");
@@ -249,7 +250,7 @@ test("mergeSkin keeps levels apart, follows version 3 sets, and an end token tha
   const main = file(3, [], [{ base: "AHbz", id: "A000", sets: [{ flag: 0, mods: [lvl(1, "main1")] }] }]);
   const skin = file(3, [], [{ base: "AHbz", id: "A000", end: "A000", sets: [{ flag: 0, mods: [lvl(1, "skin1"), lvl(2, "skin2")] }] }]);
   const merged = mergeSkin(main, skin, { addSkinOnly: false });
-  assert.deepEqual(merged.custom[0].sets![0].mods.map((m) => [m.level, m.value, m.end]), [[1, "main1", undefined], [2, "skin2", "A000"]]);
+  assert.deepEqual(merged.custom[0].sets![0].mods.map((m) => [m.level, m.value, m.end]), [[1, "skin1", "A000"], [2, "skin2", "A000"]]);
   // Nothing to put the fields in: an object with no mods of its own gets a list.
   assert.equal(mergeSkin(file(3, [], [{ base: "hfoo", id: "h000" }]), file(3, [], [unit("h000", "N")]), { addSkinOnly: false }).custom[0].mods![0].value, "N");
 });

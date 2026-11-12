@@ -32,17 +32,32 @@ const count = (f: EditFile) => f.custom.length + f.original.length;
 
 const modKey = (m: EditMod) => `${m.field}/${m.level ?? 0}/${m.data ?? 0}`;
 
+/** Finds the objects of `list` that go with others, each once: the first asked for an id gets the first object of
+ *  that id, the second the second, and so on; undefined when there are no more. */
+export function pairing(list: readonly EditObject[], same: (a: EditObject, b: EditObject) => boolean): (o: EditObject) => EditObject | undefined {
+  const used = new Set<EditObject>();
+  return (o) => {
+    const t = list.find((x) => !used.has(x) && same(x, o));
+    if (t) used.add(t);
+    return t;
+  };
+}
+
 /** A copy of `main` with the fields of the Skin file (war3mapSkin.w3?) put into the objects they belong
  *  to: Reforged maps keep names, models, art and tooltips there. Where both have a value for a field
- *  (same level and data), main's stays. `addSkinOnly`: objects only the Skin file has are added too.
- *  Where Reforged's editor itself puts these fields in a .w3o is not verified. */
+ *  (same level and data), the Skin file's wins, in main's place: the World Editor reads it so (we-drive,
+ *  2026-11-12: a unit with a name in both files shows and saves the Skin file's; skin.ts). `addSkinOnly`:
+ *  objects only the Skin file has are added too. Where Reforged's editor itself puts these fields in a .w3o is
+ *  not verified. */
 export function mergeSkin(main: EditFile, skin: EditFile | null, opts: { addSkinOnly: boolean }): EditFile {
   const out = structuredClone(main);
   if (!skin) return out;
   const fold = (target: EditObject[], from: EditObject[], same: (a: EditObject, b: EditObject) => boolean) => {
+    // A map with two objects of one id: the second Skin entry goes with the second object (skin.ts splits so).
+    const pair = pairing(target.slice(), same);
     for (const s of from) {
       const sets = s.sets ?? [{ flag: 0, mods: s.mods ?? [] }];
-      const t = target.find((x) => same(x, s));
+      const t = pair(s);
       if (!t) {
         if (opts.addSkinOnly && sets.some((x) => x.mods.length)) target.push(structuredClone(s));
         continue;
@@ -55,13 +70,14 @@ export function mergeSkin(main: EditFile, skin: EditFile | null, opts: { addSkin
           if (s.sets) t.sets.push(dest = { flag: set.flag, mods: [] }); else dest = t.sets[0];
         }
         const list = dest ? dest.mods : (t.mods ??= []);
-        const taken = new Set(list.map(modKey));
+        const at = new Map(list.map((m, i) => [modKey(m), i]));
         for (const m of set.mods) {
-          if (taken.has(modKey(m))) continue;
           const copy = structuredClone(m);
           // An object's own end token is the default of its mods; the Skin object's may differ.
           if (copy.end === undefined && s.end !== undefined && s.end !== t.end) copy.end = s.end;
-          list.push(copy);
+          // Both set it: the Skin file's value is the one (the World Editor shows and saves that one).
+          const i = at.get(modKey(m));
+          if (i === undefined) list.push(copy); else list[i] = copy;
         }
       }
     }
