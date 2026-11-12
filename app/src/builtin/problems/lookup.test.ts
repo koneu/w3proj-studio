@@ -294,3 +294,23 @@ test("control: an unreadable folder of the campaign's own map fails the check, n
   const app = chapter({ unreadable: [{ path: "map/war3mapImported", error: "Permission denied (os error 13)" }] });
   await assert.rejects(runImports(app), /couldn't be listed \(map\/war3mapImported: Permission denied/);
 });
+
+/** A model (MDX) whose only content is one texture entry. */
+function mdxWithTexture(path: string): Uint8Array {
+  const b = new Uint8Array(4 + 8 + 268);
+  const v = new DataView(b.buffer);
+  b.set([..."MDLX"].map((c) => c.charCodeAt(0)), 0);
+  b.set([..."TEXS"].map((c) => c.charCodeAt(0)), 4);
+  v.setUint32(8, 268, true);
+  b.set([...path].map((c) => c.charCodeAt(0)), 16);
+  return b;
+}
+
+test("a model's missing texture says where it was looked for, the campaign's files included", async () => {
+  const app = chapter({ own: { "map/m.mdx": mdxWithTexture("Textures\\Gone.blp") } });
+  const check = builtinChecks(app.w3).find((c) => c.id === "modelTextures")!;
+  const run = check.run();
+  await settle();
+  app.release();
+  assert.deepEqual((await run).map((p) => p.message), ["texture Textures\\Gone.blp not found (neither in the map, its campaign's files nor in the game)"]);
+});
