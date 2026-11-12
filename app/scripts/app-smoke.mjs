@@ -149,13 +149,16 @@ async function newMaps(page, found) {
       // Not awaited: the command waits for its toast's buttons.
       const output = await page.evaluate(`w3.workspace.project().default_output`);
       const map = resolve(root, output);
+      // The build is done when it says so ("Packed … files → <map>"): the file can be there before it is whole.
+      const packedToast = `[...document.querySelectorAll(".notification, .toast")].some((e) => e.textContent.includes("Packed ") && e.textContent.includes(${JSON.stringify(basename(map))}))`;
+      await page.evaluate(`document.querySelectorAll(".notification, .toast").forEach((e) => e.remove())`);
       await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
       try {
-        await until("the build", () => existsSync(map), 20000);
+        await until("the build", async () => existsSync(map) && (await page.evaluate(packedToast)), 20000);
       } catch (e) {
         throw new Error(`no map at ${map}: ${await page.evaluate(`[...document.querySelectorAll(".notification, .toast, .notifications *")].map((e) => e.textContent).join(" | ").slice(0, 300)`)}`);
       }
-      await sleep(300);
+      await settled(page);
       if (args.water === "deep") await viewCommands(page, fail, join(work, "view-shots"), size);
       const verify = spawnSync(cli, ["verify", "-q", map, ...(game ? ["--game", game] : [])], { encoding: "utf8" });
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
@@ -192,7 +195,7 @@ async function newMaps(page, found) {
 
       // Opening it again, as after a restart.
       await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); await w3.editors.open("map/war3map.w3e.txt"); })()`);
-      await sleep(300);
+      await settled(page);
       const again2 = await page.evaluate(`w3.editors.activePath()`);
       if (again2 !== "map/war3map.w3e.txt") fail("it doesn't open again");
     } catch (e) {
@@ -609,7 +612,7 @@ async function tileTemplate(page, found) {
   const own = header("tileset");
   if (header("custom-tilesets") !== "0") fail(`a new map's tile list is custom (control): ${header("custom-tilesets")}`);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
-  await sleep(300);
+  await until("the Tiles… button", () => page.evaluate(`[...document.querySelectorAll("button")].some((b) => b.textContent === "Tiles…")`), 10000);
   await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Tiles…").click()`);
   const template = `document.querySelectorAll(".terrain-tilemgr-row")[1]?.querySelector("select")`;
   await until("the tile templates", () => page.evaluate(`(${template})?.options.length > 1`), 20000);
@@ -622,9 +625,9 @@ async function tileTemplate(page, found) {
       return true;
     })()`);
     if (!ok) throw new Error(`no template ${id}`);
-    await sleep(300);
+    await settled(page);
     await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(500);
+    await settled(page);
   };
   await use(own === "A" ? "B" : "A");
   if (header("custom-tilesets") !== "1") fail(`another tileset's tiles didn't make the list custom (control): ${header("custom-tilesets")}`);
@@ -656,9 +659,14 @@ async function terrainMap(page, name) {
     made: () => page.evaluate(`window.__editorsMade`),
     /** The side list's heading, which follows the editor's tile list. */
     heading: () => page.evaluate(`[...document.querySelectorAll(".model-side h4")].find((e) => e.textContent.startsWith("Ground textures"))?.textContent ?? ""`),
-    save: async () => { await page.evaluate(`w3.editors.saveAll()`); await sleep(600); },
-    undo: async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await sleep(300); },
-    tab: async (label) => { await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent.trim() === ${JSON.stringify(label)})?.click()`); await sleep(300); },
+    /** The app at rest first (a click may still be landing), then saved, then at rest again. */
+    save: async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); },
+    undo: async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await settled(page); },
+    tab: async (label) => {
+      await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent.trim() === ${JSON.stringify(label)})?.click()`);
+      await until(`the ${label} tab`, () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent.trim() === ${JSON.stringify(label)}`), 5000);
+      await settled(page);
+    },
     done: () => page.evaluate(`window.__countEditors?.dispose(); window.__countEditors = null;`),
   };
   // The cliff types are read: what uses a tile is known (Tiles… waits for it).
@@ -733,7 +741,6 @@ async function tileCleanup(page, found) {
     const label = await page.evaluate(`${button("Remove unused")}.textContent`);
     if (label !== `Remove unused (${full.length - used.length})`) fail(`the button says "${label}" for ${full.length - used.length} unused tiles`);
     await page.evaluate(`${button("Remove unused")}.click()`);
-    await sleep(300);
     await k.save();
     if (k.ground().join(" ") !== used.join(" ")) fail(`Remove unused left ${k.ground().join(" ")}, the map uses ${used.join(" ")}`);
     await k.undo();
@@ -762,7 +769,6 @@ async function tileCleanup(page, found) {
     const painted = await page.evaluate(`window.__smokeEd.groundTileUsage()[${full.indexOf(tile)}]`);
     const intoBefore = await page.evaluate(`window.__smokeEd.groundTileUsage()[${full.indexOf(into)}]`);
     await page.evaluate(`[...document.querySelectorAll(".terrain-tilemgr button")].find((b) => /^Remove \\d+ tiles?$/.test(b.textContent)).click()`);
-    await sleep(300);
     await k.save();
     const kept = used.filter((t) => t !== tile);
     if (k.ground().join(" ") !== kept.join(" ")) fail(`Clean up left ${k.ground().join(" ")}, wanted ${kept.join(" ")}`);
@@ -994,14 +1000,14 @@ async function terrainSelectCameras(page, found) {
   await k.tab("Select");
   await k.look(0, 0);
   await k.clearToasts();
-  await sleep(1500);
+  // (mapPicture waits for the app at rest: the view's models and textures loaded, a frame drawn.)
   await mapPicture(page);
   const plain = await mapPicture(page), noise = await pixelsApart(page, plain, await mapPicture(page));
   if (noise > 200) fail(`the same view gave two pictures ${noise} pixels apart`);
   if (cameras().length) fail(`a new map has ${cameras().length} cameras`);
   await k.tab("Cameras");
   await page.evaluate(`[...document.querySelectorAll(".terrain-group-tools button")].find((b) => b.textContent === "Create from view").click()`);
-  await sleep(300);
+  await settled(page);
   // Back on Select, the Cameras tab draws nothing of its own: what shows is the layer.
   await k.tab("Select");
   const err = await k.run("w3.terrain.toggleCameraObjects");
@@ -1024,7 +1030,7 @@ async function terrainSelectCameras(page, found) {
     await page.evaluate(`w3.editors.open(${JSON.stringify(path)}, "w3.terrainViewer")`);
     await until(`the editor of ${path}`, async () => (await active()) === path, 30000);
   }
-  await sleep(1000);
+  await settled(page);
   await k.tool("terrain_screenshot", { maxSize: 64 }).catch((e) => fail(e.message));
   if ((await active()) !== TXT) fail(`terrain_screenshot switched from the text terrain's tab to ${await active()}`);
   await k.tool("terrain_screenshot", { maxSize: 64, file: BIN }).catch((e) => fail(`with file: ${e.message}`));
@@ -1051,7 +1057,7 @@ async function terrainSelectCameras(page, found) {
   // Clicked until it's selected: the cube is drawn once the reloaded file is in. A click that can't select it never will.
   await until("Zzzz selected by a click on its cube", async () => {
     await k.clickMiddle();
-    await sleep(300);
+    await settled(page);
     const p = await page.evaluate(at);
     return p && Math.abs(p[0] - 512) <= 32 && Math.abs(p[1] - 512) <= 32 && (await page.evaluate(name)) === "Zzzz";
   }, 20000).catch(async (e) => fail(`${e.message} (the selection: ${JSON.stringify(await page.evaluate(at))} "${await page.evaluate(name)}")`));
@@ -1984,8 +1990,8 @@ async function flyingHeights(page, found) {
     const reloaded = `(async () => (await w3.services.get("w3.terrain")).placedObjects()?.units?.some((u) => u.id === "hfoo" && u.position[2] === ${ground + 600}) ?? false)()`;
     await until("the gryphon and the footman drawn", async () => (await page.evaluate(reloaded)) && (await drawn("hgry")) && (await drawn("hfoo")), 20000)
       .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify([await drawn("hgry"), await drawn("hfoo")])}`); });
-    // Drawn after the reload: a moment later.
-    await sleep(500);
+    // Drawn after the reload: the view at rest.
+    await settled(page);
     const f = await drawn("hfoo"), g = await drawn("hgry");
     if (Math.abs(f.z - ground) > 1) fail(`the footman stored at ${ground + 600} is drawn at ${f.z}, not on the ground ${ground}`);
     if (Math.abs(g.z - (ground + 240)) > 1) fail(`the gryphon (stored at ${gry.position[2]}) is drawn at ${g.z}, not at its flying height 240 over the ground ${ground}`);
@@ -2052,9 +2058,11 @@ async function artModeReload(page, found) {
   const waitModel = async (what, id, re, ms = 30000) => until(what, async () => re.test((await drawn(id)) ?? ""), ms)
     .catch(async () => fail(`${what}: ${id} is drawn with ${await drawn(id)}`));
   try {
+    const openedBefore = await editors();
     await setMode("hd");
     // Opened again after the mode change (when it was another): the group's editor is the newest one.
-    await sleep(500);
+    if ((original ?? "hd") !== "hd") await until("the editor opened again in HD", async () => (await editors()) > openedBefore, 30000);
+    await settled(page);
     await k.tool("place_objects", { objects: [{ id: "nogm", x: 0, y: 0, player: 1 }, { id: "nogl", x: 384, y: 0, player: 1 }], ignoreRoom: true });
     await k.save();
     await waitModel("HD's Ogre Mauler", "nogm", /OgreMauler\\OgreMauler\.mdx$/i);
@@ -2112,21 +2120,19 @@ async function cameraEditing(page, found) {
   const field = (label) => `[...document.querySelectorAll(".terrain-camera-field")].find((l) => l.firstChild?.textContent === ${JSON.stringify(label)})?.querySelector("input")`;
   const type = (label, value, event) => page.evaluate(`(() => { const i = ${field(label)}; if (!i) return false; i.value = ${JSON.stringify(String(value))}; i.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); return true; })()`);
   const shown = (label) => page.evaluate(`${field(label)}?.value ?? null`);
+  // (k.look waits for the view drawn where it looks.)
   const clickAt = async (x, y, modifiers = 0) => {
     await k.look(x, y);
-    await sleep(300);
     const c = await k.hands.where(".model-stage canvas");
     await k.hands.mouse("mouseMoved", c.x, c.y, 0, modifiers);
     await k.hands.click(".model-stage canvas", null, modifiers);
-    await sleep(200);
+    await settled(page);
   };
 
   await k.tab("Cameras");
   await k.look(0, 0);
-  await sleep(300);
   if ((await button("Create from view")) === "missing") return fail("no Create from view button");
   await k.look(1024, 0);
-  await sleep(300);
   await button("Create from view");
   await k.save();
   const made = cameras();
@@ -2147,7 +2153,6 @@ async function cameraEditing(page, found) {
   if (both.some((c) => c.distance !== 2222)) fail(`a distance typed for two cameras gave ${both.map((c) => c.distance).join(", ")}`);
   if (both[0].targetX !== a.targetX || both[1].targetX !== b.targetX) fail("setting the distance for two cameras changed their X");
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
   await k.save();
   if (cameras().map((c) => c.distance).join() !== [a.distance, b.distance].join()) fail(`one undo of the shared distance left ${cameras().map((c) => c.distance).join(", ")}`);
 
@@ -2163,7 +2168,6 @@ async function cameraEditing(page, found) {
     if (!same(four[2], four[0]) || !same(four[3], four[1])) fail(`the copies differ from their cameras: ${JSON.stringify(four[2])} / ${JSON.stringify(four[0])}`);
   }
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
   await k.save();
   if (cameras().length !== 2) fail(`one undo of Duplicate left ${cameras().length} cameras`);
   if (await dirty()) fail("unsaved after saving the undone Duplicate");
@@ -2174,7 +2178,7 @@ async function cameraEditing(page, found) {
   if (await dirty()) fail(`a click selecting a camera made an edit: ${JSON.stringify(cameras().map((c) => [c.targetX, c.targetY]))}`);
   const before = await view();
   await type("Dist", 3333, "input");
-  await sleep(300);
+  await settled(page);
   const live = await view();
   if (!live || Math.abs(live.distance - 3333) > 1) fail(`typing a distance didn't show it in the view: ${JSON.stringify(live)} (before ${JSON.stringify(before)})`);
   if (live && Math.abs(live.target[0] - a.targetX) > 1) fail(`the live view isn't through the camera: target ${live.target}`);
@@ -2184,7 +2188,7 @@ async function cameraEditing(page, found) {
   // The preview of a value ends with it: the view is the user's again once it's entered, the field left, or the panel
   // made again by an undo (which takes the field away without a blur); it once stayed at the previewed camera.
   const userView = async (when) => {
-    await sleep(300);
+    await settled(page);
     const now = await view();
     if (!now || Math.abs(now.distance - before.distance) > 1 || Math.abs(now.target[0] - before.target[0]) > 1 || Math.abs(now.target[1] - before.target[1]) > 1) {
       fail(`${when}, the view stays at the previewed camera: ${JSON.stringify(now)} (the user's: ${JSON.stringify(before)})`);
@@ -2194,7 +2198,7 @@ async function cameraEditing(page, found) {
   await k.save();
   if (cameras()[0].distance !== 3333) fail(`the entered distance saved as ${cameras()[0].distance}`);
   await type("Dist", 4444, "input");
-  await sleep(300);
+  await settled(page);
   if (Math.abs(((await view())?.distance ?? 0) - 4444) > 1) fail("typing a second distance didn't show it in the view (control)");
   await type("Dist", 4444, "blur");
   await userView("after the field is left");
@@ -2222,8 +2226,7 @@ async function wholeMapGround(page, found) {
   // The second tree given a height of its own (Set Uniform Doodad Heights on it alone).
   await k.tab("Select");
   await k.look(512, 512, { id: "LTlt", x: 512, y: 512 });
-  await sleep(300);
-  const set = await k.run("w3.terrain.setUniformDoodadHeights", 700);
+  const set =await k.run("w3.terrain.setUniformDoodadHeights", 700);
   if (set) return fail(`Set Uniform Doodad Heights: ${set}`);
   await k.save();
   if (k.doodads().find((d) => d.position[0] === 512)?.position[2] !== 700) return fail(`the fixed tree (control): ${JSON.stringify(k.doodads().map((d) => d.position))}`);
@@ -2261,7 +2264,6 @@ async function wholeMapGround(page, found) {
   if (k.doodads().find((d) => d.position[0] === 512).position[2] !== 700) fail("the tree with a height of its own moved");
   // One undo takes it all back, byte for byte.
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
   await k.save();
   if (hashes() !== original) fail(`one undo of Adjust Cliff Levels didn't give the files back as they were: ${hashes()}`);
 
@@ -2274,11 +2276,10 @@ async function wholeMapGround(page, found) {
   await k.clearToasts();
   err = await k.run("w3.terrain.adjustCliffLevels", -1);
   if (err) fail(`a shift with nothing to move threw: ${err}`);
-  await sleep(300);
+  await settled(page);
   if (!/level 0 already/.test(await k.toasts())) fail(`a shift down from level 0 didn't say so: "${await k.toasts()}"`);
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(TXT)}) || w3.editors.unsavedPaths().length > 0`)) fail("a shift with nothing to move left unsaved changes");
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
   await k.save();
   if (hashes() !== original) fail(`one undo of the shift to level 0 didn't give the files back as they were: ${hashes()}`);
 
@@ -2291,7 +2292,6 @@ async function wholeMapGround(page, found) {
   if (Math.abs(flatTree - (lv(before.levels[0]) - 2) * 128) > 0.01) fail(`after the reset the tree stands at ${flatTree}`);
   if (k.doodads().find((d) => d.position[0] === 512).position[2] !== 700) fail("the reset moved the tree with a height of its own");
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
   await k.save();
   if (hashes() !== original) fail(`one undo of Reset Height Field didn't give the files back as they were: ${hashes()}`);
   await page.evaluate(`w3.editors.closeAll()`);
@@ -3208,7 +3208,13 @@ async function viewCommands(page, fail, shots, size) {
   // No water (it ripples) and no animation, so that the same view is the same picture.
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
-  await sleep(300);
+  await settled(page);
+  /** A tab of the terrain editor opened, and the app at rest. */
+  const openTab = async (name) => {
+    await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(name)}).click()`);
+    await until(`the ${name} tab`, () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === ${JSON.stringify(name)}`), 5000);
+    await settled(page);
+  };
   const start = await state();
   if (!start) return bad("the terrain editor has no view commands");
   // A camera object to see (close to the unit placed at 256, 0), kept to put back.
@@ -3232,8 +3238,7 @@ async function viewCommands(page, fail, shots, size) {
   };
   /** The same view twice differs by almost nothing: the control that tells a layer's difference from noise. */
   const settle = async (name) => {
-    // Textures and models load while the first pictures are taken: let the view settle first.
-    await sleep(1500);
+    // Textures and models load while the first pictures are taken: the view at rest first (picture waits for it).
     await picture(`${name}-warmup`);
     const plain = await picture(name), noise = await differ(plain, await picture(`${name}-again`));
     if (noise > 200) bad(`the same view gave two pictures ${noise} pixels apart, so no layer can be judged`);
@@ -3248,7 +3253,6 @@ async function viewCommands(page, fail, shots, size) {
   // As the World Editor's: the map's edge (the west one, inside the view's left side) flat brown over its dark,
   // and the sailable water left as it is.
   await run("w3.terrain.toggleNavalPathing");
-  await sleep(1500);
   const naval = await picture("naval-colours");
   await run("w3.terrain.toggleNavalPathing");
   const edgeBox = [weMap.left + weMap.edge * 0.2, 0.4, weMap.left + weMap.edge * 0.8, 0.6], waterBox = [0.25, 0.4, 0.35, 0.6];
@@ -3262,8 +3266,8 @@ async function viewCommands(page, fail, shots, size) {
 
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
   await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
-  await sleep(300);
-  const nothing = await run("w3.terrain.viewSelection");
+  await settled(page);
+  const nothing =await run("w3.terrain.viewSelection");
   if (nothing) bad(`View Selection with a selection: ${nothing}`);
   const near = await state();
   if (Math.hypot(near.camera.target[0] - 256, near.camera.target[1]) > 120) bad(`View Selection looks at ${near.camera.target}`);
@@ -3288,14 +3292,12 @@ async function viewCommands(page, fail, shots, size) {
   if (hd && lit && !(sunOn.drawn && sunOn.casters >= 1 && sunOn.texel > 0)) bad(`HD casts no real shadows next to the footman: ${JSON.stringify(sunOn)}`);
   const shadowsErr = await run("w3.terrain.toggleShadows");
   if (shadowsErr) bad(`w3.terrain.toggleShadows: ${shadowsErr}`);
-  await sleep(300);
   const unshaded = await differ(close.plain, await picture("shadows-off"));
   const sunOff = (await state()).sunShadows;
   if (sunOff.drawn) bad(`the real shadows stayed after Toggle Shadows: ${JSON.stringify(sunOff)}`);
   if (unshaded < 150 + close.noise) bad(`Toggle Shadows changed only ${unshaded} pixels next to the footman`);
   if ((await shadowBox()) !== false) bad("the Shadows box stayed checked after Toggle Shadows");
   await run("w3.terrain.toggleShadows");
-  await sleep(300);
   const shadedAgain = await differ(close.plain, await picture("shadows-on"));
   if (shadedAgain > close.noise + 100) bad(`shadows on again isn't the first picture (${shadedAgain} pixels differ)`);
 
@@ -3324,22 +3326,20 @@ async function viewCommands(page, fail, shots, size) {
   await run("w3.terrain.viewSelection");
   await run("w3.terrain.toggleNavalPathing");
   const painted0 = await picture("naval-before-paint");
-  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Terrain").click()`);
-  await sleep(300);
+  await openTab("Terrain");
   await page.evaluate(`document.querySelector('button.tool-button[title^="Dry:"]').click()`);
   const c = await hands.where(".model-stage canvas");
   const stroke = (dy) => hands.drag({ x: c.x - 120, y: c.y + dy }, { x: c.x + 120, y: c.y + dy });
+  // (picture waits for the app at rest: the layers due after a stroke or a toggle worked out and drawn.)
   const afresh = async (name) => {
     await run("w3.terrain.toggleNavalPathing");
-    await sleep(300);
+    await settled(page);
     await run("w3.terrain.toggleNavalPathing");
-    await sleep(2500);
     return picture(name);
   };
   let lagged0 = painted0;
   for (const [i, dy] of [[1, -80], [2, 80]]) {
     await stroke(dy);
-    await sleep(2500);
     const lagged = await picture(`paint-${i}`);
     if ((await differ(lagged0, lagged)) < 300) bad(`stroke ${i} changed nothing on screen`);
     const exact = await afresh(`paint-${i}-fresh`);
@@ -3353,7 +3353,7 @@ async function viewCommands(page, fail, shots, size) {
   await run("w3.terrain.toggleHeightMap");
   await run("w3.terrain.toggleSmallGrid");
   await run("w3.terrain.toggleCameraObjects");
-  await sleep(2500);
+  await settled(page);
   await page.evaluate(`(() => {
     const gl = WebGL2RenderingContext.prototype, live = (window.__live = { buffers: new Set(), arrays: new Set() });
     for (const [make, free, key] of [["createBuffer", "deleteBuffer", "buffers"], ["createVertexArray", "deleteVertexArray", "arrays"]]) {
@@ -3362,24 +3362,22 @@ async function viewCommands(page, fail, shots, size) {
       gl[free] = function (...a) { live[key].delete(a[0]); return f.apply(this, a); };
     }
   })()`);
-  const openTab = (name) => page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === ${JSON.stringify(name)}).click()`);
-  /** Deleting the unit and undoing it (object edits, which rebuild the placed objects), then strokes of the Dry tool. */
+  /** Deleting the unit and undoing it (object edits, which rebuild the placed objects), then strokes of the Dry tool;
+   *  after each the app at rest (the objects placed again, the layers worked out, a frame drawn). */
   const edits = async (nudges, dys) => {
     await openTab("Select");
     await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
     for (let i = 0; i < nudges; i++) {
       await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
-      await sleep(600);
+      await settled(page);
       await page.evaluate(`document.querySelector(".model-stage canvas").focus()`);
       await hands.key("Delete", "Delete", 46);
-      await sleep(800);
+      await settled(page);
       await run("workbench.undo");
-      await sleep(1000);
+      await settled(page);
     }
     await openTab("Terrain");
-    await sleep(300);
-    for (const dy of dys) { await stroke(dy); await sleep(1500); }
-    await sleep(2500);
+    for (const dy of dys) { await stroke(dy); await settled(page); }
   };
   const count = () => page.evaluate(`({ buffers: window.__live.buffers.size, arrays: window.__live.arrays.size })`);
   await edits(1, [-120]);
@@ -3390,10 +3388,9 @@ async function viewCommands(page, fail, shots, size) {
   for (const id of ["w3.terrain.toggleHeightMap", "w3.terrain.toggleSmallGrid", "w3.terrain.toggleCameraObjects", "w3.terrain.toggleNavalPathing"]) await run(id);
   // Every stroke is one step, and the nudges were undone: undoing the strokes leaves the project as it was saved.
   for (let i = 0; i < 6; i++) await run("workbench.undo");
-  await sleep(500);
+  await settled(page);
   if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt") || w3.editors.unsavedPaths().length > 0`)) bad("undoing the strokes and objects of the view test left unsaved changes");
-  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select").click()`);
-  await sleep(300);
+  await openTab("Select");
 
   // The whole map is in view from further away than an object, as the World Editor shows it (after the camera was
   // moved by View Selection and turned), and the camera keys go on from there.
@@ -3412,15 +3409,14 @@ async function viewCommands(page, fail, shots, size) {
   await picture("entire-map");
   // Select In Tool Palette (the unit is selected again: deleting it took the selection away): the Objects tab opens, with the unit's type chosen.
   await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
-  await sleep(500);
+  await settled(page);
   await run("w3.terrain.selectInPalette");
-  await sleep(300);
+  await settled(page);
   const tab = await page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent`), hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
   if (tab !== "Objects") bad(`Select In Tool Palette left the "${tab}" tab open`);
   if (!/Placing .*hfoo/.test(hint ?? "")) bad(`the Objects tab says "${hint}" after Select In Tool Palette`);
   await picture("palette");
-  await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].find((b) => b.textContent === "Select").click()`);
-  await sleep(200);
+  await openTab("Select");
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3c.json", ${JSON.stringify(cameras)})`);
   await page.evaluate(`w3.settings.set("terrain.animate", true)`);
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim())).forEach((l) => l.querySelector("input").click())`);
@@ -3528,13 +3524,15 @@ async function byHand(page, found) {
   await triggerByHand(page, hands, root, fail);
 }
 
-/** Replaces all of a text field's text, as selecting it and typing does; Tab commits. */
+/** Replaces all of a text field's text, as selecting it and typing does; Tab commits. Returns once the focus has left
+ *  the field (its change event, which commits, comes first). Not settled(): a check may hold a write meanwhile. */
 async function retype(hands, selector, text) {
   await hands.click(selector);
   await hands.key("a", "KeyA", 65, 2);
   await hands.type(text);
+  await hands.page.evaluate(`void (window.__retyped = document.activeElement)`);
   await hands.key("Tab", "Tab", 9);
-  await sleep(150);
+  await until("Tab out of the field", () => hands.page.evaluate(`document.activeElement !== window.__retyped`), 5000);
 }
 
 /** The Object Editor: finds the Footman, changes its hit points, saves. */
@@ -3578,7 +3576,7 @@ async function limits(page, hands, file, fail) {
   if ((await flagged()) !== 1) fail("999999 hit points weren't marked as outside the limits");
   if (!/Outside/.test(await tooltip())) fail(`the warning's tooltip is "${await tooltip()}"`);
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const saved = JSON.parse(readFileSync(file, "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
   if (saved?.value !== 999999) fail(`a value past the limit was saved as ${JSON.stringify(saved)}`);
   // The filter, with no field search in the way.
@@ -4650,7 +4648,7 @@ async function graphicsModes(page, found) {
   await check();
   const before = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.problems().length)`);
   await openProject(hd);
-  await sleep(300);
+  await settled(page);
   const after = await page.evaluate(`w3.services.get("w3.problems").then((s) => s.problems().length)`);
   if (before === 0) fail("the project to leave had no problems, so staleness isn't tested");
   if (after !== 0) fail(`the previous project's ${after} problems show in the next (${before} before)`);
@@ -4945,6 +4943,8 @@ async function paletteMouse(page, found) {
   // and to go up and down (WebKitGTK focuses a clicked button after its handlers ran).
   await hands.click(".titlebar-search");
   await until("the palette from the title bar", () => page.evaluate(shown), 5000).catch(() => fail("the title bar's search box didn't show the palette"));
+  // Time for a late focus change that must not come (WebKitGTK focuses a clicked button after its handlers ran): the
+  // keys have to stay in the palette's input, not merely get there.
   await sleep(300);
   if (!(await page.evaluate(`document.activeElement === document.querySelector(".quick-input-box")`))) {
     fail(`opened from the title bar, the keys are in ${await page.evaluate(`document.activeElement?.className || document.activeElement?.tagName`)}, not the palette's input`);
@@ -5004,13 +5004,15 @@ async function gameReadsOnce(page, found) {
   const asked = () => page.evaluate(`w3Workbench.game.requests`);
   // Reads others started (a table read after another, queued behind the terrain's; the Object
   // Manager's tables on a project opened) land first: what is counted is the terrain's.
-  const settled = () => until("the game reads to settle", async () => {
+  // (settled() doesn't wait for game reads nobody waits on, so these are waited for here: none running, and none
+  // started for half a second, the time that must pass without one.)
+  const readsSettled = () => until("the game reads to settle", async () => {
     const a = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
     await sleep(500);
     const b = await page.evaluate(`[w3Workbench.game.readsPending, w3Workbench.game.backendReads]`);
     return a[0] === 0 && b[0] === 0 && a[1] === b[1];
   }, 30000);
-  await settled();
+  await readsSettled();
   // The picture waits until every model and texture is in.
   const before = await reads(), missedBefore = await misses(), askedBefore = await asked();
   const texturesBefore = await page.evaluate(`window.__texturesMade`);
@@ -5034,7 +5036,7 @@ async function gameReadsOnce(page, found) {
   if (storedTif.length) fail(`the game stores .tif files now (${storedTif.join(", ")}): texpath.ts's neverStoredLast no longer holds`);
   const reopen = async () => {
     await page.evaluate(`w3.editors.closeAll()`);
-    await settled();
+    await readsSettled();
     const at = await reads(), askedAt = await asked();
     await tool("terrain_screenshot", { maxSize: 64 });
     return [(await reads()) - at, (await asked()) - askedAt];
@@ -5072,7 +5074,8 @@ async function gameReadsOnce(page, found) {
   // (With two, the tool can pick the hidden one: "isn't visible".)
   const shot = await tool("terrain_screenshot", { maxSize: 64 }).then(() => null, (e) => e.message);
   if (shot) fail(`after opening the terrain while the project's tabs came back: ${shot}`);
-  await sleep(1000);
+  // Every terrain view at rest: what a second editor would load is counted, not cut off after a while.
+  await settled(page);
   const racedAsked = (await asked()) - askedRaced;
   if (racedAsked > askedSecond * 1.5) fail(`opening the terrain while the project's tabs came back asked for ${racedAsked} game files, a plain opening ${askedSecond}`);
   await page.evaluate(`w3.editors.closeAll()`);
@@ -5519,6 +5522,9 @@ async function contextLoss(page, found) {
     })()`);
     if (r) throw new Error(`${what}: ${r}`);
   };
+  /** Two animation frames of the page (a second at most each, where the browser holds frames back): a frame asked
+   *  for before has been drawn, or not drawn, by then. */
+  const framesPassed = () => page.evaluate(`(async () => { for (let i = 0; i < 2; i++) await new Promise((done) => { const t = setTimeout(done, 1000); requestAnimationFrame(() => { clearTimeout(t); done(); }); }); })()`);
   const clickReopen = () => page.evaluate(`(() => { const c = ${canvasNow}; const b = [...(c?.parentElement.querySelectorAll(".gl-lost button") ?? [])].find((x) => /Reopen/.test(x.textContent)); b?.click(); return !!b; })()`);
   const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(ground)})`);
   const look = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(${JSON.stringify(ground)})(0, 0))()`);
@@ -5534,26 +5540,30 @@ async function contextLoss(page, found) {
   // An unsaved edit, painted by mouse (the MCP tools save what they change).
   const hands = new Hands(page);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain")?.click()`);
-  await sleep(300);
+  await until("the Terrain tab", () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent.trim() === "Terrain"`), 10000);
   await until("the terrain view's size", () => page.evaluate(`(${canvasNow})?.clientWidth > 200`), 10000);
+  await settled(page);
   const at = await page.evaluate(`(() => { const r = (${canvasNow}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await hands.drag({ x: at.x - 80, y: at.y }, { x: at.x + 80, y: at.y }).catch((e) => { throw new Error(`painting at ${JSON.stringify(at)}: ${e.message}`); });
-  await sleep(300);
+  await settled(page);
   if (!(await dirty())) return fail("painting left the terrain without unsaved changes (control)");
   const beforeLoss = await held();
   // The control: the snapshot sees a paint, so "unchanged while lost" below can fail.
   if (beforeLoss === unpainted) return fail("the terrain snapshot didn't change with the paint (control)");
   await glCall("loseContext");
   await until("the message about the lost view", lostShown, 5000).catch(() => fail("no message over the terrain view after its WebGL context was lost"));
-  await sleep(300);
+  // A frame asked for before the loss has had its turn: what is counted from here on is drawing on the lost context.
+  await framesPassed();
   const stopped = await frames();
   await look();
+  // Time for frames that must not be drawn: nothing to wait for.
   await sleep(600);
   if ((await frames()) !== stopped) fail("the terrain view still draws on a lost context");
   // Nothing edits the terrain while its view is lost: painting over it, Ctrl+Z, a command, an MCP tool.
   await hands.drag({ x: at.x, y: at.y - 60 }, { x: at.x, y: at.y + 60 }).catch(() => {});
   await page.evaluate(`(${canvasNow}).focus()`);
   await hands.key("z", "KeyZ", 90, 2);
+  // Time for an undo that must not happen: nothing to wait for.
   await sleep(300);
   if (!(await dirty())) fail("Ctrl+Z on a lost terrain view took the unsaved edit back");
   if ((await held()) !== beforeLoss) fail("painting or Ctrl+Z edited the terrain while its view was lost");
@@ -5563,11 +5573,15 @@ async function contextLoss(page, found) {
   if (!/3D view stopped/.test(sculpt ?? "")) fail(`sculpt_terrain on a lost terrain view wasn't refused: ${sculpt}`);
   if ((await held()) !== beforeLoss) fail("a command edited the terrain while its view was lost");
   if (!(await clickReopen())) fail("the message over the lost terrain view has no Reopen button");
+  // Time for a reopen that must not happen: nothing to wait for.
   await sleep(800);
   const same = await page.evaluate(`window.__lostCanvas.isConnected`);
   if (!same || !(await dirty())) fail("Reopen with unsaved edits opened the terrain editor again: the edits are gone");
   await glCall("restoreContext");
-  await sleep(500);
+  // The context back (its restored event has fired with it) and a frame later: the message must still be there.
+  await until("the context restored", () => page.evaluate(`!window.__lostCanvas.getContext("webgl2").isContextLost()`), 5000);
+  await framesPassed();
+  await settled(page);
   if (!(await lostShown())) fail("the terrain view's message went when the context came back, but its renderer has nothing on the GPU any more");
   await page.evaluate(`w3.editors.saveAll()`);
   if (await dirty()) fail("saving after the loss left the terrain unsaved");
@@ -5588,8 +5602,9 @@ async function contextLoss(page, found) {
   await until("a frame of the model (control)", async () => (await frames()) > 0, 20000);
   await glCall("loseContext");
   await until("the message about the lost model view", lostShown, 5000).catch(() => fail("no message over the model view after its WebGL context was lost"));
-  await sleep(300);
+  await framesPassed();
   const modelStopped = await frames();
+  // Time for frames that must not be drawn: nothing to wait for.
   await sleep(500);
   if ((await frames()) !== modelStopped) fail("the model view still draws on a lost context");
   await glCall("restoreContext");
