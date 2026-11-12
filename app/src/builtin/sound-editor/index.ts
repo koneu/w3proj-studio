@@ -306,6 +306,8 @@ class SoundEditor {
   private detail = h("div.snd-detail");
   private selectedFile: { path: string; source: "game" | "map" } | null = null;
   private selected: Sound | null = null;
+  /** Sounds whose Dialogue section was opened with "Add dialogue" (no keys exist until a text is typed). */
+  private dialogueOpened = new WeakSet<Sound>();
   private audio: HTMLAudioElement | null = null;
   private audioUrl: string | null = null;
   private query = "";
@@ -607,9 +609,15 @@ class SoundEditor {
           row("Outside cone volume", num("coneOutsideVolume", { int: true, min: -1, max: 127 })),
         );
       }
-      if (s.speakerUnitType || (s.dialogueTextKey ?? -1) >= 0 || s.facialAnimationLabel) {
+      if (!ro && !s.speakerUnitType && (s.dialogueTextKey ?? -1) < 0 && !s.facialAnimationLabel && !this.dialogueOpened.has(s)) {
+        parts.push(h("button.snd-add-dialogue", { title: "Give this sound a speaker, a name and a text", onclick: () => {
+          this.dialogueOpened.add(s);
+          this.renderDetail();
+          this.detail.querySelector(".snd-dialogue-head")?.scrollIntoView({ block: "nearest" });
+        } }, "Add dialogue"));
+      } else if (s.speakerUnitType || (s.dialogueTextKey ?? -1) >= 0 || s.facialAnimationLabel || this.dialogueOpened.has(s)) {
         parts.push(
-          h("h4", {}, "Dialogue"),
+          h("h4.snd-dialogue-head", {}, "Dialogue"),
           row("Speaker unit type", text(s.speakerUnitType ?? "", (v) => set(() => { s.speakerUnitType = v.trim(); }), { maxLength: 4, size: 6 })),
           ...this.dialogueRows(s, ro, row),
           row("Facial animation", text(s.facialAnimationLabel ?? "", (v) => set(() => { s.facialAnimationLabel = v; })),
