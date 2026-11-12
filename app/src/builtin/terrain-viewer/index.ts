@@ -91,7 +91,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitHalf, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -3776,16 +3776,17 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
         };
         /** Which placed objects a resize to `next` (only its size and offset are read) keeps, as the World Editor:
-         *  doodads strictly inside the new map (doodadStays), units and items with their footprint in the playable
-         *  area (unitStays). Start locations always stay: they are moved inside. */
+         *  doodads strictly inside the new map (doodadStays), units and items with their footprint or collision size
+         *  in the playable area (unitStays, unitHalf). Start locations always stay: they are moved inside. */
         const resizeRules = async (next: Pick<Terrain, "offsetX" | "offsetY" | "width" | "height">, complements: Sides) => {
           const rect = worldRect(next), edge = playableArea({ cameraComplements: complements }, next);
-          // Half a building's footprint per unit type (none known: its centre alone).
+          // What each unit type takes up: half a building's footprint, another unit's collision size (none known: its centre alone).
           const half = new Map<string, [number, number]>();
           for (const id of new Set(unitsFile?.list.map((p) => p.id) ?? [])) {
+            if (id === "sloc") continue;
             await loadCells(id).catch(() => { /* its centre alone */ });
-            const cells = buildingCells.get(id);
-            half.set(id, cells ? [cells[0] * 16, cells[1] * 16] : [0, 0]);
+            const shape = await (pathingData ?? Promise.resolve(null)).then((data) => data?.unitShape(id) ?? null).catch(() => null);
+            half.set(id, unitHalf(buildingCells.get(id), shape?.collision));
           }
           const stays = (p: Placed, doodad: boolean) => p.id === "sloc"
             || (doodad ? doodadStays(p.position[0], p.position[1], rect) : unitStays(p.position[0], p.position[1], half.get(p.id) ?? [0, 0], edge));
