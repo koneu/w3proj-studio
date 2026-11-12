@@ -22,6 +22,20 @@ test("a move's undo step redraws the selection rings now, and after undo and red
   assert.deepEqual(log, ["a@1", "b@6", "rings"]);
 });
 
+test("a move's undo and redo give back the flags the pose had (a fixed height the move cleared)", () => {
+  const seen: (number | undefined)[] = [];
+  let edit!: { undo: () => void; redo: () => void };
+  const deps = {
+    setPlacement: (_e: string, _p: number[], _a: number, flags?: number) => seen.push(flags),
+    refreshRings: () => {},
+    pushEdit: (e: typeof edit) => { edit = e; },
+  };
+  pushMoveEdit(["a"], [{ ...pose(0, 0), flags: 6 }], [{ ...pose(1, 0), flags: 2 }], deps);
+  edit.undo();
+  edit.redo();
+  assert.deepEqual(seen, [6, 2]);
+});
+
 const map: Bounds = { left: -100, right: 100, bottom: -100, top: 100 };
 
 test("clampShift: inside the bounds the shift is as asked", () => {

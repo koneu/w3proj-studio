@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
+import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
 
 test("ships float on the water surface, whatever height the placement file gives them", () => {
@@ -86,4 +86,27 @@ test("resetting a fixed height puts the object on the ground and lets it follow 
   assert.deepEqual(r, { position: [10, 20, 96], flags: 2 | 1 });
   assert.equal(resetFixedHeight({ position: [10, 20, 300], flags: 2 }, 96), null, "no fixed height, nothing to reset");
   assert.equal(resetFixedHeight({ position: [10, 20, 300] }, 96), null);
+});
+
+// we-drive 2026-11-12: a rock with flags 6 at 300 over ground 256, nudged right once: on (the default) it was saved at
+// 256 with flags 2, off at 300 with flags 6.
+test("moving a fixed doodad with Reset Fixed Object Heights on puts it on the ground and clears the flag", () => {
+  const rock = { position: [0, 0, 300], flags: 2 | FIXED_HEIGHT };
+  assert.deepEqual(movedHeight(rock, 256, true, true), { z: 256, flags: 2 });
+  assert.deepEqual(movedHeight({ position: [0, 0, 300], flags: 2 | FIXED_HEIGHT | 1 }, 256, true, true), { z: 256, flags: 2 | 1 }, "other flags stay");
+  assert.deepEqual(movedHeight({ position: [0, 0, 300], flags: FIXED_HEIGHT }, 256, true, true), { z: 256, flags: 0 });
+});
+
+test("moving a fixed doodad with Reset Fixed Object Heights off keeps its height and flags", () => {
+  const rock = { position: [0, 0, 300], flags: 2 | FIXED_HEIGHT };
+  assert.deepEqual(movedHeight(rock, 256, true, false), { z: 300, flags: 6 });
+});
+
+test("a doodad that was not moved, or has no height of its own, is the same with the switch either way", () => {
+  const fixed = { position: [0, 0, 300], flags: 6 };
+  for (const on of [true, false]) {
+    assert.deepEqual(movedHeight(fixed, 256, false, on), { z: 300, flags: 6 }, `turned in place, switch ${on}`);
+    assert.deepEqual(movedHeight({ position: [0, 0, 300], flags: 2 }, 256, true, on), { z: 256, flags: 2 }, `plain, switch ${on}`);
+    assert.deepEqual(movedHeight({ position: [0, 0, 300] }, 256, true, on), { z: 256, flags: undefined }, `no flags, switch ${on}`);
+  }
 });

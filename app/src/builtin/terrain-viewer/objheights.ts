@@ -99,3 +99,15 @@ export function resetFixedHeight(p: HeightHolder, ground: number): HeightChange 
   if (!isFixed(p)) return null;
   return { position: [p.position[0], p.position[1], ground], flags: (p.flags ?? PLAIN) & ~FIXED_HEIGHT };
 }
+
+/** Where a doodad stands, and with what flags, after it was moved from `p` to a new x/y over ground of height `ground`.
+ *  The World Editor's Advanced switch Reset Fixed Object Heights (Ctrl+Shift+H, on by default) decides, as we-drive
+ *  showed on 2026-11-12 (a rock with flags 6 at 300 over ground 256, moved one step by Edit > Nudge Selection > Move
+ *  Right, the map saved and read back): on, it came out at 256 (the ground) with flags 2, so a moved doodad follows
+ *  the ground again; off, it came out at 300 with flags 6, keeping its own height. A doodad without a fixed height
+ *  stands on the ground either way, and a fixed one that was not moved (`moved` false) stays as it is. */
+export function movedHeight(p: HeightHolder, ground: number, moved: boolean, resetFixed: boolean): { z: number; flags: number | undefined } {
+  if (!isFixed(p)) return { z: ground, flags: p.flags };
+  if (moved && resetFixed) return { z: ground, flags: (p.flags ?? PLAIN) & ~FIXED_HEIGHT };
+  return { z: p.position[2], flags: p.flags };
+}

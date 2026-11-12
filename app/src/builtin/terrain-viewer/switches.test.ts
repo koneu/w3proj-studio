@@ -12,6 +12,7 @@ test("the Advanced switches start as the World Editor's: Preserve Copied Object 
   assert.equal(SWITCH_DEFAULTS["terrain.preserveCopiedHeight"], false);
   assert.equal(SWITCH_DEFAULTS["terrain.enforceCameraBounds"], true);
   assert.equal(SWITCH_DEFAULTS["terrain.enforceWaterLimits"], false);
+  assert.equal(SWITCH_DEFAULTS["terrain.resetFixedHeights"], true);
 });
 
 test("the settings' declared defaults are the switches' defaults", () => {

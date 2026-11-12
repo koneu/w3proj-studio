@@ -960,7 +960,7 @@ async function heightKit(page, name) {
       if (verify.status !== 0 || !/1 ok(?! \(1 incomplete)/.test(verify.stdout)) fail(`verify: ${(verify.stdout + verify.stderr).trim().slice(-300)}`);
     },
     /** The Advanced switches go back to what they were, for the next check. */
-    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined, ${JSON.stringify(layer)})`)))),
+    reset: () => Promise.all(["terrain.preserveCopiedHeight", "terrain.enforceWaterLimits", "terrain.enforceCameraBounds", "terrain.resetFixedHeights"].flatMap((key) => ["user", "project"].map((layer) => page.evaluate(`w3.settings.set(${JSON.stringify(key)}, undefined, ${JSON.stringify(layer)})`)))),
   };
   return kit;
 }
@@ -1099,7 +1099,34 @@ async function heightsUniform(page, found) {
   if (k.doodads().some((d) => d.position[2] !== 150 || !(d.flags & k.FIXED))) fail("one undo didn't take Reset Fixed Object Heights back");
   await k.run("workbench.redo");
   await k.save();
+
+  // Moving a doodad with a height of its own, with Reset Fixed Object Heights on (the World Editor's default: the doodad
+  // lands on the ground and loses the flag) and off (Ctrl+Shift+H: it keeps both), as we-drive showed on 2026-11-12.
+  if ((await k.setting("terrain.resetFixedHeights")) === false) fail("Reset Fixed Object Heights isn't on by default");
+  if ((await k.box("Reset fixed heights")) !== true) fail("the Reset fixed heights box isn't on by default");
+  await k.run("w3.terrain.setUniformDoodadHeights");
+  await k.save();
+  const held = k.doodads();
+  if (held.some((d) => d.position[2] !== 150 || !(d.flags & k.FIXED))) return fail(`the fixed doodads to move (control): ${held.map((d) => `${d.position[2]}/${d.flags}`).join(" ")}`);
+  const nudge = async () => { await k.focusMap(); await k.hands.key("ArrowRight", "ArrowRight", 39, 2); await k.save(); };
+  await nudge();
+  const landed = k.doodads();
+  if (landed.some((d, i) => d.position[0] === held[i].position[0] || d.position[2] !== ground || (d.flags & k.FIXED))) fail(`nudged with Reset Fixed Object Heights on: ${landed.map((d) => `${d.position[0]},${d.position[2]}/${d.flags}`).join(" ")}`);
+  await k.run("workbench.undo");
+  await k.save();
+  if (k.doodads().some((d, i) => d.position[0] !== held[i].position[0] || d.position[2] !== 150 || !(d.flags & k.FIXED))) fail("one undo didn't put the nudged doodads back with their heights and flags");
+  await k.focusMap();
+  await k.hands.key("H", "KeyH", 72, 10);
+  await settled(page);
+  if ((await k.setting("terrain.resetFixedHeights")) !== false || (await k.box("Reset fixed heights")) !== false) fail(`Ctrl+Shift+H didn't switch Reset Fixed Object Heights off, or the box didn't follow: setting ${await k.setting("terrain.resetFixedHeights")}, box ${await k.box("Reset fixed heights")}`);
+  await nudge();
+  const kept = k.doodads();
+  if (kept.some((d, i) => d.position[0] === held[i].position[0] || d.position[2] !== 150 || !(d.flags & k.FIXED))) fail(`nudged with Reset Fixed Object Heights off: ${kept.map((d) => `${d.position[0]},${d.position[2]}/${d.flags}`).join(" ")}`);
+  await k.run("w3.terrain.toggleResetFixedHeights");
+  if ((await k.setting("terrain.resetFixedHeights")) === false || (await k.box("Reset fixed heights")) !== true) fail("the toggle command didn't switch Reset Fixed Object Heights on again");
+  await k.save();
   await k.verify(fail);
+  await k.reset();
 }
 
 /** Three things of the terrain viewer that only the real app shows:
