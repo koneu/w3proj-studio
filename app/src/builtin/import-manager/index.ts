@@ -11,7 +11,7 @@ import { clickSelection } from "../../lib/selection";
 import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, isMapFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, type ImportEntry } from "./imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, unlistedFiles, type ImportEntry } from "../../lib/imports";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
@@ -35,6 +35,8 @@ interface ImportsDoc { format?: string; version: number; files: ImportEntry[] }
 interface ImportSource { src: string; relative?: string }
 const entryKey = (e: ImportEntry) => e.path.toLowerCase();
 const plural = (n: number, what: string) => `${n.toLocaleString()} ${what}${n === 1 ? "" : "s"}`;
+/** The answers to removing entries whose files are in the project. */
+const REMOVE_ONLY = "Remove from list", REMOVE_AND_DELETE = "Remove and delete file";
 /** The open Import Manager that can change files (for its commands). */
 let openView: ImportView | null = null;
 
@@ -48,6 +50,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // A map without imports opens an empty list; the file is written with the first import.
       await w3.editors.open(FILE, "w3.importManager");
     }),
+    // Archive paths of files in the map folder into the import list (the Problems view's "Add to import list").
+    w3.commands.register("w3.imports.add", (paths: string[]) => addQueue(() => addToList(w3, paths))),
     w3.commands.register("w3.imports.replace", async () => {
       if (!openView) throw new Error("Open the Import Manager and select a file first.");
       openView.replaceSelected();
@@ -76,6 +80,46 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       },
     }),
   );
+}
+
+/** Adds to the list one at a time: two adds reading and writing the list at once would lose an entry. */
+let addTail: Promise<unknown> = Promise.resolve();
+function addQueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = addTail.then(task, task);
+  addTail = run.catch(() => {});
+  return run;
+}
+
+/** Lists archive paths in the project's import list (the campaign's in a campaign project), with the flags new
+ *  imports get; paths listed already stay as they are. Through the open Import Manager, whose list is the one in
+ *  memory, else into the file: the project's JSON, or the raw file through its codec, or a new JSON list. A list that
+ *  is there and can't be read throws, nothing written. */
+async function addToList(w3: W3Api, paths: string[]): Promise<void> {
+  const root = w3.workspace.project()?.root;
+  if (!root) throw new Error("Open or import a project first.");
+  if (!Array.isArray(paths) || !paths.length || paths.some((p) => typeof p !== "string" || !p)) throw new Error("No archive paths to add.");
+  if (openView?.isListOf(root)) { await openView.add(paths); return; }
+  const files = new Set(w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+  const { RAW, FILE } = lists(files.has("map/war3campaign.w3f.json") || files.has("map/war3campaign.w3f"));
+  const raw = !files.has(FILE) && files.has(RAW);
+  let list: ImportsDoc;
+  try {
+    const text = raw ? await w3.backend.invoke<string>("codec_decode", { root, path: RAW }) : files.has(FILE) ? await w3.workspace.readText(FILE) : null;
+    list = text === null ? { format: "w3proj.imports/1", version: 1, files: [] } : JSON.parse(text);
+    if (!Array.isArray(list?.files)) throw new Error("no file list");
+  } catch (e) {
+    throw new Error(`${raw ? RAW : FILE} can't be read (${(e as Error).message ?? e}); nothing was added.`);
+  }
+  const fresh = paths.filter((p, i) => !list.files.some((f) => samePath(f.path, p)) && paths.findIndex((q) => samePath(q, p)) === i);
+  if (!fresh.length) return;
+  list.files.push(...fresh.map((path) => ({ flags: NEW_IMPORT_FLAGS, path })));
+  const text = raw ? JSON.stringify({ format: "w3proj.imports/1", ...list }) : await w3.backend.invoke<string>("codec_canonicalize", { root, path: FILE, text: JSON.stringify(list) });
+  // Another project meanwhile, or the Import Manager opened on this one (its list in memory would be written over).
+  if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was added.");
+  if (openView?.isListOf(root)) { await openView.add(paths); return; }
+  if (raw) await w3.backend.invoke("codec_write", { root, path: RAW, text });
+  else await w3.workspace.writeText(FILE, text);
+  await w3.workspace.refresh();
 }
 
 class ImportView {
@@ -216,11 +260,21 @@ class ImportView {
     this.anchor = paths.length ? paths[paths.length - 1].toLowerCase() : null;
   }
   private register(path: string) {
-    void this.run("Add", async () => {
-      this.list.files.push({ flags: NEW_IMPORT_FLAGS, path });
+    void this.run("Add", () => this.add([path]));
+  }
+  /** Lists files of the map folder (archive paths) that aren't listed yet, and selects them. */
+  async add(paths: string[]) {
+    const fresh = paths.filter((p, i) => !this.list.files.some((f) => samePath(f.path, p)) && paths.findIndex((q) => samePath(q, p)) === i);
+    if (fresh.length) {
+      this.list.files.push(...fresh.map((path) => ({ flags: NEW_IMPORT_FLAGS, path })));
       await this.write();
-      this.select([path]);
-    });
+    }
+    this.select(paths);
+    this.render();
+  }
+  /** Whether this is the open, changeable list of the project `root`. */
+  isListOf(root: string | undefined) {
+    return !this.disposed && this.editable && !!root && this.root === root;
   }
   private changePath(entry: ImportEntry, to: string) {
     void this.run("Change path", async () => {
@@ -251,16 +305,34 @@ class ImportView {
       void this.w3.window.showInfo(`Updated ${count} reference${count === 1 ? "" : "s"} to ${to}.`);
     });
   }
+  /** Removes entries from the list. Entries whose files are in the project ask whether the files go too: a file left
+   *  in the map folder without an entry is still packed into the map and used by the game (the Problems view warns
+   *  of it), so that is never done without saying so. */
   private remove(entries: ImportEntry[]) {
     void this.run("Remove", async () => {
-      const ask = entries.length === 1 ? `Remove ${entries[0].path} from the map? The file is deleted from the project.`
-        : `Remove ${plural(entries.length, "file")} from the map? They are deleted from the project.`;
-      if (!(await this.w3.window.askDelete(ask, "Remove"))) return;
+      const what = entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
+      const asked = [...new Set(entries.flatMap((e) => this.fileOf(e)?.path ?? []))];
+      let withFiles = false;
+      if (!asked.length) {
+        const none = entries.length === 1 ? "Its file isn't in the project." : "None of their files is in the project.";
+        if (!(await this.w3.window.askDelete(`Remove ${what} from the import list? ${none}`, "Remove"))) return;
+      } else {
+        const files = asked.length === 1 ? (entries.length === 1 ? "Its file" : "1 of their files") : `${asked.length} of their files`;
+        const answer = await this.w3.window.showWarning(`Remove ${what} from the import list? ${files} ${asked.length === 1 ? "is" : "are"} in the project: `
+          + `kept, ${asked.length === 1 ? "it is" : "they are"} still packed into the map and used by the game, without an entry.`, REMOVE_ONLY, REMOVE_AND_DELETE, "Cancel");
+        if (answer !== REMOVE_ONLY && answer !== REMOVE_AND_DELETE) return;
+        withFiles = answer === REMOVE_AND_DELETE;
+      }
+      // The editor closed or another project opened during the question: nothing is done.
+      if (this.disposed || this.w3.workspace.project()?.root !== this.root) return;
+      // Entries another action removed meanwhile are left out; the files as they are now.
+      entries = entries.filter((e) => this.list.files.includes(e));
       const files = this.files();
-      const fileOf = new Map(entries.map((e) => [e, this.fileOf(e, files)?.path]));
+      const fileOf = new Map(entries.map((e) => [e, withFiles ? this.fileOf(e, files)?.path : undefined]));
       // Sound entries of different extensions can stand for the same file.
       const paths = [...new Set([...fileOf.values()].filter((p): p is string => !!p))];
-      const { deleted, error } = await this.w3.window.withProgress(`Removing ${plural(entries.length, "file")}`, () => this.w3.workspace.deleteMany(paths));
+      const { deleted, error } = paths.length ? await this.w3.window.withProgress(`Removing ${plural(entries.length, "file")}`, () => this.w3.workspace.deleteMany(paths))
+        : { deleted: 0, error: null };
       const kept = new Set(paths.slice(deleted));
       const gone = new Set(entries.filter((e) => !kept.has(fileOf.get(e) ?? "")));
       this.list.files = this.list.files.filter((f) => !gone.has(f));
@@ -367,12 +439,10 @@ class ImportView {
     const files = this.files();
     const q = this.query.trim().toLowerCase();
     const listed = this.list.files.filter((f) => !q || f.path.toLowerCase().includes(q));
-    // Files the list stands for (with their other sound extensions), then the rest of the map folder.
-    const claimed = new Set(this.list.files.map((e) => this.fileOf(e, files)?.path.replace(/\\/g, "/").toLowerCase()).filter((x): x is string => !!x));
-    // Files in the map folder that the list doesn't register (and that aren't the map's own).
-    const unlisted = [...files.values()].map((f) => f.path.replace(/\\/g, "/")).filter((p) => p.startsWith("map/"))
-      .map(archivePath)
-      .filter((p) => !isMapFile(p) && !claimed.has(projectPath(p).toLowerCase()) && (!q || p.toLowerCase().includes(q)));
+    // Files in the map folder that the list doesn't register (and that aren't the map's own); the Problems view warns
+    // of each (the same rule: lib/imports.ts unlistedFiles).
+    const unlisted = unlistedFiles([...files.values()].map((f) => f.path), this.list.files, this.folder).map(archivePath)
+      .filter((p) => !q || p.toLowerCase().includes(q));
     this.shown = listed;
     const shownKeys = new Set(listed.map(entryKey));
     for (const k of this.selected) if (!shownKeys.has(k)) this.selected.delete(k);

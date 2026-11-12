@@ -65,7 +65,9 @@ function chapter(campaign: Record<string, string | null>, own: Record<string, st
     mcp: { registerTool: () => none },
     workspace: {
       project: () => ({ root: CHAPTER, name: "Chapter", manifest: {}, default_output: "" }),
-      files: () => Object.keys(files).filter((p) => p.startsWith("map/")).map((path) => ({ path, size: 1, modified: 1 })),
+      // The project's files with their bytes listed too, as the workspace lists every file on disk (imports are read
+      // under the name listed: lib/imports.ts readImported).
+      files: () => [...new Set([...Object.keys(files), ...Object.keys(bytes)])].filter((p) => p.startsWith("map/")).map((path) => ({ path, size: 1, modified: 1 })),
       resolve: (p: string) => (p.startsWith("/") ? p : `${CHAPTER}/${p}`),
       readText: read,
       readBytes: async (p: string) => bytes[p] ?? new TextEncoder().encode(await read(p)),

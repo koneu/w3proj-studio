@@ -10,7 +10,7 @@ import { loadKind, nextFreeId, type FieldMeta, type KindData, type ValueType } f
 import { pickBaseObject } from "./picker";
 import { campaignObjects, iconLoader, imageLoader, objectsService, soundLabels, stripColors } from "./service";
 import { findCampaign } from "../../lib/objects/campaign";
-import { toProjectPath } from "../../lib/formats/archivepath";
+import { importedPath } from "../../lib/imports";
 import { joinPath } from "../../lib/paths";
 import { fieldSound, soundSets } from "./browse";
 import { pickFile, pickLabel, soundPlayer, type FileKind } from "./filepicker";
@@ -701,9 +701,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Data names .mdl; the game stores .mdx. The map's imports come first.
             const mdx = path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx");
             return h("button.obj-art-view", { title: `Open ${mdx} in the model viewer`, onclick: async () => {
-              const imported = `map/${toProjectPath(mdx)}`;
-              const has = w3.workspace.files().some((f) => f.path.replace(/\\/g, "/").toLowerCase() === imported.toLowerCase());
-              await w3.editors.open(has ? imported : `game:${mdx}`).catch((e) => w3.window.showError(String(e)));
+              // The import under its name on disk, whatever the case the field names (as the game finds it).
+              const imported = importedPath(w3, mdx);
+              await w3.editors.open(imported ?? `game:${mdx}`).catch((e) => w3.window.showError(String(e)));
             } }, "View");
           }
           return null;

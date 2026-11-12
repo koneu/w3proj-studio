@@ -3,7 +3,7 @@
 // textures of imported models, placed objects of unknown types, placed objects
 // without a Classic model, and import list entries without their file.
 
-import { readMapDoc } from "../../lib/formats/mapdoc";
+import { readMapDoc, readMapDocStrict } from "../../lib/formats/mapdoc";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck, ProblemFix } from "../../extensions/services";
 import { toProjectPath } from "../../lib/formats/archivepath";
@@ -20,8 +20,10 @@ import { chooseFolder, mergedValues, modelExists, modelFieldValue, modelNames, p
 import { conversionSources, missingTextures, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
-import { FileLookup, type FileKind } from "./lookup";
+import { FileLookup, plainPath, withoutVariant, type FileKind } from "./lookup";
 import { mapLimit, RunScope } from "./runscope";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, IMPORT_FOLDER, listedPath, unlistedFiles, type ImportEntry } from "../../lib/imports";
+import { checkpointOrStop } from "../../lib/checkpoint";
 
 export { FileLookup };
 
@@ -85,58 +87,8 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         const s = scope();
         const files = s.lookup();
         const out: Problem[] = [];
-        type Meta = NonNullable<Awaited<ReturnType<typeof loadKind>>>;
-        /** What an object field's file is looked up as, and how many numbered models it stands for: a
-         *  doodad or destructable with several variations names its model without the number; the files
-         *  are X0.mdx, X1.mdx… */
-        const lookupOf = (type: string, id: string, base: string, vars: Map<string, string>, meta: Meta, variationsField?: string) => {
-          const what: FileKind = type.startsWith("model") ? "model" : type === "icon" || type.endsWith("exture") ? "texture" : "file";
-          let variations = 1;
-          if (what === "model" && variationsField) {
-            // The count as the game merges the main and the skin file; else the base type's.
-            const f = meta.fieldById.get(variationsField);
-            variations = Number(vars.get(id) ?? (f ? meta.defaultValue(base, f, 0) : 1)) || 1;
-          }
-          return { what, variations };
-        };
-        // Every object file at once, and the game's data of each kind that has one.
-        await s.prefetch(KINDS.flatMap(objectFiles));
-        const metas = new Map(await Promise.all(KINDS.map(async (kind) => {
-          const has = (await Promise.all(objectFiles(kind).map((f) => s.doc(f)))).some((d) => d);
-          return [kind, has ? loadKind(w3, kind).catch(() => null) : null] as const;
-        })));
         // First what to look up, in the order of the problems; then the game paths of all of it at once.
-        const found: { p: string; at: string; reveal: { command: string; args: unknown[] }; what?: FileKind; variations?: number }[] = [];
-        for (const kind of KINDS) {
-          let meta: Awaited<ReturnType<typeof loadKind>> | null = null;
-          const variationsField = ART[kind]?.variations;
-          const vars = variationsField
-            ? mergedValues(await Promise.all(objectFiles(kind).map((f) => s.doc<{ original?: Obj[]; custom?: Obj[] }>(f))), variationsField)
-            : new Map<string, string>();
-          for (const file of objectFiles(kind)) {
-            const data = await s.doc<{ original?: Obj[]; custom?: Obj[] }>(file);
-            if (!data) continue;
-            meta ??= await metas.get(kind)!;
-            if (!meta) continue;
-            for (const o of [...(data.custom ?? []), ...(data.original ?? [])]) {
-              const id = o.id ?? o.base;
-              const name = meta.names.get(o.base) ?? id;
-              const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)];
-              for (const m of mods) {
-                const f = meta.fieldById.get(m.field);
-                if (!f || !PATH_TYPES.has(f.type) || typeof m.value !== "string") continue;
-                // "none.mdl" / "_": deliberately no model (e.g. no portrait).
-                const paths = (f.type.endsWith("List") ? m.value.split(",") : [m.value]).map((p) => p.trim())
-                  .filter((p) => p && p !== "_" && p !== "." && !/^none(\.\w+)?$/i.test(p));
-                for (const p of paths) {
-                  const at = `${name} (${id}) › ${f.label}${m.level ? ` (level ${m.level})` : ""}`;
-                  const reveal = { command: "w3.objectEditor.open", args: [kind, id] };
-                  found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField) });
-                }
-              }
-            }
-          }
-        }
+        const found = await objectPathUses(w3, s);
         await files.prefetch(found.flatMap(({ p, what, variations }) => (what ? modelNames(p, Math.min(variations!, BATCH_VARIATIONS)).map((x): [string, FileKind] => [x, what]) : [])));
         for (const { p, at, reveal, what, variations } of found) {
           if (!what) out.push({ severity: "error", message: `${p}: a path on someone's disk, not in the map`, location: at, reveal });
@@ -265,6 +217,11 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
         return capped(out, "missing imports");
       },
     },
+    {
+      id: "unlistedImports",
+      title: "Files not in the import list",
+      run: () => unlistedImports(w3, scope()),
+    },
   ];
 }
 
@@ -272,6 +229,155 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
 const ART: Record<string, { model: string; variations?: string }> = {
   w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
 };
+
+/** A file path in an object's field: where (`at`, the object and field), what a click opens, and unless it is a path on
+ *  someone's disk, what it is looked up as and how many numbered models it stands for (a doodad or destructable with
+ *  several variations names its model without the number; the files are X0.mdx, X1.mdx…). */
+interface PathUse { p: string; at: string; reveal: { command: string; args: unknown[] }; what?: FileKind; variations?: number }
+/** Per run: two checks read the object data's paths. */
+const pathUses = new WeakMap<RunScope, Promise<PathUse[]>>();
+
+/** Every file path the map's (and a campaign's) object data names, in the order of the object files. */
+function objectPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
+  let known = pathUses.get(s);
+  if (!known) {
+    known = readPathUses(w3, s);
+    pathUses.set(s, known);
+  }
+  return known;
+}
+
+async function readPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
+  type Meta = NonNullable<Awaited<ReturnType<typeof loadKind>>>;
+  const lookupOf = (type: string, id: string, base: string, vars: Map<string, string>, meta: Meta, variationsField?: string) => {
+    const what: FileKind = type.startsWith("model") ? "model" : type === "icon" || type.endsWith("exture") ? "texture" : "file";
+    let variations = 1;
+    if (what === "model" && variationsField) {
+      // The count as the game merges the main and the skin file; else the base type's.
+      const f = meta.fieldById.get(variationsField);
+      variations = Number(vars.get(id) ?? (f ? meta.defaultValue(base, f, 0) : 1)) || 1;
+    }
+    return { what, variations };
+  };
+  // Every object file at once, and the game's data of each kind that has one.
+  await s.prefetch(KINDS.flatMap(objectFiles));
+  const metas = new Map(await Promise.all(KINDS.map(async (kind) => {
+    const has = (await Promise.all(objectFiles(kind).map((f) => s.doc(f)))).some((d) => d);
+    return [kind, has ? loadKind(w3, kind).catch(() => null) : null] as const;
+  })));
+  const found: PathUse[] = [];
+  for (const kind of KINDS) {
+    let meta: Awaited<ReturnType<typeof loadKind>> | null = null;
+    const variationsField = ART[kind]?.variations;
+    const vars = variationsField
+      ? mergedValues(await Promise.all(objectFiles(kind).map((f) => s.doc<{ original?: Obj[]; custom?: Obj[] }>(f))), variationsField)
+      : new Map<string, string>();
+    for (const file of objectFiles(kind)) {
+      const data = await s.doc<{ original?: Obj[]; custom?: Obj[] }>(file);
+      if (!data) continue;
+      meta ??= await metas.get(kind)!;
+      if (!meta) continue;
+      for (const o of [...(data.custom ?? []), ...(data.original ?? [])]) {
+        const id = o.id ?? o.base;
+        const name = meta.names.get(o.base) ?? id;
+        const mods = [...(o.mods ?? []), ...(o.sets ?? []).flatMap((s) => s.mods)];
+        for (const m of mods) {
+          const f = meta.fieldById.get(m.field);
+          if (!f || !PATH_TYPES.has(f.type) || typeof m.value !== "string") continue;
+          // "none.mdl" / "_": deliberately no model (e.g. no portrait).
+          const paths = (f.type.endsWith("List") ? m.value.split(",") : [m.value]).map((p) => p.trim())
+            .filter((p) => p && p !== "_" && p !== "." && !/^none(\.\w+)?$/i.test(p));
+          for (const p of paths) {
+            const at = `${name} (${id}) › ${f.label}${m.level ? ` (level ${m.level})` : ""}`;
+            const reveal = { command: "w3.objectEditor.open", args: [kind, id] };
+            found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField) });
+          }
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/** Files in the project's map folder that the import list doesn't name (lib/imports.ts unlistedFiles, the rule the
+ *  Import Manager shows them by): the map packs them and the game uses them all the same, and nothing but the Import
+ *  Manager's last section says so. Each is named with what it stands for: the game's file of its path, which it
+ *  replaces, and the object data that names it. Fixes: list it, or delete it. A list that is there and can't be read
+ *  fails the check (every file would pass for unlisted, and be offered for deletion). */
+async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
+  const root = w3.workspace.project()?.root;
+  const listed = w3.workspace.files();
+  const names = new Set(listed.map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
+  const campaign = names.has("map/war3campaign.w3f.json") || names.has("map/war3campaign.w3f");
+  const listPath = campaign ? "map/war3campaign.imp.json" : "map/war3map.imp.json";
+  const folder = campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER;
+  const list = await s.docStrict<{ files?: ImportEntry[] }>(listPath);
+  if (list && !Array.isArray(list.files)) throw new Error(`${listPath} has no file list.`);
+  const unlisted = unlistedFiles(listed.map((f) => f.path), list?.files ?? [], folder);
+  if (!unlisted.length) return [];
+  const archives = unlisted.map(archivePath);
+  const lookup = s.lookup();
+  await lookup.prefetchGame(archives.map(withoutVariant));
+  // The object fields that name each file (by its plain path), as the game finds them: models also as .mdx, numbered
+  // variations, textures also as .dds.
+  const usedBy = new Map<string, string[]>();
+  for (const u of await objectPathUses(w3, s)) {
+    if (!u.what) continue;
+    const keys = new Set(modelNames(u.p, Math.min(u.variations!, BATCH_VARIATIONS)).flatMap((n) => FileLookup.variants(n, u.what!)).map(plainPath));
+    for (const k of keys) {
+      const at = usedBy.get(k) ?? [];
+      if (!at.includes(u.at)) at.push(u.at);
+      usedBy.set(k, at);
+    }
+  }
+  const out: Problem[] = [];
+  for (const [i, file] of unlisted.entries()) {
+    const archive = archives[i], game = withoutVariant(archive);
+    const replaces = await lookup.inGame(game);
+    const uses = usedBy.get(plainPath(archive)) ?? [];
+    const more = uses.length > 1 ? ` and ${uses.length - 1} more` : "";
+    out.push({
+      severity: "warning",
+      message: `${archive} isn't in the import list, but is packed into the map anyway${replaces ? ` and replaces the game's ${game}` : ""}${uses.length ? `; used by ${uses[0]}${more}` : ""}`,
+      location: listPath.slice(4).replace(/\.json$/, ""),
+      reveal: { command: "w3.imports.open" },
+      fixes: [
+        {
+          label: "Add to import list",
+          title: `Lists ${archive} in ${listPath.slice(4).replace(/\.json$/, "")}, as the Import Manager's "Add to list" does: the World Editor then shows it among the imports`,
+          run: () => serial(async () => { sameProject(w3, root); await w3.commands.execute("w3.imports.add", [archive]); }),
+        },
+        {
+          label: "Delete file",
+          title: `Deletes ${file} from the project (after a question; a checkpoint is made first where they're enabled): the map no longer packs it`,
+          run: () => deleteUnlisted(w3, root, file, archive, listPath, folder),
+        },
+      ],
+    });
+  }
+  return capped(out, "files not in the import list");
+}
+
+/** The "Delete file" fix of an unlisted file: asks, makes a checkpoint, and deletes it, unless meanwhile another
+ *  project opened, the file went, or the import list names it now (then it is an import, no leftover). */
+async function deleteUnlisted(w3: W3Api, root: string | undefined, file: string, archive: string, listPath: string, folder: string) {
+  sameProject(w3, root);
+  const unsaved = w3.editors.unsavedPaths().some((p) => p.toLowerCase() === file.toLowerCase());
+  if (!(await w3.window.askDelete(`Delete ${archive} from the project? The map packs it and the game uses it, though the import list doesn't name it.`
+    + `${unsaved ? " Its unsaved changes are lost." : ""} A checkpoint is made first, to come back to, where they're enabled.`, "Delete"))) return;
+  await serial(async () => {
+    sameProject(w3, root);
+    // As things are now, after the question.
+    const now = listedPath(w3.workspace.files(), file);
+    if (now === undefined) return;
+    const list = await readMapDocStrict<{ files?: ImportEntry[] }>(w3, listPath);
+    if (!unlistedFiles([now], list?.files ?? [], folder).length) throw new Error(`${archive} is in the import list now, so it wasn't deleted.`);
+    await checkpointOrStop(w3, `Delete ${archive}`);
+    sameProject(w3, root);
+    await w3.editors.close(now);
+    await w3.workspace.delete(now);
+  });
+}
 
 interface PlacedEntry { id: string; variation?: number; position: number[] }
 

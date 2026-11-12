@@ -10,7 +10,7 @@ import { pickObject } from "./picker";
 import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 import { decodeImage } from "../../lib/image/index.ts";
 import { StringTable } from "../../lib/formats/wts";
-import { toProjectPath } from "../../lib/formats/archivepath";
+import { readImported } from "../../lib/imports";
 import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { isNotFoundError } from "../../lib/oserror";
 import { joinPath } from "../../lib/paths";
@@ -108,7 +108,9 @@ export function imageLoader(w3: W3Api): (path: string) => Promise<string | null>
     if (!p) {
       p = (async () => {
         const project = w3.workspace.project();
-        const bytes = await (project ? w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => w3.game.read(path, background)) : w3.game.read(path, background));
+        // The map's import under its name on disk, whatever the case the field names (as the game finds it).
+        const own = project ? await readImported(w3, path).catch(() => null) : null;
+        const bytes = own ?? await w3.game.read(path, background);
         const mip = decodeImage(bytes, path).mip(0);
         const canvas = document.createElement("canvas");
         canvas.width = mip.width;

@@ -8,9 +8,13 @@ import { findCampaign } from "./invalid";
 
 /** A path as the game looks it up: lower case, "\\", without art set or language folders
  *  (`_HD.w3mod\\`, `_Locales\\zhCN.w3mod\\`), which only choose the variant. */
-const plainPath = (p: string) => {
-  let s = p.replace(/\//g, "\\").toLowerCase();
-  for (let before = ""; before !== s;) { before = s; s = s.replace(/^(_hd|_de|_teen)\.w3mod\\|^_locales\\[a-z]{4}\.w3mod\\/, ""); }
+export const plainPath = (p: string) => withoutVariant(p).toLowerCase();
+
+/** A path without its art set or language folders, its case kept ("_HD.w3mod\\Units\\X.mdx" → "Units\\X.mdx"): the
+ *  game's file it stands for. */
+export const withoutVariant = (p: string) => {
+  let s = p.replace(/\//g, "\\");
+  for (let before = ""; before !== s;) { before = s; s = s.replace(/^(_hd|_de|_teen)\.w3mod\\|^_locales\\[a-z]{4}\.w3mod\\/i, ""); }
   return s;
 };
 

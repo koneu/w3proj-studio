@@ -2,7 +2,8 @@
 // files are the map's own (not imports), and new entries as the World Editor
 // makes them.
 
-import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import type { FileInfo, W3Api } from "../extensions/api";
+import { toArchiveName, toProjectPath } from "./formats/archivepath";
 
 /** A war3map.imp entry (format definition "imports"). */
 export interface ImportEntry { flags: number; path: string }
@@ -25,8 +26,8 @@ export const archivePath = (projectFile: string) => toArchiveName(projectFile.re
 export const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** The map's own files at the archive root (and their JSON or text project forms), which aren't
- *  imports. */
-const OWN = /^(war3map(\.[a-z0-9]+|Map\.[a-z]+|Skin\.[a-z0-9]+|Units\.doo|Misc\.txt|Extra\.txt)|war3campaign(\.[a-z0-9]+|Skin\.[a-z0-9]+|Misc\.txt|Extra\.txt)|conversation\.json|\(listfile\)|\(attributes\)|\(signature\))(\.json|\.txt)?$/i;
+ *  imports (war3mapPreview.tga, the preview image, too: maps without any import entry hold it). */
+const OWN = /^(war3map(\.[a-z0-9]+|Map\.[a-z]+|Preview\.[a-z]+|Skin\.[a-z0-9]+|Units\.doo|Misc\.txt|Extra\.txt)|war3campaign(\.[a-z0-9]+|Skin\.[a-z0-9]+|Misc\.txt|Extra\.txt)|conversation\.json|\(listfile\)|\(attributes\)|\(signature\))(\.json|\.txt)?$/i;
 
 const SOUND = /\.(flac|ogg|mp3|wav)$/i;
 /** The project files that can stand for an archive path: itself, and for sounds the same name with
@@ -41,7 +42,65 @@ export function candidates(archivePath: string): string[] {
   const own = projectPath(archivePath);
   return SOUND.test(archivePath) ? [own, ...[".flac", ".ogg", ".mp3", ".wav"].map((e) => projectPath(archivePath.replace(SOUND, e)))] : [own];
 }
-export const isMapFile = (archivePath: string) => !/[\\/]/.test(archivePath) && OWN.test(archivePath);
+export const isMapFile = (archivePath: string) => {
+  // Also in an art set or language folder (Blizzard's maps hold _Locales\deDE.w3mod\war3map.wts and the like).
+  const name = archivePath.replace(/^(?:(?:_hd|_de|_teen)\.w3mod[\\/]|_locales[\\/][a-z]{4}\.w3mod[\\/])+/i, "");
+  return !/[\\/]/.test(name) && OWN.test(name);
+};
+
+/** The project file a list entry stands for: the first of its candidates the project has, in any case (the game's
+ *  archive isn't case sensitive), as `has` (lower-case project path → the path as listed) finds it. */
+export function entryFile(e: ImportEntry, folder: string, has: (lowerPath: string) => string | undefined): string | undefined {
+  for (const c of entryCandidates(e, folder)) { const f = has(c.toLowerCase()); if (f) return f; }
+  return undefined;
+}
+
+/** The files of the project's map folder (`projectFiles`: project paths, "map/…" as listed) that no entry of the import
+ *  list stands for and that aren't the map's own files: packed into the map all the same, and used by the game (an
+ *  import replacing a game file), but the World Editor's Import Manager doesn't show them. Project paths, in the
+ *  order given. */
+export function unlistedFiles(projectFiles: readonly string[], entries: readonly ImportEntry[], folder: string): string[] {
+  const inMap = projectFiles.map((p) => p.replace(/\\/g, "/")).filter((p) => p.toLowerCase().startsWith("map/"));
+  const byLower = new Map<string, string>();
+  for (const p of inMap) if (!byLower.has(p.toLowerCase())) byLower.set(p.toLowerCase(), p);
+  const claimed = new Set(entries.map((e) => entryFile(e, folder, (l) => byLower.get(l))?.toLowerCase()).filter((x): x is string => !!x));
+  return inMap.filter((p) => !claimed.has(p.toLowerCase()) && !isMapFile(archivePath(p)));
+}
+
+/** Per file list (the workspace replaces the array when a file comes or goes): exact project paths, and lower case →
+ *  the first path listed so. */
+const listIndex = new WeakMap<readonly FileInfo[], { exact: Set<string>; lower: Map<string, string> }>();
+
+/** The project file `path` ("map/…") is listed as, in whatever case it has on disk: the game finds a map's files
+ *  whatever the case, but on Linux a file read under another case isn't there. The exact spelling wins when both
+ *  are listed. Undefined when the project has no such file. */
+export function listedPath(files: readonly FileInfo[], path: string): string | undefined {
+  let index = listIndex.get(files);
+  if (!index) {
+    index = { exact: new Set(), lower: new Map() };
+    for (const f of files) {
+      const p = f.path.replace(/\\/g, "/");
+      index.exact.add(p);
+      if (!index.lower.has(p.toLowerCase())) index.lower.set(p.toLowerCase(), p);
+    }
+    listIndex.set(files, index);
+  }
+  const want = path.replace(/\\/g, "/");
+  return index.exact.has(want) ? want : index.lower.get(want.toLowerCase());
+}
+
+/** The project file of an archive path the map uses (`Units\Human\Footman\Footman.mdx`, `war3mapImported\a.blp`), found
+ *  as the game finds it, whatever its case: "map/…" as listed, or undefined when the map has no such file. */
+export function importedPath(w3: Pick<W3Api, "workspace">, archive: string): string | undefined {
+  return listedPath(w3.workspace.files(), projectPath(archive.replace(/\//g, "\\")));
+}
+
+/** The bytes of the map's own file for an archive path (see importedPath): null when the map has none. A file that is
+ *  listed but can't be read rejects. */
+export async function readImported(w3: Pick<W3Api, "workspace">, archive: string): Promise<Uint8Array | null> {
+  const path = importedPath(w3, archive);
+  return path === undefined ? null : w3.workspace.readBytes(path);
+}
 
 /** Archive path for a file imported from disk: war3mapImported\<name> (campaigns: war3campImported),
  *  numbered if taken. */

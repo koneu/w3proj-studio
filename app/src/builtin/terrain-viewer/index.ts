@@ -11,6 +11,7 @@ import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
+import { importedPath } from "../../lib/imports";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
@@ -174,9 +175,9 @@ async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
   const rel = path.replace(/\//g, "\\");
   const names = (w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd" ? [`_HD.w3mod\\${rel}`, rel] : [rel];
   const campaign = campaignRoot(w3);
-  // The project's own files are known; only those are read (most paths are the game's).
-  const files = new Set(w3.workspace.files().map((f) => f.path.toLowerCase()));
-  const own = names.map((n) => `map/${n.replace(/\\/g, "/")}`).filter((p) => files.has(p.toLowerCase()));
+  // The project's own files are known; only those are read (most paths are the game's), under the name they have on
+  // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.
+  const own = names.flatMap((n) => importedPath(w3, n) ?? []);
   const candidates = [...own, ...(campaign ? names.map((n) => joinPath(campaign, "map", n)) : [])];
   let last: unknown = new Error(`${path} isn't imported`);
   for (const c of candidates) {

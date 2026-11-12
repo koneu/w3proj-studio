@@ -4,7 +4,7 @@
 // first, whatever the graphics mode is.
 
 import type { W3Api } from "../../extensions/api";
-import { toProjectPath } from "../formats/archivepath";
+import { importedPath } from "../imports";
 import { decodeImage } from "../image/index.ts";
 import { parseMdx } from "./mdx";
 import { neverStoredLast, textureCandidates } from "./texpath";
@@ -81,10 +81,10 @@ export class ModelPreview {
   /** The map's import of a path, else the game's file (Reforged .tif/.blp textures ship as .dds). */
   private async read(path: string): Promise<Uint8Array> {
     const variants = /\.(blp|tif|tiff|tga|png)$/i.test(path) ? textureCandidates(path) : [path];
-    const files = new Set(this.w3.workspace.files().map((f) => f.path.replace(/\\/g, "/").toLowerCase()));
     for (const v of variants) {
-      const own = `map/${toProjectPath(v.replace(/\//g, "\\"))}`;
-      if (files.has(own.toLowerCase())) return this.w3.workspace.readBytes(own);
+      // Under its name on disk, whatever the case asked for (as the game finds it).
+      const own = importedPath(this.w3, v);
+      if (own !== undefined) return this.w3.workspace.readBytes(own);
     }
     let last: unknown = new Error(`${path} not found`);
     // Classic: the base folder exactly; Reforged: its DE, then HD folder; then as the game resolves it.

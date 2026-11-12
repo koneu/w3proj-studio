@@ -6,7 +6,8 @@
 // the World Editor stores them.
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
+import { toArchiveName } from "../../lib/formats/archivepath";
+import { readImported } from "../../lib/imports";
 import { lookupWestring, parseIni, parseSlk } from "../../lib/formats/text";
 import { renameInTriggers } from "../../lib/triggers/renamed";
 import { ident } from "../../lib/script/names";
@@ -63,7 +64,8 @@ function loadGameSounds(w3: W3Api): Promise<GameSounds> {
 /** Plays a sound file: imported ones from the project, game ones from storage (other extensions tried). The audio
  *  and its object URL (to stop it and free the URL), or null (said why) when there's nothing to play. */
 async function playSoundFile(w3: W3Api, path: string, game: GameSounds | null): Promise<{ audio: HTMLAudioElement; url: string } | null> {
-  let bytes: Uint8Array | null = await w3.workspace.readBytes(`map/${toProjectPath(path)}`).catch(() => null);
+  // Under its name on disk, whatever the case the sound names (as the game finds it).
+  let bytes: Uint8Array | null = await readImported(w3, path).catch(() => null);
   if (!bytes && game) {
     const full = game.files.get(path)
       ?? [".flac", ".mp3", ".wav", ".ogg"].map((e) => game.files.get(path.replace(SOUND_EXTENSIONS, e))).find(Boolean);

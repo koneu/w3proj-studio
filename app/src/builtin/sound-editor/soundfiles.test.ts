@@ -112,6 +112,11 @@ test("the map's file is found first, also under another extension, then the game
   assert.equal((await findSoundFile(h.w3, "Sound\\c.wav", new Map([["Sound\\c.wav", "War3.w3mod:Sound/c.wav"]])))?.source, "game");
 });
 
+test("the map's sound is found under its name on disk when the sound names it in another case (Linux tells cases apart)", async () => {
+  const f = fake({ mapFiles: { "map/war3mapimported/Boom.wav": bytes(5) }, gameFiles: { "war3mapImported\\boom.wav": bytes(6) } });
+  assert.deepEqual(await findSoundFile(f.w3, "war3mapImported\\boom.wav", null), { bytes: bytes(5), path: "war3mapImported\\boom.wav", source: "map" });
+});
+
 test("Export Sound writes the sound's bytes to the chosen file", async () => {
   const f = fake({ mapFiles: { "map/Sound/a.wav": bytes(7, 8, 9) } });
   assert.equal(await exportSound(f.w3, "Sound\\a.wav", null), "C:\\out\\s.wav");

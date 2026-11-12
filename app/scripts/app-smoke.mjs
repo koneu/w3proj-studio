@@ -4685,8 +4685,9 @@ async function graphicsModes(page, found) {
   const check = () => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
     await svc.run();
-    // The mini map's script, and its triggers made of made-up functions, have problems of their own; this is about the objects.
-    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "") && p.reveal?.command !== "w3.triggers.reveal").map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
+    // The mini map's script, and its triggers made of made-up functions, have problems of their own, and its readme.txt
+    // isn't in an import list; this is about the objects.
+    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "") && p.reveal?.command !== "w3.triggers.reveal" && !/isn't in the import list/.test(p.message)).map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
   })()`);
   const fix = (match, label) => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
@@ -6982,6 +6983,99 @@ async function contextMenuItem(page, selector, text, item) {
   return null;
 }
 
+/** Files of the map folder outside the import list (branch import-warnings): a unit type's model imported under another
+ *  case than its object data names it is drawn (on Linux the file's name on disk counts: lib/imports.ts readImported);
+ *  the Problems view warns of it ("used by" the type) and of a game model replaced by an unlisted file, and its fixes
+ *  list the one and delete the other; removing an entry in the Import Manager asks whether its file goes too ("Remove
+ *  from list" keeps it, "Remove and delete file" doesn't). Needs the game (W3PROJ_GAME). */
+async function importWarnings(page, found) {
+  const fail = (what) => found.push(`import warnings: ${what}`);
+  const k = await heightKit(page, "ImportWarnings");
+  const MODEL = "map/war3mapimported/smokecase.mdx", HALL = "map/Buildings/Human/TownHall/TownHall.mdx";
+  const onDisk = (p) => existsSync(join(k.root, ...p.split("/")));
+  const listed = () => { try { return k.read("war3map.imp.json").files.map((f) => f.path); } catch { return []; } };
+  await page.evaluate(`(() => {
+    window.__impKept = { ask: w3.window.askDelete, warn: w3.window.showWarning };
+    window.__impWarned = []; window.__impAnswer = "Cancel";
+    w3.window.askDelete = async () => true;
+    w3.window.showWarning = async (m, ...actions) => { window.__impWarned.push({ m, actions }); return window.__impAnswer; };
+    window.__impGroup?.dispose();
+  })()`);
+  try {
+    // The footman's model as an import in lower case; the object data names it in mixed case, as the game finds it.
+    await page.evaluate(`(async () => {
+      const b = await w3.game.read("Units\\\\Human\\\\Footman\\\\Footman.mdx");
+      await w3.workspace.writeBytes(${JSON.stringify(MODEL)}, b);
+      await w3.workspace.writeBytes(${JSON.stringify(HALL)}, b);
+    })()`);
+    const id = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Smoke Case" })).id;
+    await k.tool("set_object_fields", { kind: "units", id, changes: [{ field: "umdl", value: "war3mapImported\\SmokeCase.mdl" }] });
+    await k.tool("place_objects", { objects: [{ id, x: 0, y: 0, player: 1 }], ignoreRoom: true });
+    await k.save();
+    await page.evaluate(`(async () => {
+      const s = await w3.services.get("w3.terrain");
+      window.__impGroup = s.registerToolGroup({ id: "smoke-imp", title: "smoke-imp", order: 998, create: (ed) => { window.__impEd = ed; return { toolbar: document.createElement("div") }; } });
+    })()`);
+    const drawn = () => page.evaluate(`window.__impEd?.drawnUnits().find((u) => u.id === ${JSON.stringify(id)}) ?? null`);
+    // The placeholder cube (a model that didn't load) has no model path.
+    if (!(await soon(async () => /SmokeCase/i.test((await drawn())?.model ?? ""), 30000))) fail(`the unit whose model is imported in another case isn't drawn with it: ${JSON.stringify(await drawn())}`);
+
+    // ---- The Problems view ----------------------------------------------------------------------------------------
+    await page.evaluate(`w3.views.show("problems")`);
+    await page.evaluate(`w3.commands.execute("w3.problems.run")`);
+    const row = (text) => `[...document.querySelectorAll(".problem-row")].find((r) => r.textContent.includes(${JSON.stringify(text)}))`;
+    const rowText = (text) => page.evaluate(`${row(text)}?.textContent ?? null`);
+    await until("the Problems view's rows", () => page.evaluate(`!!${row("war3mapimported\\smokecase.mdx")}`), 30000).catch(() => {});
+    const model = await rowText("war3mapimported\\smokecase.mdx");
+    if (!model) fail(`the Problems view doesn't warn of the unlisted model: ${await page.evaluate(`[...document.querySelectorAll(".problem-row")].map((r) => r.textContent).join(" | ").slice(0, 400)`)}`);
+    else {
+      if (!/isn't in the import list, but is packed into the map anyway/.test(model) || !model.includes(`(${id})`)) fail(`the model's warning: ${model}`);
+      if (!/Add to import list/.test(model) || !/Delete file/.test(model)) fail(`the model's warning has no fixes: ${model}`);
+    }
+    const hall = await rowText("Buildings\\Human\\TownHall\\TownHall.mdx isn't");
+    if (!hall || !hall.includes("replaces the game's Buildings\\Human\\TownHall\\TownHall.mdx")) fail(`the replaced game model's warning: ${hall}`);
+    const fix = (text, label) => page.evaluate(`(() => { const b = [...(${row(text)}?.querySelectorAll("button.problem-fix") ?? [])].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return false; b.click(); return true; })()`);
+    if (!(await fix("war3mapimported\\smokecase.mdx", "Add to import list"))) fail("no Add to import list button");
+    else if (!(await soon(() => listed().some((p) => p.toLowerCase() === "war3mapimported\\smokecase.mdx"), 10000))) fail(`Add to import list: the list holds ${JSON.stringify(listed())}`);
+    if (!(await fix("Buildings\\Human\\TownHall\\TownHall.mdx isn't", "Delete file"))) fail("no Delete file button");
+    else if (!(await soon(() => !onDisk(HALL), 10000))) fail("Delete file left the file");
+    // The checks run again after a fix.
+    if (!(await soon(() => page.evaluate(`!${row("war3mapimported\\smokecase.mdx")} && !${row("Buildings\\Human\\TownHall\\TownHall.mdx isn't")}`), 20000))) {
+      fail("the listed model or the deleted file is still warned of");
+    }
+
+    // ---- The Import Manager's Remove asks about the file -------------------------------------------------------------
+    const remove = async (answer) => {
+      await page.evaluate(`window.__impWarned.length = 0; window.__impAnswer = ${JSON.stringify(answer)}`);
+      await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+      const entry = `[...document.querySelectorAll("tr.imp-row")].find((r) => /smokecase/i.test(r.textContent))`;
+      if (!(await soon(() => page.evaluate(`!!${entry}`), 20000))) return "the Import Manager doesn't show the entry";
+      await page.evaluate(`${entry}.click()`);
+      const clicked = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".imp-detail .imp-actions button")].find((x) => x.textContent === "Remove"); if (!b) return false; b.click(); return true; })()`);
+      if (!clicked) return "no Remove button";
+      if (!(await soon(() => page.evaluate(`window.__impWarned.length > 0`), 10000))) return "Remove asked nothing about the file";
+      const asked = (await page.evaluate(`window.__impWarned[0]`));
+      if (asked.actions.join() !== "Remove from list,Remove and delete file,Cancel") return `Remove offered ${JSON.stringify(asked)}`;
+      await settled(page);
+      return null;
+    };
+    let why = await remove("Remove from list");
+    if (why) fail(why);
+    else {
+      if (listed().some((p) => /smokecase/i.test(p))) fail("Remove from list left the entry");
+      if (!onDisk(MODEL)) fail("Remove from list deleted the file");
+    }
+    await page.evaluate(`w3.commands.execute("w3.imports.add", ["war3mapImported\\\\SmokeCase.mdx"])`);
+    await settled(page);
+    why = await remove("Remove and delete file");
+    if (why) fail(why);
+    else if (onDisk(MODEL) || listed().some((p) => /smokecase/i.test(p))) fail(`Remove and delete file left ${onDisk(MODEL) ? "the file" : "the entry"}`);
+  } finally {
+    await page.evaluate(`(() => { const k = window.__impKept; if (k) { w3.window.askDelete = k.ask; w3.window.showWarning = k.warn; } window.__impGroup?.dispose(); })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** The Object Manager follows the open editors, unsaved changes included: a placed unit deleted in the terrain editor, a
  *  custom object, a trigger, a variable and a sound renamed or deleted (through the Object Manager's own menu and through
  *  the editors' commands), with undo and redo, and back to the saved files when the editor closes without saving. While
@@ -7925,6 +8019,7 @@ async function run() {
         heightsLimits,
         heightsPreserve,
         heightsUniform,
+        importWarnings,
         itemDrops,
         itemTablesAccess,
         keybindings,
@@ -8162,6 +8257,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "chapterObjects");
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
   await leftOpen(page, "editorExtras");
+  await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
+  await leftOpen(page, "importWarnings");
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
   await leftOpen(page, "objectManagerLive");
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));

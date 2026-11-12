@@ -7,6 +7,7 @@ import type { W3Api } from "../../extensions/api";
 import { toArchiveName, toProjectPath } from "../../lib/formats/archivepath";
 import { checkpointIfOn } from "../../lib/checkpoint";
 import { soundVariants } from "../../lib/audio/variants";
+import { readImported } from "../../lib/imports";
 import { SOUND_EXTENSIONS } from "./sounds";
 
 export const SOUND_FILTER = [{ name: "Sound files", extensions: ["flac", "wav", "mp3", "ogg"] }];
@@ -29,7 +30,8 @@ export interface FoundSound { bytes: Uint8Array; path: string; source: "map" | "
  *  or null to ask the game by plain path). Null when neither has it, under any sound extension. */
 export async function findSoundFile(w3: W3Api, path: string, gameFiles: Map<string, string> | null): Promise<FoundSound | null> {
   for (const variant of soundVariants(path)) {
-    const bytes = await w3.workspace.readBytes(projectOf(variant)).catch(() => null);
+    // Under its name on disk, whatever the case the sound names (as the game finds it).
+    const bytes = await readImported(w3, variant).catch(() => null);
     if (bytes) return { bytes, path: variant, source: "map" };
   }
   for (const variant of soundVariants(path)) {
