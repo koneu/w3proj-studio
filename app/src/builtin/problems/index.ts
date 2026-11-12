@@ -87,10 +87,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  before (its "nothing found" says nothing about this one, and Build would pack unchecked), so
    *  then a run of its own follows once that one is over. Its results are adopted only if the project
    *  stays open meanwhile. */
+  /** A run that begins after this call: files changed just before it (a fix, a save) must be read by it. A run
+   *  going on may have read them before, so the caller waits for it and a run of its own follows; callers meanwhile
+   *  share that one. */
+  let next: Promise<Awaited<ReturnType<typeof start>>> | null = null;
+  const startAfter = () => {
+    if (!running) return start();
+    next ??= running.then(() => undefined, () => undefined).then(() => { next = null; return start(); });
+    return next;
+  };
   const runCurrent = async () => {
     for (let tries = 0; ; tries++) {
       const root = w3.workspace.project()?.root ?? null;
-      const r = await start();
+      const r = await startAfter();
       if (r.root === root || tries >= 2) return r;
     }
   };

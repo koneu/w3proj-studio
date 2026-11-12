@@ -7920,7 +7920,8 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (entry(SD).flags !== 21) fail(`the Classic entry's flags: ${entry(SD).flags}`);
     await settled(page);
     if ((await badges()).join() !== "Classic+Reforged") fail(`the pair is shown as ${JSON.stringify(await badges())} (one row with both badges wanted)`);
-    if (!(await page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`))) fail(`no note of the added version: ${JSON.stringify(await page.evaluate(`window.__impInfo`))}`);
+    // The note comes once the add has ended, which the list entry and file don't tell of.
+    if (!(await soon(() => page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`), 10000))) fail(`no note of the added version: ${JSON.stringify(await page.evaluate(`window.__impInfo`))}`);
 
     // Packed, the map holds both paths, each with its own bytes.
     await k.save();
