@@ -58,3 +58,20 @@ test("a tile with the ramp flag on all four corners across one layer is walkable
   corner(t, 1, 1).layer = 4;
   assert.deepEqual(tile(t, 0, 0), Array(16).fill(CLIFF), "two layers can't be a ramp");
 });
+
+test("a ramp side piece's flat tile is blocked beside a ramp or a cliff, walkable beside stray ramp flags", () => {
+  // Autumn Leaves' tile 17,32: a side piece (tiles 0..1 × 0) under a row of ramp flags (corners 0..2 × 1, layers
+  // 3, 2, 2) with no ramp tile above it and low ground all along its far side. The flat tile (1, 0) stays walkable.
+  const t = ground();
+  corner(t, 0, 1).layer = 3;
+  for (let x = 0; x <= 2; x++) corner(t, x, 1).ramp = true;
+  assert.deepEqual(tile(t, 0, 0), Array(16).fill(CLIFF), "the side piece's cliff tile");
+  assert.deepEqual(tile(t, 1, 0), Array(16).fill(NO_WATER), "its flat tile");
+  // Mount Hyjal: a ramp tile (1, 1) across the ramp edge from it blocks the flat tile.
+  corner(t, 1, 2).ramp = true; corner(t, 2, 2).ramp = true;
+  assert.deepEqual(tile(t, 1, 0), Array(16).fill(CLIFF), "beside a ramp");
+  corner(t, 1, 2).ramp = false; corner(t, 2, 2).ramp = false;
+  // Autumn Leaves' tile 15,25: the far side a cliff one layer high blocks it too.
+  corner(t, 0, 0).layer = 3;
+  assert.deepEqual(tile(t, 1, 0), Array(16).fill(CLIFF), "beside a cliff");
+});

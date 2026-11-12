@@ -217,7 +217,7 @@ export interface RampSide { x: number; y: number; w: number; h: number; outer: C
 /** The ramp sides of a terrain: every tile with some ramp corners, not all, whose corners' layers differ, is the
  *  first of the blocks around it that fits a ramp side (`accept`: the caller can also have it, e.g. a model for it;
  *  if not, the next block is tried). The flat tile such a block takes in is part of it. The view draws them with
- *  ramp models (planCliffs); the pathing map blocks them as cliffs. */
+ *  ramp models (planCliffs); the pathing map blocks them as cliffs (the flat tile not everywhere: generatePathing). */
 export function rampSides(t: Terrain, accept: (side: RampSide) => boolean = () => true): RampSide[] {
   const corner = (x: number, y: number) => t.corners[y * t.width + x];
   const tw = t.width - 1;
