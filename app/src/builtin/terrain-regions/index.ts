@@ -12,6 +12,7 @@ import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { jsonPathOf, readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { h } from "../../workbench/dom";
+import { NO_WEATHER as NONE, resolveWeather } from "../../lib/terrain/atmosphere";
 
 const FILE = "map/war3map.w3r";
 /** Regions snap to this grid (World Editor default). */
@@ -76,6 +77,35 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return `Removed the region ${String(name)}. list_problems shows triggers still using it.`;
     }),
   );
+  ctx.subscriptions.push(w3.mcp.registerTool("set_weather", async ({ region, effect }) => {
+    requireProject(w3);
+    if (region !== undefined && (typeof region !== "string" || !region.trim())) throw new Error("region must be a region's name, or left out for the map's global weather.");
+    if (typeof effect !== "string") throw new Error("effect must be a weather effect's id or name, or \"none\".");
+    const list = await weatherList(w3);
+    if (!list.length) throw new Error("The game's weather list (TerrainArt\\Weather.slk) can't be read.");
+    const id = resolveWeather(effect, list);
+    const label = id === NONE ? "no weather" : `${list.find(([i]) => i === id)?.[1] ?? id} (${id})`;
+    if (region === undefined) {
+      const { root } = requireProject(w3);
+      const path = jsonPathOf(w3, "war3map.w3i");
+      const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+      const changed = await edits.edit(`Set the map's weather to ${label}`, async (read) => {
+        const text = await read(path);
+        if (text === null) throw new Error("This map has no readable war3map.w3i.");
+        const doc = JSON.parse(text);
+        if (typeof doc.version === "number" && doc.version < 25) throw new Error(`This map's format (v${doc.version}) has no weather setting.`);
+        doc.weather = id;
+        return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+      });
+      return changed ? `The map's global weather is now ${label}.` : `The map's global weather was already ${label}.`;
+    }
+    const changed = await editRegions(w3, `Set weather of region ${region} to ${label}`, (doc) => {
+      const r = doc.regions.find((x) => x.name.toLowerCase() === region.trim().toLowerCase());
+      if (!r) throw new Error(`There's no region "${region}". Regions: ${doc.regions.map((x) => x.name).join(", ") || "(none)"}.`);
+      r.weather = id;
+    });
+    return changed ? `The weather of region ${region} is now ${label}.` : `The weather of region ${region} was already ${label}.`;
+  }));
   ctx.subscriptions.push(w3.mcp.registerTool("list_regions", async () => {
     requireProject(w3);
     const file = await readMapDoc<{ regions: { name: string; left: number; bottom: number; right: number; top: number; weather: string; sound: string }[] }>(w3, "map/war3map.w3r.json");

@@ -102,6 +102,9 @@ cliffs. Look at each stage with terrain_screenshot before the next, using view a
   no torches in the snow, no cage in the middle of nowhere. Keep to the tileset's theme.
 - Doodads hide seams, so use them where tiles or cliffs meet awkwardly.
 - Use list_objects with tileset map to see what suits the tileset, and terrain_screenshot to see the result.
+- Atmosphere is not terrain but sets the mood: set_sky changes light, fog, water tint and the terrain view's sky
+  model (reply lists what changed; a wrong name gets the choices), set_weather puts rain, snow or wind over the
+  whole map, or over one region (add_region first). Use weather sparingly and in a region where it belongs.
 
 ## Landmarks
 

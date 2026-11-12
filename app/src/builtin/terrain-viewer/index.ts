@@ -1,3 +1,4 @@
+import { campaignCandidates } from "./chapterimports";
 import { fogOf } from "../../lib/model/fog";
 import { GAME_LIGHT_FILL, toneOf } from "../../lib/model/tone";
 import { worldSphere } from "../../lib/model/frustum";
@@ -173,6 +174,17 @@ function campaignRoot(w3: W3Api): string | undefined {
   return root ? /^(.*)[\\/]maps[\\/][^\\/]+[\\/]?$/.exec(root)?.[1] : undefined;
 }
 
+/** The files of a campaign's map folder, to find an import under its name on disk (see campaignCandidates); one listing per
+ *  campaign for a few seconds, as most reads here are of the game's files. Null when it can't be listed. */
+const listings = new Map<string, { at: number; files: Promise<string[] | null> }>();
+function campaignListing(w3: W3Api, campaign: string): Promise<string[] | null> {
+  const known = listings.get(campaign);
+  if (known && Date.now() - known.at < 5000) return known.files;
+  const files = w3.workspace.listFolder(joinPath(campaign, "map")).catch(() => null);
+  listings.set(campaign, { at: Date.now(), files });
+  return files;
+}
+
 /** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
  *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
 async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
@@ -181,7 +193,7 @@ async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
   // The project's own files are known; only those are read (most paths are the game's), under the name they have on
   // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.
   const own = names.flatMap((n) => importedPath(w3, n) ?? []);
-  const candidates = [...own, ...(campaign ? names.map((n) => joinPath(campaign, "map", n)) : [])];
+  const candidates = [...own, ...(campaign ? campaignCandidates(campaign, names, await campaignListing(w3, campaign)) : [])];
   let last: unknown = new Error(`${path} isn't imported`);
   for (const c of candidates) {
     try { return await w3.workspace.readBytes(c); } catch (e) { last = e; }

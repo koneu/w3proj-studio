@@ -528,6 +528,58 @@ async function mcpStartMove(page, found) {
   }
 }
 
+/** set_sky and set_weather: the w3i and w3r after a save, one undo step each, names refused with the choices. */
+async function atmosphereTools(page, found) {
+  const fail = (what) => found.push(`sky and weather tools: ${what}`);
+  const tool = mcpTool(page);
+  const folder = join(work, "atmosphere");
+  mkdirSync(folder, { recursive: true });
+  await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
+  await tool("new_map", { name: "Atmosphere", width: 64, height: 64, folder });
+  await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+  const root = await page.evaluate(`w3.workspace.project()?.root`);
+  const read = (name) => JSON.parse(readFileSync(join(root, "map", name), "utf8"));
+  await tool("save_project");
+  const w3i0 = read("war3map.w3i.json"), edits = () => tool("list_edits").then((t) => JSON.parse(t).length);
+  const n0 = await edits();
+  const sky = await tool("set_sky", { lightEnvironment: "A", fogStyle: "Exponential 1", fogEnd: 7000, fogColor: "#ff0000", waterTint: [0, 255, 0], overSky: 1 }).catch((e) => fail(`set_sky: ${e.message}`));
+  if (sky === undefined) return;
+  if (!/light environment/.test(sky) || !/terrain fog: off/.test(sky)) fail(`the reply doesn't list the changes: ${sky}`);
+  if (await edits() !== n0 + 1) fail("set_sky wasn't one edit");
+  await tool("save_project");
+  const w3i = read("war3map.w3i.json");
+  if (w3i.lightEnvironment !== "A" || w3i.fog.style !== 1 || w3i.fog.end !== 7000 || JSON.stringify(w3i.fog.color.slice(0, 3)) !== "[0,0,255]" || JSON.stringify(w3i.waterTint.slice(0, 3)) !== "[0,255,0]") fail(`war3map.w3i after set_sky: ${JSON.stringify({ l: w3i.lightEnvironment, f: w3i.fog, t: w3i.waterTint })}`);
+  if ((w3i.flags & 0x12000) !== 0x12000) fail(`fog and tint flags not on: ${w3i.flags}`);
+  const refused = await tool("set_sky", { lightEnvironment: "Nowhere Land" }).then(() => "not refused", (e) => e.message);
+  if (!/Choices: .*Ashenvale/.test(refused)) fail(`an unknown light environment wasn't refused with the choices: ${refused.slice(0, 300)}`);
+  await tool("undo_last_edit");
+  await tool("save_project");
+  const back = read("war3map.w3i.json");
+  if (JSON.stringify(back) !== JSON.stringify(w3i0)) fail(`one undo didn't restore war3map.w3i: ${JSON.stringify(Object.keys(back).filter((k) => JSON.stringify(back[k]) !== JSON.stringify(w3i0[k])).map((k) => [k, back[k], w3i0[k]]))}`);
+
+  // Weather: global, then a region's.
+  await tool("set_weather", { effect: "RAlr" });
+  await tool("add_region", { name: "Storm", left: -512, bottom: -512, right: 512, top: 512 });
+  await tool("set_weather", { region: "Storm", effect: "Lordaeron Rain (Heavy)" }).catch((e) => fail(`set_weather for a region: ${e.message}`));
+  await tool("save_project");
+  if (read("war3map.w3i.json").weather !== "RAlr") fail(`the global weather is ${read("war3map.w3i.json").weather}, not RAlr`);
+  const storm = read("war3map.w3r.json").regions.find((r) => r.name === "Storm");
+  if (storm?.weather !== "RLhr") fail(`the region's weather is ${storm?.weather}, not RLhr`);
+  if (!/"weather":\s*"RLhr"/.test(await tool("list_regions"))) fail("list_regions doesn't show the weather");
+  await tool("set_weather", { region: "Storm", effect: "none" });
+  await tool("undo_last_edit");
+  await tool("save_project");
+  if (read("war3map.w3r.json").regions.find((r) => r.name === "Storm")?.weather !== "RLhr") fail("undo didn't bring back the region's weather");
+  await tool("set_weather", { effect: "none" });
+  await tool("save_project");
+  if (read("war3map.w3i.json").weather !== "0x00000000") fail("none didn't clear the global weather");
+  if (await tool("set_weather", { region: "Nowhere", effect: "RAlr" }).then(() => true, (e) => !/no region/i.test(e.message))) fail("an unknown region wasn't refused");
+  if (await tool("set_weather", { effect: "Snowstorm of doom" }).then(() => true, (e) => !/Choices: /.test(e.message))) fail("an unknown weather wasn't refused with the choices");
+  for (let i = 0; i < 4; i++) await tool("undo_last_edit");
+  await tool("save_project");
+  if (read("war3map.w3i.json").weather !== "0x00000000" || !existsSync(join(root, "map", "war3map.w3r.json")) === false && read("war3map.w3r.json").regions.length) fail("the undos didn't bring back the map as it was");
+}
+
 /** Water set by the tool reaches the pathing map: units walk through the shallow rim of a lake, not
  *  across its deep middle. War3map.wpm is rewritten by the app a moment after the edit, and has to be
  *  right when the project is saved and packed straight after. */
@@ -8811,6 +8863,7 @@ async function run() {
       // different lines and merge without conflicts.
       const onlyChecks = {
         artModeReload,
+        atmosphereTools,
         byHand,
         cameraEditing,
         campaignPresets,
@@ -9002,6 +9055,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "placeObjects", found);
   await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
   await leftOpen(page, "mcpStartMove", found);
+  await atmosphereTools(page, found).catch((e) => found.push(`sky and weather tools: ${e.message}`));
+  await leftOpen(page, "atmosphereTools", found);
   await meleeByHand(page, found).catch((e) => found.push(`melee by hand: ${e.message}`));
   await leftOpen(page, "meleeByHand", found);
   await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
