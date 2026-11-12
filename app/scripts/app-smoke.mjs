@@ -1270,6 +1270,18 @@ async function terrainSelectCameras(page, found) {
  *  doodads, units, ground pathing and light ranges, the toolbar's and the side panel's boxes follow; G goes round the
  *  grids, B draws the camera bounds, F toggles Fog Effects, T turns the selection toward the pointer, the pointer at
  *  the view's side scrolls it; and none of it is an edit. Judged on pictures of the view against the plain one (the same view twice is the noise). */
+/** The terrain view as these checks were written for: no grid, no camera-bounds outline and no minimap panel (a new view
+ *  has the medium grid, the bounds and the panel, as a fresh World Editor's), by the commands and the setting. The
+ *  pictures are compared pixel for pixel, and the panel's own redraws after an edit would count as the map's. */
+async function plainGridView(page) {
+  const view = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)})`);
+  for (let i = 0; i < 4 && (await view())?.grid !== "none"; i++) await run("w3.terrain.cycleGrid");
+  if ((await view())?.cameraBounds) await run("w3.terrain.toggleCameraBounds");
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+  await settled(page);
+}
+
 async function viewModes(page, found) {
   const fail = (what) => found.push(`view modes: ${what}`);
   const k = await heightKit(page, "ViewModes");
@@ -1298,6 +1310,7 @@ async function viewModes(page, found) {
       .catch(async () => { const v = await state(); fail(`Water and Effects didn't go off by their boxes: ${JSON.stringify(v && { water: v.water, effects: v.effects, gameView: v.gameView })}`); });
   };
   await stillView();
+  await plainGridView(page);
   await k.tab("Select");
   await k.look(start.position[0], start.position[1] + 128);
   await k.clearToasts();
@@ -1343,6 +1356,7 @@ async function viewModes(page, found) {
   if (!(await page.evaluate(`document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("the badge stays after game view");
   // The new editor's view as the first one's was (its boxes were greyed until now).
   await stillView();
+  await plainGridView(page);
   await k.clearToasts();
   if ((await changed()) > 150) fail("after game view the picture isn't the plain one again");
 
@@ -3841,6 +3855,7 @@ async function viewCommands(page, fail, shots, size) {
     await until(`the ${name} tab`, () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === ${JSON.stringify(name)}`), 5000);
     await settled(page);
   };
+  await plainGridView(page);
   const start = await state();
   if (!start) return bad("the terrain editor has no view commands");
   // A camera object to see (close to the unit placed at 256, 0), kept to put back.
@@ -5641,6 +5656,7 @@ async function keybindings(page, found) {
     await writeFile("[]\n");
     await until("the terrain view's state", async () => (await state()) !== null, 20000);
     await k.tab("Select");
+    await plainGridView(page);
     // G as the World Editor's: no grid, then the large one.
     const g0 = await grid();
     await press("G");
@@ -5882,6 +5898,8 @@ const GAME_READS_RECORDED = { reads: 105, asked: 138, textures: 140 };
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
+  // The scene is what the terrain view loads; the minimap panel (on in a new view) reads more game files of its own: off here, as recorded.
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
   const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
@@ -5990,6 +6008,7 @@ async function gameReadsOnce(page, found) {
   await settled(page);
   const racedAsked = (await asked()) - askedRaced;
   if (racedAsked > askedSecond * 1.5) fail(`opening the terrain while the project's tabs came back asked for ${racedAsked} game files, a plain opening ${askedSecond}`);
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
@@ -6972,6 +6991,8 @@ async function placerAndCampaign(page, found) {
   /** A click in the middle of the view over (x, y) (k.look waits until it's drawn there), then the app at rest. */
   const click = async (x, y) => { await k.look(x, y); await k.clickMiddle(); await settled(page); };
   try {
+    // The defaults are random (rotation, symmetric scale), as a fresh World Editor's; the checks below place plain first.
+    await page.evaluate(`Promise.all([w3.settings.set("terrain.placement.randomRotation", false), w3.settings.set("terrain.placement.randomScale", "off")])`);
     // Opening the Objects tab with nothing chosen shows its toolbar: the object browser didn't open over it by itself.
     // Control: Place… opens the browser (so the time waited would have shown one).
     const browser = `!!document.querySelector(".picker-overlay")`;
@@ -9126,6 +9147,9 @@ async function niceToHaves(page, found) {
 
     // ---- The minimap panel: on, a picture, the view's outline; a click moves the camera there -----------------------------
     const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+    // A new view shows the minimap (the World Editor's default): off first, so the command turns it on.
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+    await soon(async () => !(await state()).minimap.shown, 5000);
     await run("w3.terrain.toggleMinimap");
     await until("the minimap's picture", async () => (await state())?.minimap?.picture === true, 30000).catch(() => {});
     let s = await state();
