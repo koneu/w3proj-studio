@@ -6,12 +6,14 @@
 // (New ▸, and how trigger texts with vJASS are shown).
 
 import type { ExtensionContext, W3Api } from "../../extensions/api";
-import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type ScriptLanguagesService, type TriggersService } from "../../extensions/services";
+import { CODE_EDITOR_SERVICE, SCRIPT_LANGUAGES_SERVICE, TRIGGERS_SERVICE, type CodeEditorService, type CodeSymbol, type ScriptLanguagesService, type TriggerEditorHandle,
+  type TriggersService } from "../../extensions/services";
+import type { TriggerItem } from "../../lib/triggers/wtg";
 import { mapJass } from "../../lib/jass/env";
 import { joinPath } from "../../lib/paths";
 import { ident } from "../../lib/script/jass";
 import { h } from "../../workbench/dom";
-import { vjassSymbols } from "./symbols";
+import { vjassExports, vjassSymbols } from "./symbols";
 
 /** vJASS source: libraries, scopes, structs, modules, interfaces, textmacros, block comments
  *  (not in a // comment: "//****" banners are plain JASS), //! directives. */
@@ -32,6 +34,22 @@ export function libraryName(name: string): string {
 }
 /** JassHelper's output ("//globals from <library>:", LIBRARY_<name> constants). */
 const OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
+
+/** Each trigger's exports, scanned again only when its text changed. */
+const exportsCache = new WeakMap<TriggerItem, { text: string; name: string; symbols: CodeSymbol[] }>();
+/** What the editor's other custom texts declare for the map (vjassExports). */
+function otherTexts(ed: TriggerEditorHandle, self: TriggerItem): CodeSymbol[] {
+  const out: CodeSymbol[] = [];
+  for (const item of ed.file.items) {
+    if (item === self || (item.type !== 8 && item.type !== 16 && item.type !== 32)) continue;
+    const text = ed.customText(item);
+    if (!text) continue;
+    let hit = exportsCache.get(item);
+    if (hit?.text !== text || hit.name !== item.name) exportsCache.set(item, hit = { text, name: item.name, symbols: vjassExports(text, `trigger:${item.name}`) });
+    out.push(...hit.symbols);
+  }
+  return out;
+}
 
 export function activate(w3: W3Api, ctx: ExtensionContext) {
   const exe = () => w3.settings.get<string>("vjass.jassHelper")
@@ -143,8 +161,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const map = mapJass((p) => w3.game.readText(p), w3.workspace.readText("map/war3map.j").catch(() => null));
         const editor = code.create(box, {
           value: ed.customText(t) ?? "", language: "jass", readOnly: !ed.editable,
-          // The text's own declarations from the vJASS scanner; the rest from the game and the map.
-          symbols: async (text) => [...vjassSymbols(text), ...(await map.symbols("").catch(() => []))],
+          // The text's own declarations from the vJASS scanner; other texts' as they are now (saved or not,
+          // libraries' public ones as Library_Name); the rest from the game and the map.
+          symbols: async (text) => [...vjassSymbols(text), ...otherTexts(ed, t), ...(await map.symbols("").catch(() => []))],
           openLocation: (loc) => { if (loc.startsWith("trigger:")) ed.openTrigger(`gg_trg_${ident(loc.slice(8))}`); },
           onChange: (v) => ed.edit("Edit script", () => ed.setCustomText(t, v), { keepView: true }),
         });

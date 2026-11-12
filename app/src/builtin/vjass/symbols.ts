@@ -112,10 +112,31 @@ export function vjassSymbols(src: string): CodeSymbol[] {
       const constant = /\bconstant\b/.test(line.slice(0, line.indexOf(m[1])));
       out.push({
         name: m[2], kind: inStruct() ? "field" : constant ? "constant" : "global", detail: line.trim().replace(/\s*=.*$/, "").replace(/\s+/g, " "),
-        at: at(m[2], line.indexOf(m[1]) + m[1].length), container: inStruct() ? container() : undefined,
+        at: at(m[2], line.indexOf(m[1]) + m[1].length), container: container(),
       });
     }
     pos += raw.length + 1;
+  }
+  return out;
+}
+
+/** What another text declares for the rest of the map, as it is named there (JassHelper's prefixes):
+ *  a library's or scope's public functions, globals and structs as `Library_Name`, its plain ones by
+ *  name; private ones and struct members not. `location` is where they are declared ("trigger:<name>"). */
+export function vjassExports(src: string, location: string): CodeSymbol[] {
+  const symbols = vjassSymbols(src);
+  const libraries = new Set(symbols.filter((s) => s.kind === "library").map((s) => s.name));
+  const out: CodeSymbol[] = [];
+  for (const s of symbols) {
+    const isStruct = s.kind === "struct" && /^struct\b/.test(s.detail);
+    if (!(s.kind === "function" || s.kind === "global" || s.kind === "constant" || isStruct) || s.at === undefined) continue;
+    // Inside a struct (static members, nested declarations): reached through the struct.
+    if (s.container !== undefined && !libraries.has(s.container)) continue;
+    // The access word is on the declaration's line, before its name.
+    const head = src.slice(src.lastIndexOf("\n", s.at - 1) + 1, s.at);
+    if (/\bprivate\b/.test(head)) continue;
+    const name = /\bpublic\b/.test(head) && s.container !== undefined ? `${s.container}_${s.name}` : s.name;
+    out.push({ name, kind: s.kind, detail: s.detail, location });
   }
   return out;
 }
