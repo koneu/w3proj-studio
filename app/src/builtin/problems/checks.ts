@@ -139,7 +139,7 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
             if (t.replaceableId !== 0 || !t.path) continue;
             const reveal = { command: "w3.problems.open", args: [f.path] };
             if (isAbsolute(t.path)) out.push({ severity: "warning", message: `texture ${t.path}: a path on someone's disk`, location: f.path, reveal });
-            else if (!(await files.exists(t.path, "texture"))) out.push({ severity: "warning", message: `texture ${t.path} not found`, location: f.path, reveal });
+            else if (!(await files.exists(t.path, "texture"))) out.push({ severity: "warning", message: `texture ${files.notFound(t.path)}`, location: f.path, reveal });
           }
         }
         return capped(out, "texture problems");

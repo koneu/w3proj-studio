@@ -29,6 +29,10 @@ const rad = (d: number) => (d * Math.PI) / 180;
 /** Random Rotation turns doodads only, as the World Editor's (Tools > Randomly Rotate Doodads): units, items and the like face the default way. */
 export const rotatesRandomly = (type: LookType | null): boolean => type?.kind === undefined || type.kind === "w3d";
 
+/** The facing (radians) of one placed object: a fixed rotation wins, else random when allowed (doodads only), else 270°. Single, scatter and stroke placement all use it. */
+export const placeAngle = (type: LookType | null, randomRotation: boolean, random: () => number = Math.random): number =>
+  type?.fixedRot != null ? rad(type.fixedRot) : randomRotation && rotatesRandomly(type) ? random() * Math.PI * 2 : rad(DEFAULT_FACING);
+
 /** How the next object of a type is placed. A fixed rotation always wins; scale changes only for types that
  *  may be placed scaled (canPlaceRandScale) with a range (minScale below maxScale). */
 export function rollLook(type: LookType | null, o: LookOptions,
@@ -36,7 +40,7 @@ export function rollLook(type: LookType | null, o: LookOptions,
   const variations = Math.max(1, type?.numVar ?? 1);
   const variation = o.variation !== null ? Math.max(0, Math.min(variations - 1, Math.round(o.variation)))
     : o.randomVariation && variations > 1 ? Math.min(variations - 1, Math.floor(random() * variations)) : 0;
-  const angle = type?.fixedRot != null ? rad(type.fixedRot) : o.randomRotation && rotatesRandomly(type) ? random() * Math.PI * 2 : rad(DEFAULT_FACING);
+  const angle = placeAngle(type, o.randomRotation, random);
   let scale: [number, number, number] = [1, 1, 1];
   if (type?.randScale && type.maxScale > type.minScale && o.randomScale !== "off") {
     const k = () => type.minScale + random() * (type.maxScale - type.minScale);

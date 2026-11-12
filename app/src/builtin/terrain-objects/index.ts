@@ -14,7 +14,7 @@ import {
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
-import { applyRandom, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
+import { applyRandom, placeAngle, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { readArea } from "../../lib/terrain/area";
@@ -122,7 +122,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     const look = stroke ? null : next ?? rollLook(type, lookOptions());
     const occ = respect() || stroke ? await ed.objects.occupancy() : null;
     const fp = occ ? await occ.footprint(kind, id) : null;
-    const facing = () => (type?.fixedRot != null ? deg(type.fixedRot) : Math.random() * Math.PI * 2);
+    const facing = () => placeAngle(type, lookOptions().randomRotation);
 
     const spots: { x: number; y: number; angle: number }[] = [];
     if (!stroke) {
