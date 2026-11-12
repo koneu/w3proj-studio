@@ -94,7 +94,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const placeStart = (pos: [number, number, number]) => {
     if (owner >= 24) { w3.window.showWarning("Start locations are for players 1–24, not neutral players."); return; }
     const x = Math.round(pos[0] / 64) * 64, y = Math.round(pos[1] / 64) * 64;
-    if (!ed.objects.inBounds(x, y)) { w3.window.showWarning("Not placed: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it."); return; }
+    if (!ed.objects.inBounds(x, y)) { w3.window.showWarning(ed.objects.refusedOutside("that is")); return; }
     const old = ed.objects.list().find((o) => o.id === START.id && o.player === owner);
     if (old) {
       const before = [...old.position] as [number, number, number], after: [number, number, number] = [x, y, heightAt(ed.terrain, x, y)];
@@ -129,7 +129,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       const angle = look!.angle;
       const [x, y] = kind === "w3u" ? await ed.objects.buildingSpot(id, pos[0], pos[1]) : pos;
       if (!ed.objects.inBounds(x, y)) {
-        w3.window.showWarning("Not placed: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it.");
+        w3.window.showWarning(ed.objects.refusedOutside("that is"));
         return;
       }
       if (respect() && fp && !ed.objects.backdrop(kind, x, y) && !(await occ!.fits(kind, id, x, y, angle))) {

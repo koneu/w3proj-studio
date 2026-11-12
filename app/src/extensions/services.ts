@@ -293,6 +293,8 @@ export interface TerrainObjects {
   backdrop(kind: string, x: number, y: number): boolean;
   /** Whether an object may stand here: false past the camera bounds while Enforce Camera Bounds is on. */
   inBounds(x: number, y: number): boolean;
+  /** The warning for an object Enforce Camera Bounds refused; `what` is subject and verb, e.g. "that is". */
+  refusedOutside(what: string): string;
   /** Per pathing cell (rows from the south), 1 where cliffs, doodads, trees or buildings stop a
    *  walking unit. Unlike occupancy(), units and items don't count. */
   blockers(): Promise<Uint8Array>;

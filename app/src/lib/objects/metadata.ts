@@ -70,6 +70,8 @@ export interface KindData {
   fieldById: Map<string, FieldMeta>;
   /** Base object id → display name. */
   names: Map<string, string>;
+  /** A stored WESTRING_… name as the game's text ("WESTRING_DOOD_APMS" on a new doodad); anything else, or a key the game lacks, unchanged. */
+  westring(value: string): string;
   /** Lower-case English words for a base object from the game's tables, on any install: the shown
    *  names are in the install's language, so "footman" wouldn't find a German Fußsoldat. */
   searchText(baseId: string): string;
@@ -339,6 +341,7 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
     fields,
     fieldById,
     names,
+    westring: (value) => westring(we, value),
     searchText: (id) => englishWords([...tables.values()].flatMap((t) => { const r = t.get(id); return r ? [r] : []; })),
     baseIds: [...main.keys()],
     levels(baseId) {

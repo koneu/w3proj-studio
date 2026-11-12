@@ -1738,7 +1738,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let cameraCorners: [number, number][] | null = null;
         /** The bounds objects are held to: none unless Enforce Camera Bounds is on. */
         /** Where a moved object may stand: the map (the playable part, for units and items) cut by the camera bounds when enforced. */
-        const moveBounds = (e: Placed): Bounds => limitTo(dooFile?.list.includes(e) ? wholeMap(handle) : playableEdge ?? wholeMap(handle), heldTo());
+        const moveBase = (e: Placed): Bounds => dooFile?.list.includes(e) ? wholeMap(handle) : playableEdge ?? wholeMap(handle);
+        const moveBounds = (e: Placed): Bounds => limitTo(moveBase(e), heldTo());
         const heldTo = (): Bounds | null => (switchedOn(w3, "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]) ? cameraArea : null);
         /** One undoable change: a terrain stroke or an object edit. */
         interface Edit { undo(): void; redo(): void; terrain: boolean; objects: boolean }
@@ -3887,6 +3888,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             buildingSpot: async (id, x, y) => { await loadCells(id).catch(() => { /* stays free */ }); return onGrid(id, x, y); },
             backdrop: (kind, x, y) => isBackdrop(kind, x, y, playableEdge, wholeMap(handle)),
             inBounds: (x, y) => insideBounds(heldTo(), x, y),
+            refusedOutside: refusedOutsideText,
             update: () => {
               objectsTouched = true;
               void rebuildObjects();
@@ -4702,12 +4704,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The camera being dragged with a mouse button (MOUSE_CONTROLS' translate or rotate). */
         let drag: { x: number; y: number; mode: "translate" | "rotate" } | null = null;
         /** Selected objects being dragged: offsets follow the pointer from `anchor`. */
-        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean } | null = null;
+        let objDrag: { entries: Placed[]; before: Pose[]; anchor: Vec3; moved: boolean; warned?: boolean } | null = null;
         const dragObjects = (p: Vec3) => {
           if (!objDrag) return;
           // The group keeps its shape and stops at the map's edge (the playable part, for units), and at the camera bounds when enforced, together.
           const [dx, dy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
             objDrag.entries.map(moveBounds), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
+          if (!objDrag.warned && heldTo()) {
+            // Said once per drag, when the camera bounds (not the map's edge) are what stops it.
+            const [fx, fy] = clampShift(objDrag.before.map((b) => [b.position[0], b.position[1]] as const),
+              objDrag.entries.map(moveBase), p[0] - objDrag.anchor[0], p[1] - objDrag.anchor[1]);
+            if (fx !== dx || fy !== dy) { objDrag.warned = true; void w3.window.showWarning(stoppedAtBoundsText(objDrag.entries.length)); }
+          }
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
             setPlacement(entry, [x + dx, y + dy, ownHeight(entry) ?? heightAt(terrain, x + dx, y + dy)], entry.angle);

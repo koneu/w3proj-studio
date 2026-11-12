@@ -50,7 +50,10 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       if (text === null) return null;
       try { return JSON.parse(text) as T; } catch { throw new Error(`${path} is there but can't be read; nothing was changed.`); }
     };
-    const wts = await read(WTS);
+    const wts = await read(WTS).catch((e) => {
+      if ((e as Error)?.name === "NotUtf8Error" || /not valid UTF-8/.test(String(e))) throw new Error("war3map.wts isn't UTF-8 text, so no texts were moved. Nothing changed.");
+      throw e;
+    });
     const info = await readJson<TextMapInfo>(`${INFO}.json`);
     const objects: { path: string; kind: string; skin: boolean; doc: TextObjectFile }[] = [];
     for (const f of objectFiles) {

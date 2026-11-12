@@ -444,6 +444,7 @@ class SoundEditor {
           { label: "Export Sound…", run: () => void this.exportCurrent().catch(this.failed) },
           { label: "Find Usages…", run: () => void this.w3.commands.execute("w3.sounds.findUsages").catch(this.failed) },
           { label: "Replace Internal Sound…", disabled: !this.editable, run: () => void this.replaceCurrent().catch(this.failed) },
+          { label: "Remove Unused Sounds…", disabled: !this.editable, run: () => void this.w3.commands.execute("w3.sounds.removeUnused").catch(this.failed) },
         ]);
       },
     },

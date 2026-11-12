@@ -305,7 +305,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const nameOf = (o: Obj) => {
           for (const { mods } of modLists(o)) {
             const m = mods.find((m) => /nam$/.test(m.field) && m.type === "string");
-            if (m) return stripColors(resolveStr(m.value) ?? String(m.value));
+            if (m) return stripColors(resolveStr(m.value) ?? (kd ? kd.westring(String(m.value)) : String(m.value)));
           }
           return stripColors(baseName(o));
         };
@@ -772,7 +772,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const play = mixed ? null : playButton(metaType, String(current));
             return play ? h("div.obj-sound-cell", {}, editor, play) : editor;
           }
-          const resolved = mixed ? null : resolveStr(current);
+          const resolved = mixed ? null : resolveStr(current) ?? (typeof current === "string" && kd && /^WESTRING_/i.test(current) && kd.westring(current) !== current ? kd.westring(current) : null);
           const shown = mixed && [...new Set(mixed)].map((v) => stripColors(resolveStr(v) ?? v) || "(empty)");
           const input = h(`input.obj-value${inherited ? ".inherited" : ""}${mixed ? ".mixed" : ""}`, {
             value: mixed ? "" : String(current),
@@ -1449,9 +1449,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           pendingFocus = null;
         }
         status.textContent ||= "Loading game data…";
-        loadEditorTypes(w3).then((t) => { editorTypes = t; renderDetail(); }, () => {});
+        const loadTypes = () => loadEditorTypes(w3).then((t) => { if (!closed) { editorTypes = t; renderDetail(); } }, () => {});
+        void loadTypes();
         // Gameplay Constants limit some fields (units only: see constlimits). Read again when the map's change.
-        const limitSubs = kind === "w3u" ? [
+        const limitSubs: { dispose(): void }[] = kind === "w3u" ? [
           w3.workspace.onDidSave((p) => { if (p.toLowerCase() === MAP_CONSTANTS.toLowerCase()) void loadLimits(); }),
           w3.workspace.onDidChange(() => void loadLimits()),
         ] : [];
@@ -1459,10 +1460,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // The map's own object data: other modules see it as it is here (the newest editor of a file counts).
         const isLive = !doc.readOnly && doc.path.toLowerCase().startsWith("map/");
         if (isLive) liveData.set(doc.path, { kind, data: liveNow });
-        loadKind(w3, kind).then(
-          (k) => { kd = k; if (status.textContent === "Loading game data…") status.textContent = ""; renderList(); renderDetail(); },
-          (e) => { status.textContent = `Game data unavailable — showing raw ids (${e})`; },
-        );
+        const loadGame = () => {
+          loadKind(w3, kind).then(
+            (k) => { if (closed) return; kd = k; if (status.textContent === "Loading game data…" || status.textContent?.startsWith("Game data unavailable")) status.textContent = ""; renderList(); renderDetail(); },
+            (e) => { if (!closed) status.textContent = `Game data unavailable — showing raw ids (${e})`; },
+          );
+        };
+        loadGame();
+        // A new game folder (game.installDir): what was unavailable is read again.
+        limitSubs.push(w3.settings.onDidChange((key) => { if (key === "game.installDir" && !kd) { status.textContent = "Loading game data…"; loadGame(); if (!editorTypes) void loadTypes(); } }));
 
         return {
           undo: () => step(-1),

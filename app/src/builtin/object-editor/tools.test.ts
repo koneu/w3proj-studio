@@ -19,7 +19,7 @@ function kindData(kind: string): KindData {
   const units = kind === "w3u";
   return {
     kind, facetDefs: [], facets: () => ({}), fields: FIELDS, fieldById: new Map(FIELDS.map((f) => [f.id, f])),
-    names: new Map(units ? [["hfoo", "Footman"], ["hbar", "Barracks"]] : []), searchText: () => "",
+    names: new Map(units ? [["hfoo", "Footman"], ["hbar", "Barracks"]] : []), westring: (v) => v, searchText: () => "",
     baseIds: units ? ["hfoo", "hbar"] : kind === "w3a" ? ["AHbz"] : [], levels: () => 1, fieldsFor: () => FIELDS,
     defaultValue: (_b, f) => (f.id === "uhpm" ? "420" : undefined),
   };
