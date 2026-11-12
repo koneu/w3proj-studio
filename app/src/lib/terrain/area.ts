@@ -2,6 +2,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { readMapDoc } from "../formats/mapdoc";
+import { mapEdgeTiles, type Terrain } from "./w3e";
 
 export interface Area { left: number; bottom: number; right: number; top: number; name?: string }
 interface AreaArgs { region?: unknown; left?: unknown; bottom?: unknown; right?: unknown; top?: unknown }
@@ -17,16 +18,45 @@ export function playableArea(info: { cameraComplements?: number[] }, t: { offset
   };
 }
 
-/** The dark over the map's border, one RGBA texel per tile, row 0 in the south. */
-export function borderShade(tilesX: number, tilesY: number, complements: readonly number[] = [0, 0, 0, 0]): Uint8Array {
-  const [left, right, bottom, top] = complements;
-  const rgba = new Uint8Array(tilesX * tilesY * 4);
-  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
-    if (x < left || x >= tilesX - right || y < bottom || y >= tilesY - top) rgba[(y * tilesX + x) * 4 + 3] = BORDER_ALPHA;
+/** The terrain's grid as the border's rules read it. */
+type EdgeGrid = Pick<Terrain, "width" | "height" | "corners">;
+
+/** The dark over the map's border: black at BORDER_ALPHA over each tile the terrain marks as past the playable map
+ *  (mapEdgeTiles), not by the w3i's border, as the World Editor goes by the marks. One RGBA texel per corner of the
+ *  pathing cells (`4 * tiles + 1` a side, row 0 in the south), dark where any cell around it is past the playable map:
+ *  drawn smoothly between the corners, the dark fades out over the first playable cell, as the editor's (we-drive, map
+ *  03's west edge, 2026-11-12: from green 16 to 107 over 13 pixels, a cell's width there, just inside the edge). */
+export function borderShade(t: EdgeGrid): { rgba: Uint8Array; width: number; height: number } {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1), edge = mapEdgeTiles(t);
+  const width = tilesX * 4 + 1, height = tilesY * 4 + 1, rgba = new Uint8Array(width * height * 4);
+  const past = (cx: number, cy: number) => cx >= 0 && cy >= 0 && cx < tilesX * 4 && cy < tilesY * 4 && edge[(cy >> 2) * tilesX + (cx >> 2)] === 1;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (past(x - 1, y - 1) || past(x, y - 1) || past(x - 1, y) || past(x, y)) rgba[(y * width + x) * 4 + 3] = BORDER_ALPHA;
   }
-  return rgba;
+  return { rgba, width, height };
 }
-const BORDER_ALPHA = 165;
+/** How dark the border is: the World Editor's border ground keeps about 14.5 % of its colour (map 03, green 16 of 110
+ *  just inside, we-drive 2026-11-12; Studio's 165 kept 35 %, green 39). */
+export const BORDER_ALPHA = 218;
+
+/** Per corner (row 0 in the south), 1 where the water is black: every tile it belongs to lies past the playable map
+ *  (mapEdgeTiles). The World Editor draws the border's water black and fades it in over the last border tile, its
+ *  corners on the playable edge lit (we-drive, HillsbradCreek's west edge, 2026-11-12: a deep lake in the border,
+ *  0, 0, 0 there, rising to the lake's colour over about one tile right up to the playable edge). */
+export function darkWaterCorners(t: EdgeGrid): Uint8Array {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1), edge = mapEdgeTiles(t);
+  const out = new Uint8Array(t.width * t.height);
+  for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+    let any = false, lit = false;
+    for (const [tx, ty] of [[x - 1, y - 1], [x, y - 1], [x - 1, y], [x, y]]) {
+      if (tx < 0 || ty < 0 || tx >= tilesX || ty >= tilesY) continue;
+      any = true;
+      if (!edge[ty * tilesX + tx]) lit = true;
+    }
+    if (any && !lit) out[y * t.width + x] = 1;
+  }
+  return out;
+}
 
 /** Says when an area reaches past the playable part; null when it doesn't. */
 export function beyondPlayable(area: Area, playable: Area): string | null {

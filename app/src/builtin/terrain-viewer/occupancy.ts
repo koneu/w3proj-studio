@@ -83,7 +83,8 @@ export class Occupancy {
         const info = this.data.placedTex(id);
         // Walkable destructables (bridges) and texture-less doodads take no room.
         if (!info?.path || info.walkable) return null;
-        const img = await this.data.texture(info.path);
+        // As the pathing map has it: the type's own texture when the map's isn't found.
+        const { image: img } = await this.data.placedImage(info);
         return img ? fromImage(img) : null;
       })();
       this.footprints.set(key, f);

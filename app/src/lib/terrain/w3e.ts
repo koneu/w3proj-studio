@@ -172,6 +172,18 @@ export function onBoundary(t: Terrain, x: number, y: number): boolean {
  *  and the World Editor darken those tiles. Measured: 14 of 14 maps, saved by the World Editor among them. */
 const MAP_EDGE = 0x4000;
 
+/** Per tile (`width - 1` by `height - 1`, row 0 in the south), 1 where the tile lies past the playable map by the
+ *  MAP_EDGE bit of its lower left corner, else 0: what the game and the World Editor darken (and the editor's naval
+ *  view draws brown), whatever the w3i says. */
+export function mapEdgeTiles(t: Pick<Terrain, "width" | "height" | "corners">): Uint8Array {
+  const tilesX = Math.max(0, t.width - 1), tilesY = Math.max(0, t.height - 1);
+  const out = new Uint8Array(tilesX * tilesY);
+  for (let y = 0; y < tilesY; y++) for (let x = 0; x < tilesX; x++) {
+    if ((t.corners[y * t.width + x]?.rawWater ?? 0) & MAP_EDGE) out[y * tilesX + x] = 1;
+  }
+  return out;
+}
+
 /** Marks the tiles past the playable map; `complements` are the w3i's left, right, bottom, top. */
 export function markMapEdge(t: Terrain, complements: readonly number[]) {
   const [left, right, bottom, top] = complements;

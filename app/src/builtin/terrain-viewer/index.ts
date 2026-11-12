@@ -30,7 +30,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -42,9 +42,10 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, objectMods, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { meleeAfterSave, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
-import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
+import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee, unitLevels } from "./meleecheck";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
@@ -71,7 +72,7 @@ import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -469,11 +470,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return key;
   };
 
-  /** One edit of a placement file. */
-  /** `isItem` (units only): the map stops being a melee map in the same edit once a player owns a placed
-   *  unit, as the map script's regeneration does after a save. Done here, it doesn't depend on that running:
-   *  it waits for saves to settle, is off with script.generateOnSave, and is lost when the project closes first. */
-  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>, isItem?: (id: string) => boolean) => {
+  /** One edit of a placement file. Units: the map stops being a melee map in the same edit (one undo step) when the
+   *  World Editor's save would take it off (lib/terrain/meleesave: a player's unit or item, custom gameplay constants,
+   *  a start location under water, …), whatever the tool (placing, moving, a new owner, replacing types). The map
+   *  script's run after the save would do it too, but a moment later and lost when the project closes first. */
+  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
     // Every object tool comes through here (remove_objects without liveEditor too).
     refuseLostView(projectTerrain(w3));
@@ -500,8 +501,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Placed, moved or removed start locations add, move or remove the map's players, as the terrain editor's
         // save does, in the same edit (one undo step).
         if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
-        // Placing can make a player own something: Melee goes off as the save would take it off.
-        const flags = info.flags as number, after = isItem ? meleeFlagsAfter(info as unknown as MeleeInfo, list) : flags;
+        // Placing can make a player own something: Melee goes off as the save would take it off. The ground is the
+        // saved terrain's (a start under water).
+        const flags = info.flags as number, after = (await savedMelee(w3.workspace, info as unknown as MeleeInfo, list)).flags;
         if (after !== flags) { info.flags = after; changed = true; }
         if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
       }
@@ -700,9 +702,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { lists: { regions, groups: groups ?? [] }, ctx };
   };
   /** The object kind of a placed type in a placement file (units: w3u or w3t; doodads: w3b or w3d), as the panel has it. */
-  const placedKindOf = (handle: TerrainEditorHandle, key: "units" | "doodads") => (id: string) => {
-    const t = handle.objects.type(id)?.kind;
-    return key === "units" ? (t === "w3t" ? "w3t" : "w3u") : (t === "w3b" ? "w3b" : "w3d");
+  /** An entry of a type neither the game nor the map knows is typed by its record (unitsEntryKind). */
+  const placedKindOf = (handle: TerrainEditorHandle, key: "units" | "doodads") => (entry: Placed) => {
+    const t = handle.objects.type(entry.id)?.kind;
+    return key === "units" ? unitsEntryKind(entry, t) : (t === "w3b" ? "w3b" : "w3d");
   };
 
   /** Doodads past the playable map carry a flag: every one on ladder maps does, and no others. */
@@ -1065,7 +1068,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const giveProps = (entry: Placed, i: number) => {
         const changes = propChanges[i];
         if (!changes?.length || !factsData || !asked) return;
-        const one = [{ entry, facts: typeFacts(entry.id, kindOfPlaced(entry.id), factsData) }];
+        const one = [{ entry, facts: typeFacts(entry.id, kindOfPlaced(entry), factsData) }];
         const why = notOffered(one, changes);
         if (why) throw new Error(`Nothing was placed: objects[${i}]: ${why}`);
         const r = changeAllOf(one, changes, asked.ctx);
@@ -1135,7 +1138,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           giveProps(entry, i);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
-      }, (id) => handle.objects.type(id)?.kind === "w3t");
+      });
       return { placed, shifted, skipped };
     }),
     w3.mcp.registerTool("scatter_objects", async (args) => {
@@ -1253,7 +1256,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!e || e.id !== it.id) throw new Error(`Number ${String(it.index)} isn't a ${String(it.id)} any more. list_placed gives the numbers.`);
           return e;
         }))];
-        const objects = entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOf(entry.id), data) }));
+        const objects = entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOf(entry), data) }));
         const why = notOffered(objects, changes);
         if (why) throw new Error(`Nothing was changed: ${why}`);
         const r = changeAllOf(objects, changes, ctx);
@@ -1631,7 +1634,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           showCameraBounds();
           renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
-          renderer.setBorder(borderShade(terrain.width - 1, terrain.height - 1, info.cameraComplements), terrain.width - 1, terrain.height - 1);
+          // The border's shade comes from the terrain's own marks (the renderer's refreshBorder), as the editor's.
           redraw();
         };
         renderer.showBorder = showBoundary();
@@ -2599,7 +2602,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const kindOfEntry = (p: Placed) => {
           const k = skinOf(p)?.kind;
-          return fileOf(p) === dooFile ? (k === "w3d" ? "w3d" : k ?? "w3d") : k === "w3t" ? "w3t" : "w3u";
+          return fileOf(p) === dooFile ? (k === "w3d" ? "w3d" : k ?? "w3d") : unitsEntryKind(p, k);
         };
         const factsOf = async (entries: Placed[]): Promise<{ entry: Placed; facts: TypeFacts }[]> => {
           const load = factsData ??= loadFactsData(w3);
@@ -3283,10 +3286,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const occupancy = () => {
           occupancyPromise ??= (async () => {
             pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
-            const kindOf = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind ?? "w3u";
+            const kindOf = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind;
             const placed = [
               ...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })),
-              ...(unitsFile?.list ?? []).map((entry) => ({ entry, kind: kindOf(entry.id) === "w3t" ? "w3t" : "w3u" })),
+              ...(unitsFile?.list ?? []).map((entry) => ({ entry, kind: unitsEntryKind(entry, kindOf(entry.id)) })),
             ];
             return Occupancy.build(terrain, await pathingData, placed);
           })();
@@ -3416,7 +3419,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               let r: number | undefined;
               if (kind === "w3t") r = 24;
               else if (kind === "w3u") { const sh = data.unitShape(id); r = (await texRadius(sh?.path)) ?? sh?.collision ?? 32; }
-              else r = (await texRadius(data.placedTex(id)?.path)) ?? 32;
+              else {
+                const info = data.placedTex(id), img = info ? (await data.placedImage(info)).image : null;
+                r = img ? Math.max(img.width, img.height) * 16 : 32;
+              }
               ringRadius.set(key, Math.max(16, r));
               refreshRings();
             })().catch(() => { ringRadius.set(key, 32); });
@@ -4292,7 +4298,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The object's kind by the file it's placed in: units and items, or doodads and destructables. Models don't come into it. */
         const kindOfPlaced = (p: Placed) => {
           const skin = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
-          if (unitsFile?.list.includes(p)) return skin(p.id)?.kind === "w3t" ? "w3t" : "w3u";
+          if (unitsFile?.list.includes(p)) return unitsEntryKind(p, skin(p.id)?.kind);
           if (dooFile?.list.includes(p)) return skin(p.id)?.kind === "w3b" ? "w3b" : "w3d";
           return undefined;
         };
@@ -4340,9 +4346,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
                 parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
-                const e = playableEdge, cell = (v: number) => Math.round(v / 32);
-                const inside = e ? { width: W, x0: cell(e.left - terrain.offsetX), x1: cell(e.right - terrain.offsetX), y0: cell(e.bottom - terrain.offsetY), y1: cell(e.top - terrain.offsetY) } : null;
-                parts[3] = fits && on.naval ? navalColors(p.cells, inside) : null;
+                // The edge brown where the terrain marks the tiles past the playable map, as the editor's naval view.
+                parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: mapEdgeTiles(terrain), tilesX: terrain.width - 1 }) : null;
                 show();
               }));
             }
@@ -4377,9 +4382,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await layersRunning;
         };
         const applyGrid = () => {
-          // The tile grid is the ground's own mesh, so it follows cliffs and ramps; the others are lines per pixel.
-          renderer.wireframe = shown.grid === "medium";
-          renderer.gridStep = shown.grid === "small" || shown.grid === "large" ? GRID_STEP[shown.grid] : 0;
+          // Lines per pixel over the ground's mesh, so they follow cliffs and ramps; a finer grid keeps the coarser lines.
+          renderer.gridStep = GRID_STEP[shown.grid] ?? 0;
           redraw();
         };
         /** Light Ranges: a ring round every light of the placed objects shown, as far as it reaches. Made again when
@@ -5188,7 +5192,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           save: editable ? serial(async () => {
             // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
-            if (edgeInfo?.cameraComplements) markMapEdge(terrain, edgeInfo.cameraComplements);
+            if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
             // The game won't start a map with no players, so one always gets Player 1's start.
             const startAdded = !!edgeInfo && !!unitsFile && !unitsFile.list.some((p) => p.id === "sloc");
             if (startAdded && unitsFile) {
@@ -5224,14 +5228,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (t.starts) {
                   const starts = t.starts;
                   let changes: string[] = [];
+                  // What the Melee rules need besides the info: the gameplay constants, and the ground as saved here.
+                  const facts = await readMeleeFacts(w3.workspace, parseW3e(t.w3e));
+                  let unmelee: string[] = [];
                   await editDoc("war3map.w3i", (info) => {
                     changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
                     // The players' ally priorities follow their starts, as the World Editor's save works them out.
                     const priorities = applyAllyPriorities(info as unknown as PlayerInfo & { flags: number });
-                    return changes.length > 0 || priorities;
+                    // Placed units, new owners, pasted ones, moved starts: Melee goes off as the World Editor's save
+                    // takes it off, here in the save itself (not only when the map script is made afterwards).
+                    let melee = false;
+                    if (typeof info.flags === "number") {
+                      const after = meleeAfterSave(info as unknown as MeleeInfo, t.units ?? [], facts);
+                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; melee = true; }
+                    }
+                    return changes.length > 0 || priorities || melee;
                   });
                   savedStarts = starts;
                   if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
+                  if (unmelee.length) void w3.window.showInfo(`This map is no longer a melee map (as the World Editor's save makes it): ${unmelee.join("; ")}.`);
                 }
               },
               saved: () => doc.setDirty(mark.isDirty(at)),

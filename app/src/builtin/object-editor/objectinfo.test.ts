@@ -71,6 +71,29 @@ test("a type's variations each need a model: a placed one uses just its own", ()
   assert.deepEqual(jug.modelOnlyIn, ["DE"]);
 });
 
+test("odd model paths of the game's tables still find their files", () => {
+  // As in the game (2026-11): the dummy units' "Empty.ma", the item clom's path with its pack, the City wall endcap
+  // YSw5 of 2 variations whose classic file has no number.
+  const stored = modelPacks([
+    "War3.w3mod:_DE.w3mod:Doodads/Cinematic/Empty/Empty.mdx", "War3.w3mod:_DE.w3mod:Doodads/Undercity/Props/Corpse/Corpse2.mdx",
+    "War3.w3mod:Doodads/Cityscape/Structures/CityWallEndcap/CityWallEndcap.mdx",
+    "War3.w3mod:_DE.w3mod:Doodads/Cityscape/Structures/CityWallEndcap/CityWallEndcap0.mdx", "War3.w3mod:_HD.w3mod:Doodads/Cityscape/Structures/CityWallEndcap/CityWallEndcap1.mdx",
+  ]);
+  const paths: Record<string, string> = {
+    oimd: "Doodads/Cinematic/Empty/Empty.ma", clom: "war3.w3mod:_de.w3mod:doodads\\undercity\\props\\corpse\\corpse2.mdx",
+    YSw5: "Doodads\\Cityscape\\Structures\\CityWallEndcap\\CityWallEndcap", gone: "Doodads\\Gone\\Gone.ma",
+  };
+  const values: Record<string, string> = { YSw5: "2" };
+  const game = {
+    baseIds: Object.keys(paths), names: new Map<string, string>(), facets: () => ({}),
+    fieldById: new Map([["dfil", field("dfil", "Model")], ["dvar", field("dvar", "Variations")]]),
+    defaultValue: (id: string, f: FieldMeta) => (f.id === "dfil" ? paths[id] : values[id]),
+  };
+  assert.deepEqual(gameObjectList(game, (s) => s, undefined, undefined, stored).map(({ id, name, ...rest }) => [id, rest]), [
+    ["oimd", { modelOnlyIn: ["DE"] }], ["clom", { modelOnlyIn: ["DE"] }], ["YSw5", {}], ["gone", { noModel: true }],
+  ]);
+});
+
 test("trees go by what the game targets them as, not their category", () => {
   const targets: Record<string, string> = { ATtr: "tree", LOcg: "debris", ZTx: "tree,debris" };
   const game = {

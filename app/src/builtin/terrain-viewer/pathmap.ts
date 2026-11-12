@@ -61,14 +61,21 @@ export type PathImage = { width: number; height: number; rgba: Uint8ClampedArray
 export interface PathingData {
   margins: [number, number, number, number];
   tileRules: Map<string, TileRule>;
-  /** Doodad or destructable (`dest`, `walkable` for bridges) pathing texture. */
-  placedTex(id: string): { path?: string; dest: boolean; walkable: boolean } | null;
+  /** Doodad or destructable (`dest`, `walkable` for bridges) pathing texture. `fallback`: the type's own from the
+   *  game's table, when the map's object data names another (see placedImage). */
+  placedTex(id: string): PlacedTex | null;
+  /** The pathing picture of a placed doodad or destructable: its texture, else (the map's object data names a file
+   *  that is neither imported nor the game's) its type's own from the game's table, as `fallback` says. `image` null
+   *  with neither: then it leaves no pathing, and `missing` names what wasn't found. */
+  placedImage(info: PlacedTex): Promise<{ image: PathImage | null; fellBackTo?: string; missing?: string }>;
   /** Units: building pathing texture or collision size (world units). */
   unitShape(id: string): { path?: string; collision: number } | null;
   texture(path: string): Promise<PathImage | null>;
   /** Texture paths that couldn't be read. */
   missing: Set<string>;
 }
+
+export interface PlacedTex { path?: string; fallback?: string; dest: boolean; walkable: boolean }
 
 const usable = (p: string | undefined): p is string => !!p && p !== "_" && p !== "-" && p.toLowerCase() !== "none";
 
@@ -90,32 +97,42 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
 
   const textures = new Map<string, Promise<PathImage | null>>();
   const missing = new Set<string>();
+  const texture = (path: string): Promise<PathImage | null> => {
+    // The SLKs write some paths with doubled backslashes.
+    const p = path.replace(/\\+/g, "\\");
+    let t = textures.get(p.toLowerCase());
+    if (!t) {
+      t = readFile(p).then((b) => decodeImage(b, p).mip(0)).catch(() => { missing.add(p); return null; });
+      textures.set(p.toLowerCase(), t);
+    }
+    return t;
+  };
   return {
     margins: [m[0], m[1], m[2], m[3]],
     tileRules,
     missing,
-    texture(path) {
-      // The SLKs write some paths with doubled backslashes.
-      const p = path.replace(/\\+/g, "\\");
-      let t = textures.get(p.toLowerCase());
-      if (!t) {
-        t = readFile(p).then((b) => decodeImage(b, p).mip(0)).catch(() => { missing.add(p); return null; });
-        textures.set(p.toLowerCase(), t);
-      }
-      return t;
-    },
+    texture,
     placedTex(id) {
+      /** The map's texture, with the type's own as the fallback when they differ. */
+      const tex = (own: string | undefined, table: string | undefined) => {
+        const path = own ?? table;
+        const fallback = own !== undefined && usable(table) && table.toLowerCase() !== own.toLowerCase() ? table : undefined;
+        return { path: usable(path) ? path : undefined, ...(fallback && usable(path) ? { fallback } : {}) };
+      };
       const destMod = destMods.get(id);
       const dest = destRows.get(id) ?? (destMod && destRows.get(destMod.base));
-      if (dest) {
-        const path = destMod?.pathTex ?? dest.pathTex;
-        return { path: usable(path) ? path : undefined, dest: true, walkable: dest.walkable === "1" };
-      }
+      if (dest) return { ...tex(destMod?.pathTex, dest.pathTex), dest: true, walkable: dest.walkable === "1" };
       const mod = doodadMods.get(id);
       const row = doodadRows.get(id) ?? (mod && doodadRows.get(mod.base));
       if (!row) return null;
-      const path = mod?.pathTex ?? row.pathTex;
-      return { path: usable(path) ? path : undefined, dest: false, walkable: false };
+      return { ...tex(mod?.pathTex, row.pathTex), dest: false, walkable: false };
+    },
+    async placedImage(info) {
+      if (!info.path) return { image: null };
+      const own = await texture(info.path);
+      if (own) return { image: own };
+      const other = info.fallback ? await texture(info.fallback) : null;
+      return other ? { image: other, fellBackTo: info.fallback } : { image: null, missing: info.path };
     },
     unitShape(id) {
       // The map's own values (collision ucol, pathing texture upat) win over the base unit's.
@@ -131,12 +148,14 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
 }
 
 /** war3map.wpm for the terrain and placed doodads. `readFile` reads the
- *  map's imports first, then the game. Textures that can't be read are
- *  listed in `missing` (their objects leave no pathing). */
+ *  map's imports first, then the game. A texture the map's object data names that can't be read gives way to the
+ *  type's own (`fellBack`: that texture → the one used); with neither, it's listed in `missing` (those objects leave
+ *  no pathing; the Problems view names the object data field). */
 export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number): Promise<{ wpm: Uint8Array; missing: string[] }> {
+  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number): Promise<{ wpm: Uint8Array; missing: string[]; fellBack: [string, string][] }> {
   const data = await loadPathingData(w3, readFile);
   const stamps: PathingStamp[] = [];
+  const missing = new Set<string>(), fellBack = new Map<string, string>();
   await Promise.all(doodads.map(async (d) => {
     const e = d as Placed & { flags?: number };
     const info = data.placedTex(d.id);
@@ -145,9 +164,11 @@ export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Plac
     // ones (bridges) clear the cells they cover. Only solid doodads (flag
     // bit 1) block.
     if (info.dest ? !info.walkable : e.flags !== undefined && !(e.flags & 2)) return;
-    const t = await data.texture(info.path);
+    const { image: t, fellBackTo, missing: lost } = await data.placedImage(info);
+    if (fellBackTo) fellBack.set(info.path, fellBackTo);
+    if (lost) missing.add(lost);
     if (t) stamps.push({ x: d.position[0], y: d.position[1], angle: d.angle, width: t.width, height: t.height, rgba: t.rgba, clear: info.dest });
   }));
   const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, stamps, deepWater });
-  return { wpm, missing: [...data.missing] };
+  return { wpm, missing: [...missing], fellBack: [...fellBack] };
 }

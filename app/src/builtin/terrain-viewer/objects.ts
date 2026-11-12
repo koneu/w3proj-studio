@@ -652,6 +652,18 @@ export interface Stray { group: string; inst: ObjectInstance }
 
 /** Stand-ins for the unresolved objects of one group. Start locations are left out: they stay
  *  markers that can't be moved or deleted (a player needs one). */
+/**
+ * The kind of a war3mapUnits.doo entry: its type's when known (`known`: "w3t" an item, any other a unit), else what the
+ * record tells. The World Editor writes an item with hero level 0 and target acquisition 0, a unit with level 1 or more
+ * and target acquisition -1 (normal), -2 (camp) or its own range: so in all 281 placed items and 9,506 units of 58 maps
+ * (the game's campaigns and scenarios, melee maps; 2026-11-12), custom items of the map (I000, I003) too. A record with other
+ * values (Studio's own placing of a known type, a hand-made file) stays a unit, as before.
+ */
+export function unitsEntryKind(p: Placed & { level?: unknown; targetAcquisition?: unknown }, known?: string): "w3u" | "w3t" {
+  if (known !== undefined) return known === "w3t" ? "w3t" : "w3u";
+  return p.id !== "sloc" && p.level === 0 && p.targetAcquisition === 0 ? "w3t" : "w3u";
+}
+
 export function strayInstances(group: string, placed: readonly Placed[], unresolved: readonly Placed[], skins: Map<string, Skin>,
   teamOf: (p: Placed) => number, baseOf: (id: string) => string | undefined = () => undefined, heightOf?: (p: Placed, skin: Skin) => number): Stray[] {
   const index = new Map(placed.map((p, i) => [p, i]));
@@ -663,7 +675,7 @@ export function strayInstances(group: string, placed: readonly Placed[], unresol
       group,
       inst: {
         world: placement(p, 1, z), team: teamOf(p), sphere: [x, y, z, 32] as [number, number, number, number],
-        pick: { kind: skin?.kind ?? (group === "doodads" ? "w3d" : "w3u"), id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index: index.get(p) ?? -1, placed: p, model: "", extraScale: 1 },
+        pick: { kind: skin?.kind ?? (group === "doodads" ? "w3d" : unitsEntryKind(p)), id: p.id, base: skins.has(p.id) ? undefined : baseOf(p.id), index: index.get(p) ?? -1, placed: p, model: "", extraScale: 1 },
       },
     };
   });

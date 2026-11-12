@@ -412,6 +412,47 @@ async function placeObjects(page, found) {
   }
 }
 
+/** The Melee flag follows edits that aren't place_objects, with script.generateOnSave off (lib/terrain/meleesave):
+ *  a neutral unit given to Player 1 by hand in the terrain view's selection, then saved, takes it off in the save
+ *  itself (its message says so); on a second map a tool moving the start location into a lake takes it off in the
+ *  same edit (the file says so before the map script's run after the save could). Both maps pack and verify. */
+async function meleeByHand(page, found) {
+  const fail = (what) => found.push(`melee by hand: ${what}`);
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    const k = await heightKit(page, "MeleeHand");
+    const flags = () => k.read("war3map.w3i.json").flags;
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: 512, y: 512, player: 25 }], ignoreRoom: true });
+    await k.save();
+    if (!(flags() & 4)) { fail(`a new map with a neutral footman isn't a melee map (control): flags ${flags()}`); return; }
+    await k.tab("Select");
+    await k.look(512, 512, { id: "hfoo", x: 512, y: 512 });
+    await k.clearToasts();
+    const owner = `[...document.querySelectorAll(".terrain-selection .terrain-sel-row")].find((r) => r.textContent.startsWith("Owner"))?.querySelector("select")`;
+    if (!(await page.evaluate(`!!${owner}`))) { fail("the selection has no Owner box"); return; }
+    await page.evaluate(`(() => { const s = ${owner}; s.value = "0"; s.dispatchEvent(new Event("change")); })()`);
+    await k.save();
+    const footman = k.units().find((u) => u.id === "hfoo");
+    if ((footman?.player & 0xffff) !== 0) fail(`the footman belongs to ${footman?.player} after the owner change (control)`);
+    if (flags() & 4) fail("a map whose unit was given to Player 1 by hand and saved is still a melee map");
+    if (!/no longer a melee map/.test(await k.toasts())) fail(`the save didn't say the map is no longer a melee map: ${await k.toasts()}`);
+    await k.verify(fail);
+
+    const w = await heightKit(page, "MeleeWater");
+    const wFlags = () => w.read("war3map.w3i.json").flags;
+    await w.tool("set_water", { mode: "lake", left: -2560, bottom: -2560, right: -1536, top: -1536 });
+    if (!(wFlags() & 4)) { fail(`a new map with a lake away from its start isn't a melee map (control): flags ${wFlags()}`); return; }
+    const i = w.units().findIndex((u) => u.id === "sloc");
+    await w.tool("move_object", { kind: "units", index: i, id: "sloc", x: -2048, y: -2048 });
+    // Read at once: the map script's run after the save comes a moment later.
+    if (wFlags() & 4) fail("a start location moved into a lake by a tool left a melee map");
+    await w.save();
+    await w.verify(fail);
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
+  }
+}
+
 /** The MCP panel's GUIDES list shows a guide another program put into the guides folder (outside the project: no file
  *  event tells) once the panel is shown again, and while it's showing, once the window gets the focus back. The guide
  *  files are written and removed here, in the smoke app's own settings folder. */
@@ -3259,6 +3300,22 @@ function meanColour(page, data, box) {
   })()`);
 }
 
+/** How many pixels of a picture are the grid's line colours: `yellow` (every 4 tiles), `white` (the tiles' lines). */
+function gridPixels(page, data) {
+  return page.evaluate(`(async () => {
+    const i = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + ${JSON.stringify(data)}; });
+    const c = document.createElement("canvas"); c.width = i.width; c.height = i.height;
+    const g = c.getContext("2d"); g.drawImage(i, 0, 0);
+    const p = g.getImageData(0, 0, i.width, i.height).data;
+    let yellow = 0, white = 0;
+    for (let k = 0; k < p.length; k += 4) {
+      if (p[k] > 200 && p[k + 1] > 200 && p[k + 2] < 90) yellow++;
+      else if (p[k] > 225 && p[k + 1] > 225 && p[k + 2] > 225) white++;
+    }
+    return { yellow, white };
+  })()`);
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -3361,6 +3418,19 @@ async function viewCommands(page, fail, shots, size) {
   // The editor's 108, 55, 15 (viewcmds.ts NAVAL_EDGE), drawn over the edge's dark, not under it.
   if (edge1.some((v, i) => Math.abs(v - [108, 55, 15][i]) > 12) || edge0[0] > 80) bad(`the naval layer over the map's edge isn't the editor's flat brown: ${round(edge0)} became ${round(edge1)}`);
   if (water0.some((v, i) => Math.abs(v - water1[i]) > 6)) bad(`the naval layer covers sailable water: ${round(water0)} became ${round(water1)}`);
+  // As the World Editor's (we-drive, map 03 and HillsbradCreek, 2026-11-12): black past the map's edge (Studio's was
+  // 28, 31, 36), the border's ground keeping about 15 % of its colour (Studio's kept 35 %), and the border's water black.
+  const voidBox = [0.02, 0.4, Math.max(0.03, weMap.left - 0.03), 0.6], insideBox = [weMap.left + weMap.edge * 1.3, 0.4, weMap.left + weMap.edge * 1.7, 0.6];
+  const voidColour = await meanColour(page, far.plain, voidBox), inside0 = await meanColour(page, far.plain, insideBox);
+  if (weMap.left < 0.06) bad(`the map fills the view's width (${weMap.left}): no void to judge`);
+  else if (voidColour.some((v) => v > 3)) bad(`past the map's edge isn't black: ${round(voidColour)}`);
+  const lum = (c) => c[0] + c[1] + c[2];
+  if (lum(edge0) > 0.25 * lum(inside0)) bad(`the border's ground isn't as dark as the editor's: ${round(edge0)} against ${round(inside0)} just inside`);
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+  const wet = await picture("water-border");
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+  const [wetEdge, wetInside] = [await meanColour(page, wet, edgeBox), await meanColour(page, wet, insideBox)];
+  if (lum(wetEdge) > 12 || lum(wetInside) < 60) bad(`the border's water isn't black against the lit water inside: ${round(wetEdge)} against ${round(wetInside)}`);
   await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
 
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
@@ -3382,6 +3452,20 @@ async function viewCommands(page, fail, shots, size) {
   await trial(close.plain, close.noise, "w3.terrain.toggleSmallGrid", "grid", "grid-small", 400);
   await trial(close.plain, close.noise, "w3.terrain.toggleMediumGrid", "grid", "grid-medium", 400);
   await trial(close.plain, close.noise, "w3.terrain.toggleLargeGrid", "grid", "grid-large", 400);
+  // As the World Editor's grids (we-drive, 2026-11-12): the large one yellow every 4 tiles; the medium one keeps those
+  // and adds the tiles' white lines (Studio's had the white only); the small one keeps both. The view looks at 256, 0,
+  // so the yellow lines at x 0 and 512 and y 0 are in it.
+  const lines = { plain: await gridPixels(page, close.plain) };
+  for (const size of ["large", "medium", "small"]) {
+    const id = `w3.terrain.toggle${size[0].toUpperCase()}${size.slice(1)}Grid`;
+    await run(id);
+    lines[size] = await gridPixels(page, await picture(`grid-${size}-lines`));
+    await run(id);
+  }
+  const more = (size, colour, n) => lines[size][colour] - lines.plain[colour] >= n;
+  if (!more("large", "yellow", 150) || more("large", "white", 150)) bad(`the large grid isn't yellow lines only: ${JSON.stringify(lines)}`);
+  if (!more("medium", "yellow", 150) || !more("medium", "white", 400)) bad(`the medium grid hasn't both the white tile lines and the yellow ones: ${JSON.stringify(lines)}`);
+  if (!more("small", "yellow", 150) || !more("small", "white", 400)) bad(`the small grid lost the coarser grids' lines: ${JSON.stringify(lines)}`);
   // The grid box in the toolbar and the commands are the same thing.
   await run("w3.terrain.toggleSmallGrid");
   const shown = await page.evaluate(`document.querySelector('select[title^="Grid"] option:checked')?.textContent`);
@@ -7383,6 +7467,27 @@ async function editorExtras(page, found) {
     }
     // Then one undo: the history has the one step in its place (none done twice or skipped).
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "old words\n"))) fail("after the queued steps, undo didn't bring the old content back");
+    // Replace File on the same import again and again (a second one once didn't take effect, with no message: round 2,
+    // 2026-11-11): each takes, from files of the same size and of others, each only once the last one is done.
+    for (let i = 1; i <= 10; i++) {
+      const text = i % 2 ? `run ${i} words\n` : `run ${i}\n${"x".repeat(i * 7)}\n`;
+      const src = join(dir, `replacement-${i}.txt`);
+      writeFileSync(src, text);
+      await page.evaluate(`window.__errors.length = 0`);
+      await page.evaluate(`[...document.querySelectorAll("tr.imp-row")].find((r) => r.textContent.includes("smoke.txt"))?.click()`);
+      await answer("pickFile", src);
+      const pressed = await page.evaluate(`(() => { const b = document.querySelector(".imp-replace"); if (!b) return false; b.click(); return true; })()`);
+      if (!pressed) { fail(`replace ${i} of 10: no Replace button for the selected file`); break; }
+      const took = await soon(() => holds(text) && !existsSync(`${onDisk}.replacing`), 10000);
+      const errors = await page.evaluate(`window.__errors.slice()`);
+      if (!took || errors.length) {
+        fail(`replace ${i} of 10 in a row left ${JSON.stringify(readFileSync(onDisk, "utf8"))}${errors.length ? `, showed ${JSON.stringify(errors)}` : ""}`);
+        break;
+      }
+      if (readFileSync(impFile, "utf8") !== impBefore) { fail(`replace ${i} of 10 changed the import list`); break; }
+    }
+    // One undo takes back the last of them only.
+    if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), `run 9 words\n`))) fail(`undo after 10 replaces left ${JSON.stringify(readFileSync(onDisk, "utf8"))}, not the 9th`);
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------
@@ -8026,6 +8131,7 @@ async function run() {
         keyChords,
         mcpGuides,
         mcpStartMove,
+        meleeByHand,
         moduleFunctions,
         newMaps,
         niceToHaves,
@@ -8188,6 +8294,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "placeObjects");
   await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
   await leftOpen(page, "mcpStartMove");
+  await meleeByHand(page, found).catch((e) => found.push(`melee by hand: ${e.message}`));
+  await leftOpen(page, "meleeByHand");
   await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
   await leftOpen(page, "mcpGuides");
   await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
