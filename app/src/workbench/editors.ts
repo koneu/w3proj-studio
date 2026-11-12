@@ -574,6 +574,18 @@ export class EditorService {
     return n;
   }
 
+  /** Saves the editors whose only unsaved change is view state (EditorInstance.viewOnlyUnsaved): the normal save. */
+  async saveViewOnly(): Promise<number> {
+    let n = 0;
+    for (const t of [...this.tabs]) {
+      if (!this.tabs.includes(t) || !t.dirty) continue;
+      // Asked after the flush, so held-back edits count as the changes they are.
+      this.flush(t);
+      if (t.instance?.viewOnlyUnsaved?.() && (await this.saveTab(t))) n++;
+    }
+    return n;
+  }
+
   /** Saves every editor with unsaved changes; resolves with how many were saved. */
   async saveAll(): Promise<number> {
     let n = 0;

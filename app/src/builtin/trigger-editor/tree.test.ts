@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { writeWtg, type TriggerFile } from "../../lib/triggers/wtg";
-import { applyExpanded, collapsedOf } from "./tree";
+import { applyExpanded, collapsedOf, onlyFoldsUnsaved } from "./tree";
 
 const file = (reforged = true): TriggerFile => ({
   reforged, version: 7, unknown: 0, counts: reforged ? Array.from({ length: 8 }, () => ({ count: 0, deleted: [] })) : [], variables: [],
@@ -44,4 +44,13 @@ test("a classic file doesn't store it: nothing changes", () => {
   const f = file(false), before = structuredClone(f);
   applyExpanded(f, new Set([2]));
   assert.deepEqual(f, before);
+});
+
+test("only folds unsaved: toggles at the saved state, nothing typed", () => {
+  const s = { state: 3, savedAt: 3, toggles: 2, savedToggles: 0, pendingName: false };
+  assert.equal(onlyFoldsUnsaved(s), true);
+  // controls: each other kind of unsaved change, and a clean editor, says no
+  assert.equal(onlyFoldsUnsaved({ ...s, state: 4 }), false);
+  assert.equal(onlyFoldsUnsaved({ ...s, pendingName: true }), false);
+  assert.equal(onlyFoldsUnsaved({ ...s, toggles: 0 }), false);
 });

@@ -8,7 +8,7 @@ import { mcpErrorText } from "../../extensions/mcp";
 
 function setup(start: Record<string, string> = {}) {
   const files = new Map(Object.entries(start));
-  const state = { unsaved: [] as string[], checkpoints: 0, failCheckpoint: false, failWrite: "", logged: [] as string[] };
+  const state = { unsaved: [] as string[], checkpoints: 0, failCheckpoint: false, failWrite: "", logged: [] as string[], viewSaves: 0, viewOnly: false };
   const io: EditIO = {
     read: async (p) => files.get(p) ?? null,
     write: async (p, t) => {
@@ -16,6 +16,7 @@ function setup(start: Record<string, string> = {}) {
       if (t === null) files.delete(p); else files.set(p, t);
     },
     unsaved: () => state.unsaved,
+    saveViewOnly: async () => { state.viewSaves++; if (state.viewOnly) state.unsaved = []; },
     checkpoint: async () => { state.checkpoints++; if (state.failCheckpoint) throw new Error("pack failed"); },
     log: (l) => state.logged.push(l),
   };
@@ -307,4 +308,17 @@ test("a group puts back the script as it was before its first edit; edits of oth
   await s.log.undo();
   s.flush();
   assert.deepEqual([s.files.get(s.WTG), s.files.get(s.J), s.files.get(s.STAMP)], ["a", "mine", "#x"]);
+});
+
+test("unsaved opened and closed categories are saved, other unsaved changes still refuse", async () => {
+  const { log, files, state } = setup({ "map/a": "old" });
+  state.unsaved = ["map/war3map.wtg"];
+  state.viewOnly = true;
+  assert.equal(await log.edit("One", put("map/a", "new1")), true);
+  assert.equal(state.viewSaves, 1);
+  assert.equal(files.get("map/a"), "new1");
+  state.unsaved = ["map/war3map.wtg"];
+  state.viewOnly = false;
+  await assert.rejects(log.edit("Two", put("map/a", "new2")), /war3map\.wtg has unsaved changes/);
+  assert.equal(files.get("map/a"), "new1");
 });

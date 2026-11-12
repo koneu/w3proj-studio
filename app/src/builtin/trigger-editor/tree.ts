@@ -15,6 +15,12 @@ function container(file: TriggerFile, id: number): Item | undefined {
   return file.items.find((i) => i.id === id && (isCategory(i) || i.type === 1));
 }
 
+/** Whether the only unsaved change is a folded or unfolded category (view state the file keeps): the editor's state is
+ *  the one last saved, and categories were toggled since. A real edit, or a name typed and not committed, says no. */
+export function onlyFoldsUnsaved(s: { state: number; savedAt: number; toggles: number; savedToggles: number; pendingName: boolean }): boolean {
+  return s.state === s.savedAt && s.toggles !== s.savedToggles && !s.pendingName;
+}
+
 /** The categories the file has closed (each category's `expanded`): how the tree opens. */
 export function collapsedOf(file: TriggerFile): Set<number> {
   const out = new Set<number>();

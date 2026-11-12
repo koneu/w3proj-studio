@@ -171,6 +171,9 @@ export interface EditorInstance {
    *  Without it, a save first has the focused text field in the editor commit its text (it loses the focus and gets
    *  it back, which fires its `change` if the text changed); an editor with it commits its fields itself. */
   flush?(): void;
+  /** Whether the only unsaved change is view state the file keeps (the Trigger Editor's opened and closed categories):
+   *  actions that refuse while anything is unsaved save such an editor first (`editors.saveViewOnly`). */
+  viewOnlyUnsaved?(): boolean;
   focus?(): void;
   dispose?(): void;
   /** The editor's undo and redo, for the Edit commands and the buttons by the tabs: they work
@@ -289,6 +292,9 @@ export interface W3Api {
     isDirty(path: string): boolean;
     /** The files with unsaved changes in an editor. */
     unsavedPaths(): string[];
+    /** Saves the editors whose only unsaved change is view state (EditorInstance.viewOnlyUnsaved), the same save as
+     *  by hand; any other unsaved change stays. Resolves with how many were saved. */
+    saveViewOnly(): Promise<number>;
     /** When another tab becomes active (its file and editor id), or the last one closes (null). */
     onDidChangeActive(listener: (active: { path: string; editor: string } | null) => void): Disposable;
     /** Saves every editor with unsaved changes (e.g. before packing); resolves with how many. */

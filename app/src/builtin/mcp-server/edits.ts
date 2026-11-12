@@ -26,6 +26,8 @@ export interface EditIO {
   write(path: string, text: string | null): Promise<void>;
   /** Files with unsaved changes in an editor. */
   unsaved(): string[];
+  /** Saves editors whose only unsaved change is view state (opened or closed trigger categories). */
+  saveViewOnly?(): Promise<unknown>;
   checkpoint(): Promise<void>;
   log(line: string): void;
   /** Files made from the changed ones by work that follows a save (the map script and its stamp, from the triggers and
@@ -90,7 +92,9 @@ export class EditLog {
     return run;
   }
 
-  private refuseUnsaved() {
+  private async refuseUnsaved() {
+    // Opened or closed categories alone are saved, not refused.
+    if (this.io.unsaved().length) await this.io.saveViewOnly?.();
     const open = this.io.unsaved();
     if (!open.length) return;
     // The app's own commands (Adjust Map String IDs, …) come here too: a person reads the first, an AI client the second.
@@ -141,7 +145,7 @@ export class EditLog {
   /** `change` reads what it needs and gives the new texts. False if nothing changed. */
   edit(title: string, change: (read: (path: string) => Promise<string | null>) => Promise<EditFile[]>, follow?: EditFollow): Promise<boolean> {
     return this.inTurn(async () => {
-      this.refuseUnsaved();
+      await this.refuseUnsaved();
       const wanted = (await change((path) => this.io.read(editablePath(path)))).map((f) => ({ path: editablePath(f.path), text: f.text }));
       const files: EditRecord["files"] = [];
       for (const f of wanted) {
@@ -207,7 +211,7 @@ export class EditLog {
     return this.inTurn(async () => {
       const last = this.records.at(-1);
       if (!last) return null;
-      this.refuseUnsaved();
+      await this.refuseUnsaved();
       // Undoing closes a group: edits after this one wouldn't belong to anything.
       this.group = null;
       for (const f of last.files) {

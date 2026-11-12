@@ -29,7 +29,7 @@ import { copyText, errorView, h, widthSash } from "../../workbench/dom";
 import { copyAs } from "../../lib/triggers/astext";
 import { checkJass } from "../../lib/jass/check";
 import { mapJass } from "../../lib/jass/env";
-import { applyExpanded, collapsedOf, dropMode, moveItem, pasteBlock, subtree, type DropMode } from "./tree";
+import { applyExpanded, collapsedOf, dropMode, moveItem, onlyFoldsUnsaved, pasteBlock, subtree, type DropMode } from "./tree";
 import { deleteVariable, nameField, nameFields, newVariable, renameVariable, variableParams, variablesTable, type NameField, type VariableHost } from "./variables";
 import { errorText } from "../../lib/oserror";
 import { applyRenames, countInText, countRenames, globalRenames, renameInText, type RenameCount } from "../../lib/triggers/rename";
@@ -382,6 +382,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           redo: () => view.step(1),
           viewState: () => view.viewState(),
           flush: () => view.flush(),
+          viewOnlyUnsaved: () => view.onlyFoldsDirty,
           save,
           // The triggers' texts are this editor's too: saved by something else (set_trigger_script), it opens
           // again, else its next save would put back the texts it read.
@@ -854,6 +855,11 @@ class TriggerView {
     return false;
   }
   get editable() { return this.handle.editable; }
+  /** Whether the only unsaved change is an opened or closed category (see onlyFoldsUnsaved). */
+  get onlyFoldsDirty(): boolean {
+    this.flush();
+    return onlyFoldsUnsaved({ state: this.state, savedAt: this.savedAt, toggles: this.toggles, savedToggles: this.savedToggles, pendingName: !!this.pendingName() });
+  }
   /** Whether there are unsaved changes. */
   get dirty() { return this.state !== this.savedAt || this.toggles !== this.savedToggles; }
   get closed() { return this.disposed; }

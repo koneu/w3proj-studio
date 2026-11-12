@@ -8844,6 +8844,34 @@ async function niceToHaves(page, found) {
         await settled(page);
         if (await wtgDirty()) fail("Ctrl+S right after typing a trigger's comment left the Trigger Editor unsaved");
       }, () => fail("Melee Initialization shows no comment box"));
+    // Only a folded category unsaved: Adjust Map String IDs (and so every action that refuses on unsaved changes) saves it
+    // first and goes on; with a real edit besides, it refuses as before.
+    await settled(page);
+    const wtgPath = join(k.root, "map", "war3map.wtg.json");
+    const foldedBefore = initExpanded();
+    await toggleInit();
+    if (!(await wtgDirty())) fail("folding a category left the Trigger Editor saved (control)");
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    const foldAdjust = await run("w3.triggers.adjustStringIds", [[1, 10]]);
+    if (foldAdjust.e || foldAdjust.r !== 1) fail(`Adjust Map String IDs with only a folded category unsaved: ${foldAdjust.e ?? JSON.stringify(foldAdjust.r)}`);
+    if (initExpanded() === foldedBefore) fail("Adjust Map String IDs didn't save the folded category first");
+    if (await wtgDirty()) fail("after Adjust Map String IDs the folded category is still unsaved");
+    // Byte-identical to saving by hand: the same fold, put back and forth and saved by hand.
+    const foldBytes = readFileSync(wtgPath, "utf8");
+    await toggleInit();
+    await toggleInit();
+    await k.save();
+    if (readFileSync(wtgPath, "utf8") !== foldBytes) fail("the fold saved before Adjust differs from the same fold saved by hand");
+    await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
+    await settled(page);
+    // A real edit besides the fold: it refuses, and the fold stays unsaved.
+    await toggleInit();
+    const editT = await run("w3.triggers.reset");
+    if (editT.e) fail(`Reset Triggers (edit besides the fold): ${editT.e}`);
+    const refusedBoth = await run("w3.triggers.adjustStringIds", [[1, 10]]);
+    if (!/unsaved changes/.test(refusedBoth.e ?? "")) fail(`Adjust Map String IDs with an edit and a fold unsaved: ${JSON.stringify(refusedBoth)}`);
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await k.save();
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Adjust Map String IDs: string 1 becomes 10, its references follow; undo puts every file back ---------------------

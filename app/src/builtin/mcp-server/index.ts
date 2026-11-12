@@ -54,6 +54,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (isNew || text === null) await w3.workspace.refresh();
     },
     unsaved: () => w3.editors.unsavedPaths(),
+    saveViewOnly: () => w3.editors.saveViewOnly(),
     checkpoint: () => checkpointIfOn(w3, "The first AI edit of this project").then(() => undefined),
     log: (line) => out.append(line),
     // The map script is regenerated after a save of what it's made from: undo puts back the script it replaced.
