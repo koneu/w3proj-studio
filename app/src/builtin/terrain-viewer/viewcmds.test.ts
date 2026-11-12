@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { boxOf, composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
+import * as viewcmds from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
 /** The oracle: a real perspective projection of a point, written out here from the camera's position. */
@@ -135,14 +136,31 @@ test("navalColors: as the World Editor, red where ships can't sail (land, the ed
   assert.deepEqual(px(3), [255, 128, 128, 128]);
   assert.deepEqual(px(1), [0, 0, 0, 0]);
   assert.deepEqual(px(2), [0, 0, 0, 0]);
-  // The map's edge, past the playable part: flat brown over everything, water or land (a 4x3 grid, its middle 2x1 playable).
-  const grid = [land, shallow, deep, border, land, shallow, deep, border, land, shallow, deep, border];
-  const edged = navalColors(grid, { width: 4, x0: 1, x1: 3, y0: 1, y1: 2 });
-  const at = (x: number, y: number) => [...edged.subarray((y * 4 + x) * 4, (y * 4 + x) * 4 + 4)];
-  assert.deepEqual(at(1, 1), [0, 0, 0, 0], "sailable water inside stays clear");
-  assert.deepEqual(at(2, 1), [0, 0, 0, 0]);
-  for (const [x, y] of [[0, 0], [1, 0], [2, 0], [3, 1], [0, 1], [1, 2], [3, 2]]) assert.deepEqual(at(x, y), [108, 55, 15, 255], `edge cell ${x},${y}`);
-  assert.deepEqual([...navalColors(grid, null)], [...navalColors(grid)], "no playable part: no edge");
+  // The map's edge: flat brown over everything, water or land, on the tiles the terrain marks as past the playable map
+  // (2 by 1 tiles, 8 by 4 cells; the west tile marked). The marks count, not the w3i's border: HillsbradCreek's
+  // border carries them too (9216 corners), and its lake there shows black only as the black water lies over it.
+  const grid = Array.from({ length: 32 }, (_, i) => [land, shallow, deep, border][i % 4]);
+  const edged = navalColors(grid, { tiles: [1, 0], tilesX: 2 });
+  const at = (x: number, y: number) => [...edged.subarray((y * 8 + x) * 4, (y * 8 + x) * 4 + 4)];
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) assert.deepEqual(at(x, y), [108, 55, 15, 255], `edge cell ${x},${y}`);
+  assert.deepEqual(at(5, 2), [0, 0, 0, 0], "sailable water inside stays clear");
+  assert.deepEqual(at(6, 3), [0, 0, 0, 0]);
+  assert.deepEqual(at(4, 0), [255, 128, 128, 128], "land inside stays red");
+  assert.deepEqual([...navalColors(grid, { tiles: [0, 0], tilesX: 2 })], [...navalColors(grid)], "no marks: no edge");
+  assert.deepEqual([...navalColors(grid, null)], [...navalColors(grid)]);
+});
+
+test("gridLines: as the World Editor's, a finer grid keeps the coarser lines: white tiles and yellow every 4 tiles", () => {
+  // Looked up when the test runs, so that the other tests of this file run on code without it (fails-without.mjs).
+  const { gridLines } = viewcmds;
+  const steps = (s: number) => gridLines(s).map((l) => l.step);
+  assert.deepEqual(steps(512), [512]);
+  assert.deepEqual(steps(128), [128, 512], "medium: the tiles' lines and the large grid's");
+  assert.deepEqual(steps(32), [32, 128, 512], "small: all three");
+  assert.deepEqual(steps(0), []);
+  const [tile, four] = gridLines(128).map((l) => l.rgba);
+  assert.deepEqual(tile, [1, 1, 1, 1], "the tiles' lines white");
+  assert.deepEqual(four, [1, 1, 0, 1], "every 4 tiles yellow");
 });
 
 test("composeLayers: the later layer lies over the earlier; none gives null; one stays as it is", () => {

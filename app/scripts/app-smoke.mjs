@@ -3300,6 +3300,22 @@ function meanColour(page, data, box) {
   })()`);
 }
 
+/** How many pixels of a picture are the grid's line colours: `yellow` (every 4 tiles), `white` (the tiles' lines). */
+function gridPixels(page, data) {
+  return page.evaluate(`(async () => {
+    const i = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = "data:image/png;base64," + ${JSON.stringify(data)}; });
+    const c = document.createElement("canvas"); c.width = i.width; c.height = i.height;
+    const g = c.getContext("2d"); g.drawImage(i, 0, 0);
+    const p = g.getImageData(0, 0, i.width, i.height).data;
+    let yellow = 0, white = 0;
+    for (let k = 0; k < p.length; k += 4) {
+      if (p[k] > 200 && p[k + 1] > 200 && p[k + 2] < 90) yellow++;
+      else if (p[k] > 225 && p[k + 1] > 225 && p[k + 2] > 225) white++;
+    }
+    return { yellow, white };
+  })()`);
+}
+
 /** The terrain viewer's View commands, through the command palette's own entry point: what each shows is
  *  judged on the window's picture (which has to change when a layer goes on, and come back when it goes off),
  *  and where the camera goes on the editor's own state. The pictures stay in `shots` to look at. */
@@ -3402,6 +3418,19 @@ async function viewCommands(page, fail, shots, size) {
   // The editor's 108, 55, 15 (viewcmds.ts NAVAL_EDGE), drawn over the edge's dark, not under it.
   if (edge1.some((v, i) => Math.abs(v - [108, 55, 15][i]) > 12) || edge0[0] > 80) bad(`the naval layer over the map's edge isn't the editor's flat brown: ${round(edge0)} became ${round(edge1)}`);
   if (water0.some((v, i) => Math.abs(v - water1[i]) > 6)) bad(`the naval layer covers sailable water: ${round(water0)} became ${round(water1)}`);
+  // As the World Editor's (we-drive, map 03 and HillsbradCreek, 2026-11-12): black past the map's edge (Studio's was
+  // 28, 31, 36), the border's ground keeping about 15 % of its colour (Studio's kept 35 %), and the border's water black.
+  const voidBox = [0.02, 0.4, Math.max(0.03, weMap.left - 0.03), 0.6], insideBox = [weMap.left + weMap.edge * 1.3, 0.4, weMap.left + weMap.edge * 1.7, 0.6];
+  const voidColour = await meanColour(page, far.plain, voidBox), inside0 = await meanColour(page, far.plain, insideBox);
+  if (weMap.left < 0.06) bad(`the map fills the view's width (${weMap.left}): no void to judge`);
+  else if (voidColour.some((v) => v > 3)) bad(`past the map's edge isn't black: ${round(voidColour)}`);
+  const lum = (c) => c[0] + c[1] + c[2];
+  if (lum(edge0) > 0.25 * lum(inside0)) bad(`the border's ground isn't as dark as the editor's: ${round(edge0)} against ${round(inside0)} just inside`);
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+  const wet = await picture("water-border");
+  await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => l.textContent.trim() === "Water").forEach((l) => l.querySelector("input").click())`);
+  const [wetEdge, wetInside] = [await meanColour(page, wet, edgeBox), await meanColour(page, wet, insideBox)];
+  if (lum(wetEdge) > 12 || lum(wetInside) < 60) bad(`the border's water isn't black against the lit water inside: ${round(wetEdge)} against ${round(wetInside)}`);
   await trial(far.plain, far.noise, "w3.terrain.toggleHeightMap", "heights", "height-map", 2000);
 
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
@@ -3423,6 +3452,20 @@ async function viewCommands(page, fail, shots, size) {
   await trial(close.plain, close.noise, "w3.terrain.toggleSmallGrid", "grid", "grid-small", 400);
   await trial(close.plain, close.noise, "w3.terrain.toggleMediumGrid", "grid", "grid-medium", 400);
   await trial(close.plain, close.noise, "w3.terrain.toggleLargeGrid", "grid", "grid-large", 400);
+  // As the World Editor's grids (we-drive, 2026-11-12): the large one yellow every 4 tiles; the medium one keeps those
+  // and adds the tiles' white lines (Studio's had the white only); the small one keeps both. The view looks at 256, 0,
+  // so the yellow lines at x 0 and 512 and y 0 are in it.
+  const lines = { plain: await gridPixels(page, close.plain) };
+  for (const size of ["large", "medium", "small"]) {
+    const id = `w3.terrain.toggle${size[0].toUpperCase()}${size.slice(1)}Grid`;
+    await run(id);
+    lines[size] = await gridPixels(page, await picture(`grid-${size}-lines`));
+    await run(id);
+  }
+  const more = (size, colour, n) => lines[size][colour] - lines.plain[colour] >= n;
+  if (!more("large", "yellow", 150) || more("large", "white", 150)) bad(`the large grid isn't yellow lines only: ${JSON.stringify(lines)}`);
+  if (!more("medium", "yellow", 150) || !more("medium", "white", 400)) bad(`the medium grid hasn't both the white tile lines and the yellow ones: ${JSON.stringify(lines)}`);
+  if (!more("small", "yellow", 150) || !more("small", "white", 400)) bad(`the small grid lost the coarser grids' lines: ${JSON.stringify(lines)}`);
   // The grid box in the toolbar and the commands are the same thing.
   await run("w3.terrain.toggleSmallGrid");
   const shown = await page.evaluate(`document.querySelector('select[title^="Grid"] option:checked')?.textContent`);
