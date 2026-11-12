@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { newEntry, onBuildingGrid, pastedEntry, type PlacedFile } from "./placement";
+import type { W3Api } from "../../extensions/api";
+import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import type { Placed } from "./objects";
 
 const file = (key: "doodads" | "units", version: number, subversion: number, more: Record<string, unknown> = {}, list: Placed[] = []): PlacedFile =>
@@ -134,4 +135,26 @@ test("items belong to Neutral Passive, whoever's turn it is", () => {
   assert.equal(owner(newEntry(f, "ratf", [0, 0, 0], 3, "w3t")), 27);
   assert.equal(owner(newEntry(f, "ratf", [0, 0, 0], undefined, "w3t")), 27);
   assert.equal(owner(newEntry(f, "hfoo", [0, 0, 0], 3, "w3u")), 3);
+});
+
+test("a doodad file's special doodads are read with it and saved back as they were", async () => {
+  const specials = [{ id: "YCx7", z: 0, x: 13, y: 24 }, { id: "LCc0", z: 0, x: 40, y: 60 }];
+  const stored = JSON.stringify({ format: "w3proj.doodads/1", version: 13, subversion: 11, doodads: [], specialVersion: 0, specials });
+  const written: Record<string, string> = {};
+  const w3 = {
+    workspace: {
+      files: () => [{ path: "map/war3map.doo.json" }],
+      readText: async () => stored,
+      writeText: async (p: string, text: string) => { written[p] = text; },
+      project: () => ({ root: "/maps/M" }),
+    },
+    backend: { invoke: async (cmd: string, a: { text: string }) => { assert.equal(cmd, "codec_canonicalize"); return a.text; } },
+  } as unknown as W3Api;
+  const f = (await loadPlacedFile(w3, "war3map.doo", "doodads"))!;
+  f.list.push(newEntry(f, "LTlt", [64, 64, 0]));
+  await savePlacedFile(w3, f);
+  const saved = JSON.parse(written["map/war3map.doo.json"]) as { specials: unknown; specialVersion: number; doodads: unknown[] };
+  assert.equal(saved.doodads.length, 1, "the doodad placed is saved");
+  assert.deepEqual(saved.specials, specials);
+  assert.equal(saved.specialVersion, 0);
 });

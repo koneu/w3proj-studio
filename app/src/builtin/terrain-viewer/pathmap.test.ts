@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
 import type { Corner, Terrain } from "../../lib/terrain/w3e";
-import { buildPathingMap, loadPathingData } from "./pathmap";
+import { buildPathingMap, loadPathingData, specialsOf } from "./pathmap";
 import type { Placed } from "./objects";
 
 function slk(rows: string[][]) {
@@ -26,14 +26,14 @@ function ground(): Terrain {
   return { version: 11, tileset: "L", groundTiles: ["Ldrt"], cliffTiles: [], width: 8, height: 8, offsetX: 0, offsetY: 0, corners } as unknown as Terrain;
 }
 
-const ROCK = "PathTextures\\Rock.tga", GONE = "war3mapImported\\Gone.tga", HERE = "war3mapImported\\Here.tga";
+const ROCK = "PathTextures\\Rock.tga", GONE = "war3mapImported\\Gone.tga", HERE = "war3mapImported\\Here.tga", FLOOR = "PathTextures\\8x4Floor.tga";
 
 /** A game with a rock (its own pathing texture) and a flower (none), and a map whose object data gives custom rocks
  *  and a custom flower imported textures: one that is there, two that aren't. */
 function project() {
   const game: Record<string, string> = {
     "TerrainArt\\Terrain.slk": slk([["tileID", "walkable", "flyable", "buildable"], ["Ldrt", "1", "1", "1"]]),
-    "Doodads\\Doodads.slk": slk([["doodID", "pathTex"], ["LOrk", ROCK], ["LFlw", "_"]]),
+    "Doodads\\Doodads.slk": slk([["doodID", "pathTex"], ["LOrk", ROCK], ["LFlw", "_"], ["YCx7", FLOOR]]),
     "Units\\DestructableData.slk": slk([["DestructableID", "pathTex", "walkable"]]),
     "TerrainArt\\Water.slk": slk([["waterID", "height"], ["LSha", "-0.7"], ["ASha", "-0.6"]]),
   };
@@ -52,7 +52,7 @@ function project() {
     },
     backend: { invoke: async () => { throw new Error("no backend"); } },
   } as unknown as W3Api;
-  const files: Record<string, Uint8Array> = { [ROCK]: whiteTga(4, 4), [HERE]: whiteTga(2, 2) };
+  const files: Record<string, Uint8Array> = { [ROCK]: whiteTga(4, 4), [HERE]: whiteTga(2, 2), [FLOOR]: whiteTga(8, 4) };
   const read = async (p: string) => { if (p in files) return files[p]; throw new Error(`not found: ${p}`); };
   return { w3, read };
 }
@@ -87,6 +87,34 @@ test("with no texture of its type to fall back to, it doesn't block, and that is
   assert.deepEqual(flower.missing, [GONE]);
   assert.deepEqual(flower.fellBack, []);
   assert.deepEqual(flower.wpm, (await buildPathingMap(w3, t, [], read)).wpm);
+});
+
+test("a special doodad's texture lies unturned with its bottom left on its tile", async () => {
+  const { w3, read } = project();
+  const t = ground();
+  // A ruined floor (YCx7's 16 × 8 texture, here 8 × 4: two tiles wide, one high) at tile (2, 3).
+  const blocked = (wpm: Uint8Array) => {
+    const out: string[] = [];
+    for (let y = 0; y < 28; y++) for (let x = 0; x < 28; x++) if (wpm[16 + y * 28 + x] & 0x02) out.push(`${x},${y}`);
+    return out;
+  };
+  const none = await buildPathingMap(w3, t, [], read);
+  assert.deepEqual(blocked(none.wpm), [], "control: open ground");
+  const floor = await buildPathingMap(w3, t, [], read, undefined, [{ id: "YCx7", x: 2, y: 3 }]);
+  const want: string[] = [];
+  for (let y = 12; y < 16; y++) for (let x = 8; x < 16; x++) want.push(`${x},${y}`);
+  assert.deepEqual(blocked(floor.wpm), want);
+  assert.deepEqual(floor.missing, []);
+  // Ids the game doesn't have, and destructables, leave nothing.
+  assert.deepEqual(blocked((await buildPathingMap(w3, t, [], read, undefined, [{ id: "Zzzz", x: 2, y: 3 }])).wpm), []);
+});
+
+test("specialsOf takes the special doodads of a doodad file and leaves out broken entries", () => {
+  assert.deepEqual(specialsOf({ specials: [{ id: "YCx7", z: 0, x: 13, y: 24 }, { id: 5, x: 1, y: 1 }, { id: "LCc0", x: 1.5, y: 2 }, null] }),
+    [{ id: "YCx7", z: 0, x: 13, y: 24 }]);
+  assert.deepEqual(specialsOf({}), []);
+  assert.deepEqual(specialsOf(null), []);
+  assert.deepEqual(specialsOf({ specials: "x" }), []);
 });
 
 test("deep water is measured from the tileset's water surface (the game's water table)", async () => {

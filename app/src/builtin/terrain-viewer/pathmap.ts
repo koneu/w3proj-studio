@@ -156,9 +156,10 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
 /** war3map.wpm for the terrain and placed doodads. `readFile` reads the
  *  map's imports first, then the game. A texture the map's object data names that can't be read gives way to the
  *  type's own (`fellBack`: that texture → the one used); with neither, it's listed in `missing` (those objects leave
- *  no pathing; the Problems view names the object data field). */
+ *  no pathing; the Problems view names the object data field). `specials`: the doodad file's special doodads
+ *  (specialsOf), stamped into the ground as the World Editor does on save. */
 export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Placed[],
-  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number): Promise<{ wpm: Uint8Array; missing: string[]; fellBack: [string, string][] }> {
+  readFile: (path: string) => Promise<Uint8Array>, deepWater?: number, specials: readonly SpecialDoodad[] = []): Promise<{ wpm: Uint8Array; missing: string[]; fellBack: [string, string][] }> {
   const data = await loadPathingData(w3, readFile);
   const stamps: PathingStamp[] = [];
   const missing = new Set<string>(), fellBack = new Map<string, string>();
@@ -175,6 +176,30 @@ export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Plac
     if (lost) missing.add(lost);
     if (t) stamps.push({ x: d.position[0], y: d.position[1], angle: d.angle, width: t.width, height: t.height, rgba: t.rgba, clear: info.dest });
   }));
+  // Cliff doodads (caves, collapsed cliffs): the doodad file's second list, placed by tile. Their texture lies with
+  // its bottom left on that tile's, unturned.
+  for (const sp of specials) {
+    const info = data.placedTex(sp.id);
+    if (!info?.path || info.dest) continue;
+    const { image: t, fellBackTo, missing: lost } = await data.placedImage(info);
+    if (fellBackTo) fellBack.set(info.path, fellBackTo);
+    if (lost) missing.add(lost);
+    if (!t) continue;
+    stamps.push({
+      x: terrain.offsetX + sp.x * 128 + t.width * 16, y: terrain.offsetY + sp.y * 128 + t.height * 16,
+      angle: -Math.PI / 2, width: t.width, height: t.height, rgba: t.rgba, cliffDoodad: true,
+    });
+  }
   const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, stamps, deepWater, waterOffset: data.waterOffset(terrain.tileset) });
   return { wpm, missing: [...missing], fellBack: [...fellBack] };
+}
+
+/** A special doodad (war3map.doo's second list: caves, collapsed cliffs), placed by tile from the map's bottom left. */
+export interface SpecialDoodad { id: string; x: number; y: number }
+
+/** The special doodads of a doodad file's JSON (`specials`); malformed entries are left out. */
+export function specialsOf(doc: Record<string, unknown> | null | undefined): SpecialDoodad[] {
+  const list = doc?.specials;
+  if (!Array.isArray(list)) return [];
+  return list.filter((s): s is SpecialDoodad => typeof s?.id === "string" && Number.isInteger(s.x) && Number.isInteger(s.y));
 }
