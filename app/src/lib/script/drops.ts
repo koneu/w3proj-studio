@@ -5,6 +5,8 @@
 // (Unit000114_DropItems). Each item set picks one item by chance; random items
 // ("YiI2") become ChooseRandomItemEx( type, level ).
 
+import { ITEM_CLASSES, parseRandomId } from "../objects/randomids";
+
 const EOL = "\r\n";
 
 export interface DropItem { id: string; chance: number }
@@ -88,13 +90,25 @@ export function dropFunctionOf(prefix: string, p: Dropper, index: number, tables
 
 export interface RandomGroupJson { number: number; name: string; positions: number[]; lines: { chance: number; ids: string[] }[] }
 
+/** A random group's entry: -1 for an empty slot, the object's id, or the pick of a random object by level ("YYU3"
+ *  ChooseRandomCreep( 3 ), "YYB/" ChooseRandomNPBuilding(  ), "YiI2" a random item; World Editor 2.0, we-drive
+ *  2026-11-12: lib/objects/randomids.ts). */
+function groupEntry(id: string | undefined, editorVersion: number): string {
+  if (!id || id === "0x00000000") return "-1";
+  const r = parseRandomId(id);
+  if (r?.kind === "creep") return `ChooseRandomCreep( ${r.level} )`;
+  if (r?.kind === "building") return "ChooseRandomNPBuilding(  )";
+  if (r?.kind === "item") return randomItem(ITEM_CLASSES[r.itemClass].type, r.level, editorVersion);
+  return `'${id}'`;
+}
+
 /** "Random Groups": InitRandomGroups picks one line per group into gg_rg_<number>[position]. */
-export function randomGroupsSection(groups: RandomGroupJson[]): string {
+export function randomGroupsSection(groups: RandomGroupJson[], editorVersion = 0): string {
   if (!groups.length) return "";
   const lines = ["function InitRandomGroups takes nothing returns nothing", "    local integer curset", ""];
   for (const g of groups) {
     const arr = `gg_rg_${String(g.number).padStart(3, "0")}`;
-    const set = (ids: (string | undefined)[]) => g.positions.map((_, k) => `        set ${arr}[${k}] = ${!ids[k] || ids[k] === "0x00000000" ? "-1" : `'${ids[k]}'`}`);
+    const set = (ids: (string | undefined)[]) => g.positions.map((_, k) => `        set ${arr}[${k}] = ${groupEntry(ids[k], editorVersion)}`);
     lines.push(`    // Group ${g.number} - ${g.name}`, "    call RandomDistReset(  )",
       ...g.lines.map((l, k) => `    call RandomDistAddItem( ${k}, ${l.chance} )`), "    set curset = RandomDistChoose(  )", "");
     g.lines.forEach((l, k) => lines.push(`    ${k ? "elseif" : "if"} (curset == ${k}) then`, ...set(l.ids)));

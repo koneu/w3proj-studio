@@ -637,7 +637,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             name: async (id) => (await w3.services.get<ObjectsService>(OBJECTS_SERVICE)).name(id),
             changed: (rerender) => { update(); if (rerender) show(section); },
             flag: (mask, label) => bit(() => info.flags, (n) => { info.flags = n >>> 0; }, mask, label),
-            setFlag: (mask) => { info.flags = (info.flags | mask) >>> 0; },
+            setFlag: (mask) => { const was = (info.flags & mask) === mask; info.flags = (info.flags | mask) >>> 0; return !was; },
           }),
         };
 

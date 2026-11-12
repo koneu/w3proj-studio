@@ -1813,6 +1813,88 @@ async function unitProperties(page, found) {
   await page.evaluate(`w3Workbench.game.reload()`);
 }
 
+/** Map Properties › Techtree & Tables: a random group's positions get random objects by level from their Random… choice
+ *  (a level 3 creep, the World Editor's "YYU3"; a permanent level 2 item, "YiI2"), an item table's item a random item, and
+ *  the per-player grid makes an object available again to player 1. Saved: war3map.w3i holds the ids, the script picks
+ *  them (ChooseRandomCreep), the packed map verifies, and Map Properties opened again shows them by the editor's names. */
+async function techtreeRandomLevels(page, found) {
+  const fail = (what) => found.push(`techtree random levels: ${what}`);
+  const k = await heightKit(page, "TechRandom");
+  const W3I = "map/war3map.w3i.json";
+  const GROUP = "[data-group=\"0\"] tbody tr:nth-child(1)";
+  const cell = (position) => `${GROUP} td:nth-child(${position + 2})`;
+  const ITEM = "[data-anchor=\"item-table-0\"] .techtree-row";
+  const GRID_CELL = ".techtree-grid-techs tr[data-object=\"hkni\"] td[data-player=\"0\"] input";
+  const has = (sel) => page.evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
+  const text = (sel) => page.evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
+  const value = (sel) => page.evaluate(`document.querySelector(${JSON.stringify(sel)})?.value ?? null`);
+  const choose = (sel, v) => page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(sel)}); if (!s || ![...s.options].some((o) => o.value === ${JSON.stringify(v)})) return false;
+    s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event("change")); return true; })()`);
+  const dirty = () => page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`);
+  const open = async () => {
+    await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "techtree")`);
+    await until("Map Properties' random group", () => has(`${cell(0)} select.techtree-random`), 20000);
+  };
+  try {
+    const info = k.read("war3map.w3i.json");
+    if (!Array.isArray(info.itemTables)) return fail(`a new map's war3map.w3i has no item tables: ${Object.keys(info).join(", ")}`);
+    info.unitTables = [{ number: 0, name: "Smoke Random", positions: [0, 2], lines: [{ chance: 100, ids: ["hfoo", "ratc"] }] }];
+    info.itemTables = [{ number: 0, name: "Smoke Table", sets: [[{ chance: 100, id: "ratf" }]] }];
+    info.techs = [{ players: 1, id: "hkni" }];
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(W3I)}, ${JSON.stringify(JSON.stringify(info, null, 2))})`);
+    await settled(page);
+    await open();
+
+    // A unit position offers the creeps by level, an item position and the item table the items by class and level.
+    if (!(await choose(`${cell(0)} select.techtree-random`, "YYU3"))) fail("the unit position's Random… has no level 3 creep");
+    if (!(await choose(`${cell(1)} select.techtree-random`, "YiI2"))) fail("the item position's Random… has no permanent level 2 item");
+    if (await choose(`${cell(0)} select.techtree-random`, "YiI2")) fail("the unit position's Random… offers items");
+    if (!(await choose(`${ITEM} select.techtree-random`, "YkI1"))) fail("the item table's Random… has no power-up level 1 item");
+    if ((await value(`${cell(0)} input.techtree-id`)) !== "YYU3") fail(`the unit position's id box says ${await value(`${cell(0)} input.techtree-id`)}`);
+    const label = await text(`${cell(0)} .techtree-name`);
+    if (label !== "Random Level 3 Neutral Hostile Unit") fail(`the unit position is named ${JSON.stringify(label)}`);
+    if ((await value(`${cell(0)} select.techtree-random`)) !== "") fail("the Random… choice didn't go back to its title");
+    if (!(await dirty())) fail("choosing a random object didn't mark Map Properties changed");
+
+    // The per-player grid: the knight, unavailable to player 1, ticked available again.
+    await k.hands.click("[data-switch=\"techs\"] .techtree-view-grid");
+    await until("the techtree grid", () => has(GRID_CELL), 10000).catch(() => fail("Per player didn't show the techtree grid"));
+    if (await page.evaluate(`document.querySelector(${JSON.stringify(GRID_CELL)})?.checked !== false`)) fail("the grid shows the knight available to player 1");
+    await k.hands.click(GRID_CELL);
+    await until("the cell ticked", () => page.evaluate(`document.querySelector(${JSON.stringify(GRID_CELL)})?.checked === true`), 5000).catch(() => fail("the click didn't tick the grid's cell"));
+
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    await until("Map Properties saved", async () => !(await dirty()), 20000).catch(() => fail("Map Properties is unsaved after its save"));
+    const saved = k.read("war3map.w3i.json");
+    if (JSON.stringify(saved.unitTables?.[0]?.lines?.[0]?.ids) !== JSON.stringify(["YYU3", "YiI2"])) fail(`the saved group's ids: ${JSON.stringify(saved.unitTables?.[0]?.lines)}`);
+    if (saved.itemTables?.[0]?.sets?.[0]?.[0]?.id !== "YkI1") fail(`the saved item table: ${JSON.stringify(saved.itemTables)}`);
+    if (JSON.stringify(saved.techs) !== "[]") fail(`the saved techtree after the knight was made available to player 1: ${JSON.stringify(saved.techs)}`);
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+    const script = readFileSync(join(k.root, "map", "war3map.j"), "utf8");
+    for (const line of ["set gg_rg_000[0] = ChooseRandomCreep( 3 )", "ITEM_TYPE_PERMANENT, 2", "ITEM_TYPE_POWERUP, 1"]) {
+      if (!script.includes(line)) fail(`war3map.j has no "${line}"`);
+    }
+    await k.verify(fail);
+
+    // Opened again: the ids and their names, the grid with no unavailable object left.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await until("Map Properties closed", async () => !(await has(".map-info")), 10000);
+    await open();
+    if ((await value(`${cell(0)} input.techtree-id`)) !== "YYU3" || (await value(`${cell(1)} input.techtree-id`)) !== "YiI2") fail("Map Properties opened again doesn't show the saved random ids");
+    const names = [await text(`${cell(0)} .techtree-name`), await text(`${cell(1)} .techtree-name`), await text(`${ITEM} .techtree-name`)];
+    if (JSON.stringify(names) !== JSON.stringify(["Random Level 3 Neutral Hostile Unit", "Random Level 2 Permanent Item", "Random Level 1 Power Up Item"])) fail(`the names opened again: ${JSON.stringify(names)}`);
+    if (await has(".techtree-grid-techs tbody tr")) fail("the grid still lists an object after it was made available to every player");
+    if (await dirty()) fail("opening Map Properties again marked it changed");
+    // The list again for the checks after this one.
+    await k.hands.click("[data-switch=\"techs\"] .techtree-view-list");
+    await until("the techtree list", async () => !(await has(".techtree-grid-techs")), 5000).catch(() => fail("List didn't bring the list back"));
+    if (await dirty()) fail("switching the view marked Map Properties changed");
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** Item tables for unit drops, reached from where they're used: the unit file's older layout (no item table field) offers
  *  only own sets and says why; with the newer layout and no tables, choosing "Map item table" offers to make one, which
  *  Map Properties makes (one undo step there) and opens for editing, and the footman then drops from it (one undo step in
@@ -8985,6 +9067,7 @@ async function run() {
         specialDoodads,
         staleEditors,
         syncSafety,
+        techtreeRandomLevels,
         terrainSelectCameras,
         terrainWiring,
         // Test Map needs a map it could start, as the full run has one open by then (a new map has a start location).
@@ -9181,6 +9264,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "itemTablesAccess", found);
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
   await leftOpen(page, "itemDrops", found);
+  await techtreeRandomLevels(page, found).catch((e) => found.push(`techtree random levels: ${e.message}`));
+  await leftOpen(page, "techtreeRandomLevels", found);
   await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
   await leftOpen(page, "triggersAndAi", found);
   await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));

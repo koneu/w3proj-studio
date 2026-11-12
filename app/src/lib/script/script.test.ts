@@ -603,6 +603,27 @@ test("random groups pick a line, and an empty slot creates nothing", () => {
   assert.equal(randomGroupsSection([]), "");
 });
 
+test("a random group's random objects by level are picked as the World Editor 2.0 writes them (we-drive 2026-11-12)", () => {
+  // The lines of a probe group the editor saved: its InitRandomGroups for these ids, entry by entry.
+  const lines = [["YYU1", "YYB/", "YiI2"], ["YYU/", "YYB0", "YYI/"], ["YYU:", "YYBb", "YlI9"], ["YYU0", "YYUB", "YYI:"], ["YYI3", "YYBB", "YYU2"], ["Yyu1", "YYNB", "YoI0"]];
+  const s = randomGroupsSection([{ number: 0, name: "Probe", positions: [0, 1, 2], lines: lines.map((ids) => ({ chance: 14, ids })) }], 7003);
+  const item = (type: string, level: number) => `ChooseRandomItemExWithFilter( ITEM_TYPE_${type}, ${level}, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )`;
+  const want = [
+    ["ChooseRandomCreep( 1 )", "ChooseRandomNPBuilding(  )", item("PERMANENT", 2)],
+    ["ChooseRandomCreep( -1 )", "ChooseRandomNPBuilding(  )", item("ANY", -1)],
+    ["ChooseRandomCreep( 10 )", "ChooseRandomNPBuilding(  )", item("ARTIFACT", 9)],
+    ["ChooseRandomCreep( 0 )", "ChooseRandomCreep( 18 )", item("ANY", 10)],
+    [item("ANY", 3), "ChooseRandomNPBuilding(  )", "ChooseRandomCreep( 2 )"],
+    ["'Yyu1'", "'YYNB'", item("MISCELLANEOUS", 0)],
+  ];
+  want.forEach((entries, line) => {
+    const block = [`    ${line ? "elseif" : "if"} (curset == ${line}) then`, ...entries.map((e, k) => `        set gg_rg_000[${k}] = ${e}`)].join(EOL);
+    assert.ok(s.includes(block), `no block\n${block}\nin:\n${s}`);
+  });
+  // Older editors pick random items as their item tables do.
+  has(randomGroupsSection([{ number: 0, name: "Old", positions: [2], lines: [{ chance: 100, ids: ["YjI2"] }] }], 6114), "        set gg_rg_000[0] = ChooseRandomItemEx( ITEM_TYPE_CHARGED, 2 )");
+});
+
 // ---- upgrades and tech -------------------------------------------------------------------
 
 test("upgrades: researched levels start done, unavailable ones cap them", () => {
