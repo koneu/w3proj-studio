@@ -14,7 +14,7 @@ import {
 import { TEAM_COLORS } from "../../lib/model/renderer";
 import { heightAt } from "../../lib/terrain/w3e";
 import { capped, mapStrings, readMapDoc, readMapDocStrict, requireProject } from "../../lib/formats/mapdoc";
-import { applyRandom, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
+import { applyRandom, DEFAULT_FACING, RANDOM_IDS, RANDOM_SCALES, randomName, rollLook, rotatesRandomly, type Look, type LookOptions, type RandomGroup, type RandomScale, type RandomSpec } from "../../lib/terrain/randomplace";
 import { askRandom } from "./randomdialog";
 import { placedList, placedTypes, type PlacedThing } from "./placedinfo";
 import { readArea } from "../../lib/terrain/area";
@@ -56,8 +56,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   const lookOptions = (): LookOptions => ({
     variation: chosenVariation,
     randomVariation: w3.settings.get<boolean>("terrain.placement.randomVariation") === true,
-    randomRotation: w3.settings.get<boolean>("terrain.placement.randomRotation") === true,
-    randomScale: w3.settings.get<RandomScale>("terrain.placement.randomScale") ?? "off",
+    randomRotation: w3.settings.get<boolean>("terrain.placement.randomRotation", true) !== false,
+    randomScale: w3.settings.get<RandomScale>("terrain.placement.randomScale") ?? "symmetric",
   });
   /** How the next single placement looks: rolled ahead, so the ghost shows what a click places. */
   let next: Look | null = null;
@@ -214,7 +214,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     } });
   const variationWrap = h("label.terrain-tool-opt", {}, "Variation ", variationSel);
   const rotationWrap = toggle("Random rotation", "Each placed object faces a random way (types with a fixed rotation keep theirs); setting terrain.placement.randomRotation",
-    () => w3.settings.get<boolean>("terrain.placement.randomRotation") === true, (v) => { void w3.settings.set("terrain.placement.randomRotation", v).then(reroll); });
+    () => w3.settings.get<boolean>("terrain.placement.randomRotation", true) !== false, (v) => { void w3.settings.set("terrain.placement.randomRotation", v).then(reroll); });
   rotationWrap.classList.add("terrain-place-rotation");
   const scaleSel = h("select.terrain-place-scale", { title: "Random Scale within the type's scale range: the same on every axis (symmetric), each axis on its own (asymmetric), only the height (Z) or only the width (XY); setting terrain.placement.randomScale",
     onchange: () => { void w3.settings.set("terrain.placement.randomScale", scaleSel.value).then(reroll); ed.focus(); } },
@@ -235,7 +235,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     sizeWrap.hidden = densityWrap.hidden = !scatter || isStart();
     const type = placing && !isStart() ? ed.objects.type(placing.id) : null;
     fillVariations();
-    rotationWrap.hidden = !placing || isStart() || scatter || type?.fixedRot != null;
+    rotationWrap.hidden = !placing || isStart() || scatter || type?.fixedRot != null || !rotatesRandomly(type);
     scaleWrap.hidden = !placing || isStart() || scatter || !(type?.randScale && type.maxScale > type.minScale);
   };
   /** Starts placing another type: its look is rolled anew, a variation chosen for the last one doesn't carry over. */

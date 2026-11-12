@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { importRows } from "../../lib/imports";
-import { followingTextures, shownEntry, textureSpots, versionsToAdd, versionToAdd } from "./versions";
+import { bringsTextures, followingTextures, modelTextures, shownEntry, textureSpots, versionsToAdd, versionToAdd } from "./versions";
 
 const plain = { flags: 21, path: "war3mapImported\\Hero.mdx" }, hd = { flags: 13, path: "_HD.w3mod\\war3mapImported\\Hero.mdx" };
 const de = { flags: 13, path: "_DE.w3mod\\war3mapImported\\Hero.mdx" };
@@ -47,6 +47,38 @@ test("where a model's texture may lie next to it: the longest tail of its path f
   // Nothing climbs out of the folder.
   assert.deepEqual(textureSpots("C:\\x", "..\\..\\a.png").map((s) => s.file), ["C:\\x/a.png"]);
   assert.deepEqual(textureSpots("/d", ""), []);
+});
+
+test("an .mdl import brings its textures as an .mdx one does: the MDL text's texture list", async () => {
+  assert.ok(bringsTextures("war3mapImported\\Hero.mdl") && bringsTextures("_HD.w3mod\\war3mapImported\\Hero.MDL"));
+  assert.ok(bringsTextures("war3mapImported\\Hero.mdx"));
+  // Control: what isn't a model brings nothing.
+  assert.ok(!bringsTextures("war3mapImported\\Hero.blp") && !bringsTextures("war3mapImported\\Hero.mdl.txt"));
+  const mdl = new TextEncoder().encode(`Version {
+	FormatVersion 1000,
+}
+Model "Hero" {
+	NumGeosets 0,
+}
+Textures 3 {
+	Bitmap { Image "war3mapImported\\Hero_Diffuse.dds", }
+	Bitmap { Image "war3mapImported\\Hero_Normal.dds", }
+	Bitmap { Image "", ReplaceableId 1, }
+}
+`);
+  const textures = modelTextures(mdl);
+  assert.deepEqual(textures, [
+    { path: "war3mapImported\\Hero_Diffuse.dds", replaceableId: 0, flags: 0 },
+    { path: "war3mapImported\\Hero_Normal.dds", replaceableId: 0, flags: 0 },
+    { path: "", replaceableId: 1, flags: 0 },
+  ]);
+  const disk = new Set(["/d/Hero_Diffuse.dds", "/d/Hero_Normal.dds"]);
+  assert.deepEqual(await followingTextures("/d", textures!, (a) => `_HD.w3mod\\${a}`, async (f) => disk.has(f), () => false), [
+    { file: "/d/Hero_Diffuse.dds", archive: "_HD.w3mod\\war3mapImported\\Hero_Diffuse.dds" },
+    { file: "/d/Hero_Normal.dds", archive: "_HD.w3mod\\war3mapImported\\Hero_Normal.dds" },
+  ]);
+  // Bytes that are no model (MDX or MDL) bring none, without throwing.
+  assert.equal(modelTextures(new TextEncoder().encode("just a readme")), null);
 });
 
 test("the textures that follow a model: found next to it, not replaceable, once each, not where the map has a file", async () => {

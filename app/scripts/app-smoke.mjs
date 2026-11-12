@@ -1270,6 +1270,18 @@ async function terrainSelectCameras(page, found) {
  *  doodads, units, ground pathing and light ranges, the toolbar's and the side panel's boxes follow; G goes round the
  *  grids, B draws the camera bounds, F toggles Fog Effects, T turns the selection toward the pointer, the pointer at
  *  the view's side scrolls it; and none of it is an edit. Judged on pictures of the view against the plain one (the same view twice is the noise). */
+/** The terrain view as these checks were written for: no grid, no camera-bounds outline and no minimap panel (a new view
+ *  has the medium grid, the bounds and the panel, as a fresh World Editor's), by the commands and the setting. The
+ *  pictures are compared pixel for pixel, and the panel's own redraws after an edit would count as the map's. */
+async function plainGridView(page) {
+  const view = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+  const run = (id) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)})`);
+  for (let i = 0; i < 4 && (await view())?.grid !== "none"; i++) await run("w3.terrain.cycleGrid");
+  if ((await view())?.cameraBounds) await run("w3.terrain.toggleCameraBounds");
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+  await settled(page);
+}
+
 async function viewModes(page, found) {
   const fail = (what) => found.push(`view modes: ${what}`);
   const k = await heightKit(page, "ViewModes");
@@ -1298,6 +1310,7 @@ async function viewModes(page, found) {
       .catch(async () => { const v = await state(); fail(`Water and Effects didn't go off by their boxes: ${JSON.stringify(v && { water: v.water, effects: v.effects, gameView: v.gameView })}`); });
   };
   await stillView();
+  await plainGridView(page);
   await k.tab("Select");
   await k.look(start.position[0], start.position[1] + 128);
   await k.clearToasts();
@@ -1343,6 +1356,7 @@ async function viewModes(page, found) {
   if (!(await page.evaluate(`document.querySelector(".terrain-gameview-badge")?.hidden`))) fail("the badge stays after game view");
   // The new editor's view as the first one's was (its boxes were greyed until now).
   await stillView();
+  await plainGridView(page);
   await k.clearToasts();
   if ((await changed()) > 150) fail("after game view the picture isn't the plain one again");
 
@@ -3841,6 +3855,7 @@ async function viewCommands(page, fail, shots, size) {
     await until(`the ${name} tab`, () => page.evaluate(`document.querySelector(".terrain-tab.on")?.textContent === ${JSON.stringify(name)}`), 5000);
     await settled(page);
   };
+  await plainGridView(page);
   const start = await state();
   if (!start) return bad("the terrain editor has no view commands");
   // A camera object to see (close to the unit placed at 256, 0), kept to put back.
@@ -5077,6 +5092,67 @@ async function moduleFunctionsChecks(page, found) {
     verify(dl, "dialogue");
   }
 
+  // A plain sound (no speaker, no keys) is given a dialogue with "Add dialogue": the section opens without a change,
+  // its speaker field is reachable in a 900 px window, typed text is unsaved and Undo takes it back byte for byte.
+  const pl = join(dir, "dialogue-add");
+  cpSync(FIXTURE, pl, { recursive: true });
+  {
+    const wtsFile = join(pl, "map", "war3map.wts"), w3sFile = join(pl, "map", "war3map.w3s.json");
+    put(w3sFile, {
+      format: "w3proj.sounds/1", version: 3,
+      sounds: [{
+        name: "gg_snd_Plain01", file: "Sound\\Interface\\Plain01.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+        channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+        variableName: "gg_snd_Plain01", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+        speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 0,
+      }],
+    });
+    const wtsBefore = readFileSync(wtsFile), w3sBefore = readFileSync(w3sFile);
+    await openProject(pl);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`!!document.querySelector("tr.snd-row")`), 20000);
+    await page.evaluate(`[...document.querySelectorAll("tr.snd-row")].find((r) => r.firstChild.textContent === "Plain01")?.click()`);
+    await until("the Add dialogue button", () => page.evaluate(`!!document.querySelector("button.snd-add-dialogue")`), 10000);
+    if (await page.evaluate(`!!document.querySelector("input.snd-speaker-name")`)) fail("a plain sound shows dialogue fields before Add dialogue (control)");
+    await page.evaluate(`document.querySelector("button.snd-add-dialogue").click()`);
+    await until("the dialogue fields", () => page.evaluate(`!!document.querySelector("input.snd-speaker-name")`), 10000);
+    if ((await unsaved()) !== 0) fail("Add dialogue alone left the Sound Editor with unsaved changes");
+    // 900 px high: the page's root is set to that height (the window can't be resized from here), then put back.
+    const reach = await page.evaluate(`(async () => {
+      const app = document.getElementById("app"), was = app.style.height;
+      try {
+        app.style.height = "900px";
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const detail = document.querySelector(".snd-detail"), right = document.querySelector(".snd-right"), input = document.querySelector("input.snd-speaker-name");
+        const box = (e) => e.getBoundingClientRect();
+        const scrollable = detail.scrollHeight > detail.clientHeight + 1;
+        input.scrollIntoView({ block: "nearest" });
+        await new Promise((r) => requestAnimationFrame(r));
+        const i = box(input), d = box(detail);
+        return { inside: i.top >= d.top - 1 && i.bottom <= d.bottom + 1, detailInRight: d.bottom <= box(right).bottom + 1, scrollable, appHeight: Math.round(box(app).height) };
+      } finally { app.style.height = was; }
+    })()`);
+    if (reach.appHeight !== 900) fail(`the page root is ${reach.appHeight} px high, not 900 (control)`);
+    else if (!reach.inside || !reach.detailInRight) fail(`at 900 px the speaker field isn't fully reachable: ${JSON.stringify(reach)}`);
+    await setField("input.snd-speaker-name", "Uther");
+    await until("the typed speaker unsaved", async () => (await unsaved()) > 0, 10000).catch(() => fail("typing a speaker name left nothing unsaved"));
+    await until("the undo", async () => { await page.evaluate(`void w3.commands.execute("workbench.undo")`); return (await unsaved()) === 0; }, 10000).catch(() => fail("Undo didn't take the new dialogue back"));
+    if ((await page.evaluate(`document.querySelector("input.snd-speaker-name")?.value ?? ""`)) !== "") fail("after Undo the speaker field still shows a text");
+    if (!readFileSync(wtsFile).equals(wtsBefore) || !readFileSync(w3sFile).equals(w3sBefore)) fail("the files changed although the new dialogue was undone");
+    await saveAndSettle("the undone dialogue saved");
+    if (!readFileSync(wtsFile).equals(wtsBefore) || !readFileSync(w3sFile).equals(w3sBefore)) fail("saving after Undo changed war3map.wts or the sounds file");
+    await setField("input.snd-speaker-name", "Uther");
+    await setField("textarea.snd-dialogue-text", "For the Light.");
+    await saveAndSettle("the added dialogue saved");
+    const x = json(w3sFile).sounds[0];
+    if (!(x.speakerNameKey >= 0) || x.dialogueTextKey !== x.speakerNameKey + 1) fail(`the added dialogue's keys: ${x.speakerNameKey},${x.dialogueTextKey}`);
+    if (!readFileSync(wtsFile, "utf8").includes(`STRING ${x.dialogueTextKey}\n{\nFor the Light.\n}\n`)) fail("the added dialogue's text isn't in war3map.wts");
+    await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(pl, "dialogue-add");
+  }
+
   // A campaign map's dialogue sounds (NightElfX04Interlude: twelve, one with a text but no speaker name): a text typed
   // and typed back, saved, gives the map's war3map.w3s and war3map.wts byte for byte.
   if (game) {
@@ -5641,6 +5717,7 @@ async function keybindings(page, found) {
     await writeFile("[]\n");
     await until("the terrain view's state", async () => (await state()) !== null, 20000);
     await k.tab("Select");
+    await plainGridView(page);
     // G as the World Editor's: no grid, then the large one.
     const g0 = await grid();
     await press("G");
@@ -5882,6 +5959,8 @@ const GAME_READS_RECORDED = { reads: 105, asked: 138, textures: 140 };
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
   if (!game) { fail("needs W3PROJ_GAME"); return; }
+  // The scene is what the terrain view loads; the minimap panel (on in a new view) reads more game files of its own: off here, as recorded.
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
   const root = join(work, "game-reads");
   rmSync(root, { recursive: true, force: true });
   cpSync(FIXTURE, root, { recursive: true });
@@ -5990,6 +6069,7 @@ async function gameReadsOnce(page, found) {
   await settled(page);
   const racedAsked = (await asked()) - askedRaced;
   if (racedAsked > askedSecond * 1.5) fail(`opening the terrain while the project's tabs came back asked for ${racedAsked} game files, a plain opening ${askedSecond}`);
+  await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
@@ -6972,6 +7052,8 @@ async function placerAndCampaign(page, found) {
   /** A click in the middle of the view over (x, y) (k.look waits until it's drawn there), then the app at rest. */
   const click = async (x, y) => { await k.look(x, y); await k.clickMiddle(); await settled(page); };
   try {
+    // The defaults are random (rotation, symmetric scale), as a fresh World Editor's; the checks below place plain first.
+    await page.evaluate(`Promise.all([w3.settings.set("terrain.placement.randomRotation", false), w3.settings.set("terrain.placement.randomScale", "off")])`);
     // Opening the Objects tab with nothing chosen shows its toolbar: the object browser didn't open over it by itself.
     // Control: Place… opens the browser (so the time waited would have shown one).
     const browser = `!!document.querySelector(".picker-overlay")`;
@@ -8198,6 +8280,12 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
   })()`);
   const row = `[...document.querySelectorAll("tr.imp-row")].filter((r) => r.textContent.includes("PairHero"))`;
   const badges = () => page.evaluate(`${row}.map((r) => [...r.querySelectorAll(".imp-badge")].map((b) => b.textContent).join("+"))`);
+  /** The row's badges once they read `want`, or what was last seen after ~10 s. */
+  const badgesAre = async (want) => {
+    let last = [];
+    await soon(async () => { last = await badges(); return last.join() === want; }, 10000);
+    return { ok: last.join() === want, last };
+  };
   try {
     await page.evaluate(`w3.commands.execute("w3.imports.open")`);
     const use = await soon(() => page.evaluate(`(() => { const s = document.querySelector(".imp-use-in"); if (!s) return false;
@@ -8211,7 +8299,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (entry(HD).flags !== 13) fail(`the Reforged entry's flags: ${entry(HD).flags}`);
     if (listed().some((p) => p === SD) || onDisk("map/war3mapImported/PairHero.mdx")) fail("Reforged only also wrote the plain path");
     await settled(page);
-    if ((await badges()).join() !== "Reforged") fail(`a Reforged-only import's row shows ${JSON.stringify(await badges())}`);
+    { const b = await badgesAre("Reforged"); if (!b.ok) fail(`a Reforged-only import's row shows ${JSON.stringify(b.last)}`); }
 
     // Add Classic Version…: the selected row's plain path.
     await page.evaluate(`${row}[0]?.click()`);
@@ -8220,7 +8308,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (!(await soon(() => !!entry(SD) && onDisk("map/war3mapImported/PairHero.mdx"), 20000))) { fail(`Add Classic Version…: the list holds ${JSON.stringify(listed())}`); return; }
     if (entry(SD).flags !== 21) fail(`the Classic entry's flags: ${entry(SD).flags}`);
     await settled(page);
-    if ((await badges()).join() !== "Classic+Reforged") fail(`the pair is shown as ${JSON.stringify(await badges())} (one row with both badges wanted)`);
+    { const b = await badgesAre("Classic+Reforged"); if (!b.ok) fail(`the pair is shown as ${JSON.stringify(b.last)} (one row with both badges wanted)`); }
     // The note comes once the add has ended, which the list entry and file don't tell of.
     if (!(await soon(() => page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`), 10000))) fail(`no note of the added version: ${JSON.stringify(await page.evaluate(`window.__impInfo`))}`);
 
@@ -8232,7 +8320,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (!(await soon(() => !!entry(DE) && onDisk("map/_DE.w3mod/war3mapImported/PairHero.mdx"), 20000))) { fail(`Add 3.0 Version…: the list holds ${JSON.stringify(listed())}`); return; }
     if (entry(DE).flags !== 13) fail(`the 3.0 entry's flags: ${entry(DE).flags}`);
     await settled(page);
-    if ((await badges()).join() !== "Classic+Reforged+3.0") fail(`the three versions are shown as ${JSON.stringify(await badges())} (one row with three badges wanted)`);
+    { const b = await badgesAre("Classic+Reforged+3.0"); if (!b.ok) fail(`the three versions are shown as ${JSON.stringify(b.last)} (one row with three badges wanted)`); }
 
     // Packed, the map holds the paths, each with its own bytes.
     await k.save();
@@ -9126,6 +9214,9 @@ async function niceToHaves(page, found) {
 
     // ---- The minimap panel: on, a picture, the view's outline; a click moves the camera there -----------------------------
     const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state() ?? null)()`);
+    // A new view shows the minimap (the World Editor's default): off first, so the command turns it on.
+    await page.evaluate(`w3.settings.set("terrain.minimap.panel", false, "user")`);
+    await soon(async () => !(await state()).minimap.shown, 5000);
     await run("w3.terrain.toggleMinimap");
     await until("the minimap's picture", async () => (await state())?.minimap?.picture === true, 30000).catch(() => {});
     let s = await state();

@@ -149,7 +149,8 @@ function writeMdl(m: Model): string {
       for (const l of mat.layers) {
         o.push("\t\tLayer {", `\t\t\tFilterMode ${FILTER[l.filterMode]},`);
         o.push(...flags(l.shadingFlags, { Unshaded: 1, SphereEnvMap: 2, TwoSided: 0x10, Unfogged: 0x20, NoDepthTest: 0x40, NoDepthSet: 0x80 }).map((s) => `\t${s}`));
-        prop("TextureID", l.textureIds[0], l.textureTrack, "\t\t\t", true);
+        // A Reforged layer names one TextureID per slot; the first slot's track is the layer's texture track.
+        l.textureIds.forEach((id, slot) => prop("TextureID", id, slot === 0 ? l.textureTrack : l.slotTracks?.[slot], "\t\t\t", true));
         prop("Alpha", l.alpha, l.alphaTrack, "\t\t\t");
         if (l.textureAnimId >= 0) o.push(`\t\t\tTVertexAnimId ${l.textureAnimId},`);
         if (l.coordId) o.push(`\t\t\tCoordId ${l.coordId},`);
@@ -239,8 +240,8 @@ function comparable(m: Model) {
     if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).map(([k, x]) => [k, plain(x)]));
     return v;
   };
-  // Reforged layers' further texture slots aren't in the MDL the reader reads: the diffuse slot is what is drawn.
-  const materials = m.materials.map((mat) => ({ ...mat, layers: mat.layers.map(({ slotTracks: _s, ...l }) => ({ ...l, textureIds: l.textureIds.slice(0, 1) })) }));
+  // All of a Reforged layer's texture slots are compared; the per-slot tracks are kept apart only by mdx.ts's layout.
+  const materials = m.materials.map((mat) => ({ ...mat, layers: mat.layers.map(({ slotTracks: _s, ...l }) => l) }));
   return plain({
     version: m.version, name: m.name, extent: m.extent, sequences: m.sequences, globalSequences: m.globalSequences, textures: m.textures, materials,
     geosets: m.geosets.map((g) => ({ ...g, vertexGroups: Array.from(g.vertexGroups) })), geosetAnims: m.geosetAnims, nodes: m.nodes, pivots: m.pivots,
@@ -270,6 +271,46 @@ test("a model written as MDL text reads back as the MDX reader read it", () => {
   // Control: a changed key shows (the comparison can fail).
   const changed = parseMdl(text.replace("800: { 0, 0, 10 }", "800: { 0, 0, 11 }"));
   assert.notDeepEqual(comparable(changed), comparable(fromMdx));
+});
+
+test("a Reforged MDL layer reads every TextureID slot, as the MDX reader does", () => {
+  const text = (layer: string) => `Version {
+	FormatVersion 1000,
+}
+Model "HD" {
+	NumGeosets 0,
+}
+Textures 4 {
+	Bitmap { Image "u_Diffuse.dds", }
+	Bitmap { Image "u_Normal.dds", }
+	Bitmap { Image "u_ORM.dds", }
+	Bitmap { Image "u_Emissive.dds", }
+}
+Materials 1 {
+	Material {
+		Shader "Shader_HD_DefaultUnit",
+		Layer {
+			FilterMode None,
+${layer}
+		}
+	}
+}
+`;
+  const m = parseMdl(text(`			static TextureID 0,
+			static TextureID 1,
+			TextureID 2 { DontInterp, 0: 2, 500: 3, }
+			static TextureID 3,
+			static EmissiveGain 1,`));
+  assert.deepEqual(m.warnings, []);
+  const l = m.materials[0].layers[0];
+  assert.deepEqual(l.textureIds, [0, 1, 2, 3]);
+  assert.equal(l.textureTrack, undefined, "the diffuse slot has no flipbook");
+  assert.deepEqual([...l.slotTracks![2]!.values], [2, 3], "the ORM slot keeps its track");
+  // A classic layer: one slot, its track is the layer's texture track, no slot tracks.
+  const classic = parseMdl(text("\t\t\tTextureID 1 { DontInterp, 0: 1, 500: 0, }")).materials[0].layers[0];
+  assert.deepEqual(classic.textureIds, [1]);
+  assert.deepEqual([...classic.textureTrack!.values], [1, 0]);
+  assert.equal(classic.slotTracks, undefined);
 });
 
 test("MDL text written by hand: comments, static values, tracks, flags, the node kinds", () => {

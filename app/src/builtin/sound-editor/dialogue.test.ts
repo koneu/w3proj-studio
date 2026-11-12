@@ -161,3 +161,27 @@ test("a text the game would cut stops the save until changed", () => {
   assert.equal(strings.fixCuts(), true);
   assert.equal(new StringTable(strings.merge(WTS)!).get(8), "One\r\n }two");
 });
+
+test("a plain sound gets a dialogue (speaker n, text n + 1), saves, and undo gives the sound and the file back byte-equal", () => {
+  const strings = new DialogueStrings(WTS);
+  const plain = { ...newSound("gg_snd_Plain", "Sound\\Plain.wav", {}), unknown2: 0 } as Sound;
+  assert.ok(!plain.speakerUnitType && (plain.dialogueTextKey ?? -1) < 0, "control: the sound has no dialogue");
+  const take = () => JSON.stringify([plain, strings.state()]);
+  const before = take();
+  assert.equal(setDialogueString(plain, "speaker", "Uther", strings, [plain], [20]), true);
+  assert.equal(setDialogueString(plain, "text", "For the Light.", strings, [plain], [20]), true);
+  assert.deepEqual([plain.speakerNameKey, plain.dialogueTextKey], [21, 22]);
+  const out = strings.merge(WTS)!;
+  const back = new StringTable(out);
+  assert.equal(back.get(21), "Uther");
+  assert.equal(back.get(22), "For the Light.");
+  assert.equal(out.slice(0, WTS.length), WTS, "the old strings stay byte for byte");
+  strings.saved(out);
+  // Undo: the history restores the sound's data and the strings' state.
+  const [data, texts] = JSON.parse(before) as [Sound, [number, string][]];
+  for (const k of Object.keys(plain)) delete (plain as unknown as Record<string, unknown>)[k];
+  Object.assign(plain, data);
+  strings.restore(texts);
+  assert.equal(take(), before, "the sound is as before");
+  assert.equal(strings.merge(out), null, "nothing is written for the undone dialogue");
+});
