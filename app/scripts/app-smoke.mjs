@@ -2706,16 +2706,19 @@ async function mcpLimits(page, found) {
 
 /** A question a check left on screen (a toast asking something, which stays until answered) would cover the next
  *  checks' clicks. Each check of the full run is followed by this: it closes such questions, as dismissing them by ×
- *  would, and names the check, so the one that left it can answer it itself. */
+ *  would, and fails the run naming the check, so the one that left it answers it itself. */
 /** When the last check of the full run ended (for the per-check times `leftOpen` prints). */
 let checkEnded = Date.now();
-async function leftOpen(page, check) {
+async function leftOpen(page, check, found) {
   // How long each check took, so the gate's log shows where the run's minutes go.
   const now = Date.now();
   console.log(`  took ${((now - checkEnded) / 1000).toFixed(1)} s: ${check}`);
   checkEnded = now;
   const left = await page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].map((t) => { const text = t.querySelector(".toast-body")?.textContent ?? ""; t.querySelector(".toast-close")?.click(); return text.slice(0, 120); })`).catch(() => []);
-  for (const text of left) console.log(`  left open after ${check}: ${text}`);
+  for (const text of left) {
+    console.log(`  left open after ${check}: ${text}`);
+    found.push(`${check} left a question open: ${text}`);
+  }
 }
 
 /** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
@@ -5988,6 +5991,16 @@ async function drawCalls(page, found) {
  *  says so, keeps the unsaved edit, saves it, and opens again only once nothing is unsaved; the model viewer draws
  *  again once the context is given back. */
 async function contextLoss(page, found) {
+  // The mini map's script isn't one Studio wrote, so a terrain edit saved here asks about it: "Keep it" for this check only.
+  await page.evaluate(`(() => { const ask = w3.window.notify; window.__clKept = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Keep it") : ask(s, m, a, o)); })()`);
+  try {
+    await contextLossChecks(page, found);
+  } finally {
+    await page.evaluate(`if (window.__clKept) { w3.window.notify = window.__clKept; delete window.__clKept; }`).catch(() => {});
+  }
+}
+
+async function contextLossChecks(page, found) {
   const fail = (what) => found.push(`context loss: ${what}`);
   const root = join(work, "context-loss");
   rmSync(root, { recursive: true, force: true });
@@ -8390,6 +8403,7 @@ async function run() {
       };
       if (!Object.hasOwn(onlyChecks, only)) throw new Error(`no check "${only}" for --only: ${Object.keys(onlyChecks).join(", ")}, graphics`);
       await onlyChecks[only](page, found).catch((e) => found.push(`${only}: ${e.message}`));
+      await leftOpen(page, only, found);
       found.push(...problems(page.events));
       return found;
     }
@@ -8505,48 +8519,48 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
 async function firstHalf(page, found) {
   const made = await newMaps(page, found);
   await terrainWiring(page, found).catch((e) => found.push(`terrain wiring: ${e.message}`));
-  await leftOpen(page, "terrainWiring");
+  await leftOpen(page, "terrainWiring", found);
   await placeObjects(page, found).catch((e) => found.push(`place objects: ${e.message}`));
-  await leftOpen(page, "placeObjects");
+  await leftOpen(page, "placeObjects", found);
   await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
-  await leftOpen(page, "mcpStartMove");
+  await leftOpen(page, "mcpStartMove", found);
   await meleeByHand(page, found).catch((e) => found.push(`melee by hand: ${e.message}`));
-  await leftOpen(page, "meleeByHand");
+  await leftOpen(page, "meleeByHand", found);
   await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
-  await leftOpen(page, "mcpGuides");
+  await leftOpen(page, "mcpGuides", found);
   await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));
-  await leftOpen(page, "waterPathing");
+  await leftOpen(page, "waterPathing", found);
   await tileTemplate(page, found).catch((e) => found.push(`tile template: ${e.message}`));
-  await leftOpen(page, "tileTemplate");
+  await leftOpen(page, "tileTemplate", found);
   await tilesInPlace(page, found).catch((e) => found.push(`terrain in place: ${e.message}`));
-  await leftOpen(page, "tilesInPlace");
+  await leftOpen(page, "tilesInPlace", found);
   await tileCleanup(page, found).catch((e) => found.push(`tile cleanup: ${e.message}`));
-  await leftOpen(page, "tileCleanup");
+  await leftOpen(page, "tileCleanup", found);
   await objectsWhileOpening(page, found).catch((e) => found.push(`objects while opening: ${e.message}`));
-  await leftOpen(page, "objectsWhileOpening");
+  await leftOpen(page, "objectsWhileOpening", found);
   // Test Map needs a map it could start: the one objectsWhileOpening left open.
   await testMapWithoutGame(page, found).catch((e) => found.push(`test map: ${e.message}`));
-  await leftOpen(page, "testMapWithoutGame");
+  await leftOpen(page, "testMapWithoutGame", found);
   for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
-  await leftOpen(page, "height tools");
+  await leftOpen(page, "height tools", found);
   await mcpLimits(page, found).catch((e) => found.push(`mcp limits: ${e.message}`));
-  await leftOpen(page, "mcpLimits");
+  await leftOpen(page, "mcpLimits", found);
   await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
-  await leftOpen(page, "flyingHeights");
+  await leftOpen(page, "flyingHeights", found);
   await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
-  await leftOpen(page, "artModeReload");
+  await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
-  await leftOpen(page, "wholeMapGround");
+  await leftOpen(page, "wholeMapGround", found);
   await cameraEditing(page, found).catch((e) => found.push(`camera editing: ${e.message}`));
-  await leftOpen(page, "cameraEditing");
+  await leftOpen(page, "cameraEditing", found);
   await terrainSelectCameras(page, found).catch((e) => found.push(`terrain select and cameras: ${e.message}`));
-  await leftOpen(page, "terrainSelectCameras");
+  await leftOpen(page, "terrainSelectCameras", found);
   await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
-  await leftOpen(page, "viewModes");
+  await leftOpen(page, "viewModes", found);
   // Here rather than in part 2, which starts only after part 1's build: the two halves end about together (batch run
   // 2026-11-12: part 1 327 s, part 2 271 s from ~136 s on; unitProperties ~37 s).
   await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
-  await leftOpen(page, "unitProperties");
+  await leftOpen(page, "unitProperties", found);
   return made;
 }
 
@@ -8554,73 +8568,73 @@ async function firstHalf(page, found) {
  *  needs what part 1 left: each runs alone with --only too, and they keep their order. */
 async function secondHalf(page, found, project) {
   await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
-  await leftOpen(page, "itemTablesAccess");
+  await leftOpen(page, "itemTablesAccess", found);
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
-  await leftOpen(page, "itemDrops");
+  await leftOpen(page, "itemDrops", found);
   await triggersAndAi(page, found).catch((e) => found.push(`triggers and AI: ${e.message}`));
-  await leftOpen(page, "triggersAndAi");
+  await leftOpen(page, "triggersAndAi", found);
   await staleEditors(page, found).catch((e) => found.push(`stale editors: ${e.message}`));
-  await leftOpen(page, "staleEditors");
+  await leftOpen(page, "staleEditors", found);
   await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
-  await leftOpen(page, "scriptGuard");
+  await leftOpen(page, "scriptGuard", found);
   await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
-  await leftOpen(page, "scriptQuestionsOnSwitch");
+  await leftOpen(page, "scriptQuestionsOnSwitch", found);
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
-  await leftOpen(page, "resizeUndo");
+  await leftOpen(page, "resizeUndo", found);
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
-  await leftOpen(page, "dataSafety");
+  await leftOpen(page, "dataSafety", found);
   await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
-  await leftOpen(page, "configSafety");
+  await leftOpen(page, "configSafety", found);
   await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));
-  await leftOpen(page, "syncSafety");
+  await leftOpen(page, "syncSafety", found);
   await workbenchState(page, found).catch((e) => found.push(`workbench state: ${e.message}`));
-  await leftOpen(page, "workbenchState");
+  await leftOpen(page, "workbenchState", found);
   await shouldHaves(page, found).catch((e) => found.push(`should-haves: ${e.message}`));
-  await leftOpen(page, "shouldHaves");
+  await leftOpen(page, "shouldHaves", found);
   await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
-  await leftOpen(page, "placerAndCampaign");
+  await leftOpen(page, "placerAndCampaign", found);
   await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
-  await leftOpen(page, "chapterObjects");
+  await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
-  await leftOpen(page, "editorExtras");
+  await leftOpen(page, "editorExtras", found);
   await importWarnings(page, found).catch((e) => found.push(`import warnings: ${e.message}`));
-  await leftOpen(page, "importWarnings");
+  await leftOpen(page, "importWarnings", found);
   await objectManagerLive(page, found).catch((e) => found.push(`object manager live: ${e.message}`));
-  await leftOpen(page, "objectManagerLive");
+  await leftOpen(page, "objectManagerLive", found);
   await niceToHaves(page, found).catch((e) => found.push(`nice-to-haves: ${e.message}`));
-  await leftOpen(page, "niceToHaves");
+  await leftOpen(page, "niceToHaves", found);
   await byHand(page, found).catch((e) => found.push(`by hand: ${e.message}`));
-  await leftOpen(page, "byHand");
+  await leftOpen(page, "byHand", found);
   await typedFieldSave(page, found).catch((e) => found.push(`typed field save: ${e.message}`));
-  await leftOpen(page, "typedFieldSave");
+  await leftOpen(page, "typedFieldSave", found);
   await moduleFunctions(page, found).catch((e) => found.push(`module functions: ${e.message}`));
-  await leftOpen(page, "moduleFunctions");
+  await leftOpen(page, "moduleFunctions", found);
   await objectCopy(page, found).catch((e) => found.push(`object copy: ${e.message}`));
-  await leftOpen(page, "objectCopy");
+  await leftOpen(page, "objectCopy", found);
   await graphicsModes(page, found).catch((e) => found.push(`graphics modes: ${e.message}`));
-  await leftOpen(page, "graphicsModes");
+  await leftOpen(page, "graphicsModes", found);
   await keyChords(page, found).catch((e) => found.push(`key chords: ${e.message}`));
-  await leftOpen(page, "keyChords");
+  await leftOpen(page, "keyChords", found);
   await keybindings(page, found).catch((e) => found.push(`keybindings: ${e.message}`));
-  await leftOpen(page, "keybindings");
+  await leftOpen(page, "keybindings", found);
   await paletteMouse(page, found).catch((e) => found.push(`palette mouse: ${e.message}`));
-  await leftOpen(page, "paletteMouse");
+  await leftOpen(page, "paletteMouse", found);
   await gameReadsOnce(page, found).catch((e) => found.push(`game reads: ${e.message}`));
-  await leftOpen(page, "gameReadsOnce");
+  await leftOpen(page, "gameReadsOnce", found);
   await editorTabRaces(page, found, project).catch((e) => found.push(`editor tabs: ${e.message}`));
-  await leftOpen(page, "editorTabRaces");
+  await leftOpen(page, "editorTabRaces", found);
   await playerStarts(page, found, project).catch((e) => found.push(`player starts: ${e.message}`));
-  await leftOpen(page, "playerStarts");
+  await leftOpen(page, "playerStarts", found);
   await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
-  await leftOpen(page, "objectLayout");
+  await leftOpen(page, "objectLayout", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
-  await leftOpen(page, "realMapSave");
+  await leftOpen(page, "realMapSave", found);
   await moveTextsToTable(page, found).catch((e) => found.push(`move texts to string table: ${e.message}`));
-  await leftOpen(page, "moveTextsToTable");
+  await leftOpen(page, "moveTextsToTable", found);
   await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
-  await leftOpen(page, "drawCalls");
+  await leftOpen(page, "drawCalls", found);
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
-  await leftOpen(page, "contextLoss");
+  await leftOpen(page, "contextLoss", found);
 }
 
 try {
