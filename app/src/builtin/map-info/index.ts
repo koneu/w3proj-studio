@@ -9,6 +9,8 @@ import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
+import { applySky, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
@@ -185,6 +187,36 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       ];
     });
     return changed ? `Changed ${String(field)}.` : "It already said that.";
+  }));
+  ctx.subscriptions.push(w3.mcp.registerTool("set_sky", async (args) => {
+    const { root } = requireProject(w3);
+    if (!Object.keys(args).length) throw new Error("set_sky needs at least one setting: sky, lightEnvironment, fogStyle, fogStart, fogEnd, fogDensity, fogColor, useFog, overSky, waterTint, tintWater.");
+    const { sky, ...rest } = args as SkyArgs & { sky?: unknown };
+    const lists = await loadGameLists(w3);
+    // The sky is a view setting (the terrain view's), not part of the map: resolved first, set after the map's edit.
+    let skyPath: string | undefined;
+    if (sky !== undefined) {
+      const skies = skyList(await w3.game.readText("UI\\WorldEditData.txt").catch(() => ""), await w3.game.readText("UI\\WorldEditStrings.txt").catch(() => ""));
+      const none = String(sky).trim().toLowerCase() === "none" || sky === "";
+      skyPath = none ? "" : resolveChoice("sky", sky, skies.map((x) => [x.path, x.name] as [string, string]));
+    }
+    const path = jsonPathOf(w3, "war3map.w3i");
+    const edits = await w3.services.get<McpEditsService>(MCP_EDITS_SERVICE);
+    let changes: string[] = [];
+    if (Object.keys(rest).length) {
+      await edits.edit("Change the map's sky and light", async (read) => {
+        const text = await read(path);
+        if (text === null) throw new Error("This map has no readable war3map.w3i.");
+        const doc = JSON.parse(text);
+        changes = applySky(doc, rest, lists);
+        return [{ path, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path, text: JSON.stringify(doc) }) }];
+      });
+    }
+    if (skyPath !== undefined && skyPath !== (w3.settings.get<string>("terrain.sky", "") ?? "")) {
+      await w3.settings.set("terrain.sky", skyPath);
+      changes.push(`sky model in the terrain view (a view setting, not in the map, not undone by undo_last_edit): ${skyPath || "none"}`);
+    }
+    return changes.length ? `Changed:\n- ${changes.join("\n- ")}` : "Nothing changed: the map already had these settings.";
   }));
   /** Opens Map Properties (or shows the open one) at `section`, scrolled to `anchor` (a `data-anchor` in it). */
   const openAt = async (section?: SectionId, anchor?: string) => {
