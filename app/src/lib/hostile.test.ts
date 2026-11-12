@@ -23,6 +23,7 @@ import { checkJass, emptyEnv, envFrom } from "./jass/check";
 import { checkLua } from "./lua/check";
 import { readLightMdl, readLightMdx } from "./model/dnclight";
 import { uploadableLevels } from "./model/gltexture";
+import { parseModel } from "./model/mdl";
 import { parseMdx, renameTextures } from "./model/mdx";
 import { parseW3e } from "./terrain/w3e";
 import { parseTriggerData } from "./triggers/triggerdata";
@@ -66,6 +67,10 @@ const TARGETS: Record<string, (b: Uint8Array) => unknown> = {
     Math.max(0, ...m.nodes.map((n, i) => (n ? i : 0)));
     renameTextures(b, (p) => p);
   },
+  mdl(b) {
+    const m = parseModel(b);
+    Math.max(0, ...m.nodes.map((n, i) => (n ? i : 0)));
+  },
   light(b) { readLightMdx(b); },
   lightText(b) { readLightMdl(latin1(b)); },
   w3e(b) { parseW3e(b); },
@@ -85,14 +90,14 @@ const TARGETS: Record<string, (b: Uint8Array) => unknown> = {
   triggerData(b) { parseTriggerData(latin1(b)); },
 };
 
-const TEXT = new Set(["lightText", "wctText", "jass", "lua", "slk", "ini", "triggerData"]);
+const TEXT = new Set(["mdl", "lightText","wctText", "jass", "lua", "slk", "ini", "triggerData"]);
 
 /** Which targets a real file seeds, by its name. */
 function targetsOf(name: string): string[] {
   const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
   if (["blp", "tga", "dds"].includes(ext)) return ["image"];
   if (ext === "mdx") return name.startsWith("dnc") ? ["light", "mdx"] : ["mdx"];
-  if (ext === "mdl") return ["lightText"];
+  if (ext === "mdl") return ["lightText", "mdl"];
   if (ext === "wai") return ["wai"];
   if (ext === "w3e") return ["w3e"];
   if (ext === "wtg") return ["wtg"];
@@ -146,6 +151,7 @@ function madeUpSeeds(): Seed[] {
   wai.set([2, 0, 0, 0, 120, 0], 0);
   add("wai", "empty", wai);
   add("mdx", "textures", mdxSeed());
+  add("mdl", "model text", text(MDL_SEED));
   add("sound", "wav", wavSeed());
 
   // Files built to do damage, as they are. Each of these stopped the app once.
@@ -215,6 +221,33 @@ function mdxObjectSeed(tag: string, size: number) {
   d.setInt32(28 + 88, -1, true);
   return b;
 }
+
+/** MDL text with a block of every kind the reader reads (tracks with tangents, a geoset, nodes, an emitter). */
+const MDL_SEED = `Version { FormatVersion 800, }
+Model "Seed" { BlendTime 150, MinimumExtent { -1, -1, 0 }, MaximumExtent { 1, 1, 2 }, BoundsRadius 2, }
+Sequences 1 { Anim "Stand" { Interval { 0, 1000 }, MoveSpeed 0, } }
+GlobalSequences 1 { Duration 500, }
+Textures 1 { Bitmap { Image "Textures\\Seed.blp", ReplaceableId 0, WrapWidth, } }
+Materials 1 { Material { Layer { FilterMode Blend, TwoSided, static TextureID 0, Alpha 2 { Linear, GlobalSeqId 0, 0: 1, 250: 0, } TVertexAnimId 0, } } }
+TextureAnims 1 { TVertexAnim { Rotation 1 { Bezier, 0: { 0, 0, 0, 1 }, InTan { 0, 0, 0, 1 }, OutTan { 0, 0, 0, 1 }, } } }
+Geoset {
+  Vertices 3 { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, }
+  Normals 3 { { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 }, }
+  TVertices 3 { { 0, 0 }, { 1, 0 }, { 0, 1 }, }
+  VertexGroup { 0, 0, 0, }
+  Faces 1 3 { Triangles { { 0, 1, 2 }, }, }
+  Groups 1 1 { Matrices { 0 }, }
+  MinimumExtent { 0, 0, 0 }, MaximumExtent { 1, 1, 0 }, BoundsRadius 1,
+  MaterialID 0,
+}
+GeosetAnim { static Alpha 1, Color 1 { DontInterp, 0: { 1, 1, 1 }, } GeosetId 0, }
+Bone "Root" { ObjectId 0, GeosetId 0, Translation 2 { Hermite, 0: { 0, 0, 0 }, InTan { 0, 0, 0 }, OutTan { 0, 0, 0 }, 1000: { 0, 0, 1 }, InTan { 0, 0, 0 }, OutTan { 0, 0, 0 }, } }
+Helper "H" { ObjectId 1, Parent 0, Billboarded, DontInherit { Rotation }, }
+ParticleEmitter2 "Fx" { ObjectId 2, Parent 0, static Speed 10, static EmissionRate 5, SegmentColor { Color { 1, 1, 1 }, Color { 1, 1, 1 }, Color { 1, 1, 1 }, }, Alpha { 255, 255, 0 }, Rows 1, Columns 1, LifeSpan 1, }
+RibbonEmitter "R" { ObjectId 3, static HeightAbove 5, EmissionRate 10, MaterialID 0, }
+Light "L" { ObjectId 4, Omnidirectional, static AttenuationStart 10, static AttenuationEnd 20, }
+PivotPoints 5 { { 0, 0, 0 }, { 0, 0, 1 }, { 0, 0, 2 }, { 0, 0, 3 }, { 0, 0, 4 }, }
+`;
 
 /** A WAV header with its fmt and data chunks. */
 function wavSeed() {
