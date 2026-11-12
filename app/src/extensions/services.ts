@@ -246,9 +246,12 @@ export interface TerrainEditorHandle {
   readonly objects: TerrainObjects;
   /** Changes the map's size and its unplayable border, both per side (left, right, bottom, top;
    *  `change` in tiles added + or removed −, `complements` the border widths in tiles). Saves the
-   *  map first, rewrites terrain, placements (objects outside the new map are removed), map info,
+   *  map first, rewrites terrain, placements (see resizeRemovals for what is removed), map info,
    *  regions (clipped), pathing, shadows and minimap, then reopens the terrain editor. */
   resizeMap(change: [number, number, number, number], complements: [number, number, number, number]): Promise<{ removed: number }>;
+  /** How many placed objects (special doodads included) `resizeMap` with these arguments would remove; changes
+   *  nothing. */
+  resizeRemovals(change: [number, number, number, number], complements: [number, number, number, number]): Promise<number>;
 }
 
 /** A placed unit, item, doodad or destructable (the placement files' JSON entry). */

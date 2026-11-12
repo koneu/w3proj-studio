@@ -1,16 +1,19 @@
 // Changing a map's size and playable area, as the World Editor's "Map Size
 // and Camera Bounds": tiles are added (+) or removed (−) per side, keeping the
-// world position of everything that stays (the offset moves instead). Map
-// sizes are multiples of 32 tiles (all 116 game maps); the camera bounds sit
-// 4 tiles inside the unplayable border horizontally and 2 vertically (also
-// all 116 maps).
+// world position of everything that stays (the offset moves instead). The
+// whole map's size is a multiple of 4 tiles, as the World Editor's ("The full
+// map size must be a multiple of %d in both dimensions"; we-drive, 2026-11-12:
+// Last Refuge resized to 100 × 100 and 92 × 92, a click being 4 tiles); the
+// camera bounds sit 4 tiles inside the unplayable border horizontally and 2
+// vertically (all 116 game maps).
 
-import { randomVariation, WATER_OFFSET, waterOffsetOf, type Corner, type Terrain } from "./w3e";
+import { randomVariation, type Corner, type Terrain } from "./w3e";
+import type { Area } from "./area";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
 
-export const MIN_SIZE = 32, MAX_SIZE = 480, SIZE_STEP = 32;
+export const MIN_SIZE = 32, MAX_SIZE = 480, SIZE_STEP = 4;
 
 /** Map size in tiles after `change` (whole map, unplayable border included). */
 export function resizedSize(t: Terrain, change: Sides): [number, number] {
@@ -41,29 +44,28 @@ export function resizedCameraZoom(zoom: { default: number; max: number; min?: nu
   return { default: 1250, max: 1250, ...(zoom.min !== undefined ? { min: 1250 } : {}) };
 }
 
-/** A corner Map Size adds, as the World Editor makes it (we-drive, 2026-11-11, cliff.w3m grown by 8 tiles left and
- *  bottom: all 1104 new corners): the tileset's first ground tile (texture 0, not the neighbouring one), flat ground on
- *  level 2 (height word 0x2000), water word 0x2000, no flags, cliff type nibble 15, a ground and a cliff variation of
- *  its own. The map edge bit of the water word comes after, from the playable area (markMapEdge). */
-export function newCorner(random: () => number = Math.random, waterOffset = WATER_OFFSET): Corner {
-  return {
-    height: 0, water: -waterOffset, texture: 0, variation: randomVariation(random), cliffVariation: newCliffVariation(random),
-    cliffTexture: 15, layer: 2, ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0,
-  };
+/** A corner Map Size adds, as the World Editor makes it: a copy of the nearest corner on the old map's edge (height,
+ *  cliff level, water, ground and cliff tile, flags), with a ground and a cliff variation of its own. we-drive
+ *  2026-11-12, Last Refuge grown by 32 tiles left and bottom: all 7232 new corners equal their edge corner but for the
+ *  variations and the map edge bit; cliff.w3m grown by 8 (2026-11-11) gave flat level-2 ground of tile 0 because its
+ *  edge is that. The map edge bit of the water word comes after, from the playable area (markMapEdge). */
+export function newCorner(edge: Corner, random: () => number = Math.random): Corner {
+  return { ...edge, variation: randomVariation(random), cliffVariation: newCliffVariation(random) };
 }
 
-/** The terrain with `change` applied: new corners are the World Editor's (newCorner), removed ones are dropped; world
+/** The terrain with `change` applied: new corners copy the old map's edge (newCorner), removed ones are dropped; world
  *  positions stay. The caller marks the map edge for the new playable area (markMapEdge). */
 export function resizeTerrain(t: Terrain, change: Sides, random: () => number = Math.random): Terrain {
   const [l, , b] = change;
   const [w, h] = resizedSize(t, change);
   const corners: Corner[] = new Array((w + 1) * (h + 1));
+  const clamp = (n: number, size: number) => Math.min(Math.max(n, 0), size - 1);
   for (let y = 0; y <= h; y++) {
     const oy = y - b;
     for (let x = 0; x <= w; x++) {
       const ox = x - l;
       const inside = ox >= 0 && oy >= 0 && ox < t.width && oy < t.height;
-      corners[y * (w + 1) + x] = inside ? { ...t.corners[oy * t.width + ox] } : newCorner(random, waterOffsetOf(t));
+      corners[y * (w + 1) + x] = inside ? { ...t.corners[oy * t.width + ox] } : newCorner(t.corners[clamp(oy, t.height) * t.width + clamp(ox, t.width)], random);
     }
   }
   return { ...t, width: w + 1, height: h + 1, offsetX: t.offsetX - l * 128, offsetY: t.offsetY - b * 128, corners };
@@ -103,9 +105,22 @@ export function resizeGrid(grid: Uint8Array, t: Terrain, change: Sides, cells: n
 }
 
 /** The world rectangle a terrain covers. */
-export function worldRect(t: Terrain): { left: number; bottom: number; right: number; top: number } {
+export function worldRect(t: Pick<Terrain, "offsetX" | "offsetY" | "width" | "height">): { left: number; bottom: number; right: number; top: number } {
   return { left: t.offsetX, bottom: t.offsetY, right: t.offsetX + (t.width - 1) * 128, top: t.offsetY + (t.height - 1) * 128 };
 }
+
+/** Whether a doodad at x, y stays on a map of world rectangle `rect` after Map Size: only strictly inside it, as the
+ *  World Editor keeps them (we-drive 2026-11-12, Last Refuge cut by 32 tiles left and bottom, and by 64 left: the 11
+ *  more doodads it removed each time stood exactly on the new left or bottom edge; the nearest kept one stood 4.7 inside).
+ *  The right and top edges are taken alike; they weren't seen. Doodads past the playable area stay (the backdrop). */
+export const doodadStays = (x: number, y: number, rect: Area) => x > rect.left && x < rect.right && y > rect.bottom && y < rect.top;
+
+/** Whether a unit or item at x, y stays after Map Size: its building footprint (`half`: half its pathing texture's
+ *  width and height in world units, 0 without one) lies within the new playable area, edges included. we-drive
+ *  2026-11-12, Last Refuge cut three ways: every unit past the playable area went (12), and so did a mercenary camp
+ *  on the edge and a gold mine (16 × 16 cells, half 256) 192 inside it, while one 256 inside stayed. Start locations aren't asked: they are moved. */
+export const unitStays = (x: number, y: number, half: readonly [number, number], playable: Area) =>
+  x - half[0] >= playable.left && x + half[0] <= playable.right && y - half[1] >= playable.bottom && y + half[1] <= playable.top;
 
 /** war3map.w3i's camera bounds for a terrain and border (complements): 4 tiles inside it
  *  horizontally, 2 vertically; corners as stored (left/bottom, right/top, left/top, right/bottom). */

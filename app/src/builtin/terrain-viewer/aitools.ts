@@ -553,14 +553,6 @@ export function heightColors(t: Terrain, step = 32) {
   return { rgba, width, height };
 }
 
-/** How many objects fall outside a map after adding (or cutting, negative) tiles per side:
- *  left, right, bottom, top. */
-export function outsideAfterResize(list: readonly { position: readonly number[] }[], t: Terrain, change: readonly [number, number, number, number]) {
-  const left = t.offsetX - change[0] * TILE, right = t.offsetX + (t.width - 1 + change[1]) * TILE;
-  const bottom = t.offsetY - change[2] * TILE, top = t.offsetY + (t.height - 1 + change[3]) * TILE;
-  return list.filter((p) => p.position[0] < left || p.position[0] > right || p.position[1] < bottom || p.position[1] > top).length;
-}
-
 /** The map's tile list after changing tileset, slot by slot: the old tileset's tiles become the new
  *  one's, and a tile from elsewhere, added on purpose, stays. No corner changes slot. */
 export function swapTiles(current: readonly string[], oldOwn: readonly string[], newOwn: readonly string[]) {

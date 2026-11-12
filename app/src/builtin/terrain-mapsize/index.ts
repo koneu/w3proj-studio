@@ -121,7 +121,7 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     info.replaceChildren(
       h("div", {}, `Now ${t.width - 1} × ${t.height - 1} tiles (playable ${t.width - 1 - stored[0] - stored[1]} × ${t.height - 1 - stored[2] - stored[3]})`),
       h("div", {}, `After ${w} × ${hgt} tiles (playable ${pw} × ${ph})`),
-      problem ? h("div.mapsize-problem", {}, problem) : h("div.muted", {}, `Sizes go in steps of ${SIZE_STEP} tiles. Objects outside the new map are removed; start locations move inside.`));
+      problem ? h("div.mapsize-problem", {}, problem) : h("div.muted", {}, `The whole map's size is a multiple of ${SIZE_STEP} tiles. New ground copies the edge beside it. Doodads on or past the new edge, and units and items not in the playable area, are removed; start locations move inside.`));
     if (!active) return;
     const W = t.width - 1, H = t.height - 1;
     const rgba = new Uint8Array(W * H * 4);
@@ -140,12 +140,16 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   };
 
   const run = async () => {
-    const grow = change.filter((c) => c > 0).length, shrink = change.filter((c) => c < 0).length;
-    const lost = resizeLoss(t, change as Sides, ed.objects.list());
+    // What is asked about is what is applied, whatever is typed in the meantime.
+    const ch: Sides = [...change], co: Sides = [...complements];
+    const grow = ch.filter((c) => c > 0).length, shrink = ch.filter((c) => c < 0).length;
+    const removed = await ed.resizeRemovals(ch, co).catch((e: unknown) => { void w3.window.showError(`Map size: ${(e as Error).message ?? e}`); return null; });
+    if (removed === null) return;
+    const lost = resizeLoss(t, ch, removed);
     const undoable = "Ctrl+Z in the terrain editor or Undo Resize takes it back while Studio stays open";
     const c = await w3.window.showWarning(
       lost.length
-        ? `Shrink the map? This removes ${lost.join(" and ")}. The map is saved first and a checkpoint is made (where checkpoints are on). ${undoable}; after a restart, restore the checkpoint.`
+        ? `${shrink ? "Shrink the map" : grow ? "Resize the map" : "Change the camera bounds"}? This removes ${lost.join(" and ")}. The map is saved first and a checkpoint is made (where checkpoints are on). ${undoable}; after a restart, restore the checkpoint.`
         : `${grow || shrink ? "Resize the map" : "Change the camera bounds"}? The map is saved first. ${undoable}.`,
       "Apply", "Cancel");
     if (c !== "Apply") return;
@@ -154,10 +158,10 @@ function mapSize(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
       // progress shown: packing a big map takes a while, and nothing else says that something is happening.
       const r = await w3.window.withProgress(lost.length ? "Saving a checkpoint, then changing the map size" : "Changing the map size", async () => {
         // Without the Checkpoints extension it goes on, warned once a session, like the other checkpoint users.
-        if (lost.length) await checkpointOrStop(w3, "Shrinking the map");
-        return ed.resizeMap([...change], [...complements]);
+        if (lost.length) await checkpointOrStop(w3, shrink ? "Shrinking the map" : "Resizing the map");
+        return ed.resizeMap(ch, co);
       });
-      void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} outside the new map removed` : ""}.`);
+      void w3.window.showInfo(`Map size changed${r.removed ? `; ${r.removed} object${r.removed === 1 ? "" : "s"} removed` : ""}.`);
     } catch (e) {
       void w3.window.showError(`Map size: ${(e as Error).message ?? e}`);
     }
