@@ -9,12 +9,12 @@ import { CODE_EDITOR_SERVICE, type CodeEditorService, type CompletionItem, type 
 import { toArchiveName } from "../../lib/formats/archivepath";
 import { parseIni } from "../../lib/formats/text";
 import { loadKind } from "../../lib/objects/metadata";
+import { ABILITY_FUNC_FILES } from "../../lib/script/objects";
 import { parseSoundLabels, SOUND_INFO } from "../../lib/script/jass";
 
 /** At most this many items per list. */
 const MAX = 150;
 const MODELS = ["mdx", "mdl"], TEXTURES = ["blp", "dds", "tga", "png"], SOUNDS = ["wav", "mp3", "flac", "ogg"];
-const ABILITY_FUNC = ["Campaign", "Common", "Human", "Item", "Neutral", "NightElf", "Orc", "Undead"].map((r) => `Units\\${r}AbilityFunc.txt`);
 const KIND_LABELS: Record<string, string> = { w3u: "unit", w3a: "ability", w3t: "item", w3h: "buff", w3q: "upgrade", w3b: "destructable", w3d: "doodad" };
 
 /** What a parameter wants, from its name and type. */
@@ -71,7 +71,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // Basic commands aren't abilities; the rest comes from the abilities' order entries.
     const out = new Set<string>(["attack", "attackground", "attackonce", "move", "patrol", "holdposition", "stop", "smart", "harvest",
       "returnresources", "repair", "build", "cancel", "rally", "setrally", "dropitem", "getitem"]);
-    for (const f of ABILITY_FUNC) {
+    for (const f of ABILITY_FUNC_FILES) {
       for (const sec of parseIni(await w3.game.readText(f).catch(() => "")).values()) {
         for (const k of ["order", "orderon", "orderoff", "unorder"]) { const v = [...sec].find(([x]) => x.toLowerCase() === k)?.[1]; if (v) out.add(v); }
       }

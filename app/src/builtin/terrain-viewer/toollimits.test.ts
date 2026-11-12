@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { OUTSIDE_BOUNDS, insideBounds, pasteSkipText } from "./limits";
+import { OUTSIDE_BOUNDS, insideBounds, pasteSkipText, refusedOutsideText, stoppedAtBoundsText } from "./limits";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { WATER_LEVEL_MAX, WATER_LEVEL_MIN } from "../../lib/terrain/w3e";
 
@@ -47,4 +47,11 @@ test("with Enforce Water Height Limits on, a ground edit that pushes water to th
 test("with Enforce Water Height Limits off, the default, the edit goes through", () => {
   assert.equal(toolWaterRefusal(host(), before, after, [0, 1, 2]), null);
   assert.equal(toolWaterRefusal(host({ "terrain.enforceWaterLimits": false }), before, after, [0, 1, 2]), null);
+});
+
+test("the editor's camera-bounds warnings are built from OUTSIDE_BOUNDS", () => {
+  assert.equal(refusedOutsideText("that is"), `Not done: that is ${OUTSIDE_BOUNDS}.`);
+  assert.match(stoppedAtBoundsText(1), /^1 object stopped at the camera bounds/);
+  assert.match(stoppedAtBoundsText(3), /^3 objects stopped/);
+  assert.match(stoppedAtBoundsText(2), /turn off Enforce Camera Bounds/);
 });

@@ -19,7 +19,7 @@ import { checkLua } from "../../lib/lua/check";
 import { describeProblems, findSymbols } from "./scriptinfo";
 import { generateScript, parseSoundLabels, scriptSoundDurations, SOUND_INFO, type ScriptInput, type SoundLabel } from "../../lib/script/jass";
 import { dayNightModels } from "../../lib/script/setup";
-import { abilityOrders, autocastOrdersOf, buildingTypes, customColorTypes, customIdsOf, destructableTints, gameCustomColors, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
+import { ABILITY_FUNC_FILES, abilityOrders, autocastOrdersOf, buildingTypes, customColorTypes, customIdsOf, destructableTints, gameCustomColors, gameTeamColors, heroAbilities, scriptObjectFiles, specialUnits, teamColors, type AbilityOrders, type ObjectFile } from "../../lib/script/objects";
 import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
@@ -55,7 +55,6 @@ const VJASS_SOURCE = /^\s*(?:(?:private|public)\s+)?(?:library|scope|struct|modu
 const VJASS_OUTPUT = /^\/\/globals from \w+:|^constant boolean LIBRARY_\w+\s*=\s*true/m;
 
 /** Ability files with the orders that switch autocast on and off. */
-const ABILITY_FUNC = ["Campaign", "Common", "Human", "Item", "Neutral", "NightElf", "Orc", "Undead"].map((r) => `Units\\${r}AbilityFunc.txt`);
 
 /** UI\SoundInfo tables with the sound labels' settings, in the order the first match wins. */
 
@@ -91,7 +90,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     tables ??= (async () => {
       const text = (p: string) => w3.game.readText(p).catch(() => "");
       const balance = parseSlk(await text("Units\\UnitBalance.slk"));
-      const orders = abilityOrders(await Promise.all(ABILITY_FUNC.map(async (f) => parseIni(await text(f)))));
+      const orders = abilityOrders(await Promise.all(ABILITY_FUNC_FILES.map(async (f) => parseIni(await text(f)))));
       const abilityRows = parseSlk(await text("Units\\AbilityData.slk"));
       const unitUI = parseSlk(await text("Units\\unitUI.slk"));
       return {
