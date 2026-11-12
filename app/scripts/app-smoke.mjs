@@ -6614,6 +6614,62 @@ async function placerAndCampaign(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** The Campaign Editor's Background and Ambient Sound are named presets from the game: picking one stores its number
+ *  (the file as the World Editor keeps it), saved and reopened it shows the same preset; -1 is "Custom file". */
+async function campaignPresets(page, found) {
+  const fail = (what) => found.push(`campaign presets: ${what}`);
+  const camp = join(work, "campaign-presets");
+  rmSync(camp, { recursive: true, force: true });
+  await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Preset Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+  await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+  const w3f = "map/war3campaign.w3f.json";
+  const stored = () => JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8"));
+  const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Preset Campaign", difficulty: "Normal", author: "", description: "",
+    flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+    unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+  const writeInfo = (info) => page.evaluate(`(async () => {
+    const root = w3.workspace.project().root, path = ${JSON.stringify(w3f)};
+    await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(info))} }));
+    await w3.workspace.refresh();
+  })()`);
+  const select = (label) => `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === ${JSON.stringify(label)})?.querySelector("select")`;
+  const open = async () => {
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    await until("the preset dropdowns", () => page.evaluate(`!!(${select("Background")}) && !!(${select("Sound")})`), 20000);
+  };
+  try {
+    await writeInfo(campInfo);
+    await open().catch(() => fail("the Background and Sound fields are not dropdowns"));
+    const texts = (label) => page.evaluate(`[...(${select(label)}?.options ?? [])].map((o) => o.textContent)`);
+    const shown = (label) => page.evaluate(`(() => { const s = ${select(label)}; return s?.options[s.selectedIndex]?.textContent; })()`);
+    const bg = await texts("Background");
+    if (bg[0] !== "Custom file" || bg.length < 3) fail(`Background offers ${JSON.stringify(bg)}`);
+    if (await shown("Background") !== bg[3]) fail(`background 2 shows ${await shown("Background")}, the third preset is ${bg[3]}`);
+    // Pick another preset in both, save, reopen.
+    const pick = (label, index) => page.evaluate(`(() => { const s = ${select(label)}; s.selectedIndex = ${index}; s.dispatchEvent(new Event("change", { bubbles: true })); return s.options[${index}].textContent; })()`);
+    const bgName = await pick("Background", 2);
+    const soundName = await pick("Sound", 0);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    const info = stored();
+    if (info.background !== 1) fail(`the second preset stored background ${info.background}, not 1`);
+    if (info.ambientSound !== -1) fail(`Custom file stored sound ${info.ambientSound}, not -1`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await open();
+    if (await shown("Background") !== bgName) fail(`reopened, the background shows ${await shown("Background")}, not ${bgName}`);
+    if (await shown("Sound") !== soundName) fail(`reopened, the sound shows ${await shown("Sound")}, not ${soundName}`);
+    if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(w3f)})`)) fail("the reopened campaign is unsaved");
+    // A number that is no preset stays and is shown as such.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await writeInfo({ ...stored(), background: 77 });
+    await open();
+    if (await shown("Background") !== "Preset 77") fail(`background 77 shows ${await shown("Background")}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** A chapter map's campaign objects (war3campaign.w3u in the campaign project two folders up) outside the terrain view:
  *  the generated war3map.j has the colour only the campaign gives a unit; the chapter's Object Editor lists the campaign's
  *  objects with their names from war3campaign.wts, shows one to look at only (Delete leaves the files alone), and the
@@ -8489,6 +8545,7 @@ async function run() {
         artModeReload,
         byHand,
         cameraEditing,
+        campaignPresets,
         chapterObjects,
         configSafety,
         contextLoss,
@@ -8747,6 +8804,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "shouldHaves", found);
   await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
   await leftOpen(page, "placerAndCampaign", found);
+  await campaignPresets(page, found).catch((e) => found.push(`campaign presets: ${e.message}`));
+  await leftOpen(page, "campaignPresets", found);
   await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
   await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
