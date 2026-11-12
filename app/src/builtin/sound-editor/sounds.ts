@@ -1,5 +1,9 @@
 // Sound data helpers: game paths as maps refer to them, new entries the way
-// the World Editor writes them, and the game's sound labels (UI\SoundInfo).
+// the World Editor writes them, and the game's sound labels (UI\SoundInfo), and where a map uses its sounds.
+
+import { triggerRefs } from "../../lib/triggers/refs";
+import { customScriptParams } from "../../lib/triggers/rename";
+import type { TriggerFile } from "../../lib/triggers/wtg";
 
 /** A war3map.w3s entry (format definition "sounds", v3). */
 export interface Sound {
@@ -91,4 +95,80 @@ export function newSound(name: string, file: string, opts: { music?: boolean; im
   return { ...common, eaxEffect: "DefaultEAXON", flags: opts.imported ? IMPORTED : 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1,
     pitchVariance: 0, priority: 8, channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0,
     coneOutsideVolume: 0, coneOrientation: [0, 0, 0], assetLabel: "", assetFile: "" };
+}
+
+// ---- where the map's sounds are used ---------------------------------------------------
+
+/** One place that names a sound. */
+export interface SoundUse {
+  kind: "trigger" | "script" | "region";
+  /** A trigger's or region's name, or a script's file/part ("war3map.j", "Custom script header"). */
+  where: string;
+  /** The 1-based line in a script text. */
+  line?: number;
+}
+
+/** What names the map's sounds besides the sound list: the GUI triggers (parameters and Custom Script actions), script
+ *  texts (the map script, the custom script header and texts) and the regions' ambient sounds. */
+export interface SoundUsageInput {
+  triggers?: TriggerFile | null;
+  /** Script texts; `generated`: the map script as the generator writes it (its sound declarations and InitSounds
+   *  don't count as use). */
+  scripts?: { where: string; text: string | null; generated?: boolean }[];
+  regions?: { name: string; sound?: string }[];
+}
+
+/** The generator's own sound lines: the declarations (`sound gg_snd_X = null`, Lua `gg_snd_X = nil`) and the InitSounds
+ *  function, in JASS and Lua. Line numbers stay (the lines become empty). */
+export function withoutSoundSetup(text: string): string {
+  const lines = text.split("\n");
+  let inInit = false;
+  return lines.map((line) => {
+    if (inInit) { if (/^\s*(?:endfunction|end)\b/.test(line)) inInit = false; return ""; }
+    if (/^\s*function\s+InitSounds\b/.test(line)) { inInit = true; return ""; }
+    if (/^\s*(?:(?:sound|string)\s+)?gg_snd_\w+\s*(?:=\s*(?:null|nil))?\s*$/.test(line)) return "";
+    return line;
+  }).join("\n");
+}
+
+/** Where each sound of `names` (gg_snd_…) is used; every name has an entry, [] when it is unused. Names compare
+ *  without regard to case (GUI lookups do; a sound counted used by mistake only stays). A text that is null counts
+ *  as nothing. */
+export function soundUsages(names: readonly string[], input: SoundUsageInput): Map<string, SoundUse[]> {
+  const out = new Map<string, SoundUse[]>(names.map((n) => [n, []]));
+  const byLower = new Map<string, string[]>();
+  for (const n of names) { const k = n.toLowerCase(); byLower.set(k, [...(byLower.get(k) ?? []), n]); }
+  const add = (ref: string, use: SoundUse) => {
+    for (const n of byLower.get(ref.toLowerCase()) ?? []) {
+      const list = out.get(n)!;
+      if (!list.some((u) => u.kind === use.kind && u.where === use.where && u.line === use.line)) list.push(use);
+    }
+  };
+  const scan = (text: string | null, where: string, kind: SoundUse["kind"], lines: boolean) => {
+    if (!text) return;
+    const rows = lines ? text.split("\n") : [text];
+    rows.forEach((row, i) => { for (const m of row.matchAll(/(?<![A-Za-z0-9_])gg_snd_\w+/g)) add(m[0], lines ? { kind, where, line: i + 1 } : { kind, where }); });
+  };
+  const file = input.triggers;
+  if (file) {
+    for (const [ref, users] of triggerRefs(file)) if (ref.startsWith("gg_snd_")) for (const t of users) add(ref, { kind: "trigger", where: t });
+    for (const it of file.items) {
+      if (!("ecas" in it) || it.type === 16) continue;
+      for (const p of customScriptParams({ ...file, items: [it] })) scan(p.value, it.name, "trigger", false);
+    }
+  }
+  for (const s of input.scripts ?? []) scan(s.generated && s.text ? withoutSoundSetup(s.text) : s.text, s.where, "script", true);
+  for (const r of input.regions ?? []) if (r.sound) add(r.sound, { kind: "region", where: r.name });
+  return out;
+}
+
+/** The sounds of `names` that nothing uses. */
+export function unusedSounds(names: readonly string[], input: SoundUsageInput): string[] {
+  const used = soundUsages(names, input);
+  return names.filter((n) => !used.get(n)!.length);
+}
+
+/** A use as a line of text. */
+export function describeUse(u: SoundUse): string {
+  return u.kind === "trigger" ? `trigger ${u.where}` : u.kind === "region" ? `region ${u.where} (ambient sound)` : `${u.where}${u.line ? `, line ${u.line}` : ""}`;
 }

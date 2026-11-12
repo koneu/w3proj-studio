@@ -9,6 +9,8 @@
       { "id": "w3.sounds.open", "when": "project", "menu": "Module:1:4", "title": "Sound Editor", "category": "Module", "keybinding": "f8" },
       { "id": "w3.sounds.export", "when": "project", "title": "Export Sound…", "category": "Sound Editor" },
       { "id": "w3.sounds.replace", "when": "project", "title": "Replace Internal Sound…", "category": "Sound Editor" },
+      { "id": "w3.sounds.findUsages", "when": "project", "title": "Find Sound Usages…", "category": "Sound Editor" },
+      { "id": "w3.sounds.removeUnused", "when": "project", "title": "Remove Unused Sounds…", "category": "Sound Editor" },
       { "id": "w3.sounds.play", "title": "Sound Editor: Play Sound File", "category": "Sound Editor", "hidden": true },
       { "id": "w3.sounds.soundAction", "title": "Sound Editor: Rename or Delete a Sound", "category": "Sound Editor", "hidden": true }
     ],
