@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { isBackdrop } from "../../lib/terrain/area";
 import { generatePathing, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { heightAt, setGroundHeight, type Terrain } from "../../lib/terrain/w3e";
+import { planCliffs } from "./cliffs";
 import { groundSlot, roughenCorners, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, swapTiles, twinOf, whyNoRoom, withCliffTypes, type CliffKind } from "./aitools";
 
 const kinds: CliffKind[] = [{ cliffID: "CLdi", groundTile: "Ldrt" }, { cliffID: "CLgr", groundTile: "Lgrs" }, { cliffID: "CLro", groundTile: "Lrok" }];
@@ -299,11 +300,26 @@ test("in the pathing map a ramp can be walked up, and the cliff beside it can't"
     const w = (t.width - 1) * 4, p = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules: new Map() });
     // The middle cell of each tile along row 12 from tile 6 (low ground) to tile 8 (the top), and of tile (7, 10):
     // the ramp's flags run over corners 11..13, so that tile has two flagged corners and two not.
-    return { up: [6, 7, 8].map((x) => !(p[16 + (12 * 4 + 2) * w + x * 4 + 2] & NO_WALK)), side: !(p[16 + (10 * 4 + 2) * w + 7 * 4 + 2] & NO_WALK) };
+    // Tile (6, 10) is low ground beside the ramp's foot, taken in by the ramp side piece (rampSides).
+    const at = (x: number, y: number) => !(p[16 + (y * 4 + 2) * w + x * 4 + 2] & NO_WALK);
+    return { up: [6, 7, 8].map((x) => at(x, 12)), side: at(7, 10), foot: at(6, 10) };
   };
-  assert.deepEqual(walk(), { up: [true, false, true], side: false }, "the edge is a cliff");
+  assert.deepEqual(walk(), { up: [true, false, true], side: false, foot: true }, "the edge is a cliff");
   setRamp(t, 7.5 * 128, 12 * 128, 2, false);
-  assert.deepEqual(walk(), { up: [true, true, true], side: false }, "the ramp is walked up; the cliff further along stays");
+  assert.deepEqual(walk(), { up: [true, true, true], side: false, foot: false }, "the ramp is walked up; the cliff further along and its side piece stay");
+});
+
+test("the view draws a ramp's side pieces on the tiles the pathing map blocks beside it", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  setRamp(t, 7.5 * 128, 12 * 128, 2, false);
+  const types = new Map(kinds.map((k) => [k.cliffID, { ...k, cliffModelDir: "Cliffs", rampModelDir: "CliffTrans", texDir: "TerrainArt\\Cliffs", texFile: "Cliffs0" }]));
+  const tw = t.width - 1;
+  const sides = (exists: (path: string) => boolean) => planCliffs(t, types, exists).requests
+    .filter((r) => r.path.includes("CliffTrans")).flatMap((r) => r.tiles).sort((a, b) => a - b).map((i) => [i % tw, Math.floor(i / tw)]);
+  // The foot of the ramp at tiles (6, 10) and (6, 13), with the cliff tiles next to them.
+  assert.deepEqual(sides(() => true), [[6, 10], [7, 10], [6, 13], [7, 13]]);
+  assert.deepEqual(sides((p) => !p.includes("CliffTrans")), [], "no ramp models: ordinary cliffs");
 });
 
 test("a ramp where there's no cliff, or too high a one, says what it needs", () => {

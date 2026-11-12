@@ -31,6 +31,25 @@ test("a cliff tile with ramp flags on only some corners is blocked, as the World
   assert.deepEqual(tile(t, 0, 0), Array(16).fill(CLIFF));
 });
 
+test("a ramp's middle corners stand half a layer above shallow water, as on Snoware Bay's sunken ramps", () => {
+  // A ramp up the x axis over corners 0..2 (layer 2, 2, 3), all of it in water 40 deep by its stored heights.
+  const t = ground();
+  for (const k of t.corners) { k.hasWater = true; k.water = 40; }
+  for (let y = 0; y <= 2; y++) for (let x = 0; x <= 2; x++) { corner(t, x, y).ramp = true; if (x === 2) corner(t, x, y).layer = 3; }
+  // Tile (0, 0): the cells nearest corner x 1 (lifted 64, out of the water) are dry, those nearest x 0 are shore.
+  const row = tile(t, 0, 0).slice(0, 4);
+  assert.deepEqual(row, [NO_WATER | NO_BUILD, NO_WATER | NO_BUILD, NO_WATER, NO_WATER]);
+  assert.deepEqual(tile(t, 0, 0).slice(14, 16), [NO_WATER, NO_WATER], "the top row's cells nearest corner (1, 1)");
+  // A diagonal ramp (Ekrezem's Maze): corner (1, 1) has a ramp corner a layer up beside it too, and isn't lifted.
+  corner(t, 1, 2).layer = 3;
+  assert.deepEqual(tile(t, 0, 0).slice(14, 16), [NO_WATER | NO_BUILD, NO_WATER | NO_BUILD], "under water: shore");
+  corner(t, 1, 2).layer = 2;
+  // Control: without the ramp the whole tile is shallow water.
+  for (const k of t.corners) k.ramp = false;
+  for (let y = 0; y <= 2; y++) corner(t, 2, y).layer = 2;
+  assert.deepEqual(tile(t, 0, 0).slice(0, 4), Array(4).fill(NO_BUILD));
+});
+
 test("a tile with the ramp flag on all four corners across one layer is walkable; across two it is a cliff", () => {
   const t = ground();
   corner(t, 1, 0).layer = 3; corner(t, 1, 1).layer = 3;

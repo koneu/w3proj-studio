@@ -7,7 +7,8 @@
 // The rules below were worked out by comparing generated maps with the ones
 // World Editor saved for the sample maps.
 
-import type { Corner, Terrain } from "./w3e";
+import { rampLift, type Corner, type Terrain } from "./w3e";
+import { rampSides } from "./cliffs";
 
 export const NO_WALK = 0x02, NO_FLY = 0x04, NO_BUILD = 0x08, BLIGHT = 0x20, NO_WATER = 0x40, BLOCKED = 0x80;
 
@@ -44,7 +45,7 @@ export interface PathingInput {
 /** Water deeper than this (world units) can't be walked. */
 export const DEEP_WATER = 52;
 
-const depth = (k: Corner) => (k.hasWater ? k.water - k.height : -Infinity);
+const waterDepth = (k: Corner) => (k.hasWater ? k.water - k.height : -Infinity);
 
 /** Whether a tile (its four corners) is a cliff in the pathing map: its corners' layers differ, and it isn't a ramp.
  *  A ramp tile has the ramp flag on all four corners and spans one layer; a tile with only some corners flagged
@@ -69,6 +70,22 @@ export function generatePathing(input: PathingInput): Uint8Array {
   view.setUint32(12, h, true);
   const cells = out.subarray(16);
   const C = (x: number, y: number) => t.corners[y * t.width + x];
+  // A ramp side's tiles are cliff, the flat one it takes in beside the ramp's low end too (Mount Hyjal's ramps).
+  const sides = new Set(rampSides(t).flatMap((s) => s.tiles));
+  // A straight ramp's middle corners stand half a layer up (rampLift): the water over them is that much shallower
+  // (Snoware Bay). On a diagonal ramp, where a ramp corner beside one is a layer up, it stays (Ekrezem's Maze).
+  const lift = new Map<Corner, number>();
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < t.width && y < t.height ? C(x, y) : null);
+  for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+    const l = rampLift(t, x, y), k = C(x, y);
+    if (!l) continue;
+    // The axis the ramp climbs along: the one with a ramp corner a layer up.
+    const alongX = [at(x + 1, y), at(x - 1, y)].some((n) => n?.ramp && n.layer === k.layer + 1);
+    const across = alongX ? [at(x, y + 1), at(x, y - 1)] : [at(x + 1, y), at(x - 1, y)];
+    if (across.some((n) => n?.ramp && n.layer !== k.layer)) continue;
+    lift.set(k, l);
+  }
+  const depth = (k: Corner) => waterDepth(k) - (lift.get(k) ?? 0);
 
   for (let cy = 0; cy < h; cy++) {
     for (let cx = 0; cx < w; cx++) {
@@ -85,7 +102,7 @@ export function generatePathing(input: PathingInput): Uint8Array {
         if (!rule.flyable) p |= NO_FLY;
       }
       if (c.blight) p |= BLIGHT;
-      const cliff = isCliffTile(q);
+      const cliff = isCliffTile(q) || sides.has(ty * (t.width - 1) + tx);
       if (q.every((k) => depth(k) > 0) || depth(c) > deep) {
         // Water (the whole tile is under water) hides cliffs; unwalkable
         // ground stays dry but blocked.
