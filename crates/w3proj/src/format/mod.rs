@@ -565,6 +565,27 @@ mod w3i_tests {
         }
     }
 
+    /// Random objects by level in random groups and item tables ("YYU3" a level 3 creep, "YYB/" a neutral passive
+    /// building, "YiI2" a permanent level 2 item; the World Editor's own, app lib/objects/randomids.ts) are four
+    /// bytes like any id: the file comes back byte for byte, the JSON names them as written.
+    #[test]
+    fn random_level_ids_round_trip_byte_exact() {
+        let def = w3i();
+        let mut json = sample(31, true);
+        json["unitTables"] = json!([{ "number": 0, "name": "Probe", "positions": [0, 1, 2], "lines": [
+            { "chance": 60, "ids": ["YYU3", "YYB/", "YiI2"] },
+            { "chance": 40, "ids": ["YYU/", "0x00000000", "YYI:"] }
+        ] }]);
+        json["itemTables"] = json!([{ "number": 0, "name": "Loot", "sets": [[{ "chance": 100, "id": "YoI/" }]] }]);
+        let bin = encode(&def, &json).unwrap();
+        for id in [b"YYU3", b"YYB/", b"YiI2", b"YYU/", b"YYI:", b"YoI/"] {
+            assert!(bin.windows(4).any(|w| w == id), "{} written as its bytes", String::from_utf8_lossy(id));
+        }
+        let back = decode(&def, &bin).unwrap().value;
+        assert_eq!(back, json);
+        assert_eq!(encode(&def, &back).unwrap(), bin);
+    }
+
     #[test]
     fn unsupported_versions_are_rejected() {
         let mut json = sample(31, true);

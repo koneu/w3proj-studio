@@ -97,6 +97,47 @@
   ],
   "upgrades": [],
   "techs": [],
-  "unitTables": [],
-  "itemTables": []
+  "unitTables": [
+    {
+      "number": 0,
+      "name": "Random levels",
+      "positions": [
+        0,
+        1,
+        2
+      ],
+      "lines": [
+        {
+          "chance": 60,
+          "ids": [
+            "YYU3",
+            "YYB/",
+            "YiI2"
+          ]
+        },
+        {
+          "chance": 40,
+          "ids": [
+            "YYU/",
+            "0x00000000",
+            "YYI:"
+          ]
+        }
+      ]
+    }
+  ],
+  "itemTables": [
+    {
+      "number": 0,
+      "name": "Random loot",
+      "sets": [
+        [
+          {
+            "chance": 100,
+            "id": "YoI/"
+          }
+        ]
+      ]
+    }
+  ]
 }
