@@ -15,6 +15,7 @@ import { findCampaign, readCampaignObjects } from "../../lib/objects/campaign";
 import { isNotFoundError } from "../../lib/oserror";
 import { joinPath } from "../../lib/paths";
 import { mergeSkin } from "./w3o";
+import { withLists } from "./skin";
 import type { EditFile } from "./objectedit";
 
 const KIND_LABELS: Record<string, string> = {
@@ -59,9 +60,14 @@ function entriesOf(kind: string, kd: KindData, objects: RawObject[], wts: string
  *  war3map.wts), then, for a chapter map, its campaign's that the map doesn't have itself (war3campaign.<kind> with its
  *  Skin file, names through war3campaign.wts): the chapter can use those as its own. */
 async function customObjects(w3: W3Api, kind: string, kd: KindData): Promise<CustomEntry[]> {
-  const path = w3.workspace.files().find((f) => f.path.toLowerCase() === `map/war3map.${kind}.json`)?.path;
-  const own = path ? entriesOf(kind, kd, (JSON.parse(await w3.workspace.readText(path)) as { custom?: RawObject[] }).custom ?? [],
-    await w3.workspace.readText("map/war3map.wts").catch(() => null), false) : [];
+  // With the Skin file's fields (names, icons), its values winning, as the World Editor shows them (skin.ts).
+  const read = async (name: string) => {
+    const path = w3.workspace.files().find((f) => f.path.toLowerCase() === `map/${name}.${kind}.json`.toLowerCase())?.path;
+    return path ? withLists(JSON.parse(await w3.workspace.readText(path)) as EditFile) : null;
+  };
+  const [main, skin] = await Promise.all([read("war3map"), read("war3mapSkin")]);
+  const merged = main || skin ? mergeSkin(main ?? { format: "w3proj.objects/1", version: skin!.version, original: [], custom: [] }, skin, { addSkinOnly: true }) : null;
+  const own = merged ? entriesOf(kind, kd, merged.custom as RawObject[], await w3.workspace.readText("map/war3map.wts").catch(() => null), false) : [];
   // The campaign's are only offered: one that can't be read leaves them out, not the map's own.
   const campaign = await campaignObjects(w3, kind).catch(() => null);
   if (!campaign) return own;

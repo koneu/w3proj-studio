@@ -27,6 +27,9 @@ export interface Live {
   ext: string;
   file: { version: number; custom: CopyObject[]; original: CopyObject[] };
   text?: (value: string) => string | null;
+  /** The objects hold their Skin file's fields already (the Object Editor's do): the one on disk isn't merged in
+   *  again, its values would win over unsaved edits. */
+  skinMerged?: boolean;
 }
 
 /** What the open map has, for the rules. */
@@ -95,7 +98,7 @@ export async function viewMap(w3: W3Api, live?: Live, root = w3.workspace.projec
   for (const ext of ALL_EXTS) {
     for (const id of data.get(ext)!.baseIds) { game.add(id); idKinds.set(id, ext); }
     const main = live?.ext === ext ? (live.file as EditFile) : await readDoc<EditFile>(w3, root, `map/war3map.${ext}.json`);
-    const skin = await readDoc<EditFile>(w3, root, `map/war3mapSkin.${ext}.json`);
+    const skin = live?.ext === ext && live.skinMerged ? null : await readDoc<EditFile>(w3, root, `map/war3mapSkin.${ext}.json`);
     for (const f of [main, skin]) if (f && !Array.isArray(f.custom)) throw new Error(`The ${LABELS[ext].toLowerCase()} data of this map isn't in the shape the editor writes, so it can't be pasted into.`);
     const both = mergeSkin(main ?? emptyFile(skin?.version), skin, { addSkinOnly: true });
     versions.set(ext, main?.version ?? skin?.version ?? 3);
@@ -140,7 +143,7 @@ export async function gatherAlong(w3: W3Api, chosen: Copied[], live?: Live, root
 /** What a copy holds: the objects with the fields their Skin file has for them (names, art and models are
  *  there in Reforged maps), and what they refer to. Throws, saying why, when the map can't be read. */
 export async function prepareCopy(w3: W3Api, ext: string, objects: CopyObject[], live: Live, root = w3.workspace.project()?.root ?? ""): Promise<{ objects: CopyObject[]; along: Copied[] }> {
-  const skin = await readDoc<EditFile>(w3, root, `map/war3mapSkin.${ext}.json`);
+  const skin = live.skinMerged ? null : await readDoc<EditFile>(w3, root, `map/war3mapSkin.${ext}.json`);
   const withSkin = objects.map((o) => {
     const one = { ...emptyFile(live.file.version), ...(o.id ? { custom: [o as EditObject] } : { original: [o as EditObject] }) };
     const m = mergeSkin(one, skin, { addSkinOnly: false });

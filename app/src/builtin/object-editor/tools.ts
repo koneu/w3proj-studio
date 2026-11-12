@@ -17,9 +17,13 @@ import { isNotFoundError } from "../../lib/oserror";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { parseWct, parseWctText, readWtgFile, textTriggers, WCT_RAW, WCT_TEXT, wtgPath, type CustomTextFile, type TriggerFile } from "../../lib/triggers/wtg";
-import { addCustomObject, fieldLevel, fieldValue, NEGATIVE_REALS_SETTING, objectToEdit, removeObject, setObjectField, type EditFile } from "./objectedit";
+import { addCustomObject, fieldLevel, fieldValue, NEGATIVE_REALS_SETTING, objectToEdit, rawOnlySkin, removeObject, setObjectField, type EditFile } from "./objectedit";
 import { changedFields, gameFields, gameObjectList, mapObjectList, modelPacks, OBJECT_KINDS, objectName, type MapObject, type MapObjects } from "./objectinfo";
 import { campaignObjects, stripColors } from "./service";
+import { isSkinField, listedPath, skinChanged, skinWritable, splitSkin, withLists } from "./skin";
+import { mergeSkin } from "./w3o";
+
+const FORMAT = "w3proj.objects/1";
 
 /** Whether a project (its files) is a campaign: it has war3campaign.w3f, as the Campaign Editor decides. */
 export const isCampaignFiles = (files: readonly { path: string }[]) => files.some((f) => /^map\/war3campaign\.w3f(\.json)?$/i.test(f.path.replace(/\\/g, "/")));
@@ -166,11 +170,13 @@ export function registerObjectTools(w3: W3Api, ctx: ExtensionContext, deps: Obje
     requireProject(w3);
     const kind = kindOf(name);
     const prefix = objectPrefix(w3);
-    const [data, file, resolve, campaign] = await Promise.all([
-      deps.loadKind(kind), readMapDocStrict<MapObjects>(w3, `map/${prefix}.${kind}.json`), mapStrings(w3, `map/${prefix}.wts`),
-      prefix === "war3map" ? campaignOf(kind) : Promise.resolve(null),
+    const [data, main, skin, resolve, campaign] = await Promise.all([
+      deps.loadKind(kind), readMapDocStrict<EditFile>(w3, `map/${prefix}.${kind}.json`), readMapDocStrict<EditFile>(w3, `map/${prefix}Skin.${kind}.json`),
+      mapStrings(w3, `map/${prefix}.wts`), prefix === "war3map" ? campaignOf(kind) : Promise.resolve(null),
     ]);
-    return { kind, data, file: file ?? {}, resolve, campaign };
+    // With the Skin file's fields (names, art), its values winning, as the World Editor shows them (skin.ts).
+    const file: MapObjects = main || skin ? mergeSkin(withLists(main ?? { format: FORMAT, version: skin!.version, original: [], custom: [] }), skin && withLists(skin), { addSkinOnly: true }) as MapObjects : {};
+    return { kind, data, file, resolve, campaign };
   };
   const inCampaign = (kind: string, id: string, what: string) =>
     `${id} is ${what} of the campaign (war3campaign.${kind}), which every chapter map has. It's changed in the campaign project: open that in W3Proj Studio.`;
@@ -215,15 +221,34 @@ export function registerObjectTools(w3: W3Api, ctx: ExtensionContext, deps: Obje
       deps.loadKind(kind), w3.services.get<McpEditsService>(MCP_EDITS_SERVICE),
       prefix === "war3map" ? campaignOf(kind).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e)))) : Promise.resolve(null),
     ]);
+    // The Skin file: changed through `read` as text; kept raw, it is read through its codec and can't be changed.
+    const paths = w3.workspace.files().map((f) => f.path);
+    const skinPath = listedPath(paths, `map/${prefix}Skin.${kind}.json`);
+    const rawSkin = rawOnlySkin(paths, kind, prefix);
+    const raw = rawSkin ? await readMapDocStrict<EditFile>(w3, skinPath) : null;
     return edits.edit(title, async (read) => {
       // Which file, and the campaign's objects, were the project's then: another one opened meanwhile isn't edited.
       if (w3.workspace.project()?.root !== root) throw new Error("Another project was opened meanwhile; nothing was changed.");
       const text = await read(path);
-      const file: EditFile = text === null ? await deps.emptyFile() : JSON.parse(text);
+      const main: EditFile | null = text === null ? null : JSON.parse(text);
+      const skinText = rawSkin ? null : await read(skinPath);
+      const skin: EditFile | null = rawSkin ? raw : skinText === null ? null : JSON.parse(skinText);
+      // The objects as the World Editor shows them, the Skin file's fields in them; split again below (skin.ts).
+      const file = mergeSkin(main ? withLists(main) : { ...(await deps.emptyFile()), ...(skin ? { version: skin.version } : {}) }, skin && withLists(skin), { addSkinOnly: true });
       await change(file, kind, data, campaign);
-      const tidy = { ...file, original: file.original.filter((o) => (o.sets ?? [{ mods: o.mods ?? [] }]).some((s) => s.mods.length)) };
+      const split = splitSkin(file, main && withLists(main), skin && withLists(skin), {
+        toSkin: (field) => isSkinField(data.fieldById.get(field)),
+        skinWritable: skinWritable(file.version, rawSkin ? "raw" : skin ? "json" : "none"),
+      });
+      const tidy = { ...split.main, original: split.main.original.filter((o) => (o.sets ?? [{ mods: o.mods ?? [] }]).some((s) => s.mods.length)) };
       // Encodes it too: what can't be packed doesn't get written.
-      return [{ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(tidy) }) }];
+      const out = [{ path, text: await w3.backend.invoke<string>("objects_canonicalize", { name: path, text: JSON.stringify(tidy) }) }];
+      if (skinChanged(skin && withLists(skin), split.skin)) {
+        if (rawSkin) throw new Error(`${prefix}Skin.${kind} is kept raw in this project and holds fields of what was changed, so it can't be changed here. Nothing was changed.`);
+        // Written first: a field moving into it is never missing from both files.
+        out.unshift({ path: skinPath, text: await w3.backend.invoke<string>("objects_canonicalize", { name: skinPath, text: JSON.stringify(split.skin) }) });
+      }
+      return out;
     });
   };
   /** Fails, saying why, when `id` is the campaign's and not the map's (the map would change nothing of it). */

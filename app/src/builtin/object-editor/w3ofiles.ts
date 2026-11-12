@@ -41,11 +41,12 @@ export async function exportAllObjectData(w3: W3Api): Promise<string | null> {
   return path;
 }
 
-/** The chosen objects of one kind, as a .w3o of their own. `file` is the editor's file, `text` its string lookup. */
-export async function exportObjects(w3: W3Api, kind: string, file: EditFile, objects: EditObject[], text: (value: string) => string | null): Promise<string | null> {
+/** The chosen objects of one kind, as a .w3o of their own. `file` is the editor's file, `text` its string lookup.
+ *  `skinMerged`: the objects hold their Skin file's fields already (the Object Editor's do). */
+export async function exportObjects(w3: W3Api, kind: string, file: EditFile, objects: EditObject[], text: (value: string) => string | null, opts: { skinMerged?: boolean } = {}): Promise<string | null> {
   if (!objects.length) throw new Error("Select an object first.");
   // Their fields in the Skin file (names, models, art) go along; objects only the Skin file has are not chosen.
-  const skin = await readMapDocStrict<EditFile>(w3, `map/war3mapSkin.${kind}.json`);
+  const skin = opts.skinMerged ? null : await readMapDocStrict<EditFile>(w3, `map/war3mapSkin.${kind}.json`);
   const chosen = withOwnTexts(mergeSkin(onlyObjects(file, objects), skin, { addSkinOnly: false }), text);
   const single = objects.length === 1 ? (objects[0].id ?? objects[0].base) : `${objects.length} ${KIND_NAMES[kind] ?? kind}`;
   const target = await w3.window.pickSaveFile({ title: objects.length === 1 ? "Export Object" : "Export Objects", defaultPath: `${single}.w3o`, filters: WE_FILTER });

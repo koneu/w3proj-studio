@@ -21,10 +21,11 @@ import { ModelPreview } from "../../lib/model/preview";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
-import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, type EditFile, type EditObject } from "./objectedit";
+import { answerHolds, signature, summary, summaryTypes, writeInto, mergeObjects, autoFillText, autoFill, copyOf, negativeRefused, NEGATIVE_REALS_SETTING, pastedObject, rawOnlySkin, type EditFile, type EditObject } from "./objectedit";
 import { referencedBy, type Copied } from "../../lib/objects/copydeps";
 import { applyPlan, prepareCopy, settle, settleEditors, viewMap } from "./copyalong";
 import { isCampaignFiles, registerObjectTools } from "./tools";
+import { isSkinField, listedPath, skinChanged, skinPathOf, skinWritable, splitSkin, withLists } from "./skin";
 
 // Mirrors w3proj::objdata's JSON (format "w3proj.objects/1").
 interface Mod { field: string; type: ValueType; level?: number; data?: number; value: number | string; end?: string }
@@ -266,9 +267,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       async resolve(el, doc) {
         const exists = () => w3.workspace.files().some((f) => f.path.toLowerCase() === doc.path.toLowerCase());
         const isNew = !exists();
-        const file: ObjectFile = isNew ? await emptyFile(w3) : JSON.parse(await doc.readText());
-        if (file.format !== FORMAT) throw new Error(`unsupported format ${file.format}`);
+        const mainRead: ObjectFile = isNew ? await emptyFile(w3) : JSON.parse(await doc.readText());
+        if (mainRead.format !== FORMAT) throw new Error(`unsupported format ${mainRead.format}`);
         const kind = doc.path.replace(/\.json$/, "").split(".").pop()!.toLowerCase();
+        // The Skin file's fields (names, art, models) are shown and edited with the rest, its values winning, and a
+        // save puts each field back where the World Editor keeps it (skin.ts). One that is there but can't be read
+        // stops the editor: taken for empty, its fields would be missing here and its values could be overwritten.
+        const paths = w3.workspace.files().map((f) => f.path);
+        const skinPath = listedPath(paths, skinPathOf(doc.path));
+        const rawSkin = rawOnlySkin(paths, kind, /war3campaign\./i.test(doc.path) ? "war3campaign" : "war3map");
+        const skinRead = skinPath === doc.path ? null : await readMapDocStrict<EditFile>(w3, skinPath);
+        /** The two files as they are on disk (after the last save here): a save splits against them. */
+        let savedMain: EditFile | null = isNew ? null : withLists(structuredClone(mainRead) as unknown as EditFile);
+        let savedSkin: EditFile | null = skinRead && withLists(skinRead);
+        const file = mergeSkin(withLists(mainRead as unknown as EditFile), savedSkin, { addSkinOnly: true }) as unknown as ObjectFile;
         const kindInfo = KINDS.find((k) => k.ext === kind);
         const optInts = OPT_INTS.has(kind);
 
@@ -536,7 +548,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
           const objects = [...selection].map((o) => copyOf(o as EditObject, text) as Obj);
           // The copy is made from the editor as it is now, and finished while the user goes on.
-          const live = { ext: kind, file: { version: file.version, custom: structuredClone(file.custom), original: structuredClone(file.original) }, text };
+          const live = { ext: kind, file: { version: file.version, custom: structuredClone(file.custom), original: structuredClone(file.original) }, text, skinMerged: true };
           const ready = prepareCopy(w3, kind, objects, live, w3.workspace.project()?.root) as Promise<{ objects: Obj[]; along: Copied[] }>;
           ready.catch((e) => void w3.window.showError(`Copying: ${(e as Error).message ?? e} Pasting this copy will not work.`));
           clipboard[kind] = { count: objects.length, ready };
@@ -559,7 +571,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             try {
               // The plan reads every kind's saved data: other editors' unsaved changes are saved first.
               if (!(await settleEditors(w3, doc.path)) || !here()) return;
-              const settled = await settle(w3, { chosen, along }, label, { ext: kind, file, text: resolveStr }, true, here);
+              const settled = await settle(w3, { chosen, along }, label, { ext: kind, file, text: resolveStr, skinMerged: true }, true, here);
               if (!settled) return;
               const plan = settled.plan;
               if (plan.writes.some((x) => x.ext !== kind || x.overwrites)) {
@@ -1342,18 +1354,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!path) return;
           // Its own texts: references to this map's string table mean nothing in another.
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          // The fields the map keeps in its Skin file (names, models, art) belong in the exported file. All objects
-          // are exported here, so the Skin file's own entries come along; Export Object takes the chosen ones only.
-          const skinPath = doc.path.replace(/(war3map|war3campaign)(\.w3[utabdhq]\.json)$/i, "$1Skin$2");
-          const merged = mergeSkin(file as unknown as EditFile, await readMapDocStrict<EditFile>(w3, skinPath), { addSkinOnly: true }) as unknown as ObjectFile;
-          const own = { ...merged, custom: merged.custom.map((o) => copyOf(o as EditObject, text)), original: merged.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
+          // The fields the map keeps in its Skin file (names, models, art) belong in the exported file: the editor
+          // holds them with the rest, the Skin file's own objects too.
+          const own = { ...file, custom: file.custom.map((o) => copyOf(o as EditObject, text)), original: file.original.filter(hasMods).map((o) => copyOf(o as EditObject, text)) };
           await w3.backend.invoke("objects_export", { name: `war3map.${kind}`, text: JSON.stringify(own), path });
           void w3.window.showInfo(`Exported ${own.custom.length} custom and ${own.original.length} changed objects.`);
         };
         /** The selected objects as a .w3o of their own. */
         const exportSelection = async () => {
           const text = (v: string) => { const ref = trigRef(v); return ref === null ? null : wts.table.get(ref) ?? null; };
-          await exportObjects(w3, kind, file as unknown as EditFile, [...selection] as unknown as EditObject[], text);
+          await exportObjects(w3, kind, file as unknown as EditFile, [...selection] as unknown as EditObject[], text, { skinMerged: true });
         };
         const importFile = async () => {
           const path = await w3.window.pickFile({ title: `Import ${kindInfo?.label ?? kind}`, filters: [{ name: `${kindInfo?.label ?? kind} (.${kind})`, extensions: [kind] }] });
@@ -1479,10 +1489,40 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // The backend encodes the JSON to binary (validating it) and returns
             // it in canonical formatting, so diffs stay minimal.
             let result: { shown: boolean; recreated: boolean } | undefined;
+            /** What the save splits off into the Skin file: its text when that changed, and the files split. */
+            let split: { main: EditFile; skin: EditFile | null; skinText: string | null } | null = null;
+            const fieldsKnown = kd ?? await loadKind(w3, kind).catch(() => null);
             await runSave({
               serialize,
-              canonicalize: (text) => w3.backend.invoke<string>("objects_canonicalize", { name: doc.path, text }),
-              write: (text) => doc.writeText(text),
+              // Both files are encoded (and so checked) before either is written.
+              canonicalize: async (text) => {
+                const parts = splitSkin(JSON.parse(text) as EditFile, savedMain, savedSkin, {
+                  toSkin: (field) => (fieldsKnown ? isSkinField(fieldsKnown.fieldById.get(field)) : undefined),
+                  // A file of another name has no Skin file: nothing goes to one.
+                  skinWritable: skinPath !== doc.path && skinWritable(file.version, rawSkin ? "raw" : savedSkin ? "json" : "none"),
+                });
+                let skinText: string | null = null;
+                if (skinChanged(savedSkin, parts.skin)) {
+                  if (rawSkin) throw new Error(`${skinPath.slice(4).replace(/\.json$/, "")} is kept raw in this project and holds fields of what was changed, so it can't be saved here.`);
+                  skinText = await w3.backend.invoke<string>("objects_canonicalize", { name: skinPath, text: JSON.stringify(parts.skin) });
+                }
+                split = { ...parts, skinText };
+                return w3.backend.invoke<string>("objects_canonicalize", { name: doc.path, text: JSON.stringify(parts.main) });
+              },
+              write: async (text) => {
+                const s = split!;
+                // The Skin file first: a field moving into it is never missing from both files on disk.
+                if (s.skinText !== null) {
+                  // Written by its project path: into another project opened meanwhile it must not go.
+                  if (w3.workspace.project()?.root !== root) throw new Error("Another project was opened meanwhile; nothing was saved.");
+                  const created = !w3.workspace.files().some((f) => f.path.toLowerCase() === skinPath.toLowerCase());
+                  await w3.workspace.writeText(skinPath, s.skinText);
+                  savedSkin = s.skin;
+                  if (created) await w3.workspace.refresh();
+                }
+                await doc.writeText(text);
+                savedMain = s.main;
+              },
               afterWrite: async () => {
                 if (isNew && !exists()) await w3.workspace.refresh();
                 // Edited strings go to war3map.wts (war3campaign.wts), merged onto the file as it is now (other editors
@@ -1534,7 +1574,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             // Closed: the saved file is what there is again.
             if (liveData.get(doc.path)?.data === liveNow) { liveData.delete(doc.path); edits.fire(kind); }
           },
-          watches: [WTS],
+          watches: [WTS, skinPath],
         };
       },
     }),

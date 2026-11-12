@@ -10,8 +10,9 @@ import { describeUses, registerObjectTools, scriptLines } from "./tools";
 
 const objects = (custom: object[], original: object[] = []) => JSON.stringify({ format: "w3proj.objects/1", version: 3, original, custom });
 const mod = (field: string, value: unknown, type = "int") => ({ field, type, value });
-const field = (id: string, valueType: string): FieldMeta => ({ id, label: id, valueType, repeat: 0, data: 0 }) as FieldMeta;
-const FIELDS = [field("unam", "string"), field("uhpm", "int"), field("uabi", "string")];
+const field = (id: string, valueType: string, netsafe = "0"): FieldMeta => ({ id, label: id, valueType, repeat: 0, data: 0, use: { netsafe } }) as unknown as FieldMeta;
+/** The name is a field of the Skin file (UnitMetaData's netsafe column), the others of the main file. */
+const FIELDS = [field("unam", "string", "1"), field("uhpm", "int"), field("uabi", "string"), field("uico", "string", "1")];
 
 /** The game's tables of a kind: units hfoo and hbar, nothing of other kinds. */
 function kindData(kind: string): KindData {
@@ -180,6 +181,44 @@ test("a project opened while an edit waited isn't edited with the old project's 
   await assert.rejects(p.call("create_object", { kind: "units", base: "hfoo" }), /Another project was opened meanwhile/);
   assert.equal(Object.keys(p.files).some((f) => f.startsWith(`${CHAPTER}/map/war3campaign`)), false);
   assert.equal(p.files[`${CAMP}/map/war3campaign.w3u.json`], before);
+});
+
+test("the tools show the Skin file's name and write a name where the World Editor does: into war3mapSkin.w3u", async () => {
+  // As "Firebrand Exarchate Race" has its hero: the name, model and icon only in the Skin file, plus a name in the
+  // main file the Skin file's hides (the World Editor shows and keeps "Infernal Keeper": we-drive, 2026-11-12).
+  const M = "/fb";
+  const main = objects([{ id: "FXik", base: "hfoo", mods: [mod("uabi", "AInv", "string"), mod("unam", "MainKeeper", "string")] }]);
+  const skin = objects([{ id: "FXik", base: "hfoo", mods: [mod("unam", "TRIGSTR_050", "string"), mod("uico", "BTNInfernal Keeper Icon.dds", "string")] }]);
+  const p = project(M, { [`${M}/map/war3map.w3u.json`]: main, [`${M}/map/war3mapSkin.w3u.json`]: skin, [`${M}/map/war3map.wts`]: "STRING 50\r\n{\r\nInfernal Keeper\r\n}\r\n" });
+  const got = await p.call("get_object", { kind: "units", id: "FXik" }) as { name: string; changes: { field: string; value: unknown }[] };
+  assert.equal(got.name, "Infernal Keeper");
+  const listed = await p.call("list_objects", { kind: "units", filter: "infernal" }) as { items: { id: string; name: string }[] };
+  assert.deepEqual(listed.items.map((o) => [o.id, o.name]), [["FXik", "Infernal Keeper"]]);
+  // Hit points go to the main file; the Skin file isn't written at all.
+  await p.call("set_object_fields", { kind: "units", id: "FXik", changes: [{ field: "uhpm", value: 900 }] });
+  assert.equal(p.files[`${M}/map/war3mapSkin.w3u.json`], skin, "unchanged: not written");
+  assert.deepEqual(p.doc("map/war3map.w3u.json").custom[0].mods.map((m: { field: string }) => m.field), ["uabi", "unam", "uhpm"]);
+  // A new name goes to the Skin file and takes the hidden one out of the main file.
+  await p.call("set_object_fields", { kind: "units", id: "FXik", changes: [{ field: "unam", value: "Renamed" }] });
+  assert.deepEqual(p.doc("map/war3mapSkin.w3u.json").custom[0].mods.map((m: { field: string; value: unknown }) => [m.field, m.value]), [["unam", "Renamed"], ["uico", "BTNInfernal Keeper Icon.dds"]]);
+  assert.deepEqual(p.doc("map/war3map.w3u.json").custom[0].mods.map((m: { field: string }) => m.field), ["uabi", "uhpm"]);
+  // A new object's name goes to the Skin file too (made, as the World Editor's save makes it, next to a version-3 file).
+  const { id } = await p.call("create_object", { kind: "units", base: "hfoo", name: "Squire" }) as { id: string };
+  assert.deepEqual(p.doc("map/war3mapSkin.w3u.json").custom[1], { base: "hfoo", id, mods: [{ field: "unam", type: "string", value: "Squire" }] });
+  assert.deepEqual(p.doc("map/war3map.w3u.json").custom[1], { base: "hfoo", id, mods: [] });
+  // Deleted: gone from both.
+  await p.call("delete_object", { kind: "units", id: "FXik" });
+  assert.deepEqual([p.doc("map/war3map.w3u.json").custom.length, p.doc("map/war3mapSkin.w3u.json").custom.length], [1, 1]);
+});
+
+test("a Skin file that is there but can't be read stops the tools instead of passing for empty", async () => {
+  const M = "/fb";
+  const main = objects([{ id: "h000", base: "hfoo", mods: [] }]);
+  const p = project(M, { [`${M}/map/war3map.w3u.json`]: main, [`${M}/map/war3mapSkin.w3u.json`]: "{ broken" });
+  await assert.rejects(p.call("get_object", { kind: "units", id: "h000" }), /war3mapSkin\.w3u\.json is there but can't be read/);
+  await assert.rejects(p.call("set_object_fields", { kind: "units", id: "h000", changes: [{ field: "unam", value: "X" }] }));
+  assert.equal(p.files[`${M}/map/war3map.w3u.json`], main);
+  assert.equal(p.files[`${M}/map/war3mapSkin.w3u.json`], "{ broken");
 });
 
 test("script lines: rawcodes and FourCC strings, whole ids only", () => {

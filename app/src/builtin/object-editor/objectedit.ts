@@ -163,10 +163,12 @@ export function answerHolds(targets: ReadonlyMap<string, string>, now: (id: stri
   return [...targets].every(([id, sig]) => signature(now(id)) === sig);
 }
 
-/** Whether a project (its file paths) keeps a kind's Skin file raw only: it can't be changed as text. */
-export function rawOnlySkin(paths: readonly string[], ext: string): boolean {
+/** Whether a project (its file paths) keeps a kind's Skin file raw only: it can't be changed as text. `prefix`: a
+ *  campaign's are war3campaignSkin.*. */
+export function rawOnlySkin(paths: readonly string[], ext: string, prefix = "war3map"): boolean {
   const files = new Set(paths.map((p) => p.toLowerCase()));
-  return !files.has(`map/war3mapskin.${ext}.json`) && files.has(`map/war3mapskin.${ext}`);
+  const name = `map/${prefix.toLowerCase()}skin.${ext}`;
+  return !files.has(`${name}.json`) && files.has(name);
 }
 
 /** "B000: 2 objects, 1 placed"; `placed` null when the placements couldn't be read. */
