@@ -11,6 +11,7 @@ import { neverStoredLast } from "../../lib/model/texpath";
 import { createTexture, drawnTextures } from "../../lib/model/gltexture";
 import { placeholderImage, placeholderModel } from "../../lib/model/placeholder";
 import { worldSphere } from "../../lib/model/frustum";
+import { skinTextures } from "../../lib/model/replaceable";
 import { bounds, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { artValue } from "../../lib/objects/artset";
@@ -310,13 +311,6 @@ export function withObjectArt(skins: Map<string, Skin>, files: ObjectArt[]): Map
     }
   }
   return out;
-}
-
-/** The skin's replaceable texture. Destructable skins give the extension
- *  (ReplaceableTextures\Cliff\Cliff1.blp), doodad skins don't. */
-function skinTextures(skin: Skin): Record<number, string> {
-  if (!(skin.texId > 0 && skin.texFile)) return {};
-  return { [skin.texId]: /\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp` };
 }
 
 /** Model path of one placed object: variations are numbered files. */

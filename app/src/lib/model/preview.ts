@@ -25,6 +25,9 @@ export class ModelPreview {
   private drag: number | null = null;
   /** Bumped by every show and setPrefer: a load that finishes under an older number is dropped. */
   private token = 0;
+  /** The player colour of the team colour / glow textures (TEAM_COLORS index), and the type's replaceable textures. */
+  private team = 0;
+  private replaceable: Record<number, string> = {};
 
   /** `exact`: the path is a file of the map, shown as it is (an imported .mdl is MDL text, not the game's .mdx). */
   constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd"; exact?: boolean; onFail?: (e: unknown) => void } = {}) {
@@ -47,6 +50,31 @@ export class ModelPreview {
     this.renderer?.dispose();
     this.renderer = null;
   }
+
+  /** The player colour (TEAM_COLORS index) the team colour and glow textures show; applies at once. */
+  setTeamColor(index: number) {
+    this.team = index;
+    this.renderer?.setTeamColor(index);
+    this.publish();
+  }
+
+  /** The textures replaceable ids show (id → path; others as the game's table has them). A model shown has them
+   *  re-read; the next `show` uses them. */
+  setReplaceable(replaceable: Record<number, string>) {
+    if (JSON.stringify(replaceable) === JSON.stringify(this.replaceable)) return;
+    this.replaceable = { ...replaceable };
+    const r = this.renderer;
+    if (r) this.loadTextures(r);
+    this.publish();
+  }
+
+  /** What the preview shows: for a hook to look at. `textures` are the paths being read for the model's textures. */
+  state() {
+    return { path: this.path, team: this.team, replaceable: { ...this.replaceable }, textures: this.renderer?.texturePaths(this.replaceable) ?? [], ready: !!this.renderer && this.note.textContent === "" };
+  }
+
+  /** Puts state() on the element (data-state) for tests and tools to read. */
+  private publish() { this.el.dataset.state = JSON.stringify(this.state()); }
 
   private newCanvas(): HTMLCanvasElement {
     const c = document.createElement("canvas");
@@ -73,6 +101,7 @@ export class ModelPreview {
     this.renderer = null;
     this.note.textContent = mdx ? "Loading…" : "No model";
     this.note.title = mdx ?? "";
+    this.publish();
     if (!mdx) return;
     void this.load(mdx, token).catch((e) => {
       if (this.token !== token) return;
@@ -112,14 +141,24 @@ export class ModelPreview {
     this.renderer?.dispose();
     const r = new ModelRenderer(canvas, model);
     r.showGrid = false;
+    r.setTeamColor(this.team);
     this.renderer = r;
     this.started = performance.now();
     this.note.textContent = "";
-    r.texturePaths().forEach((p, i) => {
+    this.loadTextures(r);
+    this.publish();
+  }
+
+  /** Reads the model's textures (replaceable ones as set); one that arrives after the textures were set again, or the
+   *  model was replaced, is dropped. */
+  private loadTextures(r: ModelRenderer) {
+    const replaceable = this.replaceable, round = ++this.texRound;
+    r.texturePaths(replaceable).forEach((p, i) => {
       if (!p) return;
-      this.read(p).then((buf) => { if (this.renderer === r) r.setTexture(i, decodeImage(buf, p)); }, () => {});
+      this.read(p).then((buf) => { if (this.renderer === r && this.texRound === round) r.setTexture(i, decodeImage(buf, p)); }, () => {});
     });
   }
+  private texRound = 0;
 
   private tick = (now: number) => {
     this.raf = requestAnimationFrame(this.tick);

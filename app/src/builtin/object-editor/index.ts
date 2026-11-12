@@ -18,6 +18,8 @@ import { StringTable, WtsCutError, askWtsCuts, wtsSafeText } from "../../lib/for
 import { WtsSession, fileIsMissing, findPackedMap, mapFolderStop, isNotFoundError, recreatedMessage, attempt, isDirtyNow, runSave, type WtsSnapshot } from "./wtssession";
 import { loadEditorTypes, OBJECT_CODE, OBJECT_LIST, objectEditor, typeEditor, type EditorType, type MixedValues } from "./fields";
 import { ModelPreview } from "../../lib/model/preview";
+import { REPLACEABLE, TEAM_COLORS } from "../../lib/model/renderer";
+import { ABILITY_ART, abilityArt, previewTeam, previewTextures } from "./previewart";
 import { readMapDocStrict } from "../../lib/formats/mapdoc";
 import { exportAllObjectData, exportObjects, importObjectData } from "./w3ofiles";
 import { convertVersion, describeConversion, mergeSkin } from "./w3o";
@@ -970,9 +972,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const MODEL_FIELD: Record<string, { model: string; variations?: string }> = {
           w3u: { model: "umdl" }, w3t: { model: "ifil" }, w3d: { model: "dfil", variations: "dvar" }, w3b: { model: "bfil", variations: "bvar" },
         };
-        const preview = MODEL_FIELD[kind] ? new ModelPreview(w3) : null;
+        const preview = MODEL_FIELD[kind] || kind === "w3a" ? new ModelPreview(w3) : null;
+        // What the user chose to look at: a player colour, a replaceable texture (destructables), an ability's art field.
+        let teamPick: number | null = null, texturePick: number | null = null, artPick: string | undefined;
+        const fieldValue = (o: Obj, id: string): string => { const f = kd?.fieldById.get(id); return f ? effective(o, f, 0) : ""; };
+        const abilityModel = (o: Obj) => abilityArt((id) => fieldValue(o, id), artPick);
         /** The model the object shows (its first variation). */
         const modelOf = (o: Obj): string | null => {
+          if (kind === "w3a") return abilityModel(o)?.path ?? null;
           const mf = MODEL_FIELD[kind], f = kd?.fieldById.get(mf.model);
           if (!f) return null;
           const path = effective(o, f, 0).split(",")[0]?.trim();
@@ -985,6 +992,37 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const looksOf = (o: Obj): string => {
           const f = kind === "w3u" ? kd?.fieldById.get("uani") : undefined;
           return f ? effective(o, f, 0) : "";
+        };
+        /** Shows the object's model with the colour and textures chosen. */
+        const showPreview = (o: Obj) => {
+          if (!preview) return;
+          const num = (id: string) => { const v = fieldValue(o, id).trim(); return v === "" ? NaN : Number(v); };
+          preview.setTeamColor(previewTeam(teamPick, kind === "w3u" ? num("utco") : null));
+          const pick = texturePick !== null ? { id: num("btxi") > 0 ? num("btxi") : texturePick, path: REPLACEABLE[texturePick] } : undefined;
+          preview.setReplaceable(kind === "w3b" ? previewTextures({ texId: num("btxi"), texFile: fieldValue(o, "btxf") }, pick) : {});
+          preview.show(modelOf(o), looksOf(o));
+        };
+        /** The preview's choices: player colour, a tree texture (destructables), an ability's art field. */
+        const previewControls = (o: Obj): HTMLElement => {
+          const team = h("select", { title: "Player colour of the team colour and glow textures", onchange: () => { teamPick = Number(team.value); showPreview(o); } },
+            ...TEAM_COLORS.map(([name], i) => h("option", { value: String(i) }, name))) as HTMLSelectElement;
+          team.value = String(previewTeam(teamPick, kind === "w3u" ? Number(fieldValue(o, "utco")) || 0 : null));
+          const out: HTMLElement[] = [team];
+          if (kind === "w3b") {
+            const tex = h("select", { title: "Replaceable texture of the model", onchange: () => { texturePick = tex.value === "" ? null : Number(tex.value); showPreview(o); } },
+              h("option", { value: "" }, "Texture: the type's own"),
+              ...Object.entries(REPLACEABLE).map(([id, path]) => h("option", { value: id }, path.split("\\").pop()!.replace(/\.blp$/i, "")))) as HTMLSelectElement;
+            tex.value = texturePick === null ? "" : String(texturePick);
+            out.push(tex);
+          }
+          if (kind === "w3a") {
+            const shown = abilityModel(o);
+            const art = h("select", { title: "Which of the ability's models to show", onchange: () => { artPick = art.value; showPreview(o); renderDetail(); } },
+              ...ABILITY_ART.map((a) => h("option", { value: a.id }, `${a.label}${abilityArt((id) => fieldValue(o, id), a.id)?.id === a.id ? "" : " (none)"}`))) as HTMLSelectElement;
+            art.value = shown?.id ?? artPick ?? ABILITY_ART[0].id;
+            out.push(art);
+          }
+          return h("div.obj-preview-controls", {}, ...out);
         };
         /** A campaign object, to look at: its fields as the campaign sets them (the game's where it doesn't), no editing.
          *  "Edit in the Campaign" opens the campaign project's Object Editor at it. */
@@ -1106,7 +1144,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               outsideToggle(`Outside limits${overCount ? ` (${overCount})` : ""}`),
               LEVEL_FIELD[kind] ? h("span.muted", {}, `${levelCount(o)} level${levelCount(o) === 1 ? "" : "s"}`) : null,
             ) : null,
-            preview && kd ? h("div.obj-detail-body", {}, (preview.show(modelOf(o), looksOf(o)), preview.el), fields) : fields,
+            preview && kd ? h("div.obj-detail-body", {}, h("div.obj-preview-box", {}, (showPreview(o), preview.el), previewControls(o)), fields) : fields,
           ];
           detailEl.replaceChildren(...parts.filter((p): p is HTMLElement => p !== null));
           detailEl.scrollTop = scroll;
