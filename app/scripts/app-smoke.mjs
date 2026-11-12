@@ -55,6 +55,9 @@ let cli = process.env.W3PROJ_BIN ?? join(repo, "target", "release", `w3proj${exe
 // rebuild the gate's app for another identifier, and two worktrees don't share a settings folder).
 const IDENTIFIER = smokeId(repo);
 const FIXTURE = join(repo, "tests", "fixtures", "mini-map");
+// The time limit of a page call (page.evaluate, an MCP tool) that gives none of its own: one that hangs fails naming
+// itself. A known-long one passes `{ timeout }`; W3_SMOKE_CALL_TIMEOUT (ms) changes it for a slow machine.
+const PAGE_CALL_TIMEOUT = Number(process.env.W3_SMOKE_CALL_TIMEOUT) || 60000;
 
 function build() {
   const conf = JSON.parse(readFileSync(join(app, "src-tauri", "tauri.conf.json"), "utf8"));
@@ -90,9 +93,10 @@ const NEW_MAPS = [
 
 /** Calls an MCP tool of the app, as an AI client would; a tool error throws. Returns the reply's text. */
 function mcpTool(page) {
-  return async (name, args = {}) => {
+  // `timeout`: as page.evaluate's (PAGE_CALL_TIMEOUT unless given), for a known-long tool.
+  return async (name, args = {}, { timeout } = {}) => {
     const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
-    const reply = JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(message)})`));
+    const reply = JSON.parse(await page.evaluate(`w3.mcp.handle(${JSON.stringify(message)})`, timeout === undefined ? {} : { timeout }));
     const text = reply.result?.content?.[0]?.text ?? reply.error?.message ?? "";
     if (reply.error || reply.result?.isError) throw new Error(`${name}: ${text}`);
     return text;
@@ -106,7 +110,8 @@ async function settled(page, timeout = 60000) {
   let timer;
   try {
     await Promise.race([
-      page.evaluate(`w3Workbench.settled()`),
+      // The page call's own limit is past this one, which says what was waited for.
+      page.evaluate(`w3Workbench.settled()`, { timeout: timeout + 10000 }),
       new Promise((_, no) => { timer = setTimeout(() => no(new Error(`the app wasn't settled after ${timeout / 1000} s`)), timeout); }),
     ]);
   } finally {
@@ -615,6 +620,10 @@ async function objectsWhileOpening(page, found) {
   await tool("new_map", { name: "Opening", width: 64, height: 64, folder });
   await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
   await page.evaluate(`w3.editors.closeAll()`);
+  // The new map's script work (made, or adopted when the project opened) reads the units file too: still running, its
+  // read would be the one held, and create_object, which first waits for the script due from earlier saves, would wait
+  // for it forever. At rest, the next reader of the units file is the terrain editor opening.
+  await settled(page);
   // The next read of the units file returns what it read only once released.
   await page.evaluate(`(() => {
     const space = w3Workbench.workspace, read = (space.__read ??= space.readText);
@@ -629,6 +638,9 @@ async function objectsWhileOpening(page, found) {
   try {
     await page.evaluate(`void w3.commands.execute("w3.terrain.open")`);
     await until("the editor's first load", () => page.evaluate(`window.__heldRead.reads === 1`), 20000);
+    // The held read is the editor's only if the script isn't the one waiting on it (create_object would wait forever).
+    const script = await page.evaluate(`Promise.race([w3.commands.execute("w3.script.settle").then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))])`);
+    if (!script) { fail("the map script still waits after 20 s: the read held is its own, not the terrain editor's"); return; }
     const made = JSON.parse(await tool("create_object", { kind: "units", base: "hfoo" })).id;
     await page.evaluate(`window.__heldRead.release()`);
     const r = await tool("place_objects", { objects: [{ id: made, x: 0, y: 0, player: 1 }], ignoreRoom: true }).then(JSON.parse, (e) => ({ error: e.message }));
@@ -8103,9 +8115,11 @@ async function run() {
       appStarted = true;
       page = await connect(port);
     }
+    // A page call that hangs fails after this, naming itself, instead of holding the run for minutes.
+    page.callTimeout = PAGE_CALL_TIMEOUT;
     await until("the app to start", () => page.evaluate(`!!window.w3 && document.querySelectorAll("button.activity").length > 0`));
     // The start over (main.ts: extensions active, the explorer shown), then at rest.
-    await page.evaluate(`window.w3Started`);
+    await page.evaluate(`window.w3Started`, { timeout: 5 * 60 * 1000 });
     await settled(page);
     // An app built before W3PROJ_CONFIG_DIR would share its settings with the other part's.
     const settingsAt = (await page.evaluate(`w3.backend.invoke("app_paths")`)).config_dir;

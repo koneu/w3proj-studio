@@ -14,7 +14,11 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
-import { sleep, until } from "./cdp.mjs";
+import { sleep, timedCall, until } from "./cdp.mjs";
+
+/** WebDriver's script timeout when a call has no limit of its own: DevTools' evaluate has none, and some checks wait
+ *  minutes for the game's files. */
+const NO_LIMIT_SCRIPT_TIMEOUT = 15 * 60 * 1000;
 
 /** Is what Linux runs need there? Returns the missing tools' names. */
 export function missingTools() {
@@ -78,6 +82,10 @@ Promise.resolve().then(() => (0, eval)(expression)).then(
 
 export class WebDriverPage {
   events = [];
+  /** As cdp.mjs's `Page.callTimeout`: the limit of an `evaluate` that gives none, in ms; 0: none. */
+  callTimeout = 0;
+  /** The session's script timeout as last set (launch sets it). */
+  scriptTimeout = null;
   constructor(base, session) {
     this.base = base;
     this.session = session;
@@ -94,8 +102,20 @@ export class WebDriverPage {
     return value;
   }
 
-  async evaluate(expression) {
-    const r = await this.request("POST", "/execute/async", { script: EVALUATE, args: [expression] }).catch((e) => {
+  /** WebDriver runs a session's commands one after another: a call given up on here would hold up every later one
+   *  until the driver's own script timeout, so that is set to just past the call's limit. */
+  async setScriptTimeout(ms) {
+    if (ms === this.scriptTimeout) return;
+    await this.request("POST", "/timeouts", { script: ms });
+    this.scriptTimeout = ms;
+  }
+
+  /** `timeout` (ms, 0: none) overrides `callTimeout` for this call. One timed out goes on in the page; its answer is dropped. */
+  async evaluate(expression, { timeout = this.callTimeout } = {}) {
+    await this.setScriptTimeout(timeout ? timeout + 5000 : NO_LIMIT_SCRIPT_TIMEOUT);
+    const call = this.request("POST", "/execute/async", { script: EVALUATE, args: [expression] });
+    const r = await timedCall(call, timeout, expression).catch((e) => {
+      if (e.message.startsWith("page call timed out")) { call.catch(() => {}); throw e; }
       // A WebDriver-level failure doesn't say which call it was; the start of the expression does.
       throw new Error(`${e.message}, evaluating: ${expression.replace(/\s+/g, " ").slice(0, 160)}`);
     });
@@ -214,8 +234,7 @@ export async function launch(exe, env = {}, attempt = 1) {
     const { value } = await r.json();
     if (!r.ok || value?.error) throw new Error(`no WebDriver session: ${value?.message ?? r.status} ${stderr.trim()}`);
     const page = new WebDriverPage(base, value.sessionId);
-    // DevTools' evaluate has no time limit, and some checks wait minutes for the game's files.
-    await page.request("POST", "/timeouts", { script: 15 * 60 * 1000 });
+    await page.setScriptTimeout(NO_LIMIT_SCRIPT_TIMEOUT);
     return { page, stop: () => stop(page), exited: () => exited };
   } catch (e) {
     const gone = exited !== null;

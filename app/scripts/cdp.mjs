@@ -20,10 +20,29 @@ export async function until(what, check, timeout = 60000) {
   }
 }
 
+/** A page call's time limit: `promise`, or a failure naming the call once `ms` passed (0: no limit). A call that took
+ *  more than half its limit is told on stderr, so one growing towards it shows before it fails. */
+export async function timedCall(promise, ms, expression) {
+  if (!ms) return promise;
+  const start = Date.now(), what = expression.replace(/\s+/g, " ").slice(0, 160);
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, no) => {
+      timer = setTimeout(() => no(new Error(`page call timed out after ${ms / 1000} s (evaluate(…, { timeout }) gives a known-long one more): ${what}`)), ms);
+    })]);
+  } finally {
+    clearTimeout(timer);
+    const took = Date.now() - start;
+    if (took > ms / 2 && took < ms) process.stderr.write(`slow page call: ${Math.round(took / 1000)} s of its ${ms / 1000} s: ${what}\n`);
+  }
+}
+
 export class Page {
   next = 1;
   pending = new Map();
   events = [];
+  /** The time limit of an `evaluate` that doesn't give its own, in ms; 0: none (app-smoke sets one). */
+  callTimeout = 0;
   constructor(ws) {
     this.ws = ws;
     ws.addEventListener("message", (m) => {
@@ -43,8 +62,9 @@ export class Page {
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
-  async evaluate(expression) {
-    const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+  /** `timeout` (ms, 0: none) overrides `callTimeout` for this call. One timed out goes on in the page; its answer is dropped. */
+  async evaluate(expression, { timeout = this.callTimeout } = {}) {
+    const r = await timedCall(this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }), timeout, expression);
     if (r.exceptionDetails) {
       const e = r.exceptionDetails.exception;
       throw new Error(`in the page: ${e?.description ?? e?.value ?? r.exceptionDetails.text}`);

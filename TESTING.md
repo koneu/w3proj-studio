@@ -85,6 +85,12 @@ about 6 minutes each once built (the batch tier went from about 15 minutes to 8 
 `--part=2/2` (it builds unless `--no-build`: not while part 1 builds). A plain `node scripts/app-smoke.mjs` still
 runs everything in one app.
 
+**A page call has a time limit of its own** (app-smoke: `page.evaluate`, `mcpTool`): 60 s unless it gives one
+(`page.evaluate(expr, { timeout })`, `tool(name, args, { timeout })`; `W3_SMOKE_CALL_TIMEOUT` in ms changes the
+default). One that hangs fails with `page call timed out after … s: <the call>` instead of holding the run until
+WebDriver gives up; a call that took more than half its limit prints `slow page call: …` on stderr. On Linux the
+session's script timeout is set to just past the call's limit, since WebDriver runs a session's commands one at a time.
+
 Each step's output goes to `target/gate-logs/<tier>-<pid>/<step>.log`; the
 gate prints it, or its end and the path, when the step finishes. Times in the table are wall time,
 so they grow when steps compete for the cores.
