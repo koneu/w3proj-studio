@@ -7231,7 +7231,9 @@ async function scriptGuard(page, found) {
     const end = at < 0 ? -1 : made.indexOf("\nendfunction", at);
     if (end < 0) return fail("no main in the generated script (control)");
     // Long, so the difference view has to wrap it to show it whole.
-    const hand = `${made.slice(0, end)}\n    call BJDebugMsg("written by hand ${"and long ".repeat(40)}end")${made.slice(end)}`;
+    // Then a long tail of lines of its own: a big script must still show its changes apart, not as one.
+    const filler = Array.from({ length: 6000 }, (_, i) => `// filler ${i}`).join("\n");
+    const hand = `${made.slice(0, end)}\n    call BJDebugMsg("written by hand ${"and long ".repeat(40)}end")${made.slice(end)}\n${filler}\n`;
     writeFileSync(join(k.root, "map", "war3map.j"), hand);
     await settled(page);
     await saveRegion("Second Region");
@@ -7251,6 +7253,7 @@ async function scriptGuard(page, found) {
     // The hand-written line and the regions are the changes (the view draws only what's in sight, so it's counted).
     const head = await page.evaluate(`document.querySelector(".editor-pane:not([hidden]) .diff-head")?.innerText ?? ""`);
     if (!/war3map\.j/.test(head) || !/[1-9]\d* changes?/.test(head)) fail(`the difference's head: ${JSON.stringify(head)}`);
+    else if (!/\b([2-9]|\d\d+) changes/.test(head)) fail(`the difference of a script with a hand-written line and a long tail was one change: ${JSON.stringify(head)}`);
     // Long lines wrap in both sides: nothing is cut at the right edge.
     const cut = await page.evaluate(`(() => { const s = [...document.querySelectorAll(".editor-pane:not([hidden]) .diff-view .cm-scroller")];
       return { sides: s.length, wrapped: s.filter((x) => x.querySelector(".cm-content.cm-lineWrapping")).length, wider: s.filter((x) => x.scrollWidth > x.clientWidth + 1).length,
