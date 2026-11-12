@@ -292,6 +292,20 @@ test("a ramp goes on a straight edge, and comes off again", () => {
   assert.throws(() => setRamp(t, edge[0], edge[1], 2, true), /no ramp here/);
 });
 
+test("in the pathing map a ramp can be walked up, and the cliff beside it can't", () => {
+  const t = flat();
+  setCliffs(t, block, "box", { level: 3 }, kinds);
+  const walk = () => {
+    const w = (t.width - 1) * 4, p = generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules: new Map() });
+    // The middle cell of each tile along row 12 from tile 6 (low ground) to tile 8 (the top), and of tile (7, 10):
+    // the ramp's flags run over corners 11..13, so that tile has two flagged corners and two not.
+    return { up: [6, 7, 8].map((x) => !(p[16 + (12 * 4 + 2) * w + x * 4 + 2] & NO_WALK)), side: !(p[16 + (10 * 4 + 2) * w + 7 * 4 + 2] & NO_WALK) };
+  };
+  assert.deepEqual(walk(), { up: [true, false, true], side: false }, "the edge is a cliff");
+  setRamp(t, 7.5 * 128, 12 * 128, 2, false);
+  assert.deepEqual(walk(), { up: [true, true, true], side: false }, "the ramp is walked up; the cliff further along stays");
+});
+
 test("a ramp where there's no cliff, or too high a one, says what it needs", () => {
   assert.throws(() => setRamp(flat(), 300, 300, 2, false), /It needs a cliff one level high.*terrain_info/);
   const t = flat();

@@ -46,6 +46,17 @@ export const DEEP_WATER = 52;
 
 const depth = (k: Corner) => (k.hasWater ? k.water - k.height : -Infinity);
 
+/** Whether a tile (its four corners) is a cliff in the pathing map: its corners' layers differ, and it isn't a ramp.
+ *  A ramp tile has the ramp flag on all four corners and spans one layer; a tile with only some corners flagged
+ *  (beside a ramp, or the stray flags maps carry among cliffs) is a cliff. Worked out from the stored pathing maps of
+ *  the sample and ladder maps: every such tile is blocked there (e.g. Autumn Leaves' west cliffs, tiles 15..20 × 16..65). */
+export function isCliffTile(q: readonly Corner[]): boolean {
+  const layers = q.map((k) => k.layer);
+  const lo = Math.min(...layers), hi = Math.max(...layers);
+  if (lo === hi) return false;
+  return !(hi - lo === 1 && q.every((k) => k.ramp));
+}
+
 export function generatePathing(input: PathingInput): Uint8Array {
   const { terrain: t, margins: [ml, mr, mb, mt], tileRules } = input;
   const deep = input.deepWater ?? DEEP_WATER;
@@ -74,7 +85,7 @@ export function generatePathing(input: PathingInput): Uint8Array {
         if (!rule.flyable) p |= NO_FLY;
       }
       if (c.blight) p |= BLIGHT;
-      const cliff = new Set(q.map((k) => k.layer)).size > 1 && !q.some((k) => k.ramp);
+      const cliff = isCliffTile(q);
       if (q.every((k) => depth(k) > 0) || depth(c) > deep) {
         // Water (the whole tile is under water) hides cliffs; unwalkable
         // ground stays dry but blocked.
