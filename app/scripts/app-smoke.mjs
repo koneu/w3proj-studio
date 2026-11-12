@@ -6334,7 +6334,17 @@ async function playerStarts(page, found, root) {
       await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(infoBefore)}); })()`);
     }
   } finally {
-    await page.evaluate(`(async () => { await w3.workspace.writeText(${JSON.stringify(units)}, ${JSON.stringify(before)}); await w3.editors.closeAll(); })()`);
+    // Putting the files back is a save of script inputs: the map-script extension runs 0.8 s later, in whichever check
+    // is then running, and asks about the script Studio didn't write last. Settle it here, answering "Keep it".
+    await page.evaluate(`(async () => {
+      const ask = w3.window.notify;
+      w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Keep it") : ask(s, m, a, o));
+      try {
+        await w3.workspace.writeText(${JSON.stringify(units)}, ${JSON.stringify(before)});
+        await w3.editors.closeAll();
+        await w3.commands.execute("w3.script.settle");
+      } finally { w3.window.notify = ask; }
+    })()`);
   }
 }
 
@@ -6342,9 +6352,6 @@ async function playerStarts(page, found, root) {
  *  field: read off the preview's data-state, which holds what it shows. */
 async function objectPreview(page, found, root) {
   const fail = (what) => found.push(`object preview: ${what}`);
-  // The full run's project holds a script Studio didn't write last, and a save that lands while the editors open or
-  // close asks about it (once per project): "Keep it" for this check only, as contextLoss does.
-  await page.evaluate(`(() => { const ask = w3.window.notify; window.__opKept = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Keep it") : ask(s, m, a, o)); })()`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
   const state = () => page.evaluate(`(() => {
@@ -6408,7 +6415,7 @@ async function objectPreview(page, found, root) {
     }
     if (!changed) fail(`the model stays ${casterArt} after choosing ${others.join(", ")}`);
   } finally {
-    await page.evaluate(`(async () => { await w3.editors.closeAll(); await new Promise((r) => setTimeout(r, 2500)); w3.window.notify = window.__opKept; })()`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); })()`);
   }
 }
 
