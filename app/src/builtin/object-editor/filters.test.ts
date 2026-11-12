@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FieldMeta } from "../../lib/objects/metadata";
-import { builderField, compare, defaultOp, filterValue, parseQuery, resolveField, tokenize } from "./filters";
+import { builderField, compare, formatFilter, defaultOp, filterValue, parseQuery, resolveField, tokenize } from "./filters";
 
 const field = (id: string, label: string, column = ""): FieldMeta => ({ id, label, field: column } as FieldMeta);
 const fields = [
@@ -137,4 +137,22 @@ test("the filter builder's field box: a suggestion, an id, a label", () => {
   assert.equal(builderField({ fields, fieldById: byId }, "urac"), race);
   assert.equal(builderField({ fields, fieldById: byId }, "race"), race);
   assert.equal(builderField({ fields, fieldById: byId }, "  "), null, "nothing typed is no field (not the first one)");
+});
+
+test("formatFilter quotes a value with whitespace and parses back to the same filter", () => {
+  for (const [value, expected] of [["Night Elf", "Night Elf"], ["human", "human"], ["  a   b ", "a b"], ['say "hi" now', "say hi now"]] as const) {
+    const text = formatFilter("urac", ":", value);
+    assert.equal(tokenize(text).length, 1, text);
+    const [f] = parseQuery(text, fields).filters;
+    assert.deepEqual([f.key, f.op, f.value], ["urac", ":", expected]);
+  }
+  assert.equal(formatFilter("urac", ":", "Night Elf"), 'urac:"Night Elf"');
+  assert.equal(formatFilter("urac", "=", "human"), "urac=human");
+});
+
+test("old underscore queries still match", () => {
+  const [f] = parseQuery("race:Night_Elf", fields).filters;
+  assert.equal(compare("nightelf", f.op, f.value, "Night Elf"), true);
+  assert.equal(compare("human", f.op, f.value, "Human"), false);
+  assert.equal(compare("nightelf", ":", "Night Elf", "Night Elf"), true);
 });
