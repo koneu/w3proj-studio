@@ -1,6 +1,7 @@
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { errorView, formatBytes, h } from "../../workbench/dom";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
+import { parseModel } from "../../lib/model/mdl";
 import { parseMdx, type Model } from "../../lib/model/mdx";
 import { watchContextLoss } from "../../lib/model/contextloss";
 import { neverStoredLast } from "../../lib/model/texpath";
@@ -45,7 +46,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const bytes = await doc.readBytes();
         let model;
         try {
-          model = parseMdx(bytes);
+          model = parseModel(bytes);
         } catch (e) {
           el.append(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};

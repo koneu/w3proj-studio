@@ -728,7 +728,7 @@ class ImportView {
         try {
           const entry = { key: modelKey, view: null as unknown as ModelPreview, failed: false };
           // A model that can't be shown says so like an image does (the preview's own message names the file).
-          entry.view = new ModelPreview(this.w3, { prefer: reforged ? "hd" : undefined,
+          entry.view = new ModelPreview(this.w3, { prefer: reforged ? "hd" : undefined, exact: true,
             onFail: () => { entry.failed = true; entry.view.el.replaceChildren(h("small.muted", {}, "No preview for this file.")); } });
           this.modelPreview = entry;
           entry.view.show(path);

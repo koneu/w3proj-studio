@@ -173,7 +173,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!model.lights.length) throw new Error("it has no lights");
         } catch (e) {
           el.append(h("div.view-empty", {}, `${doc.path} isn't a lighting model: ${errorText(e)} `,
-            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.textEditor") }, "Open as text")));
+            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.textEditor") }, "Open as text"), " ",
+            h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.modelViewer") }, "Open in Model Viewer")));
           return {};
         }
         const history = new History(() => JSON.stringify(model), (state) => {
