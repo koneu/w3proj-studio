@@ -2726,7 +2726,9 @@ async function heightsLimits(page, found) {
   const { hands } = k;
   // On by default, as in the World Editor; the toggles below start from off.
   if ((await k.setting("terrain.enforceCameraBounds")) === false || (await k.box("Enforce camera bounds")) !== true) fail("Enforce Camera Bounds isn't on by default");
+  if ((await k.setting("terrain.enforceWaterLimits")) === false || (await k.box("Water limits")) !== true) fail("Enforce Water Height Limits isn't on by default");
   await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
+  await page.evaluate(`w3.settings.set("terrain.enforceWaterLimits", false)`);
   const bounds = k.read("war3map.w3i.json").cameraBounds;
   const [bl, bb, br, bt] = bounds;
   if (!(bl < br && bb < bt)) return fail(`camera bounds ${bounds}`);

@@ -1,20 +1,53 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { SWITCH_DEFAULTS } from "./switches";
+import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 
 const manifest = JSON.parse(readFileSync("src/builtin/terrain-viewer/extension.json", "utf8")) as {
   contributes: { configuration: { properties: Record<string, { default?: unknown }> } };
 };
 const declared = (key: string) => manifest.contributes.configuration.properties[key]?.default;
 
-test("the Advanced switches start as the World Editor's: Preserve Copied Object Height off, Enforce Camera Bounds on", () => {
-  assert.equal(SWITCH_DEFAULTS["terrain.preserveCopiedHeight"], false);
-  assert.equal(SWITCH_DEFAULTS["terrain.enforceCameraBounds"], true);
-  assert.equal(SWITCH_DEFAULTS["terrain.enforceWaterLimits"], false);
-  assert.equal(SWITCH_DEFAULTS["terrain.resetFixedHeights"], true);
+/**
+ * The World Editor's values after its first start in a new, empty Wine prefix (we-drive with W3PROJ_WE_DIR,
+ * 2026-11-12): the check marks of its menus (screenshots of each) and WorldEditPreferences.txt as it wrote it on
+ * closing. Only the settings Studio has; the view items that aren't settings here (grid, camera bounds) are in the
+ * terrain view's own state.
+ */
+const FRESH_WE: Record<string, boolean | string> = {
+  // Advanced > Preserve Copied Object Height: unchecked; "Preserve Z When Copying Objects=0".
+  "terrain.preserveCopiedHeight": false,
+  // Advanced > Enforce Water Height Limits: checked; "Enforce Water Limits=1".
+  "terrain.enforceWaterLimits": true,
+  // Advanced > Enforce Camera Bounds: checked; "Enforce Camera Boundaries=1".
+  "terrain.enforceCameraBounds": true,
+  // Advanced > Reset Fixed Object Heights: checked; "Reset Fixed Z When Moving Objects=1".
+  "terrain.resetFixedHeights": true,
+  // View > Lock to Game View Settings: unchecked.
+  "terrain.gameView": false,
+  // View > Fog Effects: unchecked.
+  "terrain.fog": false,
+  // View > Lighting: checked.
+  "terrain.lighting.enabled": true,
+  // View > Shadows: checked.
+  "terrain.shadows.visible": true,
+  // View > Sky: unchecked; "Sky Model=0".
+  "terrain.sky": "",
+};
+
+test("the settings Studio shares with the World Editor start as a fresh World Editor's", () => {
+  for (const [key, value] of Object.entries(FRESH_WE)) assert.equal(declared(key), value, key);
+  for (const [key, value] of Object.entries(SWITCH_DEFAULTS)) assert.equal(FRESH_WE[key], value, key);
 });
 
 test("the settings' declared defaults are the switches' defaults", () => {
   for (const [key, value] of Object.entries(SWITCH_DEFAULTS)) assert.equal(declared(key), value, key);
+});
+
+test("a switch that isn't set is its default; a set one is what was set", () => {
+  const unset = { settings: { get: <T,>(_key: string, fallback?: T) => fallback as T } };
+  for (const [key, value] of Object.entries(SWITCH_DEFAULTS)) {
+    assert.equal(switchedOn(unset, key, value), value, key);
+    for (const set of [true, false]) assert.equal(switchedOn({ settings: { get: <T,>() => set as T } }, key, value), set, `${key} set ${set}`);
+  }
 });

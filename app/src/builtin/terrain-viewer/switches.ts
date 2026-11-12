@@ -1,14 +1,17 @@
 // The World Editor's Advanced switches that are settings here: what each is until it is set. The same values stand in
-// extension.json (switches.test.ts checks they agree), and they are the World Editor's own defaults (we-drive,
-// 2026-11-11: Preserve Copied Object Height off, Enforce Camera Bounds on, Enforce Water Height Limits off;
-// 2026-11-12: Reset Fixed Object Heights on, in a Wine prefix of its own, see objheights.ts movedHeight). The editor
-// keeps these in WorldEditPreferences.txt, so a prefix shared by many runs shows what the last run left, not these.
+// extension.json (switches.test.ts checks they agree), and they are the World Editor's own defaults, read from its
+// Advanced menu and its WorldEditPreferences.txt after the first start in a new, empty Wine prefix (we-drive with
+// W3PROJ_WE_DIR, 2026-11-12): Preserve Copied Object Height off ("Preserve Z When Copying Objects=0"), Enforce Water
+// Height Limits on ("Enforce Water Limits=1"), Enforce Camera Bounds on ("Enforce Camera Boundaries=1"), Reset Fixed
+// Object Heights on ("Reset Fixed Z When Moving Objects=1"). The editor keeps these in WorldEditPreferences.txt, so a
+// prefix shared by many runs shows what the last run left, not these (that is how Enforce Water Height Limits was
+// once taken as off).
 
 import type { Settings } from "../../extensions/api";
 
 export const SWITCH_DEFAULTS = {
   "terrain.preserveCopiedHeight": false,
-  "terrain.enforceWaterLimits": false,
+  "terrain.enforceWaterLimits": true,
   "terrain.enforceCameraBounds": true,
   "terrain.resetFixedHeights": true,
 } as const;

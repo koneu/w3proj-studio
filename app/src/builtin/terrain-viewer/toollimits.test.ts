@@ -44,9 +44,9 @@ test("with Enforce Water Height Limits on, a ground edit that pushes water to th
   assert.equal(toolWaterRefusal(on, before, before, [0, 1, 2]), null);
 });
 
-test("with Enforce Water Height Limits off, the default, the edit goes through", () => {
-  assert.equal(toolWaterRefusal(host(), before, after, [0, 1, 2]), null);
+test("with Enforce Water Height Limits off the edit goes through; unset it is on, as in the World Editor", () => {
   assert.equal(toolWaterRefusal(host({ "terrain.enforceWaterLimits": false }), before, after, [0, 1, 2]), null);
+  assert.match(toolWaterRefusal(host(), before, after, [0, 1, 2])!, /at 2 corners would/);
 });
 
 test("the editor's camera-bounds warnings are built from OUTSIDE_BOUNDS", () => {
