@@ -873,6 +873,10 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-preview .obj-preview { float: none; margin: 0; width: 100%; max-width: 360px; height: 220px; }
 .imp-preview .obj-preview canvas { max-height: none; background: none; }
 .imp-warn { color: #cca700; }
+.imp-use-label { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); white-space: nowrap; }
+.imp-badge { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 3px; font-family: system-ui, sans-serif; font-size: 10px; line-height: 15px; vertical-align: middle; background: #3a4350; color: var(--fg); }
+.imp-badge.reforged { background: #4a3a5a; }
+.imp-modes { font-size: 12px; overflow-wrap: anywhere; }
 
 /* Map Size tab (terrain editor) */
 .terrain-group-tools.mapsize { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }

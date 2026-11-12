@@ -21,9 +21,9 @@ import { chooseFolder, mergedValues, modelExists, modelFieldValue, modelNames, p
 import { conversionSources, missingTextures, readLayered, type Source, SOURCE_NAME, sourcesText, textureCandidates, uniqueName } from "./reforged";
 import { gamePartOf, isMachinePath } from "../../lib/model/texpath";
 import { editPlacedFile, isRandomId, knownPlacedTypes } from "./invalid";
-import { FileLookup, plainPath, withoutVariant, type FileKind } from "./lookup";
+import { FileLookup, modesWithout, plainPath, withoutVariant, type FileKind } from "./lookup";
 import { mapLimit, RunScope } from "./runscope";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, IMPORT_FOLDER, listedPath, unlistedFiles, type ImportEntry } from "../../lib/imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, IMPORT_FOLDER, isReforgedPath, kindOf as kindOfImport, listedPath, reforgedPathOf, unlistedFiles, type ImportEntry } from "../../lib/imports";
 import { checkpointOrStop } from "../../lib/checkpoint";
 
 export { FileLookup };
@@ -511,23 +511,23 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
     return k && f ? k.defaultValue(base, f, 0, artMode) : undefined;
   };
   const found = new Map<string, (typeof MODES)[number][]>();
-  /** The supported modes that can't load a model: not in the map (imports count for every
-   *  mode), nor in the mode's folder or the Classic one. */
+  /** The supported modes that can't load a model (modesWithout): the map's plain copy counts for every mode, its
+   *  Reforged version (`_HD.w3mod\…`) only for Reforged; then the game's Classic file, then the mode's folder. */
   const missingIn = async (path: string) => {
     const known = found.get(path);
     if (known) return known;
     const key = path.replace(/\\/g, "/").toLowerCase();
-    // Only the map's own copy counts here (once a chapter map's campaign files are listed too): the
-    // game's is decided by the art folders below.
+    // The map's own copies (once a chapter map's campaign files are listed too), then the game's art folders.
     await files.whenReady();
-    const imported = files.inMap(path);
-    const out = imported || stored.get(null)!.has(key) ? [] : supported.filter((m) => !m.layer || !stored.get(m.layer)!.has(key));
+    const out = modesWithout(supported, (layer) => files.inMapFor(path, layer), (layer) => stored.get(layer)!.has(key));
     found.set(path, out);
     return out;
   };
   const inReforged = (path: string) => ["_de", "_hd"].some((l) => stored.get(l)!.has(path.replace(/\\/g, "/").toLowerCase()));
 
   const out: Problem[] = [];
+  /** The models told of (plain paths as plainPath gives them). */
+  const told = new Set<string>();
   for (const [file, key] of [["map/war3mapUnits.doo.json", "units"], ["map/war3map.doo.json", "doodads"]] as const) {
     const list = (await readJson<Record<string, PlacedEntry[]>>(w3, file))?.[key] ?? [];
     const missing = new Map<string, { items: PlacedEntry[]; paths: Set<string>; modes: Set<string> }>();
@@ -561,6 +561,15 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
       // Models split over both sets: taken from whichever has each.
       if (!sources.length && [...paths].every(inReforged)) sources.push("de");
       const fixes: ProblemFix[] = [];
+      // The map holds the model's Reforged version only: its Classic version can be added beside it.
+      const reforgedOnly = modes.has("Classic") ? [...paths].find((p) => files.inMapFor(p, "_hd") && !files.inMapFor(p, null)) : undefined;
+      if (reforgedOnly) {
+        fixes.push({
+          label: "Add Classic Version…",
+          title: `Pick a Classic model on disk; it is stored as ${reforgedOnly} beside the Reforged version, so the type's one path finds a model in every graphics mode`,
+          run: () => w3.commands.execute("w3.imports.addVersion", reforgedPathOf(reforgedOnly)).then(() => {}),
+        });
+      }
       // One button per set to take the model from, when there is a choice.
       for (const source of sources) {
         const set = SOURCE_NAME[source], pick = sources.length > 1 ? ` from ${set}` : "";
@@ -601,12 +610,35 @@ async function classicModels(w3: W3Api, s: RunScope): Promise<Problem[]> {
       out.push({
         severity: "warning",
         message: `${name} (${id}): no model in ${where} graphics, invisible there; placed ${items.length}×`
+          + (reforgedOnly ? ` (the map holds only the Reforged version, ${reforgedPathOf(reforgedOnly)})` : "")
           + (sources.length ? `. ${sourcesText(sources, [...paths][0])}` : ""),
         location: file.slice(4),
         reveal: { command: "w3.terrain.showPoint", args: [items[0].position[0], items[0].position[1]] },
         fixes,
       });
+      for (const p of paths) told.add(plainPath(p));
     }
+  }
+  // Imported models one graphics mode never reads: a Reforged version alone (_HD.w3mod\…) on a map that supports
+  // Classic, where nothing stands in for it (placed objects with it are told of above), and on a map that supports no
+  // Reforged mode at all, any Reforged version.
+  const classic = supported.some((m) => !m.layer), reforged = supported.some((m) => m.layer);
+  for (const e of (await readJson<{ files?: ImportEntry[] }>(w3, "map/war3map.imp.json"))?.files ?? []) {
+    if (typeof e?.path !== "string" || !isReforgedPath(e.path) || kindOfImport(e.path) !== "Model") continue;
+    const plain = classicPathOf(e.path), key = plainPath(plain);
+    if (told.has(key)) continue;
+    if (!reforged) {
+      out.push({ severity: "warning", location: "war3map.imp", message: `${e.path}: a Reforged version, but the map supports only Classic graphics: packed, never shown` });
+      continue;
+    }
+    if (!classic || files.inMapFor(plain, null) || stored.get(null)!.has(key.replace(/\\/g, "/"))) continue;
+    told.add(key);
+    out.push({
+      severity: "warning", location: "war3map.imp",
+      message: `${plain}: imported for Reforged only (${e.path}); Classic graphics have no model there, so what uses it is invisible in Classic`,
+      fixes: [{ label: "Add Classic Version…", title: `Pick a Classic model on disk; it is stored as ${plain} beside the Reforged version`,
+        run: () => w3.commands.execute("w3.imports.addVersion", e.path).then(() => {}) }],
+    });
   }
   return capped(out, "objects with a missing model");
 }

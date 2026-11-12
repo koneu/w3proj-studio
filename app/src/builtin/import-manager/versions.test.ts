@@ -1,0 +1,63 @@
+// "Add Reforged Version…" / "Add Classic Version…" store the file at the row's other path under the same name, a row
+// shows the version of the graphics mode set, and a model added for one mode brings the textures next to it on disk
+// into that mode's folder.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { importRows } from "../../lib/imports";
+import { followingTextures, shownEntry, textureSpots, versionToAdd } from "./versions";
+
+const plain = { flags: 21, path: "war3mapImported\\Hero.mdx" }, hd = { flags: 13, path: "_HD.w3mod\\war3mapImported\\Hero.mdx" };
+
+test("the version a row can still get: Reforged for a plain file, Classic for a Reforged one, none for a pair", () => {
+  assert.deepEqual(versionToAdd(importRows([plain])[0]), { side: "reforged", path: "_HD.w3mod\\war3mapImported\\Hero.mdx", flags: 13 });
+  assert.deepEqual(versionToAdd(importRows([hd])[0]), { side: "classic", path: "war3mapImported\\Hero.mdx", flags: 21 });
+  assert.equal(versionToAdd(importRows([plain, hd])[0]), null);
+});
+
+test("a row shows the version of the graphics mode set, else the one it has", () => {
+  const [pair] = importRows([plain, hd]);
+  assert.equal(shownEntry(pair, "sd"), plain);
+  assert.equal(shownEntry(pair, "hd"), hd);
+  assert.equal(shownEntry(pair, "de"), hd);
+  assert.equal(shownEntry(importRows([hd])[0], "sd"), hd);
+  assert.equal(shownEntry(importRows([plain])[0], "hd"), plain);
+});
+
+test("where a model's texture may lie next to it: the longest tail of its path first, then the .dds Reforged reads", () => {
+  assert.deepEqual(textureSpots("/d/pack/", "war3mapImported\\Hero\\skin.blp"), [
+    { file: "/d/pack/war3mapImported/Hero/skin.blp", archive: "war3mapImported\\Hero\\skin.blp" },
+    { file: "/d/pack/Hero/skin.blp", archive: "war3mapImported\\Hero\\skin.blp" },
+    { file: "/d/pack/skin.blp", archive: "war3mapImported\\Hero\\skin.blp" },
+    { file: "/d/pack/war3mapImported/Hero/skin.dds", archive: "war3mapImported\\Hero\\skin.dds" },
+    { file: "/d/pack/Hero/skin.dds", archive: "war3mapImported\\Hero\\skin.dds" },
+    { file: "/d/pack/skin.dds", archive: "war3mapImported\\Hero\\skin.dds" },
+  ]);
+  // Nothing climbs out of the folder.
+  assert.deepEqual(textureSpots("C:\\x", "..\\..\\a.png").map((s) => s.file), ["C:\\x/a.png"]);
+  assert.deepEqual(textureSpots("/d", ""), []);
+});
+
+test("the textures that follow a model: found next to it, not replaceable, once each, not where the map has a file", async () => {
+  const disk = new Set(["/d/skin.blp", "/d/Hero/glow.dds", "/d/taken.blp"]);
+  const textures = [
+    { path: "war3mapImported\\skin.blp", replaceableId: 0 },
+    { path: "war3mapImported\\Hero\\glow.blp", replaceableId: 0 },
+    { path: "war3mapImported\\SKIN.blp", replaceableId: 0 },
+    { path: "", replaceableId: 1 },
+    { path: "ReplaceableTextures\\TeamColor\\TeamColor00.blp", replaceableId: 1 },
+    { path: "war3mapImported\\missing.blp", replaceableId: 0 },
+    { path: "taken.blp", replaceableId: 0 },
+    { path: "C:\\Users\\me\\abs.blp", replaceableId: 0 },
+  ];
+  const asked: string[] = [];
+  const found = await followingTextures("/d", textures, (a) => `_HD.w3mod\\${a}`,
+    async (f) => { asked.push(f); return disk.has(f); }, (a) => a.toLowerCase() === "_hd.w3mod\\taken.blp");
+  assert.deepEqual(found, [
+    { file: "/d/skin.blp", archive: "_HD.w3mod\\war3mapImported\\skin.blp" },
+    { file: "/d/Hero/glow.dds", archive: "_HD.w3mod\\war3mapImported\\Hero\\glow.dds" },
+  ]);
+  assert.ok(!asked.some((f) => /abs\.blp|TeamColor/.test(f)), "a path on someone's disk or a replaceable texture isn't looked for");
+  // Control: with nothing next to the model, none follows.
+  assert.deepEqual(await followingTextures("/d", textures, (a) => a, async () => false, () => false), []);
+});

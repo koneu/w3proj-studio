@@ -1,10 +1,10 @@
 // A small live model view (object editor, the Problems view's model picker): a model's Stand
-// animation, turning slowly; drag to turn it. The map's imported file wins, else the game's:
-// through the graphics mode, or (`prefer`) the Classic or the Reforged (DE, then HD) files
-// first, whatever the graphics mode is.
+// animation, turning slowly; drag to turn it. The map's imported file wins (in Reforged its
+// `_HD.w3mod\` version first), else the game's: through the graphics mode, or (`prefer`) the
+// Classic or the Reforged (DE, then HD) files first, whatever the graphics mode is.
 
 import type { W3Api } from "../../extensions/api";
-import { importedPath } from "../imports";
+import { importedPath, ownNames, previewMode } from "../imports";
 import { decodeImage } from "../image/index.ts";
 import { parseMdx } from "./mdx";
 import { neverStoredLast, textureCandidates } from "./texpath";
@@ -80,12 +80,13 @@ export class ModelPreview {
     });
   }
 
-  /** The map's import of a path, else the game's file (Reforged .tif/.blp textures ship as .dds). */
+  /** The map's import of a path, else the game's file (Reforged .tif/.blp textures ship as .dds). In Reforged (the
+   *  graphics mode set, or `prefer`) the map's Reforged version (`_HD.w3mod\…`) comes first, as the game reads it. */
   private async read(path: string): Promise<Uint8Array> {
     const variants = /\.(blp|tif|tiff|tga|png)$/i.test(path) ? textureCandidates(path) : [path];
-    for (const v of variants) {
+    for (const name of ownNames(variants, previewMode(this.opts.prefer, this.w3.settings.get<string>("game.graphicsMode")))) {
       // Under its name on disk, whatever the case asked for (as the game finds it).
-      const own = importedPath(this.w3, v);
+      const own = importedPath(this.w3, name);
       if (own !== undefined) return this.w3.workspace.readBytes(own);
     }
     let last: unknown = new Error(`${path} not found`);

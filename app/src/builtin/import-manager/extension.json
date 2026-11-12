@@ -8,6 +8,7 @@
     "commands": [
       { "id": "w3.imports.open", "when": "project", "menu": "Module:1:5", "title": "Import Manager", "category": "Module", "keybinding": "f9" },
       { "id": "w3.imports.replace", "when": "project", "title": "Import Manager: Replace File…", "category": "Module" },
+      { "id": "w3.imports.addVersion", "when": "project", "title": "Import Manager: Add Reforged or Classic Version…", "category": "Module" },
       { "id": "w3.imports.add", "when": "project", "title": "Import Manager: Add to Import List", "category": "Module", "hidden": true }
     ]
   }

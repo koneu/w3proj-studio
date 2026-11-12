@@ -18,6 +18,35 @@ export const withoutVariant = (p: string) => {
   return s;
 };
 
+/** The art set folder an archive path is in ("_hd", "_de", "_teen"; the first, language folders left out), "" for none. */
+export function artSetOf(archive: string): string {
+  let s = archive.replace(/\//g, "\\");
+  for (let before = ""; before !== s;) {
+    before = s;
+    const set = /^(_hd|_de|_teen)\.w3mod\\/i.exec(s);
+    if (set) return set[1].toLowerCase();
+    s = s.replace(/^_locales\\[a-z]{4}\.w3mod\\/i, "");
+  }
+  return "";
+}
+
+/** Whether a graphics mode (`layer`: null Classic, "_hd", "_de") reads one of the map's copies of a file (`sets`: the art
+ *  sets it has it in, see artSetOf): the plain one in every mode, the `_HD.w3mod\` one in both Reforged modes (as the
+ *  previews and the terrain view read it), a `_DE.w3mod\` one in DE. A `_teen.w3mod\` copy alone counts for none. */
+export function mapModeHas(sets: ReadonlySet<string> | undefined, layer: string | null): boolean {
+  if (!sets) return false;
+  if (sets.has("")) return true;
+  return layer === "_hd" ? sets.has("_hd") : layer === "_de" ? sets.has("_de") || sets.has("_hd") : false;
+}
+
+/** The supported graphics modes (each with its game folder: null Classic, "_hd", "_de") that can't load a file:
+ *  `mapHas(layer)` the map's own copies as that mode reads them (FileLookup.inMapFor), `gameHas(layer)` the game's art
+ *  folders (null: the Classic files, which every mode falls back to; HD and DE never to one another). */
+export function modesWithout<M extends { layer: string | null }>(supported: readonly M[], mapHas: (layer: string | null) => boolean, gameHas: (layer: string | null) => boolean): M[] {
+  if (gameHas(null)) return [];
+  return supported.filter((m) => !mapHas(m.layer) && !(m.layer && gameHas(m.layer)));
+}
+
 /** The key of a game path in the lookup's cache. */
 const gameKey = (path: string) => path.replace(/\//g, "\\").toLowerCase();
 
@@ -34,6 +63,9 @@ export class FileLookup {
   private campaign: string | undefined;
   private game = new Map<string, Promise<boolean>>();
   private ready: Promise<void>;
+  /** The art sets the map (and a chapter map's campaign) has a file in: plain path → its leading art set folders
+   *  ("" for the plain file, "_hd", "_de", "_teen"; language folders are left out). */
+  private sets = new Map<string, Set<string>>();
   constructor(private w3: W3Api) {
     const add = (into: Map<string, string>, list: FileInfo[]) => {
       for (const f of list) {
@@ -42,6 +74,12 @@ export class FileLookup {
         const archive = toArchiveName(rel.slice(4)), key = plainPath(archive);
         // Several variants (`_HD.w3mod\…`) give one key: the plain file stands for it if there is one.
         if (!into.has(key) || archive.replace(/\//g, "\\").toLowerCase() === key) into.set(key, rel);
+        const set = artSetOf(archive);
+        if (set !== null) {
+          const s = this.sets.get(key) ?? new Set<string>();
+          s.add(set);
+          this.sets.set(key, s);
+        }
       }
     };
     add(this.own, w3.workspace.files());
@@ -76,6 +114,12 @@ export class FileLookup {
   inMap(path: string) {
     const key = plainPath(path);
     return this.own.has(key) || this.campaignFiles.has(key);
+  }
+  /** Whether a graphics mode reads the map's own copy of the file (`layer`: the mode's game folder, null Classic, "_hd",
+   *  "_de"): the plain file in every mode, its Reforged version (`_HD.w3mod\…`) in the Reforged ones (lib/imports.ts
+   *  modeNames), a `_DE.w3mod\` one in DE. Only once whenReady() resolved, as inMap. */
+  inMapFor(path: string, layer: string | null): boolean {
+    return mapModeHas(this.sets.get(plainPath(path)), layer);
   }
   /** Whether the map's own folder has the file (not only a chapter map's campaign): what writing it
    *  into the map would replace rather than create. */

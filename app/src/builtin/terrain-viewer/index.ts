@@ -11,7 +11,7 @@ import { matchPlaced, type PlacedLike, type PlacedRef } from "./pickmatch";
 import type { EditorDocument, ExtensionContext, W3Api } from "../../extensions/api";
 import { customTilesFlag, TILESETS } from "../../lib/terrain/tilesets";
 import { joinPath } from "../../lib/paths";
-import { importedPath } from "../../lib/imports";
+import { importedPath, modeNames } from "../../lib/imports";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEditorHandle, type TerrainToolGroupInstance } from "../../extensions/services";
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
@@ -175,8 +175,7 @@ function campaignRoot(w3: W3Api): string | undefined {
 /** A file the map imports: the project's own, else (chapter maps) the campaign's. In HD and
  *  Reforged modes an import's HD version (`_HD.w3mod\…`, as Reforged maps store them) wins. */
 async function readImport(w3: W3Api, path: string): Promise<Uint8Array> {
-  const rel = path.replace(/\//g, "\\");
-  const names = (w3.settings.get<string>("game.graphicsMode") ?? "hd") !== "sd" ? [`_HD.w3mod\\${rel}`, rel] : [rel];
+  const names = modeNames(path.replace(/\//g, "\\"), w3.settings.get<string>("game.graphicsMode") ?? "hd");
   const campaign = campaignRoot(w3);
   // The project's own files are known; only those are read (most paths are the game's), under the name they have on
   // disk: the game finds them whatever the case, and on Linux the name asked for may not be there.

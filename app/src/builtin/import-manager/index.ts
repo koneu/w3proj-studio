@@ -11,7 +11,9 @@ import { clickSelection } from "../../lib/selection";
 import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
-import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, unlistedFiles, type ImportEntry } from "../../lib/imports";
+import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, newEntryFlags, pathForUse, projectPath, reforgedPathOf, rowEntries, rowMoves, samePath, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type UseIn } from "../../lib/imports";
+import { followingTextures, shownEntry, versionToAdd } from "./versions";
+import { parseMdx } from "../../lib/model/mdx";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ModelPreview } from "../../lib/model/preview";
@@ -54,7 +56,18 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.imports.add", (paths: string[]) => addQueue(() => addToList(w3, paths))),
     w3.commands.register("w3.imports.replace", async () => {
       if (!openView) throw new Error("Open the Import Manager and select a file first.");
-      openView.replaceSelected();
+      await openView.replaceSelected();
+    }),
+    // The selected import's other version (Reforged for a plain file, Classic for a Reforged one), or the import of
+    // `path` (an archive path, either version; the Problems view's fixes), picked on disk.
+    w3.commands.register("w3.imports.addVersion", async (path?: string) => {
+      if (typeof path === "string" && path) {
+        await w3.commands.execute("w3.imports.open");
+        if (!openView?.isListOf(w3.workspace.project()?.root)) throw new Error("The Import Manager can't change this project's list.");
+        openView.selectPath(path);
+      }
+      if (!openView) throw new Error("Open the Import Manager and select a file first.");
+      await openView.addVersionSelected();
     }),
     w3.editors.registerProvider("w3.importManager", {
       async resolve(el, doc) {
@@ -74,9 +87,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const campaign = /war3campaign\.imp(\.json)?$/i.test(doc.path);
         const view = new ImportView(w3, el, list, write, !doc.readOnly, campaign ? CAMPAIGN_IMPORT_FOLDER : IMPORT_FOLDER);
         const stop = w3.workspace.onDidChange(() => view.render());
+        // The preview shows the version of the graphics mode set.
+        const stopMode = w3.settings.onDidChange((key) => { if (key === "game.graphicsMode") view.modeChanged(); });
         if (!doc.readOnly) openView = view;
         // Replace File is the one change here with a way back (the others act on the files at once, as there).
-        return { undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; view.dropModelPreview(); stop.dispose(); if (openView === view) openView = null; } };
+        return { undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; view.dropModelPreview(); stop.dispose(); stopMode.dispose(); if (openView === view) openView = null; } };
       },
     }),
   );
@@ -112,7 +127,7 @@ async function addToList(w3: W3Api, paths: string[]): Promise<void> {
   }
   const fresh = paths.filter((p, i) => !list.files.some((f) => samePath(f.path, p)) && paths.findIndex((q) => samePath(q, p)) === i);
   if (!fresh.length) return;
-  list.files.push(...fresh.map((path) => ({ flags: NEW_IMPORT_FLAGS, path })));
+  list.files.push(...fresh.map((path) => ({ flags: newEntryFlags(path), path })));
   const text = raw ? JSON.stringify({ format: "w3proj.imports/1", ...list }) : await w3.backend.invoke<string>("codec_canonicalize", { root, path: FILE, text: JSON.stringify(list) });
   // Another project meanwhile, or the Import Manager opened on this one (its list in memory would be written over).
   if (w3.workspace.project()?.root !== root) throw new Error("The project changed meanwhile; nothing was added.");
@@ -123,13 +138,15 @@ async function addToList(w3: W3Api, paths: string[]): Promise<void> {
 }
 
 class ImportView {
-  /** Selected entries (entryKey); render() drops what the filter hides, so that actions only
-   *  ever touch rows that can be seen. */
+  /** Selected rows (ImportRow.key: a file and its Reforged version are one row); render() drops what the filter hides,
+   *  so that actions only ever touch rows that can be seen. */
   private selected = new Set<string>();
   private anchor: string | null = null;
   /** The rows as shown (selection ranges, Ctrl+A). */
-  private shown: ImportEntry[] = [];
+  private shown: ImportRow[] = [];
   private query = "";
+  /** "Use in" for the next imports of models and textures (lib/imports.ts UseIn). */
+  private useIn: UseIn = "both";
   /** The image last previewed (the list redraws often; decoding it each time would be slow). */
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
   /** The model previewed (one WebGL context at a time: a new one replaces it, none when a non-model is selected). */
@@ -162,10 +179,10 @@ class ImportView {
         this.step(step === "undo" ? -1 : 1);
       } else if (key === "a" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        this.selected = new Set(this.shown.map(entryKey));
+        this.selected = new Set(this.shown.map((r) => r.key));
         this.render();
       } else if (key === "delete" && this.editable && this.selected.size) {
-        this.remove(this.shown.filter((s) => this.selected.has(entryKey(s))));
+        this.remove(this.shown.filter((r) => this.selected.has(r.key)));
       }
     });
     this.render();
@@ -187,6 +204,30 @@ class ImportView {
   }
   private taken(path: string) {
     return this.list.files.some((f) => samePath(f.path, path)) || this.files().has(projectPath(path).toLowerCase());
+  }
+  /** The list as rows: an import and its Reforged version (`_HD.w3mod\…`) are one. */
+  private rows(files = this.files()): ImportRow[] {
+    return importRows(this.list.files, (e) => this.shownPath(e, this.fileOf(e, files)));
+  }
+  /** The graphics mode set (game.graphicsMode): which version of a row the previews show. */
+  private mode() {
+    return this.w3.settings.get<string>("game.graphicsMode") ?? "hd";
+  }
+  /** Another graphics mode: the previews show its version. */
+  modeChanged() {
+    this.preview_ = null;
+    this.dropModelPreview();
+    this.render();
+  }
+  /** Selects the row of an archive path (either version), as the Problems view's fixes name it. */
+  selectPath(path: string) {
+    const row = this.rows().find((r) => samePath(r.path, classicPathOf(path)));
+    if (!row) throw new Error(`${path} isn't in the import list.`);
+    // A filter that hides the row would drop the selection.
+    this.query = "";
+    this.selected = new Set([row.key]);
+    this.anchor = row.key;
+    this.render();
   }
   /** False when `f` failed (its error is shown). */
   private async run(label: string, f: () => Promise<void>): Promise<boolean> {
@@ -238,10 +279,15 @@ class ImportView {
     if (!sources.length) return;
     const existing = this.files();
     const used = new Set(this.list.files.map(entryKey));
-    // Also against the batch itself, which isn't on disk or in the list yet.
-    const taken = (p: string) => used.has(p.toLowerCase()) || existing.has(projectPath(p).toLowerCase());
+    // Also against the batch itself, which isn't on disk or in the list yet, and against each name's other version (an
+    // unrelated file there would stand in for it in the other graphics mode).
+    const takenOne = (p: string) => used.has(p.toLowerCase()) || existing.has(projectPath(p).toLowerCase());
+    const taken = (p: string) => takenWithVersions(p, takenOne);
+    const use = this.useIn;
     const paths = sources.map((s) => {
-      const path = s.relative ? importTreePath(s.relative, taken, this.folder) : importPath(s.src, taken, this.folder);
+      const plain = s.relative ? importTreePath(s.relative, taken, this.folder) : importPath(s.src, taken, this.folder);
+      // Reforged only: models and textures below _HD.w3mod\ (the object data names the plain path all the same).
+      const path = pathForUse(plain, use);
       used.add(path.toLowerCase());
       return path;
     });
@@ -251,15 +297,52 @@ class ImportView {
       this.w3.workspace.copyMany(sources.map((s, i) => [s.src, projectPath(paths[i])])));
     const done = paths.slice(0, copied);
     // What was copied is listed even if a later file failed: the list and the disk agree.
-    this.list.files.push(...done.map((path) => ({ flags: NEW_IMPORT_FLAGS, path })));
+    this.list.files.push(...done.map((path) => ({ flags: newEntryFlags(path), path })));
     if (done.length) await this.write();
     this.select(done);
     if (error) throw new Error(`${done.length} of ${paths.length} imported, then: ${error}`);
-    if (done.length > 1) void this.w3.window.showInfo(`Imported ${plural(done.length, "file")}.`);
+    if (done.length > 1) void this.w3.window.showInfo(`Imported ${plural(done.length, "file")}${use === "reforged" ? " (models and textures for Reforged only)" : ""}.`);
+    // A model for one graphics mode: the textures next to it on disk can go into the same mode's folder.
+    if (use !== "both" && !sources.some((s) => s.relative)) {
+      for (const [i, path] of done.entries()) if (/\.mdx$/i.test(path)) await this.bringTextures(sources[i].src, path, use === "reforged");
+    }
+    if (use === "classic" && done.some(hasModeVersions)) {
+      // A note, not a question: the import is done either way.
+      const one = done.length === 1 ? done[0] : null;
+      void this.w3.window.showInfo(`Imported for Classic. Reforged reads ${one ? "it" : "them"} too until ${one ? "it has" : "each has"} a Reforged version.`, ...(one ? ["Add Reforged Version…"] : []))
+        .then(async (pick) => {
+          if (!one || pick !== "Add Reforged Version…" || !this.isListOf(this.w3.workspace.project()?.root)) return;
+          this.select([one]);
+          await this.addVersionSelected();
+        });
+    }
+  }
+  /** Asks whether the textures a model names that lie next to it on disk (`src`) go into the map with it, at the
+   *  model's graphics mode's path (`reforged`: below _HD.w3mod\), and imports them. Textures whose path is taken stay
+   *  out; a model that can't be read brings none. */
+  private async bringTextures(src: string, model: string, reforged: boolean) {
+    let textures: { path: string; replaceableId: number }[];
+    try { textures = parseMdx(await this.w3.backend.readBytes(src)).textures; } catch { return; }
+    const dir = src.replace(/[\\/][^\\/]*$/, "");
+    const found = await followingTextures(dir, textures, (a) => (reforged ? reforgedPathOf(a) : a),
+      (f) => this.w3.backend.invoke<boolean>("fs_exists", { path: f }).catch(() => false), (a) => this.taken(a));
+    if (!found.length || this.disposed) return;
+    const mode = reforged ? "Reforged" : "Classic";
+    const names = found.map((t) => t.archive).join(", ");
+    const c = await this.w3.window.showInfo(`${model.split("\\").pop()} names ${plural(found.length, "texture")} found next to it: ${names}. Import ${found.length === 1 ? "it" : "them"} for ${mode} too?`, "Import textures", "Skip");
+    if (c !== "Import textures" || this.disposed || this.w3.workspace.project()?.root !== this.root) return;
+    // Taken meanwhile (another action during the question): left out.
+    const fresh = found.filter((t) => !this.taken(t.archive));
+    const { copied, error } = await this.w3.window.withProgress(`Importing ${plural(fresh.length, "texture")}`, () =>
+      this.w3.workspace.copyMany(fresh.map((t) => [t.file, projectPath(t.archive)])));
+    const done = fresh.slice(0, copied);
+    this.list.files.push(...done.map((t) => ({ flags: newEntryFlags(t.archive), path: t.archive })));
+    if (done.length) await this.write();
+    if (error) throw new Error(`${done.length} of ${fresh.length} textures imported, then: ${error}`);
   }
   private select(paths: string[]) {
-    this.selected = new Set(paths.map((p) => p.toLowerCase()));
-    this.anchor = paths.length ? paths[paths.length - 1].toLowerCase() : null;
+    this.selected = new Set(paths.map((p) => classicPathOf(p).toLowerCase()));
+    this.anchor = paths.length ? classicPathOf(paths[paths.length - 1]).toLowerCase() : null;
   }
   private register(path: string) {
     void this.run("Add", () => this.add([path]));
@@ -268,7 +351,7 @@ class ImportView {
   async add(paths: string[]) {
     const fresh = paths.filter((p, i) => !this.list.files.some((f) => samePath(f.path, p)) && paths.findIndex((q) => samePath(q, p)) === i);
     if (fresh.length) {
-      this.list.files.push(...fresh.map((path) => ({ flags: NEW_IMPORT_FLAGS, path })));
+      this.list.files.push(...fresh.map((path) => ({ flags: newEntryFlags(path), path })));
       await this.write();
     }
     this.select(paths);
@@ -278,22 +361,41 @@ class ImportView {
   isListOf(root: string | undefined) {
     return !this.disposed && this.editable && !!root && this.root === root;
   }
-  private changePath(entry: ImportEntry, to: string) {
+  /** Moves a row's files and entries: an import and its Reforged version move together (the Reforged one into its
+   *  folder), so what names the plain path finds both. */
+  private changePath(row: ImportRow, to: string) {
     void this.run("Change path", async () => {
-      to = to.trim().replace(/^\\+/, "");
-      const f = this.fileOf(entry);
-      if (!to || samePath(to, this.shownPath(entry, f))) return;
-      if (to.split("\\").some((part) => part === ".." || part === "")) throw new Error("Not a valid path.");
-      if (this.taken(to)) throw new Error(`${to} is already in the map.`);
-      const from = this.shownPath(entry, f);
-      if (f) await this.w3.workspace.rename(f.path, projectPath(to));
-      // A standard-path entry (name inside the import folder) now has a path of its own.
-      if (entry.path !== from) entry.flags = CUSTOM_PATH_FLAGS;
-      entry.path = to;
-      await this.write();
+      to = to.trim().replace(/\//g, "\\").replace(/^\\+/, "");
+      const files = this.files();
+      const pathOf = (e: ImportEntry) => this.shownPath(e, this.fileOf(e, files));
+      const moves = rowMoves(row, to, pathOf).filter((m) => !samePath(m.from, m.to));
+      if (!to || !moves.length) return;
+      if (moves.some((m) => m.to.split("\\").some((part) => part === ".." || part === ""))) throw new Error("Not a valid path.");
+      // A move onto the row's own other path (the case of a name changed) isn't a clash.
+      const own = new Set(moves.map((m) => m.from.toLowerCase()));
+      const clash = moves.find((m) => !own.has(m.to.toLowerCase()) && this.taken(m.to));
+      if (clash) throw new Error(`${clash.to} is already in the map.`);
+      let changed = false;
+      try {
+        for (const m of moves) {
+          const f = this.fileOf(m.entry, files);
+          if (f) await this.w3.workspace.rename(f.path, projectPath(m.to));
+          // A standard-path entry (name inside the import folder) now has a path of its own.
+          if (m.entry.path !== m.from) m.entry.flags = CUSTOM_PATH_FLAGS;
+          m.entry.path = m.to;
+          changed = true;
+        }
+      } finally {
+        // Also after a failed second move: the list says where the first file went.
+        if (changed) await this.write();
+      }
+      // The data names the plain path, whichever versions moved.
+      const from = classicPathOf(moves[0].from);
+      to = classicPathOf(moves[0].to);
       this.select([to]);
+      if (samePath(from, to)) return;
       // What used the old path (object data, triggers, scripts, models) can follow.
-      const refs = await findPathRefs(this.w3, from, projectPath(to));
+      const refs = await findPathRefs(this.w3, from, projectPath(moves[0].to));
       const raw = refs.raw.length ? ` Not changeable (kept in binary form; re-sync the project to get text): ${refs.raw.map((p) => p.slice(4)).join(", ")}.` : "";
       if (!refs.files.length) {
         void this.w3.window.showInfo(`Moved. Nothing in the map's text files or models used the old path.${raw}`);
@@ -310,9 +412,12 @@ class ImportView {
   /** Removes entries from the list. Entries whose files are in the project ask whether the files go too: a file left
    *  in the map folder without an entry is still packed into the map and used by the game (the Problems view warns
    *  of it), so that is never done without saying so. */
-  private remove(entries: ImportEntry[]) {
+  private remove(rows: ImportRow[]) {
     void this.run("Remove", async () => {
-      const what = entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
+      // A row's versions go together (the question says so).
+      let entries = rows.flatMap(rowEntries);
+      const pair = rows.length === 1 && !!rows[0].classic && !!rows[0].reforged;
+      const what = pair ? `${rows[0].path} (both its Classic and its Reforged version)` : entries.length === 1 ? entries[0].path : `${entries.length.toLocaleString()} entries`;
       const asked = [...new Set(entries.flatMap((e) => this.fileOf(e)?.path ?? []))];
       let withFiles = false;
       if (!asked.length) {
@@ -375,12 +480,51 @@ class ImportView {
     });
   }
   /** Replace File on the one selected entry (the command). */
-  replaceSelected() {
-    const sel = this.shown.filter((s) => this.selected.has(entryKey(s)));
+  async replaceSelected() {
+    const sel = this.shown.filter((r) => this.selected.has(r.key));
     if (sel.length !== 1) throw new Error("Select one imported file to replace.");
-    const f = this.fileOf(sel[0]);
-    if (!f) throw new Error(`${sel[0].path} isn't in the project's map folder.`);
-    this.replace(sel[0], f.path);
+    let e = rowEntries(sel[0])[0];
+    // A row with both versions: which one.
+    if (sel[0].classic && sel[0].reforged) {
+      const c = await this.w3.window.showInfo(`Replace which version of ${sel[0].path}?`, "Classic version", "Reforged version", "Cancel");
+      if (c !== "Classic version" && c !== "Reforged version") return;
+      e = c === "Classic version" ? sel[0].classic : sel[0].reforged;
+    }
+    const f = this.fileOf(e);
+    if (!f) throw new Error(`${e.path} isn't in the project's map folder.`);
+    this.replace(e, f.path);
+  }
+  /** "Add Reforged Version…" / "Add Classic Version…" on the one selected row (the command). */
+  async addVersionSelected() {
+    const sel = this.shown.filter((r) => this.selected.has(r.key));
+    if (sel.length !== 1) throw new Error("Select one imported file to add a version to.");
+    if (!versionToAdd(sel[0])) throw new Error(`${sel[0].path} has both a Classic and a Reforged version.`);
+    await this.addVersion(sel[0]);
+  }
+  /** Picks a file on disk and stores it as the row's other version: below _HD.w3mod\ for a plain import, at the plain
+   *  path for a Reforged one; the same name, so the object data's one path finds the version of each graphics mode. A
+   *  model's textures next to it can come along (asked). */
+  private addVersion(row: ImportRow): Promise<boolean> {
+    return this.run("Add version", async () => {
+      const add = versionToAdd(row);
+      if (!add) return;
+      const mode = add.side === "reforged" ? "Reforged" : "Classic";
+      const root = this.w3.workspace.project()?.root;
+      const src = await this.w3.window.pickFile({ title: `${mode} version of ${row.path}` });
+      if (!src || this.disposed || this.w3.workspace.project()?.root !== root) return;
+      const ext = (p: string) => (/\.([^.\\/]+)$/.exec(p)?.[1] ?? "").toLowerCase();
+      if (ext(src) !== ext(row.path) && !(await this.w3.window.confirm(`${src.split(/[\\/]/).pop()} isn't a .${ext(row.path) || "(no extension)"} file. It is stored as ${add.path} anyway, and what uses that path reads it as such.`, "Add", 60000))) return;
+      // The row's other version arrived meanwhile, or a file of that name: nothing is written over.
+      if (this.disposed || this.w3.workspace.project()?.root !== root || !this.list.files.includes(rowEntries(row)[0])) return;
+      if (this.taken(add.path)) throw new Error(`${add.path} is already in the map.`);
+      await this.w3.window.withProgress(`Adding ${add.path}`, () => this.w3.workspace.copy(src, projectPath(add.path)));
+      this.list.files.push({ flags: add.flags, path: add.path });
+      await this.write();
+      this.select([add.path]);
+      this.render();
+      if (/\.mdx$/i.test(add.path)) await this.bringTextures(src, add.path, add.side === "reforged");
+      void this.w3.window.showInfo(`Added the ${mode} version: ${add.path}.`);
+    });
   }
   /** Undo (-1) or redo (1) of Replace File; pressed while a replace (or another step) is writing, it runs after that. */
   step(dir: -1 | 1) {
@@ -440,13 +584,13 @@ class ImportView {
   render() {
     const files = this.files();
     const q = this.query.trim().toLowerCase();
-    const listed = this.list.files.filter((f) => !q || f.path.toLowerCase().includes(q));
+    const listed = this.rows(files).filter((r) => !q || rowEntries(r).some((e) => e.path.toLowerCase().includes(q)) || r.path.toLowerCase().includes(q));
     // Files in the map folder that the list doesn't register (and that aren't the map's own); the Problems view warns
     // of each (the same rule: lib/imports.ts unlistedFiles).
     const unlisted = unlistedFiles([...files.values()].map((f) => f.path), this.list.files, this.folder).map(archivePath)
       .filter((p) => !q || p.toLowerCase().includes(q));
     this.shown = listed;
-    const shownKeys = new Set(listed.map(entryKey));
+    const shownKeys = new Set(listed.map((r) => r.key));
     for (const k of this.selected) if (!shownKeys.has(k)) this.selected.delete(k);
     const total = this.list.files.reduce((n, e) => n + (this.fileOf(e, files)?.size ?? 0), 0);
 
@@ -460,30 +604,43 @@ class ImportView {
         box?.focus();
         box?.setSelectionRange(caret, caret);
       } });
+    // Which graphics modes the next imports of models and textures are for.
+    const USE_IN: [UseIn, string, string][] = [
+      ["both", "Both graphics modes", "Models and textures go to their plain path: Classic and Reforged both read it"],
+      ["classic", "Classic only", "The plain path; Reforged reads it too until it has a Reforged version (Add Reforged Version…)"],
+      ["reforged", "Reforged only", "Models and textures go below _HD.w3mod\\ (the object data names the plain path): only Reforged reads them"]];
+    const useIn = h("select.imp-use-in", { title: USE_IN.find((u) => u[0] === this.useIn)?.[2] ?? "",
+      onchange: () => { this.useIn = useIn.value as UseIn; this.render(); } },
+    ...USE_IN.map(([value, label, title]) => h("option", { value, title, selected: value === this.useIn }, label))) as HTMLSelectElement;
     const toolbar = h("div.imp-toolbar", {},
-      ...(this.editable ? [h("button.primary", { onclick: () => this.importFiles() }, "Import files…"), h("button", { onclick: () => this.importFolder() }, "Import folder…")] : []),
+      ...(this.editable ? [h("button.primary", { onclick: () => this.importFiles() }, "Import files…"), h("button", { onclick: () => this.importFolder() }, "Import folder…"),
+        h("label.imp-use-label", {}, "Use in", useIn)] : []),
       search, h("span.muted", {}, `${this.list.files.length} imported · ${formatBytes(total)}`));
 
-    const rows = listed.map((e) => {
-      const f = this.fileOf(e, files);
-      const active = this.selected.has(entryKey(e));
-      return h(`tr.imp-row${active ? ".active" : ""}${f ? "" : ".missing"}`, {
+    const rows = listed.map((r) => {
+      const found = rowEntries(r).map((e) => this.fileOf(e, files));
+      const shown = shownEntry(r, this.mode());
+      const f = this.fileOf(shown, files);
+      const active = this.selected.has(r.key);
+      const size = found.reduce((n, x) => n + (x?.size ?? 0), 0);
+      return h(`tr.imp-row${active ? ".active" : ""}${found.some((x) => !x) ? ".missing" : ""}`, {
         onclick: (ev: MouseEvent) => {
-          const next = clickSelection(listed.map(entryKey), this.selected, this.anchor, entryKey(e), { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey });
+          const next = clickSelection(listed.map((x) => x.key), this.selected, this.anchor, r.key, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey });
           this.selected = next.selected;
           this.anchor = next.anchor;
           this.render();
         },
-        ondblclick: () => { if (f && f.size <= MAX_OPEN) this.openFile(e.path, f.path); },
-        title: f ? "" : "Not in the project's map folder",
-      }, h("td.imp-path", {}, this.shownPath(e, f)), h("td", {}, kindOf(e.path)), h("td.imp-size", {}, f ? formatBytes(f.size) : "missing"), h("td.muted", {}, String(e.flags)));
+        ondblclick: () => { if (f && f.size <= MAX_OPEN) this.openFile(shown.path, f.path); },
+        title: found.some((x) => !x) ? "Not in the project's map folder" : "",
+      }, h("td.imp-path", {}, r.classic ? this.shownPath(r.classic, found[0]) : r.path, ...this.badges(r)), h("td", {}, kindOf(r.path)),
+      h("td.imp-size", {}, found.every((x) => !x) ? "missing" : formatBytes(size)), h("td.muted", {}, rowEntries(r).map((e) => String(e.flags)).join(" / ")));
     });
     const table = h("table.imp-table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Path in the map"), h("th", {}, "Type"), h("th", {}, "Size"), h("th", { title: "Import flags (war3map.imp)" }, "Flags"))),
       h("tbody", {}, ...rows));
 
-    const sel = listed.filter((e) => this.selected.has(entryKey(e)));
+    const sel = listed.filter((r) => this.selected.has(r.key));
     const detail = sel.length > 1 ? this.detailMany(sel, files)
-      : sel.length ? this.detail(sel[0], this.fileOf(sel[0], files))
+      : sel.length ? this.detail(sel[0], files)
       : h("p.muted", {}, "Select a file to change its path, open, export or remove it. Ctrl and Shift select several.");
 
     this.el.replaceChildren(h("div.imp-main", {}, toolbar,
@@ -495,38 +652,64 @@ class ImportView {
     h("div.imp-detail", {}, detail));
   }
 
-  private detail(e: ImportEntry, file: FileInfo | undefined): HTMLElement {
+  private detail(row: ImportRow, files: Map<string, FileInfo>): HTMLElement {
+    const both = !!(row.classic && row.reforged);
+    // The version the graphics mode set reads (opened, previewed); a row of one version has just that.
+    const e = shownEntry(row, this.mode());
+    const file = this.fileOf(e, files);
     const exists = !!file;
-    const path = h("input.imp-path-edit", { type: "text", value: this.shownPath(e, file), readOnly: !this.editable });
+    const versions = rowEntries(row).map((x) => ({ e: x, f: this.fileOf(x, files), mode: x === row.reforged ? "Reforged" : "Classic" }));
+    const path = h("input.imp-path-edit", { type: "text", value: row.classic ? this.shownPath(row.classic, versions[0].f) : row.path, readOnly: !this.editable });
+    const add = this.editable ? versionToAdd(row) : null;
+    const modes = both ? `Classic: ${versions[0].e.path} · Reforged: ${versions[1].e.path}`
+      : row.reforged ? `Reforged only (${row.reforged.path}): Classic reads nothing at this path from the map.`
+      : "Both graphics modes (one file at the plain path).";
     return h("div", {},
-      h("h3", {}, e.path.split(/[\\/]/).pop() ?? e.path),
+      h("h3", {}, row.path.split(/[\\/]/).pop() ?? row.path, ...this.badges(row)),
       h("div.imp-field", {}, h("label", {}, "Path in the map"), path,
-        ...(this.editable ? [h("button", { onclick: () => this.changePath(e, path.value) }, "Change path")] : [])),
+        ...(this.editable ? [h("button", { title: row.reforged ? "The Reforged version moves along, below _HD.w3mod\\" : "", onclick: () => this.changePath(row, path.value) }, "Change path")] : [])),
       h("p.muted", {}, "Models, textures and sounds are referred to by this path (object data, triggers, other models)."),
-      h("div.imp-field", {}, h("label", {}, "Type"), h("span", {}, `${kindOf(e.path)} · flags ${e.flags}`)),
-      exists ? null : h("p.imp-warn", {}, "This file isn't in the project's map folder, so it isn't packed. (Blizzard's own maps list files the game provides itself.)"),
+      h("div.imp-field", {}, h("label", {}, "Graphics modes"), h("span.imp-modes", {}, modes)),
+      h("div.imp-field", {}, h("label", {}, "Type"), h("span", {}, `${kindOf(row.path)} · flags ${versions.map((v) => v.e.flags).join(" / ")}`)),
+      versions.every((v) => v.f) ? null : h("p.imp-warn", {}, `${versions.length > 1 ? `The ${versions.filter((v) => !v.f).map((v) => v.mode).join(" and ")} version isn't` : "This file isn't"} in the project's map folder, so it isn't packed. (Blizzard's own maps list files the game provides itself.)`),
       h("div.imp-actions", {},
         // Viewers load the whole file: very large ones (maps, campaigns, movies) can only be exported.
-        h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : "",
+        h("button", { disabled: !exists || (file?.size ?? 0) > MAX_OPEN, title: (file?.size ?? 0) > MAX_OPEN ? "Too large to open here" : both ? `The ${e === row.reforged ? "Reforged" : "Classic"} version (the graphics mode set)` : "",
           onclick: () => file && this.openFile(e.path, file.path) }, kindOf(e.path) === "Sound" ? "▶ Play" : "Open"),
-        h("button", { disabled: !exists, onclick: () => file && this.exportFile(e.path, file.path) }, "Export…"),
+        // A row's versions are exported together, each at its place in the map.
+        h("button", { disabled: !versions.some((v) => v.f), title: both ? "Both versions, each at its place in the map below the chosen folder" : "",
+          onclick: () => (both ? this.exportMany(versions.flatMap((v) => v.f?.path ?? [])) : file && this.exportFile(e.path, file.path)) }, "Export…"),
         ...(this.editable ? [
-          h("button.imp-replace", { disabled: !exists, title: "Another file's content under this path (Ctrl+Z takes it back)", onclick: () => file && this.replace(e, file.path) }, "Replace…"),
-          h("button", { onclick: () => this.remove([e]) }, "Remove")] : [])),
-      file ? this.preview(e.path, file) : null);
+          ...versions.map((v) => h("button.imp-replace", { disabled: !v.f, title: "Another file's content under this path (Ctrl+Z takes it back)",
+            onclick: () => v.f && this.replace(v.e, v.f.path) }, both ? `Replace ${v.mode}…` : "Replace…")),
+          h("button", { onclick: () => this.remove([row]) }, "Remove")] : [])),
+      add ? h("div.imp-actions", {}, h("button.imp-add-version", {
+        title: add.side === "reforged" ? `A file for Reforged, stored as ${add.path}: Reforged reads it instead of this one, Classic keeps this one`
+          : `A file for Classic, stored as ${add.path}: Classic reads it, Reforged keeps the Reforged version`,
+        onclick: () => void this.addVersion(row) }, add.side === "reforged" ? "Add Reforged Version…" : "Add Classic Version…")) : null,
+      file ? this.preview(e.path, file, e === row.reforged) : null);
   }
 
-  private detailMany(entries: ImportEntry[], files: Map<string, FileInfo>): HTMLElement {
+  /** The graphics modes of a row with a Reforged version ("Classic", "Reforged"); none for a plain file alone (both
+   *  modes read it). */
+  private badges(row: ImportRow): HTMLElement[] {
+    if (!row.reforged) return [];
+    return [...(row.classic ? [h("span.imp-badge", { title: "Classic reads this version" }, "Classic")] : []),
+      h("span.imp-badge.reforged", { title: `Reforged reads ${row.reforged.path}` }, "Reforged")];
+  }
+
+  private detailMany(rows: ImportRow[], files: Map<string, FileInfo>): HTMLElement {
+    const entries = rows.flatMap(rowEntries);
     const found = entries.flatMap((e) => this.fileOf(e, files) ?? []);
     const size = found.reduce((n, f) => n + f.size, 0);
     const paths = [...new Set(found.map((f) => f.path))];
     const missing = entries.length - found.length;
     return h("div", {},
-      h("h3", {}, plural(entries.length, "file")),
+      h("h3", {}, plural(entries.length, "file") + (entries.length !== rows.length ? ` in ${rows.length.toLocaleString()} rows (Classic and Reforged versions)` : "")),
       h("p.muted", {}, `${formatBytes(size)}${missing ? ` · ${missing} not in the project's map folder` : ""}`),
       h("div.imp-actions", {},
         h("button", { disabled: !paths.length, title: "Keeps each file's path in the map below the chosen folder", onclick: () => this.exportMany(paths) }, "Export…"),
-        ...(this.editable ? [h("button", { onclick: () => this.remove(entries) }, "Remove")] : [])));
+        ...(this.editable ? [h("button", { onclick: () => this.remove(rows) }, "Remove")] : [])));
   }
 
   /** The image itself, for files that are images and can be decoded here. */
@@ -534,7 +717,9 @@ class ImportView {
     this.modelPreview?.view.dispose();
     this.modelPreview = null;
   }
-  private preview(path: string, file: FileInfo): HTMLElement | null {
+  /** `reforged`: the file is a Reforged version, whose model reads the map's and the game's Reforged files first
+   *  whatever the graphics mode set. */
+  private preview(path: string, file: FileInfo, reforged = false): HTMLElement | null {
     const modelKey = kindOf(path) === "Model" ? previewKey(path, file, "model") : null;
     if (modelKey === null) this.dropModelPreview();
     if (modelKey !== null) {
@@ -543,7 +728,8 @@ class ImportView {
         try {
           const entry = { key: modelKey, view: null as unknown as ModelPreview, failed: false };
           // A model that can't be shown says so like an image does (the preview's own message names the file).
-          entry.view = new ModelPreview(this.w3, { onFail: () => { entry.failed = true; entry.view.el.replaceChildren(h("small.muted", {}, "No preview for this file.")); } });
+          entry.view = new ModelPreview(this.w3, { prefer: reforged ? "hd" : undefined,
+            onFail: () => { entry.failed = true; entry.view.el.replaceChildren(h("small.muted", {}, "No preview for this file.")); } });
           this.modelPreview = entry;
           entry.view.show(path);
         } catch {

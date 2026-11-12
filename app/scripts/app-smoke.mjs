@@ -7485,10 +7485,10 @@ async function importWarnings(page, found) {
     }
 
     // ---- The Import Manager's Remove asks about the file -------------------------------------------------------------
-    const remove = async (answer) => {
+    const remove = async (answer, name = "smokecase") => {
       await page.evaluate(`window.__impWarned.length = 0; window.__impAnswer = ${JSON.stringify(answer)}`);
       await page.evaluate(`w3.commands.execute("w3.imports.open")`);
-      const entry = `[...document.querySelectorAll("tr.imp-row")].find((r) => /smokecase/i.test(r.textContent))`;
+      const entry = `[...document.querySelectorAll("tr.imp-row")].find((r) => r.textContent.toLowerCase().includes(${JSON.stringify(name.toLowerCase())}))`;
       if (!(await soon(() => page.evaluate(`!!${entry}`), 20000))) return "the Import Manager doesn't show the entry";
       await page.evaluate(`${entry}.click()`);
       const clicked = await page.evaluate(`(() => { const b = [...document.querySelectorAll(".imp-detail .imp-actions button")].find((x) => x.textContent === "Remove"); if (!b) return false; b.click(); return true; })()`);
@@ -7525,9 +7525,87 @@ async function importWarnings(page, found) {
     why = await remove("Remove and delete file");
     if (why) fail(why);
     else if (onDisk(MODEL) || listed().some((p) => /smokecase/i.test(p))) fail(`Remove and delete file left ${onDisk(MODEL) ? "the file" : "the entry"}`);
+
+    // ---- A model per graphics mode (branch import-graphics-mode): imported "Reforged only" it goes below _HD.w3mod\,
+    // "Add Classic Version…" stores the Classic one at the plain path, the list shows the two as one row with both
+    // badges, the packed map holds both paths, and Remove asks once and takes both. -------------------------------------
+    await graphicsModeVersions(page, k, fail, { onDisk, listed, remove });
   } finally {
     await page.evaluate(`(() => { const k = window.__impKept; if (k) { w3.window.askDelete = k.ask; w3.window.showWarning = k.warn; } window.__impGroup?.dispose(); })()`);
     await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
+/** The Import Manager's versions per graphics mode, on importWarnings' map: the footman's model imported for Reforged
+ *  only (the toolbar's Use in), the knight's added as its Classic version; one row with Classic and Reforged badges and
+ *  the right flags (13 for the Reforged entry, as Blizzard's campaigns list them), both paths packed with their own
+ *  bytes, and Remove of the row asking once and deleting both. Leaves the map saved, no question open. */
+async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
+  const HD = "_HD.w3mod\\war3mapImported\\PairHero.mdx", SD = "war3mapImported\\PairHero.mdx";
+  const src = (mode) => join(k.root, "smoke-src", mode, "PairHero.mdx");
+  const entry = (path) => { try { return k.read("war3map.imp.json").files.find((f) => f.path === path) ?? null; } catch { return null; } };
+  await page.evaluate(`(async () => {
+    window.__impKept2 = { files: w3.window.pickFiles, file: w3.window.pickFile, info: w3.window.showInfo };
+    window.__impInfo = [];
+    w3.window.showInfo = async (m, ...actions) => { window.__impInfo.push({ m, actions }); return undefined; };
+    w3.window.pickFiles = async () => [${JSON.stringify(src("Reforged"))}];
+    w3.window.pickFile = async () => ${JSON.stringify(src("Classic"))};
+    // Two models told apart by their bytes: the knight for Reforged, the footman for Classic.
+    await w3.workspace.writeBytes("smoke-src/Reforged/PairHero.mdx", await w3.game.read("Units\\\\Human\\\\Knight\\\\Knight.mdx"));
+    await w3.workspace.writeBytes("smoke-src/Classic/PairHero.mdx", await w3.game.read("Units\\\\Human\\\\Footman\\\\Footman.mdx"));
+  })()`);
+  const row = `[...document.querySelectorAll("tr.imp-row")].filter((r) => r.textContent.includes("PairHero"))`;
+  const badges = () => page.evaluate(`${row}.map((r) => [...r.querySelectorAll(".imp-badge")].map((b) => b.textContent).join("+"))`);
+  try {
+    await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+    const use = await soon(() => page.evaluate(`(() => { const s = document.querySelector(".imp-use-in"); if (!s) return false;
+      s.value = "reforged"; s.dispatchEvent(new Event("change", { bubbles: true })); return document.querySelector(".imp-use-in").value === "reforged"; })()`), 20000);
+    if (!use) { fail("the Import Manager has no Use in choice"); return; }
+    await page.evaluate(`[...document.querySelectorAll(".imp-toolbar button")].find((b) => b.textContent === "Import files…").click()`);
+    if (!(await soon(() => !!entry(HD) && onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx"), 20000))) {
+      fail(`Import files… with Use in: Reforged only: the list holds ${JSON.stringify(listed())}`);
+      return;
+    }
+    if (entry(HD).flags !== 13) fail(`the Reforged entry's flags: ${entry(HD).flags}`);
+    if (listed().some((p) => p === SD) || onDisk("map/war3mapImported/PairHero.mdx")) fail("Reforged only also wrote the plain path");
+    await settled(page);
+    if ((await badges()).join() !== "Reforged") fail(`a Reforged-only import's row shows ${JSON.stringify(await badges())}`);
+
+    // Add Classic Version…: the selected row's plain path.
+    await page.evaluate(`${row}[0]?.click()`);
+    const add = await page.evaluate(`(() => { const b = document.querySelector(".imp-detail .imp-add-version"); if (!b) return null; const t = b.textContent; b.click(); return t; })()`);
+    if (add !== "Add Classic Version…") { fail(`the Reforged-only row's detail offers ${JSON.stringify(add)}, not Add Classic Version…`); return; }
+    if (!(await soon(() => !!entry(SD) && onDisk("map/war3mapImported/PairHero.mdx"), 20000))) { fail(`Add Classic Version…: the list holds ${JSON.stringify(listed())}`); return; }
+    if (entry(SD).flags !== 21) fail(`the Classic entry's flags: ${entry(SD).flags}`);
+    await settled(page);
+    if ((await badges()).join() !== "Classic+Reforged") fail(`the pair is shown as ${JSON.stringify(await badges())} (one row with both badges wanted)`);
+    if (!(await page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`))) fail(`no note of the added version: ${JSON.stringify(await page.evaluate(`window.__impInfo`))}`);
+
+    // Packed, the map holds both paths, each with its own bytes.
+    await k.save();
+    await k.verify(fail);
+    const map = join(work, "heights", "ImportWarnings", "ImportWarnings.w3x");
+    const listing = spawnSync(cli, ["ls", map], { encoding: "utf8" }).stdout;
+    const packed = (p) => spawnSync(cli, ["cat", map, p], { maxBuffer: 256 * 1024 * 1024 }).stdout;
+    for (const [p, file] of [[HD, src("Reforged")], [SD, src("Classic")]]) {
+      const bytes = listing.includes(p) ? packed(p) : null;
+      if (!bytes) fail(`the packed map has no ${p}`);
+      else if (!bytes.equals(readFileSync(file))) fail(`the packed ${p} isn't the file imported for it (${bytes.length} bytes, ${readFileSync(file).length} imported)`);
+    }
+
+    // Remove on the row: one question, both entries and files gone.
+    const why = await remove("Remove and delete file", "PairHero");
+    if (why) fail(`removing the pair: ${why}`);
+    else {
+      const asked = await page.evaluate(`window.__impWarned.map((w) => w.m)`);
+      if (asked.length !== 1 || !/both its Classic and its Reforged version/.test(asked[0])) fail(`Remove on the pair asked ${JSON.stringify(asked)}`);
+      if (!(await soon(() => !entry(HD) && !entry(SD) && !onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx") && !onDisk("map/war3mapImported/PairHero.mdx"), 10000))) {
+        fail(`Remove and delete file on the pair left ${JSON.stringify(listed().filter((p) => /pairhero/i.test(p)))}`);
+      }
+    }
+  } finally {
+    await page.evaluate(`(async () => { const k = window.__impKept2; if (k) { w3.window.pickFiles = k.files; w3.window.pickFile = k.file; w3.window.showInfo = k.info; }
+      for (const m of ["Reforged", "Classic"]) await w3.workspace.delete("smoke-src/" + m + "/PairHero.mdx").catch(() => {}); })()`);
   }
 }
 

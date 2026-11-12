@@ -6,7 +6,7 @@ import { watchContextLoss } from "../../lib/model/contextloss";
 import { neverStoredLast } from "../../lib/model/texpath";
 import { ModelRenderer, TEAM_COLORS, type Clock } from "../../lib/model/renderer";
 import { errorText } from "../../lib/oserror";
-import { readImported } from "../../lib/imports";
+import { readImportedFor } from "../../lib/imports";
 
 const FILTER_NAMES = ["none", "transparent", "blend", "additive", "add alpha", "modulate", "modulate 2x"];
 
@@ -25,8 +25,10 @@ function textureLoader(w3: W3Api, doc: EditorDocument) {
         try { return await w3.game.read(layer + v); } catch { /* next */ }
       }
     } else if (w3.workspace.project()) {
-      // Under its name on disk, whatever the case the model asks for (as the game finds it).
-      try { const own = await readImported(w3, path); if (own) return own; } catch { /* next */ }
+      // Under its name on disk, whatever the case the model asks for (as the game finds it). A map's Reforged version
+      // (below _HD.w3mod) reads the Reforged textures first, another model those of the graphics mode set.
+      const mode = /^map\/_hd\.w3mod\//i.test(doc.path.replace(/\\/g, "/")) ? "hd" : w3.settings.get<string>("game.graphicsMode") ?? "hd";
+      try { const own = await readImportedFor(w3, path, mode); if (own) return own; } catch { /* next */ }
     }
     let failed: unknown;
     for (const v of variants(path)) {
