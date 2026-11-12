@@ -5,7 +5,7 @@ import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
-import { groundHeight, heightAt, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -271,8 +271,16 @@ export function setWater(t: Terrain, place: Area | { points: readonly [number, n
   return changed.length ? withCliffTypes(t, changed, kinds) : changed;
 }
 
-/** Why something can't stand at a place, as far as can be told from what's known there. */
-export function whyNoRoom(t: Terrain, p: Pathing, standing: { id: string; position: readonly number[] } | null, x: number, y: number) {
+/** Whether painted Boundary keeps an object of `kind` off a place: units and items can't stand on a tile with a corner
+ *  painted Boundary; doodads, destructables and start locations can (as past the map's edge). */
+export const boundaryRefuses = (t: Terrain, kind: string, id: string, x: number, y: number) =>
+  (kind === "w3u" || kind === "w3t") && id !== "sloc" && onBoundary(t, x, y);
+
+/** Why something can't stand at a place, as far as can be told from what's known there. `what` is the object that was
+ *  refused, when known: painted Boundary refuses some kinds only (boundaryRefuses), before anything else is asked. */
+export function whyNoRoom(t: Terrain, p: Pathing, standing: { id: string; position: readonly number[] } | null, x: number, y: number,
+  what?: { kind: string; id: string }) {
+  if (what && boundaryRefuses(t, what.kind, what.id, x, y)) return "it's on the map's boundary: a corner of this tile is painted Boundary, and units and items can't stand there";
   if (standing) return `${standing.id} stands there, at ${Math.round(standing.position[0])}, ${Math.round(standing.position[1])}`;
   const tx = Math.floor((x - t.offsetX) / TILE), ty = Math.floor((y - t.offsetY) / TILE);
   const at = (cx: number, cy: number) => (cx >= 0 && cy >= 0 && cx < t.width && cy < t.height ? t.corners[cy * t.width + cx] : undefined);

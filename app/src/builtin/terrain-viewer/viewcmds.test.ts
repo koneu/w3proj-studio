@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
+import { boxOf, composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, nextGrid, regionColors, toggleGrid, viewOfBox, viewOfMap, type Angle, type Box, type GridSize } from "./viewcmds";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 
 /** The oracle: a real perspective projection of a point, written out here from the camera's position. */
@@ -92,6 +92,19 @@ test("viewOfMap: as the World Editor, straight down, north up, framed by the pla
   assert.equal(whole.target[2], 200);
   const offCentre = viewOfMap(wide, { ...wide, minX: 1024 }, 1, aspect);
   assert.equal(offCentre.target[0], (1024 + 32768) / 2);
+});
+
+test("cycleIndex: View Selection goes through the selection one object a press and stops at either end", () => {
+  // we-drive 2026-11-12, four rocks selected: Next twice, then it stayed; Previous then stayed at its end too.
+  assert.equal(cycleIndex(4, -1, 1), 0, "the first press: the first selected");
+  assert.equal(cycleIndex(4, 0, 1), 1);
+  assert.equal(cycleIndex(4, 3, 1), 3, "Next stays at the last");
+  assert.equal(cycleIndex(4, 3, -1), 2);
+  assert.equal(cycleIndex(4, 0, -1), 0, "Previous stays at the first");
+  assert.equal(cycleIndex(4, -1, -1), 3, "Previous first: the last selected");
+  assert.equal(cycleIndex(4, 7, 1), 0, "a look from an older selection starts again");
+  assert.equal(cycleIndex(1, 0, 1), 0, "one object: always it");
+  assert.equal(cycleIndex(0, -1, 1), -1, "nothing selected");
 });
 
 test("boxOf: the points' extent plus the padding; nothing and non-numbers give null", () => {

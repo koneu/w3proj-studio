@@ -12,6 +12,9 @@ export interface FragmentObject {
   list: "doodads" | "units";
   /** From the fragment's centre, the height from the ground under it. */
   at: [number, number, number];
+  /** The height as stored where it was copied (a paste with Preserve Copied Object Height keeps it). Without it, the
+   *  height over the ground (`at`) counts. */
+  z?: number;
   /** Radians. */
   angle: number;
   /** The rest of the placed object, as its file has it. */
@@ -82,7 +85,7 @@ export function fragmentOf(items: readonly { list: FragmentObject["list"]; entry
     objects: items.map(({ list, entry }) => {
       const { position, angle, ...rest } = structuredClone(entry) as Source & Record<string, unknown>;
       const [x, y, z] = position;
-      return { list, at: [x - cx, y - cy, z - groundAt(x, y)], angle, entry: rest };
+      return { list, at: [x - cx, y - cy, z - groundAt(x, y)], z, angle, entry: rest };
     }),
   };
 }
