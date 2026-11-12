@@ -707,7 +707,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-tree-rows { flex: 1; overflow: auto; padding: 4px 0; }
 /* The buttons wrap inside the column rather than run into the right pane. */
 .trig-toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); }
-.trig-toolbar .trig-new { flex: 1 1 100px; min-width: 0; }
+/* At the tree's narrowest (180 px) two lines: New… with ↑ and ↓, then Delete and ⋯; one line from about 240 px. */
+.trig-toolbar .trig-new { flex: 1 1 60px; min-width: 0; }
 .trig-editor:focus { outline: none; }
 .trig-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .trig-name { font-size: 15px; font-weight: 600; min-width: 260px; }

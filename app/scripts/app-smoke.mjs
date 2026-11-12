@@ -7516,13 +7516,34 @@ async function niceToHaves(page, found) {
     await k.tool("create_script_trigger", { name: "Nice Extra", script: "" });
     await run("w3.triggers.open");
     await until("the trigger tree", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
+    // The left column's toolbar (New…, ↑, ↓, Delete, ⋯) stays inside the column, and at its narrowest (180 px, the sash's
+    // minimum) takes two lines at most.
+    const toolbarAt = (width) => page.evaluate(`(async () => {
+      const treeEl = document.querySelector(".trig-tree"); if (!treeEl) return "no tree";
+      if (${width}) treeEl.parentElement.style.setProperty("--trig-tree-width", "${width}px");
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const tree = treeEl.getBoundingClientRect(), items = [...document.querySelectorAll(".trig-toolbar > *")];
+      return { width: Math.round(tree.width), spill: items.filter((b) => b.getBoundingClientRect().right > tree.right + 0.5).map((b) => b.textContent),
+        lines: new Set(items.map((b) => Math.round(b.getBoundingClientRect().top))).size, items: items.length };
+    })()`);
+    const spill = await toolbarAt(0);
+    if (spill === "no tree" || spill.spill.length) fail(`the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(spill)}`);
+    const narrow = await toolbarAt(180);
+    if (narrow === "no tree" || narrow.width !== 180 || narrow.items < 5) fail(`the trigger tree at 180 px: ${JSON.stringify(narrow)} (control)`);
+    else {
+      if (narrow.spill.length) fail(`at 180 px the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(narrow.spill)}`);
+      if (narrow.lines > 2) fail(`at 180 px the Trigger Editor's toolbar takes ${narrow.lines} lines`);
+    }
+    await page.evaluate(`document.querySelector(".trig-tree")?.parentElement.style.removeProperty("--trig-tree-width")`);
+    // Its ⋯ has Export… and Import….
+    await page.evaluate(`document.querySelector(".trig-toolbar .trig-more")?.click()`);
+    const more = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
+    if (!more.includes("Export…") || !more.includes("Import…")) fail(`the trigger toolbar's ⋯ offers ${JSON.stringify(more)}`);
+    await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await until("the ⋯ menu closed", () => page.evaluate(`!document.querySelector(".context-menu")`), 5000).catch(() => fail("Escape didn't close the trigger toolbar's ⋯ menu"));
     const menued = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".trig-row.trig-cat")].find((e) => e.textContent.includes("Initialization"));
       if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
     if (!menued) fail("no Initialization category in the trigger tree");
-    // The left column's toolbar (New…, ↑, ↓, Delete, Export…, Import…) stays inside the column.
-    const spill = await page.evaluate(`(() => { const tree = document.querySelector(".trig-tree")?.getBoundingClientRect(); if (!tree) return "no tree";
-      return [...document.querySelectorAll(".trig-toolbar > *")].filter((b) => b.getBoundingClientRect().right > tree.right + 0.5).map((b) => b.textContent); })()`);
-    if (spill === "no tree" || spill.length) fail(`the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(spill)}`);
     /** The Category is Comment entry of the open menu: whether it says on (aria-checked) and draws the check mark. */
     const commentEntry = () => page.evaluate(`(() => { const e = [...document.querySelectorAll(".context-menu-item")].find((x) => x.textContent.startsWith("Category is Comment"));
       if (!e) return null;
