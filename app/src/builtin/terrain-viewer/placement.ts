@@ -130,6 +130,23 @@ export function pastedEntry(f: PlacedFile, copied: { entry: Record<string, unkno
   return made;
 }
 
+/** The grid a copied group moves on when pasted, so every object keeps the parity of its own grid. */
+const PASTE_GRID = 64;
+/** On the paste grid, half-way values up (Math.round: -15.5 cells is -15), never -0. */
+const onPasteGrid = (v: number) => Math.round(v / PASTE_GRID) * PASTE_GRID + 0;
+
+/** The centre of a copied group of objects, as the World Editor's: the mean of their positions (not the middle of
+ *  their extent) on the 64 grid. we-drive 2026-11-12, nine pastes (placement.test.ts). */
+export function copyCentre(positions: readonly (readonly number[])[]): [number, number] {
+  const mean = (i: number) => positions.reduce((sum, p) => sum + p[i], 0) / positions.length;
+  return [onPasteGrid(mean(0)), onPasteGrid(mean(1))];
+}
+
+/** Where the World Editor puts a copied group's centre for the pointer at (x, y): on the 64 grid. */
+export function pasteCentreAt(x: number, y: number): [number, number] {
+  return [onPasteGrid(x), onPasteGrid(y)];
+}
+
 /** The building grid: a building's edges lie on the 64 grid, so a 6×6 one stands at 32 past it and an
  *  8×8 one on it. All 251 buildings on 14 real maps do. `cells` is its pathing texture's side. */
 export const onBuildingGrid = (v: number, cells: number) => {

@@ -137,7 +137,7 @@ falls short, rather than copying their insides into a scratch file.
 | look up a game table's rows | `w3proj game slk Units/UnitData.slk hfoo hbot --col unitID,movetp` (tab-separated, header first) |
 | see how the open points burn down | `node scripts/openpoints-burndown.mjs` (repo root): reads `openpoints/*.md` (an open point is a `- [ ] ` line plus its indented lines), writes `openpoints/openpoints.json` (every point with file, section, text, a stable id), adds an entry to `openpoints/burndown.json` and writes `openpoints/burndown.html` (the chart, data inside, opens from disk). `--dry-run` prints the counts, `--no-entry` refreshes without an entry. The open points stay local; only the script is in git |
 | see how well the app's pathing (war3map.wpm) matches the maps' own | `node scripts/wpm-compare.mjs [maps or folders] [--map NAME] [--cells N] [--save F] [--baseline F]` (in `app/`): regenerates each map's wpm with `buildPathingMap` (what a save runs) and diffs it with the stored file: exact or differing cells per map and a total. Default `smoketest_maps`; give the downloaded ladder folders for the large set. `--cells N` lists differing cells (x,y, tile, stored->regenerated), `--save` writes the result, `--baseline` reports maps that got better or worse (exit 1 if worse). Unpacked maps are cached in the temp folder |
-| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--wheel N`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
+| look at the real World Editor (Linux, **local only**) | `node scripts/we-drive.mjs <steps>` (in `app/`): `--map`, `--wait-ready`, `--compare-ready`, `--compare-ready-unlit`, `--look x,y[,distance…]\|center`, `--shot`, `--shot-window`, `--shot-screen`, `--key`, `--click X,Y`, `--drag X,Y:X,Y`, `--wheel N`, `--windows`, `--view-menu`, `--view Lighting=off`, `--game-view on\|off\|status`, `--fps ms`, `--save FILE` (Ctrl+S, the default-name reminder answered, the saved map copied to FILE), `--close`; options `--mode sd\|hd`, `--day-night fixed\|cycle` (fixed by default). The list is at the top of the file; setting up and the proof that nothing of the user's changed: `scripts/we-setup.mjs` |
 
 The game folder: `W3PROJ_GAME`, else `.game-path` in the checkout (written by `scripts/setup-linux.sh`; its first
 line is a comment, the path is the first line that isn't), else the folder above the checkout (the Windows layout).
@@ -212,6 +212,12 @@ It never starts the game itself.
 - **Dialogs that don't draw**: Scenario > Player Properties opened (window "Scenario Properties") but stayed a blank
   white rectangle in the hidden display, also after moving the pointer over it and clicking; `--close` then can't
   answer it.
+- **Copy and paste of objects** (branch paste-anchor-we, 2026-11-12, SD, a flat 64x64 map): `--key d` (doodads layer),
+  `--click` on a doodad or `--drag` a box round several, `--key ctrl+c`, `--key ctrl+v`, `--move` to a spot, `--click`
+  there, `--key Escape`; the clipboard stays for another `ctrl+v`. The status bar's "Point: (x, y, z)" at the pointer
+  (the bottom left of `--shot-window`) gives its world position; at the opening camera the ground maps to the display
+  by a plane homography (fitted from six such readings to the pixel). The editor moves each doodad onto its own grid
+  when the map loads (a barrel to 64n + 32, a crate to 64n), so the copied positions are read from its save.
 - **Unit Properties**: `--key u` (units layer), `--click` on the unit, `--key Return` opens the dialog (two clicks are too
   slow for a double click). Its tab strip moves two tabs per click or arrow key in this display: `--click` on General,
   `--key Right`, `--key Left` lands on Abilities. The Skin button on General opens "Choose Skin", which does draw (a list

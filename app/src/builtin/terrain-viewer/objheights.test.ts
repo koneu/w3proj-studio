@@ -5,6 +5,7 @@ import { FIXED_HEIGHT } from "./selectionkeys";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
 import { fragmentOf, turnFragment, type Turn } from "../../lib/terrain/fragment";
+import { copyCentre, pasteCentreAt } from "./placement";
 
 test("ships float on the water surface, whatever height the placement file gives them", () => {
   // 03_Water_Ford_Lake_Boats: the transport (hbot), destroyer and battleship are stored at z 0, the sea bed;
@@ -133,14 +134,14 @@ test("a doodad that was not moved, or has no height of its own, is the same with
 // we-drive 2026-11-12 (verify round 2, C7): four doodads of a flat map copied and pasted plain, mirrored and turned,
 // with Preserve Copied Object Height off (its default) and Reset Fixed Object Heights off and on alike. Each copy was
 // saved with flags 2 and height 0 (the ground), and where it went, from the paste's centre, is the turn of where it
-// was from the group's; its facing went with it. (Where the group's centre lands for a pointer is left out: the World
-// Editor's centre was (-512, 0) and its paste centre (384, -576) for a pointer at (354, -573.4).)
+// was from the group's; its facing went with it. The group's centre (-512, 0) and the paste centre (384, -576) for the
+// pointer at (354, -573.4) are copyCentre's and pasteCentreAt's (placement.test.ts has more pastes).
 test("pasted copies, plain, mirrored and turned, as the World Editor's: same offsets turned, flags 2, on the ground", () => {
   const deg = (r: number) => Math.round((r * 180) / Math.PI) % 360;
   const rad = (d: number) => (d * Math.PI) / 180;
   const src = [["LTcr", -640, -128, 300, 30, 6], ["LTbs", -352, -96, 0, 90, 2], ["LRrk", -640, 128, 0, 60, 2], ["LRrk", -384, 128, 150, 120, 6]] as const;
-  const fragment = fragmentOf(src.map(([id, x, y, z, a, flags]) => ({ list: "doodads" as const, entry: { id, position: [x, y, z], angle: rad(a), flags } })), () => 0, [-512, 0]);
-  const at = [384, -576];
+  const fragment = fragmentOf(src.map(([id, x, y, z, a, flags]) => ({ list: "doodads" as const, entry: { id, position: [x, y, z], angle: rad(a), flags } })), () => 0, copyCentre(src.map(([, x, y]) => [x, y])));
+  const at = pasteCentreAt(354, -573.4);
   const we: Record<string, [number, number, number][]> = {
     plain: [[256, -704, 30], [544, -672, 90], [256, -448, 60], [512, -448, 120]],
     mirrorY: [[256, -448, 330], [544, -480, 270], [256, -704, 300], [512, -704, 240]],
