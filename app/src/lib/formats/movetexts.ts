@@ -1,5 +1,5 @@
 // Move Texts to String Table: what the World Editor does to a map's texts when it saves it, as a command of its own
-// (Studio's save keeps every file as it is). Literal texts of some object fields and of the players' and forces' names
+// (Studio's save keeps the texts where they are; packing only drops unused strings: builtin/map-project/prunestrings.ts). Literal texts of some object fields and of the players' and forces' names
 // go into war3map.wts as new strings, the fields then refer to them ("TRIGSTR_007"), and strings nothing refers to any
 // more leave the table.
 //

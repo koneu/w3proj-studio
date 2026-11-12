@@ -307,6 +307,24 @@ export function removeStrings(text: string, nums: ReadonlySet<number>): string {
   return out + text.slice(at);
 }
 
+/** war3map.wts without the strings nothing refers to (`referenced`: every TRIGSTR number the map's files use), as the
+ *  World Editor drops them on every save. The strings that stay keep their numbers, comments and order, and the rest
+ *  of the file stays byte for byte (the World Editor writes the whole file anew: no comments but its own, numbers in
+ *  order). `dropped`: the numbers that went, ascending; none gives `text` itself. Throws rather than give a table in
+ *  which a kept string doesn't read back as it was. */
+export function pruneStrings(text: string, referenced: ReadonlySet<number>): { text: string; dropped: number[] } {
+  const table = new StringTable(text);
+  const dropped = [...new Set(scan(text).map((b) => b.num))].filter((n) => !referenced.has(n)).sort((a, b) => a - b);
+  if (!dropped.length) return { text, dropped };
+  const out = removeStrings(text, new Set(dropped));
+  const back = new StringTable(out);
+  for (const [n, v] of table.entries()) {
+    if (referenced.has(n) && back.get(n) !== v) throw new Error(`string ${n} wouldn't stay as it is; no strings were dropped.`);
+  }
+  for (const n of dropped) if (back.has(n)) throw new Error(`string ${n} wouldn't go; no strings were dropped.`);
+  return { text: out, dropped };
+}
+
 /** A text with its TRIGSTR_ references changed by `ids` (JSON, scripts, custom text): a zero-padded number keeps its
  *  width ("TRIGSTR_007" for 7 → 12 becomes "TRIGSTR_012"). Null when nothing in it changes. */
 export function renumberStringRefs(text: string, ids: ReadonlyMap<number, number>): string | null {
