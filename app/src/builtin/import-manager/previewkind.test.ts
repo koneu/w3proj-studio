@@ -4,12 +4,16 @@ import { isPreviewModel, MAX_PREVIEW, previewKey } from "./previewkind";
 
 const file = (size: number, modified = 1) => ({ path: "map/a.mdx", size, modified });
 
-test("only .mdx files get a model preview", () => {
+test("only .mdx and .mdl (text) files get a model preview", () => {
   assert.ok(isPreviewModel("war3mapImported\\A.MDX"));
-  assert.ok(!isPreviewModel("a.mdl"));
+  assert.ok(isPreviewModel("war3mapImported\\A.Mdl"));
   assert.ok(!isPreviewModel("a.mdx.txt"));
-  assert.equal(previewKey("a.mdl", file(10), "model"), null);
+  assert.ok(!isPreviewModel("a.mdlx"));
+  assert.ok(!isPreviewModel("a.blp"));
+  assert.ok(previewKey("a.mdl", file(10), "model"));
   assert.ok(previewKey("a.mdx", file(10), "model"));
+  assert.equal(previewKey("a.txt", file(10), "model"), null);
+  assert.notEqual(previewKey("a.mdl", file(10), "model"), previewKey("a.mdx", file(10), "model"), "a.mdl and a.mdx are different files");
 });
 
 test("the size cap", () => {

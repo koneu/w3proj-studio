@@ -2,8 +2,11 @@
   "id": "w3.modelViewer",
   "name": "Model Viewer",
   "version": "0.1.0",
-  "description": "3D view of MDX models (v800–v1800): animations, team colour, textures from the map or the game.",
+  "description": "3D view of MDX models (v800–v1800) and MDL text models: animations, team colour, textures from the map or the game.",
   "contributes": {
-    "editors": [{ "id": "w3.modelViewer", "title": "Model Viewer", "graphicsMode": "reopen", "patterns": ["*.mdx"] }]
+    "editors": [
+      { "id": "w3.modelViewer", "title": "Model Viewer", "graphicsMode": "reopen", "patterns": ["*.mdx"] },
+      { "id": "w3.modelViewer", "title": "Model Viewer", "graphicsMode": "reopen", "patterns": ["*.mdl"], "priority": "option" }
+    ]
   }
 }

@@ -4,6 +4,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
+import { parseModel } from "../../lib/model/mdl";
 import { parseMdx, type Model } from "../../lib/model/mdx";
 import { parseAnimProps } from "../../lib/model/stand";
 import { neverStoredLast } from "../../lib/model/texpath";
@@ -503,7 +504,7 @@ export class ObjectLoader {
     let m = this.models.get(key);
     if (!m) {
       m = this.track((async () => {
-        const model = parseMdx(await this.readFile(req.path).catch((e: unknown) => {
+        const model = parseModel(await this.readFile(req.path).catch((e: unknown) => {
           if (req.plain) return this.readFile(req.plain);
           throw e;
         }));

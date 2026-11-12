@@ -7624,7 +7624,27 @@ async function contextMenuItem(page, selector, text, item) {
  *  without an import list the Problems view has one warning for both files; with one, it warns of each: the model
  *  ("used by" the type) and a game model replaced by an unlisted file, and its fixes
  *  list the one and delete the other; removing an entry in the Import Manager asks whether its file goes too ("Remove
- *  from list" keeps it, "Remove and delete file" doesn't). Needs the game (W3PROJ_GAME). */
+ *  from list" keeps it, "Remove and delete file" doesn't). An imported model and an imported .mdl (text) one show a
+ *  preview. Needs the game (W3PROJ_GAME). */
+/** A small MDL text model (a team-coloured quad on one bone, turning in its Stand) for the Import Manager's preview. */
+const SMOKE_MDL = [
+  "// MDL text for app-smoke", "Version {", "\tFormatVersion 800,", "}", 'Model "SmokeText" {', "\tBoundsRadius 60,", "}",
+  "Sequences 1 {", '\tAnim "Stand" {', "\t\tInterval { 0, 2000 },", "\t}", "}",
+  "Textures 1 {", "\tBitmap {", '\t\tImage "",', "\t\tReplaceableId 1,", "\t}", "}",
+  "Materials 1 {", "\tMaterial {", "\t\tLayer {", "\t\t\tFilterMode None,", "\t\t\tTwoSided,", "\t\t\tstatic TextureID 0,", "\t\t}", "\t}", "}",
+  "Geoset {",
+  "\tVertices 4 {", "\t\t{ -50, 0, 0 },", "\t\t{ 50, 0, 0 },", "\t\t{ -50, 0, 100 },", "\t\t{ 50, 0, 100 },", "\t}",
+  "\tNormals 4 {", "\t\t{ 0, -1, 0 },", "\t\t{ 0, -1, 0 },", "\t\t{ 0, -1, 0 },", "\t\t{ 0, -1, 0 },", "\t}",
+  "\tTVertices 4 {", "\t\t{ 0, 1 },", "\t\t{ 1, 1 },", "\t\t{ 0, 0 },", "\t\t{ 1, 0 },", "\t}",
+  "\tVertexGroup {", "\t\t0,", "\t\t0,", "\t\t0,", "\t\t0,", "\t}",
+  "\tFaces 1 6 {", "\t\tTriangles {", "\t\t\t{ 0, 1, 2, 2, 1, 3 },", "\t\t}", "\t}",
+  "\tGroups 1 1 {", "\t\tMatrices { 0 },", "\t}",
+  "\tMinimumExtent { -50, 0, 0 },", "\tMaximumExtent { 50, 0, 100 },", "\tBoundsRadius 60,", "\tMaterialID 0,", "\tSelectionGroup 0,", "}",
+  'Bone "Root" {', "\tObjectId 0,", "\tGeosetId 0,", "\tGeosetAnimId None,",
+  "\tRotation 2 {", "\t\tLinear,", "\t\t0: { 0, 0, 0, 1 },", "\t\t2000: { 0, 0, 1, 0 },", "\t}", "}",
+  "PivotPoints 1 {", "\t{ 0, 0, 0 },", "}",
+].join("\r\n") + "\r\n";
+
 async function importWarnings(page, found) {
   const fail = (what) => found.push(`import warnings: ${what}`);
   const k = await heightKit(page, "ImportWarnings");
@@ -7720,6 +7740,25 @@ async function importWarnings(page, found) {
       await page.evaluate(`${entryRow}.click()`);
       await page.evaluate(`${entryRow}.click()`);
       if ((await page.evaluate(`document.querySelectorAll(".imp-detail canvas").length`)) > 1) fail("a second selection of the model left two canvases");
+    }
+    // An imported MDL (text) model is previewed too, from its own text (branch mdl-text-reader); then removed with its file.
+    const TEXT_MODEL = "map/war3mapImported/SmokeText.mdl";
+    await page.evaluate(`w3.workspace.writeText(${JSON.stringify(TEXT_MODEL)}, ${JSON.stringify(SMOKE_MDL)})`);
+    await page.evaluate(`w3.commands.execute("w3.imports.add", ["war3mapImported\\\\SmokeText.mdl"])`);
+    await settled(page);
+    await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+    const textRow = `[...document.querySelectorAll("tr.imp-row")].find((r) => /smoketext\\.mdl/i.test(r.textContent))`;
+    if (!(await soon(() => page.evaluate(`!!${textRow}`), 20000))) fail(`the Import Manager doesn't show the imported .mdl: the list holds ${JSON.stringify(listed())}`);
+    else {
+      await page.evaluate(`${textRow}.click()`);
+      const box = `document.querySelector(".imp-detail .imp-preview .obj-preview")`;
+      if (!(await soon(() => page.evaluate(`!!${box}?.querySelector("canvas")`), 10000))) fail(`selecting an imported .mdl shows no preview canvas: ${await page.evaluate(`document.querySelector(".imp-detail")?.textContent?.slice(0, 300)`)}`);
+      else if (!(await soon(() => page.evaluate(`${box}.querySelector(".obj-preview-note")?.textContent === ""`), 20000))) {
+        fail(`the .mdl preview says: ${await page.evaluate(`${box}?.textContent`)}`);
+      }
+      const gone = await remove("Remove and delete file", "smoketext");
+      if (gone) fail(`the .mdl: ${gone}`);
+      else if (!(await soon(() => !onDisk(TEXT_MODEL) && !listed().some((p) => /smoketext/i.test(p)), 10000))) fail("Remove and delete file left the .mdl or its entry");
     }
     let why = await remove("Remove from list");
     if (why) fail(why);

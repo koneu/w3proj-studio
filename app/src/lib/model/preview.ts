@@ -6,7 +6,7 @@
 import type { W3Api } from "../../extensions/api";
 import { importedPath, ownNames, previewMode } from "../imports";
 import { decodeImage } from "../image/index.ts";
-import { parseMdx } from "./mdx";
+import { parseModel } from "./mdl";
 import { neverStoredLast, textureCandidates } from "./texpath";
 import { ModelRenderer, standClock, type Clock } from "./renderer";
 import { parseAnimProps } from "./stand";
@@ -26,7 +26,8 @@ export class ModelPreview {
   /** Bumped by every show and setPrefer: a load that finishes under an older number is dropped. */
   private token = 0;
 
-  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd"; onFail?: (e: unknown) => void } = {}) {
+  /** `exact`: the path is a file of the map, shown as it is (an imported .mdl is MDL text, not the game's .mdx). */
+  constructor(private w3: W3Api, private opts: { prefer?: "classic" | "reforged" | "de" | "hd"; exact?: boolean; onFail?: (e: unknown) => void } = {}) {
     this.canvas = this.newCanvas();
     this.note = div("obj-preview-note muted");
     this.el = div("obj-preview");
@@ -60,11 +61,11 @@ export class ModelPreview {
   };
   private onUp = () => { this.drag = null; };
 
-  /** Shows a model (data path, with or without extension; .mdl names the game's .mdx); null: none.
-   *  `animProps` is the look to show, for a model that holds several. */
+  /** Shows a model (data path, with or without extension; .mdl names the game's .mdx unless `exact`); null: none.
+   *  `animProps` is the look to show, for a model that holds several. MDX and MDL text are told apart by content. */
   show(path: string | null, animProps = "") {
     this.props = parseAnimProps(animProps);
-    const mdx = path && path !== "_" ? path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx") : null;
+    const mdx = !path || path === "_" ? null : this.opts.exact ? path : path.replace(/\.mdl$/i, ".mdx").replace(/^(?!.*\.\w+$)(.*)$/, "$1.mdx");
     if (mdx === this.path) return;
     this.path = mdx;
     const token = ++this.token;
@@ -102,7 +103,7 @@ export class ModelPreview {
   }
 
   private async load(mdx: string, token: number) {
-    const model = parseMdx(await this.read(mdx));
+    const model = parseModel(await this.read(mdx));
     if (this.token !== token) return;
     // A fresh canvas per model: a disposed renderer's WebGL context can't be used again.
     const canvas = this.newCanvas();

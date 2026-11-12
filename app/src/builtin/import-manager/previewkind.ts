@@ -3,9 +3,9 @@
 /** Files above this size aren't previewed (they'd be read and decoded on every selection). */
 export const MAX_PREVIEW = 32 * 1024 * 1024;
 
-/** The model preview reads .mdx only (the model loader has no .mdl text parser). */
+/** The model preview reads .mdx and .mdl (text) models. */
 export function isPreviewModel(path: string): boolean {
-  return /\.mdx$/i.test(path);
+  return /\.md[xl]$/i.test(path);
 }
 
 /** The key of what is previewed: a changed file (replaced, undone) gets a new preview. Null: no preview of that file. */
