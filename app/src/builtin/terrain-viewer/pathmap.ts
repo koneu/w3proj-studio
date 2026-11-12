@@ -61,6 +61,9 @@ export type PathImage = { width: number; height: number; rgba: Uint8ClampedArray
 export interface PathingData {
   margins: [number, number, number, number];
   tileRules: Map<string, TileRule>;
+  /** How far below its stored level a tileset's water surface lies (generatePathing's `waterOffset`); undefined for
+   *  a tileset the game's water table doesn't have. */
+  waterOffset(tileset: string): number | undefined;
   /** Doodad or destructable (`dest`, `walkable` for bridges) pathing texture. `fallback`: the type's own from the
    *  game's table, when the map's object data names another (see placedImage). */
   placedTex(id: string): PlacedTex | null;
@@ -87,6 +90,12 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
   for (const r of parseSlk(await w3.game.readText("TerrainArt\\Terrain.slk"))) {
     if (r.tileID) tileRules.set(r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" });
   }
+  // A tileset's water is the row "<letter>Sha"; its height is in tiles (128), negative below the stored level.
+  const waterOffsets = new Map<string, number>();
+  for (const r of parseSlk(await w3.game.readText("TerrainArt\\Water.slk").catch(() => ""))) {
+    const height = Number(r.height);
+    if (r.waterID?.length === 4 && r.waterID.endsWith("Sha") && r.height !== undefined && r.height !== "" && Number.isFinite(height)) waterOffsets.set(r.waterID[0], -height * 128);
+  }
   const doodadRows = new Map(parseSlk(await w3.game.readText("Doodads\\Doodads.slk")).map((r) => [r.doodID, r]));
   const destRows = new Map(parseSlk(await w3.game.readText("Units\\DestructableData.slk")).map((r) => [r.DestructableID, r]));
   const unitRows = new Map(parseSlk(await w3.game.readText("Units\\UnitData.slk").catch(() => "")).map((r) => [r.unitID, r]));
@@ -110,6 +119,7 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
   return {
     margins: [m[0], m[1], m[2], m[3]],
     tileRules,
+    waterOffset: (tileset) => waterOffsets.get(tileset),
     missing,
     texture,
     placedTex(id) {
@@ -169,6 +179,6 @@ export async function buildPathingMap(w3: W3Api, terrain: Terrain, doodads: Plac
     if (lost) missing.add(lost);
     if (t) stamps.push({ x: d.position[0], y: d.position[1], angle: d.angle, width: t.width, height: t.height, rgba: t.rgba, clear: info.dest });
   }));
-  const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, stamps, deepWater });
+  const wpm = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, stamps, deepWater, waterOffset: data.waterOffset(terrain.tileset) });
   return { wpm, missing: [...missing], fellBack: [...fellBack] };
 }

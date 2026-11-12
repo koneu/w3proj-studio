@@ -40,7 +40,7 @@ export class Occupancy {
   private constructor(private terrain: Terrain, private data: PathingData) {
     this.w = (terrain.width - 1) * 4;
     this.h = (terrain.height - 1) * 4;
-    const pathing = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules }).subarray(16);
+    const pathing = generatePathing({ terrain, margins: data.margins, tileRules: data.tileRules, waterOffset: data.waterOffset(terrain.tileset) }).subarray(16);
     this.blocked = new Uint8Array(this.w * this.h);
     for (let i = 0; i < this.blocked.length; i++) if (pathing[i] & NO_WALK) this.blocked[i] = 1;
   }

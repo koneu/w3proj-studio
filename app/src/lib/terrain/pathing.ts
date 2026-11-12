@@ -7,7 +7,7 @@
 // The rules below were worked out by comparing generated maps with the ones
 // World Editor saved for the sample maps.
 
-import { rampLift, type Corner, type Terrain } from "./w3e";
+import { rampLift, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
 import { rampSides } from "./cliffs";
 
 export const NO_WALK = 0x02, NO_FLY = 0x04, NO_BUILD = 0x08, BLIGHT = 0x20, NO_WATER = 0x40, BLOCKED = 0x80;
@@ -40,6 +40,11 @@ export interface PathingInput {
   stamps?: PathingStamp[];
   /** Water deeper than this can't be walked (default DEEP_WATER). */
   deepWater?: number;
+  /** How far below its stored level the tileset's water surface lies (default WATER_OFFSET): the `height` of
+   *  TerrainArt/Water.slk × −128. Most tilesets have 89.6; Ashenvale and Dungeon 76.8, Dalaran 96, Outland 192. The
+   *  World Editor measures the depth from there: with 89.6, Ashenvale maps came out with thousands of deep cells
+   *  walkable. */
+  waterOffset?: number;
 }
 
 /** Water deeper than this (world units) can't be walked. */
@@ -103,7 +108,9 @@ export function generatePathing(input: PathingInput): Uint8Array {
     if (across.some((n) => n?.ramp && n.layer !== k.layer)) continue;
     lift.set(k, l);
   }
-  const depth = (k: Corner) => waterDepth(k) - (lift.get(k) ?? 0);
+  // A corner's water level is read with WATER_OFFSET; the tileset's own surface may lie elsewhere (waterOffset).
+  const raise = WATER_OFFSET - (input.waterOffset ?? WATER_OFFSET);
+  const depth = (k: Corner) => waterDepth(k) + raise - (lift.get(k) ?? 0);
 
   for (let cy = 0; cy < h; cy++) {
     for (let cx = 0; cx < w; cx++) {

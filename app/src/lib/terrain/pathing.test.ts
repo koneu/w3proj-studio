@@ -59,6 +59,17 @@ test("a tile with the ramp flag on all four corners across one layer is walkable
   assert.deepEqual(tile(t, 0, 0), Array(16).fill(CLIFF), "two layers can't be a ramp");
 });
 
+test("the water's depth is measured from the tileset's own surface", () => {
+  // Ashenvale's water lies 76.8 below the stored level, not 89.6: 12.8 deeper than the corners' `water` says.
+  const t = ground();
+  for (const k of t.corners) { k.hasWater = true; k.water = 45; }
+  const cell = (waterOffset?: number) => generatePathing({ terrain: t, margins: [0, 0, 0, 0], tileRules: new Map(), waterOffset })[16];
+  assert.equal(cell(), NO_BUILD, "45 deep: shallow, walkable");
+  assert.equal(cell(89.6), NO_BUILD, "the usual surface is the default");
+  assert.equal(cell(76.8), NO_BUILD | NO_WALK, "57.8 deep on Ashenvale: past the 52 of deep water");
+  assert.equal(cell(96), NO_BUILD, "38.6 deep on Dalaran");
+});
+
 test("a ramp side piece's flat tile is blocked beside a ramp or a cliff, walkable beside stray ramp flags", () => {
   // Autumn Leaves' tile 17,32: a side piece (tiles 0..1 × 0) under a row of ramp flags (corners 0..2 × 1, layers
   // 3, 2, 2) with no ramp tile above it and low ground all along its far side. The flat tile (1, 0) stays walkable.
