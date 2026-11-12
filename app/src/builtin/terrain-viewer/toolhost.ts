@@ -12,7 +12,9 @@ import type { DropsSource } from "./dropstab";
 
 /** The View commands of one open terrain editor. Each returns what to tell the person when it can't run, else null. */
 export interface ViewCommands {
-  viewSelection(): string | null;
+  /** Pans to the next (`step` 1, the default) or previous (-1) of the selected objects, keeping the distance; frames a
+   *  selected area of ground. */
+  viewSelection(step?: 1 | -1): string | null;
   viewEntireMap(): void;
   selectInPalette(): Promise<string | null>;
   /** A View item (Pathing - Naval and Ground, Height Map, Camera Objects, Camera Bounds, Regions, Light Ranges,

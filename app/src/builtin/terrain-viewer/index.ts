@@ -18,8 +18,8 @@ import { SWITCH_DEFAULTS } from "./switches";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, pasteSkipText, scaledNudge, waterLimitHits, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
-import { boxOf, composeLayers, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
-import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, lightRings, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
+import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
+import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
 import { cameraColors, type CameraObject } from "../../lib/terrain/cameras";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { levelFor } from "../../lib/model/gltexture";
@@ -54,7 +54,7 @@ import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, snapped, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -224,6 +224,7 @@ const why = (answer: boolean | string, states: readonly string[] = []): string |
 /** The View commands: id and what each does to an editor; text back is what to tell the person. */
 const viewCommandList: [string, (v: ViewCommands) => string | null | Promise<string | null>][] = [
   ["w3.terrain.viewSelection", (v) => v.viewSelection()],
+  ["w3.terrain.viewSelectionPrevious", (v) => v.viewSelection(-1)],
   ["w3.terrain.viewEntireMap", (v) => { v.viewEntireMap(); return null; }],
   ["w3.terrain.selectInPalette", (v) => v.selectInPalette()],
   ["w3.terrain.toggleNavalPathing", (v) => why(v.toggleLayer("naval"))],
@@ -1072,7 +1073,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const edge = await playable().catch(() => null);
       const whole = wholeMap(handle);
       const pathing = await handle.pathing();
-      const why = (x: number, y: number) => whyNoRoom(handle.terrain, pathing, nearestObject(handle.objects.list(), [x, y]), x, y);
+      const why = (x: number, y: number, what: { kind: string; id: string }) => whyNoRoom(handle.terrain, pathing, nearestObject(handle.objects.list(), [x, y]), x, y, what);
       const random = typeof seed === "number" ? seededRandom(seed) : Math.random;
       const skipped: { index: number; id: string; x: number; y: number; reason: string }[] = [];
       const shifted: { index: number; id: string; from: [number, number]; to: [number, number] }[] = [];
@@ -1098,7 +1099,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               for (const s of spotsAround(x, y)) if (await room.fits(kindOf, id, s[0], s[1], angle)) { spot = s; break; }
             }
             if (!spot) {
-              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y) });
+              skipped.push({ index: i, id, x, y, reason: edge && !inArea(x, y, edge) ? "units and items can't stand outside the playable map" : why(x, y, { kind: kindOf, id }) });
               continue;
             }
             shifted.push({ index: i, id, from: [x, y], to: spot });
@@ -1108,7 +1109,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const paired = twin && Math.hypot(twin[0] - spot[0], twin[1] - spot[1]) > 16;
           const twinFacing = type.fixedRot ?? (facing + 180) % 360, twinAngle = (twinFacing * Math.PI) / 180;
           if (paired && room && !isBackdrop(kindOf, twin[0], twin[1], edge, whole) && !(await room.fits(kindOf, id, twin[0], twin[1], twinAngle))) {
-            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1])}` });
+            skipped.push({ index: i, id, x, y, reason: `its twin at ${Math.round(twin[0])}, ${Math.round(twin[1])} has no room: ${why(twin[0], twin[1], { kind: kindOf, id })}` });
             continue;
           }
           await place?.(o, i, spot[0], spot[1], facing);
@@ -3048,8 +3049,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const [cx, cy] = pasteCentre(pasting as Fragment, g);
           const [x, y] = o.list === "units" ? onGrid(String(o.entry.id), cx + o.at[0], cy + o.at[1]) : [cx + o.at[0], cy + o.at[1]];
           if (!inArea(x, y, wholeMap(handle))) return null;
-          const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0, ground = heightAt(terrain, x, y);
-          return [x, y, pastedHeight(ground, o.at[2], fixed, preserveHeight())];
+          const ground = heightAt(terrain, x, y);
+          if (o.list === "doodads") return [x, y, pastedHeight(ground, o.z ?? ground + o.at[2], preserveHeight())];
+          // A unit stands on the ground (the World Editor writes its height from the ground on save).
+          const fixed = ((Number(o.entry.flags) || 0) & FIXED_HEIGHT) !== 0;
+          return [x, y, fixed && preserveHeight() ? ground + o.at[2] : ground];
         };
         const showPaste = (g: Vec3) => {
           pasteAt = g;
@@ -3169,7 +3173,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             if (!insideBounds(heldTo(), spot[0], spot[1])) { skips.outsideBounds++; continue; }
             // A type given another id here: its skin, and the items and abilities the object has, follow.
             const made = pastedEntry(file, renames.size ? { ...o, entry: renamedEntry(o.entry, renames) } : o, spot);
-            if (typeof (made as Placed & { flags?: number }).flags === "number") (made as Placed & { flags?: number }).flags = pastedFlags((made as Placed & { flags: number }).flags, preserveHeight());
+            const madeFlags = (made as Placed & { flags?: number }).flags;
+            if (typeof madeFlags === "number") {
+              (made as Placed & { flags: number }).flags = o.list === "doodads" ? pastedFlags(madeFlags, preserveHeight())
+                : preserveHeight() ? madeFlags : madeFlags & ~FIXED_HEIGHT;
+            }
             file.list.push(made);
             repositioned.add(made);
             added.push({ entry: made, f: file });
@@ -3911,7 +3919,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 footprint: async (kind, id) => { const fp = await occ.footprint(id, kind); return fp && { width: fp.width, height: fp.height }; },
                 fits: async (kind, id, x, y, angle) => {
                   // Units and items can't stand on painted Boundary. Doodads can, as past the map's edge.
-                  if ((kind === "w3u" || kind === "w3t") && id !== "sloc" && onBoundary(terrain, x, y)) return false;
+                  if (boundaryRefuses(terrain, kind, id, x, y)) return false;
                   const fp = await occ.footprint(id, kind);
                   return !fp || occ.fits(fp, x, y, angle);
                 },
@@ -4258,12 +4266,20 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           Object.assign(renderer, { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: Math.max(200, Math.min(maxDistance(), v.distance)) });
           redraw();
         };
-        /** The camera moves to what's selected: the selected objects, else the area drawn on the ground. */
-        const viewSelection = (): string | null => {
+        /** The selected object View Selection looked at last: the next press goes on from it (cycleIndex). */
+        let viewedEntry: Placed | null = null;
+        /** The camera moves to what's selected: one of the selected objects, as the World Editor's Cycle Main View
+         *  (`step` 1 Next, -1 Previous), panning over the ground under it and keeping its distance and angles (we-drive
+         *  2026-11-12: the view came back to the very picture it had there); else it frames the area drawn on the ground. */
+        const viewSelection = (step: 1 | -1 = 1): string | null => {
           const entries = selectedEntries();
-          if (entries.length) {
-            const box = boxOf(entries.map((e) => e.position), 96);
-            if (box) { frameBox(box, { margin: 1.3, minDistance: 700 }); return null; }
+          const i = cycleIndex(entries.length, viewedEntry ? entries.indexOf(viewedEntry) : -1, step);
+          const [x, y] = entries[i]?.position ?? [];
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            viewedEntry = entries[i];
+            renderer.target = [x, y, heightAt(terrain, x, y)];
+            redraw();
+            return null;
           }
           if (terrainArea) {
             const a = terrainArea, [lo, hi] = cornerHeights(a.x0, a.y0, a.x1, a.y1);
@@ -4340,13 +4356,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The regions of the Regions layer: the Region Editor's, unsaved edits included, else the saved file. */
         const regionsNow = () => layerRegions(groupInsts.values(),
           async () => (await readMapDoc<{ regions?: RegionBox[] }>(w3, "map/war3map.w3r.json"))?.regions ?? []);
-        /** The ground layers drawn: those shown, except the one the active tab draws itself (the Regions and Pathing
-         *  tabs lay their own picture over the ground, which would show twice). */
-        const groundLayersOn = () => ({
-          naval: shown.naval, heights: shown.heights, cameras: shown.cameras,
-          pathing: shown.pathing && activeGroup !== "pathing", regions: shown.regions && activeGroup !== "regions",
-        });
-        layersAfterTab = () => { if (shown.pathing || shown.regions) void refreshLayers(); };
+        /** The ground layers drawn (groundLayersDrawn): those shown, except the one the active tab draws itself. */
+        const groundLayersOn = () => groundLayersDrawn(shown, activeGroup);
+        layersAfterTab = () => { if (shown.pathing || shown.regions || shown.cameras) void refreshLayers(); };
         const refreshLayersSoon = () => {
           if (shown.lightRanges) showLightRanges();
           showDropRings();
@@ -4452,15 +4464,16 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         viewChanged = applyView;
         const refusedInGameView = () => (gameViewOn() ? GAME_VIEW_NOTE : null);
-        /** The Regions tab draws the regions itself while it's open, and the Pathing tab the ground pathing: that layer
-         *  is on then, and stays so. */
+        /** The Regions tab draws the regions itself while it's open, the Pathing tab the ground pathing and the Cameras
+         *  tab the cameras (TAB_DRAWN): that layer is on then, and stays so. */
         const TAB_LAYERS: Partial<Record<ToggleLayer | "water", { tab: string; note: string }>> = {
-          regions: { tab: "regions", note: "The Regions tab shows the regions while it's open." },
-          pathing: { tab: "pathing", note: "The Pathing tab shows the ground pathing while it's open." },
+          regions: { tab: TAB_DRAWN.regions!, note: "The Regions tab shows the regions while it's open." },
+          pathing: { tab: TAB_DRAWN.pathing!, note: "The Pathing tab shows the ground pathing while it's open." },
+          cameras: { tab: TAB_DRAWN.cameras!, note: "The Cameras tab shows the cameras while it's open." },
         };
         const shownByTab = (layer: ToggleLayer | "water") => TAB_LAYERS[layer]?.tab === activeGroup;
         /** The layers the open tab shows, as the view's state reports them. */
-        const byTabNow = () => Object.fromEntries((["regions", "pathing"] as const).filter(shownByTab).map((l) => [l, true]));
+        const byTabNow = () => Object.fromEntries((["regions", "pathing", "cameras"] as const).filter(shownByTab).map((l) => [l, true]));
         const setGrid = (g: GridSize) => { viewState.grid = g; applyView(); };
         const toggleLayer = (layer: ToggleLayer | "water"): boolean | string => {
           const no = refusedInGameView() ?? (shownByTab(layer) ? TAB_LAYERS[layer]!.note : null);
@@ -4512,7 +4525,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** A toolbar box for a View item: game view greys it out (the World Editor's View menu does so too). */
         const layerToggle = (label: string, title: string, layer: ToggleLayer | "water", command?: string) => {
           const box = h("input", { type: "checkbox", checked: viewState[layer], onchange: () => { if (viewState[layer] !== box.checked) toggleLayer(layer); keysToMap(); } });
-          // The Regions and Pathing tabs' own pictures are those layers: on, and not to be turned off, while the tab is open.
+          // The Regions, Pathing and Cameras tabs' own pictures are those layers: on, and not to be turned off, while the tab is open.
           const byTab = () => shownByTab(layer);
           viewSyncs.push(() => { box.checked = viewState[layer] || byTab(); box.disabled = gameViewOn() || byTab(); });
           return h("label.model-toggle", command ? keyTitle(title, command) : { title }, box, ` ${label}`);

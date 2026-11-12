@@ -91,6 +91,17 @@ export function dropRings(units: readonly { id: string; position: readonly numbe
 /** Whether any of the ground layers is drawn. */
 export const anyGroundLayer = (s: Pick<ViewSet, GroundLayer>) => GROUND_LAYERS.some((k) => s[k]);
 
+/** The tab that draws a ground layer itself while it's open, by layer: the Regions, Pathing and Cameras tabs lay their
+ *  own picture over the ground. */
+export const TAB_DRAWN: Partial<Record<GroundLayer, string>> = { regions: "regions", pathing: "pathing", cameras: "cameras" };
+
+/** The ground layers the view draws: those shown, except the one the open tab (`activeGroup`) draws itself, which
+ *  would show twice; the layer's picture would also lag behind what the tab moves, as it follows finished edits only
+ *  (a camera dragged in the Cameras tab, round 2 2026-11-11). */
+export function groundLayersDrawn(shown: Pick<ViewSet, GroundLayer>, activeGroup: string | null): Record<GroundLayer, boolean> {
+  return Object.fromEntries(GROUND_LAYERS.map((k) => [k, shown[k] && (activeGroup === null || TAB_DRAWN[k] !== activeGroup)])) as Record<GroundLayer, boolean>;
+}
+
 // ---- light ranges ------------------------------------------------------------------------------
 
 /** A circle on the ground: centre, radius, colour 0–255. */

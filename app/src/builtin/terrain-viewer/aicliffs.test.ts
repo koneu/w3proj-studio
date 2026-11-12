@@ -239,6 +239,22 @@ test("the reason something can't stand somewhere names the cause", () => {
   assert.match(whyNoRoom(open, { ...p, cells: new Uint8Array(132 * 132).fill(0x08) }, null, 300, 300), /can't be built on/);
 });
 
+test("a unit refused on painted Boundary is told so, not that its footprint reaches something", () => {
+  // Round 3 (B10, 2026-11-12): a footman refused on a tile with a Boundary corner got the footprint text.
+  const p = { cells: new Uint8Array(132 * 132), width: 132, height: 132 };
+  const edge = flat();
+  edge.corners[2 * edge.width + 3].boundary = true;
+  const x = edge.offsetX + 2.5 * 128, y = edge.offsetY + 2.5 * 128;
+  assert.match(whyNoRoom(edge, p, null, x, y, { kind: "w3u", id: "hfoo" }), /boundary/i);
+  assert.match(whyNoRoom(edge, p, null, x, y, { kind: "w3t", id: "ratc" }), /boundary/i, "an item too");
+  // It comes before an object nearby: the boundary refuses first.
+  assert.match(whyNoRoom(edge, p, { id: "LTlt", position: [x + 40, y, 0] }, x, y, { kind: "w3u", id: "hfoo" }), /boundary/i);
+  // A doodad and a start location can stand there, so it isn't their reason; nor is it a tile further off.
+  assert.doesNotMatch(whyNoRoom(edge, p, null, x, y, { kind: "w3d", id: "LTlt" }), /boundary/i);
+  assert.doesNotMatch(whyNoRoom(edge, p, null, x, y, { kind: "w3u", id: "sloc" }), /boundary/i);
+  assert.doesNotMatch(whyNoRoom(edge, p, null, x + 3 * 128, y, { kind: "w3u", id: "hfoo" }), /boundary/i);
+});
+
 test("a twin stands turned 180° around the middle of the map", () => {
   assert.deepEqual(twinOf(1000, -500, { left: -4096, bottom: -4096, right: 4096, top: 4096 }), [-1000, 500]);
   assert.deepEqual(twinOf(1000, 500, { left: 0, bottom: 0, right: 8192, top: 4096 }), [7192, 3596]);

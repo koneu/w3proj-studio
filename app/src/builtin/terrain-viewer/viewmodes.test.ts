@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
+import { anyGroundLayer, CAMERA_COMMANDS, CAMERA_STEPS, cameraBoundsCorners, cameraMoveOf, DROP_RING, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lineAlong, dropRings, lightRings, nextTerrainLook, shownView, type ViewSet } from "./viewmodes";
 import { HELD_COMMANDS, KEY_COMMANDS, runsAsCommand } from "./selectionkeys";
 import { commandsFor, defaultBindings, eventChord, keyLabel, primaryKey } from "../../lib/keybindings";
 
@@ -29,6 +29,17 @@ test("shownView: without game view, what was chosen, start locations included", 
 test("shownView: Info Display off hides the start locations, and nothing else", () => {
   assert.deepEqual(shownView({ ...chosen, info: false }, false), { ...chosen, info: false, starts: false });
   assert.equal(shownView({ ...chosen, info: true }, true).info, false, "game view draws no info");
+});
+
+test("groundLayersDrawn: the layer an open tab draws itself is left out, the Cameras tab's too", () => {
+  const all = { naval: true, heights: true, cameras: true, pathing: true, regions: true };
+  assert.deepEqual(groundLayersDrawn(all, null), all);
+  assert.deepEqual(groundLayersDrawn(all, "select"), all);
+  assert.deepEqual(groundLayersDrawn(all, "regions"), { ...all, regions: false });
+  assert.deepEqual(groundLayersDrawn(all, "pathing"), { ...all, pathing: false });
+  // Else the layer's camera stays behind while one is dragged in the tab (it follows finished edits only).
+  assert.deepEqual(groundLayersDrawn(all, "cameras"), { ...all, cameras: false });
+  assert.deepEqual(groundLayersDrawn({ ...all, heights: false }, "cameras"), { ...all, heights: false, cameras: false });
 });
 
 test("dropRings: a ring round each unit with an item table or item sets, none for others or start locations", () => {

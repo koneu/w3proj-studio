@@ -23,6 +23,18 @@ export async function layerRegions(groups: Iterable<Pick<TerrainToolGroupInstanc
   return saved();
 }
 
+/** Which selected object View Selection goes to (the World Editor's Edit > View Selection > Cycle Main View - Next, ~,
+ *  and - Previous, Shift+~): an index into the `count` selected, `last` the one looked at before (-1 when it isn't one of
+ *  them). we-drive 2026-11-12, copies of an empty map with three and four rocks: each press pans to one object, keeping
+ *  the camera's distance and angles; Next goes on through the selection and then stays at its end, Previous goes back
+ *  and stays at its start; neither goes round. (The editor's own order isn't the placement order; Studio goes by the
+ *  selection's.) -1 for nothing selected. */
+export function cycleIndex(count: number, last: number, step: 1 | -1): number {
+  if (count <= 0) return -1;
+  if (last < 0 || last >= count) return step > 0 ? 0 : count - 1;
+  return Math.max(0, Math.min(count - 1, last + step));
+}
+
 export interface Box { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number }
 /** The camera's direction: `yaw` and `pitch` point from the target to the eye, `fov` is vertical. */
 export interface Angle { yaw: number; pitch: number; fov: number }

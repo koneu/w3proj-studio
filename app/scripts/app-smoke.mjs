@@ -906,6 +906,21 @@ async function heightsPreserve(page, found) {
   if (!(await page.evaluate(`document.activeElement === document.querySelector(".model-stage canvas")`))) fail("the Preserve Copied Object Height box kept the keyboard");
   await k.hands.key("Escape", "Escape", 27);
 
+  // On, a doodad without a height of its own is pasted with one: fixed, at the height it was copied at (the World
+  // Editor saved a plain rock pasted so with flags 6 and its old height, we-drive 2026-11-12).
+  const pastedBefore = new Set([...kept, ...loose].map((d) => JSON.stringify(d.position)));
+  await k.look(0, 0, { id: "LTlt", x: 0, y: 0 });
+  await k.focusMap();
+  await k.hands.key("c", "KeyC", 67, 2);
+  await k.look(-1024, -512);
+  await k.focusMap();
+  await k.hands.key("v", "KeyV", 86, 2);
+  await k.clickMiddle();
+  await k.save();
+  await k.hands.key("Escape", "Escape", 27);
+  const plain = fresh().filter((d) => !pastedBefore.has(JSON.stringify(d.position)));
+  if (plain.length !== 1 || plain[0].position[2] !== ground || !(plain[0].flags & k.FIXED)) fail(`a pasted plain doodad with Preserve Copied Object Height on: ${JSON.stringify(plain.map((d) => [d.position, d.flags]))}`);
+
   // A project that keeps its own value (.w3proj/settings.json) wins over the user's: the switch has to change that one.
   await page.evaluate(`w3.settings.set("terrain.preserveCopiedHeight", true, "project")`);
   await k.run("w3.terrain.togglePreserveCopiedHeight");
@@ -994,6 +1009,30 @@ async function terrainSelectCameras(page, found) {
   const active = () => page.evaluate(`w3.editors.activePath()`);
   const cameras = () => k.read("war3map.w3c.json").cameras ?? [];
 
+  // View Selection, as the World Editor's Cycle Main View (we-drive 2026-11-12): each press pans to one of the selected
+  // objects and keeps the camera's distance and angles, goes on through the selection and stays at its end; Previous
+  // goes back.
+  await k.tool("place_objects", { objects: [{ id: "LTlt", x: -512, y: 0 }, { id: "LTlt", x: -1024, y: -512 }], ignoreRoom: true });
+  await k.tab("Select");
+  await k.look(0, -768);
+  await k.focusMap();
+  await k.hands.key("a", "KeyA", 65, 2);
+  await settled(page);
+  const camera = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(w3.editors.activePath())?.state().camera ?? null)()`);
+  const from = await camera(), looks = [];
+  for (const id of ["w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelection", "w3.terrain.viewSelectionPrevious"]) {
+    const err = await k.run(id);
+    if (err) fail(`${id}: ${err}`);
+    looks.push(await camera());
+  }
+  const spot = (c) => c ? c.target.slice(0, 2).map(Math.round).join(",") : "none";
+  const spots = looks.map(spot);
+  if (new Set(spots.slice(0, 2)).size !== 2 || !spots.slice(0, 2).every((s) => s === "-512,0" || s === "-1024,-512")) fail(`View Selection twice didn't go to the two doodads in turn: ${spots.join(" | ")}`);
+  else if (spots[2] !== spots[1] || spots[3] !== spots[0]) fail(`View Selection didn't stay at the selection's end, or Previous didn't go back: ${spots.join(" | ")}`);
+  const moved = looks.filter((c) => !c || ["distance", "yaw", "pitch", "fov"].some((key) => Math.abs(c[key] - from[key]) > 1e-6));
+  if (moved.length) fail(`View Selection changed the camera's distance or angles: from ${JSON.stringify(from)} to ${JSON.stringify(moved[0])}`);
+  await k.hands.key("Escape", "Escape", 27);
+
   // Cameras: a still picture (no water, no animation), the plain view against itself first.
   await page.evaluate(`w3.settings.set("terrain.animate", false)`);
   await page.evaluate(`[...document.querySelectorAll(".model-toggle")].filter((l) => ["Water", "Effects"].includes(l.textContent.trim()) && l.querySelector("input").checked).forEach((l) => l.querySelector("input").click())`);
@@ -1016,6 +1055,17 @@ async function terrainSelectCameras(page, found) {
   await k.run("w3.terrain.toggleCameraObjects");
   if (cameras().length) fail("the camera was saved before the picture, so the picture proves nothing");
   else if (shown < 150 + noise) fail(`the Camera Objects layer doesn't show the unsaved camera (${shown} pixels changed, noise ${noise})`);
+  // On the Cameras tab, which draws the cameras itself, the layer adds nothing: else its picture of a camera being
+  // dragged there stays behind until the drag ends (it follows finished edits only).
+  await k.run("w3.terrain.toggleCameraObjects");
+  await k.tab("Cameras");
+  const tabWithLayer = await mapPicture(page);
+  await k.tab("Select");
+  await k.run("w3.terrain.toggleCameraObjects");
+  await k.tab("Cameras");
+  const twice = await pixelsApart(page, tabWithLayer, await mapPicture(page));
+  if (twice > 100 + noise) fail(`on the Cameras tab, the Camera Objects layer draws the cameras a second time (${twice} pixels apart, noise ${noise})`);
+  await k.tab("Select");
   await k.save();
   if (cameras().length !== 1) fail(`saved, the map has ${cameras().length} cameras`);
 

@@ -40,15 +40,20 @@ test("units are drawn at their flying height over the ground, whatever height is
   assert.equal(unitDrawHeight(undefined, 77, null, { ground: 10, height: 240 }), 77);
 });
 
-test("a pasted fixed-height object keeps its height over the ground, only when preserving", () => {
-  assert.equal(pastedHeight(100, 40, true, true), 140);
-  assert.equal(pastedHeight(100, 40, true, false), 100);
-  assert.equal(pastedHeight(100, 40, false, true), 100, "an object without a height of its own sits on the ground");
-  assert.equal(pastedHeight(100, -25, true, true), 75);
+test("a pasted doodad keeps the height it was copied at when preserving, else stands on the ground", () => {
+  // we-drive 2026-11-12: a fixed rock at 200 (copied over ground 0) pasted onto ground 64 stayed at 200, not 264;
+  // one at 64 (over ground 64) pasted onto ground 0 stayed at 64; a plain one at 0 stayed at 0 in ground 64.
+  assert.equal(pastedHeight(64, 200, true), 200);
+  assert.equal(pastedHeight(0, 64, true), 64);
+  assert.equal(pastedHeight(64, 0, true), 0, "a doodad that had no height of its own keeps its height too");
+  // Off (the editor's default): the ground, fixed or not.
+  assert.equal(pastedHeight(64, 200, false), 64);
+  assert.equal(pastedHeight(-25, 0, false), -25);
 });
 
-test("pasting without preserving drops the fixed height; the other flags stay", () => {
+test("preserving gives every pasted doodad a fixed height, not preserving takes it away; the other flags stay", () => {
   assert.equal(pastedFlags(2 | FIXED_HEIGHT, true), 2 | FIXED_HEIGHT);
+  assert.equal(pastedFlags(2, true), 2 | FIXED_HEIGHT, "a plain doodad pasted with Preserve on is fixed (the editor saved 6)");
   assert.equal(pastedFlags(2 | FIXED_HEIGHT | 1, false), 2 | 1);
   assert.equal(pastedFlags(2, false), 2);
 });

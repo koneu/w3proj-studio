@@ -14,16 +14,20 @@ export interface HeightChange { position: [number, number, number]; flags: numbe
 const PLAIN = 2;
 const isFixed = (p: HeightHolder) => ((p.flags ?? 0) & FIXED_HEIGHT) !== 0;
 
-/** A pasted object's height: a fixed one keeps its height over the ground when `preserve`, anything
- *  else stands on the ground. `offset` is its height over the ground where it was copied. */
-export function pastedHeight(ground: number, offset: number, fixed: boolean, preserve: boolean): number {
-  return fixed && preserve ? ground + offset : ground;
+/** A pasted doodad's height, as the World Editor's Preserve Copied Object Height has it (we-drive 2026-11-12, copies of
+ *  an empty map with a raised part, saved and read back, the switch's check mark seen in the Advanced menu): on, every
+ *  pasted doodad keeps the height it had where it was copied (`copied`, as stored), whatever the ground is where it
+ *  lands (a fixed rock at 200 pasted onto ground 64 stayed at 200, one at 64 pasted onto ground 0 at 64, a plain one at
+ *  0 sank into ground 64); off, every one stands on the ground (`ground`), fixed or not. */
+export function pastedHeight(ground: number, copied: number, preserve: boolean): number {
+  return preserve ? copied : ground;
 }
 
-/** A pasted object's flags: without preserving, a fixed height is dropped, so the copy stands on the
- *  ground and follows it, like any doodad that was never given a height. */
+/** A pasted doodad's flags, from the same runs: on, every pasted doodad has a fixed height (flags 2 became 6), so it
+ *  holds the height it was given; off, none has (6 became 2), so the copy follows the ground like any doodad that was
+ *  never given a height. The other flags stay. */
 export function pastedFlags(flags: number, preserve: boolean): number {
-  return preserve ? flags : flags & ~FIXED_HEIGHT;
+  return preserve ? flags | FIXED_HEIGHT : flags & ~FIXED_HEIGHT;
 }
 
 /** Movement types (UnitData.slk `movetp`, object data `umvt`) whose units the game puts on the water surface:
