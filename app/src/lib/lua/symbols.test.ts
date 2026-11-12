@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { emptyEnv } from "../jass/check";
-import { luaDeclarations, luaMemberBase, luaMembers, luaSpot, luaSymbols } from "./symbols";
+import { luaDeclarations, luaDottedAt, luaMemberBase, luaMembers, luaSpot, luaSymbols } from "./symbols";
 
 test("members after a table's name: math.fl offers floor, a text's tables their functions", () => {
   assert.equal(luaMemberBase("local x = math.fl"), "math");
@@ -85,4 +85,35 @@ if Score == 1 then end
   assert.ok(!text.slice(unit.scope![0], unit.scope![1]).includes("helper"));
   const a = d.find((s) => s.name === "a")!, b = d.find((s) => s.name === "b")!;
   assert.deepEqual([text[a.at!], text[b.at!]], ["a", "b"]);
+});
+
+test("table fields: assignments, methods and nested tables are members of their table", () => {
+  const text = "T = {}\nT.x = 1\nT.a.b.c = 2\nfunction T.f()\n  self.n = 3\n  if T.y == 1 then end\nend\nfunction T:m()\nend\nlocal v = T.z\nother = 5\n-- T.c = 1\nlocal s = \"T.q = 1\"\n";
+  const symbols = luaSymbols(emptyEnv(), text);
+  assert.deepEqual(luaMembers(symbols, "T").map((m) => [m.name, m.table]).sort(), [["a", true], ["f", false], ["m", false], ["x", false]]);
+  assert.deepEqual(luaMembers(symbols, "T.a").map((m) => [m.name, m.table]), [["b", true]]);
+  assert.deepEqual(luaMembers(symbols, "T.a.b").map((m) => m.name), ["c"]);
+  assert.deepEqual(luaMembers(symbols, "self").map((m) => m.name), ["n"]);
+  // Unrelated names get nothing; `==` and a plain global are no field.
+  assert.deepEqual(luaMembers(symbols, "other"), []);
+  assert.deepEqual(luaMembers(symbols, "U"), []);
+  const x = luaDeclarations(text).find((d) => d.name === "T.x")!;
+  assert.equal(x.at, text.indexOf("T.x"));
+  assert.equal(x.detail, "field T.x");
+});
+
+test("hover name: the dotted name up to the part under the mouse", () => {
+  const text = "local y = math.floor(M.run.go(1)) + a..b + 1.5";
+  const at = (needle: string, d = 1) => luaDottedAt(text, text.indexOf(needle) + d)?.text;
+  assert.equal(at("floor"), "math.floor");
+  assert.equal(at("math"), "math");
+  assert.equal(at("run"), "M.run");
+  assert.equal(at("go"), "M.run.go");
+  assert.equal(at("b +"), "b"); // not a..b
+  assert.equal(luaDottedAt(text, text.indexOf("1.5")), null);
+  assert.equal(luaDottedAt("obj:run()", 5)?.text, "obj:run");
+  assert.equal(luaDottedAt("a + b", 3), null);
+  // The declarations carry what hover shows for it.
+  const sym = luaSymbols(emptyEnv(), text).find((s) => s.name === "math.floor");
+  assert.equal(sym?.detail, "Lua: math.floor");
 });

@@ -9,7 +9,7 @@ import { type Extension } from "@codemirror/state";
 import { EditorView, hoverTooltip, keymap, showPanel, type Panel } from "@codemirror/view";
 import type { CodeSymbol, CompletionItem, CompletionRequest } from "../../extensions/services";
 import { codeSpot, paramOf } from "../../lib/jass/callsite";
-import { luaMemberBase, luaMembers, luaSpot } from "../../lib/lua/symbols";
+import { luaDottedAt, luaMemberBase, luaMembers, luaSpot } from "../../lib/lua/symbols";
 import { h } from "../../workbench/dom";
 
 const COMPLETION_TYPE: Record<string, string> = {
@@ -50,11 +50,20 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
   extra?: ExtraCompletion, language: "jass" | "lua" = "jass"): Extension {
   // The document's own text: its offsets are what positions in the editor mean, also in CRLF files
   // (sliceDoc gives the file's line breaks, two characters each).
+  // Lua names are dotted (`math.floor`, `M.run`): the word is the whole name up to the part under the mouse.
+  const nameAt = (view: EditorView, pos: number) => {
+    if (language !== "lua") return wordAt(view, pos);
+    const w = luaDottedAt(view.state.doc.toString(), pos);
+    return w;
+  };
+  // `obj.m` and `obj:m` name the same method.
+  const find = (list: CodeSymbol[], name: string, pos: number) => lookup(list, name, pos)
+    ?? (language === "lua" && /[.:]/.test(name) ? lookup(list, name.replace(/[.:]([^.:]*)$/, (m) => (m[0] === "." ? ":" : ".") + m.slice(1)), pos) : undefined);
   const current = (view: EditorView) => symbols(view.state.doc.toString());
   const goTo = async (view: EditorView, pos: number) => {
-    const w = wordAt(view, pos);
+    const w = nameAt(view, pos);
     if (!w) return false;
-    const s = lookup(await current(view), w.text, pos);
+    const s = find(await current(view), w.text, pos);
     if (s?.at === undefined) {
       if (s?.location) { openElsewhere(s.location, s.name); return true; }
       return false;
@@ -159,9 +168,9 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
       }],
     }),
     hoverTooltip(async (view, pos) => {
-      const w = wordAt(view, pos);
+      const w = nameAt(view, pos);
       if (!w) return null;
-      const s = lookup(await current(view), w.text, pos);
+      const s = find(await current(view), w.text, pos);
       if (!s) return null;
       return {
         pos: w.from, end: w.to, above: true,

@@ -100,7 +100,32 @@ export function luaDeclarations(text: string): JassSymbol[] {
     }
   }
   for (const m of code.matchAll(/^([A-Za-z_]\w*)[ \t]*=[^=]/gm)) add({ name: m[1], kind: "global", detail: `global ${m[1]}`, at: m.index });
+  // Table fields: `t.x = 1`, `a.b.c = 2` (also indented, e.g. `self.x = 1` in a function). A field a function
+  // declaration already named keeps that declaration.
+  for (const m of code.matchAll(/^[ \t]*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)[ \t]*=[^=]/gm)) {
+    add({ name: m[1], kind: "global", detail: `field ${m[1]}`, at: m.index + m[0].indexOf(m[1]) });
+  }
   return out;
+}
+
+/** The dotted name under `pos` in Lua text, up to the end of the part the cursor is on: `math.floor` for a
+ *  cursor in "floor" (and `math` for one in "math"); `obj:run` too. Null if no name is there. */
+export function luaDottedAt(text: string, pos: number): { from: number; to: number; text: string } | null {
+  let to = pos;
+  while (to < text.length && /\w/.test(text[to])) to++;
+  let from = pos;
+  while (from > 0 && /\w/.test(text[from - 1])) from--;
+  if (from === to || /\d/.test(text[from])) return null;
+  // Take the parts before it: `a.b.` and `a:`, each a plain name (not after a number or `..`).
+  for (;;) {
+    const sep = text[from - 1];
+    if ((sep !== "." && sep !== ":") || text[from - 2] === "." ) break;
+    let start = from - 1;
+    while (start > 0 && /\w/.test(text[start - 1])) start--;
+    if (start === from - 1 || /\d/.test(text[start])) break;
+    from = start;
+  }
+  return { from, to, text: text.slice(from, to) };
 }
 
 /** Everything a Lua script can name: its own, Lua's, and the game's functions and constants. */
