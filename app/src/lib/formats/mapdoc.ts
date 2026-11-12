@@ -2,6 +2,7 @@
 
 import type { W3Api } from "../../extensions/api";
 import { StringTable } from "./wts";
+import { refsIn } from "./movetexts";
 import { parseW3e } from "../terrain/w3e";
 import { readTerrainBytes, terrainPath } from "../terrain/w3etext";
 
@@ -24,6 +25,26 @@ export const readMapDocStrict = async <T>(w3: W3Api, path: string, read: (w3: W3
   if ((await there(path)) || (await there(path.replace(/\.json$/, "")))) throw new Error(`${path} is there but can't be read.`);
   return null;
 };
+
+/** Files that may refer to strings and are read as text (latin1: a reference is plain ASCII). */
+export const STRING_REF_TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc|ai|slk|ini)$/i;
+/** The map's own files kept raw (no codec): searched as bytes. */
+export const STRING_REF_RAW_FILE = /^map\/war3(map|campaign)[^/]*$/i;
+
+/** Every TRIGSTR number the map's files refer to (`paths`: the project's files; string tables, `.wts`, and those
+ *  `skip` names in lower case are left out), added to `into`. New strings are numbered after these, so a reference
+ *  to a string the table lacks doesn't come to show a new text (Move Texts, the Sound Editor's dialogue keys). A file
+ *  that can't be read throws: an unknown reference is never taken for none. */
+export async function stringRefsInMap(w3: W3Api, paths: Iterable<string>, skip: (lower: string) => boolean = () => false,
+  into = new Set<number>()): Promise<Set<number>> {
+  for (const path of paths) {
+    const lower = path.replace(/\\/g, "/").toLowerCase();
+    if (skip(lower) || lower.endsWith(".wts")) continue;
+    if (!STRING_REF_TEXT_FILE.test(lower) && !STRING_REF_RAW_FILE.test(lower)) continue;
+    refsIn(new TextDecoder("latin1").decode(await w3.workspace.readBytes(path)), into);
+  }
+  return into;
+}
 
 /** Turns "TRIGSTR_012" into the text in war3map.wts (`path`: another string table, such as a campaign's
  *  map/war3campaign.wts); anything else stays. */

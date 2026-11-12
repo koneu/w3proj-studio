@@ -4705,6 +4705,114 @@ async function moduleFunctionsChecks(page, found) {
     await page.evaluate(`w3.editors.closeAll()`);
     verify(u, "unused-sounds");
   }
+
+  // ---- Sound Editor: a dialogue's speaker name and text (strings of war3map.wts) ------------------
+  // A sound with a speaker but no keys: typed, it gets speaker name n and text n + 1 after the table's highest string;
+  // saved, the strings are in war3map.wts and the keys in the sound; opened again, the fields show the same. An edit of
+  // the text then changes only its string.
+  const setField = (sel, value) => page.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event("change")); })()`);
+  const dialogueFields = () => page.evaluate(`[document.querySelector("input.snd-speaker-name")?.value ?? null, document.querySelector("textarea.snd-dialogue-text")?.value ?? null]`);
+  const unsaved = () => page.evaluate(`w3.editors.unsavedPaths().length`);
+  /** Opens the Sound Editor at the sound `name`, with its dialogue fields. */
+  const openDialogue = async (name) => {
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`!!document.querySelector("tr.snd-row")`), 20000);
+    await page.evaluate(`[...document.querySelectorAll("tr.snd-row")].find((r) => r.firstChild.textContent === ${JSON.stringify(name.replace(/^gg_snd_/, ""))})?.click()`);
+    await until("the dialogue fields", () => page.evaluate(`!!document.querySelector("textarea.snd-dialogue-text")`), 10000);
+  };
+  const saveAndSettle = async (what) => {
+    await page.evaluate(`w3.editors.saveAll()`);
+    await until(what, async () => (await unsaved()) === 0, 15000).catch(() => fail(`${what}: still unsaved`));
+    await settled(page);
+  };
+  const dl = join(dir, "dialogue");
+  cpSync(FIXTURE, dl, { recursive: true });
+  {
+    const wtsFile = join(dl, "map", "war3map.wts"), w3sFile = join(dl, "map", "war3map.w3s.json");
+    const wtsBefore = readFileSync(wtsFile, "utf8");
+    // The map script refers to a string the table lacks, 40 above its highest: the new keys go after that one.
+    const top = Math.max(...[...wtsBefore.matchAll(/^STRING (\d+)/gm)].map((m) => Number(m[1])), 0) + 40;
+    const scriptFile = join(dl, "map", "war3map.j");
+    writeFileSync(scriptFile, `${readFileSync(scriptFile, "utf8")}\n// TRIGSTR_${String(top).padStart(3, "0")}\n`);
+    put(w3sFile, {
+      format: "w3proj.sounds/1", version: 3,
+      sounds: [{
+        name: "gg_snd_Jaina01", file: "Sound\\Dialogue\\Jaina01.flac", eaxEffect: "HeroAcksEAX", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+        channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+        variableName: "gg_snd_Jaina01", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+        speakerUnitType: "Hjai", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 0,
+      }],
+    });
+    await openProject(dl);
+    await openDialogue("gg_snd_Jaina01");
+    const empty = await dialogueFields();
+    if (empty.join("|") !== "|") fail(`a dialogue sound without keys shows ${JSON.stringify(empty)}`);
+    await setField("input.snd-speaker-name", "Jaina Proudmoore");
+    await setField("textarea.snd-dialogue-text", "We must hurry.\nThe dead are coming.");
+    await until("the dialogue text unsaved", async () => (await unsaved()) > 0, 10000).catch(() => fail("typing a dialogue text left the Sound Editor without unsaved changes"));
+    await saveAndSettle("the dialogue texts saved");
+    const keys = () => { const x = json(w3sFile).sounds[0]; return [x.speakerNameKey, x.dialogueTextKey]; };
+    if (keys().join() !== `${top + 1},${top + 2}`) fail(`the new dialogue keys: ${keys().join()}, not ${top + 1},${top + 2}`);
+    const wtsAfter = readFileSync(wtsFile, "utf8");
+    const block = (n, text) => `STRING ${n}\n{\n${text}\n}\n`;
+    if (!wtsAfter.startsWith(wtsBefore)) fail("war3map.wts's old strings didn't stay as they were");
+    if (!wtsAfter.includes(block(top + 1, "Jaina Proudmoore")) || !wtsAfter.includes(block(top + 2, "We must hurry.\nThe dead are coming."))) fail(`the dialogue strings in war3map.wts: ${JSON.stringify(wtsAfter.slice(wtsBefore.length))}`);
+    await openDialogue("gg_snd_Jaina01");
+    const shown = await dialogueFields();
+    if (shown.join("|") !== "Jaina Proudmoore|We must hurry.\nThe dead are coming.") fail(`opened again, the dialogue fields show ${JSON.stringify(shown)}`);
+    // The text changed: only its string changes, the keys stay.
+    await setField("textarea.snd-dialogue-text", "Hurry!");
+    await saveAndSettle("the changed dialogue text saved");
+    const wtsThen = readFileSync(wtsFile, "utf8");
+    if (wtsThen !== wtsAfter.replace(block(top + 2, "We must hurry.\nThe dead are coming."), block(top + 2, "Hurry!"))) fail(`the changed text's war3map.wts: ${JSON.stringify(wtsThen.slice(wtsBefore.length))}`);
+    if (keys().join() !== `${top + 1},${top + 2}`) fail(`editing the text changed the keys to ${keys().join()}`);
+    await openDialogue("gg_snd_Jaina01");
+    const again = await dialogueFields();
+    if (again.join("|") !== "Jaina Proudmoore|Hurry!") fail(`opened again after the change, the dialogue fields show ${JSON.stringify(again)}`);
+    // The script line added above makes the save ask about writing the map script anew: not what is tested here.
+    await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(dl, "dialogue");
+  }
+
+  // A campaign map's dialogue sounds (NightElfX04Interlude: twelve, one with a text but no speaker name): a text typed
+  // and typed back, saved, gives the map's war3map.w3s and war3map.wts byte for byte.
+  if (game) {
+    const real = join(dir, "dialogue-real"), src = join(dir, "NightElfX04Interlude.w3x");
+    const got = spawnSync(cli, ["game", "cat", "War3.w3mod:Campaign/Classic/TFT/NightElfX04Interlude.w3x"], { maxBuffer: 1 << 28, env: { ...process.env, W3PROJ_GAME: game } });
+    if (got.status !== 0 || !got.stdout?.length) fail(`the campaign map couldn't be read from the game: ${String(got.stderr).slice(-200)}`);
+    else {
+      writeFileSync(src, got.stdout);
+      await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(src)}, dir: ${JSON.stringify(real)}, allowIncomplete: false, install: ${JSON.stringify(game)} }); })()`);
+      const spoken = json(join(real, "map", "war3map.w3s.json")).sounds.filter((x) => x.speakerNameKey >= 0 && x.dialogueTextKey >= 0);
+      if (spoken.length < 10) fail(`the campaign map has ${spoken.length} sounds with both dialogue keys (control: 11)`);
+      else {
+        const s0 = spoken[0];
+        const wtsText = readFileSync(join(real, "map", "war3map.wts"), "utf8");
+        await openProject(real);
+        await openDialogue(s0.name);
+        const [speaker, text] = await dialogueFields();
+        if (!speaker || !text || !wtsText.includes(speaker)) fail(`${s0.name}'s dialogue fields show ${JSON.stringify([speaker, text])}`);
+        await setField("textarea.snd-dialogue-text", `${text} (typed)`);
+        await setField("textarea.snd-dialogue-text", text);
+        if (!(await unsaved())) fail("a text typed and typed back left nothing for the save to do (control: the save runs)");
+        await saveAndSettle("the campaign map's sounds saved");
+        // The map script the save may want to write anew asks; not what is tested here.
+        await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
+        await page.evaluate(`w3.editors.closeAll()`);
+        const packed = join(dir, "dialogue-real.w3x");
+        const p = spawnSync(cli, ["pack", real, "-o", packed], { encoding: "utf8" });
+        if (p.status !== 0) fail(`the campaign map's project didn't pack: ${(p.stdout + p.stderr).slice(-300)}`);
+        else {
+          for (const f of ["war3map.w3s", "war3map.wts"]) {
+            const a = spawnSync(cli, ["cat", src, f], { maxBuffer: 1 << 26 }).stdout, b = spawnSync(cli, ["cat", packed, f], { maxBuffer: 1 << 26 }).stdout;
+            if (!a?.length || !b || !a.equals(b)) fail(`${f} of the campaign map isn't byte for byte the same after a save without changes (${a?.length} → ${b?.length} bytes)`);
+          }
+        }
+      }
+    }
+  }
 }
 
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });

@@ -842,6 +842,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .snd-field { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 8px; margin: 4px 0; }
 .snd-field input[type="text"] { font: inherit; }
 .snd-field > div > input[type="text"]:not(.snd-num) { width: 100%; max-width: 420px; }
+.snd-field .form-stack > input[type="text"], .snd-field .form-stack > textarea { width: 100%; max-width: 420px; font: inherit; box-sizing: border-box; }
 .snd-num { width: 6em; }
 .snd-flag { margin-right: 12px; white-space: nowrap; }
 .snd-note { margin: 4px 0; }

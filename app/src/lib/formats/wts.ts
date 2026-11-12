@@ -270,6 +270,25 @@ export function renumberWts(text: string, ids: ReadonlyMap<number, number>): str
   return out + text.slice(at);
 }
 
+/** A new string block for appendStrings: `text` with "\n" line ends; `comment` a line of its own ("// …") or none. */
+export interface NewString { num: number; text: string; comment?: string | null }
+
+/** `text` (a war3map.wts, "" for a new one) with `blocks` added at the end as the World Editor writes them, a blank line
+ *  between blocks and the file's line ends (`eol`). Everything before stays byte for byte. The caller makes sure the
+ *  numbers are free and the texts would read back whole (wtsCutLines). */
+export function appendStrings(text: string, blocks: readonly NewString[], eol: string): string {
+  if (!blocks.length) return text;
+  let out = text;
+  if (out.replace(/^﻿/, "").trim() !== "") {
+    if (!out.endsWith("\n")) out += eol;
+    if (!/\n[ \t]*\r?\n$/.test(out)) out += eol;
+  }
+  for (const b of blocks) {
+    out += `STRING ${b.num}${eol}${b.comment ? `// ${b.comment}${eol}` : ""}{${eol}${b.text.replace(/\n/g, eol)}${eol}}${eol}${eol}`;
+  }
+  return out;
+}
+
 /** war3map.wts without the blocks of `nums`: each goes from its STRING header up to the next header (or the end of the
  *  file), so the blank line after it goes too. Everything else stays byte for byte. */
 export function removeStrings(text: string, nums: ReadonlySet<number>): string {
