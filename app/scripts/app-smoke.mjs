@@ -3822,6 +3822,10 @@ async function typedFieldSave(page, found) {
     }
 
     // ---- Gameplay Constants: Max Unit Speed ----
+    // A value set takes the Melee flag off, as the World Editor's save does ("Custom gameplay constants have been specified").
+    const meleeFlag = () => k.read("war3map.w3i.json").flags & 4;
+    const meleeBefore = meleeFlag();
+    if (!meleeBefore) fail("the map isn't a melee map before its gameplay constants change (control)");
     await page.evaluate(`w3.editors.closeAll()`);
     await page.evaluate(`w3.commands.execute("w3.gameplayConstants.open")`);
     const speed = `[...document.querySelectorAll(".gs-row")].find((r) => r.title.startsWith("Misc › MaxUnitSpeed "))?.querySelector("input.gs-input")`;
@@ -3832,6 +3836,9 @@ async function typedFieldSave(page, found) {
     await until("the typed speed saved", () => /^MaxUnitSpeed=432\r?$/m.test(misc()), 5000).catch(() => fail(`Ctrl+S right after typing 432 as Max Unit Speed saved ${JSON.stringify(misc().slice(0, 200))}`));
     await settled(page);
     if (await dirty(miscPath)) fail("Ctrl+S right after typing in Gameplay Constants left it unsaved");
+    if (meleeBefore) {
+      await until("the Melee flag off", () => meleeFlag() === 0, 10000).catch(() => fail("a map with custom gameplay constants saved is still a melee map"));
+    }
 
     // ---- The Sound Editor: a sound's volume ----
     const w3s = "map/war3map.w3s.json";

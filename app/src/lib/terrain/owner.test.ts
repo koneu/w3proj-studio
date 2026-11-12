@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hasPlayerUnits, joinOwners, meleeBlockers, meleeFlagsAfter, ownerOf, placedText, splitOwners } from "./owner";
+import { hasCustomConstants, hasPlayerUnits, joinOwners, meleeBlockers, meleeFlagsAfter, ownerOf, placedText, splitOwners } from "./owner";
 
 const UPROOTED = 0x10001;
 
@@ -103,4 +103,20 @@ test("the World Editor's melee rules, as far as war3map.w3i and the units tell",
   // A start in an invalid position (World Editor 7003's new maps on water, 2026-11-11) only when the caller tells.
   assert.deepEqual(meleeBlockers(base, sloc, true), ["Start locations are in invalid positions"]);
   assert.equal(meleeFlagsAfter({ ...base, flags: 0x2fc14 }, sloc, true), 0x2fc10);
+});
+
+// World Editor 7003 (2026-11-12): ticking "Use Custom Gameplay Constants" alone changed nothing; editing one value wrote
+// war3mapMisc.txt ([Misc] ScaledAnimTime=75.0) and the save took the Melee flag off (39956 → 39952) with this reason.
+test("custom gameplay constants take the Melee flag off", () => {
+  const info = { flags: 39956, customConstants: true } as Parameters<typeof meleeBlockers>[0];
+  assert.deepEqual(meleeBlockers(info, []), ["Custom gameplay constants have been specified"]);
+  assert.equal(meleeFlagsAfter(info, []), 39952);
+  assert.equal(meleeFlagsAfter({ flags: 39956 }, []), 39956, "control: none set");
+});
+
+test("a war3mapMisc.txt sets constants only with a value in it", () => {
+  assert.equal(hasCustomConstants("[Misc]\r\nScaledAnimTime=75.0\r\n"), true);
+  assert.equal(hasCustomConstants("[HERO]\nMaxLevel=20\n"), true, "any section");
+  assert.equal(hasCustomConstants(""), false, "Studio's Gameplay Constants opened, nothing changed");
+  assert.equal(hasCustomConstants("[Misc]\n\n"), false);
 });

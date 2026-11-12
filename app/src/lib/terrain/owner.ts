@@ -2,6 +2,8 @@
 // and bit 16 says an Ancient is placed uprooted. Everything that shows or edits an owner uses the
 // low half; the flags go back into the file unchanged.
 
+import { readIni } from "../formats/iniedit";
+
 interface Owned { player?: number; playerFlags?: number }
 
 const OWNER = 0xffff;
@@ -29,6 +31,15 @@ export interface MeleeInfo {
   gameDataSet?: number;
   upgrades?: readonly unknown[];
   techs?: readonly unknown[];
+  /** The map's war3mapMisc.txt sets a value (customConstants); not in war3map.w3i, the caller tells. */
+  customConstants?: boolean;
+}
+
+/** Whether a war3mapMisc.txt sets a gameplay constant: a value in any section. Ticking "Use Custom Gameplay Constants"
+ *  alone changes nothing in World Editor 7003; editing one value writes the file ([Misc] ScaledAnimTime=75.0) and takes
+ *  the Melee flag off (2026-11-12). An empty file (Studio's Gameplay Constants opened, nothing changed) sets none. */
+export function hasCustomConstants(misc: string): boolean {
+  return [...readIni(misc).values()].some((section) => section.size > 0);
 }
 
 /**
@@ -37,7 +48,8 @@ export interface MeleeInfo {
  * the flag cleared and one thing changed each; the flag came back with none of these and stayed off with each. The game's
  * 258 melee maps have none of them. Not reasons: custom techtree, abilities or upgrades turned on in the options without
  * entries, Fixed Player Settings without custom forces, Race selectable, neutral units, computer players, races.
- * Its other reasons aren't here: custom object data, gameplay constants or interface, triggers other than the default
+ * Custom gameplay constants count when the caller tells (`customConstants`, see hasCustomConstants).
+ * Its other reasons aren't here: custom object data or interface, triggers other than the default
  * Melee Initialization (renaming it, dropping an action or disabling it counted; its description and the custom script
  * header didn't), and start locations "in invalid positions" (trees about 200 from a start made it one; a start 250 from
  * a tavern also took the flag off). That one counts only when the caller tells (`startsInvalid`): a start under water is
@@ -53,6 +65,7 @@ export function meleeBlockers(info: MeleeInfo, placed: readonly (Owned & { id: s
   if (info.players?.some((p) => ((p.fixedStart ?? 0) & 1) !== 0)) out.push("Fixed starting locations have been specified");
   if (info.upgrades?.length) out.push("Custom upgrade settings have been specified");
   if (info.techs?.length) out.push("Custom techtree or ability settings have been specified");
+  if (info.customConstants) out.push("Custom gameplay constants have been specified");
   // 0 and -1 (0xffffffff, what World Editor 7003 gives its new maps, Melee on) are the default; 1 was a reason.
   if (info.gameDataSet && (info.gameDataSet >>> 0) !== 0xffffffff) out.push("Non-default game data set has been specified");
   return out;
