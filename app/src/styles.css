@@ -887,6 +887,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .imp-use-label { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); white-space: nowrap; }
 .imp-badge { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 3px; font-family: system-ui, sans-serif; font-size: 10px; line-height: 15px; vertical-align: middle; background: #3a4350; color: var(--fg); }
 .imp-badge.reforged { background: #4a3a5a; }
+.imp-badge.de { background: #3a5a4a; }
 .imp-modes { font-size: 12px; overflow-wrap: anywhere; }
 
 /* Map Size tab (terrain editor) */

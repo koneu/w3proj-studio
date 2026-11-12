@@ -8156,6 +8156,7 @@ async function importWarnings(page, found) {
 async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
   const HD = "_HD.w3mod\\war3mapImported\\PairHero.mdx", SD = "war3mapImported\\PairHero.mdx";
   const src = (mode) => join(k.root, "smoke-src", mode, "PairHero.mdx");
+  const DE = "_DE.w3mod\\war3mapImported\\PairHero.mdx";
   const entry = (path) => { try { return k.read("war3map.imp.json").files.find((f) => f.path === path) ?? null; } catch { return null; } };
   await page.evaluate(`(async () => {
     window.__impKept2 = { files: w3.window.pickFiles, file: w3.window.pickFile, info: w3.window.showInfo };
@@ -8166,6 +8167,8 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     // Two models told apart by their bytes: the knight for Reforged, the footman for Classic.
     await w3.workspace.writeBytes("smoke-src/Reforged/PairHero.mdx", await w3.game.read("Units\\\\Human\\\\Knight\\\\Knight.mdx"));
     await w3.workspace.writeBytes("smoke-src/Classic/PairHero.mdx", await w3.game.read("Units\\\\Human\\\\Footman\\\\Footman.mdx"));
+    // A third, for the 3.0 version.
+    await w3.workspace.writeBytes("smoke-src/DE/PairHero.mdx", await w3.game.read("Units\\\\Human\\\\Rifleman\\\\Rifleman.mdx"));
   })()`);
   const row = `[...document.querySelectorAll("tr.imp-row")].filter((r) => r.textContent.includes("PairHero"))`;
   const badges = () => page.evaluate(`${row}.map((r) => [...r.querySelectorAll(".imp-badge")].map((b) => b.textContent).join("+"))`);
@@ -8195,13 +8198,23 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     // The note comes once the add has ended, which the list entry and file don't tell of.
     if (!(await soon(() => page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`), 10000))) fail(`no note of the added version: ${JSON.stringify(await page.evaluate(`window.__impInfo`))}`);
 
-    // Packed, the map holds both paths, each with its own bytes.
+    // Add 3.0 Version…: the pair's row offers just that one, stored below _DE.w3mod with the flags of a Reforged entry.
+    await page.evaluate(`w3.window.pickFile = async () => ${JSON.stringify(src("DE"))}`);
+    await page.evaluate(`${row}[0]?.click()`);
+    const addDe = await page.evaluate(`(() => { const bs = [...document.querySelectorAll(".imp-detail .imp-add-version")]; const t = bs.map((b) => b.textContent); bs[0]?.click(); return t; })()`);
+    if (addDe.join() !== "Add 3.0 Version…") { fail(`the pair's detail offers ${JSON.stringify(addDe)}, not Add 3.0 Version…`); return; }
+    if (!(await soon(() => !!entry(DE) && onDisk("map/_DE.w3mod/war3mapImported/PairHero.mdx"), 20000))) { fail(`Add 3.0 Version…: the list holds ${JSON.stringify(listed())}`); return; }
+    if (entry(DE).flags !== 13) fail(`the 3.0 entry's flags: ${entry(DE).flags}`);
+    await settled(page);
+    if ((await badges()).join() !== "Classic+Reforged+3.0") fail(`the three versions are shown as ${JSON.stringify(await badges())} (one row with three badges wanted)`);
+
+    // Packed, the map holds the paths, each with its own bytes.
     await k.save();
     await k.verify(fail);
     const map = join(work, "heights", "ImportWarnings", "ImportWarnings.w3x");
     const listing = spawnSync(cli, ["ls", map], { encoding: "utf8" }).stdout;
     const packed = (p) => spawnSync(cli, ["cat", map, p], { maxBuffer: 256 * 1024 * 1024 }).stdout;
-    for (const [p, file] of [[HD, src("Reforged")], [SD, src("Classic")]]) {
+    for (const [p, file] of [[HD, src("Reforged")], [SD, src("Classic")], [DE, src("DE")]]) {
       const bytes = listing.includes(p) ? packed(p) : null;
       if (!bytes) fail(`the packed map has no ${p}`);
       else if (!bytes.equals(readFileSync(file))) fail(`the packed ${p} isn't the file imported for it (${bytes.length} bytes, ${readFileSync(file).length} imported)`);
@@ -8212,14 +8225,14 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (why) fail(`removing the pair: ${why}`);
     else {
       const asked = await page.evaluate(`window.__impWarned.map((w) => w.m)`);
-      if (asked.length !== 1 || !/both its Classic and its Reforged version/.test(asked[0])) fail(`Remove on the pair asked ${JSON.stringify(asked)}`);
-      if (!(await soon(() => !entry(HD) && !entry(SD) && !onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx") && !onDisk("map/war3mapImported/PairHero.mdx"), 10000))) {
+      if (asked.length !== 1 || !/its Classic, Reforged and 3\.0 versions/.test(asked[0])) fail(`Remove on the pair asked ${JSON.stringify(asked)}`);
+      if (!(await soon(() => !entry(HD) && !entry(SD) && !entry(DE) && !onDisk("map/_DE.w3mod/war3mapImported/PairHero.mdx") && !onDisk("map/_HD.w3mod/war3mapImported/PairHero.mdx") && !onDisk("map/war3mapImported/PairHero.mdx"), 10000))) {
         fail(`Remove and delete file on the pair left ${JSON.stringify(listed().filter((p) => /pairhero/i.test(p)))}`);
       }
     }
   } finally {
     await page.evaluate(`(async () => { const k = window.__impKept2; if (k) { w3.window.pickFiles = k.files; w3.window.pickFile = k.file; w3.window.showInfo = k.info; }
-      for (const m of ["Reforged", "Classic"]) await w3.workspace.delete("smoke-src/" + m + "/PairHero.mdx").catch(() => {}); })()`);
+      for (const m of ["Reforged", "Classic", "DE"]) await w3.workspace.delete("smoke-src/" + m + "/PairHero.mdx").catch(() => {}); })()`);
   }
 }
 

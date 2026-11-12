@@ -142,34 +142,53 @@ export const REFORGED_FOLDER = "_HD.w3mod";
 /** Flags of a Reforged version's entry (Blizzard's campaigns: custom path). */
 export const REFORGED_FLAGS = CUSTOM_PATH_FLAGS;
 const REFORGED_PREFIX = /^_hd\.w3mod\\/i;
+/** The folder of a map's 3.0 (DE) versions: the game's `_DE.w3mod` art layer, which the 3.0 graphics mode reads first. */
+export const DE_FOLDER = "_DE.w3mod";
+/** Flags of a 3.0 version's entry: as a Reforged one's (the World Editor 3.0.1 keeps them as listed). */
+export const DE_FLAGS = CUSTOM_PATH_FLAGS;
+const DE_PREFIX = /^_de\.w3mod\\/i;
 
 /** The Reforged version's path of a plain path ("war3mapImported\a.mdx" → "_HD.w3mod\war3mapImported\a.mdx"). */
 export const reforgedPathOf = (plain: string) => `${REFORGED_FOLDER}\\${plain.replace(/\//g, "\\")}`;
 /** Whether an archive path is a Reforged version (below `_HD.w3mod\`, any case). */
 export const isReforgedPath = (path: string) => REFORGED_PREFIX.test(path.replace(/\//g, "\\"));
-/** The plain path a Reforged version stands for ("_hd.w3mod\x.mdx" → "x.mdx"); a plain path as it is. */
-export const classicPathOf = (path: string) => path.replace(/\//g, "\\").replace(REFORGED_PREFIX, "");
+/** The 3.0 version's path of a plain path ("war3mapImported\a.mdx" → "_DE.w3mod\war3mapImported\a.mdx"). */
+export const dePathOf = (plain: string) => `${DE_FOLDER}\\${plain.replace(/\//g, "\\")}`;
+/** Whether an archive path is a 3.0 version (below `_DE.w3mod\`, any case). */
+export const isDePath = (path: string) => DE_PREFIX.test(path.replace(/\//g, "\\"));
+/** The plain path a Reforged or 3.0 version stands for ("_hd.w3mod\x.mdx" → "x.mdx"); a plain path as it is. */
+export const classicPathOf = (path: string) => path.replace(/\//g, "\\").replace(REFORGED_PREFIX, "").replace(DE_PREFIX, "");
 /** The flags a new entry for an archive path gets: a Reforged version's as Blizzard's campaigns list them, else the
  *  current editors'. */
-export const newEntryFlags = (path: string) => (isReforgedPath(path) ? REFORGED_FLAGS : NEW_IMPORT_FLAGS);
+export const newEntryFlags = (path: string) => (isReforgedPath(path) ? REFORGED_FLAGS : isDePath(path) ? DE_FLAGS : NEW_IMPORT_FLAGS);
 
 /** Which graphics modes a new import is meant for: both (the plain path, as before), Classic only (the plain path too:
  *  Reforged reads it as well until a Reforged version is added), Reforged only (below `_HD.w3mod\`). */
-export type UseIn = "both" | "classic" | "reforged";
+export type UseIn = "both" | "classic" | "reforged" | "de";
 /** Whether "Use in" applies to a file: models and textures (the files the game has per graphics mode). */
 export const hasModeVersions = (path: string) => kindOf(path) === "Model" || kindOf(path) === "Image";
 /** The archive path an import of `plain` gets for a "Use in" choice (other files than models and textures stay plain). */
-export const pathForUse = (plain: string, use: UseIn) => (use === "reforged" && hasModeVersions(plain) ? reforgedPathOf(plain) : plain);
+export const pathForUse = (plain: string, use: UseIn) =>
+  !hasModeVersions(plain) ? plain : use === "reforged" ? reforgedPathOf(plain) : use === "de" ? dePathOf(plain) : plain;
 /** Whether `path` (a new import's path) clashes with what is there: itself or its other version (an unrelated
  *  `_HD.w3mod\` file of the same name would stand in for it in Reforged, and the other way round). */
-export const takenWithVersions = (path: string, taken: (path: string) => boolean) =>
-  taken(path) || taken(isReforgedPath(path) ? classicPathOf(path) : reforgedPathOf(path));
+export const takenWithVersions = (path: string, taken: (path: string) => boolean) => {
+  const plain = classicPathOf(path);
+  return taken(path) || [plain, reforgedPathOf(plain), dePathOf(plain)].some((p) => p !== path && taken(p));
+};
 
-/** One row of the Import Manager: a plain entry and the entry of its Reforged version are one row, each alone is one.
- *  `path`: the plain path (what the map's data names). */
-export interface ImportRow { key: string; path: string; classic?: ImportEntry; reforged?: ImportEntry }
-/** The entries of a row (Classic first). */
-export const rowEntries = (r: ImportRow): ImportEntry[] => [r.classic, r.reforged].filter((e): e is ImportEntry => !!e);
+/** One row of the Import Manager: a plain entry and the entries of its Reforged and 3.0 versions are one row, each alone
+ *  is one. `path`: the plain path (what the map's data names). */
+export interface ImportRow { key: string; path: string; classic?: ImportEntry; reforged?: ImportEntry; de?: ImportEntry }
+/** The graphics modes' versions of a file: Classic (the plain path), Reforged (`_HD.w3mod\`), 3.0 (`_DE.w3mod\`). */
+export type Side = "classic" | "reforged" | "de";
+export const SIDES: readonly Side[] = ["classic", "reforged", "de"];
+/** Which version an archive path is. */
+export const sideOf = (path: string): Side => (isReforgedPath(path) ? "reforged" : isDePath(path) ? "de" : "classic");
+/** The path of a plain path's version. */
+export const sidePathOf = (plain: string, side: Side) => (side === "reforged" ? reforgedPathOf(plain) : side === "de" ? dePathOf(plain) : plain.replace(/\//g, "\\"));
+/** The entries of a row (Classic, Reforged, 3.0). */
+export const rowEntries = (r: ImportRow): ImportEntry[] => SIDES.map((s) => r[s]).filter((e): e is ImportEntry => !!e);
 /** The rows of the list, in the order of each row's first entry. `pathOf`: the archive path an entry stands for (a
  *  standard-path entry's name is inside the import folder). A second entry for the same version stays a row of its
  *  own (lists may name a path twice). */
@@ -178,15 +197,14 @@ export function importRows(entries: readonly ImportEntry[], pathOf: (e: ImportEn
   const byKey = new Map<string, ImportRow>();
   for (const e of entries) {
     const full = pathOf(e).replace(/\//g, "\\");
-    const reforged = isReforgedPath(full);
+    const side = sideOf(full);
     const path = classicPathOf(full);
     const key = path.toLowerCase();
     const row = byKey.get(key);
-    const side = reforged ? "reforged" : "classic";
     if (row && !row[side]) {
       row[side] = e;
       // The plain entry's spelling names the row.
-      if (!reforged) row.path = path;
+      if (side === "classic") row.path = path;
       continue;
     }
     const fresh: ImportRow = { key: row ? `${key}|${rows.length}` : key, path, [side]: e };
@@ -196,32 +214,36 @@ export function importRows(entries: readonly ImportEntry[], pathOf: (e: ImportEn
   return rows;
 }
 
-/** What Change path does to a row: each version moves (from → to, archive paths). A row with a Reforged version takes
- *  the plain path (an `_HD.w3mod\` in front is left out: the Reforged version follows into its folder); a Classic entry
- *  alone moves to whatever is typed, as before. */
+/** What Change path does to a row: each version moves (from → to, archive paths). A row with a Reforged or 3.0 version
+ *  takes the plain path (an `_HD.w3mod\` or `_DE.w3mod\` in front is left out: the versions follow into their folders);
+ *  a Classic entry alone moves to whatever is typed, as before. */
 export function rowMoves(row: ImportRow, to: string, pathOf: (e: ImportEntry) => string = (e) => e.path): { entry: ImportEntry; from: string; to: string }[] {
-  const target = row.reforged ? classicPathOf(to) : to.replace(/\//g, "\\");
-  return rowEntries(row).map((entry) => ({ entry, from: pathOf(entry), to: entry === row.reforged ? reforgedPathOf(target) : target }));
+  const target = row.reforged || row.de ? classicPathOf(to) : to.replace(/\//g, "\\");
+  return SIDES.filter((s) => row[s]).map((s) => ({ entry: row[s]!, from: pathOf(row[s]!), to: sidePathOf(target, s) }));
 }
 
-/** The map's own names for an archive path in a graphics mode ("sd": Classic, "hd" and "de": Reforged), in the order the
- *  game reads them: Reforged takes the `_HD.w3mod\` version first, Classic never. */
+/** The map's own names for an archive path in a graphics mode, in the order the game reads them: Classic ("sd") only the
+ *  plain path; Reforged ("hd") the `_HD.w3mod\` version, then the plain one; 3.0 ("de") the `_DE.w3mod\` version, then
+ *  the `_HD.w3mod\` one, then the plain one (the game's own 3.0 layer falls back to its Reforged art, then Classic). */
 export function modeNames(archive: string, mode: string | undefined): string[] {
   const plain = classicPathOf(archive);
-  return mode === "sd" || mode === "classic" ? [plain] : [reforgedPathOf(plain), plain];
+  return mode === "sd" || mode === "classic" ? [plain] : mode === "de" ? [dePathOf(plain), reforgedPathOf(plain), plain] : [reforgedPathOf(plain), plain];
 }
 
-/** The graphics mode a preview reads the map's files in: its preference ("classic"; "reforged", "de", "hd"), else the
+/** The graphics mode a preview reads the map's files in: its preference ("classic"; "reforged", "hd"; "de"), else the
  *  mode set (game.graphicsMode; Reforged HD when unset, as the setting's default). */
-export function previewMode(prefer: string | undefined, setting: string | undefined): "sd" | "hd" {
-  const m = prefer === "classic" ? "sd" : prefer ? "hd" : setting ?? "hd";
-  return m === "sd" ? "sd" : "hd";
+export function previewMode(prefer: string | undefined, setting: string | undefined): "sd" | "hd" | "de" {
+  const m = prefer === "classic" ? "sd" : prefer ? prefer : setting ?? "hd";
+  return m === "sd" ? "sd" : m === "de" ? "de" : "hd";
 }
 /** The map's own names for the names a file may have (`variants`: a texture's .blp and .dds, …) in a graphics mode, in
- *  the order they are read: in Reforged every Reforged version before any plain file. */
+ *  the order they are read: every version of the mode's first layer before any of the next layer's. */
 export function ownNames(variants: readonly string[], mode: string | undefined): string[] {
   const names = variants.map((v) => modeNames(v.replace(/\//g, "\\"), mode));
-  return [...names.map((n) => n[0]), ...names.flatMap((n) => n.slice(1))].filter((n, i, all) => all.indexOf(n) === i);
+  const layers = Math.max(0, ...names.map((n) => n.length));
+  const out: string[] = [];
+  for (let i = 0; i < layers; i++) for (const n of names) if (n[i] !== undefined) out.push(n[i]);
+  return out.filter((n, i, all) => all.indexOf(n) === i);
 }
 
 /** The project file the map reads for an archive path in a graphics mode (see modeNames, importedPath). */
