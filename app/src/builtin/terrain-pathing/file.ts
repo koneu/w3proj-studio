@@ -51,3 +51,34 @@ export async function backupPath(path: string, exists: (p: string) => Promise<bo
   }
   throw new Error(`${path}: there are 99 backups of it already; move some away first.`);
 }
+
+/** One cell's manual override: flags set and flags cleared. */
+export interface CellOverride { set: number; clear: number }
+
+/** What importing the saved war3map.wpm's differences from the derived pathing (no overrides) would change:
+ *  `changed` maps each cell index whose override becomes the difference (set = in the wpm only, clear = in the
+ *  derived pathing only) to it. Cells the wpm agrees with the derived pathing on keep their override (unsaved
+ *  painting survives), so importing again changes nothing. `error` when the wpm isn't for this size. */
+export function importWpmDifferences(wpm: Uint8Array, derived: Uint8Array, width: number, height: number, existing: ReadonlyMap<number, CellOverride>):
+  { error: string } | { changed: Map<number, CellOverride>; differing: number } {
+  if (wpm.length < 16 || wpm[0] !== 0x4d || wpm[1] !== 0x50 || wpm[2] !== 0x33 || wpm[3] !== 0x57) return { error: "war3map.wpm isn't a pathing map." };
+  const v = new DataView(wpm.buffer, wpm.byteOffset, wpm.byteLength);
+  const w = v.getUint32(8, true), h = v.getUint32(12, true);
+  if (w !== width || h !== height) return { error: `war3map.wpm is ${w}×${h} cells, this map's pathing is ${width}×${height}: nothing imported.` };
+  if (wpm.length < 16 + width * height || derived.length < width * height) return { error: "war3map.wpm is cut short: nothing imported." };
+  const changed = new Map<number, CellOverride>();
+  let differing = 0;
+  for (let i = 0; i < width * height; i++) {
+    const a = wpm[16 + i], b = derived[i];
+    if (a === b) continue;
+    differing++;
+    const o = { set: a & ~b & 0xff, clear: b & ~a & 0xff };
+    const e = existing.get(i);
+    if (!e || e.set !== o.set || e.clear !== o.clear) changed.set(i, o);
+  }
+  const cells: PathingOverrides["cells"] = [];
+  for (const [i, o] of existing) if (!changed.has(i)) cells.push([i % width, Math.floor(i / width), o.set, o.clear]);
+  for (const [i, o] of changed) cells.push([i % width, Math.floor(i / width), o.set, o.clear]);
+  if (!validPathingOverrides({ width, height, cells })) return { error: "The differences can't be stored as overrides: nothing imported." };
+  return { changed, differing };
+}
