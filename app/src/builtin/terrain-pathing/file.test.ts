@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { backupPath, mayPaint, readPathingFile, replaceQuestion } from "./file";
+import { backupPath, importWpmDifferences, mayPaint, readPathingFile, replaceQuestion } from "./file";
 
 const FILE = ".w3proj/pathing.json";
 const good = (w: number, h: number) => JSON.stringify({ format: "w3proj.pathing/1", width: w, height: h, cells: [[1, 2, 2, 0]] });
@@ -53,4 +53,38 @@ test("a backup never takes the name of an earlier one, and a name it can't check
   assert.equal(await backupPath(FILE, no), `${FILE}.bak`);
   await assert.rejects(backupPath(FILE, async () => { throw "Permission denied"; }));
   await assert.rejects(backupPath(FILE, yes), /99 backups/);
+});
+
+const wpmOf = (w: number, h: number, cells: number[]) => {
+  const b = new Uint8Array(16 + cells.length);
+  b.set([0x4d, 0x50, 0x33, 0x57]);
+  const v = new DataView(b.buffer);
+  v.setUint32(8, w, true); v.setUint32(12, h, true);
+  b.set(cells, 16);
+  return b;
+};
+
+test("importing a wpm's differences makes set and clear masks, leaves equal cells and unsaved overrides, and is idempotent", () => {
+  const derived = Uint8Array.from([0, 0x0a, 0x02, 0x40, 0]);
+  const wpm = wpmOf(5, 1, [0x08, 0x0a, 0x00, 0x42, 0]);
+  const painted = new Map([[4, { set: 2, clear: 0 }]]);
+  const r = importWpmDifferences(wpm, derived, 5, 1, painted);
+  assert.ok(!("error" in r));
+  assert.deepEqual([...r.changed], [[0, { set: 0x08, clear: 0 }], [2, { set: 0, clear: 0x02 }], [3, { set: 0x02, clear: 0 }]]);
+  assert.equal(r.differing, 3);
+  const again = importWpmDifferences(wpm, derived, 5, 1, new Map([...painted, ...r.changed]));
+  assert.ok(!("error" in again));
+  assert.equal(again.changed.size, 0, "a second import changes nothing");
+  assert.equal(again.differing, 3);
+  // control: without the already-imported overrides the same call does change cells
+  assert.equal((importWpmDifferences(wpm, derived, 5, 1, new Map()) as { changed: Map<number, unknown> }).changed.size, 3);
+});
+
+test("a wpm of another size, cut short or not a wpm is refused", () => {
+  const derived = new Uint8Array(4);
+  for (const wpm of [wpmOf(2, 3, new Array(6).fill(0)), wpmOf(2, 2, [0, 0]), new Uint8Array(20)]) {
+    const r = importWpmDifferences(wpm, derived, 2, 2, new Map());
+    assert.ok("error" in r);
+  }
+  assert.match((importWpmDifferences(wpmOf(2, 3, new Array(6).fill(0)), derived, 2, 2, new Map()) as { error: string }).error, /2×3 cells, this map's pathing is 2×2/);
 });

@@ -2718,6 +2718,63 @@ async function leftOpen(page, check) {
   for (const text of left) console.log(`  left open after ${check}: ${text}`);
 }
 
+/** The Pathing Editor's "Import differences from war3map.wpm": a wpm edited outside the app (bytes changed in a scratch
+ *  map) becomes overrides, one undo step; a second import changes nothing; the wpm itself isn't written by it. */
+async function pathingImport(page, found) {
+  const fail = (what) => found.push(`pathing import: ${what}`);
+  const k = await heightKit(page, "PathingImport");
+  const wpmFile = join(k.root, "map", "war3map.wpm");
+  const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
+  const importNow = async () => {
+    await page.evaluate(`[...document.querySelectorAll(".pathing-bar button")].find((b) => b.textContent === "Import differences from war3map.wpm").click()`);
+    await settled(page);
+  };
+  await k.save();
+  await k.tab("Pathing");
+  await until("the pathing overlay", async () => /cells overridden/.test(await overridden()), 20000);
+  const bytes = readFileSync(wpmFile);
+  const cellAt = (x, y) => 16 + (128 + y) * bytes.readUInt32LE(8) + 128 + x;
+  // Control: nothing differs before the edit.
+  await importNow();
+  if (!/^0 cells/.test(await overridden())) fail(`importing an unedited wpm made overrides (${await overridden()})`);
+  const a = cellAt(0, 0), b = cellAt(3, 0);
+  if (bytes[a] & 0x0a || bytes[b] & 0x08) fail("the new map's middle cells are blocked already (control)");
+  const edited = Buffer.from(bytes);
+  edited[a] |= 0x0a;
+  edited[b] |= 0x08;
+  writeFileSync(wpmFile, edited);
+  await importNow();
+  if (!/^2 cells/.test(await overridden())) fail(`two edited cells became ${await overridden()}`);
+  await importNow();
+  if (!/^2 cells/.test(await overridden())) fail(`a second import changed the count to ${await overridden()}`);
+  if (!readFileSync(wpmFile).equals(edited)) fail("the import wrote war3map.wpm");
+  if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the import left the editor clean");
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await settled(page);
+  if (!/^0 cells/.test(await overridden())) fail(`one undo left ${await overridden()}`);
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await settled(page);
+  await k.save();
+  const file = JSON.parse(readFileSync(join(k.root, ".w3proj", "pathing.json"), "utf8"));
+  const got = JSON.stringify(file.cells.sort((p, q) => p[0] - q[0]));
+  if (got !== JSON.stringify([[128, 128, 0x0a, 0], [131, 128, 0x08, 0]])) fail(`pathing.json holds ${got}`);
+  // Another size: refused with a message, no overrides.
+  const small = Buffer.from(edited);
+  small.writeUInt32LE(128, 8);
+  writeFileSync(wpmFile, small);
+  await page.evaluate(`(() => { window.__said = []; window.__pathWarn = w3.window.showWarning; w3.window.showWarning = async (m) => { window.__said.push(m); }; })()`);
+  try {
+    await page.evaluate(`w3.commands.execute("workbench.undo")`);
+    await settled(page);
+    await importNow();
+    const said = await page.evaluate(`window.__said`);
+    if (!said.some((m) => /256×256/.test(m) && /128×256/.test(m))) fail(`a wpm of another size said ${JSON.stringify(said)}`);
+    if (!/^0 cells/.test(await overridden())) fail(`a wpm of another size made overrides (${await overridden()})`);
+  } finally {
+    await page.evaluate(`w3.window.showWarning = window.__pathWarn`);
+  }
+}
+
 /** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
  *  each undone with Ctrl+Z in the reopened editor (and the command), then redone, with every file of the map byte for byte
  *  what it was before the resize / after it. A shrink names what it cuts off and makes a checkpoint. */
@@ -8356,6 +8413,7 @@ async function run() {
         objectManagerLive,
         objectsWhileOpening,
         paletteMouse,
+        pathingImport,
         placeObjects,
         placerAndCampaign,
         playerStarts: (p, f) => playerStarts(p, f, project),
@@ -8569,6 +8627,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "resizeUndo");
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
   await leftOpen(page, "dataSafety");
+  await pathingImport(page, found).catch((e) => found.push(`pathing import: ${e.message}`));
+  await leftOpen(page, "pathingImport");
   await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
   await leftOpen(page, "configSafety");
   await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));

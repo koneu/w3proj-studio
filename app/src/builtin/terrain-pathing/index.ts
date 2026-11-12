@@ -8,7 +8,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance } from "../../extensions/services";
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { overridesForSize, pathingOverridesText } from "../../lib/terrain/resize";
-import { backupPath, mayPaint, readPathingFile, replaceQuestion, type PathingFile } from "./file";
+import { backupPath, importWpmDifferences, mayPaint, readPathingFile, replaceQuestion, type PathingFile } from "./file";
 import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
@@ -174,6 +174,29 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     render();
   };
 
+  /** Turns the differences between the saved wpm and the derived pathing into overrides: one undo step. The wpm isn't written. */
+  const importDifferences = async () => {
+    if (!ed.editable) return;
+    if (!mayPaint(found, replacing)) { await ask(); if (!mayPaint(found, replacing)) return; }
+    const at = changes;
+    let r: ReturnType<typeof importWpmDifferences>;
+    try {
+      const [saved, derived] = await Promise.all([w3.workspace.readBytes("map/war3map.wpm"), ed.pathing({ filtered: false })]);
+      r = derived.width === W && derived.height === H ? importWpmDifferences(saved, derived.cells, W, H, overrides) : { error: "The pathing map changed size: try again." };
+    } catch (e) {
+      void w3.window.showError(`Import from war3map.wpm: ${(e as Error).message ?? e}`);
+      return;
+    }
+    if (changes !== at) { void w3.window.showWarning("The overrides changed while war3map.wpm was read: nothing imported, try again."); return; }
+    if ("error" in r) { void w3.window.showWarning(r.error); return; }
+    if (!r.changed.size) { void w3.window.showInfo(`No new differences: war3map.wpm differs from the derived pathing in ${r.differing.toLocaleString()} cells, all already overrides.`); return; }
+    const before = new Map([...r.changed.keys()].map((i) => [i, overrides.get(i) && { ...overrides.get(i)! }] as const));
+    const after = new Map([...r.changed].map(([i, o]) => [i, { ...o }] as const));
+    restore(after);
+    ed.pushEdit({ undo: () => restore(before), redo: () => restore(after), terrain: false, objects: false });
+    void w3.window.showInfo(`Imported ${r.changed.size.toLocaleString()} cells from war3map.wpm as overrides.`);
+  };
+
   // ---- toolbar -----------------------------------------------------------------------
   const count = h("span.muted");
   const notice = h("span.pathing-notice", { role: "status" });
@@ -203,6 +226,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       restore(cleared);
       ed.pushEdit({ undo: () => restore(before), redo: () => restore(cleared), terrain: false, objects: false });
     } }, "Clear overrides"),
+    h("button", { title: "Make every difference between the saved war3map.wpm and the pathing derived from terrain and doodads a manual override (for a wpm edited elsewhere)", onclick: () => void importDifferences() }, "Import differences from war3map.wpm"),
     count,
     notice,
     h("span.pathing-legends", {},
