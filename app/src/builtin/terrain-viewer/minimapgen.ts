@@ -82,6 +82,11 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
     cliffColors.set(id, await textureColor(`cliff:${id}`, row ? `${row.texDir}\\${row.texFile}.blp` : null));
   }
 
+  // The tileset's blight texture (UI\WorldEditData.txt, [TileSets]: name,texture), for Export Minimap's Include Blight.
+  const tilesets = parseIni(await w3.game.readText("UI\\WorldEditData.txt").catch(() => "")).get("TileSets");
+  const blightPath = tilesets?.get(terrain.tileset.toLowerCase())?.split(",")[1]?.trim();
+  const blightColor = await textureColor(`blight:${terrain.tileset}`, blightPath ? `${blightPath}.blp` : null);
+
   const water = parseSlk(await w3.game.readText("TerrainArt\\Water.slk"));
   const wrow = water.find((r) => r.waterID === `${terrain.tileset}Sha`) ?? water.find((r) => r.waterID === "LSha");
   const waterColor: Rgb = wrow ? [Number(wrow.mmRed), Number(wrow.mmGreen), Number(wrow.mmBlue)] : [0, 0, 192];
@@ -99,7 +104,7 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   }
 
   return {
-    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, objects,
+    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, objects, blightColor,
     tileColor: (id) => colors.get(id) ?? [128, 128, 128],
     cliffColor: (id) => cliffColors.get(id) ?? null,
   };

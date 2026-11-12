@@ -4556,7 +4556,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!minimapPanel.shown) return;
           const seq = ++minimapSeq;
           const src = await exportSource();
-          const rgba = await exportPicture(src, { ...DEFAULT_EXPORT, size: MINIMAP_SIZE, playableOnly: true });
+          // Units and icons on, as the panel always had them (Export Minimap's defaults have them off).
+          const rgba = await exportPicture(src, { ...DEFAULT_EXPORT, units: true, icons: true, size: MINIMAP_SIZE, playableOnly: true });
           // A later refresh, or the panel turned off, wins.
           if (seq !== minimapSeq || !minimapPanel.shown) return;
           minimapMargins = src.base.margins;

@@ -35,8 +35,11 @@ export interface MinimapInput {
   // Export Minimap's options; left out, the picture is war3mapMap.blp's.
   /** Side of the square picture in pixels (MINIMAP_SIZE). */
   size?: number;
-  /** The ground's colours and the water (both on by default); without the ground it is black. */
-  show?: { terrain?: boolean; water?: boolean };
+  /** The ground's colours and the water (both on by default); without the ground it is black. Blight (off by default)
+   *  colours blighted ground in `blightColor`. */
+  show?: { terrain?: boolean; water?: boolean; blight?: boolean };
+  /** The tileset's blight texture's smallest mip level (WorldEditData's [TileSets]); null when it isn't known. */
+  blightColor?: Rgb | null;
   /** The whole map, unplayable border included, instead of the playable area. */
   wholeMap?: boolean;
   /** Per pathing cell over the whole map (4 per tile, rows from the south), RGBA blended over the ground. */
@@ -103,9 +106,10 @@ export function minimapFrame(t: Pick<Terrain, "width" | "height" | "offsetX" | "
 }
 
 /** The flat colour every tile point gives the tile to its north-east (RGB per point, rows from the south): its ground
- *  texture's, or next to a cliff (the layers of the points around it differ) its cliff type's, where it has one. */
+ *  texture's, or next to a cliff (the layers of the points around it differ) its cliff type's, where it has one. A
+ *  blighted point not coloured by a cliff takes `blight` when given (Export Minimap's Include Blight). */
 export function groundColors(t: Pick<Terrain, "width" | "height" | "corners" | "groundTiles" | "cliffTiles">,
-  tileColor: (tileId: string) => Rgb, cliffColor?: (cliffId: string) => Rgb | null): Float32Array {
+  tileColor: (tileId: string) => Rgb, cliffColor?: (cliffId: string) => Rgb | null, blight?: Rgb | null): Float32Array {
   const { width, height, corners } = t;
   const out = new Float32Array(width * height * 3);
   const layer = (x: number, y: number) => corners[Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))].layer;
@@ -116,7 +120,7 @@ export function groundColors(t: Pick<Terrain, "width" | "height" | "corners" | "
       for (let j = -1; j <= 1 && !nearCliff; j++) for (let i = -1; i <= 1; i++) if (layer(x + i, y + j) !== c.layer) { nearCliff = true; break; }
       const cliff = nearCliff ? t.cliffTiles?.[c.cliffTexture] : undefined;
       const color = cliff !== undefined ? cliffColor?.(cliff) : null;
-      out.set(color ?? tileColor(t.groundTiles[c.texture]), (y * width + x) * 3);
+      out.set(color ?? (blight && c.blight ? blight : tileColor(t.groundTiles[c.texture])), (y * width + x) * 3);
     }
   }
   return out;
@@ -149,13 +153,19 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const img = new Float32Array(N * N * 3);
   /** Where the ground is drawn (the grain goes there, not on the black around it or on dots and squares). */
   const grain = new Uint8Array(N * N);
-  const ground = showGround ? groundColors(t, tileColor, input.cliffColor) : null;
+  const ground = showGround ? groundColors(t, tileColor, input.cliffColor, input.show?.blight ? input.blightColor : null) : null;
+  /** Whether a pixel is in the drawn area (the playable area, or the whole map): objects past it aren't drawn, as the
+   *  World Editor's Playable Area Only cuts the trees past the playable area's edges. */
+  const drawn = (px: number, py: number) => {
+    const fx = (px + 0.5 - ox) / scale, fy = (N - (py + 0.5) - oy) / scale;
+    return fx >= 0 && fy >= 0 && fx < pw && fy < ph;
+  };
 
   for (let py = 0; py < N; py++) {
     for (let px = 0; px < N; px++) {
       // Tiles from the playable area's bottom-left.
+      if (!drawn(px, py)) continue;
       const fx = (px + 0.5 - ox) / scale, fy = (N - (py + 0.5) - oy) / scale;
-      if (fx < 0 || fy < 0 || fx >= pw || fy >= ph) continue;
       const gx = fx + ml, gy = fy + mb;
       const x0 = Math.floor(gx), y0 = Math.floor(gy), u = gx - x0, v = gy - y0;
       const q = [C(x0, y0), C(x0 + 1, y0), C(x0, y0 + 1), C(x0 + 1, y0 + 1)];
@@ -195,7 +205,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     const [cx, cy] = at(o.x, o.y);
     for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
       for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
-        if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rad) continue;
+        if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rad || !drawn(x, y)) continue;
         img.set(o.rgb, (y * N + x) * 3);
         grain[y * N + x] = 0;
       }
@@ -207,7 +217,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
     const [cx, cy] = at(u.x, u.y);
     for (let y = Math.floor(cy - half); y < Math.ceil(cy + half); y++) {
       for (let x = Math.floor(cx - half); x < Math.ceil(cx + half); x++) {
-        if (x >= 0 && y >= 0 && x < N && y < N) { img.set(u.rgb, (y * N + x) * 3); grain[y * N + x] = 0; }
+        if (x >= 0 && y >= 0 && x < N && y < N && drawn(x, y)) { img.set(u.rgb, (y * N + x) * 3); grain[y * N + x] = 0; }
       }
     }
   }
