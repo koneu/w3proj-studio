@@ -3,6 +3,7 @@
 // for one mode brings along from next to it on disk. Pure, so tests need no app.
 
 import { newEntryFlags, sidePathOf, type ImportEntry, type ImportRow, type Side } from "../../lib/imports";
+import { parseModel } from "../../lib/model/mdl";
 
 /** What a side is called in the Import Manager. */
 export const SIDE_NAME: Record<Side, string> = { classic: "Classic", reforged: "Reforged", de: "3.0" };
@@ -47,6 +48,17 @@ export function textureSpots(dir: string, texture: string): { file: string; arch
     for (let i = 0; i < p.length; i++) out.push({ file: `${base}/${p.slice(i).join("/")}`, archive: name });
   }
   return out;
+}
+
+/** Whether a file imported at `path` is a model whose textures can come along with it: .mdx, or .mdl text. */
+export function bringsTextures(path: string): boolean {
+  return /\.md[xl]$/i.test(path);
+}
+
+/** The textures a model file names, read as MDX or MDL text by content (lib/model/mdl.ts parseModel); null when the
+ *  bytes can't be read as a model. */
+export function modelTextures(bytes: Uint8Array): { path: string; replaceableId: number }[] | null {
+  try { return parseModel(bytes).textures; } catch { return null; }
 }
 
 /** The textures of a model (`textures` as the model names them) to bring along with it: the colour textures (not
