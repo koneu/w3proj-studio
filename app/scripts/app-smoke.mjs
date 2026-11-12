@@ -5217,7 +5217,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     // keeps it, asking: answered with Replace, as the World Editor's save writes the script anew.
     // (Lines of the Map Script output before this save: an earlier check's "replaced on request" doesn't count.)
     const logBefore = await page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).length`);
-    if (two) await page.evaluate(`(() => { const warn = w3.window.showWarning; window.__rmsWarn = warn; w3.window.showWarning = (m, ...a) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Replace the script") : warn(m, ...a)); })()`);
+    if (two) await page.evaluate(`(() => { const ask = w3.window.notify; window.__rmsWarn = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Replace the script") : ask(s, m, a, o)); })()`);
     await page.evaluate(`w3.editors.saveAll()`);
     if (readFileSync(file("war3map.w3e.txt"), "utf8") === terrain) return fail("the terrain edit wasn't saved (control)");
     if (readFileSync(file("war3mapUnits.doo.json"), "utf8") === units) return fail("the start location didn't go up with the ground (control)");
@@ -5259,7 +5259,7 @@ async function realMapSaveRound(page, found, map, name, prepare) {
     if (startsAfter.some((u) => u.hp !== -1 || u.mana !== -1)) fail(`the start locations' hit points and mana are ${JSON.stringify(startsAfter.map((u) => [u.hp, u.mana]))}, the World Editor saves -1`);
     if (two) await mapPropertiesPriorities(page, fail, file);
   } finally {
-    await page.evaluate(`if (window.__rmsWarn) { w3.window.showWarning = window.__rmsWarn; delete window.__rmsWarn; }`).catch(() => {});
+    await page.evaluate(`if (window.__rmsWarn) { w3.window.notify = window.__rmsWarn; delete window.__rmsWarn; }`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
   }
 }
@@ -6473,10 +6473,11 @@ async function scriptGuard(page, found) {
     await settle();
   };
   await settle();
+  // The questions about a kept script come through notify (closed when another project opens).
   await page.evaluate(`(() => {
-    window.__sg = { warn: w3.window.showWarning };
+    window.__sg = { notify: w3.window.notify };
     window.__warns = [];
-    w3.window.showWarning = (m, ...a) => new Promise((r) => window.__warns.push({ m, a, r }));
+    w3.window.notify = (s, m, a, o) => (s === "warning" ? new Promise((r) => window.__warns.push({ m, a, r })) : window.__sg.notify(s, m, a, o));
   })()`);
   const warnings = () => page.evaluate(`window.__warns.map((w) => ({ m: w.m, a: w.a }))`);
   const answer = (i, choice) => page.evaluate(`window.__warns[${i}].r(${JSON.stringify(choice)})`);
@@ -6566,7 +6567,38 @@ async function scriptGuard(page, found) {
     await saveRegion("Fifth Region");
     if (!/gg_rct_Fifth_Region/.test(script()) || (await warnings()).length) fail(`the first save of a script in another placing order didn't regenerate quietly: ${JSON.stringify(await warnings())}`);
   } finally {
-    await page.evaluate(`(() => { for (const w of window.__warns ?? []) w.r(undefined); w3.window.showWarning = window.__sg.warn; })()`);
+    await page.evaluate(`(() => { for (const w of window.__warns ?? []) w.r(undefined); w3.window.notify = window.__sg.notify; })()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
+/** A project's question about its kept script ("war3map.j has 1 function that the map's triggers don't make … Replace the
+ *  script / Show Difference / Keep it") goes when another project opens: it stayed on screen, about a project no longer
+ *  open (answering it was safe, but only said so). The real toast, not a stand-in: the question is there before the switch. */
+async function scriptQuestionsOnSwitch(page, found) {
+  const fail = (what) => found.push(`script questions on switch: ${what}`);
+  const k = await heightKit(page, "ScriptQuestions");
+  const asking = () => page.evaluate(`[...document.querySelectorAll(".toast[data-asks]")].filter((t) => /function that the map's triggers don't make/.test(t.textContent) && t.textContent.includes("Replace the script")).length`);
+  try {
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`);
+    const file = join(k.root, "map", "war3map.j");
+    const made = readFileSync(file, "utf8");
+    const at = made.indexOf("function main takes nothing returns nothing");
+    if (at < 0) return fail("no main in the generated script (control)");
+    writeFileSync(file, `${made.slice(0, at)}function SmokeHandWritten takes nothing returns nothing\nendfunction\n\n${made.slice(at)}`);
+    await settled(page);
+    const err = await k.run("w3.script.generate", { quiet: true });
+    if (err) return fail(`Generate Map Script: ${err}`);
+    await until("the question about the kept script", async () => (await asking()) === 1, 30000)
+      .catch(async () => fail(`Generate Map Script on a script with a hand-written function asked nothing (control); toasts: ${await k.toasts()}`));
+    if ((await asking()) !== 1) return;
+    // Another project opens (a new map, as heightKit makes one).
+    const other = await heightKit(page, "ScriptQuestionsOther");
+    if (other.root === k.root) return fail("the second project is the first (control)");
+    await until("the question gone", async () => (await asking()) === 0, 10000)
+      .catch(() => fail("the first project's question about its script stayed on screen after another project opened"));
+    if (readFileSync(file, "utf8").includes("SmokeHandWritten") === false) fail("the first project's script was replaced");
+  } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -7682,6 +7714,7 @@ async function run() {
         realMapSave,
         resizeUndo,
         scriptGuard,
+        scriptQuestionsOnSwitch,
         shouldHaves,
         staleEditors,
         syncSafety,
@@ -7878,6 +7911,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "staleEditors");
   await scriptGuard(page, found).catch((e) => found.push(`script guard: ${e.message}`));
   await leftOpen(page, "scriptGuard");
+  await scriptQuestionsOnSwitch(page, found).catch((e) => found.push(`script questions on switch: ${e.message}`));
+  await leftOpen(page, "scriptQuestionsOnSwitch");
   await resizeUndo(page, found).catch((e) => found.push(`resize undo: ${e.message}`));
   await leftOpen(page, "resizeUndo");
   await dataSafety(page, found).catch((e) => found.push(`data safety: ${e.message}`));
