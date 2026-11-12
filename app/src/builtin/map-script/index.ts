@@ -8,6 +8,7 @@ import { isScriptInput, KEPT_SCRIPT_WORDS, SCRIPT_FILES, SCRIPT_STAMP, sameButPl
 import { isNotFoundError } from "../../lib/oserror";
 import { h } from "../../workbench/dom";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { changesToA } from "./linediff";
 import { getChunks, goToNextChunk, goToPreviousChunk, MergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -462,7 +463,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const box = h("div.diff-view");
           // Long lines wrap, as in a diff view: cut at the pane's edge, a change past it couldn't be seen.
           const ro = [EditorState.readOnly.of(true), EditorView.editable.of(false), EditorView.lineWrapping, lineNumbers(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }), oneDark];
-          view = new MergeView({ a: { doc: current ?? "", extensions: ro }, b: { doc: made.text, extensions: ro }, parent: box, collapseUnchanged: { margin: 3, minSize: 6 }, gutter: true });
+          // The merge view's own diff works on characters and gives up on a big script (one change for the whole file).
+          // So it starts with the same text on both sides and the script is typed into the left one as line hunks,
+          // each of which it diffs inside; the unchanged lines are folded once the chunks are known.
+          view = new MergeView({ a: { doc: made.text, extensions: ro }, b: { doc: made.text, extensions: ro }, parent: box, gutter: true });
+          const edits = changesToA(current ?? "", made.text);
+          if (edits.length) view.a.dispatch({ changes: edits });
+          view.reconfigure({ collapseUnchanged: { margin: 3, minSize: 6 } });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const step = (cmd: typeof goToNextChunk) => () => { if (view) { cmd(view.b); view.b.focus(); } };
           head.append(
