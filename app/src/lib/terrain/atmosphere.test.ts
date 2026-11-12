@@ -14,7 +14,7 @@ const doc = () => ({
 test("a name is an id or a label in any case; an unknown one lists the choices", () => {
   assert.equal(resolveChoice("light", "a", tilesets), "A");
   assert.equal(resolveChoice("light", "lordaeron summer", tilesets), "L");
-  assert.throws(() => resolveChoice("light", "Nowhere Land", tilesets), /Unknown light "Barrens"\. Choices: A = Ashenvale; L = Lordaeron Summer/);
+  assert.throws(() => resolveChoice("light", "Nowhere Land", tilesets), /Unknown light "Nowhere Land"\. Choices: A = Ashenvale; L = Lordaeron Summer/);
   assert.equal(resolveWeather("none", weather), NO_WEATHER);
   assert.equal(resolveWeather("RAlr", weather), "RAlr");
   assert.equal(resolveWeather("outland wind", weather), "WOsw");
