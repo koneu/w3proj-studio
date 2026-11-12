@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
-import { TerrainRenderer } from "./renderer";
+import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, selectableObjects, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
+import { TerrainRenderer, type ObjectInstance } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
 
@@ -327,4 +327,20 @@ test("a map's object data goes on the game's skins fresh each time, and doesn't 
   assert.equal(again.get("hfoo")?.file, "Units\\Human\\Footman\\Footman");
   assert.deepEqual(again.get("hfoo")?.animProps, ["upgrade", "first"]);
   assert.equal(withObjectArt(again, []).get("hfoo")?.file, "Units\\Human\\Footman\\Footman");
+});
+
+test("a click picks a start location by its model in the editor's view (not in game view), and Select All takes it with the rest", () => {
+  const start = placed("sloc", 100, 100, { player: 0 }), unit = placed("hfoo", 500, 500, { player: 0 });
+  const inst = (p: Placed): ObjectInstance => ({ world: placement(p, 1, 0), team: 0, sphere: [p.position[0], p.position[1], 0, 32],
+    pick: { kind: "w3u", id: p.id, index: 0, placed: p, model: "m", extraScale: 1 } });
+  const batches = [{ group: "units", editorOnly: true, instances: [inst(start)] }, { group: "units", instances: [inst(unit)] }];
+  const pick = (showEditorOnly: boolean, x: number, y: number) => TerrainRenderer.prototype.pickObject.call(
+    { batches, hiddenGroups: new Set<string>(), showEditorOnly } as unknown as TerrainRenderer,
+    { origin: [x, y, 2000], dir: [0, 0, -1] }, () => 24);
+  assert.equal(pick(true, 100, 100)?.pick?.placed, start, "the start location");
+  assert.equal(pick(true, 500, 500)?.pick?.placed, unit, "the unit beside it still");
+  assert.equal(pick(false, 100, 100), null, "not in game view");
+  const sources = batches.flatMap((b) => b.instances.map((i) => ({ group: b.group, inst: i })));
+  assert.deepEqual(selectableObjects(sources, new Set()).map((o) => o.p), [start, unit], "Select All includes the start location");
+  assert.deepEqual(selectableObjects(sources, new Set(["units"])), [], "a hidden group is left out (control)");
 });

@@ -1345,6 +1345,23 @@ async function viewModes(page, found) {
   await stillView();
   await k.clearToasts();
   if ((await changed()) > 150) fail("after game view the picture isn't the plain one again");
+  // A click on the start location selects it (as a box does), and Ctrl+A takes it along with the others.
+  await k.look(start.position[0], start.position[1]);
+  await k.clickMiddle();
+  await settled(page);
+  const selName = () => page.evaluate(`document.querySelector(".terrain-sel-name")?.textContent ?? ""`);
+  if ((await selName()) !== "Start location") fail(`a click on the start location selected "${await selName()}"`);
+  const count = () => page.evaluate(`document.querySelector(".terrain-selection")?.textContent.match(/^(\\d+) objects selected/)?.[1] ?? "0"`);
+  await key("a", "KeyA", 65, CTRL);
+  const all = Number(await count());
+  await key("Escape", "Escape", 27);
+  await k.look(start.position[0], start.position[1] + 4000);
+  await k.clickMiddle();
+  await settled(page);
+  if (await selName()) fail(`the selection stayed after a click on empty ground: "${await selName()}"`);
+  await k.look(start.position[0], start.position[1] + 128);
+  const placedCount = await page.evaluate(`(async () => { const o = (await w3.services.get("w3.terrain")).placedObjects(); return o.units.length + o.doodads.length; })()`);
+  if (all !== placedCount) fail(`Ctrl+A selected ${all} objects of ${placedCount} (the start location is one)`);
 
   /** A View key: the state (against `s`, taken before) changes and the picture by at least `least` pixels. */
   const trial = async (label, field, press, least) => {

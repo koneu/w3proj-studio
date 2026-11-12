@@ -32,7 +32,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, selectableObjects, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -2829,14 +2829,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return null;
         };
         /** Every placed object with a model (the groups not hidden). */
-        const allPlaced = (): { p: Placed; kind: string; id: string }[] => {
-          const out: { p: Placed; kind: string; id: string }[] = [];
-          for (const { group, inst } of shownInstances()) {
-            if ((group !== "doodads" && group !== "units") || renderer.hiddenGroups.has(group)) continue;
-            if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
-          }
-          return out;
-        };
+        const allPlaced = (): { p: Placed; kind: string; id: string }[] => selectableObjects(shownInstances(), renderer.hiddenGroups);
         const selectSameTypes = () => {
           const ids = new Set(selectedEntries().map((p) => p.id));
           selectEntries(allPlaced().filter((o) => ids.has(o.id)).map((o) => o.p));
@@ -3284,7 +3277,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           if (ids.includes(CLIPBOARD_COMMANDS.cut) && !terrainArea && editable && copySelection()) { deleteEntries(copyable()); return true; }
           if (ids.includes(CLIPBOARD_COMMANDS.paste) && editable && startPaste()) return true;
-          if (ids.includes(CLIPBOARD_COMMANDS.selectAll) && !activeGroup) { selectEntries(allPlaced().filter((o) => o.id !== "sloc").map((o) => o.p)); return true; }
+          if (ids.includes(CLIPBOARD_COMMANDS.selectAll) && !activeGroup) { selectEntries(allPlaced().map((o) => o.p)); return true; }
           return false;
         };
         /** The key commands the open tab takes (`ids` as earlyKeys'): Cancel and Delete when it has something of its own

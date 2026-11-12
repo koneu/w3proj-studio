@@ -694,6 +694,16 @@ export function strayInstances(group: string, placed: readonly Placed[], unresol
   });
 }
 
+/** Every doodad and unit of the groups not hidden, start locations among them: what Select All takes. */
+export function selectableObjects(sources: Iterable<Stray>, hidden: ReadonlySet<string>): { p: Placed; kind: string; id: string }[] {
+  const out: { p: Placed; kind: string; id: string }[] = [];
+  for (const { group, inst } of sources) {
+    if ((group !== "doodads" && group !== "units") || hidden.has(group)) continue;
+    if (inst.pick) out.push({ p: inst.pick.placed, kind: inst.pick.kind, id: inst.pick.id });
+  }
+  return out;
+}
+
 /** The placed objects whose position projects into a rectangle of the canvas (CSS pixels), among
  *  the doodads and units not hidden, of the kinds wanted. */
 export function objectsInRect(sources: Iterable<Stray>, project: (position: [number, number, number]) => [number, number] | null | undefined,
