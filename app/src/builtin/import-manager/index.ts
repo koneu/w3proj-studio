@@ -12,8 +12,7 @@ import { keyOf } from "../../lib/keys";
 import { BusyQueue } from "../../lib/busyqueue";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, classicPathOf, CUSTOM_PATH_FLAGS, entryCandidates, hasModeVersions, IMPORT_FOLDER, importPath, importRows, importTreePath, isJunkFile, kindOf, newEntryFlags, pathForUse, projectPath, rowEntries, rowMoves, samePath, sidePathOf, SIDES, takenWithVersions, unlistedFiles, type ImportEntry, type ImportRow, type Side, type UseIn } from "../../lib/imports";
-import { followingTextures, shownEntry, SIDE_NAME, SIDE_PREFER, versionsToAdd, versionToAdd } from "./versions";
-import { parseMdx } from "../../lib/model/mdx";
+import { bringsTextures, followingTextures, modelTextures, shownEntry, SIDE_NAME, SIDE_PREFER, versionsToAdd, versionToAdd } from "./versions";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
 import { ModelPreview } from "../../lib/model/preview";
@@ -309,7 +308,7 @@ class ImportView {
     if (done.length > 1) void this.w3.window.showInfo(`Imported ${plural(done.length, "file")}${use === "reforged" ? " (models and textures for Reforged only)" : use === "de" ? " (models and textures for 3.0 only)" : ""}.`);
     // A model for one graphics mode: the textures next to it on disk can go into the same mode's folder.
     if (use !== "both" && !sources.some((s) => s.relative)) {
-      for (const [i, path] of done.entries()) if (/\.mdx$/i.test(path)) await this.bringTextures(sources[i].src, path, use === "reforged" ? "reforged" : use === "de" ? "de" : "classic");
+      for (const [i, path] of done.entries()) if (bringsTextures(path)) await this.bringTextures(sources[i].src, path, use === "reforged" ? "reforged" : use === "de" ? "de" : "classic");
     }
     if (use === "classic" && done.some(hasModeVersions)) {
       // A note, not a question: the import is done either way.
@@ -326,8 +325,10 @@ class ImportView {
    *  model's graphics mode's path (`reforged`: below _HD.w3mod\), and imports them. Textures whose path is taken stay
    *  out; a model that can't be read brings none. */
   private async bringTextures(src: string, model: string, side: Side) {
-    let textures: { path: string; replaceableId: number }[];
-    try { textures = parseMdx(await this.w3.backend.readBytes(src)).textures; } catch { return; }
+    let bytes: Uint8Array;
+    try { bytes = await this.w3.backend.readBytes(src); } catch { return; }
+    const textures = modelTextures(bytes);
+    if (!textures) return;
     const dir = src.replace(/[\\/][^\\/]*$/, "");
     const found = await followingTextures(dir, textures, (a) => sidePathOf(a, side),
       (f) => this.w3.backend.invoke<boolean>("fs_exists", { path: f }).catch(() => false), (a) => this.taken(a));
@@ -530,7 +531,7 @@ class ImportView {
       await this.write();
       this.select([add.path]);
       this.render();
-      if (/\.mdx$/i.test(add.path)) await this.bringTextures(src, add.path, add.side);
+      if (bringsTextures(add.path)) await this.bringTextures(src, add.path, add.side);
       void this.w3.window.showInfo(`Added the ${mode} version: ${add.path}.`);
     });
   }

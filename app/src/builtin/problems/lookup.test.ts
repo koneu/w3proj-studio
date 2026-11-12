@@ -12,6 +12,7 @@ import { builtinChecks } from "./checks";
 import { activate } from "./index";
 import { findCampaign, knownPlacedTypes } from "./invalid";
 import { FileLookup } from "./lookup";
+import { mapChecks } from "./mapchecks";
 import { joinPath } from "../../lib/paths";
 
 const CHAPTER = "/camp/maps/Chapter 1";
@@ -32,6 +33,8 @@ interface Options {
   isCampaign?: boolean;
   /** The chapter map's import list (war3map.imp). */
   imports?: { flags: number; path: string }[];
+  /** More of the chapter map's documents (project path → JSON text). */
+  docs?: Record<string, string>;
 }
 
 /** A chapter map's project whose campaign file list arrives only when `release()` is called. */
@@ -43,6 +46,7 @@ function chapter(opts: Options = {}) {
   const asked: string[] = [];
   const docs: Record<string, string> = {
     "map/war3map.imp.json": JSON.stringify({ files: opts.imports ?? [{ flags: 10, path: IMPORTED }] }),
+    ...opts.docs,
   };
   const services = new Map<string, unknown>();
   const tools = new Map<string, (args: unknown) => Promise<unknown>>();
@@ -88,8 +92,9 @@ function chapter(opts: Options = {}) {
     window: { showError() {}, showInfo() {} },
   } as unknown as W3Api;
   const imports = builtinChecks(w3).find((c) => c.id === "imports")!;
+  const sounds = mapChecks(w3).find((c) => c.id === "soundFiles")!;
   return {
-    w3, imports, release, asked, tools,
+    w3, imports, sounds, release, asked, tools,
     service: () => services.get("w3.problems") as ProblemsService,
     switchTo: (root: string | null) => { open = root ? { root } : null; },
   };
@@ -116,7 +121,41 @@ test("the imports check waits for the campaign's file list: a file only the camp
 test("control: a file neither the map, the campaign nor the game has is reported, also after the wait", async () => {
   const app = chapter({ campaign: [{ path: "map/war3mapImported/other.blp", size: 1, modified: 1 }] });
   const found = await runImports(app);
-  assert.deepEqual(found.map((p) => p.message), [`${IMPORTED} is listed but its file is missing`]);
+  assert.deepEqual(found.map((p) => p.message), [`${IMPORTED} is listed but its file is missing (also not in the campaign's files)`]);
+});
+
+// CSW Tides of Darkness, chapter WC2Orc01: its object data names 36 files (Duck, WarTent's Tent, Corpsewind, …) that
+// neither the chapter, the campaign (.w3n listfile and unpacked folder), nor the game's storage (all root names,
+// stored locally or not) has. They are really missing; the problem has to say the campaign was looked in too.
+const SOUNDS = JSON.stringify({ sounds: [
+  { name: "gg_snd_Camp", file: "Sound\\Camp.wav" },
+  { name: "gg_snd_Duck", file: "CSW\\Units\\Critters\\Duck\\Quack.wav" },
+] });
+
+test("a chapter's file only the campaign has isn't reported; one nowhere says the campaign's files were looked in too", async () => {
+  const app = chapter({ campaign: [{ path: "map/Sound/Camp.flac", size: 1, modified: 1 }], docs: { "map/war3map.w3s.json": SOUNDS } });
+  const run = app.sounds.run();
+  await settle();
+  app.release();
+  assert.deepEqual((await run).map((p) => p.message), ["CSW\\Units\\Critters\\Duck\\Quack.wav not found (neither in the map, its campaign's files nor in the game)"]);
+  // The object data's and interface art's problems take the same wording.
+  const lookup = new FileLookup(app.w3);
+  await lookup.whenReady();
+  assert.equal(lookup.notFound("Corpsewind.mdl"), "Corpsewind.mdl not found (neither in the map, its campaign's files nor in the game)");
+});
+
+test("control: a map that is no chapter says only the map and the game, and reports what a campaign would have had", async () => {
+  const app = chapter({ isCampaign: false, campaign: [{ path: "map/Sound/Camp.flac", size: 1, modified: 1 }], docs: { "map/war3map.w3s.json": SOUNDS } });
+  const found = (await app.sounds.run()).map((p) => p.message);
+  assert.deepEqual(found, [
+    "Sound\\Camp.wav not found (neither in the map nor in the game)",
+    "CSW\\Units\\Critters\\Duck\\Quack.wav not found (neither in the map nor in the game)",
+  ]);
+  // The other checks' wording comes from the same place.
+  const lookup = new FileLookup(app.w3);
+  await lookup.whenReady();
+  assert.equal(lookup.hasCampaign(), false);
+  assert.equal(lookup.notFound("Corpsewind.mdl"), "Corpsewind.mdl not found (neither in the map nor in the game)");
 });
 
 test("a campaign file list that can't be read fails the check, naming why, instead of counting as empty", async () => {
@@ -209,7 +248,7 @@ test("control: list_problems for the project the run is for joins it and answers
   const listing = app.tools.get("list_problems")!({}) as Promise<Problem[]>;
   await settle();
   app.release();
-  assert.deepEqual((await listing).map((p) => p.message), [`${IMPORTED} is listed but its file is missing`]);
+  assert.deepEqual((await listing).map((p) => p.message), [`${IMPORTED} is listed but its file is missing (also not in the campaign's files)`]);
   assert.deepEqual(app.asked, ["/camp"], "the campaign was listed more than once: the run wasn't joined");
 });
 

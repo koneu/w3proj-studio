@@ -8,6 +8,12 @@ const plain: LookOptions = { variation: null, randomVariation: false, randomRota
 const seq = (...v: number[]) => { let i = 0; return () => v[i++ % v.length]; };
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 
+test("Random Rotation turns doodads only: a unit or an item keeps facing 270", () => {
+  const on = { ...plain, randomRotation: true };
+  assert.ok(near(rollLook({ ...tree, kind: "w3d" }, on, () => 0.25).angle, Math.PI / 2));
+  for (const kind of ["w3u", "w3t"]) assert.ok(near(rollLook({ ...tree, kind }, on, () => 0.25).angle, (270 * Math.PI) / 180), kind);
+});
+
 test("with nothing random a placement is the first variation, facing 270, unscaled", () => {
   const look = rollLook(tree, plain, () => { throw new Error("no roll wanted"); });
   assert.deepEqual(look, { variation: 0, angle: (270 * Math.PI) / 180, scale: [1, 1, 1] });

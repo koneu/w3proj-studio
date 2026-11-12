@@ -110,7 +110,7 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
             const table = pathing ? (await ownPathTex(pathing.base))?.replace(/\\+/g, "\\") : undefined;
             const own = table && table !== "_" && table !== "-" && table.toLowerCase() !== "none" && table.toLowerCase() !== p.toLowerCase() && await files.exists(table, "texture") ? table : null;
             const instead = !pathing ? "" : own ? `; the pathing map uses its base type's ${own} instead` : "; placed ones leave no pathing (they don't block)";
-            out.push({ severity: "warning", message: `${p} not found (neither in the map nor in the game)${instead}`, location: at, reveal });
+            out.push({ severity: "warning", message: `${files.notFound(p)}${instead}`, location: at, reveal });
           }
         }
         return capped(out, "missing files");
@@ -228,7 +228,7 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
             if (variants.some((v) => files.inMap(v))) continue;
             let inGame = false;
             for (const v of variants) if (await files.inGame(v)) { inGame = true; break; }
-            if (!inGame) out.push({ severity: "warning", message: `${e.path} is listed but its file is missing`, location: list.slice(4), reveal: { command: "w3.imports.open" } });
+            if (!inGame) out.push({ severity: "warning", message: `${e.path} is listed but its file is missing${files.hasCampaign() ? " (also not in the campaign's files)" : ""}`, location: list.slice(4), reveal: { command: "w3.imports.open" } });
           }
         }
         return capped(out, "missing imports");

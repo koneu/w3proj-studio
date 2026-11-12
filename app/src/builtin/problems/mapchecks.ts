@@ -111,7 +111,7 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
           for (const name of names(s.file)) {
             if (await files.exists(name, "file")) { found = true; break; }
           }
-          if (!found) out.push({ severity: "warning", message: `${s.file} not found (neither in the map nor in the game)`, location: s.name.replace(/^gg_snd_/, ""), reveal: { command: "w3.sounds.open" } });
+          if (!found) out.push({ severity: "warning", message: files.notFound(s.file), location: s.name.replace(/^gg_snd_/, ""), reveal: { command: "w3.sounds.open" } });
         }
         return out;
       },
@@ -151,7 +151,7 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
         for (const [value, location, command, args] of values) {
           const a = art(value);
           if (!a || (await files.exists(a.p, a.kind))) continue;
-          out.push({ severity: "warning", message: `${a.p} not found (neither in the map nor in the game)`, location, reveal: { command, ...(args ? { args } : {}) } });
+          out.push({ severity: "warning", message: files.notFound(a.p), location, reveal: { command, ...(args ? { args } : {}) } });
         }
         return out.slice(0, 200);
       },

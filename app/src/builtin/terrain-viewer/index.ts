@@ -398,7 +398,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // Window > Minimap: the minimap panel in every terrain view, on or off (a setting, kept for the next session).
     w3.commands.register("w3.terrain.toggleMinimap", async () => {
-      const on = w3.settings.get<boolean>("terrain.minimap.panel", false) !== true;
+      const on = w3.settings.get<boolean>("terrain.minimap.panel", true) !== true;
       await w3.settings.set("terrain.minimap.panel", on);
       return on;
     }),
@@ -4337,7 +4337,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The View items as chosen (the toolbar, the side panel's Doodads and Units, the commands and keys). Lighting,
          *  fog and weather are settings. Game view sets the choice aside without changing it: `shown` is what's drawn. */
         const viewState = {
-          grid: "none" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, cameraBounds: false, info: true,
+          grid: "medium" as GridSize, naval: false, heights: false, cameras: false, pathing: false, regions: false, lightRanges: false, cameraBounds: true, info: true,
           terrain: "textured" as TerrainLook, doodads: true, units: true, water: true, blight: true, cliffs: true, effects: true,
         };
         const viewSet = (): ViewSet => ({ ...viewState, lighting: lightOn(),
@@ -4696,7 +4696,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           minimapPanel.setOutline(ground.map(([x, y]) => frame.toPixel(x, y)));
         };
         minimapOutline = showMinimapOutline;
-        const minimapShown = () => w3.settings.get<boolean>("terrain.minimap.panel", false) === true;
+        const minimapShown = () => w3.settings.get<boolean>("terrain.minimap.panel", true) === true;
         const applyMinimapSetting = () => {
           const on = minimapShown();
           if (on === minimapPanel.shown) return;

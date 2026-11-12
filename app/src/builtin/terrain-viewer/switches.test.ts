@@ -33,6 +33,8 @@ const FRESH_WE: Record<string, boolean | string> = {
   "terrain.shadows.visible": true,
   // View > Sky: unchecked; "Sky Model=0".
   "terrain.sky": "",
+  // Window > Minimap: checked.
+  "terrain.minimap.panel": true,
 };
 
 test("the settings Studio shares with the World Editor start as a fresh World Editor's", () => {
@@ -50,4 +52,16 @@ test("a switch that isn't set is its default; a set one is what was set", () => 
     assert.equal(switchedOn(unset, key, value), value, key);
     for (const set of [true, false]) assert.equal(switchedOn({ settings: { get: <T,>() => set as T } }, key, value), set, `${key} set ${set}`);
   }
+});
+
+test("the object placer starts as a fresh World Editor's Tools menu: Randomly Rotate Doodads, Randomly Scale Doodads Symmetric", () => {
+  const objects = JSON.parse(readFileSync("src/builtin/terrain-objects/extension.json", "utf8")) as typeof manifest;
+  const placed = (key: string) => objects.contributes.configuration.properties[key]?.default;
+  assert.equal(placed("terrain.placement.randomRotation"), true);
+  assert.equal(placed("terrain.placement.randomScale"), "symmetric");
+});
+
+test("the terrain view starts with the medium grid and the camera bounds, as a fresh World Editor", () => {
+  const source = readFileSync("src/builtin/terrain-viewer/index.ts", "utf8");
+  assert.match(source, /const viewState = \{\s*grid: "medium" as GridSize,[^}]*cameraBounds: true,/);
 });

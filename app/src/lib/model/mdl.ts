@@ -448,7 +448,7 @@ class MdlReader {
 
   private layer(): Layer {
     const l: Layer = { filterMode: 0, shadingFlags: 0, textureIds: [0], textureAnimId: -1, coordId: 0, alpha: 1 };
-    let haveTexture = false;
+    const ids: number[] = [], slotTracks: (Track | undefined)[] = [];
     this.block("Layer", (k) => {
       if (k === "FilterMode") {
         if (this.kind !== T.Word || FILTER[this.text] === undefined) this.fail("filter mode expected");
@@ -457,8 +457,9 @@ class MdlReader {
       } else if (SHADING[k]) l.shadingFlags |= SHADING[k];
       else if (k === "TextureID") {
         const p = this.prop(1);
-        // Reforged layers name a texture per slot; the first (the diffuse) is what is drawn.
-        if (!haveTexture) { l.textureIds = [Math.trunc(p.value[0]) || 0]; if (p.track) l.textureTrack = p.track; haveTexture = true; }
+        // Reforged layers name a texture per slot (diffuse, normal, ORM, emissive, …), as mdx.ts reads them.
+        ids.push(Math.trunc(p.value[0]) || 0);
+        slotTracks.push(p.track);
       } else if (k === "Alpha") { const p = this.prop(1, [l.alpha]); l.alpha = p.value[0]; l.alphaTrack = p.track; }
       else if (k === "TVertexAnimId") l.textureAnimId = this.int();
       else if (k === "CoordId") l.coordId = this.int();
@@ -466,6 +467,12 @@ class MdlReader {
       else return false;
       return true;
     });
+    if (ids.length) {
+      l.textureIds = ids;
+      // The diffuse slot's flipbook is the layer's texture track; further slots' tracks only as mdx.ts keeps them.
+      if (slotTracks[0]) l.textureTrack = slotTracks[0];
+      if (ids.length > 1 && slotTracks.some((t) => t)) l.slotTracks = slotTracks;
+    }
     return l;
   }
 
