@@ -5092,6 +5092,67 @@ async function moduleFunctionsChecks(page, found) {
     verify(dl, "dialogue");
   }
 
+  // A plain sound (no speaker, no keys) is given a dialogue with "Add dialogue": the section opens without a change,
+  // its speaker field is reachable in a 900 px window, typed text is unsaved and Undo takes it back byte for byte.
+  const pl = join(dir, "dialogue-add");
+  cpSync(FIXTURE, pl, { recursive: true });
+  {
+    const wtsFile = join(pl, "map", "war3map.wts"), w3sFile = join(pl, "map", "war3map.w3s.json");
+    put(w3sFile, {
+      format: "w3proj.sounds/1", version: 3,
+      sounds: [{
+        name: "gg_snd_Plain01", file: "Sound\\Interface\\Plain01.wav", eaxEffect: "DefaultEAXON", flags: 0, fadeInRate: 10, fadeOutRate: 10, volume: 127, pitch: 1, pitchVariance: 0, priority: 8,
+        channel: 0, minDistance: 0, maxDistance: 10000, distanceCutoff: 3000, coneInside: 0, coneOutside: 0, coneOutsideVolume: 0, coneOrientation: [0, 0, 0],
+        variableName: "gg_snd_Plain01", assetLabel: "", assetFile: "", dialogueTextKey: -1, dialogueText: "", speakerNameKey: -1, speakerName: "", unknown1: 0,
+        speakerUnitType: "", facialAnimationLabel: "", facialAnimationGroupLabel: "", facialAnimationSetFile: "", unknown2: 0,
+      }],
+    });
+    const wtsBefore = readFileSync(wtsFile), w3sBefore = readFileSync(w3sFile);
+    await openProject(pl);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`void w3.commands.execute("w3.sounds.open")`);
+    await until("the sound list", () => page.evaluate(`!!document.querySelector("tr.snd-row")`), 20000);
+    await page.evaluate(`[...document.querySelectorAll("tr.snd-row")].find((r) => r.firstChild.textContent === "Plain01")?.click()`);
+    await until("the Add dialogue button", () => page.evaluate(`!!document.querySelector("button.snd-add-dialogue")`), 10000);
+    if (await page.evaluate(`!!document.querySelector("input.snd-speaker-name")`)) fail("a plain sound shows dialogue fields before Add dialogue (control)");
+    await page.evaluate(`document.querySelector("button.snd-add-dialogue").click()`);
+    await until("the dialogue fields", () => page.evaluate(`!!document.querySelector("input.snd-speaker-name")`), 10000);
+    if ((await unsaved()) !== 0) fail("Add dialogue alone left the Sound Editor with unsaved changes");
+    // 900 px high: the page's root is set to that height (the window can't be resized from here), then put back.
+    const reach = await page.evaluate(`(async () => {
+      const app = document.getElementById("app"), was = app.style.height;
+      try {
+        app.style.height = "900px";
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const detail = document.querySelector(".snd-detail"), right = document.querySelector(".snd-right"), input = document.querySelector("input.snd-speaker-name");
+        const box = (e) => e.getBoundingClientRect();
+        const scrollable = detail.scrollHeight > detail.clientHeight + 1;
+        input.scrollIntoView({ block: "nearest" });
+        await new Promise((r) => requestAnimationFrame(r));
+        const i = box(input), d = box(detail);
+        return { inside: i.top >= d.top - 1 && i.bottom <= d.bottom + 1, detailInRight: d.bottom <= box(right).bottom + 1, scrollable, appHeight: Math.round(box(app).height) };
+      } finally { app.style.height = was; }
+    })()`);
+    if (reach.appHeight !== 900) fail(`the page root is ${reach.appHeight} px high, not 900 (control)`);
+    else if (!reach.inside || !reach.detailInRight) fail(`at 900 px the speaker field isn't fully reachable: ${JSON.stringify(reach)}`);
+    await setField("input.snd-speaker-name", "Uther");
+    await until("the typed speaker unsaved", async () => (await unsaved()) > 0, 10000).catch(() => fail("typing a speaker name left nothing unsaved"));
+    await until("the undo", async () => { await page.evaluate(`void w3.commands.execute("workbench.undo")`); return (await unsaved()) === 0; }, 10000).catch(() => fail("Undo didn't take the new dialogue back"));
+    if ((await page.evaluate(`document.querySelector("input.snd-speaker-name")?.value ?? ""`)) !== "") fail("after Undo the speaker field still shows a text");
+    if (!readFileSync(wtsFile).equals(wtsBefore) || !readFileSync(w3sFile).equals(w3sBefore)) fail("the files changed although the new dialogue was undone");
+    await saveAndSettle("the undone dialogue saved");
+    if (!readFileSync(wtsFile).equals(wtsBefore) || !readFileSync(w3sFile).equals(w3sBefore)) fail("saving after Undo changed war3map.wts or the sounds file");
+    await setField("input.snd-speaker-name", "Uther");
+    await setField("textarea.snd-dialogue-text", "For the Light.");
+    await saveAndSettle("the added dialogue saved");
+    const x = json(w3sFile).sounds[0];
+    if (!(x.speakerNameKey >= 0) || x.dialogueTextKey !== x.speakerNameKey + 1) fail(`the added dialogue's keys: ${x.speakerNameKey},${x.dialogueTextKey}`);
+    if (!readFileSync(wtsFile, "utf8").includes(`STRING ${x.dialogueTextKey}\n{\nFor the Light.\n}\n`)) fail("the added dialogue's text isn't in war3map.wts");
+    await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    verify(pl, "dialogue-add");
+  }
+
   // A campaign map's dialogue sounds (NightElfX04Interlude: twelve, one with a text but no speaker name): a text typed
   // and typed back, saved, gives the map's war3map.w3s and war3map.wts byte for byte.
   if (game) {
