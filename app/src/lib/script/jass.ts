@@ -447,7 +447,7 @@ const editorVersion = (i: ScriptInput) => (i.info.editorVersion as number | unde
 const gameBuild = (i: ScriptInput) => { const v = i.info.gameVersion; return Array.isArray(v) && typeof v[3] === "number" ? v[3] : undefined; };
 
 function randomGroups(i: ScriptInput): string {
-  const body = randomGroupsSection((i.info.unitTables as RandomGroupJson[] | undefined) ?? []);
+  const body = randomGroupsSection((i.info.unitTables as RandomGroupJson[] | undefined) ?? [], editorVersion(i));
   return body ? banner("Random Groups") + body : "";
 }
 

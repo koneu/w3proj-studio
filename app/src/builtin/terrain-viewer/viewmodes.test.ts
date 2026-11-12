@@ -149,8 +149,8 @@ test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Rig
 test("every View key runs a command the terrain viewer declares, one per key; titles don't name keys that can change", () => {
   const ids = new Map(manifest.contributes.commands.map((c) => [c.id, c.title]));
   const view = bindings.filter((b) => runsAsCommand(b.command));
-  // 17, and View Selection's ~ and Shift+~ by character and by place (5 keys).
-  assert.equal(view.length, 22, "the World Editor's View keys Studio has");
+  // 17, View Selection's ~ and Shift+~ by character and by place (5 keys), and Ctrl+Shift+H (Reset Fixed Object Heights).
+  assert.equal(view.length, 23, "the World Editor's View keys Studio has");
   for (const b of bindings) assert.ok(ids.has(b.command), `${b.command} (${b.key}) isn't declared`);
   // A key in brackets at the end ("(H)", "(Ctrl+T)", "(Backquote)"); a word that isn't a key ("(Previous)") may be there.
   const namesKey = (title: string, k: string) => {

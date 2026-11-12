@@ -408,6 +408,12 @@ textarea.form-input { resize: vertical; font: inherit; user-select: text; }
 .techtree-position { white-space: nowrap; }
 .techtree-position select { width: auto; display: inline-block; }
 .techtree-warn { color: var(--warning, #d7a03a); }
+.techtree-random.form-input { width: 76px; display: inline-block; }
+.techtree-view { display: inline-flex; gap: 2px; margin-left: 16px; }
+.techtree-view button.active { background: var(--accent-2); border-color: var(--accent-2); color: white; }
+.techtree-grid th.techtree-grid-player, .techtree-grid td.techtree-grid-cell { text-align: center; padding: 2px 3px; }
+.techtree-grid-object code { font-family: var(--mono, monospace); }
+.techtree-grid select.techtree-grid-state { width: auto; padding: 0 2px; }
 .force { border-top: 1px solid #2a2c30; padding: 6px 0; }
 input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var(--bg); }
 .ext-item.is-disabled { opacity: 0.55; }

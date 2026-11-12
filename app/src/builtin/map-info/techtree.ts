@@ -3,7 +3,9 @@
 // Techtree, Random Groups and Item Tables. The lists are edited as stored, so an untouched
 // entry keeps its bytes.
 
+import { ITEM_CLASSES, parseRandomId, randomChoices, randomIdLabel } from "../../lib/objects/randomids";
 import { h } from "../../workbench/dom";
+import { techGrid, upgradeGrid } from "./techgrid";
 
 export interface Upgrade { players: number; id: string; level: number; availability: number }
 export interface Tech { players: number; id: string }
@@ -23,7 +25,8 @@ export interface TechContext {
   /** A map flag's checkbox, and setting a flag (the game's maps set "Use custom techtree" and
    *  "Use custom upgrades" whenever they have such entries). */
   flag(mask: number, label: string): HTMLElement;
-  setFlag(mask: number): void;
+  /** Sets a map flag; true when it wasn't set before. */
+  setFlag(mask: number): boolean | void;
 }
 
 const CUSTOM_TECHTREE = 0x80, CUSTOM_UPGRADES = 0x200;
@@ -39,13 +42,32 @@ const section = (title: string, hint: string, ...children: Node[]) =>
   h("section.form-section.techtree-section", {}, h("h3", {}, title), h("p.muted.techtree-hint", {}, hint), ...children);
 const removeButton = (title: string, onclick: () => void) => h("button.icon-button", { title, onclick }, "×");
 
-/** An object id with its name (filled in when known) and a button to pick another. */
-function objectCell(ctx: TechContext, kinds: string[], get: () => string, set: (id: string) => void): HTMLElement {
-  const label = h("span.muted");
+/** The random objects by level a position of a type offers ("Random Level 3 Neutral Hostile Unit"), as a choice that
+ *  gives the chosen one's id and goes back to its title; the items by class. */
+function randomSelect(positionType: number, choose: (id: string) => void): HTMLSelectElement {
+  const choices = randomChoices(positionType);
+  const byClass = positionType === 2
+    ? ITEM_CLASSES.map((c, k) => h("optgroup", { label: c.label }, ...choices.filter((x) => { const r = parseRandomId(x.id); return r?.kind === "item" && r.itemClass === k; })
+      .map((x) => h("option", { value: x.id }, x.label))))
+    : choices.map((x) => h("option", { value: x.id }, x.label));
+  const sel = h("select.form-input.techtree-random", { title: "A random object of a level, chosen when the game starts" },
+    h("option", { value: "" }, "Random…"), ...byClass);
+  sel.addEventListener("change", () => {
+    const id = sel.value;
+    sel.value = "";
+    if (id) choose(id);
+  });
+  return sel;
+}
+
+/** An object id with its name (filled in when known) and a button to pick another; with `randomType` (the position's
+ *  type: 0 unit, 1 building, 2 item) also the random objects by level, which show the World Editor's names. */
+function objectCell(ctx: TechContext, kinds: string[], get: () => string, set: (id: string) => void, randomType?: number): HTMLElement {
+  const label = h("span.muted.techtree-name");
   const show = () => {
     const id = get();
-    label.textContent = "";
-    if (id && id !== NONE) void ctx.name(id).then((n) => { if (n && get() === id) label.textContent = n; });
+    label.textContent = randomIdLabel(id) ?? "";
+    if (id && id !== NONE && !randomIdLabel(id)) void ctx.name(id).then((n) => { if (n && get() === id) label.textContent = n; });
   };
   const input = h("input.form-input.techtree-id", {
     value: get() === NONE ? "" : get(), placeholder: "none", maxLength: 10,
@@ -62,8 +84,14 @@ function objectCell(ctx: TechContext, kinds: string[], get: () => string, set: (
       ctx.changed();
     },
   }, "…");
+  const random = randomType === undefined ? [] : [randomSelect(randomType, (id) => {
+    input.value = id;
+    set(id);
+    show();
+    ctx.changed();
+  })];
   show();
-  return h("span.techtree-object", {}, input, browse, label);
+  return h("span.techtree-object", {}, input, browse, ...random, label);
 }
 
 /** Checkboxes for the map's players over a player bit mask. */
@@ -88,18 +116,35 @@ const numberInput = (get: () => number, set: (n: number) => void, ctx: TechConte
     } });
   return input;
 };
-const select = <T extends number>(options: readonly (readonly [T, string])[], get: () => number, set: (v: T) => void, ctx: TechContext) => {
+const select = <T extends number>(options: readonly (readonly [T, string])[], get: () => number, set: (v: T) => void, ctx: TechContext, rerender = false) => {
   const sel = h("select.form-input", {}, ...options.map(([v, label]) => h("option", { value: String(v), selected: v === get() }, label)));
   if (!options.some(([v]) => v === get())) sel.prepend(h("option", { value: String(get()), selected: true }, `${get()} (unknown)`));
-  sel.addEventListener("change", () => { set(Number(sel.value) as T); ctx.changed(); });
+  sel.addEventListener("change", () => { set(Number(sel.value) as T); ctx.changed(rerender); });
   return sel;
 };
+
+/** Which of the two sections show the grid of objects × players instead of the list of entries (kept while the app runs). */
+const perPlayer = { upgrades: false, techs: false };
+
+/** The switch between a section's list and its grid: the section is made again in place (each view edits the lists
+ *  without drawing the other, so it is drawn from them anew); nothing of the map changes. */
+function viewSwitch(which: keyof typeof perPlayer, remake: () => HTMLElement): HTMLElement {
+  const button = (grid: boolean, label: string) => h(`button.techtree-view-${grid ? "grid" : "list"}${perPlayer[which] === grid ? ".active" : ""}`, {
+    "aria-pressed": String(perPlayer[which] === grid),
+    onclick: (e: Event) => {
+      if (perPlayer[which] === grid) return;
+      perPlayer[which] = grid;
+      (e.currentTarget as HTMLElement).closest(".techtree-section")?.replaceWith(remake());
+    },
+  }, label);
+  return h("span.techtree-view", { "data-switch": which }, button(false, "List"), button(true, "Per player"));
+}
 
 function upgrades(info: TechInfo, ctx: TechContext): HTMLElement {
   return section(`Upgrades (${info.upgrades.length})`,
     "Per player and upgrade level: unavailable, available (the default) or already researched.",
-    h("div", {}, ctx.flag(CUSTOM_UPGRADES, "Use custom upgrades")),
-    h("table.form-table", {},
+    h("div", {}, ctx.flag(CUSTOM_UPGRADES, "Use custom upgrades"), viewSwitch("upgrades", () => upgrades(info, ctx))),
+    perPlayer.upgrades ? upgradeGrid(info, ctx) : h("table.form-table", {},
       h("thead", {}, h("tr", {}, h("th", {}, "Players"), h("th", {}, "Upgrade"), h("th", {}, "Level"), h("th", {}, "State"), h("th", {}))),
       h("tbody", {}, ...info.upgrades.map((u) => h("tr", {},
         h("td", {}, playersCell(ctx, () => u.players, (m) => { u.players = m; })),
@@ -119,8 +164,8 @@ function upgrades(info: TechInfo, ctx: TechContext): HTMLElement {
 function techs(info: TechInfo, ctx: TechContext): HTMLElement {
   return section(`Techtree (${info.techs.length} unavailable)`,
     "Units, buildings, items and abilities the players can't use (everything else is available).",
-    h("div", {}, ctx.flag(CUSTOM_TECHTREE, "Use custom techtree")),
-    h("table.form-table", {},
+    h("div", {}, ctx.flag(CUSTOM_TECHTREE, "Use custom techtree"), viewSwitch("techs", () => techs(info, ctx))),
+    perPlayer.techs ? techGrid(info, ctx) : h("table.form-table", {},
       h("thead", {}, h("tr", {}, h("th", {}, "Players"), h("th", {}, "Object"), h("th", {}))),
       h("tbody", {}, ...info.techs.map((t) => h("tr", {},
         h("td", {}, playersCell(ctx, () => t.players, (m) => { t.players = m; })),
@@ -163,7 +208,7 @@ const chanceTotal = (chances: number[]) => {
 function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
   return section(`Random groups (${info.unitTables.length})`,
     "Each line is chosen with its chance; its objects go to the group's positions (random units, buildings or items placed on the map).",
-    ...info.unitTables.map((g) => h("div.techtree-table", {},
+    ...info.unitTables.map((g) => h("div.techtree-table", { "data-group": String(g.number) },
       h("div.techtree-table-head", {},
         h("input.form-input", { value: g.name, onchange: (e: Event) => { g.name = (e.target as HTMLInputElement).value; ctx.changed(); } }),
         h("span.muted", {}, `#${g.number}`), chanceTotal(g.lines.map((l) => l.chance)),
@@ -171,12 +216,13 @@ function unitTables(info: TechInfo, ctx: TechContext): HTMLElement {
       h("table.form-table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "Chance %"),
           ...g.positions.map((_, k) => h("th.techtree-position", {},
-            select(POSITION_TYPES, () => g.positions[k], (v) => { g.positions[k] = v; }, ctx),
+            // Drawn again: the position's random choices follow its type.
+            select(POSITION_TYPES, () => g.positions[k], (v) => { g.positions[k] = v; }, ctx, true),
             removeButton("Remove this position", () => { g.positions.splice(k, 1); for (const l of g.lines) l.ids.splice(k, 1); ctx.changed(true); }))),
           h("th", {}, h("button", { title: "Add a position", onclick: () => { g.positions.push(0); for (const l of g.lines) l.ids.push(NONE); ctx.changed(true); } }, "+")))),
         h("tbody", {}, ...g.lines.map((l) => h("tr", {},
           h("td", {}, numberInput(() => l.chance, (n) => { l.chance = n; }, ctx, { max: 100 })),
-          ...l.ids.map((_, k) => h("td", {}, objectCell(ctx, KINDS_OF_POSITION[g.positions[k]] ?? ["w3u"], () => l.ids[k], (id) => { l.ids[k] = id; }))),
+          ...l.ids.map((_, k) => h("td", {}, objectCell(ctx, KINDS_OF_POSITION[g.positions[k]] ?? ["w3u"], () => l.ids[k], (id) => { l.ids[k] = id; }, g.positions[k]))),
           h("td", {}, removeButton("Remove this line", () => { g.lines.splice(g.lines.indexOf(l), 1); ctx.changed(true); })))))),
       h("button", { onclick: () => { g.lines.push({ chance: 0, ids: g.positions.map(() => NONE) }); ctx.changed(true); } }, "Add line"))),
     h("button", { onclick: () => {
@@ -199,7 +245,7 @@ function itemTables(info: Required<TechInfo>, ctx: TechContext): HTMLElement {
           removeButton("Remove the set", () => { t.sets.splice(k, 1); ctx.changed(true); })),
         ...set.map((x) => h("div.techtree-row", {},
           numberInput(() => x.chance, (n) => { x.chance = n; }, ctx, { max: 100 }), "% ",
-          objectCell(ctx, ["w3t"], () => x.id, (id) => { x.id = id; }),
+          objectCell(ctx, ["w3t"], () => x.id, (id) => { x.id = id; }, 2),
           removeButton("Remove the item", () => { set.splice(set.indexOf(x), 1); ctx.changed(true); }))),
         h("button", { onclick: async () => {
           const id = await ctx.pick("Add an item", ["w3t"]);

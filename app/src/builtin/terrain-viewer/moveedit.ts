@@ -1,10 +1,11 @@
 // Moving placed objects: the undo step for a move, and keeping a moved group on the map.
 
-export interface Pose { position: [number, number, number]; angle: number }
+/** Where an object stands and how it faces; `flags` only for doodads, whose fixed-height flag a move may clear. */
+export interface Pose { position: [number, number, number]; angle: number; flags?: number }
 export interface Bounds { left: number; right: number; bottom: number; top: number }
 
 export interface MoveDeps<E> {
-  setPlacement(entry: E, position: [number, number, number], angle: number): void;
+  setPlacement(entry: E, position: [number, number, number], angle: number, flags?: number): void;
   /** Redraws the selection rings after the entries moved. */
   refreshRings(): void;
   pushEdit(edit: { undo: () => void; redo: () => void; terrain: false; objects: false }): void;
@@ -14,7 +15,7 @@ export interface MoveDeps<E> {
  *  pose after). The rings follow them now, and after every undo and redo. */
 export function pushMoveEdit<E>(entries: E[], before: Pose[], after: Pose[], deps: MoveDeps<E>) {
   const apply = (poses: Pose[]) => {
-    entries.forEach((e, i) => deps.setPlacement(e, [...poses[i].position], poses[i].angle));
+    entries.forEach((e, i) => deps.setPlacement(e, [...poses[i].position], poses[i].angle, poses[i].flags));
     deps.refreshRings();
   };
   deps.pushEdit({ undo: () => apply(before), redo: () => apply(after), terrain: false, objects: false });

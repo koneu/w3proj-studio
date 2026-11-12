@@ -18,7 +18,7 @@ import { OBJECTS_SERVICE, TERRAIN_SERVICE, type ObjectsService, type TerrainEdit
 import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type WholeMapGround } from "./toolhost";
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
-import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
+import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
 import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
@@ -1389,6 +1389,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // The Advanced switches are settings, so they hold for every terrain editor and stay for the next session.
     ...([["w3.terrain.togglePreserveCopiedHeight", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]],
+      ["w3.terrain.toggleResetFixedHeights", "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]],
       ["w3.terrain.toggleEnforceWaterLimits", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]],
       ["w3.terrain.toggleEnforceCameraBounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]],
       // View > Shadows: a view setting, also for every terrain editor.
@@ -1721,7 +1722,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (key === "terrain.minimap.panel") minimapSetting();
           else if (key.startsWith("terrain.minimap.")) minimapPanelSoon();
           if (key === "terrain.sky") void showSkyChoice();
-          if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds") viewSyncs.forEach((f) => f());
+          if (key === "terrain.preserveCopiedHeight" || key === "terrain.enforceWaterLimits" || key === "terrain.enforceCameraBounds" || key === "terrain.resetFixedHeights") viewSyncs.forEach((f) => f());
           if (key.startsWith("terrain.lighting.")) applyLight();
           if (key === "terrain.gameView" || key === "terrain.fog" || key === "terrain.weather") viewChanged();
           if (key === "terrain.animate") { renderer.setAnimate(w3.settings.get<boolean>("terrain.animate", true) !== false); redraw(); }
@@ -1743,6 +1744,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const editable = !doc.readOnly;
         // The World Editor's Advanced switches for this kind of work; the settings are shared by every terrain editor.
         const preserveHeight = () => switchedOn(w3, "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]);
+        const resetFixedOn = () => switchedOn(w3, "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]);
         const enforceWater = () => switchedOn(w3, "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]);
         /** The map's camera bounds as last read; null until then, or when the map has none. */
         let cameraArea: Bounds | null = null;
@@ -2523,7 +2525,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** Objects placed or moved since the last save: saving sets their border flag. Others keep what they have. */
         const repositioned = new Set<Placed>();
         /** Moves/turns an entry and its model in place (no rebuild). */
-        const setPlacement = (entry: Placed, wanted: [number, number, number], angle: number) => {
+        const setPlacement = (entry: Placed, wanted: [number, number, number], angle: number, flags?: number) => {
           const inst = findInstance(entry);
           const [gx, gy] = onGrid(entry.id, wanted[0], wanted[1]);
           const position: [number, number, number] = gx === wanted[0] && gy === wanted[1] ? wanted : [gx, gy, heightAt(terrain, gx, gy)];
@@ -2536,6 +2538,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           entry.position = position;
           entry.angle = angle;
+          // A doodad's fixed-height flag, when a move or its undo changes it (before the model is placed again).
+          if (flags !== undefined && flags !== flagsOf(entry)) (entry as Placed & { flags?: number }).flags = flags;
           objectsTouched = true;
           if (inst?.pick) {
             // The drawn height moves, which for a ship on the water isn't the stored one's move.
@@ -2558,8 +2562,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           groupRingsStale = false;
           renderer.setSelection(group.map(findInstance).filter((i): i is ObjectInstance => !!i?.pick).map(ringOf));
         };
-        type Pose = { position: [number, number, number]; angle: number };
-        const poseOf = (p: Placed): Pose => ({ position: [...p.position] as [number, number, number], angle: p.angle });
+        type Pose = { position: [number, number, number]; angle: number; flags?: number };
+        const poseOf = (p: Placed): Pose => ({ position: [...p.position] as [number, number, number], angle: p.angle, flags: flagsOf(p) });
         /** One undo step for moving/turning several entries. */
         const moveEdits = (entries: Placed[], before: Pose[]) =>
           pushMoveEdit(entries, before, entries.map(poseOf), { setPlacement, refreshRings: refreshGroupRings, pushEdit });
@@ -2852,8 +2856,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!found.length) w3.window.showInfo("No objects match.");
           return null;
         };
-        /** The height of a doodad that has one of its own, which moving it mustn't lose. */
-        const ownHeight = (p: Placed) => (((flagsOf(p) ?? 0) & FIXED_HEIGHT) !== 0 ? p.position[2] : null);
+        /** Where `from` (a pose before a move) lands at x, y, and its flags then: on the ground, except that a doodad
+         *  with a height of its own keeps it, unless the Reset Fixed Object Heights switch is on and it moved
+         *  (objheights.ts movedHeight). */
+        const landed = (from: Pose, x: number, y: number): { position: [number, number, number]; flags: number | undefined } => {
+          const moved = x !== from.position[0] || y !== from.position[1];
+          const r = movedHeight({ position: from.position, flags: from.flags }, heightAt(terrain, x, y), moved, resetFixedOn());
+          return { position: [x, y, r.z], flags: r.flags };
+        };
         /** The World Editor's keys for the selection. Height and size are for doodads and destructables. */
         const keyEdit = (key: SelectionKey) => {
           const entries = selectedEntries(), doodads = entries.filter((p) => dooFile?.list.includes(p));
@@ -2865,7 +2875,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             const moves = scaledNudge(entries.map((p) => [p.position[0], p.position[1]] as const), entries.map(moveBounds), entries.map((p) => (buildingCells.get(p.id) ? 2 : 1)), key.nudge);
             for (const [i, p] of entries.entries()) {
               const x = p.position[0] + moves[i][0], y = p.position[1] + moves[i][1];
-              setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], p.angle);
+              const to = landed(poseOf(p), x, y);
+              setPlacement(p, to.position, p.angle, to.flags);
             }
             moveEdits(entries, before);
           } else if ("raise" in key) {
@@ -2882,7 +2893,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           for (const p of entries) {
             const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy), x = cx + dx, y = cy + dy;
-            setPlacement(p, [x, y, ownHeight(p) ?? heightAt(terrain, x, y)], turnAngle(turn, p.angle));
+            const to = landed(poseOf(p), x, y);
+            setPlacement(p, to.position, turnAngle(turn, p.angle), to.flags);
           }
           moveEdits(entries, before);
           refreshGroupRings();
@@ -4717,6 +4729,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               toggle("Minimap", minimapShown, (v) => void w3.settings.set("terrain.minimap.panel", v), false, "The minimap in the view's corner: click or drag on it to move the view there"),
               ...(editable ? [
                 switchBox("Keep pasted height", "Preserve Copied Object Height: pasted doodads with a fixed height keep their height over the ground; with it off they all sit on the ground", "terrain.preserveCopiedHeight", SWITCH_DEFAULTS["terrain.preserveCopiedHeight"]),
+                switchBox("Reset fixed heights", "Reset Fixed Object Heights (Ctrl+Shift+H): a doodad with a height of its own that is moved lands on the ground and follows it again; with it off the doodad keeps its height", "terrain.resetFixedHeights", SWITCH_DEFAULTS["terrain.resetFixedHeights"]),
                 switchBox("Water limits", "Enforce Water Height Limits: an edit that would push water past the game's lowest or highest water height is refused, not cut off", "terrain.enforceWaterLimits", SWITCH_DEFAULTS["terrain.enforceWaterLimits"]),
                 switchBox("Enforce camera bounds", "Enforce Camera Bounds: objects can't be placed, pasted or moved outside the map's camera bounds", "terrain.enforceCameraBounds", SWITCH_DEFAULTS["terrain.enforceCameraBounds"]),
               ] : []),
@@ -4772,7 +4785,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           objDrag.entries.forEach((entry, i) => {
             const [x, y] = objDrag!.before[i].position;
-            setPlacement(entry, [x + dx, y + dy, ownHeight(entry) ?? heightAt(terrain, x + dx, y + dy)], entry.angle);
+            const to = landed(objDrag!.before[i], x + dx, y + dy);
+            setPlacement(entry, to.position, entry.angle, to.flags);
           });
           refreshGroupRings();
         };

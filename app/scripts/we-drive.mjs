@@ -129,7 +129,7 @@ export function viewChecks(column, items = VIEW_ITEMS) {
 // The first-start dialog's Continue button, from the dialog's corner.
 const WELCOME = { title: "Welcome to the Warcraft III World Editor", button: { x: 473, y: 470 } };
 /** The editor's module windows: it opens those that were open when it was last closed again at the start. */
-const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Editor", "Import Manager", "AI Editor", "Campaign Editor", "Object Manager"]);
+const REOPENED_MODULES = new Set(["Trigger Editor", "Object Editor", "Sound Editor", "Import Manager", "AI Editor", "Campaign Editor", "Object Manager", "Asset Manager"]);
 /** Whether a window is one of those modules. The Campaign Editor's title names its campaign ("Campaign Editor -
  *  [Untitled]" when it reopens with none), so it goes by the start of the title. */
 export const isReopenedModule = (title) => REOPENED_MODULES.has(title) || /^Campaign Editor\b/.test(title ?? "");
