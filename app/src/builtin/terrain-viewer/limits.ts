@@ -29,6 +29,12 @@ export const waterLimitText = (corners: number) =>
 /** Where Enforce Camera Bounds keeps an object from going, as a paste and the AI tools say it. */
 export const OUTSIDE_BOUNDS = "outside the camera bounds (turn off Enforce Camera Bounds to allow it)";
 
+/** The warning for an edit Enforce Camera Bounds refused: `what` is the subject and verb, e.g. "that is". */
+export const refusedOutsideText = (what: string) => `Not done: ${what} ${OUTSIDE_BOUNDS}.`;
+
+/** The warning for objects a move held at the camera bounds. */
+export const stoppedAtBoundsText = (count: number) => `${count} object${count === 1 ? "" : "s"} stopped at the camera bounds (turn off Enforce Camera Bounds to go past them).`;
+
 import { clampShift, type Bounds } from "./moveedit";
 export type { Bounds };
 

@@ -18,7 +18,7 @@ import { TerrainToolRegistry, type HeightCommands, type ViewCommands, type Whole
 import { SWITCH_DEFAULTS, switchedOn } from "./switches";
 import { toolBounds, toolWaterRefusal } from "./toollimits";
 import { parseHeight, pastedFlags, pastedHeight, resetFixedHeight, goesOnWater, heightByMoveType, uniformDefaultHeight, uniformHeight, unitDrawHeight, unitLooks, unitSwims } from "./objheights";
-import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
+import { cameraRect, clampPoint, insideBounds, limitTo, OUTSIDE_BOUNDS, pasteSkipText, refusedOutsideText, stoppedAtBoundsText, scaledNudge, waterLimitHits, waterLimitText, type Bounds, type PasteSkips } from "./limits";
 import { errorView, h } from "../../workbench/dom";
 import { composeLayers, cycleIndex, GRID_STEP, groundPathingColors, layerCameras, layerRegions, MAX_PITCH, navalColors, regionColors, nextGrid, toggleGrid, viewOfBox, viewOfMap, type Box, type GridSize, type RegionBox } from "./viewcmds";
 import { anyGroundLayer, CAMERA_BOUNDS_RGB, cameraBoundsCorners, cameraMoveOf, dropRings, EDGE_SCROLL, edgeScroll, groundLayersDrawn, lightRings, TAB_DRAWN, lineAlong, nextTerrainLook, shownView, TERRAIN_LOOKS, type TerrainLook, type ToggleLayer, type ViewSet } from "./viewmodes";
@@ -2790,7 +2790,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               case "owner": return p.player !== undefined ? { player: Math.max(0, Math.min(27, Math.round(v) - 1)) } : null;
             }
           });
-          if (heldBack) void w3.window.showWarning(`${heldBack} object${heldBack === 1 ? "" : "s"} stopped at the camera bounds. Turn off Enforce Camera Bounds to go past them.`);
+          if (heldBack) void w3.window.showWarning(stoppedAtBoundsText(heldBack));
           return null;
         };
         /** Every placed object with a model (the groups not hidden). */
@@ -2846,7 +2846,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const entries = selectedEntries(), before = entries.map(poseOf), [cx, cy] = centreOf(entries.map((p) => p.position));
           const held = heldTo();
           if (held && entries.some((p) => { const [dx, dy] = turnOffset(turn, p.position[0] - cx, p.position[1] - cy); return !insideBounds(held, cx + dx, cy + dy); })) {
-            void w3.window.showWarning("Not done: part of the selection would end up outside the camera bounds. Turn off Enforce Camera Bounds to allow it.");
+            void w3.window.showWarning(refusedOutsideText("part of the selection would end up"));
             return;
           }
           for (const p of entries) {
@@ -3367,7 +3367,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...(pl.player !== undefined ? [field("Owner", choice(pl.player, ownerOptions(), (v) => editProps(pl, { player: v })))] : []),
               field("Position", triple(pl.position, "16", (v) => {
                 if (!insideBounds(heldTo(), v[0], v[1])) {
-                  void w3.window.showWarning("Not done: that is outside the camera bounds. Turn off Enforce Camera Bounds to allow it.");
+                  void w3.window.showWarning(refusedOutsideText("that is"));
                   // The boxes show where the object is again, not what was typed.
                   if (selected) selectObject(selected);
                   return;
