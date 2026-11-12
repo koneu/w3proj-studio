@@ -227,6 +227,27 @@ test("a unit type's own team colour wins over its owner's: the tavern's roof is 
   assert.equal(drawnTeam(out.get("nmr2")!, 7), 7);
 });
 
+test("a type whose skin section is spelled in another case is drawn, from its own kind's section only", async () => {
+  // Doodads.slk has Yosh, DoodadSkins.txt [YOsh] (Ycgd [YCgd], Lccn [LCcn], …). An item spelled as a doodad in another
+  // case isn't the doodad's, and the type's own spelling wins.
+  const slk = (key: string, ...ids: string[]) => `ID;PWXL;N;E\r\nC;Y1;X1;K"${key}"\r\n${ids.map((id, i) => `C;Y${i + 2};X1;K"${id}"\r\n`).join("")}E\r\n`;
+  const files = {
+    ...gameTables(),
+    "Doodads\\DoodadSkins.txt": "[YOsh]\r\nskinType=doodad\r\nfile=Doodads\\Ship\r\n[LTlt]\r\nfile=Doodads\\Tree\r\n[LTLT]\r\nfile=Doodads\\Upper\r\n",
+    "Doodads\\Doodads.slk": slk("doodID", "Yosh", "LTlt", "Ztst"),
+    "Units\\ItemSkin.txt": "[ztst]\r\nskinType=item\r\nfile=Items\\Item\r\n",
+    "Units\\ItemData.slk": slk("itemID", "ztst"),
+  };
+  const skins = await loadSkins(fakeGame(files, { "game.installDir": "/case", "game.graphicsMode": "hd" }));
+  assert.equal(skins.get("Yosh")?.file, "Doodads\\Ship");
+  assert.equal(skins.get("Yosh")?.kind, "w3d");
+  assert.equal(skins.get("LTlt")?.file, "Doodads\\Tree", "the own spelling wins");
+  assert.equal(skins.get("Ztst"), undefined, "an item's section isn't a doodad's");
+  assert.equal(skins.get("ztst")?.kind, "w3t");
+  // A map's custom doodad based on it gets its model too.
+  assert.equal(withObjectArt(skins, [{ kind: "w3d", custom: [{ base: "Yosh", id: "D000", mods: [] }] }]).get("D000")?.file, "Doodads\\Ship");
+});
+
 test("a placed waygate is drawn in its own colour; a type that doesn't allow one in its owner's", async () => {
   // World Editor 2.0 (we-drive, 2026-11-10, a copy of cliff.w3m): a waygate with colour 4 yellow, one with 2 teal, a
   // waygate type with utcc 0 and colour 4 in Neutral Passive's, a footman type with utcc 1 and colour 6 green, a plain

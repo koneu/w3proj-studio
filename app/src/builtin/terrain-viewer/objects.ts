@@ -13,6 +13,7 @@ import { worldSphere } from "../../lib/model/frustum";
 import { bounds, mat4, ModelGpu, poseNodes, standClock, type Mat4 } from "../../lib/model/renderer";
 import { parseIni, parseSlk } from "../../lib/formats/text";
 import { artValue } from "../../lib/objects/artset";
+import { SKIN_KINDS, SkinIds } from "../../lib/objects/skinids";
 import type { EffectSource, ObjectBatch, ObjectInstance } from "./renderer";
 
 export interface Placed {
@@ -131,12 +132,17 @@ export function addMoveTypes(skins: Map<string, Skin>, rows: readonly Record<str
   }
 }
 
-const SKIN_FILES: [string, string][] = [
-  ["Doodads\\DoodadSkins.txt", "w3d"], ["Units\\DestructableSkin.txt", "w3b"], ["Units\\UnitSkin.txt", "w3u"], ["Units\\ItemSkin.txt", "w3t"],
+/** The kinds drawn, in the order their skin tables are read (a later one's entry wins), with each kind's data
+ *  table and its id column: the type ids as placed objects name them, whose skin section may be spelled in another
+ *  case (lib/objects/skinids.ts). */
+const DRAWN_KINDS: [string, string, string][] = [
+  ["w3d", "Doodads\\Doodads.slk", "doodID"], ["w3b", "Units\\DestructableData.slk", "DestructableID"],
+  ["w3u", "Units\\UnitData.slk", "unitID"], ["w3t", "Units\\ItemData.slk", "itemID"],
 ];
+const SKIN_FILES: [string, string][] = DRAWN_KINDS.map(([kind]) => [SKIN_KINDS[kind].files[0], kind]);
 
 /** Every game table the skins are made from, in the order they're read. */
-const SKIN_TABLES = [...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, "Units\\UnitData.slk", "Doodads\\Doodads.slk"];
+const SKIN_TABLES = [...new Set([...SKIN_FILES.map(([f]) => f), ...UNIT_FUNC, ...DRAWN_KINDS.map(([, table]) => table)])];
 
 /** The skins last made, with what they were made from: reading the tables again is cheap (the game's
  *  files are kept, see workbench/game.ts), parsing them isn't (tens of ms, on each reload of the
@@ -200,13 +206,16 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
   skinParses.count++;
   const out = new Map<string, Skin>();
   const tables = new Map(SKIN_TABLES.map((f, i) => [f, texts[i]]));
+  const rowsOf = new Map<string, Record<string, string>[]>();
+  const rows = (table: string) => rowsOf.get(table) ?? rowsOf.set(table, parseSlk(tables.get(table) ?? "")).get(table)!;
   for (const [f, kind] of SKIN_FILES) {
-    const text = tables.get(f) ?? "";
-    for (const [id, sec] of parseIni(text)) {
+    const sections = parseIni(tables.get(f) ?? "");
+    const own = new Map<string, Skin>();
+    for (const [id, sec] of sections) {
       const get = (k: string) => artValue((key) => sec.get(key), k, mode);
       const file = get("file");
       if (!file) continue;
-      out.set(id, {
+      own.set(id, {
         kind,
         file,
         numVar: Number(get("numvar") ?? 1) || 1,
@@ -221,10 +230,19 @@ function parseSkins(mode: string, texts: string[]): Map<string, Skin> {
         ...shadowFields(get, kind),
       });
     }
+    // Types whose section is spelled in another case (doodad Yosh: [YOsh]) under their own id too.
+    const [, table, key] = DRAWN_KINDS.find(([k]) => k === kind)!;
+    const skinIds = new SkinIds(kind, [...sections].map(([id, sec]) => [id, sec.get("skintype")]));
+    for (const r of rows(table)) {
+      const id = r[key], section = id ? skinIds.section(id) : undefined;
+      const skin = section !== undefined && section !== id ? own.get(section) : undefined;
+      if (id && skin && !own.has(id)) own.set(id, { ...skin });
+    }
+    for (const [id, skin] of own) out.set(id, skin);
   }
   for (const f of UNIT_FUNC) addAnimProps(out, tables.get(f) ?? "");
-  addMoveTypes(out, parseSlk(tables.get("Units\\UnitData.slk") ?? ""));
-  addClickHelpers(out, parseSlk(tables.get("Doodads\\Doodads.slk") ?? ""));
+  addMoveTypes(out, rows("Units\\UnitData.slk"));
+  addClickHelpers(out, rows("Doodads\\Doodads.slk"));
   // Start locations have no skin entry; the World Editor draws them with this model
   // (WorldEditData.txt, StartLocation), which also makes them selectable here.
   if (!out.has("sloc")) {
