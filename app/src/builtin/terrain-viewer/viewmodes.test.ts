@@ -105,7 +105,28 @@ test("View keys: the World Editor's, with their modifiers exactly", () => {
   // Studio's own keys stay: T faces the selection, A selects an area, arrows and Page keys move.
   for (const k of ["t", "a", "ArrowUp", "PageUp", "Home", " "]) assert.equal(viewKeyCommand(key(k)), null, k);
   assert.equal(keyOf("w3.terrain.toggleBlight"), "H");
-  assert.equal(keyOf("w3.terrain.viewSelection"), undefined);
+  assert.equal(keyOf("w3.terrain.viewSelection"), "Backquote", "the key left of 1, named by its place where the layout isn't known");
+  assert.equal(keyOf("w3.terrain.viewSelectionPrevious"), "Shift+Backquote");
+});
+
+test("View Selection is the World Editor's ~ key (left of 1) on every layout, Shift goes back; each press runs one command", () => {
+  const NEXT = "w3.terrain.viewSelection", PREVIOUS = "w3.terrain.viewSelectionPrevious";
+  const presses: [string, Ev, string][] = [
+    ["US `", key("`"), NEXT],
+    ["US Shift+` (~)", key("~", { shiftKey: true }), PREVIOUS],
+    ["German ^ (a dead key)", { ...key("Dead"), code: "Backquote" }, NEXT],
+    ["German Shift+^ (°)", { ...key("°", { shiftKey: true }), code: "Backquote" }, PREVIOUS],
+    ["US International ` (dead)", { ...key("Dead"), code: "Backquote" }, NEXT],
+    ["US International Shift+` (dead ~)", { ...key("Dead", { shiftKey: true }), code: "Backquote" }, PREVIOUS],
+  ];
+  for (const [what, e, command] of presses) {
+    const ids = bound(e);
+    assert.deepEqual(ids.filter((id) => id === NEXT || id === PREVIOUS), [command], what);
+    assert.equal(viewKeyCommand(e), command, what);
+  }
+  // Control: a dead key elsewhere (the German ´) and Ctrl with the key aren't View Selection.
+  assert.deepEqual(bound({ ...key("Dead"), code: "Equal" }), []);
+  assert.equal(viewKeyCommand({ ...key("`", { ctrlKey: true }), code: "Backquote" }), null);
 });
 
 test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Right turn; Alt and the Page keys don't", () => {
@@ -128,9 +149,16 @@ test("camera keys: arrows scroll, Shift faster, Ctrl+Up/Down zoom, Ctrl+Left/Rig
 test("every View key runs a command the terrain viewer declares, one per key; titles don't name keys that can change", () => {
   const ids = new Map(manifest.contributes.commands.map((c) => [c.id, c.title]));
   const view = bindings.filter((b) => runsAsCommand(b.command));
-  assert.equal(view.length, 17, "the World Editor's View keys Studio has");
+  // 17, and View Selection's ~ and Shift+~ by character and by place (5 keys).
+  assert.equal(view.length, 22, "the World Editor's View keys Studio has");
   for (const b of bindings) assert.ok(ids.has(b.command), `${b.command} (${b.key}) isn't declared`);
-  for (const b of view) assert.ok(!/\([^)]*\)$/.test(ids.get(b.command)!), `${b.command}'s title names a key: ${ids.get(b.command)}`);
+  // A key in brackets at the end ("(H)", "(Ctrl+T)", "(Backquote)"); a word that isn't a key ("(Previous)") may be there.
+  const namesKey = (title: string, k: string) => {
+    const end = /\(([^)]*)\)$/.exec(title)?.[1];
+    return !!end && (end.length === 1 || /^(?:ctrl|alt|shift)\+/i.test(end) || end.toLowerCase() === keyLabel(k).toLowerCase());
+  };
+  for (const b of view) assert.ok(!namesKey(ids.get(b.command)!, b.key), `${b.command}'s title names a key: ${ids.get(b.command)}`);
+  assert.ok(namesKey("Toggle Blight (H)", "h") && namesKey("Terrain (Ctrl+T)", "ctrl+t") && namesKey("View (Backquote)", "backquote"), "control: a key in brackets is found");
   assert.equal(new Set(view.map((b) => b.key)).size, view.length, "one View command per key");
   // Each camera command has its keys, and every key command is declared.
   for (const id of Object.keys(CAMERA_COMMANDS)) assert.ok(bindings.some((b) => b.command === id), id);

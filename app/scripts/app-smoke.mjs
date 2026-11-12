@@ -1031,6 +1031,23 @@ async function terrainSelectCameras(page, found) {
   else if (spots[2] !== spots[1] || spots[3] !== spots[0]) fail(`View Selection didn't stay at the selection's end, or Previous didn't go back: ${spots.join(" | ")}`);
   const moved = looks.filter((c) => !c || ["distance", "yaw", "pitch", "fov"].some((key) => Math.abs(c[key] - from[key]) > 1e-6));
   if (moved.length) fail(`View Selection changed the camera's distance or angles: from ${JSON.stringify(from)} to ${JSON.stringify(moved[0])}`);
+  // By key, as the World Editor's ~ (the key left of 1) and Shift+~: the US characters typed, then the German ^ (a dead
+  // key: key "Dead", code "Backquote") and its Shift+^ "°" as the webview gives them. From the first doodad (Previous
+  // went back to it) each press goes to the other one, at the same distance.
+  const byKey = [
+    ["`", () => k.hands.chord("`")],
+    ["Shift+`", () => k.hands.chord("Shift+`")],
+    ["German ^", () => page.evaluate(`document.querySelector(".model-stage canvas").dispatchEvent(new KeyboardEvent("keydown", { key: "Dead", code: "Backquote", bubbles: true, cancelable: true }))`)],
+    ["German Shift+^", () => page.evaluate(`document.querySelector(".model-stage canvas").dispatchEvent(new KeyboardEvent("keydown", { key: "°", code: "Backquote", shiftKey: true, bubbles: true, cancelable: true }))`)],
+  ];
+  for (const [i, [what, press]] of byKey.entries()) {
+    await k.focusMap();
+    await press();
+    await settled(page);
+    const c = await camera(), want = spots[i % 2 ? 0 : 1];
+    if (spot(c) !== want) fail(`${what} in the terrain view didn't pan to ${want}: it looks at ${spot(c)}`);
+    else if (Math.abs(c.distance - from.distance) > 1e-6) fail(`${what} changed the distance: ${from.distance} to ${c.distance}`);
+  }
   await k.hands.key("Escape", "Escape", 27);
 
   // Cameras: a still picture (no water, no animation), the plain view against itself first.

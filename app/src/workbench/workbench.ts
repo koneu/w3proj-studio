@@ -8,7 +8,7 @@ import { McpTools } from "../extensions/mcp";
 import { backendInvoke } from "./trackedinvoke";
 import { invoke, listen, NotUtf8Error, readBytes, readText, writeBytes, writeText } from "./backend";
 import { CommandService } from "./commands";
-import { conflictsOf, eventChord, isViewBinding, keyLabel, KeybindingService, mouseChord, normalizeKey, REDO_COMMAND, targetContext, UNDO_BINDINGS, UNDO_COMMAND } from "../lib/keybindings";
+import { conflictsOf, eventChord, isViewBinding, keyLabel, KeybindingService, mouseChord, normalizeKey, REDO_COMMAND, setLayoutKeyNames, targetContext, UNDO_BINDINGS, UNDO_COMMAND } from "../lib/keybindings";
 import { h, showContextMenu } from "./dom";
 import { MenuBar } from "./menubar";
 import { menuTree, whyBlocked } from "./menus";
@@ -512,6 +512,12 @@ export class Workbench {
   }
 
   private registerKeybindings() {
+    // What the layout calls the keys bound by their place (the ~ key: ^ on a German keyboard), for the labels; again
+    // when the layout changes. WebKitGTK has no layout map: there the labels say "Backquote".
+    type LayoutKeyboard = EventTarget & { getLayoutMap?: () => Promise<{ get(code: string): string | undefined }> };
+    const keyboard = (navigator as Navigator & { keyboard?: LayoutKeyboard }).keyboard;
+    const readLayout = () => { keyboard?.getLayoutMap?.().then((m) => { setLayoutKeyNames(m); }, () => {}); };
+    if (keyboard?.getLayoutMap) { readLayout(); keyboard.addEventListener?.("layoutchange", readLayout); }
     window.addEventListener("keydown", (e) => {
       const chord = eventChord(e);
       if (!chord) return; // a modifier alone (and the first chord of two stays awaited)

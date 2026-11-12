@@ -16,6 +16,16 @@ test("keyOf: the key as the webview names it; the physical key where WebKitGTK s
   assert.equal(keyOf({ key: "Unidentified" }), "Unidentified");
 });
 
+test("keyOf: a dead key is its place (the German ^ is Backquote); the character it makes otherwise stays", () => {
+  assert.equal(keyOf({ key: "Dead", code: "Backquote" }), "Backquote", "German ^, US International `");
+  assert.equal(keyOf({ key: "Dead", code: "Backquote", shiftKey: true }), "Backquote", "US International Shift+` (~)");
+  assert.equal(keyOf({ key: "Dead", code: "Equal" }), "Equal", "German ´");
+  assert.equal(keyOf({ key: "Dead" }), "Dead", "no place to go by: left as it is");
+  // Control: a key that gives its character is that character, on that place or not.
+  assert.equal(keyOf({ key: "°", code: "Backquote", shiftKey: true }), "°", "German Shift+^");
+  assert.equal(keyOf({ key: "`", code: "Backquote" }), "`", "US `");
+});
+
 test("keyOf: the rest of WebKitGTK's Unidentified chords (Ctrl+Alt+F-keys and number pad operators), Shift's capitals, modifiers", () => {
   assert.equal(keyOf({ key: "Unidentified", code: "F5" }), "F5", "Ctrl+Alt+F5");
   assert.equal(keyOf({ key: "Unidentified", code: "NumpadAdd" }), "+", "Ctrl+Alt+Numpad +");

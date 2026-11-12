@@ -19,7 +19,7 @@ import { keyOf } from "./keys";
 
 // ---- keys --------------------------------------------------------------------------------------------------------
 
-const NAMED = /^(?:f(?:[1-9]|1[0-9]|2[0-4])|numpad[0-9]|up|down|left|right|space|enter|escape|tab|backspace|delete|insert|home|end|pageup|pagedown|pause|capslock|contextmenu|leftbutton|middlebutton|rightbutton|wheelup|wheeldown)$/;
+const NAMED = /^(?:f(?:[1-9]|1[0-9]|2[0-4])|numpad[0-9]|up|down|left|right|space|enter|escape|tab|backspace|delete|insert|home|end|pageup|pagedown|pause|capslock|contextmenu|backquote|leftbutton|middlebutton|rightbutton|wheelup|wheeldown)$/;
 /** The mouse's "keys", as the World Editor's Configure Controls offers them (its WESTRING_MOUSE_BUTTON_* and
  *  WESTRING_MOUSE_WHEEL_*): a button, pressed with modifiers ("alt+leftbutton"), or the wheel turned. Only a view that
  *  reads them (the terrain view: w3.keybindings.mouseCommandsFor) does anything with them. */
@@ -33,6 +33,8 @@ const ALIAS: Record<string, string> = {
 const MODS: Record<string, "ctrl" | "alt" | "shift"> = { ctrl: "ctrl", control: "ctrl", cmd: "ctrl", meta: "ctrl", win: "ctrl", alt: "alt", option: "alt", shift: "shift" };
 
 /** A key as bindings write it: a named key ("pageup", "numpad8", "f1"), a letter or digit, or one other character.
+ *  "backquote" is the key left of 1 by its place, pressed as a dead key (keys.ts keyOf: the German ^, the US
+ *  International `); where it gives its character ("`", the German Shift "°") that character is the key.
  *  Shift isn't part of a chord with such a character: it went into making it ("+" is Shift and = on a US keyboard,
  *  and "/" Shift and 7 on a German one). */
 const isChar = (k: string) => k.length === 1 && !/[a-z0-9]/.test(k);
@@ -110,12 +112,26 @@ const LABEL: Record<string, string> = {
   leftbutton: "Left Button", middlebutton: "Middle Button", rightbutton: "Right Button", wheelup: "Wheel Up", wheeldown: "Wheel Down",
 };
 
-/** "ctrl+k ctrl+s" as people write it: Ctrl+K Ctrl+S; "numpad8" NumPad 8, "pageup" Page Up. */
+/** What the keyboard's layout calls the keys named by their place ("Backquote": "^" on a German one), as the webview's
+ *  navigator.keyboard.getLayoutMap() gives it (WebView2 has it, WebKitGTK not); null where it can't tell. */
+let layoutNames: { get(code: string): string | undefined } | null = null;
+export function setLayoutKeyNames(names: { get(code: string): string | undefined } | null) { layoutNames = names; }
+const PLACED: Record<string, string> = { backquote: "Backquote" };
+/** A key named by its place, as the layout calls it if it says (one character you can see, not a combining accent). */
+function placedLabel(code: string): string {
+  let name: string | undefined;
+  try { name = layoutNames?.get(code); } catch { name = undefined; }
+  return name && [...name].length === 1 && !/[\p{M}\p{C}\s]/u.test(name) ? name.toUpperCase() : code;
+}
+
+/** "ctrl+k ctrl+s" as people write it: Ctrl+K Ctrl+S; "numpad8" NumPad 8, "pageup" Page Up, "backquote" as the layout
+ *  names that key (^ on a German keyboard), else Backquote. */
 export function keyLabel(key: string): string {
   return key.split(" ").map((chord) => {
     const parts = chord.endsWith("++") ? [...chord.slice(0, -2).split("+").filter(Boolean), "+"] : chord === "+" ? ["+"] : chord.split("+");
     return parts.map((p) => {
       if (LABEL[p]) return LABEL[p];
+      if (PLACED[p]) return placedLabel(PLACED[p]);
       const pad = /^numpad([0-9])$/.exec(p);
       if (pad) return `NumPad ${pad[1]}`;
       if (p.length === 1 || /^f\d+$/.test(p)) return p.toUpperCase();

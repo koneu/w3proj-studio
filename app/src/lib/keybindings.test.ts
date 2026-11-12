@@ -8,7 +8,7 @@ import { test } from "node:test";
 import {
   addKey, changeKey, changeWhen, commandsFor, conflictsOf, defaultBindings, effectiveBindings, eventChord, isViewBinding, keyLabel,
   KeybindingService, normalizeKey, parseKeybindingsFile, parseWhen, evalWhen, primaryKey, removeBinding, resetCommand, resolve,
-  targetContext, userRules, type Binding, isMouseKey, mouseChord, mouseCommandsFor, UNDO_BINDINGS, UNDO_CONTEXT, undoStepOf,
+  setLayoutKeyNames, targetContext, userRules, type Binding, isMouseKey, mouseChord, mouseCommandsFor, UNDO_BINDINGS, UNDO_CONTEXT, undoStepOf,
 } from "./keybindings";
 
 const ev = (key: string, mods: Partial<{ code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) =>
@@ -55,6 +55,30 @@ test("keys read as people write them", () => {
   assert.equal(keyLabel("numpad8"), "NumPad 8");
   assert.equal(keyLabel("f5"), "F5");
   assert.equal(keyLabel("ctrl+,"), "Ctrl+,");
+});
+
+test("the key left of 1 by its place: a dead key's chord, written and named as the layout calls it", () => {
+  assert.equal(normalizeKey("Backquote"), "backquote");
+  assert.equal(normalizeKey("Shift+Backquote"), "shift+backquote");
+  assert.equal(normalizeKey("shift+`"), "`", "Shift isn't part of a chord with a character");
+  assert.equal(eventChord(ev("Dead", { code: "Backquote" })), "backquote", "German ^");
+  assert.equal(eventChord(ev("Dead", { code: "Backquote", shiftKey: true })), "shift+backquote", "US International Shift+`");
+  assert.equal(eventChord(ev("°", { code: "Backquote", shiftKey: true })), "°", "German Shift+^");
+  assert.equal(eventChord(ev("`", { code: "Backquote" })), "`");
+  assert.equal(eventChord(ev("~", { code: "Backquote", shiftKey: true })), "~");
+  try {
+    setLayoutKeyNames(null);
+    assert.equal(keyLabel("shift+backquote"), "Shift+Backquote", "the layout unknown (WebKitGTK)");
+    setLayoutKeyNames(new Map([["Backquote", "^"]]));
+    assert.equal(keyLabel("backquote"), "^");
+    assert.equal(keyLabel("shift+backquote"), "Shift+^");
+    setLayoutKeyNames(new Map([["Backquote", String.fromCharCode(0x302)]])); // the combining circumflex
+    assert.equal(keyLabel("backquote"), "Backquote", "a combining accent alone isn't a name to show");
+    setLayoutKeyNames({ get: () => { throw new Error("gone"); } });
+    assert.equal(keyLabel("backquote"), "Backquote");
+  } finally {
+    setLayoutKeyNames(null);
+  }
 });
 
 test("when: keys, !, &&, ||, ==, != and brackets; mistakes are told", () => {

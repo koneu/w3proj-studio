@@ -8,6 +8,11 @@
 // Page Up/Down, Delete, F1…), letters and digits are read from KeyA and Digit1, the number pad's operators from
 // NumpadAdd and the like, a modifier from its left or right key.
 //
+// A dead key (one that waits for the next to make an accented letter: ^ left of 1 on a German keyboard, ` and ´ on many
+// others) comes as `key: "Dead"`, which doesn't say which key it was: its physical key stands in too ("Backquote"), so
+// the World Editor's ~ key (View Selection, the key left of 1 wherever its character lies) can be bound on every layout.
+// Text typed into a field doesn't go through here, so composing "â" with ^ is left alone.
+//
 // Shortcut handlers read the key through keyOf, never `e.key` itself: scripts/check-keys.mjs (in `npm run check`)
 // finds the ones that don't. Where the typed character is what counts (a menu's Alt+letter mnemonic is still a
 // shortcut; text typed into a field isn't handled by key events here), a line can say why with `keys-ok: <reason>`.
@@ -16,9 +21,10 @@ const NUMPAD: Record<string, string> = {
   NumpadAdd: "+", NumpadSubtract: "-", NumpadMultiply: "*", NumpadDivide: "/", NumpadDecimal: ".", NumpadEnter: "Enter", NumpadEqual: "=",
 };
 
-/** `e.key`, or what `e.code` names when the webview couldn't tell the key ("Unidentified" or empty). A letter with
- *  Shift is its capital, as the webview gives it when it can tell. */
+/** `e.key`, or what `e.code` names when the webview couldn't tell the key ("Unidentified" or empty) or it is a dead key
+ *  ("Dead": "Backquote" for the German ^). A letter with Shift is its capital, as the webview gives it when it can tell. */
 export function keyOf(e: { key: string; code?: string; shiftKey?: boolean }): string {
+  if (e.key === "Dead") return e.code || e.key;
   if (e.key && e.key !== "Unidentified") return e.key;
   const code = e.code ?? "";
   const letter = /^Key([A-Z])$/.exec(code);

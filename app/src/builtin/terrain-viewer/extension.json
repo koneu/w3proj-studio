@@ -173,6 +173,11 @@
       { "key": "i", "command": "w3.terrain.toggleInfoDisplay", "when": "terrainFocus" },
       { "key": "ctrl+r", "command": "w3.terrain.toggleRegions", "when": "terrainFocus" },
       { "key": "ctrl+m", "command": "w3.terrain.toggleCameraObjects", "when": "terrainFocus" },
+      { "key": "backquote", "command": "w3.terrain.viewSelection", "when": "terrainFocus" },
+      { "key": "`", "command": "w3.terrain.viewSelection", "when": "terrainFocus" },
+      { "key": "shift+backquote", "command": "w3.terrain.viewSelectionPrevious", "when": "terrainFocus" },
+      { "key": "~", "command": "w3.terrain.viewSelectionPrevious", "when": "terrainFocus" },
+      { "key": "°", "command": "w3.terrain.viewSelectionPrevious", "when": "terrainFocus" },
 
       { "key": "up", "command": "w3.terrain.camera.panUp", "when": "terrainFocus" },
       { "key": "numpad8", "command": "w3.terrain.camera.panUp", "when": "terrainFocus" },

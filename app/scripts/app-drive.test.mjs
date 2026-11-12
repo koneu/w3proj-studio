@@ -55,6 +55,8 @@ test("--key: a chord as a person names it, as DevTools' key event takes it (cdp.
   assert.deepEqual(parseChord("Space"), { key: " ", code: "Space", windowsVirtualKeyCode: 32, modifiers: 0 });
   assert.deepEqual(parseChord("Alt"), { key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18, modifiers: 0 });
   assert.deepEqual(parseChord("["), { key: "[", code: "BracketLeft", windowsVirtualKeyCode: 219, modifiers: 0 });
+  assert.deepEqual(parseChord("`"), { key: "`", code: "Backquote", windowsVirtualKeyCode: 192, modifiers: 0 });
+  assert.deepEqual(parseChord("Shift+`"), { key: "~", code: "Backquote", windowsVirtualKeyCode: 192, modifiers: 8 });
   assert.equal(parseChord("Numpad7").key, "7");
   assert.throws(() => parseChord("Hyper+A"), /isn't a modifier/);
   assert.throws(() => parseChord("Ctrl+Banana"), /no key named/);

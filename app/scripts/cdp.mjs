@@ -158,7 +158,8 @@ const MODIFIER_KEYS = { Shift: 16, Control: 17, Alt: 18, Meta: 91 };
 /**
  * A chord as DevTools' Input.dispatchKeyEvent takes it: "Ctrl+Shift+Z" is key "Z" (a letter with Shift is its capital,
  * as a keyboard gives it), code "KeyZ", modifiers Ctrl|Shift. The last part is the key: a letter, a digit, a named key
- * (Tab, Enter, Escape, Space, the arrows, PageUp, Home, Delete, F1…F12), US punctuation ([ ] - = / , .) or a number
+ * (Tab, Enter, Escape, Space, the arrows, PageUp, Home, Delete, F1…F12), US punctuation ([ ] - = / , . and `, which
+ * with Shift is ~) or a number
  * pad key by its code (Numpad7, NumpadAdd, NumpadEnter), or a modifier alone (Alt, Control, Shift, Meta: the left one).
  * "Plus" names "+" ("Ctrl+Plus").
  */
@@ -186,6 +187,8 @@ export function parseChord(spec) {
   if (name === "+" || name === "Plus") return { key: "+", code: "NumpadAdd", windowsVirtualKeyCode: 107, modifiers };
   if (name === "*") return { key: "*", code: "NumpadMultiply", windowsVirtualKeyCode: 106, modifiers };
   if (PUNCTUATION[name]) return { key: name, code: PUNCTUATION[name][0], windowsVirtualKeyCode: PUNCTUATION[name][1], modifiers };
+  // The key left of 1 (the World Editor's ~): "`", with Shift "~", as a US keyboard gives them.
+  if (name === "`" || name === "Backquote") return { key: shift ? "~" : "`", code: "Backquote", windowsVirtualKeyCode: 192, modifiers };
   throw new Error(`"${spec}": no key named "${name}" (a letter, digit, Tab, Enter, F1, ArrowUp, Numpad7, …)`);
 }
 
