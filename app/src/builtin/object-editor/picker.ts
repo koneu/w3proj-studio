@@ -6,7 +6,7 @@ import { focusAfterClick, h } from "../../workbench/dom";
 import { keyOf } from "../../lib/keys";
 import type { FieldMeta, KindData } from "../../lib/objects/metadata";
 import { shownValue, type EditorType } from "./fields";
-import { builderField, compare, defaultOp, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, tokenize, type FieldFilter } from "./filters";
+import { builderField, compare, formatFilter, defaultOp, filterValue, OP_LABEL, OPS, parseQuery as parseFilters, tokenize, type FieldFilter, type Op } from "./filters";
 
 const MAX_ROWS = 300;
 
@@ -164,7 +164,7 @@ export function pickObject(host: HTMLElement, kd: KindData, opts: PickOptions): 
         valueInput.classList.toggle("invalid", !valueInput.value.trim());
         return;
       }
-      search.value = `${search.value.trim()} ${field.id}${opSelect.value}${valueInput.value.trim().replace(/\s+/g, "_")}`.trim();
+      search.value = `${search.value.trim()} ${formatFilter(field.id, opSelect.value as Op, valueInput.value)}`.trim();
       fieldInput.value = valueInput.value = "";
       opChosen = false;
       opSelect.value = defaultOp(null);

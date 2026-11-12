@@ -66,6 +66,13 @@ export function parseQuery(text: string, fields: FieldMeta[]): { words: string[]
   return { words, filters };
 }
 
+/** The text of one filter as the builder writes it: `race:"Night Elf"` for a value with whitespace, a single word bare.
+ *  The query has no way to escape a double quote, so quotes in the value are dropped. */
+export function formatFilter(fieldId: string, op: Op, value: string): string {
+  const v = value.replace(/"/g, "").trim().replace(/\s+/g, " ");
+  return `${fieldId}${op}${/\s/.test(v) ? `"${v}"` : v}`;
+}
+
 /** The operator a new filter on the field starts with: an order for numbers, equality for on/off fields, "contains"
  *  for text and choices (a race, a list), where an order finds nothing. */
 export function defaultOp(field: Pick<FieldMeta, "type" | "valueType"> | null): Op {
