@@ -7,6 +7,7 @@ import { readMapDoc } from "../../lib/formats/mapdoc";
 import type { W3Api } from "../../extensions/api";
 import type { Problem, ProblemCheck, ProblemFix } from "../../extensions/services";
 import { toProjectPath } from "../../lib/formats/archivepath";
+import { parseSlk } from "../../lib/formats/text";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage } from "../../lib/image/index.ts";
 import { toClassicMdx } from "../../lib/model/classic";
@@ -106,7 +107,21 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
           return [kind, has ? loadKind(w3, kind).catch(() => null) : null] as const;
         })));
         // First what to look up, in the order of the problems; then the game paths of all of it at once.
-        const found: { p: string; at: string; reveal: { command: string; args: unknown[] }; what?: FileKind; variations?: number }[] = [];
+        // `pathing`: a doodad's or destructable's pathing texture, with its base type's own (what the pathing map uses
+        // when the file isn't found, terrain-viewer/pathmap.ts placedImage).
+        const found: { p: string; at: string; reveal: { command: string; args: unknown[] }; what?: FileKind; variations?: number; pathing?: { base: string } }[] = [];
+        /** The game's own pathing texture of a doodad or destructable type (its table's pathTex), read when needed. */
+        let pathTables: Promise<Map<string, string>> | null = null;
+        const ownPathTex = async (base: string) => {
+          pathTables ??= (async () => {
+            const out = new Map<string, string>();
+            for (const [path, key] of [["Doodads\\Doodads.slk", "doodID"], ["Units\\DestructableData.slk", "DestructableID"]]) {
+              for (const r of parseSlk(await w3.game.readText(path).catch(() => ""))) if (r[key] && r.pathTex) out.set(r[key], r.pathTex);
+            }
+            return out;
+          })();
+          return (await pathTables).get(base);
+        };
         for (const kind of KINDS) {
           let meta: Awaited<ReturnType<typeof loadKind>> | null = null;
           const variationsField = ART[kind]?.variations;
@@ -128,20 +143,25 @@ export function builtinChecks(w3: W3Api, scope: () => RunScope = () => new RunSc
                 // "none.mdl" / "_": deliberately no model (e.g. no portrait).
                 const paths = (f.type.endsWith("List") ? m.value.split(",") : [m.value]).map((p) => p.trim())
                   .filter((p) => p && p !== "_" && p !== "." && !/^none(\.\w+)?$/i.test(p));
+                const pathing = (m.field === "dptx" || m.field === "bptx") ? { base: o.base } : undefined;
                 for (const p of paths) {
                   const at = `${name} (${id}) › ${f.label}${m.level ? ` (level ${m.level})` : ""}`;
                   const reveal = { command: "w3.objectEditor.open", args: [kind, id] };
-                  found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField) });
+                  found.push(isAbsolute(p) ? { p, at, reveal } : { p, at, reveal, ...lookupOf(f.type, id, o.base, vars, meta, variationsField), ...(pathing ? { pathing } : {}) });
                 }
               }
             }
           }
         }
         await files.prefetch(found.flatMap(({ p, what, variations }) => (what ? modelNames(p, Math.min(variations!, BATCH_VARIATIONS)).map((x): [string, FileKind] => [x, what]) : [])));
-        for (const { p, at, reveal, what, variations } of found) {
+        for (const { p, at, reveal, what, variations, pathing } of found) {
           if (!what) out.push({ severity: "error", message: `${p}: a path on someone's disk, not in the map`, location: at, reveal });
           else if (!(await modelExists(p, variations!, (x) => files.exists(x, what)))) {
-            out.push({ severity: "warning", message: `${p} not found (neither in the map nor in the game)`, location: at, reveal });
+            // What the pathing map does instead: the base type's own texture, else nothing blocks.
+            const table = pathing ? (await ownPathTex(pathing.base))?.replace(/\\+/g, "\\") : undefined;
+            const own = table && table !== "_" && table !== "-" && table.toLowerCase() !== "none" && table.toLowerCase() !== p.toLowerCase() && await files.exists(table, "texture") ? table : null;
+            const instead = !pathing ? "" : own ? `; the pathing map uses its base type's ${own} instead` : "; placed ones leave no pathing (they don't block)";
+            out.push({ severity: "warning", message: `${p} not found (neither in the map nor in the game)${instead}`, location: at, reveal });
           }
         }
         return capped(out, "missing files");

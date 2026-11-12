@@ -75,11 +75,15 @@ export async function writeDerived(w3: W3Api, s: DeriveSources) {
   const cfg = <T,>(key: string) => w3.settings.get<T>(`terrain.${key}`);
   const gone = () => s.stillOpen?.() === false;
   if (cfg<boolean>("pathing.regenerate")) try {
-    const { wpm, missing } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"));
+    const { wpm, missing, fellBack } = await buildPathingMap(w3, s.now, s.doodads, s.read, cfg<number>("pathing.deepWater"));
     await s.filterPathing(wpm);
     if (gone()) return;
     await w3.workspace.writeBytes("map/war3map.wpm", wpm);
-    if (missing.length) w3.window.showWarning(`Pathing map: no pathing texture for ${missing.join(", ")}; those doodads don't block.`);
+    const said = [
+      ...(fellBack.length ? [`${fellBack.map(([a, b]) => `${a} (used their type's own ${b} instead)`).join(", ")} not found`] : []),
+      ...(missing.length ? [`no pathing texture for ${missing.join(", ")}; those doodads don't block`] : []),
+    ];
+    if (said.length) w3.window.showWarning(`Pathing map: ${said.join("; ")}. The Problems view lists the object data that names them.`);
   } catch (e) {
     w3.window.showError(`The pathing map (war3map.wpm) couldn't be regenerated: ${(e as Error).message ?? e}`);
   }

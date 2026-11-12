@@ -40,7 +40,7 @@ function slk(rows: string[][]) {
 }
 
 /** A made-up game: unit metadata with a model and an icon field, one stored model; nothing else. */
-const GAME: Record<string, string> = {
+const BASE_GAME: Record<string, string> = {
   "Units\\UnitMetaData.slk": slk([["ID", "field", "slk", "category", "displayName", "sort", "type", "useUnit"],
     ["umdl", "file", "Profile", "art", "", "1", "model", "1"], ["uico", "Art", "Profile", "art", "", "2", "icon", "1"]]),
   "Units\\UnitData.slk": slk([["unitID"], ["hfoo"]]),
@@ -49,11 +49,11 @@ const GAME: Record<string, string> = {
   "Units\\UnitWeapons.slk": slk([["unitWeaponID"]]),
   "Units\\UnitAbilities.slk": slk([["unitAbilID"]]),
 };
-const STORED = new Set(["units\\stored\\model.mdx"]);
+const BASE_STORED = ["units\\stored\\model.mdx"];
 
 /** Made-up files on top of the mini map, so that every kind of lookup happens: object data with
  *  paths, sounds, import entries and Game Interface art. */
-const OVERLAY: Record<string, string> = {
+const BASE_OVERLAY: Record<string, string> = {
   "map/war3map.w3u.json": JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [
     { base: "hfoo", id: "h000", mods: [{ field: "umdl", value: "Units\\Stored\\Model.mdl" }, { field: "uico", value: "UI\\Made\\Icon.blp" }] },
     { base: "hfoo", id: "h001", mods: [{ field: "umdl", value: "Units\\Made\\Missing" }, { field: "uico", value: "C:\\Users\\someone\\icon.blp" }] },
@@ -69,7 +69,9 @@ function walk(dir: string, base = dir): string[] {
 
 /** The part of the app the checks and the service use, over the mini map, counting every call that
  *  would go to the backend (key: "what path"). */
-function fakeApp() {
+function fakeApp(more: { overlay?: Record<string, string>; game?: Record<string, string>; stored?: string[] } = {}) {
+  const OVERLAY = { ...BASE_OVERLAY, ...more.overlay }, GAME = { ...BASE_GAME, ...more.game };
+  const STORED = new Set([...BASE_STORED, ...(more.stored ?? []).map((p) => p.toLowerCase())]);
   const root = fixture();
   const calls = new Map<string, number>();
   const count = (key: string) => calls.set(key, (calls.get(key) ?? 0) + 1);
@@ -149,3 +151,27 @@ test("control: the same checks without a shared run read files again, and the co
   for (const check of [...builtinChecks(app.w3), ...mapChecks(app.w3)]) await check.run().catch(() => []);
   assert.notDeepEqual(repeated(app.calls), [], "the counting saw no repeated read: it can't catch one");
   assert.ok(total(app.calls) > BUDGET, `only ${total(app.calls)} calls without sharing: the budget can't tell`);});
+
+test("a doodad's pathing texture that isn't found says what the pathing map does instead", async () => {
+  const rock = "PathTextures\\Rock.tga", gone = "war3mapImported\\Gone.tga";
+  const app = fakeApp({
+    game: {
+      "Doodads\\DoodadMetaData.slk": slk([["ID", "field", "slk", "category", "displayName", "sort", "type"], ["dptx", "pathTex", "DoodadData", "path", "", "1", "pathingTexture"]]),
+      "Doodads\\Doodads.slk": slk([["doodID", "pathTex"], ["LOrk", rock], ["LFlw", "_"]]),
+    },
+    overlay: {
+      "map/war3map.w3d.json": JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [
+        { base: "LOrk", id: "D000", mods: [{ field: "dptx", type: "string", value: gone }] },
+        { base: "LFlw", id: "D002", mods: [{ field: "dptx", type: "string", value: gone }] },
+      ] }),
+    },
+    stored: [rock],
+  });
+  const check = builtinChecks(app.w3).find((c) => c.id === "objectPaths")!;
+  const found = (await check.run()).filter((p) => /Gone\.tga/.test(p.message));
+  const of = (id: string) => found.find((p) => p.location?.includes(`(${id})`))?.message ?? "";
+  assert.match(of("D000"), /Gone\.tga not found .*; the pathing map uses its base type's PathTextures\\Rock\.tga instead/);
+  assert.match(of("D002"), /Gone\.tga not found .*; placed ones leave no pathing \(they don't block\)/);
+  // Other paths say only that they aren't found.
+  assert.ok((await check.run()).some((p) => p.message === "Units\\Made\\Missing not found (neither in the map nor in the game)"));
+});

@@ -3418,7 +3418,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               let r: number | undefined;
               if (kind === "w3t") r = 24;
               else if (kind === "w3u") { const sh = data.unitShape(id); r = (await texRadius(sh?.path)) ?? sh?.collision ?? 32; }
-              else r = (await texRadius(data.placedTex(id)?.path)) ?? 32;
+              else {
+                const info = data.placedTex(id), img = info ? (await data.placedImage(info)).image : null;
+                r = img ? Math.max(img.width, img.height) * 16 : 32;
+              }
               ringRadius.set(key, Math.max(16, r));
               refreshRings();
             })().catch(() => { ringRadius.set(key, 32); });
