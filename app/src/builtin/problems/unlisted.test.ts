@@ -46,8 +46,9 @@ const FILES: Record<string, string> = {
 function fake(opts: { imp?: string | null; ask?: boolean } = {}) {
   const files = new Map(Object.entries(FILES));
   if (opts.imp !== null) files.set("map/war3map.imp.json", opts.imp ?? IMP);
-  const log: string[] = [];
+  const log: string[] = [], shown: string[] = [];
   const w3 = {
+    output: { channel: () => ({ append: (l: string) => shown.push(l), clear() {}, show() {} }) },
     workspace: {
       project: () => ({ root: "/p", name: "p", manifest: {}, default_output: "" }),
       files: () => [...files.keys()].sort().map((path) => ({ path, size: 1, modified: 1 })),
@@ -75,7 +76,7 @@ function fake(opts: { imp?: string | null; ask?: boolean } = {}) {
     window: { askDelete: async (m: string) => { log.push(`ask ${m}`); return opts.ask ?? true; }, showWarning: async () => undefined, showInfo: async () => undefined },
   } as unknown as W3Api;
   const check = builtinChecks(w3).find((c) => c.id === "unlistedImports")!;
-  return { w3, files, log, run: () => check.run() };
+  return { w3, files, log, shown, run: () => check.run() };
 }
 
 const byFile = (found: Problem[], archive: string) => found.find((p) => p.message.startsWith(`${archive} `));
@@ -99,9 +100,22 @@ test("files the import list doesn't name are reported, with the game file they r
   assert.doesNotMatch(hero, /replaces/);
 });
 
-test("without an import list every file but the map's own is reported; one that can't be read fails the check", async () => {
-  const none = await fake({ imp: null }).run();
-  assert.equal(none.length, 5);
+test("a map without any import list gets one warning for all its files, whose fixes list them all or show them", async () => {
+  const f = fake({ imp: null });
+  const none = await f.run();
+  assert.equal(none.length, 1);
+  assert.equal(none[0].message, "This map has no import list: 5 files are packed anyway (2 of them replace game files)");
+  assert.deepEqual(none[0].fixes?.map((x) => x.label), ["Add all to import list", "Show the files"]);
+  await none[0].fixes![0].run();
+  assert.equal(f.log.length, 1);
+  assert.deepEqual(JSON.parse(f.log[0].replace(/^w3\.imports\.add /, ""))[0].sort(), ["Buildings\\Human\\TownHall\\TownHall.mdx", "_HD.w3mod\\Buildings\\Human\\TownHall\\TownHall.mdx",
+    "war3mapImported\\Short.blp", "war3mapImported\\listed.blp", "war3mapimported\\hero.mdx"]);
+  await none[0].fixes![1].run();
+  assert.equal(f.shown.length, 6);
+  assert.match(f.shown.join("\n"), /^ {2}Buildings\\Human\\TownHall\\TownHall\.mdx {2}\(replaces the game's Buildings\\Human\\TownHall\\TownHall\.mdx\)$/m);
+});
+
+test("an import list that can't be read fails the check", async () => {
   await assert.rejects(fake({ imp: "{ not json" }).run(), /war3map\.imp\.json is there but can't be read/);
   await assert.rejects(fake({ imp: JSON.stringify({ format: "w3proj.imports/1", version: 1 }) }).run(), /has no file list/);
 });

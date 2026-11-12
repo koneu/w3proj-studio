@@ -4769,9 +4769,9 @@ async function graphicsModes(page, found) {
   const check = () => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
     await svc.run();
-    // The mini map's script, and its triggers made of made-up functions, have problems of their own, and its readme.txt
-    // isn't in an import list; this is about the objects.
-    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "") && p.reveal?.command !== "w3.triggers.reveal" && !/isn't in the import list/.test(p.message)).map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
+    // The mini map's script, and its triggers made of made-up functions, have problems of their own, and it has no
+    // import list for its readme.txt; this is about the objects.
+    return svc.problems().filter((p) => !/^war3map\.(j|lua)/.test(p.location ?? "") && p.reveal?.command !== "w3.triggers.reveal" && !/isn't in the import list|has no import list/.test(p.message)).map((p) => ({ severity: p.severity, message: p.message, location: p.location ?? "", fixes: (p.fixes ?? []).map((f) => f.label) }));
   })()`);
   const fix = (match, label) => page.evaluate(`(async () => {
     const svc = await w3.services.get("w3.problems");
@@ -7069,7 +7069,8 @@ async function contextMenuItem(page, selector, text, item) {
 
 /** Files of the map folder outside the import list (branch import-warnings): a unit type's model imported under another
  *  case than its object data names it is drawn (on Linux the file's name on disk counts: lib/imports.ts readImported);
- *  the Problems view warns of it ("used by" the type) and of a game model replaced by an unlisted file, and its fixes
+ *  without an import list the Problems view has one warning for both files; with one, it warns of each: the model
+ *  ("used by" the type) and a game model replaced by an unlisted file, and its fixes
  *  list the one and delete the other; removing an entry in the Import Manager asks whether its file goes too ("Remove
  *  from list" keeps it, "Remove and delete file" doesn't). Needs the game (W3PROJ_GAME). */
 async function importWarnings(page, found) {
@@ -7109,6 +7110,16 @@ async function importWarnings(page, found) {
     await page.evaluate(`w3.commands.execute("w3.problems.run")`);
     const row = (text) => `[...document.querySelectorAll(".problem-row")].find((r) => r.textContent.includes(${JSON.stringify(text)}))`;
     const rowText = (text) => page.evaluate(`${row(text)}?.textContent ?? null`);
+    // A new map has no import list: one warning for both files, not one per file.
+    await until("the no-list warning", () => page.evaluate(`!!${row("This map has no import list")}`), 30000).catch(() => {});
+    const whole = await rowText("This map has no import list");
+    if (!whole || !whole.includes("2 files are packed anyway (1 of them replace game files)") || !/Add all to import list/.test(whole) || !/Show the files/.test(whole)) {
+      fail(`without an import list: ${whole ?? await page.evaluate(`[...document.querySelectorAll(".problem-row")].map((r) => r.textContent).join(" | ").slice(0, 400)`)}`);
+    }
+    if (await page.evaluate(`!!${row("isn't in the import list")}`)) fail("without an import list, files are warned of one by one");
+    // With a list (empty), each file missing from it is.
+    await page.evaluate(`(async () => { await w3.workspace.writeText("map/war3map.imp.json", JSON.stringify({ format: "w3proj.imports/1", version: 1, files: [] })); await w3.workspace.refresh(); })()`);
+    await page.evaluate(`w3.commands.execute("w3.problems.run")`);
     await until("the Problems view's rows", () => page.evaluate(`!!${row("war3mapimported\\smokecase.mdx")}`), 30000).catch(() => {});
     const model = await rowText("war3mapimported\\smokecase.mdx");
     if (!model) fail(`the Problems view doesn't warn of the unlisted model: ${await page.evaluate(`[...document.querySelectorAll(".problem-row")].map((r) => r.textContent).join(" | ").slice(0, 400)`)}`);

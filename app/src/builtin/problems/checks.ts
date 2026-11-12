@@ -325,7 +325,8 @@ async function readPathUses(w3: W3Api, s: RunScope): Promise<PathUse[]> {
 /** Files in the project's map folder that the import list doesn't name (lib/imports.ts unlistedFiles, the rule the
  *  Import Manager shows them by): the map packs them and the game uses them all the same, and nothing but the Import
  *  Manager's last section says so. Each is named with what it stands for: the game's file of its path, which it
- *  replaces, and the object data that names it. Fixes: list it, or delete it. A list that is there and can't be read
+ *  replaces, and the object data that names it. Fixes: list it, or delete it. A map without any list gets one warning
+ *  for all of them (list them all, or show them in Output). A list that is there and can't be read
  *  fails the check (every file would pass for unlisted, and be offered for deletion). */
 async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
   const root = w3.workspace.project()?.root;
@@ -341,6 +342,36 @@ async function unlistedImports(w3: W3Api, s: RunScope): Promise<Problem[]> {
   const archives = unlisted.map(archivePath);
   const lookup = s.lookup();
   await lookup.prefetchGame(archives.map(withoutVariant));
+  // A map without any import list never had one (maps whose list was stripped, made by other tools): one warning for
+  // all of its files, not one per file.
+  if (list === null) {
+    let replacing = 0;
+    for (const a of archives) if (await lookup.inGame(withoutVariant(a))) replacing++;
+    const n = unlisted.length, listName = listPath.slice(4).replace(/\.json$/, "");
+    return [{
+      severity: "warning",
+      message: `This map has no import list: ${n} file${n === 1 ? " is" : "s are"} packed anyway${replacing ? ` (${replacing} of them replace game files)` : ""}`,
+      location: listName,
+      reveal: { command: "w3.imports.open" },
+      fixes: [
+        {
+          label: "Add all to import list",
+          title: `Makes ${listName} with every one of the ${n} files, as the Import Manager's "Add to list" does: the World Editor then shows them among the imports`,
+          run: () => serial(async () => { sameProject(w3, root); await w3.commands.execute("w3.imports.add", archives); }),
+        },
+        {
+          label: "Show the files",
+          title: "Lists them in the Output panel (Problems), the game files they replace marked",
+          run: async () => {
+            const channel = w3.output.channel("Problems");
+            channel.append(`${n} file${n === 1 ? "" : "s"} packed into the map without an import list:`);
+            for (const a of archives) channel.append(`  ${a}${(await lookup.inGame(withoutVariant(a))) ? `  (replaces the game's ${withoutVariant(a)})` : ""}`);
+            channel.show();
+          },
+        },
+      ],
+    }];
+  }
   // The object fields that name each file (by its plain path), as the game finds them: models also as .mdx, numbered
   // variations, textures also as .dds.
   const usedBy = new Map<string, string[]>();
