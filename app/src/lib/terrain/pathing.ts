@@ -70,8 +70,26 @@ export function generatePathing(input: PathingInput): Uint8Array {
   view.setUint32(12, h, true);
   const cells = out.subarray(16);
   const C = (x: number, y: number) => t.corners[y * t.width + x];
-  // A ramp side's tiles are cliff, the flat one it takes in beside the ramp's low end too (Mount Hyjal's ramps).
-  const sides = new Set(rampSides(t).flatMap((s) => s.tiles));
+  // A ramp side's flat tile (the other one is a cliff anyway) is blocked where a ramp tile lies across the side's
+  // ramp edge (Mount Hyjal's ramps), or where its far side is a cliff one layer high (Autumn Leaves' tile 15,25).
+  // Beside stray ramp flags with low ground all along the far side it stays walkable (Autumn Leaves' tile 17,32).
+  // Measured on the stored pathing maps of 161 sample and ladder maps.
+  const tw = t.width - 1;
+  const isRampTile = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= tw || y >= t.height - 1) return false;
+    const q = [C(x, y), C(x + 1, y), C(x, y + 1), C(x + 1, y + 1)];
+    return q.every((k) => k.ramp) && !isCliffTile(q);
+  };
+  const sides = new Set(rampSides(t).filter((s) => {
+    const far = s.outer.filter((k) => !k.ramp);
+    if (Math.abs(far[0].layer - far[1].layer) === 1) return true;
+    // outer: bottom-left, top-left, top-right, bottom-right; the ramp corners are two of them along the long side.
+    const ramps = s.outer.map((k, i) => (k.ramp ? i : -1)).filter((i) => i >= 0).join("");
+    const across: [number, number][] = s.w === 2
+      ? (ramps === "12" ? [[s.x, s.y + 1], [s.x + 1, s.y + 1]] : [[s.x, s.y - 1], [s.x + 1, s.y - 1]])
+      : (ramps === "01" ? [[s.x - 1, s.y], [s.x - 1, s.y + 1]] : [[s.x + 1, s.y], [s.x + 1, s.y + 1]]);
+    return across.some(([x, y]) => isRampTile(x, y));
+  }).flatMap((s) => s.tiles));
   // A straight ramp's middle corners stand half a layer up (rampLift): the water over them is that much shallower
   // (Snoware Bay). On a diagonal ramp, where a ramp corner beside one is a layer up, it stays (Ekrezem's Maze).
   const lift = new Map<Corner, number>();
