@@ -28,6 +28,7 @@ export const FILES = [
   { file: "engineering.md", label: "Engineering", active: true },
   { file: "test.md", label: "To test", active: true },
   { file: "user.md", label: "For the user", active: true },
+  { file: "fable.md", label: "For Fable", active: true },
   { file: "blocked.md", label: "Blocked", active: false },
   { file: "onhold.md", label: "On hold", active: false },
 ];
@@ -140,7 +141,7 @@ summary .n { color: var(--muted); font-weight: 400; } ul { margin: 6px 0 4px; pa
 </main>
 <script>
 const DATA = ${data};
-const COLORS = { "bugs.md": "#d1242f", "features.md": "#0969da", "lowprio-bugs.md": "#ff8182", "lowprio-features.md": "#80ccff", "engineering.md": "#8250df", "test.md": "#bf8700", "user.md": "#1a7f37", "blocked.md": "#6e7781", "onhold.md": "#afb8c1" };
+const COLORS = { "bugs.md": "#d1242f", "features.md": "#0969da", "lowprio-bugs.md": "#ff8182", "lowprio-features.md": "#80ccff", "engineering.md": "#8250df", "test.md": "#bf8700", "user.md": "#1a7f37", "fable.md": "#a475f9", "blocked.md": "#6e7781", "onhold.md": "#afb8c1" };
 const entries = DATA.entries, files = DATA.files;
 const svg = document.getElementById("chart"), tip = document.getElementById("tip");
 const W = 1000, H = 420, L = 48, R = 16, T = 16, B = 40;
