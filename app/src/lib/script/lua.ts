@@ -5,7 +5,9 @@
 //   takes … returns …` → `function N(params)`, end* → `end`, `loop`/`exitwhen`
 //   → `while (true) do` / `if (…) then break end`, `call`/`set`/types dropped,
 //   'hfoo' → FourCC("hfoo"), null → nil, != → ~=, `function F` → `F`, and
-//   spacing as the World Editor's Lua writer has it ("f(a, b)").
+//   spacing as the World Editor's Lua writer has it ("f(a, b)", "return ").
+// What differs by type (real defaults `0.0`, empty strings `""`) is decided
+// before, in jass.ts and triggers.ts with the `lua` flag.
 // Lines marked RAW (the map's own Lua: custom script, custom-text triggers)
 // are copied as they are; markers stand for `..` and `//`, which have no
 // JASS spelling.
@@ -98,6 +100,8 @@ export function jassToLua(jass: string): string {
     }
     if (line === "loop") { out.push("while (true) do"); continue; }
     if ((m = /^exitwhen\s+(.*)$/.exec(line))) { out.push(`if (${expr(m[1])}) then break end`); continue; }
+    // A bare return (Skip Remaining Actions) keeps the space the World Editor writes after it.
+    if (line === "return") { out.push("return "); continue; }
     out.push(expr(line.replace(/^(call|set)\s+/, "")));
   }
   return out.join(EOL) + EOL;
