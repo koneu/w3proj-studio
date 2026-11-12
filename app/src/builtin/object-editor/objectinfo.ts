@@ -31,12 +31,19 @@ const SCALE_FIELDS = [["bmis", "bmas"], ["dmis", "dmas"]];
 const PATH_FIELDS = ["bptx", "dptx", "upat"];
 const VARIATION_FIELDS = ["bvar", "dvar"];
 
+/** A model path as the stored files are looked up by: without a storage prefix (a table can name a file with its pack,
+ *  "war3.w3mod:_de.w3mod:doodads\…\corpse2.mdx", the item clom), without the extension the tables write (".mdl", or the
+ *  odd ".ma" of the dummy units oimd and oie1: the game reads the .mdx), backslashes, lower case. */
+function modelKey(path: string): string {
+  return path.slice(path.lastIndexOf(":") + 1).replace(/\//g, "\\").replace(/\.[^.\\]{1,3}$/, "").toLowerCase();
+}
+
 /** Stored model → the graphics packs it's only in; empty when the base game has it. */
 export function modelPacks(all: readonly string[]): Map<string, string[]> {
   const out = new Map<string, Set<string>>();
   for (const full of all) {
     if (!/\.mdx$/i.test(full)) continue;
-    const key = full.slice(full.lastIndexOf(":") + 1).replace(/\.mdx$/i, "").replace(/\//g, "\\").toLowerCase();
+    const key = modelKey(full);
     const set = out.get(key) ?? new Set<string>();
     const pack = /^War3\.w3mod:_(HD|DE|Teen)\b/i.exec(full)?.[1].toUpperCase();
     set.add(pack ?? "");
@@ -45,12 +52,21 @@ export function modelPacks(all: readonly string[]): Map<string, string[]> {
   return new Map([...out].map(([k, v]) => [k, v.has("") ? [] : [...v].sort()]));
 }
 
+/** The packs a variation's model is in: its numbered file, else the type's file without a number, as the terrain view
+ *  reads them (objects.ts modelPath, plainModelPath: the classic City wall endcap YSw5 has only CityWallEndcap.mdx,
+ *  the numbered files are Reforged's). In the base game when either is. */
+function variationPacks(stored: ReadonlyMap<string, string[]>, key: string, i: number): string[] | undefined {
+  const own = stored.get(`${key}${i}`), plain = stored.get(key);
+  if (!own || !plain) return own ?? plain;
+  return own.length && plain.length ? [...new Set([...own, ...plain])] : [];
+}
+
 /** What a model means for an object: nothing to report, or that it won't show everywhere. Types
  *  with variations have a file for each, and a placed one uses just its own, so each counts. */
 function modelNote(path: string | undefined, variations: number, stored: ReadonlyMap<string, string[]>): { noModel?: boolean; modelOnlyIn?: string[]; variationsWithoutModel?: number[] } {
-  const key = (path ?? "").replace(/\.md[lx]$/i, "").replace(/\//g, "\\").toLowerCase();
+  const key = modelKey(path ?? "");
   if (!key || key === "_") return { noModel: true };
-  const files = variations > 1 ? Array.from({ length: variations }, (_, i) => stored.get(`${key}${i}`)) : [stored.get(key) ?? stored.get(`${key}0`)];
+  const files = variations > 1 ? Array.from({ length: variations }, (_, i) => variationPacks(stored, key, i)) : [stored.get(key) ?? stored.get(`${key}0`)];
   if (files.every((f) => !f)) return { noModel: true };
   const missing = files.flatMap((f, i) => (f ? [] : [i]));
   const packs = [...new Set(files.flatMap((f) => f ?? []))].sort();
