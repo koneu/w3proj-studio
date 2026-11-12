@@ -115,6 +115,15 @@ export class FileLookup {
     const key = plainPath(path);
     return this.own.has(key) || this.campaignFiles.has(key);
   }
+  /** Whether a chapter map's campaign's files are looked in too: only once whenReady() resolved. */
+  hasCampaign(): boolean {
+    return this.campaign !== undefined;
+  }
+  /** What a missing file's problem says: where it was looked for, a chapter map's campaign's files included (a chapter's
+   *  object data often names files the campaign was meant to have). Only once whenReady() resolved, as inMap. */
+  notFound(path: string): string {
+    return `${path} not found (neither in the map${this.hasCampaign() ? ", its campaign's files" : ""} nor in the game)`;
+  }
   /** Whether a graphics mode reads the map's own copy of the file (`layer`: the mode's game folder, null Classic, "_hd",
    *  "_de"): the plain file in every mode, its Reforged version (`_HD.w3mod\…`) in the Reforged ones (lib/imports.ts
    *  modeNames), a `_DE.w3mod\` one in DE. Only once whenReady() resolved, as inMap. */
