@@ -98,8 +98,9 @@ test("a new AI is the AI Editor's new AI", () => {
     ["1HIA", "2HIA", "3HIA", "hdhw", "hfoo", "hgry", "hgyr", "hkni", "hmpr", "hmtm", "hmtt", "hrif", "hsor", "hspt"]);
   assert.ok(ai.groups[0].units.every((u) => (u.quantity | 0) === -1 && (u.max | 0) === -1), "all of each");
   assert.deepEqual(ai.waves, [{ group: 0, delay: 0 }]);
-  // Minimum forces "First Hero Only": 'AISH' (u05_mint.wai, whose script says "// First Hero Only").
-  assert.deepEqual([ai.repeatWaves, ai.minForces, ai.initialDelay], [1, 0x41495348, 0]);
+  // Minimum forces "First Hero Only": the bytes "HAIA" (u05_mint.wai, whose script says "// First Hero Only").
+  assert.deepEqual([ai.repeatWaves, ai.minForces, ai.initialDelay], [1, 0x41494148, 0]);
+  assert.ok(Buffer.from(writeWai(ai)).includes("HAIA"), "as the file has it");
   assert.deepEqual([ai.gameOptions, ai.gameSpeed, ai.mapPath], [2, 1, "Maps\\(2)PlunderIsle.w3m"]);
   assert.deepEqual(ai.players, [{ index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" }]);
 });

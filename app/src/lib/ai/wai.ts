@@ -323,9 +323,10 @@ export function writeWai(f: AiFile): Uint8Array {
 /** No object (unset hero, skill or worker). */
 export const NO_ID = "\0\0\0\0";
 
-/** Minimum forces "First Hero Only" ('AISH'): no attack group, the first hero is enough (u05_mint.ai: "// First Hero
- *  Only", GetUnitCountDone(hero_id) < 1). Else the field is an attack group's index. */
-export const FIRST_HERO_ONLY = 0x41495348;
+/** Minimum forces "First Hero Only" (the bytes "HAIA", like the special build ids "1HIA"): no attack group, the first
+ *  hero is enough (u05_mint.wai has it; u05_mint.ai: "// First Hero Only", GetUnitCountDone(hero_id) < 1). Else the
+ *  field is an attack group's index. */
+export const FIRST_HERO_ONLY = 0x41494148;
 
 /** Build, harvest and target priorities: the type field each list's entries have in the game's files. */
 const BUILD = 0, HARVEST = 1, TARGET = 2;

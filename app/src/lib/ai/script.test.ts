@@ -374,7 +374,7 @@ test("the minimum force decides when to attack", () => {
 
 test("minimum forces \"First Hero Only\" wait for the first hero, as u05_mint.ai", () => {
   const ai = newWai();
-  ai.minForces = 0x41495348;
+  ai.minForces = 0x41494148; // the bytes "HAIA", as u05_mint.wai has it
   assert.deepEqual(body(ai, "HaveMinimumAttackers").slice(-6), [
     "    // First Hero Only", "    if (GetUnitCountDone(hero_id) < 1) then", "        return false", "    endif", "", "    return true",
   ]);

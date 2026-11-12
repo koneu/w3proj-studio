@@ -9,7 +9,7 @@ test("removing a group moves the minimum forces down, but not \"First Hero Only\
   ai.minForces = 2;
   removeGroup(ai, 0);
   assert.equal(ai.minForces, 1, "control: a group's index moves down");
-  ai.minForces = 0x41495348;
+  ai.minForces = 0x41494148;
   removeGroup(ai, 0);
-  assert.equal(ai.minForces, 0x41495348);
+  assert.equal(ai.minForces, 0x41494148);
 });
