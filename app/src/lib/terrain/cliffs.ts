@@ -54,8 +54,10 @@ export function adjustLevels(t: Terrain, a: { x0: number; y0: number; x1: number
  *  so painting grass next to a cliff, or raising a cliff on grass, gives a grass cliff. That's what the World
  *  Editor's maps show: on cliff corners the ground tile and the cliff type agree in 85–100 % (12
  *  maps), on flat ground they don't. `cliffGround`: the ground tile of each cliff type number;
- *  corners next to `around` are checked too (a cliff's type comes from its bottom-left corner). */
-export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: CornerLog, fixed?: number): boolean {
+ *  corners next to `around` are checked too (a cliff's type comes from its bottom-left corner). `own` are corners
+ *  that take the type though no cliff touches them: those a water brush turned into water, as the World Editor's
+ *  size 3 brush gave its middle corner, with only water round it, the chosen cliff type too (we-drive 2026-11-12). */
+export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGround: string[], stroke: CornerLog, fixed?: number, own?: ReadonlySet<number>): boolean {
   if (!cliffGround.length) return false;
   const W = t.width, H = t.height;
   const layer = (x: number, y: number) => t.corners[y * W + x].layer;
@@ -72,7 +74,7 @@ export function matchCliffTypes(t: Terrain, around: Iterable<number>, cliffGroun
   let changed = false;
   for (const i of near) {
     const x = i % W, y = Math.floor(i / W);
-    if (!(cliffTile(x - 1, y - 1) || cliffTile(x, y - 1) || cliffTile(x - 1, y) || cliffTile(x, y))) continue;
+    if (!own?.has(i) && !(cliffTile(x - 1, y - 1) || cliffTile(x, y - 1) || cliffTile(x - 1, y) || cliffTile(x, y))) continue;
     const c = t.corners[i];
     const type = fixed ?? cliffGround.indexOf(t.groundTiles[c.texture]);
     if (type < 0 || c.cliffTexture === type) continue;

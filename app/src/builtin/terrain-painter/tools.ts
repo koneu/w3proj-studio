@@ -1,6 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
+import { matchCliffTypes } from "../../lib/terrain/cliffs";
 import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
@@ -27,6 +28,17 @@ export interface Brush {
   square?: boolean;
 }
 
+/** The Shallow and Deep Water brush of a size (the toolbar's Size, as the World Editor's brush size) at a ground point:
+ *  centred on the nearest corner, it takes the corners up to size − 1 tiles from it, so size 1 is that corner alone,
+ *  size 2 it and the 4 next to it (a cross), size 3 the 13 within two (a diamond). we-drive 2026-11-12 (verify round 2,
+ *  C3), one Shallow Water click on a flat empty Lordaeron map: size 2 turned 5 corners into water, size 3 13, these;
+ *  size 1 the one corner (tests/fixtures/water-brush). Larger sizes and the square shape weren't seen: they go on alike
+ *  (a circle of radius size − 1 over the corners, a square of that half side). */
+export function waterBrush(t: Pick<Terrain, "offsetX" | "offsetY">, x: number, y: number, size: number, square = false): Brush {
+  const snap = (v: number, o: number) => o + Math.round((v - o) / 128) * 128;
+  return { x: snap(x, t.offsetX), y: snap(y, t.offsetY), radius: Math.max(0, Math.round(size) - 1), square };
+}
+
 /** Corners inside the brush with a weight (1 in the middle, 0 at the rim). */
 function cornersIn(t: Terrain, b: Brush): { i: number; w: number }[] {
   const r = b.radius * 128;
@@ -38,7 +50,7 @@ function cornersIn(t: Terrain, b: Brush): { i: number; w: number }[] {
     const d = b.square ? Math.max(Math.abs(dx), Math.abs(dy)) : Math.hypot(dx, dy);
     if (d > r) continue;
     // Smooth falloff so repeated strokes don't leave terraces.
-    const w = Math.cos((d / r) * (Math.PI / 2)) ** 2;
+    const w = r > 0 ? Math.cos((d / r) * (Math.PI / 2)) ** 2 : 1;
     out.push({ i: y * t.width + x, w: Math.max(w, 0.15) });
   }
   return out;
@@ -50,6 +62,8 @@ export class Stroke {
   private after = new Map<number, Corner>();
   /** Corners the brush went over, changed or not. */
   private covered = new Set<number>();
+  /** Corners a water brush turned into water: they take the cliff type (retypeCliffs). */
+  readonly wet = new Set<number>();
 
   constructor(readonly label: string) {}
 
@@ -149,9 +163,16 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
     stroke.touch(t, i);
     setLayer(c, target.layer);
     if (water && target.waterLevel !== undefined) setWaterLevel(c, target.waterLevel, waterOffsetOf(t));
+    if (water) stroke.wet.add(i);
     changed = true;
   }
   return changed;
+}
+
+/** After a stroke: cliffs next to what it changed take the cliff type `chosen` (the palette's) or that of their
+ *  ground tile, and so do the corners a water brush turned into water (matchCliffTypes). Whether a corner changed. */
+export function retypeCliffs(t: Terrain, stroke: Stroke, cliffGround: string[], chosen?: number): boolean {
+  return matchCliffTypes(t, stroke.area(), cliffGround, stroke, chosen, stroke.wet);
 }
 
 
