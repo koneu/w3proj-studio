@@ -35,6 +35,7 @@ function project() {
     "TerrainArt\\Terrain.slk": slk([["tileID", "walkable", "flyable", "buildable"], ["Ldrt", "1", "1", "1"]]),
     "Doodads\\Doodads.slk": slk([["doodID", "pathTex"], ["LOrk", ROCK], ["LFlw", "_"]]),
     "Units\\DestructableData.slk": slk([["DestructableID", "pathTex", "walkable"]]),
+    "TerrainArt\\Water.slk": slk([["waterID", "height"], ["LSha", "-0.7"], ["ASha", "-0.6"]]),
   };
   const mod = (value: string) => [{ field: "dptx", type: "string", value }];
   const w3d = JSON.stringify({ custom: [
@@ -86,4 +87,23 @@ test("with no texture of its type to fall back to, it doesn't block, and that is
   assert.deepEqual(flower.missing, [GONE]);
   assert.deepEqual(flower.fellBack, []);
   assert.deepEqual(flower.wpm, (await buildPathingMap(w3, t, [], read)).wpm);
+});
+
+test("deep water is measured from the tileset's water surface (the game's water table)", async () => {
+  const { w3, read } = project();
+  const data = await loadPathingData(w3, read);
+  assert.ok(Math.abs(data.waterOffset("L")! - 89.6) < 1e-9);
+  assert.ok(Math.abs(data.waterOffset("A")! - 76.8) < 1e-9);
+  assert.equal(data.waterOffset("Z"), undefined, "not in the table: the default");
+  // Water 45 over the ground by the usual surface: shallow (0x08). Ashenvale's lies 12.8 higher: deep (no walk, 0x0a).
+  const lake = (tileset: string) => {
+    const t = ground();
+    (t as { tileset: string }).tileset = tileset;
+    for (const k of t.corners) { k.hasWater = true; k.water = 45; }
+    return t;
+  };
+  const cell = async (tileset: string) => (await buildPathingMap(w3, lake(tileset), [], read)).wpm[16 + 3 * 28 + 3];
+  assert.equal(await cell("L"), 0x08);
+  assert.equal(await cell("Z"), 0x08);
+  assert.equal(await cell("A"), 0x0a);
 });

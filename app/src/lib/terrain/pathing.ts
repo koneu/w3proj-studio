@@ -7,7 +7,7 @@
 // The rules below were worked out by comparing generated maps with the ones
 // World Editor saved for the sample maps.
 
-import { rampLift, type Corner, type Terrain } from "./w3e";
+import { rampLift, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
 import { rampSides } from "./cliffs";
 
 export const NO_WALK = 0x02, NO_FLY = 0x04, NO_BUILD = 0x08, BLIGHT = 0x20, NO_WATER = 0x40, BLOCKED = 0x80;
@@ -40,6 +40,11 @@ export interface PathingInput {
   stamps?: PathingStamp[];
   /** Water deeper than this can't be walked (default DEEP_WATER). */
   deepWater?: number;
+  /** How far below its stored level the tileset's water surface lies (default WATER_OFFSET): the `height` of
+   *  TerrainArt/Water.slk × −128. Most tilesets have 89.6; Ashenvale and Dungeon 76.8, Dalaran 96, Outland 192. The
+   *  World Editor measures the depth from there: with 89.6, Ashenvale maps came out with thousands of deep cells
+   *  walkable. */
+  waterOffset?: number;
 }
 
 /** Water deeper than this (world units) can't be walked. */
@@ -50,7 +55,8 @@ const waterDepth = (k: Corner) => (k.hasWater ? k.water - k.height : -Infinity);
 /** Whether a tile (its four corners) is a cliff in the pathing map: its corners' layers differ, and it isn't a ramp.
  *  A ramp tile has the ramp flag on all four corners and spans one layer; a tile with only some corners flagged
  *  (beside a ramp, or the stray flags maps carry among cliffs) is a cliff. Worked out from the stored pathing maps of
- *  the sample and ladder maps: every such tile is blocked there (e.g. Autumn Leaves' west cliffs, tiles 15..20 × 16..65). */
+ *  the sample and ladder maps: every such tile is blocked there (e.g. Autumn Leaves' west cliffs, tiles 15..20 × 16..65).
+ *  generatePathing also blocks a ramp tile that rises with no ramp foot beside it (it needs the neighbours). */
 export function isCliffTile(q: readonly Corner[]): boolean {
   const layers = q.map((k) => k.layer);
   const lo = Math.min(...layers), hi = Math.max(...layers);
@@ -80,6 +86,27 @@ export function generatePathing(input: PathingInput): Uint8Array {
     const q = [C(x, y), C(x + 1, y), C(x, y + 1), C(x + 1, y + 1)];
     return q.every((k) => k.ramp) && !isCliffTile(q);
   };
+  // A ramp climbs one layer over two tiles: foot, middle (on the low layer, half a layer up: rampLift), top. So
+  // along an edge of a ramp tile that rises, the ramp goes on past the low end: the next corner out is a ramp corner
+  // on the low layer too. A tile with all four flags across one layer where no rising edge has that (stray flags
+  // around a pit, Autumn Leaves' tile 17,17) steps a whole layer in one tile: a cliff. In the 161 maps' stored
+  // pathing it is the only such tile, and the only ramp tile blocked for no other reason.
+  const footless = (x: number, y: number) => {
+    if (!isRampTile(x, y)) return false;
+    const p: [number, number][] = [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]];
+    let rising = false;
+    for (const [i, j] of [[0, 1], [2, 3], [0, 2], [1, 3]]) {
+      const a = C(...p[i]), b = C(...p[j]);
+      if (a.layer === b.layer) continue;
+      rising = true;
+      const [lo, hi] = a.layer < b.layer ? [p[i], p[j]] : [p[j], p[i]];
+      const fx = 2 * lo[0] - hi[0], fy = 2 * lo[1] - hi[1];
+      if (fx < 0 || fy < 0 || fx >= t.width || fy >= t.height) continue;
+      const foot = C(fx, fy);
+      if (foot.ramp && foot.layer === C(...lo).layer) return false;
+    }
+    return rising;
+  };
   const sides = new Set(rampSides(t).filter((s) => {
     const far = s.outer.filter((k) => !k.ramp);
     if (Math.abs(far[0].layer - far[1].layer) === 1) return true;
@@ -103,7 +130,9 @@ export function generatePathing(input: PathingInput): Uint8Array {
     if (across.some((n) => n?.ramp && n.layer !== k.layer)) continue;
     lift.set(k, l);
   }
-  const depth = (k: Corner) => waterDepth(k) - (lift.get(k) ?? 0);
+  // A corner's water level is read with WATER_OFFSET; the tileset's own surface may lie elsewhere (waterOffset).
+  const raise = WATER_OFFSET - (input.waterOffset ?? WATER_OFFSET);
+  const depth = (k: Corner) => waterDepth(k) + raise - (lift.get(k) ?? 0);
 
   for (let cy = 0; cy < h; cy++) {
     for (let cx = 0; cx < w; cx++) {
@@ -120,7 +149,7 @@ export function generatePathing(input: PathingInput): Uint8Array {
         if (!rule.flyable) p |= NO_FLY;
       }
       if (c.blight) p |= BLIGHT;
-      const cliff = isCliffTile(q) || sides.has(ty * (t.width - 1) + tx);
+      const cliff = isCliffTile(q) || sides.has(ty * (t.width - 1) + tx) || (q[0].ramp && footless(tx, ty));
       if (q.every((k) => depth(k) > 0) || depth(c) > deep) {
         // Water (the whole tile is under water) hides cliffs; unwalkable
         // ground stays dry but blocked.
