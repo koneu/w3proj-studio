@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { newCliffVariation, resizedCameraZoom, resizeSpecials, resizeTerrain } from "./resize";
+import { doodadStays, newCliffVariation, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -11,23 +11,88 @@ function terrain(w: number, h: number): Terrain {
   return { width: w, height: h, offsetX: -64, offsetY: -64, corners: Array.from({ length: w * h }, (_, i) => corner(i)) } as unknown as Terrain;
 }
 
-test("corners that stay are untouched; new ones are the World Editor's, not copies of the edge", () => {
+test("corners that stay are untouched; new ones copy the nearest edge corner, with variations of their own", () => {
   const t = terrain(3, 2);
-  t.corners.forEach((c) => Object.assign(c, { texture: 2, layer: 4, rawHeight: 0x2100, rawWater: 0x2400, hasWater: true, boundary: true, cliffTexture: 1 }));
+  t.corners.forEach((c, i) => Object.assign(c, { texture: 2 + i, layer: 4, rawHeight: 0x2100 + i, rawWater: 0x2400, hasWater: true, boundary: true, cliffTexture: 1, ramp: false, blight: false }));
+  t.corners[2].rawWater = 0x60cb; // the map edge bit comes along; markMapEdge sets it anew afterwards
   const r = resizeTerrain(t, [0, 2, 0, 0], () => 0.99); // randomVariation: 17, never the 5 of the old corners
   assert.equal(r.width, 5);
   assert.equal(r.corners.length, 10);
   assert.deepEqual(r.corners[1], t.corners[1]);
-  // we-drive, 2026-11-11, cliff.w3m grown: all 1104 new corners tex 0, height word 0x2000, water word 0x2000, layer 2,
-  // flags 0, cliff type nibble 15.
-  const added = r.corners[3];
-  assert.deepEqual(
-    [added.texture, added.rawHeight, added.height, added.rawWater, added.layer, added.ramp, added.blight, added.hasWater, added.boundary, added.cliffTexture, added.texExtra],
-    [0, 0x2000, 0, 0x2000, 2, false, false, false, false, 15, 0],
-  );
-  assert.equal(added.variation, 17);
+  // we-drive 2026-11-12, Last Refuge grown by 32 left and bottom: all 7232 new corners equal their edge corner (height,
+  // water, flags, tile, cliff tile, layer) but for the variations.
+  for (const [x, y, from] of [[3, 0, 2], [4, 0, 2], [3, 1, 5], [4, 1, 5]]) {
+    const added = r.corners[y * 5 + x];
+    assert.deepEqual({ ...added, variation: 0, cliffVariation: 0 }, { ...t.corners[from], variation: 0, cliffVariation: 0 }, `corner ${x},${y}`);
+    assert.equal(added.variation, 17);
+    assert.equal(added.cliffVariation, 2);
+    assert.notEqual(added, t.corners[from], "a copy, not the same object");
+  }
   const back = parseW3e(writeW3e({ ...base, ...r }));
-  assert.deepEqual(back.corners[3], added, "it reads back as made");
+  // The test terrain's decoded height and water aren't its words' (terrain()); the words are what is stored.
+  assert.deepEqual({ ...back.corners[3], height: 0, water: 0 }, { ...r.corners[3], height: 0, water: 0 }, "it reads back as made");
+});
+
+test("growing on the left and bottom copies the left column, the bottom row and the corner", () => {
+  const t = terrain(3, 3);
+  const r = resizeTerrain(t, [2, 0, 1, 0], () => 0);
+  const at = (x: number, y: number) => r.corners[y * r.width + x];
+  const same = (a: Corner, b: Corner) => assert.deepEqual({ ...a, variation: 0, cliffVariation: 0 }, { ...b, variation: 0, cliffVariation: 0 });
+  same(at(0, 0), t.corners[0]); // the old bottom left corner fills the new bottom left block
+  same(at(1, 0), t.corners[0]);
+  same(at(0, 3), t.corners[6]); // left of the old top row
+  same(at(3, 0), t.corners[1]); // below the old bottom row
+  same(at(4, 0), t.corners[2]);
+});
+
+test("a cut on one side and growth on another copy the edge that is left", () => {
+  const t = terrain(5, 3);
+  const r = resizeTerrain(t, [-2, 0, 1, 0], () => 0);
+  assert.equal(r.width, 3);
+  // New bottom row: below the old corners 2, 3, 4 (those that stay).
+  assert.deepEqual([0, 1, 2].map((x) => r.corners[x].height), [2, 3, 4]);
+});
+
+test("the whole map's size goes in steps of 4 tiles, as the World Editor's, from 32 to 480", () => {
+  const t = terrain(97, 97); // 96 × 96 tiles, as Last Refuge
+  const none: Sides = [0, 0, 0, 0], border: Sides = [6, 6, 4, 8];
+  assert.equal(resizeProblem(t, [4, 0, 0, 0], border), null, "100 × 96, a click in the World Editor");
+  assert.equal(resizeProblem(t, [-4, 0, -4, 0], border), null, "92 × 92 (the World Editor saved it)");
+  assert.equal(resizeProblem(t, [32, 0, 32, 0], border), null);
+  assert.match(resizeProblem(t, [2, 0, 0, 0], border) ?? "", /width must be a multiple of 4/);
+  assert.match(resizeProblem(t, [0, 0, 0, -1], border) ?? "", /height must be a multiple of 4/);
+  assert.match(resizeProblem(t, [-68, 0, 0, 0], none) ?? "", /width must be 32–480 tiles \(28\)/);
+  assert.match(resizeProblem(t, [388, 0, 0, 0], none) ?? "", /484/);
+  assert.equal(resizeProblem(t, [384, 0, 0, 0], none), null, "480 is the largest");
+  assert.equal(resizeProblem(t, [-64, 0, 0, 0], none), null, "32 the smallest");
+});
+
+test("doodads stay only strictly inside the new map, as the World Editor keeps them", () => {
+  // Last Refuge cut by 32 left and bottom: the new map runs from -2048 to 6144. The World Editor removed the doodads
+  // at x = -2048 and at y = -2048 and kept those 4.7 and 8.5 inside (we-drive, 2026-11-12).
+  const rect = { left: -2048, bottom: -2048, right: 6144, top: 6144 };
+  assert.equal(doodadStays(-2048, 192, rect), false);
+  assert.equal(doodadStays(-768, -2048, rect), false);
+  assert.equal(doodadStays(-2039.5, 2106.7, rect), true);
+  assert.equal(doodadStays(-1610.9, -2043.3, rect), true);
+  assert.equal(doodadStays(6144, 0, rect), false);
+  assert.equal(doodadStays(0, 6144, rect), false);
+  assert.equal(doodadStays(-3000, 0, rect), false, "past the map");
+  // Past the playable area but on the map: the backdrop stays.
+  assert.equal(doodadStays(-1900, -1900, rect), true);
+});
+
+test("units and items stay with their footprint inside the playable area, as the World Editor keeps them", () => {
+  // Last Refuge cut by 4 left and bottom: playable area -4864..5376 by -5120..5120 (we-drive, 2026-11-12).
+  const playable = { left: -4864, bottom: -5120, right: 5376, top: 5120 };
+  const none: [number, number] = [0, 0], mine: [number, number] = [256, 256], camp: [number, number] = [192, 192];
+  assert.equal(unitStays(-4672, 1856, mine, playable), false, "a gold mine 192 inside: its footprint reaches past");
+  assert.equal(unitStays(-4608, -4288, mine, playable), true, "one 256 inside stays");
+  assert.equal(unitStays(-256, -5120, camp, playable), false, "a mercenary camp on the edge");
+  assert.equal(unitStays(-4793.1, 0, none, playable), true, "a creep 70.9 inside");
+  assert.equal(unitStays(-4900, 0, none, playable), false, "a creep past the playable area");
+  assert.equal(unitStays(5376, 5120, none, playable), true, "on the edge itself: the centre counts");
+  assert.equal(unitStays(5377, 0, none, playable), false);
 });
 
 test("Map Size growth on the left and bottom, playable area grown: edge bits as the World Editor sets them", () => {

@@ -167,22 +167,17 @@ export class ResizeHistory {
 /** The session's resize history, shared by the terrain editor (which records) and Map Size (which undoes). */
 export const resizeHistory = new ResizeHistory();
 
-/** What a resize takes away, for asking first: tiles of ground cut off, and how many objects
- *  lie outside (start locations move inside, so they aren't counted). Empty when nothing is cut. */
-export function resizeLoss(t: Terrain, change: Sides, objects: readonly { id?: string; position: readonly number[] }[]): string[] {
-  if (change.every((c) => c >= 0)) return [];
+/** What a resize takes away, for asking first: tiles of ground cut off, and the objects it removes (`removed`: the
+ *  terrain editor's resizeRemovals; start locations move inside, so they aren't among them). Empty when it takes
+ *  nothing. */
+export function resizeLoss(t: Terrain, change: Sides, removed: number): string[] {
   const ow = t.width - 1, oh = t.height - 1;
   // The old map's tiles that are still inside the new one.
   const kw = Math.max(0, Math.min(ow, ow + change[1]) - Math.max(0, -change[0])), kh = Math.max(0, Math.min(oh, oh + change[3]) - Math.max(0, -change[2]));
   const cut = ow * oh - kw * kh;
-  // The new map's edges, as the resize keeps objects (inclusive).
-  const left = t.offsetX - change[0] * 128, right = t.offsetX + (ow + change[1]) * 128;
-  const bottom = t.offsetY - change[2] * 128, top = t.offsetY + (oh + change[3]) * 128;
-  // Start locations aren't removed: they move inside the map.
-  const objectsOutside = objects.filter((o) => o.id !== "sloc" && (o.position[0] < left || o.position[0] > right || o.position[1] < bottom || o.position[1] > top)).length;
   const out: string[] = [];
   if (cut > 0) out.push(`${cut} tile${cut === 1 ? "" : "s"} of terrain (ground, cliffs, water, pathing, shadows)`);
-  if (objectsOutside > 0) out.push(`${objectsOutside} object${objectsOutside === 1 ? "" : "s"} (doodads, units, items) outside the new map`);
+  if (removed > 0) out.push(`${removed} object${removed === 1 ? "" : "s"} (doodads on or past the new edge, units and items outside the playable area)`);
   return out;
 }
 

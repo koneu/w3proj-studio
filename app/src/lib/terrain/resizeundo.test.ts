@@ -168,20 +168,19 @@ function terrain(w: number, h: number): Terrain {
   return { width: w + 1, height: h + 1, offsetX: -w * 64, offsetY: -h * 64, corners: [] } as unknown as Terrain;
 }
 
-test("what a shrink loses is named: tiles of ground and objects outside", () => {
+test("what a resize loses is named: tiles of ground and the objects it removes", () => {
   const t = terrain(64, 64); // 64 x 64 tiles, from -4096 to 4096
-  assert.deepEqual(resizeLoss(t, [0, 0, 0, 0], []), []);
-  assert.deepEqual(resizeLoss(t, [32, 0, 0, 32], [{ position: [9999, 0] }]), [], "growing loses nothing, whatever lies about");
-  const objects = [{ position: [-4000, 0, 0] }, { position: [-3000, 0, 0] }, { position: [3000, 4000, 0] }, { position: [0, 0, 0] }];
-  // Cut 32 tiles from the left: 32 x 64 tiles go, and x < -4096 + 32 * 128 = 0 is outside.
-  const left = resizeLoss(t, [-32, 0, 0, 0], objects);
+  assert.deepEqual(resizeLoss(t, [0, 0, 0, 0], 0), []);
+  assert.deepEqual(resizeLoss(t, [32, 0, 0, 32], 0), [], "growing loses no ground");
+  // Cut 32 tiles from the left: 32 x 64 tiles go.
+  const left = resizeLoss(t, [-32, 0, 0, 0], 2);
   assert.equal(left.length, 2);
   assert.match(left[0], /^2048 tiles of terrain/);
-  assert.match(left[1], /^2 objects /);
-  assert.match(resizeLoss(t, [-32, 0, -32, 0], [])[0], /^3072 tiles/, "an L-shaped cut: 4096 minus 32 x 32 kept");
-  assert.equal(resizeLoss(t, [0, -32, 0, 0], [{ position: [-100, 0] }]).length, 1, "one object inside: no object line");
-  assert.equal(resizeLoss(t, [-32, 0, 0, 0], [{ id: "sloc", position: [-3000, 0] }, { id: "hfoo", position: [-3000, 0] }])[1], "1 object (doodads, units, items) outside the new map", "a start location is moved, not lost");
-  assert.equal(resizeLoss(t, [-32, 0, 0, 0], [{ position: [-4096, 0] }])[1], "1 object (doodads, units, items) outside the new map");
+  assert.equal(left[1], "2 objects (doodads on or past the new edge, units and items outside the playable area)");
+  assert.match(resizeLoss(t, [-32, 0, -32, 0], 0)[0], /^3072 tiles/, "an L-shaped cut: 4096 minus 32 x 32 kept");
+  assert.equal(resizeLoss(t, [0, -32, 0, 0], 0).length, 1, "nothing removed: no object line");
+  assert.deepEqual(resizeLoss(t, [32, 0, 0, 0], 1), ["1 object (doodads on or past the new edge, units and items outside the playable area)"],
+    "growing can remove a unit that the new border leaves outside the playable area");
 });
 
 test("undo and redo run one at a time: two started together neither lose a step nor take the same one twice", async () => {

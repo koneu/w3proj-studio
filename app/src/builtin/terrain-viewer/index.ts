@@ -58,7 +58,7 @@ import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
 import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, snapped, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
-import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, outsideAfterResize, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
+import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
 import { changedTypes, changesImports, changesObjectData, changesPathing, DebouncedReload } from "./filewatch";
 import { askReplace, replaceCorners, replaceTitle, swapsOf, type ReplaceRequest, type ReplaceTypes } from "./replace";
 import { bounds } from "../../lib/model/renderer";
@@ -89,7 +89,7 @@ import { ITEM_DROPS_DOC, itemDropsEditor, type DropsSource } from "./dropstab";
 import { bulkDrops, itemTablesDiffer } from "./dropsview";
 import { beginResize, resizeHistory, settleWithin } from "../../lib/terrain/resizeundo";
 import { PendingWork } from "../../lib/settle";
-import { cameraBounds, applyResizePathing, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, worldRect, type Sides } from "../../lib/terrain/resize";
+import { cameraBounds, applyResizePathing, doodadStays, planPathingOverrides, playableSize, resizeGrid, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitStays, worldRect, type Sides } from "../../lib/terrain/resize";
 
 /** Failures already shown, by message: one cause that fails many small reads is said once. */
 const reported = new Set<string>();
@@ -810,11 +810,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const problem = resizeProblem(t, change, complements);
       if (problem) throw new Error(problem);
       const [width, height] = resizedSize(t, change);
-      const removed = outsideAfterResize(handle.objects.list(), t, change);
+      const removed = await handle.resizeRemovals(change, complements);
       const grows = change.some((n) => n > 0);
       const result = {
         width, height, border: complements, playable: playableSize({ ...t, width: width + 1, height: height + 1 }, complements), objectsRemoved: removed,
-        ...(grows ? { note: "New ground is flat, on cliff level 2, with the tileset's first tile (as the World Editor adds it). Paint and shape it afterwards." } : {}),
+        ...(grows ? { note: "New ground copies the map's edge beside it (height, cliff level, water and tiles), as the World Editor adds it. Paint and shape it afterwards." } : {}),
       };
       if (dryRun === true) return result;
       refuseLostView(projectTerrain(w3));
@@ -3733,26 +3733,50 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             throw e;
           }
         };
+        /** Which placed objects a resize to `next` (only its size and offset are read) keeps, as the World Editor:
+         *  doodads strictly inside the new map (doodadStays), units and items with their footprint in the playable
+         *  area (unitStays). Start locations always stay: they are moved inside. */
+        const resizeRules = async (next: Pick<Terrain, "offsetX" | "offsetY" | "width" | "height">, complements: Sides) => {
+          const rect = worldRect(next), edge = playableArea({ cameraComplements: complements }, next);
+          // Half a building's footprint per unit type (none known: its centre alone).
+          const half = new Map<string, [number, number]>();
+          for (const id of new Set(unitsFile?.list.map((p) => p.id) ?? [])) {
+            await loadCells(id).catch(() => { /* its centre alone */ });
+            const cells = buildingCells.get(id);
+            half.set(id, cells ? [cells[0] * 16, cells[1] * 16] : [0, 0]);
+          }
+          const stays = (p: Placed, doodad: boolean) => p.id === "sloc"
+            || (doodad ? doodadStays(p.position[0], p.position[1], rect) : unitStays(p.position[0], p.position[1], half.get(p.id) ?? [0, 0], edge));
+          return { rect, edge, stays };
+        };
+        /** How many placed objects (special doodads included) a resize would remove; changes nothing. */
+        const resizeRemovals = async (change: Sides, complements: Sides): Promise<number> => {
+          const [w, h] = resizedSize(terrain, change);
+          const next = { offsetX: terrain.offsetX - change[0] * 128, offsetY: terrain.offsetY - change[2] * 128, width: w + 1, height: h + 1 };
+          const { stays } = await resizeRules(next, complements);
+          const specials = Array.isArray(dooFile?.doc.specials) ? resizeSpecials(dooFile.doc.specials as unknown[], terrain, change).removed : 0;
+          return (dooFile?.list.filter((p) => !stays(p, true)).length ?? 0) + (unitsFile?.list.filter((p) => !stays(p, false)).length ?? 0) + specials;
+        };
         const applyResize = async (change: Sides, complements: Sides): Promise<{ removed: number }> => {
           const next = resizeTerrain(terrain, change);
           // Read and moved before anything is written; a bad file is left alone (see planPathingOverrides).
           const stored = await w3.workspace.readText(".w3proj/pathing.json").then((x) => JSON.parse(x) as unknown).catch(() => null);
           const plan = planPathingOverrides(stored, terrain, change);
-          const rect = worldRect(next);
-          const inside = (x: number, y: number) => x >= rect.left && x <= rect.right && y >= rect.bottom && y <= rect.top;
-          // Start locations aren't removed but moved into the map (a player needs one).
+          const { rect, edge, stays } = await resizeRules(next, complements);
+          const playable = (x: number, y: number) => inArea(x, y, edge);
+          // Start locations aren't removed but moved into the playable map (a player needs one). The World Editor
+          // removes them and asks on save whether to generate the missing ones.
           const pb = cameraBounds(next, complements);
           const clamp = (x: number, y: number): [number, number] => [Math.min(Math.max(x, pb[0]), pb[2]), Math.min(Math.max(y, pb[1]), pb[3])];
           let removed = 0;
           for (const f of [dooFile, unitsFile]) {
             if (!f) continue;
-            for (const p of f.list) if (p.id === "sloc" && !inside(p.position[0], p.position[1])) [p.position[0], p.position[1]] = clamp(p.position[0], p.position[1]);
-            const keep = f.list.filter((p) => inside(p.position[0], p.position[1]));
+            for (const p of f.list) if (p.id === "sloc" && !playable(p.position[0], p.position[1])) [p.position[0], p.position[1]] = clamp(p.position[0], p.position[1]);
+            const keep = f.list.filter((p) => stays(p, f === dooFile));
             removed += f.list.length - keep.length;
             f.list.splice(0, f.list.length, ...keep);
             // The border itself moved, so anything can be on the other side of it now.
             if (f === dooFile) {
-              const edge = playableArea({ cameraComplements: complements }, next);
               for (const p of keep) {
                 const flags = flagsOf(p);
                 if (flags !== undefined) (p as Placed & { flags?: number }).flags = borderFlags(flags, !inArea(p.position[0], p.position[1], edge));
@@ -3774,7 +3798,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
             [info.playableWidth, info.playableHeight] = playableSize(next, complements);
             const zoom = resizedCameraZoom(info.cameraZoom as Parameters<typeof resizedCameraZoom>[0]);
             if (zoom) info.cameraZoom = zoom;
-            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) if (!inside(pl.start[0], pl.start[1])) [pl.start[0], pl.start[1]] = clamp(pl.start[0], pl.start[1]);
+            for (const pl of (info.players as { start: number[] }[] | undefined) ?? []) if (!playable(pl.start[0], pl.start[1])) [pl.start[0], pl.start[1]] = clamp(pl.start[0], pl.start[1]);
           });
           void loadBorder();
           // Regions are clipped to the map (those left outside go).
@@ -3805,7 +3829,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           return { removed };
         };
         const handle: TerrainEditorHandle = {
-          terrain, editable, redraw, host: el, resizeMap,
+          terrain, editable, redraw, host: el, resizeMap, resizeRemovals,
           terrainChanged: (cliffs) => { renderer.terrainChanged(); if (cliffs) void liveCliffs(); doc.setDirty(true); redraw(); },
           commitTerrain,
           tilesets: tilesetList,
