@@ -203,6 +203,9 @@ export interface TerrainEditorHandle {
   /** Where the placed units' models are drawn now (a flyer at its flying height, a ship on the water), by their
    *  placement's id and position, with the team colour they're drawn in and their model ("" for a checkered cube).
    *  For tests and measuring. */
+  /** The special doodads (cliff and cave models placed by tile) drawn now: type id, position and model. They can't be
+   *  selected. For tests and measuring. */
+  drawnSpecials(): { id: string; x: number; y: number; z: number; model: string }[];
   drawnUnits(): { id: string; x: number; y: number; z: number; team: number; model: string }[];
   /** Redraws the ground after corners of `terrain` were changed in place (during a stroke). */
   terrainChanged(cliffs?: boolean): void;
