@@ -125,6 +125,23 @@ export type GridSize = "none" | "small" | "medium" | "large";
 /** Distance between grid lines: small is the pathing cell, medium the tile, large four tiles. */
 export const GRID_STEP: Record<GridSize, number> = { none: 0, small: 32, medium: 128, large: 512 };
 
+/** One set of grid lines: every `step` world units from the map's corner, in `rgba` (0–1, alpha how much of it covers
+ *  the ground). */
+export interface GridLines { step: number; rgba: readonly [number, number, number, number] }
+
+/** The World Editor's line colours: in SD the tiles' lines pure white and every 4 tiles pure yellow, a pixel wide and
+ *  opaque (we-drive, map 03's opening view, 2026-11-12: 254, 254, 254 and 252, 253, 2; its HD tints them, 195, 199, 228
+ *  and 196, 200, 68 on HillsbradCreek, 2026-11-11), none over deep water. The pathing cells' lines were only seen in
+ *  HD, a faint lavender (115, 120, 159 over ground of about 100, 100, 105). */
+const GRID_COLOUR: Record<number, GridLines["rgba"]> = { 32: [0.55, 0.58, 0.85, 0.5], 128: [1, 1, 1, 1], 512: [1, 1, 0, 1] };
+
+/** The lines a grid of this step draws, finest first: as the World Editor's, a finer grid keeps the coarser ones'
+ *  lines over its own (medium: the tiles' white lines and every 4 tiles yellow; small: the pathing cells too). */
+export function gridLines(step: number): GridLines[] {
+  if (!(step > 0)) return [];
+  return [32, 128, 512].filter((s) => s >= step).map((s) => ({ step: s, rgba: GRID_COLOUR[s] }));
+}
+
 /** What a "Toggle ... Grid" does: the same size again switches the grid off, another one replaces it. */
 export const toggleGrid = (current: GridSize, size: Exclude<GridSize, "none">): GridSize => (current === size ? "none" : size);
 
@@ -143,19 +160,19 @@ export const NAVAL_BLOCKED: readonly number[] = [255, 128, 128, 128];
  *  ground just inside came out as half of it plus half the light red, as anywhere else). */
 export const NAVAL_EDGE: readonly number[] = [108, 55, 15, 255];
 
-/** The playable part in pathing cells of a `width` wide grid: columns `x0` to `x1` and rows `y0` to `y1`, ends excluded. */
-export interface CellRect { width: number; x0: number; y0: number; x1: number; y1: number }
+/** The tiles past the playable map (w3e.ts mapEdgeTiles: 1 per tile, rows from the south) of a map `tilesX` wide. */
+export interface EdgeTiles { tiles: ArrayLike<number>; tilesX: number }
 
-/** Where ships can't sail (per pathing cell, rows from the south), as the World Editor shows it: red over every cell
- *  without water for ships (land, what blocks them), nothing over water they sail, shallow or deep, and the map's
- *  edge (the cells outside `playable`, when given) brown. */
-export function navalColors(cells: ArrayLike<number>, playable?: CellRect | null): Uint8Array {
+/** Where ships can't sail (per pathing cell, 4 by 4 per tile, rows from the south), as the World Editor shows it: red
+ *  over every cell without water for ships (land, what blocks them), nothing over water they sail, shallow or deep, and
+ *  the map's edge brown: the cells of the tiles the terrain marks as past the playable map (`edge`), as the editor goes
+ *  by those marks, not by the w3i's border. Over the edge's water the editor's black water lies on top (the renderer's
+ *  darkWaterCorners): HillsbradCreek's west border, a deep lake, stays black in its naval view (we-drive, 2026-11-12). */
+export function navalColors(cells: ArrayLike<number>, edge?: EdgeTiles | null): Uint8Array {
   const rgba = new Uint8Array(cells.length * 4);
+  const width = edge ? edge.tilesX * 4 : 0;
   for (let i = 0; i < cells.length; i++) {
-    if (playable && playable.width > 0) {
-      const x = i % playable.width, y = Math.floor(i / playable.width);
-      if (x < playable.x0 || x >= playable.x1 || y < playable.y0 || y >= playable.y1) { rgba.set(NAVAL_EDGE, i * 4); continue; }
-    }
+    if (edge && width > 0 && edge.tiles[Math.floor(i / width / 4) * edge.tilesX + ((i % width) >> 2)]) { rgba.set(NAVAL_EDGE, i * 4); continue; }
     if (cells[i] & NO_WATER) rgba.set(NAVAL_BLOCKED, i * 4);
   }
   return rgba;

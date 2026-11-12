@@ -44,7 +44,9 @@ export function hdWaterAt(depth: number): { alpha: number; deep: number } {
 import { ParticleInstance, ParticleRenderer } from "../../lib/model/particles";
 import { MOST_PARTICLES, placeWeather, viewBox, type WeatherBox, type WeatherEffect } from "../../lib/model/weather";
 import type { Placed } from "./objects";
-import { cornerNormal, heightAt, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { cornerNormal, heightAt, mapEdgeTiles, rampLift, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { borderShade, darkWaterCorners } from "../../lib/terrain/area";
+import { gridLines } from "./viewcmds";
 
 const norm = (a: Vec3): Vec3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
@@ -112,14 +114,17 @@ void main() { outColor = vColor; }`;
 // "shallow min" to "shallow max" as the water deepens to 64/128 of a cliff layer (from 10/128),
 // then from "deep min" to "deep max" until 72/128 (TerrainArt\Water.slk).
 const WATER_VS = `#version 300 es
-in vec3 aPos; in vec2 aUv; in float aDepth;
+in vec3 aPos; in vec2 aUv; in float aDepth; in float aDark;
 uniform mat4 uViewProj;
-out vec2 vUv; out float vDepth; out highp vec3 vWorld;
+out vec2 vUv; out float vDepth; out highp vec3 vWorld; out float vDark;
 ${FOG_VS}
-void main() { vUv = aUv; vDepth = aDepth; vWorld = aPos; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
+void main() { vUv = aUv; vDepth = aDepth; vDark = aDark; vWorld = aPos; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const WATER_FS = `#version 300 es
 precision mediump float;
-in vec2 vUv; in float vDepth; in highp vec3 vWorld;
+in vec2 vUv; in float vDepth; in highp vec3 vWorld; in float vDark;
+// Past the playable map the water is black (vDark 1 at corners whose tiles are all past it: darkWaterCorners), its
+// colour fading in over the last tile there; uEdgeDark 0 when the border isn't shown.
+uniform float uEdgeDark;
 uniform sampler2D uTex; uniform vec4 uShallowMin; uniform vec4 uShallowMax; uniform vec4 uDeepMin; uniform vec4 uDeepMax;
 // The scene light on a flat surface (the map's water tint is in the ramp: waterRamp); uGrey 1: the
 // texture gives only its brightness (tinted water).
@@ -163,12 +168,12 @@ void main() {
     float ripple = clamp(dot(t.rgb, vec3(0.299, 0.587, 0.114)) / max(uWaterBrightness, 0.05), 0.5, 1.5);
     // The models' real shadows fall on the water too, keeping WATER_SHADE of its colour.
     vec3 shade = mix(vec3(${WATER_SHADE.map((v) => v.toFixed(3)).join(", ")}), vec3(1.0), sunLit(vWorld, vec3(0.0, 0.0, 1.0)));
-    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade), a);
+    outColor = vec4(fogged(colour * mix(1.0, ripple, 0.5) * shade * (1.0 - vDark * uEdgeDark)), a);
     return;
   }
   t.rgb = mix(t.rgb, vec3(dot(t.rgb, vec3(0.299, 0.587, 0.114))), uGrey);
   vec4 w = t * c;
-  outColor = vec4(fogged(toned(w.rgb, uLight)), w.a);
+  outColor = vec4(fogged(toned(w.rgb, uLight) * (1.0 - vDark * uEdgeDark)), w.a);
 }`;
 
 /** Texture unit of HD water's depth picture of the models (drawWaterDepth): beside SUN_UNIT (5). */
@@ -328,8 +333,9 @@ precision mediump float; in vec2 vUV; uniform sampler2D uTex; out vec4 outColor;
 ${FOG_FS}
 void main() { outColor = texture(uTex, vUV); if (outColor.a < 0.01) discard; outColor.rgb = fogged(outColor.rgb); }`;
 
-// Grid lines over the ground, drawn per pixel so any map size costs the same: lines every uStep world units
-// from the map's corner, fading out once the cells are too small to tell apart.
+// Grid lines over the ground, drawn per pixel so any map size costs the same: up to three sets of lines (finest first,
+// every uSteps[i] world units from the map's corner, in uColors[i]), each fading out once its cells are too small to tell
+// apart, the coarser lying over the finer.
 const GRID_VS = `#version 300 es
 in vec3 aPos;
 uniform mat4 uViewProj;
@@ -337,15 +343,27 @@ out highp vec2 vW;
 ${FOG_VS}
 void main() { vW = aPos.xy; gl_Position = uViewProj * vec4(aPos, 1.0); vFogDepth = gl_Position.w; }`;
 const GRID_FS = `#version 300 es
-precision highp float; in vec2 vW; uniform vec2 uOrigin; uniform float uStep; uniform vec4 uColor; out vec4 outColor;
+precision highp float; in vec2 vW; uniform vec2 uOrigin; uniform float uSteps[3]; uniform int uLevels; uniform vec4 uColors[3]; out vec4 outColor;
 ${FOG_FS}
-void main() {
-  vec2 g = (vW - uOrigin) / uStep, w = max(fwidth(g), vec2(1e-6));
+float lineAt(float step) {
+  vec2 g = (vW - uOrigin) / step, w = max(fwidth(g), vec2(1e-6));
   vec2 d = abs(fract(g - 0.5) - 0.5) / w;
-  float line = (1.0 - min(min(d.x, d.y), 1.0)) * (1.0 - smoothstep(0.2, 0.45, max(w.x, w.y)));
-  if (line < 0.02) discard;
-  outColor = vec4(fogged(uColor.rgb), uColor.a * line);
+  // About a pixel wide and solid, as the World Editor's lines (solid within 0.4 of a pixel, gone at 0.9).
+  return clamp(2.0 * (0.9 - min(d.x, d.y)), 0.0, 1.0) * (1.0 - smoothstep(0.2, 0.45, max(w.x, w.y)));
+}
+void main() {
+  vec3 rgb = vec3(0.0); float a = 0.0;
+  for (int i = 0; i < 3; i++) {
+    if (i >= uLevels) break;
+    float ai = uColors[i].a * lineAt(uSteps[i]);
+    rgb = uColors[i].rgb * ai + rgb * (1.0 - ai);
+    a = ai + a * (1.0 - ai);
+  }
+  if (a < 0.02) discard;
+  outColor = vec4(fogged(rgb / a), a);
 }`;
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 /** A ground-following circle (selection, brush outline). */
 export interface Ring {
@@ -516,7 +534,6 @@ export class TerrainRenderer {
   /** A sky model drawn around the camera, and the radius it reaches at scale 1. */
   sky: { gpu: ModelGpu; radius: number } | null = null;
   showSky = true;
-  private wire: Mesh;
   private markers = new Map<string, Mesh>();
   private selection: Mesh[] = [];
   showWater = true;
@@ -549,7 +566,6 @@ export class TerrainRenderer {
   /** The map's weather: over its box, or following the view without one. */
   weather: { effect: WeatherEffect; particles: ParticleInstance; texture: WebGLTexture | null; box: WeatherBox | null }[] = [];
   showWeather = true;
-  wireframe = false;
   /** Object groups (models and markers) that aren't drawn. */
   hiddenGroups = new Set<string>();
   /** Lit as the game is (the map's lighting on): the pair of the World Editor's game view. */
@@ -687,8 +703,8 @@ export class TerrainRenderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([110, 110, 100, 255]));
     this.ground = this.buildGround();
     this.water = this.buildWater();
-    this.wire = this.buildWire();
     this.heightMap = this.buildHeightMap();
+    this.refreshBorder();
 
     const t = terrain, w = (t.width - 1) * 128, h = (t.height - 1) * 128;
     this.center = [t.offsetX + w / 2, t.offsetY + h / 2, 0];
@@ -720,12 +736,13 @@ export class TerrainRenderer {
     const gl = this.gl;
     this.setCliffTiles(this.cliffTiles, this.groundOverrides);
     this.heightRange = null;
-    for (const m of [this.water, this.wire]) this.freeVao(m.vao);
+    this.freeVao(this.water.vao);
     this.water = this.buildWater();
-    this.wire = this.buildWire();
     if (this.terrainWire) { this.freeVao(this.terrainWire.vao); this.terrainWire = null; }
     // Same size, new heights: the overlays' meshes only get new positions.
     for (const layer of [this.overlay, this.border, this.viewLayer, this.held?.viewLayer, this.gridMesh]) if (layer) this.reshapeOverlay(layer.pos);
+    // The marks of the tiles past the playable map are part of the corners too.
+    this.refreshBorder();
     gl.bindTexture(gl.TEXTURE_2D, this.heightMap.texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.terrain.width, this.terrain.height, gl.RED, gl.FLOAT, this.groundHeights());
   }
@@ -833,6 +850,7 @@ export class TerrainRenderer {
   private buildWater(): Mesh {
     const t = this.terrain, gl = this.gl, out: number[] = [];
     const surfaces = new Float32Array((t.width - 1) * (t.height - 1)).fill(NaN);
+    const dark = darkWaterCorners(t);
     for (let y = 0; y < t.height - 1; y++) {
       for (let x = 0; x < t.width - 1; x++) {
         const cs = [this.corner(x, y), this.corner(x + 1, y), this.corner(x + 1, y + 1), this.corner(x, y + 1)];
@@ -841,7 +859,7 @@ export class TerrainRenderer {
         surfaces[y * (t.width - 1) + x] = Math.max(...tile.z);
         const v = cs.map((_, i) => {
           const dx = i === 1 || i === 2 ? 1 : 0, dy = i >= 2 ? 1 : 0;
-          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, tile.z[i], dx, 1 - dy, tile.depth[i] / 128];
+          return [t.offsetX + (x + dx) * 128, t.offsetY + (y + dy) * 128, tile.z[i], dx, 1 - dy, tile.depth[i] / 128, dark[(y + dy) * t.width + x + dx]];
         });
         out.push(...v[0], ...v[1], ...v[2], ...v[0], ...v[2], ...v[3]);
       }
@@ -855,15 +873,15 @@ export class TerrainRenderer {
       const loc = gl.getAttribLocation(this.waterProg, name);
       if (loc < 0) return;
       gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 24, offset * 4);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 28, offset * 4);
     };
-    attr("aPos", 3, 0); attr("aUv", 2, 3); attr("aDepth", 1, 5);
+    attr("aPos", 3, 0); attr("aUv", 2, 3); attr("aDepth", 1, 5); attr("aDark", 1, 6);
     gl.bindVertexArray(null);
     this.wet = wetLevels(t.width - 1, t.height - 1, (x, y) => {
       const s = surfaces[y * (t.width - 1) + x];
       return Number.isNaN(s) ? null : s;
     });
-    return { vao, count: out.length / 6 };
+    return { vao, count: out.length / 7 };
   }
 
   /** Per tile, the highest water surface near it (wetLevels), made with the water. */
@@ -975,16 +993,6 @@ export class TerrainRenderer {
     return n > 1 ? Math.floor((performance.now() / 1000) * this.waterLook.rate) % n : 0;
   }
 
-  private buildWire(): Mesh {
-    const t = this.terrain, out: number[] = [];
-    const p = (x: number, y: number) => [t.offsetX + x * 128, t.offsetY + y * 128, this.corner(x, y).height + 1, 0, 0, 0, 0.35];
-    for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
-      if (x + 1 < t.width) out.push(...p(x, y), ...p(x + 1, y));
-      if (y + 1 < t.height) out.push(...p(x, y), ...p(x, y + 1));
-    }
-    return this.colorMesh(out);
-  }
-
   /** View > Terrain > Wireframe: every tile's edges and one diagonal, green, as the World Editor draws it. */
   private buildTerrainWire(): Mesh {
     const t = this.terrain, out: number[] = [];
@@ -1003,7 +1011,7 @@ export class TerrainRenderer {
   /** Everything shown, whatever the user switched off, apart from what the tool asks to `hide`,
    *  until the function it returns runs: a tool sees the map, not this person's way of looking at it. */
   showEverything(hide: { groups: string[]; water: boolean } = { groups: [], water: false }) {
-    const { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep, groundLook, showEditorOnly, ringSets } = this;
+    const { hiddenGroups, showWater, showEffects, overlay, showBorder, showFog, showSky, showWeather, viewLayer, gridStep, groundLook, showEditorOnly, ringSets } = this;
     // The view layer is put aside, not dropped: a layer set while this lasts goes there, and is what comes back.
     this.held = { viewLayer };
     this.groundLook = "textured";
@@ -1012,7 +1020,6 @@ export class TerrainRenderer {
     this.hiddenGroups = new Set(hide.groups);
     this.showWater = !hide.water;
     this.showEffects = true;
-    this.wireframe = false;
     this.overlay = null;
     this.viewLayer = null;
     this.gridStep = 0;
@@ -1026,7 +1033,7 @@ export class TerrainRenderer {
       this.held = null;
       // Rings set while this lasted (none: the picture is taken in one go) replace the ones put aside.
       for (const [name, rings] of this.ringSets) { ringSets.get(name)?.forEach((r) => this.freeVao(r.vao)); ringSets.set(name, rings); }
-      Object.assign(this, { hiddenGroups, showWater, showEffects, wireframe, overlay, showBorder, showFog, showSky, showWeather, viewLayer: held?.viewLayer ?? null, gridStep, groundLook, showEditorOnly, ringSets });
+      Object.assign(this, { hiddenGroups, showWater, showEffects, overlay, showBorder, showFog, showSky, showWeather, viewLayer: held?.viewLayer ?? null, gridStep, groundLook, showEditorOnly, ringSets });
     };
   }
 
@@ -1060,12 +1067,20 @@ export class TerrainRenderer {
     this.uploadOverlay(slot.viewLayer.tex, rgba, width, height);
   }
 
-  /** The border's shade, one texel per tile. */
-  setBorder(rgba: Uint8Array, width: number, height: number) {
+  /** The border's shade, from the terrain's marks of the tiles past the playable map (area.ts borderShade): made
+   *  with the renderer and after each change of the corners; the editor calls it after it marks the edge anew. */
+  refreshBorder() {
     if (!this.overlayProgram()) return;
+    // Most edits leave the marks alone, and a big map's shade has millions of texels: made again only when they moved.
+    const marks = mapEdgeTiles(this.terrain);
+    if (this.border && this.borderMarks && sameBytes(marks, this.borderMarks)) return;
+    this.borderMarks = marks;
+    const { rgba, width, height } = borderShade(this.terrain);
     this.border ??= { ...this.overlayMesh(), tex: this.gl.createTexture()! };
-    this.uploadOverlay(this.border.tex, rgba, width, height);
+    this.uploadOverlay(this.border.tex, rgba, width, height, true);
   }
+  /** The marks the border's shade was made from. */
+  private borderMarks: Uint8Array | null = null;
 
   /** The overlay program, compiled the first time; null once the context is gone (the editor closed
    *  while a file was still being read for a layer): a shader can't compile then, and nothing is drawn anyway. */
@@ -1074,13 +1089,15 @@ export class TerrainRenderer {
     return (this.overlayProg ??= compile(this.gl, OVERLAY_VS, OVERLAY_FS));
   }
 
-  private uploadOverlay(tex: WebGLTexture, rgba: Uint8Array, width: number, height: number) {
+  /** `smooth`: drawn blended between the texels (the border's shade), else a texel's square each. */
+  private uploadOverlay(tex: WebGLTexture, rgba: Uint8Array, width: number, height: number, smooth = false) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const filter = smooth ? gl.LINEAR : gl.NEAREST;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
@@ -1468,9 +1485,10 @@ export class TerrainRenderer {
     // the eye as in the game, also from further out than the game's camera: zoomed out, a near fog covers
     // everything, as it does there (the view's Fog box turns it off).
     const fog = this.showFog && this.fog ? this.fog : null;
-    // With the terrain as a wireframe or hidden, the World Editor shows black behind it.
+    // With the terrain as a wireframe or hidden, the World Editor shows black behind it, and past the map's edge too
+    // (we-drive, map 03 and HillsbradCreek, 2026-11-12: 0, 0, 0 there; Studio's was 28, 31, 36).
     const textured = this.groundLook === "textured";
-    const back = !textured ? [0, 0, 0] : fog?.color ?? [0.11, 0.12, 0.14];
+    const back = textured && fog ? fog.color : [0, 0, 0];
     gl.clearColor(back[0], back[1], back[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
@@ -1532,7 +1550,9 @@ export class TerrainRenderer {
       // The border is part of the map, and fades with it. What a tool shows has to stay readable.
       setFog(gl, (name) => gl.getUniformLocation(this.overlayProg as WebGLProgram, name), layer === this.border ? fog : null);
       gl.uniformMatrix4fv(gl.getUniformLocation(this.overlayProg, "uViewProj"), false, viewProj);
-      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX, t.offsetY, (t.width - 1) * 128, (t.height - 1) * 128);
+      // The border's texels sit on the pathing cells' corners (borderShade), the layers' on the cells.
+      const half = layer === this.border ? 16 : 0;
+      gl.uniform4f(gl.getUniformLocation(this.overlayProg, "uRect"), t.offsetX - half, t.offsetY - half, (t.width - 1) * 128 + 2 * half, (t.height - 1) * 128 + 2 * half);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
       gl.uniform1i(gl.getUniformLocation(this.overlayProg, "uTex"), 0);
@@ -1629,10 +1649,6 @@ export class TerrainRenderer {
     gl.useProgram(this.colorProg);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.colorProg, "uViewProj"), false, viewProj);
     gl.uniform1f(gl.getUniformLocation(this.colorProg, "uPointSize"), 5000);
-    if (this.wireframe && onGround) {
-      gl.bindVertexArray(this.wire.vao);
-      gl.drawArrays(gl.LINES, 0, this.wire.count);
-    }
     if (this.groundLook === "wireframe") {
       this.terrainWire ??= this.buildTerrainWire();
       gl.bindVertexArray(this.terrainWire.vao);
@@ -1661,6 +1677,8 @@ export class TerrainRenderer {
       setTone(gl, (name) => gl.getUniformLocation(this.waterProg, name), this.tone);
       gl.uniform3fv(gl.getUniformLocation(this.waterProg, "uHdWater"), hdWaterColor(this.terrain.tileset, !!this.waterTint));
       gl.uniform1f(gl.getUniformLocation(this.waterProg, "uWaterBrightness"), look.frames.some((f) => f) ? this.waterBrightness : 1);
+      // The border's black water goes with the border's shade (the Boundary switch, and the textured ground it lies on).
+      gl.uniform1f(gl.getUniformLocation(this.waterProg, "uEdgeDark"), this.showBorder && textured ? 1 : 0);
       const lit = this.flatLight(terrainLight);
       gl.uniform3f(gl.getUniformLocation(this.waterProg, "uLight"), lit[0], lit[1], lit[2]);
       // The models' depth picture (a texture of its own is always bound to the sampler, as for the shadow map).
@@ -1781,9 +1799,11 @@ export class TerrainRenderer {
     setFog(gl, (name) => gl.getUniformLocation(this.gridProg as WebGLProgram, name), null);
     gl.uniformMatrix4fv(gl.getUniformLocation(this.gridProg, "uViewProj"), false, viewProj);
     gl.uniform2f(gl.getUniformLocation(this.gridProg, "uOrigin"), t.offsetX, t.offsetY);
-    gl.uniform1f(gl.getUniformLocation(this.gridProg, "uStep"), this.gridStep);
-    const colour = this.gridStep >= 512 ? [1, 0.9, 0.3, 0.95] : this.gridStep >= 128 ? [1, 1, 1, 0.7] : [0.75, 0.9, 1, 0.45];
-    gl.uniform4fv(gl.getUniformLocation(this.gridProg, "uColor"), colour);
+    // As the World Editor's: the medium grid keeps the large one's yellow lines, the small one both (gridLines).
+    const lines = gridLines(this.gridStep);
+    gl.uniform1i(gl.getUniformLocation(this.gridProg, "uLevels"), lines.length);
+    gl.uniform1fv(gl.getUniformLocation(this.gridProg, "uSteps"), new Float32Array([0, 1, 2].map((i) => lines[i]?.step ?? 1)));
+    gl.uniform4fv(gl.getUniformLocation(this.gridProg, "uColors"), new Float32Array([0, 1, 2].flatMap((i) => lines[i]?.rgba ?? [0, 0, 0, 0])));
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.depthMask(false);

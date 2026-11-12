@@ -43,7 +43,7 @@ import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, 
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
-import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
+import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
 import { campsOf, checkMelee, unitLevels } from "./meleecheck";
 import { AREA_COMMAND, borderFlags, CANCEL_COMMAND, CLIPBOARD_COMMANDS, DELETE_COMMAND, FACE_COMMAND, FIXED_HEIGHT, HELD_COMMANDS, joinSteps, KEY_COMMANDS, MOUSE_CONTROLS, mouseControlOf, OBJECT_EDITOR_COMMAND, OUTSIDE_PLAYABLE, RECALL_COMMAND, runsAsCommand, scaled, selectionEditOf, turnOf, type SelectionKey } from "./selectionkeys";
@@ -70,7 +70,7 @@ import { predictShadows } from "./shadowmap";
 import { playerRaces, startPreviews, START_PREVIEW_ALPHA } from "./startpreview";
 import { lightAt, type SceneLight } from "../../lib/model/dnclight";
 import { BLIGHT_TEXTURE, TerrainRenderer, type Marker, type ObjectInstance } from "./renderer";
-import { groundHeight, onBoundary, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, onBoundary, mapEdgeTiles, markMapEdge, heightAt, parseW3e, setGroundHeight, waterSurfaceAt, writeW3e, type Corner, type Terrain } from "../../lib/terrain/w3e";
 import { keyOf as eventKey } from "../../lib/keys";
 import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { readTerrainBytes, TERRAIN_PATHS, terrainPath, writeTerrainBytes } from "../../lib/terrain/w3etext";
@@ -1630,7 +1630,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           showCameraBounds();
           renderer.fog = fogOf(info);
           playableEdge = playableArea(info, terrain);
-          renderer.setBorder(borderShade(terrain.width - 1, terrain.height - 1, info.cameraComplements), terrain.width - 1, terrain.height - 1);
+          // The border's shade comes from the terrain's own marks (the renderer's refreshBorder), as the editor's.
           redraw();
         };
         renderer.showBorder = showBoundary();
@@ -4339,9 +4339,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               late.push(handle.pathing().then((p) => {
                 const fits = p.width === W && p.height === H;
                 parts[1] = fits && on.pathing ? groundPathingColors(p.cells) : null;
-                const e = playableEdge, cell = (v: number) => Math.round(v / 32);
-                const inside = e ? { width: W, x0: cell(e.left - terrain.offsetX), x1: cell(e.right - terrain.offsetX), y0: cell(e.bottom - terrain.offsetY), y1: cell(e.top - terrain.offsetY) } : null;
-                parts[3] = fits && on.naval ? navalColors(p.cells, inside) : null;
+                // The edge brown where the terrain marks the tiles past the playable map, as the editor's naval view.
+                parts[3] = fits && on.naval ? navalColors(p.cells, { tiles: mapEdgeTiles(terrain), tilesX: terrain.width - 1 }) : null;
                 show();
               }));
             }
@@ -4376,9 +4375,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           await layersRunning;
         };
         const applyGrid = () => {
-          // The tile grid is the ground's own mesh, so it follows cliffs and ramps; the others are lines per pixel.
-          renderer.wireframe = shown.grid === "medium";
-          renderer.gridStep = shown.grid === "small" || shown.grid === "large" ? GRID_STEP[shown.grid] : 0;
+          // Lines per pixel over the ground's mesh, so they follow cliffs and ramps; a finer grid keeps the coarser lines.
+          renderer.gridStep = GRID_STEP[shown.grid] ?? 0;
           redraw();
         };
         /** Light Ranges: a ring round every light of the placed objects shown, as far as it reaches. Made again when
@@ -5187,7 +5185,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           save: editable ? serial(async () => {
             // The dark border comes from the terrain. Real maps always agree with the w3i, ones made here before didn't.
             const edgeInfo = await readMapDoc<{ cameraComplements?: number[] }>(w3, "map/war3map.w3i.json").catch(() => null);
-            if (edgeInfo?.cameraComplements) markMapEdge(terrain, edgeInfo.cameraComplements);
+            if (edgeInfo?.cameraComplements) { markMapEdge(terrain, edgeInfo.cameraComplements); renderer.refreshBorder(); }
             // The game won't start a map with no players, so one always gets Player 1's start.
             const startAdded = !!edgeInfo && !!unitsFile && !unitsFile.list.some((p) => p.id === "sloc");
             if (startAdded && unitsFile) {
