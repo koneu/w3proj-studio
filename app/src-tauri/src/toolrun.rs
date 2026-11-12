@@ -179,20 +179,41 @@ fn end_own_leftovers(program: &Path, out: &Output) {
     let Some(dir) = program.parent() else { return };
     let Some(dir_name) = dir.file_name().map(|n| n.to_string_lossy().to_lowercase()) else { return };
     let ours: Vec<(u64, u64)> = [&out.stdout, &out.stderr].iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| (m.dev(), m.ino())).collect();
-    let Ok(procs) = std::fs::read_dir("/proc") else { return };
-    for p in procs.flatten() {
-        let Some(pid) = p.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else { continue };
-        let holds = ["fd/1", "fd/2"].iter().any(|fd| std::fs::metadata(p.path().join(fd)).is_ok_and(|m| ours.contains(&(m.dev(), m.ino()))));
-        if !holds {
-            continue;
+    // A process the tool started just before it exited may still be between fork and exec: it holds the output but
+    // its command line is still the parent's (a shell, setsid), so one look would miss it. Look again until two looks
+    // in a row see the same holders (or about a second has passed).
+    let mut seen: Vec<(i32, String)> = Vec::new();
+    let mut same = 0;
+    for _ in 0..10 {
+        let mut now = Vec::new();
+        let Ok(procs) = std::fs::read_dir("/proc") else { return };
+        for p in procs.flatten() {
+            let Some(pid) = p.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else { continue };
+            let holds = ["fd/1", "fd/2"].iter().any(|fd| std::fs::metadata(p.path().join(fd)).is_ok_and(|m| ours.contains(&(m.dev(), m.ino()))));
+            if !holds {
+                continue;
+            }
+            let Ok(cmdline) = std::fs::read(p.path().join("cmdline")) else { continue };
+            let first = String::from_utf8_lossy(cmdline.split(|b| *b == 0).next().unwrap_or_default()).to_lowercase();
+            let mut parts = first.rsplit(['\\', '/']);
+            let (name, parent) = (parts.next().unwrap_or_default().to_string(), parts.next().unwrap_or_default().to_string());
+            if !name.is_empty() && parent == dir_name && is_file_ci(dir, &name) {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+                continue;
+            }
+            now.push((pid, first));
         }
-        let Ok(cmdline) = std::fs::read(p.path().join("cmdline")) else { continue };
-        let first = String::from_utf8_lossy(cmdline.split(|b| *b == 0).next().unwrap_or_default()).to_lowercase();
-        let mut parts = first.rsplit(['\\', '/']);
-        let (name, parent) = (parts.next().unwrap_or_default().to_string(), parts.next().unwrap_or_default().to_string());
-        if !name.is_empty() && parent == dir_name && is_file_ci(dir, &name) {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+        now.sort();
+        if now == seen {
+            same += 1;
+            if same >= 2 {
+                break;
+            }
+        } else {
+            same = 0;
+            seen = now;
         }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -327,6 +348,33 @@ mod tests {
             unsafe { libc::kill(window, libc::SIGKILL) };
         }
         assert!(!left, "the tool's error window was left running");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The error window may still be between fork and exec when the tool exits (on a busy machine, or started through a
+    /// shell): it holds the output under the shell's name for a moment. It is ended all the same.
+    #[test]
+    fn what_the_tool_starts_just_before_it_exits_is_ended_after_it() {
+        let dir = scratch("late");
+        let tool = dir.join("tool");
+        std::fs::create_dir_all(&tool).unwrap();
+        let sleep = ["/bin/sleep", "/usr/bin/sleep"].into_iter().find(|p| Path::new(p).is_file()).unwrap();
+        std::fs::copy(sleep, tool.join("showerrors")).unwrap();
+        let program = tool.join("compiler");
+        std::fs::write(&program, "").unwrap();
+        let script = format!("setsid sh -c 'sleep 0.15; exec \"{}\" 30' & echo $! > window.pid; exit 1", tool.join("showerrors").display());
+        let (r, _) = sh(&script, &dir, Some(program), None, Duration::from_secs(10)).expect("waited for the error window");
+        assert_eq!(r.unwrap().code, 1);
+        let window = pid_in(&dir.join("window.pid"));
+        let t = Instant::now();
+        while alive(window) && t.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let left = alive(window);
+        if left {
+            unsafe { libc::kill(window, libc::SIGKILL) };
+        }
+        assert!(!left, "the error window started just before the tool exited was left running");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
