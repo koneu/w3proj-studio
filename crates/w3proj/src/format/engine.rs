@@ -364,7 +364,7 @@ fn write(node: &Node, v: &Value, out: &mut Vec<u8>, frames: &mut Vec<Map<String,
                         continue;
                     }
                 }
-                let value = field_value(f, obj.get(name), frames, &format!("{path}.{name}"))?;
+                let value = field_value(f, obj, frames, &format!("{path}.{name}"))?;
                 // Make computed values (defaults, variants) visible to later conditions.
                 frames.last_mut().unwrap().insert(name.to_string(), value.clone());
                 write(f, &value, out, frames, &format!("{path}.{name}"))?;
@@ -396,10 +396,21 @@ fn write(node: &Node, v: &Value, out: &mut Vec<u8>, frames: &mut Vec<Map<String,
     }
 }
 
-/// The JSON value for a field, falling back to its default or `prefer`.
-fn field_value(f: &Node, v: Option<&Value>, frames: &[Map<String, Value>], path: &str) -> Result<Value> {
-    if let Some(v) = v {
+/// The JSON value for a field of `obj`, falling back to where older JSON had it (`was`), its default or `prefer`.
+fn field_value(f: &Node, obj: &Map<String, Value>, frames: &[Map<String, Value>], path: &str) -> Result<Value> {
+    if let Some(v) = obj.get(f.name.as_deref().unwrap_or_default()) {
         return Ok(v.clone());
+    }
+    if let Some((old, index)) = &f.was {
+        let found = match (obj.get(old), index) {
+            (Some(v), None) => Some(v),
+            (Some(Value::Array(items)), Some(i)) => items.get(*i),
+            (Some(v), Some(_)) => return Err(Error::Format(format!("{path}: the older field {old} is {v}, not a list"))),
+            (None, _) => None,
+        };
+        if let Some(v) = found {
+            return Ok(v.clone());
+        }
     }
     if let Some(d) = &f.default {
         return Ok(d.clone());
@@ -432,7 +443,7 @@ pub fn encode(def: &Definition, value: &Value) -> Result<Vec<u8>> {
                 continue;
             }
         }
-        let v = field_value(f, obj.get(name), &frames, name)?;
+        let v = field_value(f, obj, &frames, name)?;
         frames[0].insert(name.to_string(), v.clone());
         write(f, &v, &mut out, &mut frames, name)?;
     }

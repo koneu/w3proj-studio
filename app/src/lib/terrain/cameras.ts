@@ -11,6 +11,21 @@ export interface CameraLook { fov: number[]; line: number[]; target: number[]; e
 /** The Camera Objects layer of the View menu. */
 export const LAYER_LOOK: CameraLook = { fov: [255, 150, 60, 130], line: [255, 190, 60, 230], target: [255, 190, 60, 255], eye: [255, 255, 255, 255], targetRadius: 2, eyeRadius: 1 };
 
+/** Version 3's floats after the local angles: the World Editor's DoF Distance, DoF Scale and Pos Absolute Z, in the
+ *  file's order (the codec's cameras definition). JSON written before they had names keeps them in `unknown`. */
+export const DEPTH_OF_FIELD = ["dofDistance", "dofScale", "posAbsoluteZ"] as const;
+type DepthOfField = { [K in (typeof DEPTH_OF_FIELD)[number]]?: number } & { unknown?: number[] };
+
+/** Gives a camera of older JSON its named fields (from `unknown`, which goes); a named field already there wins, as the
+ *  codec reads it. `fill`: the missing ones become 0, as a version 3 file needs them. */
+export function nameDepthOfField(c: DepthOfField, fill = false): void {
+  DEPTH_OF_FIELD.forEach((k, i) => {
+    const old = c.unknown?.[i];
+    if (c[k] === undefined && (old !== undefined || fill)) c[k] = old ?? 0;
+  });
+  delete c.unknown;
+}
+
 const RAD = Math.PI / 180;
 /** Cell size of the drawing (world units): the pathing cells. */
 export const CAMERA_CELL = 32;

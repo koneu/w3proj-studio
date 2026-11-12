@@ -138,7 +138,7 @@ export function lookCamera(look, i, version, localAngles, name = lookName(i)) {
     distance: look.distance, roll: 0, fieldOfView: look.fov, farZ: 5000, nearZ: 100,
   };
   if (version >= 3 || localAngles) Object.assign(c, { localPitch: 0, localYaw: 0, localRoll: 0 });
-  if (version >= 3) c.unknown = [0, 0, 0];
+  if (version >= 3) Object.assign(c, { dofDistance: 0, dofScale: 0, posAbsoluteZ: 0 });
   c.name = name;
   if (version >= 3) c.trailer = 0;
   return c;

@@ -2161,6 +2161,13 @@ async function cameraEditing(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
   if (cameras().map((c) => c.distance).join() !== [a.distance, b.distance].join()) fail(`one undo of the shared distance left ${cameras().map((c) => c.distance).join(", ")}`);
+  // The World Editor's DoF Scale (version 3's second float after the local angles), named in the file; then undone.
+  if ((await shown("DoF ×")) !== "0") fail(`the DoF Scale field shows ${JSON.stringify(await shown("DoF ×"))} for two new cameras, not 0`);
+  await type("DoF ×", 123, "change");
+  await k.save();
+  if (cameras().some((c) => c.dofScale !== 123 || "unknown" in c)) fail(`a DoF Scale typed for two cameras saved ${JSON.stringify(cameras().map((c) => [c.dofDistance, c.dofScale, c.posAbsoluteZ, c.unknown]))}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
 
   // Duplicate the two (still selected after the undo): two copies with new names, one step.
   if ((await page.evaluate(`document.querySelector(".terrain-camera-count")?.textContent ?? ""`)) !== "2 cameras") fail("the undo didn't keep the two cameras selected");

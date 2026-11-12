@@ -59,11 +59,11 @@ test("addLookCameras puts the looks first, in the file's version, and keeps the 
   assert.equal(out.cameras[1].distance, 2000);
   const local = addLookCameras({ ...v0, localAngles: true }, looks).cameras[0];
   assert.equal(local.localPitch, 0);
-  assert.equal(local.unknown, undefined);
+  assert.equal(local.dofScale, undefined);
   const v3 = addLookCameras(null, looks);
   assert.equal(v3.version, 3);
   assert.equal(v3.format, "w3proj.cameras/1");
-  assert.deepEqual(v3.cameras[0].unknown, [0, 0, 0]);
+  assert.deepEqual([v3.cameras[0].dofDistance, v3.cameras[0].dofScale, v3.cameras[0].posAbsoluteZ], [0, 0, 0]);
   assert.equal(v3.cameras[0].trailer, 0);
   assert.throws(() => addLookCameras({ version: 0 }, looks), /no cameras list/);
   assert.ok(lookName(0) < lookName(1) && lookName(9) < lookName(10), "the names sort in row order");
