@@ -25,6 +25,7 @@
 //! | `check`   | plausibility expression on `value`; failures make a variant less likely |
 //! | `prefer`  | `variant` only: expression choosing the expected alternative |
 //! | `default` | value written when the field is missing from the JSON |
+//! | `was`     | where older JSON had the value, read when the field is missing: a sibling's name, or `name[index]` for an item of a sibling list (a field that got its name later) |
 //! | `doc`     | free text for humans |
 
 mod engine;
@@ -108,6 +109,8 @@ struct RawNode {
     #[serde(default)]
     default: Option<Value>,
     #[serde(default)]
+    was: Option<String>,
+    #[serde(default)]
     #[allow(dead_code)]
     doc: Option<String>,
 }
@@ -149,6 +152,8 @@ pub struct Node {
     pub cond: Option<expr::Expr>,
     pub check: Option<expr::Expr>,
     pub default: Option<Value>,
+    /// Older JSON's place of the value (`was`): a sibling field, and an index into it when it's a list.
+    pub was: Option<(String, Option<usize>)>,
 }
 
 #[derive(Debug)]
@@ -202,6 +207,14 @@ fn compile_node(raw: RawNode, path: &str) -> Result<Node> {
     };
     let cond = parse(&raw.cond)?;
     let check = parse(&raw.check)?;
+    let was = match raw.was.as_deref() {
+        None => None,
+        Some(s) => Some(match s.strip_suffix(']').and_then(|s| s.split_once('[')) {
+            Some((name, index)) => (name.to_string(), Some(index.parse::<usize>().map_err(|_| err(format!("was: {s:?} isn't name[index]")))?)),
+            None if !s.is_empty() && !s.contains(['[', ']']) => (s.to_string(), None),
+            None => return Err(err(format!("was: {s:?} isn't a name or name[index]"))),
+        }),
+    };
     let count = match &raw.count {
         None => None,
         Some(Value::Number(n)) => Some(Count::Fixed(n.as_u64().ok_or_else(|| err("count must be a whole number".into()))? as usize)),
@@ -242,6 +255,7 @@ fn compile_node(raw: RawNode, path: &str) -> Result<Node> {
                 cond,
                 check: None,
                 default: raw.default,
+                was,
             });
         }
         "variant" => Kind::Variant { prefer: parse(&raw.prefer)? },
@@ -251,12 +265,13 @@ fn compile_node(raw: RawNode, path: &str) -> Result<Node> {
     Ok(match count {
         Some(count) => Node {
             name: raw.name,
-            kind: Kind::List(count, Box::new(Node { name: None, kind: base, cond: None, check, default: None })),
+            kind: Kind::List(count, Box::new(Node { name: None, kind: base, cond: None, check, default: None, was: None })),
             cond,
             check: None,
             default: raw.default,
+            was,
         },
-        None => Node { name: raw.name, kind: base, cond, check, default: raw.default },
+        None => Node { name: raw.name, kind: base, cond, check, default: raw.default, was },
     })
 }
 
@@ -617,6 +632,32 @@ mod classic_tests {
             assert_eq!(got["cameras"][1]["name"], "Second");
             assert_eq!(got["cameras"][0].get("localPitch").is_some(), angles);
         }
+    }
+
+    /// Version 3's three floats after the local angles are the World Editor's DoF Distance, DoF Scale and Pos Absolute Z
+    /// (0, 123 and 2.5 typed in its camera dialog, 2026-11-12); JSON from before keeps them as `unknown`.
+    #[test]
+    fn version_3_cameras_name_their_depth_of_field() {
+        let fl = |x: f32| x.to_le_bytes().to_vec();
+        let one = [f(13), fl(0.0), fl(123.0), fl(2.5), z("look"), u(0)].concat();
+        let bytes = [u(3), u(1), one].concat();
+        let got = exact("cameras", &bytes);
+        let cam = &got["cameras"][0];
+        assert_eq!((cam["dofDistance"].as_f64(), cam["dofScale"].as_f64(), cam["posAbsoluteZ"].as_f64()), (Some(0.0), Some(123.0), Some(2.5)));
+        assert!(cam.get("unknown").is_none());
+        // The old JSON: the same bytes.
+        let mut old = got.clone();
+        let c = old["cameras"][0].as_object_mut().unwrap();
+        for k in ["dofDistance", "dofScale", "posAbsoluteZ"] {
+            c.remove(k);
+        }
+        c.insert("unknown".into(), serde_json::json!([0.0, 123.0, 2.5]));
+        assert_eq!(encode(&def("cameras"), &old).unwrap(), bytes);
+        // A name wins over the old list; neither is an error.
+        old["cameras"][0]["dofScale"] = serde_json::json!(7.0);
+        assert_eq!(encode(&def("cameras"), &old).unwrap()[4 + 4 + 14 * 4..4 + 4 + 15 * 4], 7f32.to_le_bytes());
+        old["cameras"][0].as_object_mut().unwrap().remove("unknown");
+        assert!(encode(&def("cameras"), &old).is_err());
     }
 
     /// Long names fit the longer layout as well: letters read as floats, and shifted names.

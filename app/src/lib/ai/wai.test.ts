@@ -75,6 +75,36 @@ test("a new AI writes and reads back as it was", () => {
   assert.deepEqual(parseWai(writeWai(newWai()), n), newWai());
 });
 
+test("a new AI is the AI Editor's new AI", () => {
+  // What World Editor 7003's five tabs show for a new AI (2026-11-12), in the encodings of the game's AI files.
+  const ai = newWai();
+  assert.equal(ai.name, "Just another Warcraft III AI");
+  assert.equal(ai.race, 1, "Human");
+  assert.equal(ai.options, 0x39ff);
+  assert.equal(ai.conditionsUnknown, 7, "as in every game AI file");
+  assert.deepEqual(ai.heroes, ["Hpal", "Hamg", "Hmkg"]);
+  assert.deepEqual(ai.heroChances, [17, 17, 16, 17, 17, 16]);
+  const paladin = "AHhb,AHds,AHad,AHhb,AHds,AHre,AHad,AHhb,AHds,AHad";
+  assert.deepEqual(ai.skills.slice(0, 3).map((s) => s.join(",")), [paladin, paladin, paladin]);
+  assert.equal(ai.skills[3][5], "AHmt", "the Archmage's sixth skill: Mass Teleport");
+  assert.equal(ai.skills[8][5], "AHav", "the Mountain King's: Avatar");
+  assert.deepEqual(ai.build.map((b) => [b.kind, b.id, b.town | 0]), [[0, "htow", -1], ...Array(5).fill([0, "hpea", -1])]);
+  assert.deepEqual(ai.harvest.map((b) => [b.resource, b.workers, b.town]), [[0, 5, 0], [1, 5, 0], [0, 5, 1], [1, 4, 0]]);
+  assert.deepEqual(ai.targets.map((t) => [t.target, t.creep ?? null]),
+    [[0, null], [1, null], [2, null], [3, null], [4, null], [5, { min: 0, max: 9, allowFlyers: 0 }], [5, { min: 10, max: 100, allowFlyers: 1 }]]);
+  assert.equal(ai.groups.length, 1);
+  assert.equal(ai.groups[0].name, "All Units");
+  assert.deepEqual(ai.groups[0].units.map((u) => u.id),
+    ["1HIA", "2HIA", "3HIA", "hdhw", "hfoo", "hgry", "hgyr", "hkni", "hmpr", "hmtm", "hmtt", "hrif", "hsor", "hspt"]);
+  assert.ok(ai.groups[0].units.every((u) => (u.quantity | 0) === -1 && (u.max | 0) === -1), "all of each");
+  assert.deepEqual(ai.waves, [{ group: 0, delay: 0 }]);
+  // Minimum forces "First Hero Only": the bytes "HAIA" (u05_mint.wai, whose script says "// First Hero Only").
+  assert.deepEqual([ai.repeatWaves, ai.minForces, ai.initialDelay], [1, 0x41494148, 0]);
+  assert.ok(Buffer.from(writeWai(ai)).includes("HAIA"), "as the file has it");
+  assert.deepEqual([ai.gameOptions, ai.gameSpeed, ai.mapPath], [2, 1, "Maps\\(2)PlunderIsle.w3m"]);
+  assert.deepEqual(ai.players, [{ index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" }]);
+});
+
 test("an AI with every section survives, to the byte", () => {
   const bytes = writeWai(full());
   const back = parseWai(bytes, n);
@@ -130,10 +160,11 @@ test("names that aren't UTF-8 come back as the same bytes", () => {
   const raw = writeWai(ai);
   const at = 4; // the name
   const korean = new Uint8Array([0xc7, 0xd1, 0xb1, 0xdb]);
-  const patched = new Uint8Array(raw.length - "Untitled AI".length + korean.length);
+  const name = ai.name.length; // ASCII
+  const patched = new Uint8Array(raw.length - name + korean.length);
   patched.set(raw.subarray(0, at));
   patched.set(korean, at);
-  patched.set(raw.subarray(at + "Untitled AI".length), at + korean.length);
+  patched.set(raw.subarray(at + name), at + korean.length);
   const back = parseWai(patched, n);
   assert.deepEqual(writeWai(back), patched);
   assert.notEqual(back.name, "");

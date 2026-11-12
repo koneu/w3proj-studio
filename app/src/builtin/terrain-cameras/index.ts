@@ -11,7 +11,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { TERRAIN_SERVICE, TRIGGERS_SERVICE, type TerrainEditorHandle, type TerrainService, type TerrainToolGroupInstance, type TerrainView, type TriggersService } from "../../extensions/services";
 import { heightAt } from "../../lib/terrain/w3e";
 import { moveInList, stepInList, type ListCommand } from "../../lib/terrain/objectlist";
-import { CAMERA_CELL, cameraColors, cameraEye, type CameraLook } from "../../lib/terrain/cameras";
+import { CAMERA_CELL, cameraColors, cameraEye, nameDepthOfField, type CameraLook } from "../../lib/terrain/cameras";
 import { readMapDoc, requireProject } from "../../lib/formats/mapdoc";
 import { renameInTriggers, SavedNames } from "../../lib/triggers/renamed";
 import { h } from "../../workbench/dom";
@@ -38,7 +38,10 @@ interface Camera {
   localPitch?: number;
   localYaw?: number;
   localRoll?: number;
-  unknown?: number[];
+  /** Version 3 (nameDepthOfField). */
+  dofDistance?: number;
+  dofScale?: number;
+  posAbsoluteZ?: number;
   name: string;
   trailer?: number;
 }
@@ -50,6 +53,8 @@ const FIELDS: [keyof Camera, string, string][] = [
   ["rotation", "Rot", "Rotation (degrees; 90 looks north)"], ["angleOfAttack", "AoA", "Angle of attack (degrees; 304 is the game camera)"],
   ["distance", "Dist", "Distance to the target"], ["roll", "Roll", "Roll (degrees; not shown in the preview)"],
   ["fieldOfView", "FoV", "Field of view (degrees)"], ["farZ", "Far", "Far clipping"], ["nearZ", "Near", "Near clipping"],
+  ["dofDistance", "DoF", "Depth of field distance (the World Editor's DoF Distance)"], ["dofScale", "DoF ×", "Depth of field scale (DoF Scale)"],
+  ["posAbsoluteZ", "Abs Z", "Absolute height of the camera's position (Pos Absolute Z)"],
 ];
 /** The game's field of view is horizontal at 4:3; the editor's is vertical. */
 const ASPECT = 4 / 3;
@@ -94,6 +99,7 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     if (files.has(`${FILE}.json`)) doc = JSON.parse(await w3.workspace.readText(`${FILE}.json`));
     else if (files.has(FILE) && root) { doc = JSON.parse(await w3.backend.invoke<string>("codec_decode", { root, path: FILE })); asJson = false; }
     doc.cameras ??= [];
+    for (const c of doc.cameras) nameDepthOfField(c);
     names.saved(doc.cameras);
   };
   const load = read().catch((e) => w3.window.showError(`Cameras: ${(e as Error).message ?? e}`));
@@ -249,8 +255,9 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       } });
     // Several selected: a field shows the value they share, or stays empty where they differ; a value typed goes to all.
     const fields = FIELDS.map(([key, label, title]) => {
-      const values = new Set(selection.map((x) => x[key] as number));
-      const shared = values.size === 1 ? round(c[key] as number) : null;
+      // A classic camera has no depth of field values: 0, as a version 3 save gives it.
+      const values = new Set(selection.map((x) => (x[key] as number | undefined) ?? 0));
+      const shared = values.size === 1 ? round((c[key] as number | undefined) ?? 0) : null;
       const input = h("input.terrain-camera-value", {
         type: "number", step: "any", value: shared === null ? "" : String(shared), placeholder: shared === null ? "—" : "",
         title: shared === null ? `${title} (differs between the selected cameras)` : title,
@@ -411,7 +418,10 @@ function cameraEditor(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       // Version 0 files (classic, or written empty) take the Reforged layout once they have cameras.
       if (doc.version < 3 && doc.cameras.length) doc.version = 3;
       if (doc.version >= 3) {
-        for (const c of doc.cameras) Object.assign(c, { localPitch: c.localPitch ?? 0, localYaw: c.localYaw ?? 0, localRoll: c.localRoll ?? 0, unknown: c.unknown ?? [0, 0, 0], trailer: c.trailer ?? 0 });
+        for (const c of doc.cameras) {
+          Object.assign(c, { localPitch: c.localPitch ?? 0, localYaw: c.localYaw ?? 0, localRoll: c.localRoll ?? 0, trailer: c.trailer ?? 0 });
+          nameDepthOfField(c, true);
+        }
       }
       const root = w3.workspace.project()!.root;
       const text = JSON.stringify({ format: "w3proj.cameras/1", ...doc });

@@ -1,5 +1,5 @@
 // Export Minimap: a picture of the map as the minimap draws it, as a PNG file anywhere on disk, with the World
-// Editor's options (WESTRING_EXPORTMINIMAP_*, MINIMAPOPT_*): what it includes (terrain, water, the pathing map,
+// Editor's options (WESTRING_EXPORTMINIMAP_*, MINIMAPOPT_*): what it includes (terrain, water, blight, the pathing map,
 // doodads, units, regions, preview icons), the playable area or the whole map, the image size and smoothing. It is
 // made from the terrain editor's state as it is now, unsaved edits included (regions: the Region Editor's).
 
@@ -17,6 +17,8 @@ import type { Placed } from "./objects";
 export interface ExportOptions {
   terrain: boolean;
   water: boolean;
+  /** Blighted ground in the tileset's blight colour (the editor paints it dark brown). */
+  blight: boolean;
   pathing: boolean;
   doodads: boolean;
   units: boolean;
@@ -30,7 +32,11 @@ export interface ExportOptions {
 }
 
 export const EXPORT_SIZES = [128, 256, 512, 1024, 2048];
-export const DEFAULT_EXPORT: ExportOptions = { terrain: true, water: true, pathing: false, doodads: true, units: true, regions: false, icons: true, playableOnly: true, size: 256, smooth: true };
+/** The World Editor's (7003, 2026-11-12): terrain, water, doodads and the playable area only; blight, the pathing map,
+ *  units, regions and the preview icons off. */
+export const DEFAULT_EXPORT: ExportOptions = {
+  terrain: true, water: true, blight: false, pathing: false, doodads: true, units: false, regions: false, icons: false, playableOnly: true, size: 256, smooth: true,
+};
 
 /** What the picture is made of, from the open terrain editor. */
 export interface ExportSource {
@@ -71,7 +77,7 @@ export async function exportPicture(src: ExportSource, o: ExportOptions): Promis
     objects: o.doodads ? src.base.objects : [],
     params: { ...src.params, ...(o.smooth ? {} : { blurPasses: 0 }) },
     size: o.size,
-    show: { terrain: o.terrain, water: o.water },
+    show: { terrain: o.terrain, water: o.water, blight: o.blight },
     wholeMap: !o.playableOnly,
   };
   if (o.pathing) {
@@ -103,7 +109,7 @@ export function askExportOptions(last: ExportOptions): Promise<ExportOptions | n
       const input = h("input", { type: "checkbox", checked: last[key] === true, "data-option": key });
       return { key, input, el: h("label.minimap-opt", {}, input, ` ${label}`) };
     };
-    const boxes = [box("terrain", "Include terrain"), box("water", "Include water"), box("pathing", "Include pathing map"), box("doodads", "Include doodads"),
+    const boxes = [box("terrain", "Include terrain"), box("water", "Include water"), box("blight", "Include blight"), box("pathing", "Include pathing map"), box("doodads", "Include doodads"),
       box("units", "Include units"), box("regions", "Include regions"), box("icons", "Include preview icons"), box("playableOnly", "Playable area only")];
     const size = h("select.minimap-size", {}, ...EXPORT_SIZES.map((s) => h("option", { value: String(s), selected: s === last.size }, `${s} × ${s}`)));
     const smooth = h("input.minimap-smooth", { type: "checkbox", checked: last.smooth });

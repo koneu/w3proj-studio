@@ -323,13 +323,45 @@ export function writeWai(f: AiFile): Uint8Array {
 /** No object (unset hero, skill or worker). */
 export const NO_ID = "\0\0\0\0";
 
-/** A new, empty AI like the AI Editor starts with. */
+/** Minimum forces "First Hero Only" (the bytes "HAIA", like the special build ids "1HIA"): no attack group, the first
+ *  hero is enough (u05_mint.wai has it; u05_mint.ai: "// First Hero Only", GetUnitCountDone(hero_id) < 1). Else the
+ *  field is an attack group's index. */
+export const FIRST_HERO_ONLY = 0x41494148;
+
+/** Build, harvest and target priorities: the type field each list's entries have in the game's files. */
+const BUILD = 0, HARVEST = 1, TARGET = 2;
+
+/**
+ * A new AI as the AI Editor starts with (World Editor 7003, 2026-11-12, its five tabs): a Human AI with three heroes,
+ * a town hall and five peasants, four harvest priorities, every Human unit in "All Units", one wave, the seven targets
+ * and a test game on (2)PlunderIsle. What the tabs show, in the encodings of the game's AI files; u05_mint.wai,
+ * made from such a new AI, has the same skills, attack group, targets, minimum forces, game settings and first player,
+ * and every game AI file has 7 in the field after the condition count. Taken from those, not seen in the editor's
+ * file: the mine building (htow, as u05_mint.wai; the editor shows None for a Human AI), the towns of the harvest
+ * priorities (Main 0, Exp 1 1, as townText reads them) and the attack group's order (u05_mint.wai's, by id).
+ */
 export function newWai(): AiFile {
+  const none = (): AiCondition => ({ name: "", call: null });
+  const paladin = ["AHhb", "AHds", "AHad", "AHhb", "AHds", "AHre", "AHad", "AHhb", "AHds", "AHad"];
+  const archmage = ["AHbz", "AHab", "AHwe", "AHbz", "AHab", "AHmt", "AHwe", "AHbz", "AHab", "AHwe"];
+  const mountainKing = ["AHtc", "AHtb", "AHbh", "AHtc", "AHtb", "AHav", "AHbh", "AHtc", "AHtb", "AHbh"];
+  const units = ["1HIA", "2HIA", "3HIA", "hdhw", "hfoo", "hgry", "hgyr", "hkni", "hmpr", "hmtm", "hmtt", "hrif", "hsor", "hspt"];
+  const harvest: [number, number, number][] = [[0, 0, 5], [1, 0, 5], [0, 1, 5], [1, 0, 4]];
   return {
-    version: 2, name: "Untitled AI", race: 1, options: 0x3e, workers: ["hpea", "hpea", "htow", "htow"], conditionsUnknown: 0, conditions: [],
-    heroes: [NO_ID, NO_ID, NO_ID], heroChances: [100, 0, 0, 0, 0, 0], skills: Array.from({ length: 9 }, () => Array(10).fill(NO_ID)),
-    build: [], harvest: [], targets: [], repeatWaves: 1, minForces: 0, initialDelay: 0,
-    groups: [{ index: 0, name: "All Units", units: [] }], waves: [], wavesUnknown: 1,
-    gameOptions: 0, gameSpeed: 3, mapPath: "", players: [], trailer: 0, extra: new Uint8Array(),
+    version: 2, name: "Just another Warcraft III AI", race: 1, options: 0x39ff, workers: ["hpea", "hpea", "htow", "htow"], conditionsUnknown: 7, conditions: [],
+    heroes: ["Hpal", "Hamg", "Hmkg"], heroChances: [17, 17, 16, 17, 17, 16],
+    skills: [paladin, paladin, paladin, archmage, archmage, archmage, mountainKing, mountainKing, mountainKing].map((s) => [...s]),
+    build: ["htow", "hpea", "hpea", "hpea", "hpea", "hpea"].map((id) => ({ type: BUILD, kind: 0, id, town: 0xffffffff, condIndex: -1, cond: none() })),
+    harvest: harvest.map(([resource, town, workers]) => ({ type: HARVEST, resource, town, workers, condIndex: -1, cond: none() })),
+    targets: [0, 1, 2, 3, 4, 5, 5].map((target, i) => ({
+      type: TARGET, target, ...(target === 5 ? { creep: i === 5 ? { min: 0, max: 9, allowFlyers: 0 } : { min: 10, max: 100, allowFlyers: 1 } } : {}), condIndex: -1, cond: none(),
+    })),
+    repeatWaves: 1, minForces: FIRST_HERO_ONLY, initialDelay: 0,
+    groups: [{ index: 0, name: "All Units", units: units.map((id) => ({ id, quantity: 0xffffffff, max: 0xffffffff, condIndex: -1, cond: none() })) }],
+    waves: [{ group: 0, delay: 0 }], wavesUnknown: 1,
+    gameOptions: 2, gameSpeed: 1, mapPath: "Maps\\(2)PlunderIsle.w3m",
+    // User, Random, Observer, Red, 100 %, Standard, Normal (control and observer in aiType, as the game's AI files' first player).
+    players: [{ index: 0, team: 0, race: 32, color: 0, handicap: 100, aiType: 3, difficulty: 1, script: "" }],
+    trailer: 0, extra: new Uint8Array(),
   };
 }

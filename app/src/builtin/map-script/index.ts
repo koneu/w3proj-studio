@@ -24,7 +24,7 @@ import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects
 import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
-import { meleeBlockers, meleeFlagsAfter, type MeleeInfo } from "../../lib/terrain/owner";
+import { hasCustomConstants, meleeBlockers, meleeFlagsAfter, type MeleeInfo } from "../../lib/terrain/owner";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
@@ -37,6 +37,9 @@ const STAMP = SCRIPT_STAMP;
 const DIFF = "w3:script-diff:";
 
 const INFO_JSON = "map/war3map.w3i.json";
+/** The map's gameplay constants: one of the save's Melee reasons (meleeBlockers). */
+const MISC_TXT = "map/war3mapMisc.txt";
+const MELEE_INPUT = /^map\/war3mapMisc\.txt$/i;
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
@@ -166,7 +169,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     // As the World Editor does when saving. Only ever off (see meleeFlagsAfter). An open, changed Map Properties gets
     // its turn when that's saved.
     const placed = (await json<{ units?: { id: string; player?: number }[] }>("map/war3mapUnits.doo"))?.units ?? [];
-    const meleeInfo = { ...info, flags: Number(info.flags) } as MeleeInfo;
+    // Gameplay constants: a missing war3mapMisc.txt sets none; one that can't be read is left out too (the flag only
+    // ever goes off here, so not knowing keeps it as it is).
+    const miscPath = w3.workspace.files().find((f) => f.path.toLowerCase() === MISC_TXT.toLowerCase())?.path;
+    const misc = miscPath ? await w3.workspace.readText(miscPath).catch(() => null) : null;
+    const meleeInfo = { ...info, flags: Number(info.flags), customConstants: misc !== null && hasCustomConstants(misc) } as MeleeInfo;
     const flags = meleeInfo.flags, unmelee = meleeFlagsAfter(meleeInfo, placed);
     if (unmelee !== flags && !w3.editors.isDirty(INFO_JSON)) {
       info.flags = unmelee;
@@ -464,7 +471,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.workspace.onDidSave((path) => {
       // A chapter map's script is made from its campaign's object files too.
-      if (!isScriptInput(path, campaignOf(w3.workspace.project()?.root)) || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
+      // Gameplay constants don't make the script, but saving them can take the Melee flag off, which generate does.
+      const input = isScriptInput(path, campaignOf(w3.workspace.project()?.root)) || MELEE_INPUT.test(path);
+      if (!input || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
       clearTimeout(timer);
       pending = path;
       timer = setTimeout(() => { pending = null; void afterSave(path); }, 800);

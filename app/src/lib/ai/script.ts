@@ -8,7 +8,7 @@
 
 import { CONDITION, type TriggerData } from "../triggers/triggerdata";
 import type { Param } from "../triggers/wtg";
-import { NO_ID, type AiCall, type AiCondition, type AiFile } from "./wai";
+import { FIRST_HERO_ONLY, NO_ID, type AiCall, type AiCondition, type AiFile } from "./wai";
 
 const BAR = "//===========================================================================";
 const STARS = "//***************************************************************************";
@@ -224,7 +224,9 @@ export function generateAiScript(ai: AiFile, data: TriggerData, date = new Date(
   const min = ai.groups.find((g) => g.index === ai.minForces);
   const minimum: string[] = ["    local integer count", "", "    // Check for attack wave limit", `    if (attackWave > ${ai.waves.length}) then`, "        return false", "    endif", ""];
   let never = false;
-  if (min) {
+  if (ai.minForces === FIRST_HERO_ONLY) {
+    minimum.push("    // First Hero Only", "    if (GetUnitCountDone(hero_id) < 1) then", "        return false", "    endif", "");
+  } else if (min) {
     minimum.push(`    // Attack Group: ${min.name}`);
     const fixed = min.units.filter((u) => !isAll(u.quantity));
     if (!min.units.length) {

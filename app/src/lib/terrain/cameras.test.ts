@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cameraColors, cameraEye, LAYER_LOOK, type CameraLook } from "./cameras";
+import { cameraColors, cameraEye, DEPTH_OF_FIELD, LAYER_LOOK, nameDepthOfField, type CameraLook } from "./cameras";
 
 const cam = { targetX: 640, targetY: 640, rotation: 0, distance: 640, angleOfAttack: 0, fieldOfView: 60 };
 const W = 40, H = 40;
@@ -25,4 +25,22 @@ test("cameraColors: each camera takes the look it is given, and the later one is
   // A target radius of 3 reaches three cells out; the layer's own 2 doesn't.
   assert.deepEqual(texel(rgba, 640 + 3 * 32, 640), blue.target);
   assert.deepEqual(texel(cameraColors([cam], W, H, 0, 0), 640 + 3 * 32, 640), [0, 0, 0, 0]);
+});
+
+test("nameDepthOfField: older JSON's unknown becomes DoF Distance, DoF Scale and Pos Absolute Z", () => {
+  // The World Editor's camera dialog: 0, 123 and 2.5 typed there are the three floats in this order (2026-11-12).
+  const old: Record<string, unknown> = { name: "look", unknown: [0, 123, 2.5] };
+  nameDepthOfField(old);
+  assert.deepEqual(old, { name: "look", dofDistance: 0, dofScale: 123, posAbsoluteZ: 2.5 });
+  // A named value wins, as the codec reads it.
+  const both: Record<string, unknown> = { dofScale: 7, unknown: [1, 2, 3] };
+  nameDepthOfField(both);
+  assert.deepEqual(both, { dofScale: 7, dofDistance: 1, posAbsoluteZ: 3 });
+  // A classic camera stays without them, unless a version 3 save fills them.
+  const classic: Record<string, unknown> = { name: "c" };
+  nameDepthOfField(classic);
+  assert.deepEqual(classic, { name: "c" });
+  nameDepthOfField(classic as Record<string, unknown>, true); // (deepEqual narrowed its type)
+  assert.deepEqual(classic, { name: "c", dofDistance: 0, dofScale: 0, posAbsoluteZ: 0 });
+  assert.deepEqual(DEPTH_OF_FIELD, ["dofDistance", "dofScale", "posAbsoluteZ"]);
 });

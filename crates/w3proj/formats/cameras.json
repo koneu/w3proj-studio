@@ -1,7 +1,10 @@
 // war3map.w3c — camera objects ("gg_cam_<name>" in triggers).
-// Version 0 (classic) and 3 (Reforged: three more floats and a u32 after the
-// name). Worked out from the game's maps and 46 others; the extra floats are
-// zero except one 0.01, the trailer is zero in all samples.
+// Version 0 (classic) and 3 (Reforged: the local angles, three more floats and
+// a u32 after the name). Worked out from the game's maps and 46 others; the
+// three floats are zero except one 0.01, the trailer is zero in all samples.
+// They are the World Editor's DoF Distance, DoF Scale and Pos Absolute Z (its
+// camera dialog, 2026-11-12: 0, 123 and 2.5 typed there are those floats in
+// this order); JSON written before they had names keeps them in `unknown`.
 // Version 0 comes in two layouts with nothing to tell them apart but the bytes:
 // the Reign of Chaos campaign's files stop after nearZ. Both readings are tried. A long name
 // fits the longer layout too, its first 12 letters read as three floats, and it would still
@@ -29,7 +32,9 @@
       { "name": "localPitch", "type": "f32", "if": "version >= 3 || localAngles", "check": "value > -1000000 && value < 1000000" },
       { "name": "localYaw", "type": "f32", "if": "version >= 3 || localAngles", "check": "value > -1000000 && value < 1000000" },
       { "name": "localRoll", "type": "f32", "if": "version >= 3 || localAngles", "check": "value > -1000000 && value < 1000000" },
-      { "name": "unknown", "type": "f32", "count": 3, "if": "version >= 3", "doc": "zero in nearly all samples" },
+      { "name": "dofDistance", "type": "f32", "if": "version >= 3", "was": "unknown[0]", "doc": "the World Editor's DoF Distance" },
+      { "name": "dofScale", "type": "f32", "if": "version >= 3", "was": "unknown[1]", "doc": "the World Editor's DoF Scale" },
+      { "name": "posAbsoluteZ", "type": "f32", "if": "version >= 3", "was": "unknown[2]", "doc": "the World Editor's Pos Absolute Z" },
       { "name": "name", "type": "cstring" },
       { "name": "trailer", "type": "u32", "if": "version >= 3", "doc": "zero in all samples" }
     ] }

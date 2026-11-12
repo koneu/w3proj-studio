@@ -60,18 +60,48 @@ test("without terrain the ground is black; pathing, units, regions and icons are
   assert.ok(px(paths, 64, 32, 60)[0] > 150 && px(paths, 64, 32, 60)[1] < 120, String(px(paths, 64, 32, 60)));
   assert.deepEqual(px(paths, 64, 32, 4), [100, 200, 100]);
   // A unit in its owner's colour (blue for player 2), start locations aren't units.
-  const units = await exportPicture(s, opts({ size: 64, doodads: false, icons: false }));
+  const units = await exportPicture(s, opts({ size: 64, doodads: false, units: true, icons: false }));
   assert.deepEqual(px(units, 64, 16, 16), [0, 66, 255]);
   assert.deepEqual(px(units, 64, 48, 48), [100, 200, 100]);
   // Regions: outlined in their colour.
   const regions = await exportPicture(s, opts({ size: 64, doodads: false, units: false, icons: false, regions: true }));
   assert.deepEqual(px(regions, 64, 0, 63), [255, 0, 0]);
   // Icons: the gold mine white, the start location in its player's colour; the footman has none.
-  const icons = await exportPicture(s, opts({ size: 64, doodads: false, units: false }));
+  const icons = await exportPicture(s, opts({ size: 64, doodads: false, units: false, icons: true }));
   assert.deepEqual(px(icons, 64, 48, 16), [255, 255, 255]);
   assert.deepEqual(px(icons, 64, 48, 48), [255, 3, 3]);
   assert.deepEqual(px(icons, 64, 16, 16), [100, 200, 100]);
   assert.deepEqual(s.asked, ["pathing", "regions", "icons"]);
+});
+
+test("the options start as the World Editor's", () => {
+  // World Editor 7003 (2026-11-12): terrain, water, doodads and Playable Area Only on; the rest off.
+  const on = Object.entries(DEFAULT_EXPORT).filter(([, v]) => v === true).map(([k]) => k).sort();
+  assert.deepEqual(on, ["doodads", "playableOnly", "smooth", "terrain", "water"]);
+  assert.equal(DEFAULT_EXPORT.size, 256);
+});
+
+test("Playable Area Only cuts doodads past the playable area, as the editor's export", async () => {
+  // A square map (8 × 8 playable tiles) made wide: margins 4 left and right, 6 at the bottom and top, so the picture
+  // has black bands above and below. A tree just past the top edge and one just past the bottom.
+  const s = source();
+  s.base = { ...s.base, margins: [4, 4, 6, 6], objects: [{ x: 0, y: 2 * 128 + 40, rgb: [250, 0, 250] }, { x: 0, y: -2 * 128 - 40, rgb: [250, 0, 250] }] };
+  const rgba = await exportPicture(s, opts({ size: 64 }));
+  let past = 0, inside = 0;
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) if (px(rgba, 64, x, y)[0] === 250) (y < 16 || y >= 48 ? past++ : inside++);
+  assert.equal(past, 0, "nothing in the black bands");
+  assert.ok(inside > 0, "control: the trees' dots reach into the playable area");
+});
+
+test("Include Blight colours blighted ground in the tileset's blight colour", async () => {
+  const s = source();
+  s.terrain.corners.forEach((c, i) => { (c as { blight?: boolean }).blight = i % 17 < 8; });
+  s.base = { ...s.base, blightColor: [60, 50, 40] };
+  const west = (o: Partial<ExportOptions>) => exportPicture(s, opts({ size: 64, doodads: false, ...o })).then((p) => px(p, 64, 4, 32));
+  assert.deepEqual(await west({ blight: true }), [60, 50, 40]);
+  assert.deepEqual(await west({}), [100, 200, 100], "off by default");
+  const east = px(await exportPicture(s, opts({ size: 64, doodads: false, blight: true })), 64, 60, 32);
+  assert.deepEqual(east, [100, 200, 100], "unblighted ground keeps its colour");
 });
 
 test("smoothing softens the edges", async () => {

@@ -2161,6 +2161,13 @@ async function cameraEditing(page, found) {
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
   await k.save();
   if (cameras().map((c) => c.distance).join() !== [a.distance, b.distance].join()) fail(`one undo of the shared distance left ${cameras().map((c) => c.distance).join(", ")}`);
+  // The World Editor's DoF Scale (version 3's second float after the local angles), named in the file; then undone.
+  if ((await shown("DoF ×")) !== "0") fail(`the DoF Scale field shows ${JSON.stringify(await shown("DoF ×"))} for two new cameras, not 0`);
+  await type("DoF ×", 123, "change");
+  await k.save();
+  if (cameras().some((c) => c.dofScale !== 123 || "unknown" in c)) fail(`a DoF Scale typed for two cameras saved ${JSON.stringify(cameras().map((c) => [c.dofDistance, c.dofScale, c.posAbsoluteZ, c.unknown]))}`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await k.save();
 
   // Duplicate the two (still selected after the undo): two copies with new names, one step.
   if ((await page.evaluate(`document.querySelector(".terrain-camera-count")?.textContent ?? ""`)) !== "2 cameras") fail("the undo didn't keep the two cameras selected");
@@ -3822,6 +3829,10 @@ async function typedFieldSave(page, found) {
     }
 
     // ---- Gameplay Constants: Max Unit Speed ----
+    // A value set takes the Melee flag off, as the World Editor's save does ("Custom gameplay constants have been specified").
+    const meleeFlag = () => k.read("war3map.w3i.json").flags & 4;
+    const meleeBefore = meleeFlag();
+    if (!meleeBefore) fail("the map isn't a melee map before its gameplay constants change (control)");
     await page.evaluate(`w3.editors.closeAll()`);
     await page.evaluate(`w3.commands.execute("w3.gameplayConstants.open")`);
     const speed = `[...document.querySelectorAll(".gs-row")].find((r) => r.title.startsWith("Misc › MaxUnitSpeed "))?.querySelector("input.gs-input")`;
@@ -3832,6 +3843,9 @@ async function typedFieldSave(page, found) {
     await until("the typed speed saved", () => /^MaxUnitSpeed=432\r?$/m.test(misc()), 5000).catch(() => fail(`Ctrl+S right after typing 432 as Max Unit Speed saved ${JSON.stringify(misc().slice(0, 200))}`));
     await settled(page);
     if (await dirty(miscPath)) fail("Ctrl+S right after typing in Gameplay Constants left it unsaved");
+    if (meleeBefore) {
+      await until("the Melee flag off", () => meleeFlag() === 0, 10000).catch(() => fail("a map with custom gameplay constants saved is still a melee map"));
+    }
 
     // ---- The Sound Editor: a sound's volume ----
     const w3s = "map/war3map.w3s.json";
@@ -4077,12 +4091,17 @@ async function moduleFunctions(page, found) {
       const size = png.readUInt32BE(16), raw = inflateSync(png.subarray(41, png.length - 12));
       return { size, height: png.readUInt32BE(20), at: (x, y) => raw.readUIntBE(y * (1 + size * 4) + 1 + x * 4, 3), raw };
     };
-    // The dialog, by its controls: 512 pixels, the pathing map too.
+    // The dialog, by its controls: 512 pixels, the pathing map too, the whole map (the mini map's playable area is a line,
+    // and the dialog starts with units and icons off, as the World Editor's).
     await page.evaluate(`(() => { window.__export = w3.commands.execute("w3.terrain.exportMinimap").then(() => null, (e) => String(e)); return null; })()`);
     await until("the Export Minimap dialog", () => page.evaluate(`!!document.querySelector(".minimap-export-dialog")`), 20000).catch(() => fail("Export Minimap shows no dialog"));
+    // It starts as the World Editor's: terrain, water, doodads and the playable area only.
+    const startsOn = await page.evaluate(`[...document.querySelectorAll(".minimap-export-dialog [data-option]")].filter((b) => b.checked).map((b) => b.dataset.option).join()`);
+    if (startsOn !== "terrain,water,doodads,playableOnly") fail(`Export Minimap starts with ${JSON.stringify(startsOn)} on`);
     await page.evaluate(`(() => { const d = document.querySelector(".minimap-export-dialog"); if (!d) return;
       const s = d.querySelector(".minimap-size"); s.value = "512"; s.dispatchEvent(new Event("change"));
-      d.querySelector("[data-option=pathing]").checked = true; d.querySelector(".newmap-buttons button.primary").click(); })()`);
+      d.querySelector("[data-option=pathing]").checked = true; d.querySelector("[data-option=playableOnly]").checked = false;
+      d.querySelector(".newmap-buttons button.primary").click(); })()`);
     const err = await page.evaluate(`window.__export`);
     if (err) fail(`Export Minimap: ${err}`);
     else if (!existsSync(out)) fail("Export Minimap wrote no file");
