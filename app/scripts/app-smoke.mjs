@@ -2639,6 +2639,71 @@ async function heightsLimits(page, found) {
   await k.reset();
 }
 
+/** The AI tools under Enforce Camera Bounds and Enforce Water Height Limits (toollimits.ts): each call is made with its
+ *  switch on and off against the same input, which shows the switch made the difference. Camera bounds: place_objects
+ *  skips what lands outside them, scatter_objects leaves those spots out and move_object refuses the place; water:
+ *  set_water on ground raised so high that the surface would pass the limit of the stored level is refused whole. */
+async function mcpLimits(page, found) {
+  const fail = (what) => found.push(`mcp limits: ${what}`);
+  const k = await heightKit(page, "McpLimits");
+  const refusal = (name, args) => k.tool(name, args).then(() => null, (e) => e.message);
+  const allow = /turn off Enforce Camera Bounds to allow it/;
+  try {
+    const [, , br] = k.read("war3map.w3i.json").cameraBounds;
+    const inside = { id: "LTlt", x: br - 256, y: 0 }, outside = { id: "LTlt", x: br + 384, y: 0 };
+    const at = (x, y) => k.doodads().findIndex((d) => d.position[0] === x && d.position[1] === y);
+    // On by default: of two, the one outside is skipped with the editor's words; alone, nothing is placed.
+    if ((await k.setting("terrain.enforceCameraBounds")) === false) fail("Enforce Camera Bounds isn't on by default");
+    const two = JSON.parse(await k.tool("place_objects", { objects: [inside, outside], ignoreRoom: true }));
+    await settled(page);
+    if (two.placed !== 1 || two.skipped.length !== 1 || two.skipped[0].index !== 1 || !allow.test(two.skipped[0].reason)) fail(`place_objects across the camera bounds: ${JSON.stringify(two)}`);
+    if (at(inside.x, 0) < 0 || at(outside.x, 0) >= 0) fail("place_objects didn't place the one inside the camera bounds alone");
+    const doo = k.docHash();
+    const alone = await refusal("place_objects", { objects: [outside], ignoreRoom: true });
+    if (!allow.test(alone ?? "") || k.docHash() !== doo) fail(`place_objects outside the camera bounds: ${alone ?? "placed"}`);
+    const beyond = { ids: ["LTlt"], left: br + 128, bottom: -512, right: br + 768, top: 512, shape: "box", seed: 7 };
+    const scattered = await refusal("scatter_objects", beyond);
+    if (!allow.test(scattered ?? "") || k.docHash() !== doo) fail(`scatter_objects outside the camera bounds: ${scattered ?? "placed"}`);
+    const moved = await refusal("move_object", { kind: "doodads", index: at(inside.x, 0), id: "LTlt", x: outside.x, y: 256 });
+    if (!/Not done: .*turn off Enforce Camera Bounds to allow it/.test(moved ?? "") || k.docHash() !== doo) fail(`move_object outside the camera bounds: ${moved ?? "moved"}`);
+
+    // Off: the same calls do what they did before the switch was held to.
+    await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
+    const placed = await refusal("place_objects", { objects: [outside], ignoreRoom: true });
+    await settled(page);
+    if (placed || at(outside.x, 0) < 0) fail(`place_objects outside the camera bounds with Enforce Camera Bounds off: ${placed ?? "not there"}`);
+    const spread = JSON.parse(await k.tool("scatter_objects", beyond));
+    if (!(spread.placed > 0) || spread.spotsOutsideCameraBounds !== undefined) fail(`scatter_objects with Enforce Camera Bounds off: ${JSON.stringify(spread)}`);
+    await settled(page);
+    const move = await refusal("move_object", { kind: "doodads", index: at(inside.x, 0), id: "LTlt", x: outside.x, y: 256 });
+    await settled(page);
+    if (move || at(outside.x, 256) < 0) fail(`move_object with Enforce Camera Bounds off: ${move ?? "not there"}`);
+
+    // Water: four raises of 1000 make a mound whose top is past where the stored level of a surface at its height ends.
+    for (let i = 0; i < 4; i++) {
+      const raise = await refusal("sculpt_terrain", { mode: "raise", amount: 1000, left: -2304, bottom: 256, right: -256, top: 2304, shape: "box" });
+      if (raise) return fail(`raising the ground: ${raise}`);
+    }
+    await settled(page);
+    const w3e = join(k.root, "map", "war3map.w3e.txt"), raised = hash(w3e);
+    const mound = { mode: "deep", left: -1536, bottom: 1024, right: -1024, top: 1536, shape: "box" };
+    await page.evaluate(`w3.settings.set("terrain.enforceWaterLimits", true)`);
+    const low = await refusal("set_water", { mode: "deep", left: -1536, bottom: -1536, right: -1024, top: -1024, shape: "box" });
+    await settled(page);
+    const lowHash = hash(w3e);
+    if (low || lowHash === raised) fail(`deep water on low ground with Enforce Water Height Limits on (control): ${low ?? "nothing changed"}`);
+    const high = await refusal("set_water", mound);
+    await settled(page);
+    if (!/Not done: the water at \d+ corners? would go past .*Turn off Enforce Water Height Limits/.test(high ?? "") || hash(w3e) !== lowHash) fail(`deep water on the mound with Enforce Water Height Limits on: ${high ?? "drawn"}`);
+    await page.evaluate(`w3.settings.set("terrain.enforceWaterLimits", false)`);
+    const drawn = await refusal("set_water", mound);
+    await settled(page);
+    if (drawn || hash(w3e) === lowHash) fail(`the same water with Enforce Water Height Limits off: ${drawn ?? "nothing changed"}`);
+  } finally {
+    await k.reset();
+  }
+}
+
 /** A question a check left on screen (a toast asking something, which stays until answered) would cover the next
  *  checks' clicks. Each check of the full run is followed by this: it closes such questions, as dismissing them by ×
  *  would, and names the check, so the one that left it can answer it itself. */
@@ -2705,8 +2770,10 @@ async function resizeUndoChecks(page, found) {
   };
   const doodadIds = () => JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads.map((d) => d.id);
 
-  // Something in the strip that a shrink from the left will cut off.
-  await tool("place_objects", { objects: [{ id: "LPwb", x: -3900, y: 0 }], ignoreRoom: true });
+  // Something in the strip that a shrink from the left will cut off: outside the camera bounds, so with Enforce Camera Bounds off.
+  await page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", false)`);
+  await tool("place_objects", { objects: [{ id: "LPwb", x: -3900, y: 0 }], ignoreRoom: true })
+    .finally(() => page.evaluate(`w3.settings.set("terrain.enforceCameraBounds", undefined)`));
   await tool("save_project");
   await until("the map's editor drawn", () => page.evaluate(`!!document.querySelector(".model-stage canvas")`), 30000);
   await settled(page);
@@ -8155,6 +8222,7 @@ async function run() {
         keybindings,
         keyChords,
         mcpGuides,
+        mcpLimits,
         mcpStartMove,
         meleeByHand,
         moduleFunctions,
@@ -8338,6 +8406,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "testMapWithoutGame");
   for (const check of [heightsPreserve, heightsUniform, heightsLimits]) await check(page, found).catch((e) => found.push(`height tools (${check.name}): ${e.message}`));
   await leftOpen(page, "height tools");
+  await mcpLimits(page, found).catch((e) => found.push(`mcp limits: ${e.message}`));
+  await leftOpen(page, "mcpLimits");
   await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
   await leftOpen(page, "flyingHeights");
   await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
