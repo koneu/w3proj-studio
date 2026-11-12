@@ -4,12 +4,7 @@
 // (w3:diff:<path>); "Commit" stages and commits the project's changes. git itself runs in the
 // backend (git_status, git_show, git_size; tool_run for init/add/commit).
 
-import { json } from "@codemirror/lang-json";
-import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { goToNextChunk, goToPreviousChunk, MergeView, getChunks } from "@codemirror/merge";
-import { EditorState } from "@codemirror/state";
-import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorView, lineNumbers } from "@codemirror/view";
 import { BRANCH_FORMAT, branchProblem, chunks, commitPaths, diffTarget, discardPlan, lfsSize, LOG_FORMAT, parseBranches, parseCounts, parseLog, parseNameStatus, type Branch, type Change, type Commit, type CommitFile } from "./git";
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, type ObjectsService } from "../../extensions/services";
@@ -18,6 +13,7 @@ import { keyOf } from "../../lib/keys";
 import { checkpointBefore } from "../../lib/checkpoint";
 import { loadKind } from "../../lib/objects/metadata";
 import { formatBytes, h } from "../../workbench/dom";
+import { diffExtensions } from "./diffext";
 import { diffObjects, type ObjectChange } from "./objdiff";
 import { errorText } from "../../lib/oserror";
 
@@ -368,8 +364,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           }
           const a = before.text ?? "", b = after.text ?? "";
           const box = h("div.diff-view");
-          const lang = /\.json$/i.test(path) ? [json()] : [];
-          const ro = [EditorState.readOnly.of(true), EditorView.editable.of(false), lineNumbers(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }), oneDark, ...lang];
+          const ro = diffExtensions(path);
           view = new MergeView({ a: { doc: a, extensions: ro }, b: { doc: b, extensions: ro }, parent: box, collapseUnchanged: { margin: 3, minSize: 6 }, gutter: true });
           const chunks = getChunks(view.b.state)?.chunks ?? [];
           const lines = (s: string) => (s ? s.split(/\r\n|\r|\n/).length : 0);
