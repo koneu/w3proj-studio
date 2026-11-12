@@ -47,7 +47,7 @@ import { specialFootprints, specialPlacements, type Footprint } from "./specials
 import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
-import { meleeAfterSave, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
+import { meleeAfterSave, meleeFiles, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -484,7 +484,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   /** One edit of a placement file. Units: the map stops being a melee map in the same edit (one undo step) when the
    *  World Editor's save would take it off (lib/terrain/meleesave: a player's unit or item, custom gameplay constants,
-   *  a start location under water, …), whatever the tool (placing, moving, a new owner, replacing types). The map
+   *  a start location under water, …), whatever the tool (placing, moving, a new owner, replacing types), and becomes
+   *  one again when Studio can tell the editor's save would make it one. The map
    *  script's run after the save would do it too, but a moment later and lost when the project closes first. */
   const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
@@ -515,7 +516,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
         // Placing can make a player own something: Melee goes off as the save would take it off. The ground is the
         // saved terrain's (a start under water).
-        const flags = info.flags as number, after = (await savedMelee(w3.workspace, info as unknown as MeleeInfo, list)).flags;
+        const flags = info.flags as number, after = (await savedMelee(meleeFiles(w3), info as unknown as MeleeInfo, list)).flags;
         if (after !== flags) { info.flags = after; changed = true; }
         if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
       }
@@ -5337,8 +5338,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                   const starts = t.starts;
                   let changes: string[] = [];
                   // What the Melee rules need besides the info: the gameplay constants, and the ground as saved here.
-                  const facts = await readMeleeFacts(w3.workspace, parseW3e(t.w3e));
-                  let unmelee: string[] = [];
+                  const facts = await readMeleeFacts(meleeFiles(w3), parseW3e(t.w3e), true);
+                  let unmelee: string[] = [], remelee = false;
                   await editDoc("war3map.w3i", (info) => {
                     changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
                     // The players' ally priorities follow their starts, as the World Editor's save works them out.
@@ -5348,13 +5349,14 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                     let melee = false;
                     if (typeof info.flags === "number") {
                       const after = meleeAfterSave(info as unknown as MeleeInfo, t.units ?? [], facts);
-                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; melee = true; }
+                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; remelee = !after.reasons.length; melee = true; }
                     }
                     return changes.length > 0 || priorities || melee;
                   });
                   savedStarts = starts;
                   if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
                   if (unmelee.length) void w3.window.showInfo(`This map is no longer a melee map (as the World Editor's save makes it): ${unmelee.join("; ")}.`);
+                  if (remelee) void w3.window.showInfo("This map is a melee map again: it meets the World Editor's melee rules, whose save makes it one.");
                 }
               },
               saved: () => doc.setDirty(mark.isDirty(at)),

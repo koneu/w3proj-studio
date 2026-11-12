@@ -207,8 +207,12 @@ It never starts the game itself.
   reports; the flat `empty_map_on_newest_world_editor.w3m` doesn't. The save also turns the Melee flag back on for a map
   that meets its rules (a copy with the flag off got it). Those rules (branch props-ui-fixes: copies of (4)PhantomGrove
   with the flag cleared and one change each) are in lib/terrain/owner.ts `meleeBlockers`; Studio's save takes the flag
-  off by them but never puts it back, since two of the editor's reasons (custom triggers, start locations in invalid
-  positions) it can't tell. A player's flag bit 1 is SetPlayerRaceSelectable (map-info/priorities.ts RACE_SELECTABLE).
+  off by them, and puts it back only where it can tell every reason is absent (lib/terrain/meleesave.ts
+  `meleeSetBlockers`: the default trigger only, no object data or interface file, nothing but creeps within 512 of a
+  start on flat buildable ground). Branch melee-flag-set (2026-11-13): copies with the flag cleared of cliff.w3m,
+  (2)BanditRidge, (8)Friends, (4)RustyCreek_S2_v1.3 and (4)FrozenClover (a creep 12 from a start) got it back from the
+  editor's save, as from Studio's; (6)Zandalar got it back too, where Studio leaves it off (doodads 39 from the starts).
+  Studio puts it back on 153 of the game's 185 FrozenThrone melee maps with the flag cleared. A player's flag bit 1 is SetPlayerRaceSelectable (map-info/priorities.ts RACE_SELECTABLE).
 - **Dialogs that don't draw**: Scenario > Player Properties opened (window "Scenario Properties") but stayed a blank
   white rectangle in the hidden display, also after moving the pointer over it and clicking; `--close` then can't
   answer it.

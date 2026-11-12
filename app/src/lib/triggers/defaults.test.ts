@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultTriggerFile, defaultWct, defaultWtg, resetTriggers } from "./defaults";
-import { parseWct, parseWtg, textTriggers, writeWct, writeWtg, type CustomTextFile, type TriggerFile } from "./wtg";
+import { defaultTriggerFile, defaultWct, defaultWtg, isDefaultTriggers, parseWtgWithoutArgs, resetTriggers } from "./defaults";
+import { parseWct, parseWtg, textTriggers, writeWct, writeWtg, type CustomTextFile, type TriggerFile, type TriggerItem } from "./wtg";
 import type { TriggerData } from "./triggerdata";
 
 const noArgs = { find: () => ({ args: [] }) } as unknown as TriggerData;
@@ -73,4 +73,31 @@ test("Reset Triggers on a classic file keeps its layout and reads back", () => {
     assert.equal(back.variables.length, 0);
     assert.deepEqual(r.custom.texts, [null]);
   }
+});
+
+// What the World Editor's save doesn't count as custom triggers (we-drive, 2026-11-09): the description didn't count;
+// a renamed trigger, a dropped or disabled action did. Anything else unproven reads as custom.
+test("only the default trigger file counts as the default", () => {
+  assert.equal(isDefaultTriggers(defaultTriggerFile("My Map")), true);
+  assert.equal(isDefaultTriggers(parseWtgWithoutArgs(new Uint8Array(Buffer.from(EDITOR_RESET_S_W3M, "base64")))), true, "the editor's own file");
+  const { file } = resetTriggers(worked().file, null);
+  assert.equal(isDefaultTriggers(file), true, "Reset Triggers");
+  const classic = resetTriggers({ ...worked().file, reforged: false, version: 7 }, null).file;
+  assert.equal(isDefaultTriggers(classic), true, "a classic file's default");
+  const changed = (f: (file: TriggerFile, melee: TriggerItem) => void) => {
+    const x = defaultTriggerFile();
+    f(x, x.items.find((i) => i.type === 8) as TriggerItem);
+    return isDefaultTriggers(x);
+  };
+  assert.equal(changed((_, m) => { m.description = "Mine"; }), true, "the description doesn't count");
+  assert.equal(changed((_, m) => { m.name = "Melee Init"; }), false, "renamed");
+  assert.equal(changed((_, m) => { m.ecas.pop(); }), false, "an action dropped");
+  assert.equal(changed((_, m) => { m.ecas[3].enabled = false; }), false, "an action disabled");
+  assert.equal(changed((_, m) => { m.enabled = false; }), false, "the trigger disabled");
+  assert.equal(changed((_, m) => { m.isCustom = true; }), false, "custom text");
+  assert.equal(changed((_, m) => { m.ecas.push({ ...m.ecas[1] }); }), false, "an action more");
+  assert.equal(changed((_, m) => { m.ecas[1].params = [{ type: 0, value: "1" }]; }), false, "an argument");
+  assert.equal(changed((f) => { f.variables.push(worked().file.variables[0]); }), false, "a variable");
+  assert.equal(changed((f, m) => { f.items.push({ ...structuredClone(m), name: "Second", id: 0x03000001 }); }), false, "a trigger more");
+  assert.equal(isDefaultTriggers(worked().file), false);
 });

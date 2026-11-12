@@ -26,8 +26,8 @@ import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
 import { readImported } from "../../lib/imports";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
-import type { MeleeInfo } from "../../lib/terrain/owner";
-import { savedMelee } from "../../lib/terrain/meleesave";
+import { MELEE_MAP, type MeleeInfo } from "../../lib/terrain/owner";
+import { meleeFiles, savedMelee } from "../../lib/terrain/meleesave";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
@@ -40,10 +40,11 @@ const STAMP = SCRIPT_STAMP;
 const DIFF = "w3:script-diff:";
 
 const INFO_JSON = "map/war3map.w3i.json";
-/** Files whose save can take the Melee flag off (lib/terrain/meleesave): the placed units, the map's info, its gameplay
- *  constants, and the ground (a start location under water). Looked at after every save, whatever
- *  script.generateOnSave says and whatever the script's language. */
-const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapUnits\.doo(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?)$/i;
+/** Files whose save can change the Melee flag (lib/terrain/meleesave): the placed units, the map's info, its gameplay
+ *  constants, and the ground (a start location under water) take it off; with the triggers and the doodads they can
+ *  also put it back. Looked at after every save, whatever script.generateOnSave says and whatever the script's
+ *  language. */
+const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapUnits\.doo(\.json)?|war3map\.doo(\.json)?|war3map\.wtg(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?)$/i;
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
@@ -119,7 +120,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   };
 
   /** The Melee flag as the World Editor's save leaves it (lib/terrain/meleesave): set in `info`, the flags the script is
-   *  made with, and written into war3map.w3i.json unless `look`. Only ever off. Not written while Map Properties holds
+   *  made with, and written into war3map.w3i.json unless `look`. Off, or back on when Studio can tell every rule is met.
+   *  Not written while Map Properties holds
    *  unsaved changes (it gets its turn when that's saved), nor into a w3i kept raw (left as it is, as the placing tools
    *  do), nor into another project than `root` (the reads take a while). */
   const followMelee = async (info: { flags?: unknown }, look: boolean, root: string | undefined, reason?: string) => {
@@ -127,7 +129,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const flags = Number(info.flags);
     if (!Number.isFinite(flags)) return;
     const placed = (await json<{ units?: { id: string; player?: number; position?: number[] }[] }>("map/war3mapUnits.doo"))?.units ?? [];
-    const melee = await savedMelee(w3.workspace, { ...info, flags } as MeleeInfo, placed);
+    const melee = await savedMelee(meleeFiles(w3), { ...info, flags } as MeleeInfo, placed);
     if (melee.flags === flags || w3.editors.isDirty(INFO_JSON)) return;
     info.flags = melee.flags;
     if (look) return;
@@ -140,7 +142,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: INFO_JSON, text: JSON.stringify(now) });
     if (w3.workspace.project()?.root !== root) return;
     await w3.workspace.writeText(INFO_JSON, canonical);
-    out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`);
+    out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: ${melee.flags & MELEE_MAP ? "a melee map again (it meets the World Editor's melee rules, whose save makes it one)"
+      : `not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`}`);
   };
 
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
