@@ -3349,10 +3349,17 @@ async function viewCommands(page, fail, shots, size) {
   // Close to the unit: what is thin, and the grids, whose lines would vanish from far away.
   await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
   await settled(page);
+  const beforeSel = (await state()).camera;
   const nothing =await run("w3.terrain.viewSelection");
   if (nothing) bad(`View Selection with a selection: ${nothing}`);
   const near = await state();
   if (Math.hypot(near.camera.target[0] - 256, near.camera.target[1]) > 120) bad(`View Selection looks at ${near.camera.target}`);
+  // As the World Editor's ~: it pans to the object and keeps the distance.
+  if (Math.abs(near.camera.distance - beforeSel.distance) > 1) bad(`View Selection changed the distance: ${beforeSel.distance} → ${near.camera.distance}`);
+  // Then in close with the zoom key, for what is thin and the grids.
+  for (let i = 0; i < 60 && (await state()).camera.distance > 900; i++) await run("w3.terrain.camera.zoomIn");
+  const closeDistance = (await state()).camera.distance;
+  if (closeDistance > 900) bad(`zooming in didn't get close: ${closeDistance}`);
   const close = await settle("selection");
   await trial(close.plain, close.noise, "w3.terrain.toggleCameraObjects", "cameras", "cameras", 150);
   await trial(close.plain, close.noise, "w3.terrain.toggleSmallGrid", "grid", "grid-small", 400);
@@ -3487,7 +3494,7 @@ async function viewCommands(page, fail, shots, size) {
   const moved = (await state()).camera;
   if (!(moved.distance < whole.camera.distance * 0.95) || Math.abs(moved.yaw - whole.camera.yaw) < 0.05) bad(`zoom and turn after View Entire Map: ${JSON.stringify(moved)}`);
   await run("w3.terrain.viewEntireMap");
-  if (!(near.camera.distance < whole.camera.distance / 2)) bad(`View Selection stays far away (${near.camera.distance} against ${whole.camera.distance})`);
+  if (!(closeDistance < whole.camera.distance / 2)) bad(`the close view isn't closer than View Entire Map (${closeDistance} against ${whole.camera.distance})`);
   await picture("entire-map");
   // Select In Tool Palette (the unit is selected again: deleting it took the selection away): the Objects tab opens, with the unit's type chosen.
   await page.evaluate(`(async () => (await w3.services.get("w3.terrain")).look.get(w3.editors.activePath())(256, 0, { id: "hfoo", x: 256, y: 0 }))()`);
