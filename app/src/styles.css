@@ -182,8 +182,10 @@ code { font-family: var(--mono); font-size: 12px; }
 
 /* Object editor */
 .object-editor { display: flex; height: 100%; }
-.obj-sidebar { width: 300px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.obj-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 8px; }
+/* The list narrows with the editor (a third of it, 190 to 300 px): at the window's 800 px minimum the fields keep most of it. */
+.obj-sidebar { width: clamp(190px, 34%, 300px); flex: none; min-width: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.obj-toolbar { display: flex; flex-wrap: wrap; gap: 4px; justify-content: space-between; align-items: center; padding: 8px; }
+.obj-sidebar .obj-toolbar-buttons { flex-wrap: wrap; }
 .obj-search { margin: 0 8px 6px; }
 .obj-list { flex: 1; overflow-y: auto; }
 .obj-group { padding: 6px 10px 2px; font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -193,7 +195,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-item code { color: var(--accent); }
 .obj-item small { color: var(--fg-muted); }
 .obj-item span { overflow: hidden; text-overflow: ellipsis; }
-.obj-detail { flex: 1; overflow: auto; padding: 12px 20px; outline: none; }
+.obj-detail { flex: 1; min-width: 0; overflow: auto; padding: 12px 20px; outline: none; container-type: inline-size; }
 .obj-preview { position: relative; float: right; width: 220px; height: 220px; margin: 0 0 10px 14px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); overflow: hidden; cursor: grab; }
 /* The fields and the model preview side by side (the preview first in the DOM, drawn on the right): every section's
    table has the same width, so their columns line up; a narrow pane puts the preview above the fields. */
@@ -223,6 +225,22 @@ code { font-family: var(--mono); font-size: 12px; }
 .obj-value.invalid { border-color: var(--error); }
 .obj-resolved { color: var(--fg-muted); font-size: 12px; padding: 1px 6px; white-space: pre-wrap; }
 .obj-add td { padding-top: 8px; }
+/* A narrow detail pane (a small window): the preview above the fields and not sticky (it would lie over them), and each
+   field on two lines, its name with the level and the reset button, then the value across the whole width. */
+@container (max-width: 560px) {
+  .obj-detail-body > .obj-preview { position: static; width: 100%; max-width: 360px; height: 180px; margin: 4px 0 6px; }
+}
+@container (max-width: 480px) {
+  .obj-table, .obj-table tbody { display: block; width: 100%; }
+  .obj-table thead { display: none; }
+  .obj-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; border-bottom: 1px solid #2a2c30; }
+  .obj-table tr > :nth-child(n) { width: auto; border-bottom: none; }
+  .obj-table tr > td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .obj-table tr > td:nth-child(2) { grid-column: 2; grid-row: 1; }
+  .obj-table tr > td:nth-child(3) { grid-column: 1 / -1; grid-row: 2; padding-bottom: 4px; }
+  .obj-table tr > td:nth-child(4) { grid-column: 3; grid-row: 1; }
+  .obj-table tr > td:empty { padding: 0; }
+}
 
 /* Extensions view */
 .ext-item { padding: 6px 14px; border-bottom: 1px solid #2a2c30; }
@@ -261,8 +279,10 @@ code { font-family: var(--mono); font-size: 12px; }
 .chip small { color: var(--fg-muted); font-size: 10px; }
 .chip.on { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
 .chip.on small { color: rgba(255, 255, 255, 0.75); }
-.obj-detail-toolbar { display: flex; gap: 14px; align-items: center; margin: 4px 0 8px; position: sticky; top: -12px; background: var(--bg); padding: 6px 0; z-index: 1; }
-.obj-field-search { width: 260px; }
+/* Wraps in a narrow pane: the filter box shrinks to 140 px first, the check boxes keep their labels on one line. */
+.obj-detail-toolbar { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin: 4px 0 8px; position: sticky; top: -12px; background: var(--bg); padding: 6px 0; z-index: 1; }
+.obj-detail-toolbar > label, .obj-detail-toolbar > span { white-space: nowrap; }
+.obj-field-search { width: 260px; flex: 0 1 260px; min-width: 140px; }
 .obj-section h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted); margin: 16px 0 4px; }
 .obj-table tr.modified td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .obj-table tr.modified .obj-field-label { color: var(--accent); }
@@ -566,6 +586,8 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 /* Buttons in a value keep their one line and sit in the row's middle (.terrain-selection's align-self put them at the top). */
 .terrain-prop-value > button { flex: none; align-self: center; white-space: nowrap; }
 .terrain-prop-value > button.icon-button { min-width: 22px; height: 22px; padding: 0 4px; font-size: 15px; line-height: 1; }
+/* An inventory slot's Choose… and × at the row's end, whether the slot shows a name (which grows), "empty" or "mixed". */
+.terrain-prop-value > button[data-prop^="slot-"] { margin-left: auto; }
 /* A chance in percent: three digits and the spinner (WebKitGTK's takes about 20 px). */
 .terrain-prop-value > input.terrain-prop-chance { flex: none; width: 62px; }
 .terrain-prop-check { display: inline-flex; align-items: center; gap: 4px; }
@@ -687,7 +709,8 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .trig-tree-rows { flex: 1; overflow: auto; padding: 4px 0; }
 /* The buttons wrap inside the column rather than run into the right pane. */
 .trig-toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; border-bottom: 1px solid var(--border); }
-.trig-toolbar .trig-new { flex: 1 1 100px; min-width: 0; }
+/* At the tree's narrowest (180 px) two lines: New… with ↑ and ↓, then Delete and ⋯; one line from about 240 px. */
+.trig-toolbar .trig-new { flex: 1 1 60px; min-width: 0; }
 .trig-editor:focus { outline: none; }
 .trig-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .trig-name { font-size: 15px; font-weight: 600; min-width: 260px; }

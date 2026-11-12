@@ -1228,8 +1228,14 @@ class TriggerView {
       h("button", { title: "Move up", onclick: () => this.move(-1) }, "↑"),
       h("button", { title: "Move down", onclick: () => this.move(1) }, "↓"),
       h("button", { title: "Delete (Del)", onclick: () => this.deleteSelected() }, "Delete"),
-      h("button", { title: "Save all triggers and variables as a .wtg and .wct, which the World Editor can import too", onclick: () => this.run("w3.triggers.export") }, "Export…"),
-      h("button", { title: "Replace all triggers and variables with a .wtg and .wct", onclick: () => this.run("w3.triggers.import") }, "Import…"));
+      // Export and Import in a menu: with them as buttons the toolbar took three lines at the tree's narrowest.
+      h("button.trig-more", { title: "More: Export…, Import…", onclick: (e: MouseEvent) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        this.w3.window.showContextMenu({ x: r.left, y: r.bottom }, [
+          { label: "Export…", hint: "Save all triggers and variables as a .wtg and .wct, which the World Editor can import too", run: () => this.run("w3.triggers.export") },
+          { label: "Import…", hint: "Replace all triggers and variables with a .wtg and .wct", run: () => this.run("w3.triggers.import") },
+        ]);
+      } }, "⋯"));
   }
   private run(command: string) { this.w3.commands.execute(command).catch((e) => this.w3.window.showError(String((e as Error).message ?? e))); }
   private convertCommand() { this.run("w3.triggers.convertToCustomText"); }

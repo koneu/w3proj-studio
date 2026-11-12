@@ -1443,6 +1443,14 @@ async function unitProperties(page, found) {
   await redrawn();
   await k.save();
   if (JSON.stringify(unit("Hpal").inventory) !== JSON.stringify([{ slot: 0, id: "ankh" }])) fail(`the Paladin's inventory: ${JSON.stringify(unit("Hpal").inventory)}`);
+  // Every slot's buttons end at the row's right edge, filled (Choose… ×) or not (Choose…): the × of a filled slot and of
+  // a mixed one (a text, not a name) stood at different places, after the name or right after "mixed".
+  const slotEnds = await page.evaluate(`[...document.querySelectorAll('.terrain-props [data-prop^="slot-"]')].map((b) => {
+    const value = b.closest(".terrain-prop-value"), buttons = [...value.querySelectorAll(":scope > button")];
+    return { slot: b.dataset.prop, filled: buttons.length > 1, gap: Math.round(value.getBoundingClientRect().right - buttons.at(-1).getBoundingClientRect().right) };
+  })`);
+  if (!slotEnds.some((s) => s.filled) || !slotEnds.some((s) => !s.filled)) fail(`the Paladin's slots aren't filled and empty both (control): ${JSON.stringify(slotEnds)}`);
+  else if (slotEnds.some((s) => Math.abs(s.gap) > 1)) fail(`the inventory slots' buttons don't end at the row's edge: ${JSON.stringify(slotEnds)}`);
   // One undo takes the item back, and only that.
   await undo();
   await k.save();
@@ -3918,16 +3926,48 @@ async function typedFieldSave(page, found) {
       await until("the AI Editor's number fields", () => page.evaluate(`${aiNum}.length > 0`), 20000);
       const index = 0, old = await page.evaluate(`${aiNum}[0].value`);
       const typed = old === "13" ? "14" : "13";
-      await typeAndSave("an AI number field", `${aiNum}[${index}]`, typed);
       const aiPath = await page.evaluate(`w3.editors.activePath()`);
+      // Unsaved while typing, before the field commits (it marked the tab only on its change).
+      await typeAndSave("an AI number field", `${aiNum}[${index}]`, typed, aiPath);
       await until("the AI saved", async () => !(await dirty(aiPath)), 5000).catch(() => fail("Ctrl+S right after typing an AI number left the AI Editor unsaved"));
       // The fields drawn again after the save, where the focus goes back to.
       await settled(page);
       const focus = await page.evaluate(`(() => { const a = document.activeElement; const list = ${aiNum}; return { at: list.indexOf(a), value: a?.value ?? null, tag: a?.tagName ?? null, cls: a?.className ?? null }; })()`);
       if (focus.at !== index || focus.value !== typed) fail(`after Ctrl+S in an AI number field the focus is on ${JSON.stringify(focus)}, not the field (number ${index}, ${typed})`);
+      // An AI text field (the AI's name, General tab) too.
+      await page.evaluate(`[...document.querySelectorAll(".ai-tabs button")].find((x) => x.textContent === "General")?.click()`);
+      await typeAndSave("the AI's name", `document.querySelector("input.ai-text")`, "Typed Name", aiPath);
+      await until("the AI saved", async () => !(await dirty(aiPath)), 5000).catch(() => fail("Ctrl+S right after typing the AI's name left the AI Editor unsaved"));
     } finally {
       await page.evaluate(`(() => { if (window.__typedSave) w3.window.pickSaveFile = window.__typedSave; delete window.__typedSave; })()`);
     }
+
+    // ---- The Campaign Editor: a number field (Screen's fog style) marks the tab unsaved while typing ----
+    const camp = join(work, "typed-campaign");
+    rmSync(camp, { recursive: true, force: true });
+    await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Typed Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+    await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+    const w3f = "map/war3campaign.w3f.json";
+    const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Typed Campaign", difficulty: "Normal", author: "", description: "",
+      flags: 1, background: 0, backgroundPath: "", minimapPath: "", ambientSound: 0, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+      unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+    await page.evaluate(`(async () => {
+      const root = w3.workspace.project().root, path = ${JSON.stringify(w3f)};
+      await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(campInfo))} }));
+      await w3.workspace.refresh();
+    })()`);
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    const fogStyle = `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === "Fog style")?.querySelector("input")`;
+    await until("the Campaign Editor's fog style", () => page.evaluate(`!!(${fogStyle})`), 20000);
+    const campPath = await page.evaluate(`w3.editors.activePath()`);
+    if (campPath !== w3f) fail(`w3.campaign.open opened ${campPath}`);
+    const style = () => JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8")).fogStyle;
+    const newStyle = style() === 1 ? 2 : 1;
+    await typeAndSave("the campaign's fog style", fogStyle, String(newStyle), w3f);
+    await until("the typed fog style saved", () => style() === newStyle, 5000).catch(() => fail(`Ctrl+S right after typing ${newStyle} as the campaign's fog style saved ${JSON.stringify(style())}`));
+    await settled(page);
+    if (await dirty(w3f)) fail("Ctrl+S right after typing in the Campaign Editor left it unsaved");
   } finally {
     await page.evaluate(`w3.editors.closeAll()`);
   }
@@ -5381,7 +5421,48 @@ async function objectLayout(page, found, root) {
     if (!(m.gap < 12)) fail(`the first field table starts ${Math.round(m.gap)} px under its heading`);
     if (Math.max(...m.valueLefts) - Math.min(...m.valueLefts) > 1) fail(`the Value columns of the sections start at ${[...new Set(m.valueLefts)].join(", ")} px`);
     if (m.overlaps) fail(`the model preview lies over ${m.overlaps} field tables`);
+
+    // A small window: 800 px (the window's minimum) and 900 px wide, the side bar at its default 280 px. The page's root
+    // is narrowed to that (the window itself can't be resized from here); one hidden or of another width is made up for.
+    for (const [width, minDetail] of [[800, 270], [900, 360]]) {
+      const n = await page.evaluate(`(async () => {
+        const side = [...document.querySelectorAll(".sidebar")].find((e) => e.offsetParent !== null)?.getBoundingClientRect().width ?? 0;
+        document.getElementById("app").style.width = (${width} - 280 + side) + "px";
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const r = (e) => e.getBoundingClientRect();
+        const shown = (e) => e.offsetParent !== null && r(e).width > 0;
+        const detail = [...document.querySelectorAll(".obj-detail")].find(shown);
+        const list = [...document.querySelectorAll(".obj-sidebar")].find(shown);
+        const d = r(detail), l = r(list);
+        const lineHeight = parseFloat(getComputedStyle(detail.querySelector(".obj-field-label")).lineHeight) || 18;
+        const labels = [...detail.querySelectorAll(".obj-field-label")].filter(shown);
+        const values = [...detail.querySelectorAll(".obj-table .obj-value")].filter(shown);
+        const bar = detail.querySelector(".obj-detail-toolbar");
+        const out = (e, box) => r(e).right > box.right + 1 || r(e).left < box.left - 1;
+        return {
+          detail: Math.round(d.width),
+          // A field name on more than two lines was broken inside its words ("Upgra" / "de").
+          tallLabels: labels.filter((e) => r(e).height > lineHeight * 2 + 2).map((e) => e.textContent).slice(0, 5),
+          labels: labels.length,
+          narrowValues: values.filter((e) => r(e).width < 150).length,
+          values: values.length,
+          // The filter row inside the pane, its check boxes' labels on one line each.
+          clipped: [...bar.children].filter((e) => out(e, d)).map((e) => e.textContent.trim() || e.className),
+          wrappedChecks: [...bar.querySelectorAll("label")].filter((e) => r(e).height > lineHeight * 1.6).map((e) => e.textContent.trim()),
+          listClipped: [...list.querySelectorAll(".obj-toolbar button, .obj-toolbar-buttons > *")].filter((e) => out(e, l)).map((e) => e.textContent.trim()),
+        };
+      })()`);
+      const at = `at a ${width} px window`;
+      if (!n.labels || !n.values) { fail(`${at}: no field names (${n.labels}) or values (${n.values}) shown (control)`); continue; }
+      if (n.detail < minDetail) fail(`${at} the fields pane is ${n.detail} px wide (wanted ${minDetail} px or more)`);
+      if (n.tallLabels.length) fail(`${at} field names wrap over more than two lines: ${n.tallLabels.join(", ")}`);
+      if (n.narrowValues) fail(`${at} ${n.narrowValues} of ${n.values} value fields are under 150 px wide`);
+      if (n.clipped.length) fail(`${at} the filter row sticks out of the pane: ${n.clipped.join(", ")}`);
+      if (n.wrappedChecks.length) fail(`${at} the filter row's check boxes wrap their labels: ${n.wrappedChecks.join(", ")}`);
+      if (n.listClipped.length) fail(`${at} the object list's buttons stick out of it: ${n.listClipped.join(", ")}`);
+    }
   } finally {
+    await page.evaluate(`document.getElementById("app").style.width = ""`).catch(() => {});
     await page.evaluate(`w3.editors.closeAll()`);
   }
 }
@@ -5857,6 +5938,28 @@ async function placerAndCampaign(page, found) {
   /** A click in the middle of the view over (x, y) (k.look waits until it's drawn there), then the app at rest. */
   const click = async (x, y) => { await k.look(x, y); await k.clickMiddle(); await settled(page); };
   try {
+    // Opening the Objects tab with nothing chosen shows its toolbar: the object browser didn't open over it by itself.
+    // Control: Place… opens the browser (so the time waited would have shown one).
+    const browser = `!!document.querySelector(".picker-overlay")`;
+    const place = async (within) => {
+      await k.hands.click(".terrain-group-tools button", "Place…");
+      await until("the object browser from Place…", () => page.evaluate(browser), within)
+        .catch(() => fail(`Place… didn't open the object browser within ${within / 1000} s (control)`));
+      await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await until("the object browser closed", () => page.evaluate(`!(${browser})`), 5000);
+    };
+    // The first time, with the object data still loading; any browser the tab opened is put away first.
+    await k.tab("Objects");
+    await page.evaluate(`document.querySelectorAll(".picker-overlay").forEach((e) => e.remove())`);
+    await place(30000);
+    // Back to the tab, nothing chosen yet. Something that must not happen: a pause as long as Place… is given below.
+    const other = await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].map((b) => b.textContent.trim()).find((t) => t !== "Objects")`);
+    await k.tab(other);
+    await k.tab("Objects");
+    await sleep(1500);
+    if (await page.evaluate(browser)) fail("opening the Objects tab opened the object browser over its toolbar");
+    await page.evaluate(`document.querySelectorAll(".picker-overlay").forEach((e) => e.remove())`);
+    await place(1500);
     // A rock (ten variations, scale 0.8–1.2, any facing), chosen in the Objects tab from one placed by a tool.
     await k.tool("place_objects", { objects: [{ id: "ARrk", x: -768, y: -768 }], ignoreRoom: true });
     await k.save();
@@ -7421,13 +7524,34 @@ async function niceToHaves(page, found) {
     await k.tool("create_script_trigger", { name: "Nice Extra", script: "" });
     await run("w3.triggers.open");
     await until("the trigger tree", () => page.evaluate(`document.querySelectorAll(".trig-row.trig-cat").length > 0`), 20000);
+    // The left column's toolbar (New…, ↑, ↓, Delete, ⋯) stays inside the column, and at its narrowest (180 px, the sash's
+    // minimum) takes two lines at most.
+    const toolbarAt = (width) => page.evaluate(`(async () => {
+      const treeEl = document.querySelector(".trig-tree"); if (!treeEl) return "no tree";
+      if (${width}) treeEl.parentElement.style.setProperty("--trig-tree-width", "${width}px");
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const tree = treeEl.getBoundingClientRect(), items = [...document.querySelectorAll(".trig-toolbar > *")];
+      return { width: Math.round(tree.width), spill: items.filter((b) => b.getBoundingClientRect().right > tree.right + 0.5).map((b) => b.textContent),
+        lines: new Set(items.map((b) => Math.round(b.getBoundingClientRect().top))).size, items: items.length };
+    })()`);
+    const spill = await toolbarAt(0);
+    if (spill === "no tree" || spill.spill.length) fail(`the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(spill)}`);
+    const narrow = await toolbarAt(180);
+    if (narrow === "no tree" || narrow.width !== 180 || narrow.items < 5) fail(`the trigger tree at 180 px: ${JSON.stringify(narrow)} (control)`);
+    else {
+      if (narrow.spill.length) fail(`at 180 px the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(narrow.spill)}`);
+      if (narrow.lines > 2) fail(`at 180 px the Trigger Editor's toolbar takes ${narrow.lines} lines`);
+    }
+    await page.evaluate(`document.querySelector(".trig-tree")?.parentElement.style.removeProperty("--trig-tree-width")`);
+    // Its ⋯ has Export… and Import….
+    await page.evaluate(`document.querySelector(".trig-toolbar .trig-more")?.click()`);
+    const more = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
+    if (!more.includes("Export…") || !more.includes("Import…")) fail(`the trigger toolbar's ⋯ offers ${JSON.stringify(more)}`);
+    await page.evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await until("the ⋯ menu closed", () => page.evaluate(`!document.querySelector(".context-menu")`), 5000).catch(() => fail("Escape didn't close the trigger toolbar's ⋯ menu"));
     const menued = await page.evaluate(`(() => { const r = [...document.querySelectorAll(".trig-row.trig-cat")].find((e) => e.textContent.includes("Initialization"));
       if (!r) return false; r.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); return true; })()`);
     if (!menued) fail("no Initialization category in the trigger tree");
-    // The left column's toolbar (New…, ↑, ↓, Delete, Export…, Import…) stays inside the column.
-    const spill = await page.evaluate(`(() => { const tree = document.querySelector(".trig-tree")?.getBoundingClientRect(); if (!tree) return "no tree";
-      return [...document.querySelectorAll(".trig-toolbar > *")].filter((b) => b.getBoundingClientRect().right > tree.right + 0.5).map((b) => b.textContent); })()`);
-    if (spill === "no tree" || spill.length) fail(`the Trigger Editor's toolbar runs out of its column: ${JSON.stringify(spill)}`);
     /** The Category is Comment entry of the open menu: whether it says on (aria-checked) and draws the check mark. */
     const commentEntry = () => page.evaluate(`(() => { const e = [...document.querySelectorAll(".context-menu-item")].find((x) => x.textContent.startsWith("Category is Comment"));
       if (!e) return null;
