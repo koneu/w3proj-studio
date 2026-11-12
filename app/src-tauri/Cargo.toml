@@ -23,6 +23,10 @@ casc.workspace = true
 # The MCP server's pipe; the runtime itself comes with Tauri.
 tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
 
+[target.'cfg(unix)'.dependencies]
+# Ending a tool run by tool_run with what it started (its process group).
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # Job objects: tools run by tool_run end together with anything they started.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
