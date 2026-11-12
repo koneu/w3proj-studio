@@ -11,7 +11,7 @@
 // the field, as `// Units: h000 (Lit Unit), Tip (Tooltip - Basic)`; levels share it. Trigger strings aren't
 // covered (not checked in the World Editor yet).
 
-import { StringTable, removeStrings, wtsCutLines } from "./wts";
+import { StringTable, appendStrings, removeStrings, wtsCutLines } from "./wts";
 
 /** The object fields whose literal texts move. */
 export const MOVED_FIELDS: ReadonlySet<string> = new Set(["unam", "utip", "utub", "upro", "uhot", "anam", "atp1", "aub1", "ansf"]);
@@ -186,16 +186,7 @@ export function moveTexts(input: MoveTextsInput): MoveTextsResult {
   if (blocks.length || dropped.length) {
     const base = input.wts ?? "﻿";
     const eol = input.wts === null || input.wts.includes("\r\n") || !input.wts.includes("\n") ? "\r\n" : "\n";
-    let out = removeStrings(base, droppedSet);
-    if (blocks.length) {
-      if (out.replace(/^﻿/, "").trim() !== "") {
-        if (!out.endsWith("\n")) out += eol;
-        if (!/\n[ \t]*\r?\n$/.test(out)) out += eol;
-      }
-      for (const b of blocks) {
-        out += `STRING ${b.num}${eol}${b.comment ? `// ${b.comment}${eol}` : ""}{${eol}${b.text.replace(/\n/g, eol)}${eol}}${eol}${eol}`;
-      }
-    }
+    const out = appendStrings(removeStrings(base, droppedSet), blocks, eol);
     // Read back: every new string whole, every old one but the dropped as it was.
     const back = new StringTable(out);
     for (const b of blocks) {
