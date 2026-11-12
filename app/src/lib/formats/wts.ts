@@ -270,6 +270,24 @@ export function renumberWts(text: string, ids: ReadonlyMap<number, number>): str
   return out + text.slice(at);
 }
 
+/** war3map.wts without the blocks of `nums`: each goes from its STRING header up to the next header (or the end of the
+ *  file), so the blank line after it goes too. Everything else stays byte for byte. */
+export function removeStrings(text: string, nums: ReadonlySet<number>): string {
+  if (!nums.size) return text;
+  let out = "", at = 0, pos = 0;
+  for (const b of scan(text)) {
+    HEADER.lastIndex = pos;
+    const h = HEADER.exec(text)!;
+    pos = b.end;
+    if (!nums.has(b.num)) continue;
+    HEADER.lastIndex = b.end;
+    const next = HEADER.exec(text);
+    out += text.slice(at, h.index);
+    at = next ? next.index : text.length;
+  }
+  return out + text.slice(at);
+}
+
 /** A text with its TRIGSTR_ references changed by `ids` (JSON, scripts, custom text): a zero-padded number keeps its
  *  width ("TRIGSTR_007" for 7 → 12 becomes "TRIGSTR_012"). Null when nothing in it changes. */
 export function renumberStringRefs(text: string, ids: ReadonlyMap<number, number>): string | null {
