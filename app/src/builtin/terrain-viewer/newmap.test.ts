@@ -22,6 +22,13 @@ test("a name is enough next to an open project, with the dialog's defaults", () 
   assert.equal(o.customTiles, false);
   // The World Editor's "Initial Tile: <tileset> - Dirt": ground index 0, though the tileset has Grass.
   assert.equal(o.baseTile, "Ldrt", "the tileset's first ground tile, not Grass");
+  // The World Editor's new map: author "Unknown", description "Nondescript", in war3map.w3i itself (no TRIGSTR).
+  assert.deepEqual([o.author, o.description], ["Unknown", "Nondescript"]);
+  const info = mapInfo(o, newTerrain(o)) as { author: string; description: string };
+  assert.deepEqual([info.author, info.description], ["Unknown", "Nondescript"]);
+  // Given ones are kept, also empty.
+  const own = mapChoices({ name: "A", author: " Me ", description: "" }, data, folder);
+  assert.deepEqual([own.author, own.description], ["Me", ""]);
 });
 
 test("every tileset starts on its first tile", () => {

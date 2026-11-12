@@ -104,6 +104,10 @@ export async function loadTilesets(w3: W3Api): Promise<TileData> {
   return { sets: out.sort((a, b) => a.name.localeCompare(b.name)), all: tiles.map(tile), cliffsOn };
 }
 
+/** The author and description of World Editor 3.0.1's new map, written into war3map.w3i as they are (not as
+ *  TRIGSTRs; light_map, a new map of that editor) and into the script's header and config. */
+export const MAP_DEFAULTS = { author: "Unknown", description: "Nondescript" };
+
 /** The folder a map of this name gets. */
 const folderName = (name: string) => name.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/[. ]+$/, "") || "Untitled";
 /** The tileset's first ground tile, as the World Editor's default: its New Map dialog reads "Initial Tile: <tileset> -
@@ -137,9 +141,10 @@ export function mapChoices(a: Record<string, unknown>, data: Pick<TileData, "set
   if (water !== "none" && water !== "shallow" && water !== "deep") throw new Error("water must be none, shallow or deep.");
   const script = a.script === undefined ? "jass" : a.script;
   if (script !== "jass" && script !== "lua") throw new Error("script must be jass or lua.");
-  const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const text = (v: unknown, fallback: string) => (typeof v === "string" ? v.trim() : fallback);
   return {
-    dir: joinPath(parent, folderName(a.name)), name: a.name.trim(), author: text(a.author), description: text(a.description),
+    dir: joinPath(parent, folderName(a.name)), name: a.name.trim(),
+    author: text(a.author, MAP_DEFAULTS.author), description: text(a.description, MAP_DEFAULTS.description),
     width, height, tileset: set.id, groundTiles: tiles, cliffTiles: data.cliffsOn(tiles), customTiles: false, baseTile,
     layer: layer as number, water, noise: a.hills === true, lua: script === "lua",
   };
@@ -160,8 +165,9 @@ export async function askNewMap(w3: W3Api, preset: NewMapPreset = {}): Promise<N
   return new Promise((resolve) => {
     let parent = preset.parent ?? "";
     const name = h("input.newmap-input", { type: "text", value: "Untitled", placeholder: "Map name" });
-    const author = h("input.newmap-input", { type: "text", value: "", placeholder: "Author" });
+    const author = h("input.newmap-input", { type: "text", value: MAP_DEFAULTS.author, placeholder: "Author" });
     const description = h("textarea.newmap-input", { rows: 2, placeholder: "Description" });
+    description.value = MAP_DEFAULTS.description;
     const sizeSelect = (value: number) => h("select", {}, ...SIZES.map((s) => h("option", { value: String(s), selected: s === value }, String(s))));
     const width = sizeSelect(96), height = sizeSelect(96);
     const playable = h("span.muted");
