@@ -7289,6 +7289,27 @@ async function editorExtras(page, found) {
     }
     // Then one undo: the history has the one step in its place (none done twice or skipped).
     if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), "old words\n"))) fail("after the queued steps, undo didn't bring the old content back");
+    // Replace File on the same import again and again (a second one once didn't take effect, with no message: round 2,
+    // 2026-11-11): each takes, from files of the same size and of others, each only once the last one is done.
+    for (let i = 1; i <= 10; i++) {
+      const text = i % 2 ? `run ${i} words\n` : `run ${i}\n${"x".repeat(i * 7)}\n`;
+      const src = join(dir, `replacement-${i}.txt`);
+      writeFileSync(src, text);
+      await page.evaluate(`window.__errors.length = 0`);
+      await page.evaluate(`[...document.querySelectorAll("tr.imp-row")].find((r) => r.textContent.includes("smoke.txt"))?.click()`);
+      await answer("pickFile", src);
+      const pressed = await page.evaluate(`(() => { const b = document.querySelector(".imp-replace"); if (!b) return false; b.click(); return true; })()`);
+      if (!pressed) { fail(`replace ${i} of 10: no Replace button for the selected file`); break; }
+      const took = await soon(() => holds(text) && !existsSync(`${onDisk}.replacing`), 10000);
+      const errors = await page.evaluate(`window.__errors.slice()`);
+      if (!took || errors.length) {
+        fail(`replace ${i} of 10 in a row left ${JSON.stringify(readFileSync(onDisk, "utf8"))}${errors.length ? `, showed ${JSON.stringify(errors)}` : ""}`);
+        break;
+      }
+      if (readFileSync(impFile, "utf8") !== impBefore) { fail(`replace ${i} of 10 changed the import list`); break; }
+    }
+    // One undo takes back the last of them only.
+    if (!(await impStep(() => page.evaluate(`w3.commands.execute("workbench.undo")`), `run 9 words\n`))) fail(`undo after 10 replaces left ${JSON.stringify(readFileSync(onDisk, "utf8"))}, not the 9th`);
     await page.evaluate(`w3.editors.closeAll()`);
 
     // ---- Object Manager: Map Summary, Rename / Delete Object, Play Sound -------------------------------------------------
