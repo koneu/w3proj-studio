@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, uniformDefaultHeight, uniformHeight, unitDrawHeight } from "./objheights";
 import { FIXED_HEIGHT } from "./selectionkeys";
+import { heightAt, parseW3e } from "../../lib/terrain/w3e";
+import { w3eFromText } from "../../lib/terrain/w3etext";
 
 test("ships float on the water surface, whatever height the placement file gives them", () => {
   // 03_Water_Ford_Lake_Boats: the transport (hbot), destroyer and battleship are stored at z 0, the sea bed;
@@ -100,6 +102,22 @@ test("moving a fixed doodad with Reset Fixed Object Heights on puts it on the gr
 test("moving a fixed doodad with Reset Fixed Object Heights off keeps its height and flags", () => {
   const rock = { position: [0, 0, 300], flags: 2 | FIXED_HEIGHT };
   assert.deepEqual(movedHeight(rock, 256, true, false), { z: 300, flags: 6 });
+});
+
+// we-drive 2026-11-12 again, in a prefix of its own (the item checked by default): an empty 64 x 64 map whose ground rises
+// 32 per 128 east of x 512, doodads with flags 6 moved 64 right by Edit > Nudge Selection > Move Right. On: saved at the
+// ground where they stopped, 80 at x 832 and 144 at x 1088, flags 2; off: at 400 and 350 with flags 6.
+test("on a slope, a moved fixed doodad lands on the ground where it stops, as the World Editor's", () => {
+  const row = Array.from({ length: 65 }, (_, c) => Math.max(0, Math.min(1536, (c - 36) * 128))).join(" ");
+  const text = ["W3E version 12", "tileset L", "custom-tilesets 0", "ground Ldrt", "cliffs CLdi", "corners 65 65", "offset -4096 -4096",
+    "[height]", ...Array.from({ length: 65 }, () => row), "[water] all 0", "[water-bits] all 0", "[texture] all 0", "[variation] all 0",
+    "[cliff-variation] all 0", "[cliff-texture] all f", "[layer] all 2", "[flags] all 0"].join("\n");
+  const terrain = parseW3e(w3eFromText(text));
+  const crate = { position: [768, -128, 400], flags: 6 }, rock = { position: [1024, 128, 350], flags: 6 };
+  assert.deepEqual(movedHeight(crate, heightAt(terrain, 832, -128), true, true), { z: 80, flags: 2 });
+  assert.deepEqual(movedHeight(rock, heightAt(terrain, 1088, 128), true, true), { z: 144, flags: 2 });
+  assert.deepEqual(movedHeight(crate, heightAt(terrain, 832, -128), true, false), { z: 400, flags: 6 });
+  assert.deepEqual(movedHeight({ position: [1024, -128, 128], flags: 2 }, heightAt(terrain, 1088, -128), true, false), { z: 144, flags: 2 }, "a plain doodad follows the ground");
 });
 
 test("a doodad that was not moved, or has no height of its own, is the same with the switch either way", () => {

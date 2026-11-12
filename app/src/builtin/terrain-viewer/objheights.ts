@@ -105,7 +105,14 @@ export function resetFixedHeight(p: HeightHolder, ground: number): HeightChange 
  *  showed on 2026-11-12 (a rock with flags 6 at 300 over ground 256, moved one step by Edit > Nudge Selection > Move
  *  Right, the map saved and read back): on, it came out at 256 (the ground) with flags 2, so a moved doodad follows
  *  the ground again; off, it came out at 300 with flags 6, keeping its own height. A doodad without a fixed height
- *  stands on the ground either way, and a fixed one that was not moved (`moved` false) stays as it is. */
+ *  stands on the ground either way, and a fixed one that was not moved (`moved` false) stays as it is.
+ *  Settled again the same day, as two runs had disagreed about the default: in a Wine prefix of its own (we-drive with
+ *  W3PROJ_WE_DIR; the editor keeps the switch as "Reset Fixed Z When Moving Objects" in WorldEditPreferences.txt, so the
+ *  shared prefix shows what the last run left) the item is checked, the file then says 1. A map with doodads of flags 6
+ *  at 300 and 150 over flat ground 0 and at 400 and 350 over a slope rising 32 per 128 to the east, all selected and
+ *  moved 64 by Edit > Nudge Selection > Move Right: on (the default), each landed on the ground where it stopped (0, 80
+ *  and 144) with flags 2; switched off by a click on the item, each kept its height and flags 6. A plain doodad (flags
+ *  2) on the slope went to the ground there (144) both ways. Turning in place (Rotate Right) changes neither. */
 export function movedHeight(p: HeightHolder, ground: number, moved: boolean, resetFixed: boolean): { z: number; flags: number | undefined } {
   if (!isFixed(p)) return { z: ground, flags: p.flags };
   if (moved && resetFixed) return { z: ground, flags: (p.flags ?? PLAIN) & ~FIXED_HEIGHT };
