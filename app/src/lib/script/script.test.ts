@@ -870,6 +870,11 @@ test("cameras of the old file format have fewer fields", () => {
   const now = generateSections(input({ cameras: [{ ...cam, unknown: [1, 2, 3], trailer: 1 }] })).get("Cameras")!;
   has(now, "    call CameraSetupSetField( gg_cam_C, CAMERA_FIELD_ZABSOLUTE, 3.0, 0.0 )");
   has(now, "    call BlzCameraSetupSetCameraType( gg_cam_C, 1 )");
+  // As the codec names them now (DoF Distance, DoF Scale, Pos Absolute Z).
+  const named = generateSections(input({ cameras: [{ ...cam, dofDistance: 0, dofScale: 123, posAbsoluteZ: 2.5, trailer: 0 }] })).get("Cameras")!;
+  has(named, "    call CameraSetupSetField( gg_cam_C, CAMERA_FIELD_DEPTH_OF_FIELD_SCALE, 123.0, 0.0 )");
+  has(named, "    call CameraSetupSetField( gg_cam_C, CAMERA_FIELD_ZABSOLUTE, 2.5, 0.0 )");
+  has(named, "    call BlzCameraSetupSetCameraType( gg_cam_C, 0 )");
 });
 
 test("camera fields round like the rest", () => {

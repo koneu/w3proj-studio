@@ -8,6 +8,7 @@
 import { parseSlk } from "../formats/text";
 import { jassToLua, RAW } from "./lua";
 import { ident } from "./names";
+import { nameDepthOfField } from "../terrain/cameras";
 import type { TriggerData } from "../triggers/triggerdata";
 import type { CustomTextFile, TriggerFile, Variable } from "../triggers/wtg";
 import { customTextGlobals, runsAtInit, scriptItems, triggersSection } from "./triggers";
@@ -29,7 +30,9 @@ export interface RegionJson { left: number; bottom: number; right: number; top: 
 export interface CameraJson {
   targetX: number; targetY: number; zOffset: number; rotation: number; angleOfAttack: number; distance: number; roll: number;
   fieldOfView: number; farZ: number; nearZ: number; localPitch?: number; localYaw?: number; localRoll?: number;
-  unknown?: number[]; name: string; trailer?: number;
+  /** Version 3 only (lib/terrain/cameras: DEPTH_OF_FIELD); JSON from before they had names has them in `unknown`. */
+  dofDistance?: number; dofScale?: number; posAbsoluteZ?: number; unknown?: number[];
+  name: string; trailer?: number;
 }
 export interface SoundJson {
   name: string; file: string; eaxEffect: string; flags: number; fadeInRate: number; fadeOutRate: number; volume: number;
@@ -386,7 +389,10 @@ export function regions(i: ScriptInput): string {
 export function cameras(i: ScriptInput): string {
   if (!i.cameras?.length) return "";
   const lines = ["function CreateCameras takes nothing returns nothing", ""];
-  for (const c of i.cameras ?? []) {
+  for (const given of i.cameras ?? []) {
+    const c = { ...given };
+    const v3 = c.dofDistance !== undefined || c.unknown !== undefined;
+    nameDepthOfField(c);
     const n = `gg_cam_${ident(c.name)}`;
     const field = (f: string, v: number) => `    call CameraSetupSetField( ${n}, CAMERA_FIELD_${f}, ${r1(v)}, 0.0 )`;
     lines.push(`    set ${n} = CreateCameraSetup(  )`,
@@ -394,9 +400,9 @@ export function cameras(i: ScriptInput): string {
       field("TARGET_DISTANCE", c.distance), field("ROLL", c.roll), field("FIELD_OF_VIEW", c.fieldOfView), field("FARZ", c.farZ),
       field("NEARZ", c.nearZ), field("LOCAL_PITCH", c.localPitch ?? 0), field("LOCAL_YAW", c.localYaw ?? 0), field("LOCAL_ROLL", c.localRoll ?? 0));
     // Only the newer camera file has these (war3map.w3c v3; v0 is the old form).
-    if (c.unknown) lines.push(field("DEPTH_OF_FIELD_DISTANCE", c.unknown[0]), field("DEPTH_OF_FIELD_SCALE", c.unknown[1]), field("ZABSOLUTE", c.unknown[2]));
+    if (v3) lines.push(field("DEPTH_OF_FIELD_DISTANCE", c.dofDistance ?? 0), field("DEPTH_OF_FIELD_SCALE", c.dofScale ?? 0), field("ZABSOLUTE", c.posAbsoluteZ ?? 0));
     lines.push(`    call CameraSetupSetDestPosition( ${n}, ${r1(c.targetX)}, ${r1(c.targetY)}, 0.0 )`);
-    if (c.unknown) lines.push(`    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ?? 0} )`);
+    if (v3) lines.push(`    call BlzCameraSetupSetCameraType( ${n}, ${c.trailer ?? 0} )`);
     lines.push("");
   }
   lines.push("endfunction", "", "");
