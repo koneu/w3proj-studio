@@ -9,7 +9,7 @@ import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
-import { applySky, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
+import { applySky, fogViewNote, resolveChoice, type SkyArgs } from "../../lib/terrain/atmosphere";
 import { skyList } from "../../lib/terrain/skies";
 import { moveTextsToStringTable } from "./movetexts";
 import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
@@ -216,7 +216,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.settings.set("terrain.sky", skyPath);
       changes.push(`sky model in the terrain view (a view setting, not in the map, not undone by undo_last_edit): ${skyPath || "none"}`);
     }
-    return changes.length ? `Changed:\n- ${changes.join("\n- ")}` : "Nothing changed: the map already had these settings.";
+    const note = fogViewNote(args, w3.settings.get<boolean>("terrain.fog", false) === true);
+    const reply = changes.length ? `Changed:\n- ${changes.join("\n- ")}` : "Nothing changed: the map already had these settings.";
+    return note ? `${reply}\n${note}` : reply;
   }));
   /** Opens Map Properties (or shows the open one) at `section`, scrolled to `anchor` (a `data-anchor` in it). */
   const openAt = async (section?: SectionId, anchor?: string) => {

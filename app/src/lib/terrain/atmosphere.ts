@@ -91,3 +91,10 @@ export function resolveWeather(value: unknown, weather: readonly (readonly [stri
   if (text === "none" || text === "" || text === NO_WEATHER) return NO_WEATHER;
   return resolveChoice("weather effect", value, [[NO_WEATHER, "None"], ...weather]);
 }
+
+/** What set_sky adds when fog was set (a fog setting or useFog true) while the terrain view's "Fog" checkbox
+ *  (setting terrain.fog, off by default) is off: the view shows no fog until it is on. Else "". */
+export function fogViewNote(args: Record<string, unknown>, viewFogOn: boolean): string {
+  const set = ["fogStyle", "fogStart", "fogEnd", "fogDensity", "fogColor"].some((k) => args[k] !== undefined) || args.useFog === true;
+  return set && !viewFogOn ? "Note: the terrain view shows no fog until its \"Fog\" checkbox (setting terrain.fog, off by default) is on; the map's fog is set." : "";
+}

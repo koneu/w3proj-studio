@@ -49,3 +49,12 @@ test("a refused call leaves the document as it was", () => {
   const old = doc() as Record<string, unknown>; delete old.terrainFog;
   assert.throws(() => applySky(old, { overSky: 1 }, { tilesets }), /over sky/);
 });
+
+test("set_sky says the terrain view shows no fog while its Fog checkbox is off", async () => {
+  const { fogViewNote } = await import("./atmosphere");
+  assert.match(fogViewNote({ fogEnd: 4000 }, false), /Fog.*checkbox/);
+  assert.match(fogViewNote({ useFog: true }, false), /Fog/);
+  assert.equal(fogViewNote({ fogEnd: 4000 }, true), "", "view fog on: nothing to add");
+  assert.equal(fogViewNote({ useFog: false }, false), "", "fog turned off: nothing to add");
+  assert.equal(fogViewNote({ waterTint: "#fff" }, false), "", "no fog setting: nothing to add");
+});
