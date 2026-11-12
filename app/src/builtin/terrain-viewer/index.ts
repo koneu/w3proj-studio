@@ -42,6 +42,7 @@ import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
+import { specialFootprints, specialPlacements, type Footprint } from "./specials";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
@@ -2304,6 +2305,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (selected?.pick) selectObject(selected);
           if (group.length) { groupRingsStale = true; refreshGroupRings(); }
         }
+        /** The specials' footprints by type id (null: unreadable), and what is drawn of them now (for tests). */
+        const specialSizes = new Map<string, Footprint | null>();
+        let drawnSpecials: { id: string; x: number; y: number; z: number; model: string }[] = [];
         async function rebuildObjects() {
           const ctx = nextCtx ?? objCtx;
           if (!ctx) return;
@@ -2312,13 +2316,27 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           const doodads = dooFile?.list ?? [], units = unitsFile?.list ?? [];
           markerList.replaceChildren(markerToggle("doodads", "Doodads", doodads.length), markerToggle("units", "Units & items", units.length));
           const baseOf = (id: string) => bases.get(id);
-          const [d, u, s] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
+          // The special doodads (cliff and cave models, placed by tile) are drawn with the doodads, but only drawn:
+          // no pick, so nothing selects, moves or saves them.
+          const specialList = specialsOf(dooFile?.doc);
+          const unsized = specialList.filter((sp) => !specialSizes.has(sp.id));
+          if (unsized.length) {
+            const found = await specialFootprints(w3, unsized, (p) => readFile(w3, doc, p, terrain.tileset)).catch(() => new Map<string, Footprint>());
+            for (const sp of unsized) specialSizes.set(sp.id, found.get(sp.id) ?? null);
+          }
+          if (gen !== rebuildGen) return;
+          const specialPlaced = specialPlacements(specialList, skins, (id) => specialSizes.get(id) ?? undefined,
+            { x: terrain.offsetX, y: terrain.offsetY }, (x, y) => heightAt(terrain, x, y));
+          const [d, u, s, sp] = await Promise.all([loader.load("doodads", doodads, skins, () => 0, baseOf),
             loader.load("units", units, skins, team, baseOf, (p, skin) => drawnZ(p, skin.moveType, skin), true, shownAs,
               (p, skin) => unitLooks(isUprooted(p), swims(p, skin.moveType))),
-            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false)]);
+            loader.load("units", startPreviews(units, startRaces), skins, team, undefined, undefined, false),
+            loader.load("doodads", specialPlaced, skins, () => 0, baseOf, undefined, false)]);
           // The later rebuild does the selection and the rest.
           if (gen !== rebuildGen) return;
-          renderer.setGroup("doodads", d.batches);
+          drawnSpecials = sp.batches.flatMap((b) => b.instances.flatMap((i) => (i.pick ? [{ id: i.pick.id, x: i.world[12], y: i.world[13], z: i.world[14], model: i.pick.model }] : [])));
+          for (const b of sp.batches) for (const inst of b.instances) delete inst.pick;
+          renderer.setGroup("doodads", [...d.batches, ...sp.batches]);
           // The start buildings inside the start locations' rings: drawn see-through without their particles
           // (the editor shows no fire on an orc hall's preview), never picked (no pick), shown and hidden with
           // the units; a town hall that doesn't load is just left out.
@@ -4021,6 +4039,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           },
           sunShadows: () => ({ ...renderer.sunShadowState }),
           waterDepth: () => ({ ...renderer.waterDepthState }),
+          drawnSpecials: () => drawnSpecials.map((d) => ({ ...d })),
           drawnUnits: () => renderer.batches.filter((b) => b.group === "units").flatMap((b) => b.instances.flatMap((i) => {
             const p = i.pick?.placed;
             return p ? [{ id: p.id, x: p.position[0], y: p.position[1], z: i.world[14], team: i.team, model: i.pick!.model }] : [];

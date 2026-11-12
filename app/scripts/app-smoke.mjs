@@ -2172,6 +2172,46 @@ async function flyingHeights(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** The doodad file's special doodads (cliff and cave models placed by tile) are drawn in the terrain view, on their
+ *  tiles, and only drawn: an id with no model is left out, the map isn't marked as changed, and saving after only
+ *  looking leaves the doodad file as it was. */
+async function specialDoodads(page, found) {
+  const fail = (what) => found.push(`special doodads: ${what}`);
+  const k = await heightKit(page, "Specials");
+  await k.save();
+  const doo = k.read("war3map.doo.json");
+  doo.specials = [{ id: "YCl2", z: 0, x: 3, y: 2 }, { id: "YCg1", z: 0, x: 10, y: 12 }, { id: "ZZZZ", z: 0, x: 5, y: 5 }];
+  await page.evaluate(`w3.workspace.writeText("map/war3map.doo.json", ${JSON.stringify(JSON.stringify(doo, null, 2))})`);
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__spGroup?.dispose();
+    window.__spGroup = s.registerToolGroup({ id: "smoke-special", title: "smoke-special", order: 998, create: (ed) => { window.__spEd = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const drawn = () => page.evaluate(`window.__spEd?.drawnSpecials() ?? []`);
+  try {
+    await until("the two specials with a model drawn", async () => (await drawn()).length === 2, 30000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await drawn())}`); });
+    await settled(page);
+    const list = await drawn(), offset = await page.evaluate(`[window.__spEd.terrain.offsetX, window.__spEd.terrain.offsetY]`);
+    for (const [id, tx, ty] of [["YCl2", 3, 2], ["YCg1", 10, 12]]) {
+      const d = list.find((s) => s.id === id);
+      if (!d) { fail(`${id} isn't drawn: ${JSON.stringify(list)}`); continue; }
+      const x0 = offset[0] + tx * 128, y0 = offset[1] + ty * 128;
+      if (!(d.x > x0 && d.x < x0 + 1024 && d.y > y0 && d.y < y0 + 1024)) fail(`${id} is drawn at ${d.x}, ${d.y}, not on its tile (${x0}, ${y0})`);
+      if (!/\.mdx$/i.test(d.model)) fail(`${id} is drawn with the model "${d.model}"`);
+    }
+    if (list.some((s) => s.id === "ZZZZ")) fail("an id without a model is drawn");
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt") || w3.editors.isDirty("map/war3map.doo.json")`)) fail("showing the specials marked the map as changed");
+    const before = hash(join(k.root, "map", "war3map.doo.json"));
+    await k.save();
+    if (hash(join(k.root, "map", "war3map.doo.json")) !== before) fail("saving after only looking changed the doodad file");
+  } finally {
+    await page.evaluate(`window.__spGroup?.dispose(); window.__spGroup = null; window.__spEd = null;`);
+  }
+  await k.save();
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
  *  HD model is OgreMauler and Classic one Ogre, is drawn with each in turn. In the 3.0 art (DE) the Ogre Lord (nogl),
  *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
@@ -8586,6 +8626,7 @@ async function run() {
         scriptGuard,
         scriptQuestionsOnSwitch,
         shouldHaves,
+        specialDoodads,
         staleEditors,
         syncSafety,
         terrainSelectCameras,
@@ -8756,6 +8797,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "mcpLimits", found);
   await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
   await leftOpen(page, "flyingHeights", found);
+  await specialDoodads(page, found).catch((e) => found.push(`special doodads: ${e.message}`));
+  await leftOpen(page, "specialDoodads", found);
   await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
