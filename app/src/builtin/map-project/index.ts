@@ -3,6 +3,7 @@ import { PROBLEMS_SERVICE, type ProblemsService } from "../../extensions/service
 import { gameProgram, joinPath, onWindows } from "../../lib/paths";
 import { testMapArgs, testMapOptions } from "./testmap";
 import { checkOpenedProject, offerStrayMoves } from "./strays";
+import { dropUnusedStrings } from "./prunestrings";
 import { deleteQuestion, wouldDelete } from "../../lib/syncdeletes";
 
 interface UnpackReport {
@@ -128,6 +129,19 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         if (c === "Show Problems") await w3.commands.execute("w3.problems.show");
         if (c !== "Pack anyway") return null;
       }
+    }
+    // Strings nothing refers to leave war3map.wts, in the project too, as the World Editor drops them on every save.
+    // Not doing so never stops the build: the strings just stay.
+    try {
+      const pruned = await dropUnusedStrings(w3);
+      if (pruned.kept) out.append(`unused strings kept in war3map.wts: ${pruned.kept}`);
+      if (pruned.dropped.length) {
+        out.append(`dropped ${pruned.dropped.length} unused string${pruned.dropped.length === 1 ? "" : "s"} from war3map.wts (${pruned.dropped.join(", ")}); "MCP: Undo Last AI Edit" puts them back`);
+        // The table is one of the script's inputs.
+        await w3.commands.execute("w3.script.settle").catch(() => {});
+      }
+    } catch (e) {
+      out.append(`unused strings kept in war3map.wts: ${e instanceof Error ? e.message : String(e)}`);
     }
     const r = await w3.window.withProgress("Packing map", () => w3.backend.invoke<PackReport>("project_pack", { root: root(), output }));
     out.append(`packed ${r.files} files, ${r.bytes} bytes → ${r.output}`);

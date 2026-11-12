@@ -31,17 +31,49 @@ export const STRING_REF_TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc|ai|slk|in
 /** The map's own files kept raw (no codec): searched as bytes. */
 export const STRING_REF_RAW_FILE = /^map\/war3(map|campaign)[^/]*$/i;
 
+/** The sounds file: its dialogue sounds name their strings by number (dialogueTextKey, speakerNameKey), not as
+ *  TRIGSTR_ text. */
+const SOUNDS_FILE = "map/war3map.w3s";
+
+/** The string numbers a sounds document (w3proj.sounds JSON) names in its dialogue keys, added to `into`. */
+export function soundKeysIn(doc: unknown, into = new Set<number>()): Set<number> {
+  const sounds = (doc as { sounds?: unknown } | null)?.sounds;
+  if (!Array.isArray(sounds)) return into;
+  for (const s of sounds) {
+    for (const k of [(s as Record<string, unknown>)?.dialogueTextKey, (s as Record<string, unknown>)?.speakerNameKey]) {
+      if (typeof k === "number" && Number.isSafeInteger(k) && k >= 0) into.add(k);
+    }
+  }
+  return into;
+}
+
 /** Every TRIGSTR number the map's files refer to (`paths`: the project's files; string tables, `.wts`, and those
- *  `skip` names in lower case are left out), added to `into`. New strings are numbered after these, so a reference
- *  to a string the table lacks doesn't come to show a new text (Move Texts, the Sound Editor's dialogue keys). A file
- *  that can't be read throws: an unknown reference is never taken for none. */
+ *  `skip` names in lower case are left out), added to `into`: TRIGSTR_ anywhere in a text file or a raw map file, and
+ *  the dialogue keys of the sounds file. New strings are numbered after these, so a reference to a string the table
+ *  lacks doesn't come to show a new text (Move Texts, the Sound Editor's dialogue keys), and the strings that aren't
+ *  among them are the ones a save drops. A file that can't be read throws (a raw sounds file too, which is read
+ *  through its codec): an unknown reference is never taken for none. */
 export async function stringRefsInMap(w3: W3Api, paths: Iterable<string>, skip: (lower: string) => boolean = () => false,
   into = new Set<number>()): Promise<Set<number>> {
   for (const path of paths) {
     const lower = path.replace(/\\/g, "/").toLowerCase();
     if (skip(lower) || lower.endsWith(".wts")) continue;
     if (!STRING_REF_TEXT_FILE.test(lower) && !STRING_REF_RAW_FILE.test(lower)) continue;
-    refsIn(new TextDecoder("latin1").decode(await w3.workspace.readBytes(path)), into);
+    const text = new TextDecoder("latin1").decode(await w3.workspace.readBytes(path));
+    refsIn(text, into);
+    if (lower === `${SOUNDS_FILE}.json`) {
+      let doc: unknown;
+      try { doc = JSON.parse(text); } catch { throw new Error(`${path} is there but can't be read, so the strings its dialogue sounds use can't be told.`); }
+      soundKeysIn(doc, into);
+    } else if (lower === SOUNDS_FILE) {
+      // Kept raw: its keys are binary numbers, so the codec reads it.
+      const root = w3.workspace.project()?.root;
+      const json = root ? await w3.backend.invoke<string>("codec_decode", { root, path: path.replace(/\\/g, "/") }).catch(() => null) : null;
+      let doc: unknown = null;
+      try { doc = json === null ? null : JSON.parse(json); } catch { /* below */ }
+      if (doc === null) throw new Error(`${path} is kept raw and can't be read, so the strings its dialogue sounds use can't be told.`);
+      soundKeysIn(doc, into);
+    }
   }
   return into;
 }
