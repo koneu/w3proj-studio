@@ -6136,6 +6136,9 @@ async function playerStarts(page, found, root) {
  *  field: read off the preview's data-state, which holds what it shows. */
 async function objectPreview(page, found, root) {
   const fail = (what) => found.push(`object preview: ${what}`);
+  // The full run's project holds a script Studio didn't write last, and a save that lands while the editors open or
+  // close asks about it (once per project): "Keep it" for this check only, as contextLoss does.
+  await page.evaluate(`(() => { const ask = w3.window.notify; window.__opKept = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Keep it") : ask(s, m, a, o)); })()`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
   await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
   const state = () => page.evaluate(`(() => {
@@ -6199,7 +6202,7 @@ async function objectPreview(page, found, root) {
     }
     if (!changed) fail(`the model stays ${casterArt} after choosing ${others.join(", ")}`);
   } finally {
-    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`(async () => { await w3.editors.closeAll(); await new Promise((r) => setTimeout(r, 2500)); w3.window.notify = window.__opKept; })()`);
   }
 }
 
