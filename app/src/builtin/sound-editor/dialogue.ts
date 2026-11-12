@@ -6,7 +6,8 @@
 //
 // A sound that has no key yet gets both when its text or speaker name is first typed, as the game's campaign maps have
 // them (3,207 of 3,519 dialogue sounds with both keys: speaker name n, text n + 1; no map has a sound with only one):
-// the next free numbers after the highest string of the table and the highest key of the map's sounds.
+// the next free numbers after the highest string of the table, the highest key of the map's sounds and the highest
+// TRIGSTR reference in the map's other files.
 
 import { appendStrings, StringTable, WtsCutError, wtsCuts, wtsSafeText, type NewString, type WtsCut } from "../../lib/formats/wts";
 import type { Sound } from "./sounds";
@@ -79,9 +80,12 @@ export class DialogueStrings {
     return cuts.length > 0;
   }
 
-  /** The number for a new string: after the highest of the table, of the strings set here and of the sounds' keys. */
-  nextKey(sounds: readonly Sound[]): number {
+  /** The number for a new string: after the highest of the table, of the strings set here, of the sounds' keys and of
+   *  `otherRefs` (the TRIGSTR numbers the map's other files refer to: lib/formats/mapdoc stringRefsInMap, as Move Texts
+   *  numbers), so a reference to a string the table lacks doesn't come to show a dialogue text. */
+  nextKey(sounds: readonly Sound[], otherRefs: Iterable<number>): number {
     let max = 0;
+    for (const n of otherRefs) max = Math.max(max, n);
     for (const [n] of this.base?.entries() ?? []) max = Math.max(max, n);
     for (const n of this.orig.keys()) max = Math.max(max, n);
     for (const s of sounds) max = Math.max(max, s.dialogueTextKey ?? -1, s.speakerNameKey ?? -1);
@@ -143,11 +147,12 @@ export class DialogueStrings {
 
 /** Sets a sound's dialogue text or speaker name. A sound without the keys gets them first (speaker name, then text, the
  *  next free numbers), both strings made. False when nothing changed (the same text, or "" for a sound without a key). */
-export function setDialogueString(s: Sound, which: "text" | "speaker", value: string, strings: DialogueStrings, sounds: readonly Sound[]): boolean {
+export function setDialogueString(s: Sound, which: "text" | "speaker", value: string, strings: DialogueStrings, sounds: readonly Sound[],
+  otherRefs: Iterable<number>): boolean {
   const key = which === "text" ? s.dialogueTextKey : s.speakerNameKey;
   if (norm(strings.text(key)) === norm(value)) return false;
   if (key === undefined || key < 0) {
-    let next = strings.nextKey(sounds);
+    let next = strings.nextKey(sounds, otherRefs);
     if ((s.speakerNameKey ?? -1) < 0) { s.speakerNameKey = next++; strings.set(s.speakerNameKey, ""); }
     if ((s.dialogueTextKey ?? -1) < 0) { s.dialogueTextKey = next++; strings.set(s.dialogueTextKey, ""); }
   }

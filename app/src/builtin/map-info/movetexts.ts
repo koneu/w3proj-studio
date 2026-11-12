@@ -4,8 +4,8 @@
 
 import type { W3Api } from "../../extensions/api";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
-import { requireProject } from "../../lib/formats/mapdoc";
-import { moveTexts, OBJECT_KINDS, refsIn, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
+import { requireProject, STRING_REF_TEXT_FILE, stringRefsInMap } from "../../lib/formats/mapdoc";
+import { moveTexts, OBJECT_KINDS, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 
 /** What reading war3map.wts failing says: a file that isn't UTF-8 text gets a plain sentence, anything else stays. */
@@ -16,10 +16,6 @@ export function wtsReadError(e: unknown): unknown {
 
 const WTS = "map/war3map.wts";
 const INFO = "map/war3map.w3i";
-/** Files that may refer to strings and are read as text (latin1 here: a reference is plain ASCII). */
-const TEXT_FILE = /^map\/.*\.(json|j|lua|txt|fdf|toc|ai|slk|ini)$/i;
-/** The map's own files kept raw (no codec): searched as bytes. */
-const RAW_MAP_FILE = /^map\/war3(map|campaign)[^/]*$/i;
 
 export interface MoveTextsOutcome { moved: number; dropped: number; kept: string[]; raw: string[] }
 
@@ -65,15 +61,11 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
     }
     const edited = new Set([WTS, `${INFO}.json`, ...objects.map((o) => o.path)].map((p) => p.toLowerCase()));
     // What else refers to strings: every text file of the map, and the map's own files kept raw (as bytes).
-    const otherRefs = new Set<number>();
+    const otherRefs = await stringRefsInMap(w3, files.values(), (lower) => edited.has(lower));
     raw = [];
     for (const [lower, path] of files) {
-      if (edited.has(lower) || lower.endsWith(".wts")) continue;
-      const text = TEXT_FILE.test(path), rawFile = RAW_MAP_FILE.test(path);
-      if (!text && !rawFile) continue;
-      const bytes = await w3.workspace.readBytes(path);
-      refsIn(new TextDecoder("latin1").decode(bytes), otherRefs);
-      if (!text && !edited.has(`${lower}.json`) && (lower === INFO || objectFiles.some((f) => f.path.toLowerCase() === lower))) raw.push(path);
+      if (edited.has(lower) || STRING_REF_TEXT_FILE.test(path) || edited.has(`${lower}.json`)) continue;
+      if (lower === INFO || objectFiles.some((f) => f.path.toLowerCase() === lower)) raw.push(path);
     }
     result = moveTexts({
       wts, info, objects, otherTexts: [], otherRefs,

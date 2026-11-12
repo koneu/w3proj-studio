@@ -18,6 +18,7 @@ import { h } from "../../workbench/dom";
 import { errorText, isNotFoundError } from "../../lib/oserror";
 import { askWtsCuts, WtsCutError } from "../../lib/formats/wts";
 import { DialogueStrings, setDialogueString } from "./dialogue";
+import { stringRefsInMap } from "../../lib/formats/mapdoc";
 import { Listeners } from "../../lib/listeners";
 import { SOUNDS_SERVICE, type SoundsService } from "../../extensions/services";
 import {
@@ -199,7 +200,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (current === editor) edits.fire();
         });
         const changed = () => { if (history.commit() && current === editor) edits.fire(); doc.setDirty(history.dirty); };
-        const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError);
+        // The TRIGSTR numbers the map's files refer to (new dialogue keys go after them, as Move Texts numbers), read in
+        // the background; the sounds' own keys come from the live list.
+        const otherRefs = strings && !doc.readOnly ? stringRefsInMap(w3, w3.workspace.files().map((f) => f.path)) : null;
+        otherRefs?.catch(() => {});
+        const editor = new SoundEditor(w3, el, sounds, changed, !doc.readOnly, strings, stringsError, otherRefs);
         current = editor;
         const unbindKeys = bindUndoKeys(el, () => history.undo(), () => history.redo(), (e) => w3.keybindings.commandsFor(e));
         void loadGameSounds(w3).then((g) => editor.setGame(g), (e) => editor.setGameError(String(e)));
@@ -310,7 +315,9 @@ class SoundEditor {
 
   constructor(private w3: W3Api, el: HTMLElement, private doc: SoundsDoc, private changed: () => void, private editable: boolean,
     /** The dialogue texts (war3map.wts); null with the reason when it can't be read. */
-    private strings: DialogueStrings | null, private stringsError: string | null) {
+    private strings: DialogueStrings | null, private stringsError: string | null,
+    /** The TRIGSTR numbers the map's files refer to (null: read-only, or no string table). */
+    private otherRefs: Promise<Set<number>> | null) {
     el.classList.add("snd-editor");
     el.append(h("div.snd-left", {}, this.browser), h("div.snd-right", {}, this.list, this.detail));
     this.imported = w3.workspace.files().map((f) => f.path.replace(/\\/g, "/"))
@@ -336,7 +343,8 @@ class SoundEditor {
 
   setGame(g: GameSounds) { this.game = g; this.renderBrowser(); this.renderDetail(); }
   setGameError(msg: string) { this.browser.replaceChildren(h("p.muted", {}, `Game sounds unavailable: ${msg}`)); }
-  dispose() { this.stop(); }
+  private disposed = false;
+  dispose() { this.disposed = true; this.stop(); }
   /** After undo/redo: the list and the selected sound (if it's still there). */
   refresh() {
     if (this.selected && !this.doc.sounds.includes(this.selected)) this.selected = null;
@@ -623,10 +631,19 @@ class SoundEditor {
     }
     const field = (which: "speaker" | "text") => {
       const key = () => (which === "text" ? s.dialogueTextKey : s.speakerNameKey);
-      const onchange = () => {
-        if (!setDialogueString(s, which, control.value, strings, this.doc.sounds)) return;
+      const apply = (refs: Iterable<number>) => {
+        // Closed, or the sound gone (undo), while the map's references were read: nothing is done.
+        if (this.disposed || !this.doc.sounds.includes(s)) return;
+        if (!setDialogueString(s, which, control.value, strings, this.doc.sounds, refs)) return;
         this.changed();
         this.renderDetail();
+      };
+      const onchange = () => {
+        // Keys are only made for a sound without them; then after every TRIGSTR number the map's files refer to.
+        if ((key() ?? -1) >= 0 || control.value === "") { apply([]); return; }
+        if (!this.otherRefs) return;
+        this.otherRefs.then(apply, (e) => void this.w3.window.showError(
+          `No dialogue strings were made: the TRIGSTR references in the map's files couldn't be read (${errorText(e)}). Reopen the Sound Editor once they can be.`));
       };
       const control: HTMLInputElement | HTMLTextAreaElement = which === "text"
         ? h("textarea.snd-dialogue-text", { value: strings.text(key()), readOnly: ro, rows: 3, onchange })

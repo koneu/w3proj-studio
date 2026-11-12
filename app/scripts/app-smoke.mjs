@@ -4731,7 +4731,10 @@ async function moduleFunctionsChecks(page, found) {
   {
     const wtsFile = join(dl, "map", "war3map.wts"), w3sFile = join(dl, "map", "war3map.w3s.json");
     const wtsBefore = readFileSync(wtsFile, "utf8");
-    const top = Math.max(...[...wtsBefore.matchAll(/^STRING (\d+)/gm)].map((m) => Number(m[1])));
+    // The map script refers to a string the table lacks, 40 above its highest: the new keys go after that one.
+    const top = Math.max(...[...wtsBefore.matchAll(/^STRING (\d+)/gm)].map((m) => Number(m[1])), 0) + 40;
+    const scriptFile = join(dl, "map", "war3map.j");
+    writeFileSync(scriptFile, `${readFileSync(scriptFile, "utf8")}\n// TRIGSTR_${String(top).padStart(3, "0")}\n`);
     put(w3sFile, {
       format: "w3proj.sounds/1", version: 3,
       sounds: [{
@@ -4747,7 +4750,7 @@ async function moduleFunctionsChecks(page, found) {
     if (empty.join("|") !== "|") fail(`a dialogue sound without keys shows ${JSON.stringify(empty)}`);
     await setField("input.snd-speaker-name", "Jaina Proudmoore");
     await setField("textarea.snd-dialogue-text", "We must hurry.\nThe dead are coming.");
-    if (!(await unsaved())) fail("typing a dialogue text left the Sound Editor without unsaved changes");
+    await until("the dialogue text unsaved", async () => (await unsaved()) > 0, 10000).catch(() => fail("typing a dialogue text left the Sound Editor without unsaved changes"));
     await saveAndSettle("the dialogue texts saved");
     const keys = () => { const x = json(w3sFile).sounds[0]; return [x.speakerNameKey, x.dialogueTextKey]; };
     if (keys().join() !== `${top + 1},${top + 2}`) fail(`the new dialogue keys: ${keys().join()}, not ${top + 1},${top + 2}`);
@@ -4767,6 +4770,8 @@ async function moduleFunctionsChecks(page, found) {
     await openDialogue("gg_snd_Jaina01");
     const again = await dialogueFields();
     if (again.join("|") !== "Jaina Proudmoore|Hurry!") fail(`opened again after the change, the dialogue fields show ${JSON.stringify(again)}`);
+    // The script line added above makes the save ask about writing the map script anew: not what is tested here.
+    await page.evaluate(`document.querySelectorAll(".toast[data-asks]").forEach((t) => t.querySelector(".toast-close")?.click())`);
     await page.evaluate(`w3.editors.closeAll()`);
     verify(dl, "dialogue");
   }
