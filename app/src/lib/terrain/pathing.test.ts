@@ -51,12 +51,31 @@ test("a ramp's middle corners stand half a layer above shallow water, as on Snow
 });
 
 test("a tile with the ramp flag on all four corners across one layer is walkable; across two it is a cliff", () => {
+  // A ramp up the x axis: foot, middle, top (layers 2, 2, 3).
   const t = ground();
-  corner(t, 1, 0).layer = 3; corner(t, 1, 1).layer = 3;
-  for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1]]) corner(t, x, y).ramp = true;
-  assert.deepEqual(tile(t, 0, 0), Array(16).fill(NO_WATER), "a ramp");
-  corner(t, 1, 1).layer = 4;
-  assert.deepEqual(tile(t, 0, 0), Array(16).fill(CLIFF), "two layers can't be a ramp");
+  for (let y = 0; y <= 1; y++) for (let x = 0; x <= 2; x++) { corner(t, x, y).ramp = true; if (x === 2) corner(t, x, y).layer = 3; }
+  assert.deepEqual(tile(t, 1, 0), Array(16).fill(NO_WATER), "a ramp");
+  corner(t, 2, 1).layer = 4;
+  assert.deepEqual(tile(t, 1, 0), Array(16).fill(CLIFF), "two layers can't be a ramp");
+});
+
+test("a tile with all four ramp flags that rises a layer with no ramp foot past its low end is a cliff", () => {
+  // Autumn Leaves' tile 17,17 (here 1,1): stray flags on 3 × 2 corners around a pit, layers 4 3 4 below 4 4 5.
+  const t = ground();
+  for (const k of t.corners) k.layer = 4;
+  for (let y = 1; y <= 2; y++) for (let x = 1; x <= 3; x++) corner(t, x, y).ramp = true;
+  corner(t, 2, 1).layer = 3; corner(t, 3, 2).layer = 5;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(CLIFF), "the pit's low corner has higher ramp corners on both sides");
+  // Control: with the next corner out on the low layer too, the same tile is a ramp's upper half.
+  corner(t, 3, 1).layer = 3;
+  assert.deepEqual(tile(t, 1, 1), Array(16).fill(NO_WATER));
+  // A lone flagged tile across a layer has no foot either.
+  const lone = ground();
+  corner(lone, 2, 1).layer = 3; corner(lone, 2, 2).layer = 3;
+  for (const [x, y] of [[1, 1], [2, 1], [1, 2], [2, 2]]) corner(lone, x, y).ramp = true;
+  assert.deepEqual(tile(lone, 1, 1), Array(16).fill(CLIFF));
+  corner(lone, 0, 1).ramp = true;
+  assert.deepEqual(tile(lone, 1, 1), Array(16).fill(NO_WATER), "control: a foot corner on the low layer");
 });
 
 test("the water's depth is measured from the tileset's own surface", () => {
