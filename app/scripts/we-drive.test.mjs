@@ -94,6 +94,10 @@ test("parseArgs: the day and night fixed by default; --compare-ready refuses a t
   assert.throws(() => parseArgs(["--day-night", "cycle", "--map", "m.w3x", "--compare-ready"]), /day and night fixed/);
 });
 
+test("parseArgs: --drag takes its two positions as one value", () => {
+  assert.deepEqual(parseArgs(["--map", "m.w3x", "--drag", "375,200:570,255", "--key", "ctrl+c"]).steps, [["--map", "m.w3x"], ["--drag", "375,200:570,255"], ["--key", "ctrl+c"]]);
+});
+
 test("parseArgs: the looks are parsed up front, need a map before them, and are numbered in order", () => {
   const { looks, steps } = parseArgs(["--map", "m.w3x", "--wait-ready", "--look", "center", "--shot", "a.png", "--look", "100,200,2000"]);
   assert.deepEqual(looks.map((l) => [l.center, l.x, l.y, l.distance]), [[true, null, null, 3000], [false, 100, 200, 2000]]);
