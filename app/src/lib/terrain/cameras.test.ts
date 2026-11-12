@@ -40,7 +40,7 @@ test("nameDepthOfField: older JSON's unknown becomes DoF Distance, DoF Scale and
   const classic: Record<string, unknown> = { name: "c" };
   nameDepthOfField(classic);
   assert.deepEqual(classic, { name: "c" });
-  nameDepthOfField(classic, true);
+  nameDepthOfField(classic as Record<string, unknown>, true); // (deepEqual narrowed its type)
   assert.deepEqual(classic, { name: "c", dofDistance: 0, dofScale: 0, posAbsoluteZ: 0 });
   assert.deepEqual(DEPTH_OF_FIELD, ["dofDistance", "dofScale", "posAbsoluteZ"]);
 });
