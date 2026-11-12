@@ -2877,6 +2877,42 @@ async function pathingImport(page, found) {
   if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the check left the terrain editor with unsaved changes");
 }
 
+/** The Pathing brush's Square shape, through the real tool: one stroke with Square at size 3 makes the 5 × 5 cells around
+ *  the click (a Round brush of that size leaves out the corners), and the saved overrides hold exactly those. */
+async function pathingSquare(page, found) {
+  const fail = (what) => found.push(`pathing square: ${what}`);
+  const k = await heightKit(page, "PathingSquare");
+  await k.save();
+  await k.tab("Pathing");
+  const overridden = () => page.evaluate(`[...document.querySelectorAll(".pathing-bar .muted")].map((e) => e.textContent).join("")`);
+  await until("the pathing overlay", async () => /cells overridden/.test(await overridden()), 20000);
+  await page.evaluate(`(() => {
+    const bar = document.querySelector(".pathing-bar");
+    const size = bar.querySelector("input[type=range]");
+    size.value = "3";
+    size.dispatchEvent(new Event("input", { bubbles: true }));
+    const shape = bar.querySelector("select");
+    shape.value = "square";
+    shape.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  // The choice stays when another tab is used and the Pathing tab comes back.
+  await k.tab("Regions");
+  await k.tab("Pathing");
+  const kept = await page.evaluate(`document.querySelector(".pathing-bar select")?.value`);
+  if (kept !== "square") fail(`the shape after a tab switch is ${kept}`);
+  await until("the overlay again", async () => /cells overridden/.test(await overridden()), 20000);
+  await k.clickMiddle();
+  await until("the stroke's cells", async () => /^25 cells/.test(await overridden()), 10000)
+    .catch(async (e) => { throw new Error(`${e.message} (${await overridden()})`); });
+  await k.save();
+  const cells = JSON.parse(readFileSync(join(k.root, ".w3proj", "pathing.json"), "utf8")).cells;
+  const xs = cells.map((c) => c[0]), ys = cells.map((c) => c[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  if (cells.length !== 25 || x1 - x0 !== 4 || y1 - y0 !== 4) fail(`${cells.length} cells in ${x1 - x0 + 1} × ${y1 - y0 + 1}`);
+  if (new Set(cells.map((c) => c[1] * 4096 + c[0])).size !== 25) fail("cells repeat");
+  if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the check left the terrain editor with unsaved changes");
+}
+
 /** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
  *  each undone with Ctrl+Z in the reopened editor (and the command), then redone, with every file of the map byte for byte
  *  what it was before the resize / after it. A shrink names what it cuts off and makes a checkpoint. */
@@ -8867,6 +8903,7 @@ async function run() {
         objectsWhileOpening,
         paletteMouse,
         pathingImport,
+        pathingSquare,
         placeObjects,
         placerAndCampaign,
         playerStarts: (p, f) => playerStarts(p, f, project),
@@ -9088,6 +9125,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "dataSafety", found);
   await pathingImport(page, found).catch((e) => found.push(`pathing import: ${e.message}`));
   await leftOpen(page, "pathingImport", found);
+  await pathingSquare(page, found).catch((e) => found.push(`pathing square: ${e.message}`));
+  await leftOpen(page, "pathingSquare", found);
   await configSafety(page, found).catch((e) => found.push(`config safety: ${e.message}`));
   await leftOpen(page, "configSafety", found);
   await syncSafety(page, found).catch((e) => found.push(`sync safety: ${e.message}`));

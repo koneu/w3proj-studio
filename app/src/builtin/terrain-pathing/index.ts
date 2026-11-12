@@ -9,6 +9,7 @@ import { TERRAIN_SERVICE, type TerrainEditorHandle, type TerrainService, type Te
 import { BLOCKED, NO_BUILD, NO_FLY, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { overridesForSize, pathingOverridesText } from "../../lib/terrain/resize";
 import { backupPath, importWpmDifferences, mayPaint, readPathingFile, replaceQuestion, type PathingFile } from "./file";
+import { brushCells } from "./brush";
 import { strokePoints } from "../../lib/terrain/strokepath";
 import { h } from "../../workbench/dom";
 
@@ -61,7 +62,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let replacing = false;
   /** A question about replacing it is on screen. */
   let asking = false;
-  let mode: Mode = "block", radius = 2;
+  let mode: Mode = "block", radius = 2, square = false;
   const flags = { walk: true, fly: false, build: true };
   let active = false;
   /** Generated pathing without overrides; null when stale. */
@@ -139,16 +140,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
   let stroke: Map<number, Override | undefined> | null = null;
   /** The stroke's last point. */
   let last: [number, number] | null = null;
-  const touched =(cx: number, cy: number) => {
-    const out: number[] = [];
-    for (let y = cy - radius + 1; y < cy + radius; y++) {
-      for (let x = cx - radius + 1; x < cx + radius; x++) {
-        if (x < 0 || y < 0 || x >= W || y >= H || Math.hypot(x - cx, y - cy) > radius - 0.5) continue;
-        out.push(y * W + x);
-      }
-    }
-    return out;
-  };
+  const touched = (cx: number, cy: number) => brushCells(cx, cy, radius, square, W, H);
   const mask = () => (flags.walk ? WALK : 0) | (flags.fly ? NO_FLY : 0) | (flags.build ? NO_BUILD : 0);
   const paint = (p: [number, number, number]) => {
     const m = mask();
@@ -219,6 +211,9 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
     h("span.terrain-tool-opt", {}, "for:", flag("walk", "Walk"), flag("fly", "Fly"), flag("build", "Build")),
     h("label.terrain-tool-opt", { title: "Brush radius in pathing cells (32 units)" }, "Size ",
       h("input", { type: "range", min: "1", max: "16", value: String(radius), oninput: (e: Event) => { radius = Number((e.target as HTMLInputElement).value); } })),
+    h("label.terrain-tool-opt", { title: "Brush shape" }, "Shape ",
+      h("select", { onchange: (e: Event) => { square = (e.target as HTMLSelectElement).value === "square"; ed.focus(); } },
+        h("option", { value: "round" }, "Round"), h("option", { value: "square" }, "Square"))),
     h("button", { title: "Remove every manual override", onclick: () => {
       if (!overrides.size) return;
       const before = new Map([...overrides].map(([i, o]) => [i, { ...o }] as const));
@@ -252,7 +247,7 @@ function pathingGroup(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInsta
       return true;
     },
     pointerMove(p) {
-      if (p.ground) ed.setBrush({ x: p.ground[0], y: p.ground[1], r: radius * 32, rgb: mode === "block" ? [255, 90, 90] : mode === "allow" ? [120, 255, 140] : [220, 220, 220] });
+      if (p.ground) ed.setBrush({ x: p.ground[0], y: p.ground[1], r: radius * 32, square, rgb: mode === "block" ? [255, 90, 90] : mode === "allow" ? [120, 255, 140] : [220, 220, 220] });
       if (p.down && stroke && p.ground) paint(p.ground);
     },
     pointerUp() {
