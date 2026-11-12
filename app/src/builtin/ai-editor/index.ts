@@ -9,7 +9,7 @@
 import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { OBJECTS_SERVICE, TRIGGER_GUI_SERVICE, type ObjectsService, type TriggerGuiService } from "../../extensions/services";
 import {
-  AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
+  AI_OPTIONS, aiArgCount, aiTriggerData, clearObjectData, editorDate, embeddedObjectBytes, embeddedObjectData, embedObjectData, FIRST_HERO_ONLY, newWai, NO_ID, parseWai, W3O_KINDS, w3oOfKind, writeWai,
   type AiCall, type AiCondition, type AiFile, type BuildPriority, type HarvestPriority, type TargetPriority,
 } from "../../lib/ai/wai";
 import { generateAiScript } from "../../lib/ai/script";
@@ -725,7 +725,7 @@ class AiView {
       h("h3", {}, "Attack Waves"),
       this.field("Initial Delay", this.num(ai.initialDelay, (v) => { ai.initialDelay = v; }, { min: 0 }), h("span.muted", {}, " seconds before the first wave attacks")),
       this.field("Repeat Waves", this.num(ai.repeatWaves, (v) => { ai.repeatWaves = v; }, { min: 0 }), h("span.muted", {}, " waves repeated after the last one")),
-      this.field("Minimum Forces", ai.groups.length ? this.select(ai.minForces, groupChoices, (v) => { ai.minForces = v; }) : h("span.muted", {}, "(no groups)")),
+      this.field("Minimum Forces", this.select(ai.minForces, [[FIRST_HERO_ONLY, "First Hero Only"], ...groupChoices], (v) => { ai.minForces = v; })),
       h("div.ai-list.ai-scroll", {}, h("table.ai-table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "#"), h("th", {}, "Attack Group"), h("th", {}, "Delay"))),
         h("tbody", {}, ...ai.waves.map((w, i) => h(`tr.ai-row${i === this.wave ? ".active" : ""}`, { onclick: () => { this.wave = i; this.render(); } },

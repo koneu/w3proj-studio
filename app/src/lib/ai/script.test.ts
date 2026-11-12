@@ -318,8 +318,11 @@ test("hero chances add up, and each order trains its three heroes", () => {
 });
 
 test("no heroes, no hero code", () => {
-  assert.deepEqual(body(newWai(), "SetHero"), []);
-  assert.deepEqual(body(newWai(), "SelectHeroes"), ["    local integer roll = GetRandomInt(1,100)"]);
+  const ai = newWai();
+  ai.heroes = [NO_ID, NO_ID, NO_ID];
+  ai.heroChances = [100, 0, 0, 0, 0, 0];
+  assert.deepEqual(body(ai, "SetHero"), []);
+  assert.deepEqual(body(ai, "SelectHeroes"), ["    local integer roll = GetRandomInt(1,100)"]);
 });
 
 test("attack groups go by name, and waves find them there", () => {
@@ -367,6 +370,14 @@ test("the minimum force decides when to attack", () => {
 
   ai.minForces = 99;
   assert.ok(!body(ai, "HaveMinimumAttackers").some((l) => l.includes("Attack Group")), "no such group: no check");
+});
+
+test("minimum forces \"First Hero Only\" wait for the first hero, as u05_mint.ai", () => {
+  const ai = newWai();
+  ai.minForces = 0x41495348;
+  assert.deepEqual(body(ai, "HaveMinimumAttackers").slice(-6), [
+    "    // First Hero Only", "    if (GetUnitCountDone(hero_id) < 1) then", "        return false", "    endif", "", "    return true",
+  ]);
 });
 
 test("delays wait for their wave, and waves repeat", () => {

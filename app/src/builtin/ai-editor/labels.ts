@@ -5,7 +5,7 @@
 // -3 - k the town k mines on from the current one (the conditions of
 // WyrmMonger.wai use "Town with a gold mine + 1" in the same places).
 
-import type { AiFile } from "../../lib/ai/wai";
+import { FIRST_HERO_ONLY, type AiFile } from "../../lib/ai/wai";
 
 export const RACES = ["Custom", "Human", "Orc", "Undead", "Night Elf"];
 
@@ -85,6 +85,8 @@ export function removeGroup(ai: AiFile, index: number) {
   ai.groups = ai.groups.filter((g) => g.index !== index);
   ai.groups.forEach((g, i) => { g.index = i; });
   ai.waves = ai.waves.filter((w) => w.group !== index).map((w) => ({ ...w, group: w.group > index ? w.group - 1 : w.group }));
+  // "First Hero Only" isn't a group.
+  if (ai.minForces === FIRST_HERO_ONLY) return;
   if (ai.minForces === index) ai.minForces = 0;
   else if (ai.minForces > index) ai.minForces--;
 }
