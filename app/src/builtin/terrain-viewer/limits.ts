@@ -22,6 +22,13 @@ export function waterLimitHits(before: readonly WaterWord[], after: readonly Wat
   return hits;
 }
 
+/** What Enforce Water Height Limits says when it refuses an edit, in the terrain editor and the AI tools alike. */
+export const waterLimitText = (corners: number) =>
+  `Not done: the water at ${corners} corner${corners === 1 ? "" : "s"} would go past the game's lowest or highest water height. Turn off Enforce Water Height Limits to have it cut off there.`;
+
+/** Where Enforce Camera Bounds keeps an object from going, as a paste and the AI tools say it. */
+export const OUTSIDE_BOUNDS = "outside the camera bounds (turn off Enforce Camera Bounds to allow it)";
+
 import { clampShift, type Bounds } from "./moveedit";
 export type { Bounds };
 
@@ -77,7 +84,7 @@ export function pasteSkipText(total: number, s: PasteSkips): string | null {
   const reasons = [
     s.offMap ? `${s.offMap} would land off the map` : "",
     s.pastPlayable ? `${s.pastPlayable} ${s.pastPlayable === 1 ? "is a unit or item" : "are units or items"} past the playable part of the map, where they can't stand` : "",
-    s.outsideBounds ? `${s.outsideBounds} would land outside the camera bounds (turn off Enforce Camera Bounds to allow it)` : "",
+    s.outsideBounds ? `${s.outsideBounds} would land ${OUTSIDE_BOUNDS}` : "",
     s.noFile ? `${s.noFile} ${s.noFile === 1 ? "has" : "have"} no placement file in this map` : "",
   ].filter(Boolean);
   return `${skipped} of ${total} pasted object${total === 1 ? "" : "s"} ${skipped === 1 ? "wasn't" : "weren't"} placed: ${reasons.join("; ")}.`;
