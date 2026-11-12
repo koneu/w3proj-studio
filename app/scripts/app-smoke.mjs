@@ -8847,8 +8847,11 @@ async function run() {
   // A part's settings are in its own folder (both parts' apps have the build's identifier); the app is told where
   // its settings are in either case, and asked below whether it listened.
   const configDir = part ? join(work, "config") : join(process.env.APPDATA ?? join(process.env.HOME ?? "", ".config"), IDENTIFIER);
-  const configEnv = { W3PROJ_CONFIG_DIR: configDir };
+  // On Linux the webview keeps its storage (localStorage: the open tabs per project) by the build's identifier too: a
+  // part has a folder of its own, else the other part's apps clear and rewrite it under this one's feet.
+  const configEnv = { W3PROJ_CONFIG_DIR: configDir, ...(part && process.platform !== "win32" ? { XDG_DATA_HOME: join(work, "xdg-data"), XDG_CACHE_HOME: join(work, "xdg-cache") } : {}) };
   rmSync(configDir, { recursive: true, force: true });
+  for (const dir of [configEnv.XDG_DATA_HOME, configEnv.XDG_CACHE_HOME]) if (dir) rmSync(dir, { recursive: true, force: true });
   mkdirSync(configDir, { recursive: true });
   // AI clients on this machine would connect to a server of this build. Automatic checkpoints come by the clock
   // (the first one at the first 20-second poll that finds a project without one): which project got one, and
