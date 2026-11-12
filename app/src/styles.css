@@ -586,6 +586,8 @@ input[type="color"] { width: 44px; height: 26px; padding: 0 2px; background: var
 /* Buttons in a value keep their one line and sit in the row's middle (.terrain-selection's align-self put them at the top). */
 .terrain-prop-value > button { flex: none; align-self: center; white-space: nowrap; }
 .terrain-prop-value > button.icon-button { min-width: 22px; height: 22px; padding: 0 4px; font-size: 15px; line-height: 1; }
+/* An inventory slot's Choose… and × at the row's end, whether the slot shows a name (which grows), "empty" or "mixed". */
+.terrain-prop-value > button[data-prop^="slot-"] { margin-left: auto; }
 /* A chance in percent: three digits and the spinner (WebKitGTK's takes about 20 px). */
 .terrain-prop-value > input.terrain-prop-chance { flex: none; width: 62px; }
 .terrain-prop-check { display: inline-flex; align-items: center; gap: 4px; }

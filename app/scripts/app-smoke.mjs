@@ -1443,6 +1443,14 @@ async function unitProperties(page, found) {
   await redrawn();
   await k.save();
   if (JSON.stringify(unit("Hpal").inventory) !== JSON.stringify([{ slot: 0, id: "ankh" }])) fail(`the Paladin's inventory: ${JSON.stringify(unit("Hpal").inventory)}`);
+  // Every slot's buttons end at the row's right edge, filled (Choose… ×) or not (Choose…): the × of a filled slot and of
+  // a mixed one (a text, not a name) stood at different places, after the name or right after "mixed".
+  const slotEnds = await page.evaluate(`[...document.querySelectorAll('.terrain-props [data-prop^="slot-"]')].map((b) => {
+    const value = b.closest(".terrain-prop-value"), buttons = [...value.querySelectorAll(":scope > button")];
+    return { slot: b.dataset.prop, filled: buttons.length > 1, gap: Math.round(value.getBoundingClientRect().right - buttons.at(-1).getBoundingClientRect().right) };
+  })`);
+  if (!slotEnds.some((s) => s.filled) || !slotEnds.some((s) => !s.filled)) fail(`the Paladin's slots aren't filled and empty both (control): ${JSON.stringify(slotEnds)}`);
+  else if (slotEnds.some((s) => Math.abs(s.gap) > 1)) fail(`the inventory slots' buttons don't end at the row's edge: ${JSON.stringify(slotEnds)}`);
   // One undo takes the item back, and only that.
   await undo();
   await k.save();
