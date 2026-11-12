@@ -115,12 +115,25 @@ export function worldRect(t: Pick<Terrain, "offsetX" | "offsetY" | "width" | "he
  *  The right and top edges are taken alike; they weren't seen. Doodads past the playable area stay (the backdrop). */
 export const doodadStays = (x: number, y: number, rect: Area) => x > rect.left && x < rect.right && y > rect.bottom && y < rect.top;
 
-/** Whether a unit or item at x, y stays after Map Size: its building footprint (`half`: half its pathing texture's
- *  width and height in world units, 0 without one) lies within the new playable area, edges included. we-drive
- *  2026-11-12, Last Refuge cut three ways: every unit past the playable area went (12), and so did a mercenary camp
- *  on the edge and a gold mine (16 × 16 cells, half 256) 192 inside it, while one 256 inside stayed. Start locations aren't asked: they are moved. */
+/** Whether a unit or item at x, y stays after Map Size: what it takes up (`half`, from unitHalf) lies within the new
+ *  playable area, edges included. we-drive 2026-11-12, Last Refuge cut four ways (left and bottom by 4 and by 32, left
+ *  by 64, right and top by 32; the World Editor's saves in openpoints/verify-2026-11-12/C and R2-C): every unit past the
+ *  playable area went, and so did a mercenary camp on the edge, a gold mine (16 × 16 cells, half 256) 192 inside it and
+ *  a gnoll warden (collision 32) 22 inside the right edge, while a gold mine 256 inside stayed and so did creeps of
+ *  collision 32 70.9 and 90.4 inside. Not the camera bounds: the cut by 4 kept creeps 288 past them (but inside the
+ *  playable area); the "Deleting unplaceable object" of the cut by 32 on the right only looked so as no unit stood
+ *  between 616 (kept) and 1258. Start locations aren't asked: they are moved. */
 export const unitStays = (x: number, y: number, half: readonly [number, number], playable: Area) =>
   x - half[0] >= playable.left && x + half[0] <= playable.right && y - half[1] >= playable.bottom && y + half[1] <= playable.top;
+
+/** What a unit type takes up for unitStays, half across and half up in world units: a building its pathing texture
+ *  (`cells`, its width and height; 16 world units per half cell), any other unit its collision size (a radius, from the
+ *  game's UnitBalance.slk or the map's object data `ucol`), an item or an unknown type nothing (its centre alone). */
+export function unitHalf(cells: readonly [number, number] | null | undefined, collision: number | null | undefined): [number, number] {
+  if (cells) return [cells[0] * 16, cells[1] * 16];
+  const r = collision !== null && collision !== undefined && Number.isFinite(collision) && collision > 0 ? collision : 0;
+  return [r, r];
+}
 
 /** war3map.w3i's camera bounds for a terrain and border (complements): 4 tiles inside it
  *  horizontally, 2 vertically; corners as stored (left/bottom, right/top, left/top, right/bottom). */

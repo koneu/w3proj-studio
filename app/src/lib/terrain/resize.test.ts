@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { doodadStays, newCliffVariation, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitStays } from "./resize";
+import { doodadStays, newCliffVariation, resizedCameraZoom, resizeProblem, resizeSpecials, resizeTerrain, unitHalf, unitStays } from "./resize";
 import { markMapEdge, parseW3e, writeW3e, type Corner, type Terrain } from "./w3e";
 
 /** The header fields of a w3e, for terrains that get written. */
@@ -93,6 +93,33 @@ test("units and items stay with their footprint inside the playable area, as the
   assert.equal(unitStays(-4900, 0, none, playable), false, "a creep past the playable area");
   assert.equal(unitStays(5376, 5120, none, playable), true, "on the edge itself: the centre counts");
   assert.equal(unitStays(5377, 0, none, playable), false);
+});
+
+test("units stay with their collision size inside the playable area, as the World Editor's cuts of Last Refuge kept them", () => {
+  // The World Editor's saves (we-drive 2026-11-12; collision from UnitBalance.slk): units it removed and kept nearest
+  // the new playable area's edges. Cut by 4 left and bottom: playable -4864..5376 by -5120..5120.
+  const small = { left: -4864, bottom: -5120, right: 5376, top: 5120 };
+  assert.equal(unitStays(-1802.7, -5049.1, unitHalf(null, 32), small), true, "a creep (nftt, collision 32) 70.9 inside");
+  assert.equal(unitStays(-435.2, -5029.6, unitHalf(null, 31), small), true, "nfsh, collision 31, 90.4 inside");
+  assert.equal(unitStays(-4672, 1856, unitHalf([16, 16], 50), small), false, "a gold mine 192 inside: its footprint reaches past");
+  // Its camera bounds were -4352..4864 by -4864..4864: units past them but inside the playable area stayed.
+  assert.equal(unitStays(-4640, 3936, unitHalf(null, 32), small), true, "nmh1 288 past the camera bounds");
+  // Cut by 32 right and top: playable -5376..1280 by -5632..1024, camera bounds right and top 768.
+  const shrunk = { left: -5376, bottom: -5632, right: 1280, top: 1024 };
+  assert.equal(unitStays(1258.013, -1071.863, unitHalf(null, 32), shrunk), false, "a gnoll warden (collision 32) 22 inside the right edge");
+  assert.equal(unitStays(1258.013, -1071.863, unitHalf(null, null), shrunk), true, "control: its centre alone is inside");
+  assert.equal(unitStays(592.1, -3408.5, unitHalf(null, 32), shrunk), true, "nshe, the easternmost unit kept");
+  assert.equal(unitStays(-1720, 615.9, unitHalf(null, 32), shrunk), true, "ngnv, the northernmost unit kept");
+  // Cut by 64 left: playable 2816..5376; necr (collision 16) 95.2 inside stayed.
+  assert.equal(unitStays(2911.2, 269, unitHalf(null, 16), { left: 2816, bottom: -5632, right: 5376, top: 5120 }), true);
+});
+
+test("what a unit type takes up: a building its footprint, another unit its collision, an item nothing", () => {
+  assert.deepEqual(unitHalf([16, 12], 50), [256, 192]);
+  assert.deepEqual(unitHalf(null, 32), [32, 32]);
+  assert.deepEqual(unitHalf(undefined, undefined), [0, 0]);
+  assert.deepEqual(unitHalf(null, Number.NaN), [0, 0]);
+  assert.deepEqual(unitHalf(null, -5), [0, 0]);
 });
 
 test("Map Size growth on the left and bottom, playable area grown: edge bits as the World Editor sets them", () => {

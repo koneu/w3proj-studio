@@ -1,7 +1,8 @@
 // The World Editor's Advanced switches that are settings here: what each is until it is set. The same values stand in
 // extension.json (switches.test.ts checks they agree), and they are the World Editor's own defaults (we-drive,
 // 2026-11-11: Preserve Copied Object Height off, Enforce Camera Bounds on, Enforce Water Height Limits off;
-// 2026-11-12: Reset Fixed Object Heights on, see objheights.ts movedHeight).
+// 2026-11-12: Reset Fixed Object Heights on, in a Wine prefix of its own, see objheights.ts movedHeight). The editor
+// keeps these in WorldEditPreferences.txt, so a prefix shared by many runs shows what the last run left, not these.
 
 import type { Settings } from "../../extensions/api";
 
