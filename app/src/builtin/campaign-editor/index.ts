@@ -17,6 +17,8 @@ import { addChapter, buttonsOf, dropFromMapOrder } from "./chapters";
 import { exportMap, removeMap, replaceMap, type CampaignFs, type FileStep } from "./mapfiles";
 import { StringTable, WtsCutError, askWtsCuts, wtsCuts, wtsSafeText } from "../../lib/formats/wts";
 import { h } from "../../workbench/dom";
+import { parseIni } from "../../lib/formats/text";
+import { parsePresets, presetOptions, type Preset } from "./presets";
 import { FOG_UNSET_DENSITY, FOG_UNSET_Z, askNewCampaign, createCampaign } from "./newcampaign";
 
 const FILE = "map/war3campaign.w3f.json", WTS = "map/war3campaign.wts";
@@ -47,6 +49,22 @@ interface CampaignInfo {
   chapters: Chapter[];
   mapOrder: { unknown: string; map: string }[];
   [more: string]: unknown;
+}
+
+/** The game's campaign screen and ambient sound presets (UI/WorldEditData.txt); empty lists when the game has none. */
+interface PresetLists { screens: Preset[]; sounds: Preset[] }
+let presetLists: Promise<PresetLists> | null = null;
+function loadPresets(w3: W3Api): Promise<PresetLists> {
+  presetLists ??= (async () => {
+    const we = new Map<string, string>();
+    for (const f of ["UI\\WorldEditStrings.txt", "UI\\WorldEditGameStrings.txt"]) {
+      for (const sec of parseIni(await w3.game.readText(f)).values()) for (const [k, v] of sec) we.set(k.toUpperCase(), v);
+    }
+    const data = parseIni(await w3.game.readText("UI\\WorldEditData.txt"));
+    return { screens: parsePresets(data.get("CampaignScreens"), we), sounds: parsePresets(data.get("AmbientSounds"), we) };
+  })();
+  presetLists.catch(() => { presetLists = null; });
+  return presetLists;
 }
 
 const RACES: [number, string][] = [[0, "Human"], [1, "Orc"], [2, "Undead"], [3, "Night Elf"]];
@@ -204,6 +222,8 @@ class CampaignView {
   private redoStack: State[] = [];
   private savedAt = 0;
   private selected = -1;
+  /** The game's presets once read; until then (or without them) the screen sections show the numbers. */
+  private presets: PresetLists | null = null;
 
   constructor(private w3: W3Api, private el: HTMLElement, public info: CampaignInfo, private strings: StringTable | null,
     private editable: boolean, private setDirty: (dirty: boolean) => void, private save: () => Promise<void>) {
@@ -213,6 +233,7 @@ class CampaignView {
     addKeyContext(el, UNDO_CONTEXT);
     el.addEventListener("keydown", (e) => this.keyDown(e));
     this.render();
+    loadPresets(w3).then((p) => { if (!this.disposed && (p.screens.length || p.sounds.length)) { this.presets = p; this.render(); } }, () => {});
   }
 
   /** A number typed into its field that its `change` hasn't committed yet: the tab counts as unsaved meanwhile. */
@@ -352,6 +373,11 @@ class CampaignView {
     const sel = h("select.form-input", { disabled: !this.editable }, ...opts.map(([k, l]) => h("option", { selected: k === value }, l)));
     sel.addEventListener("change", () => { const v = opts[sel.selectedIndex][0]; if (v !== value) this.change(() => set(v)); });
     return sel;
+  }
+  /** A preset dropdown (the number stored is the preset's); the number field when the game has no list. */
+  private preset(list: Preset[] | undefined, value: number, set: (n: number) => void) {
+    if (!list?.length) return this.num(value, set, { int: true });
+    return this.select(presetOptions(list, value), value, set);
   }
   private check(label: string, on: boolean, set: (on: boolean) => void, title = "") {
     return h("label.form-check", { title }, h("input", { type: "checkbox", checked: on, disabled: !this.editable,
@@ -570,11 +596,11 @@ class CampaignView {
     const c = this.info;
     return [
       h("div.form-section", {}, h("h3", {}, "Background"),
-        this.row("Background", this.num(c.background, (v) => { c.background = v; }, { int: true }), "Preset number; -1: the model or movie below, none when that is empty"),
+        this.row("Background", this.preset(this.presets?.screens, c.background, (v) => { c.background = v; }), "Custom file: the model or movie below, none when that is empty"),
         this.row("Custom background", this.text(() => c.backgroundPath, (v) => { c.backgroundPath = v; }), "Model (.mdx) or movie in the campaign or the game"),
         this.row("Campaign picture", this.text(() => c.minimapPath, (v) => { c.minimapPath = v; }), "Shown in the campaign list")),
       h("div.form-section", {}, h("h3", {}, "Ambient Sound"),
-        this.row("Sound", this.num(c.ambientSound, (v) => { c.ambientSound = v; }, { int: true }), "Preset number; -1: the file below, none when that is empty"),
+        this.row("Sound", this.preset(this.presets?.sounds, c.ambientSound, (v) => { c.ambientSound = v; }), "Custom file: the file below, none when that is empty"),
         this.row("Custom sound", this.text(() => c.ambientSoundPath, (v) => { c.ambientSoundPath = v; }))),
       h("div.form-section", {}, h("h3", {}, "Fog"),
         this.row("Fog style", this.num(c.fogStyle, (v) => { c.fogStyle = v; }, { int: true }), "-1 or 0: no fog"),

@@ -2172,6 +2172,46 @@ async function flyingHeights(page, found) {
   await page.evaluate(`w3.editors.closeAll()`);
 }
 
+/** The doodad file's special doodads (cliff and cave models placed by tile) are drawn in the terrain view, on their
+ *  tiles, and only drawn: an id with no model is left out, the map isn't marked as changed, and saving after only
+ *  looking leaves the doodad file as it was. */
+async function specialDoodads(page, found) {
+  const fail = (what) => found.push(`special doodads: ${what}`);
+  const k = await heightKit(page, "Specials");
+  await k.save();
+  const doo = k.read("war3map.doo.json");
+  doo.specials = [{ id: "YCl2", z: 0, x: 3, y: 2 }, { id: "YCg1", z: 0, x: 10, y: 12 }, { id: "ZZZZ", z: 0, x: 5, y: 5 }];
+  await page.evaluate(`w3.workspace.writeText("map/war3map.doo.json", ${JSON.stringify(JSON.stringify(doo, null, 2))})`);
+  await page.evaluate(`(async () => {
+    const s = await w3.services.get("w3.terrain");
+    window.__spGroup?.dispose();
+    window.__spGroup = s.registerToolGroup({ id: "smoke-special", title: "smoke-special", order: 998, create: (ed) => { window.__spEd = ed; return { toolbar: document.createElement("div") }; } });
+  })()`);
+  const drawn = () => page.evaluate(`window.__spEd?.drawnSpecials() ?? []`);
+  try {
+    await until("the two specials with a model drawn", async () => (await drawn()).length === 2, 30000)
+      .catch(async (e) => { throw new Error(`${e.message}: ${JSON.stringify(await drawn())}`); });
+    await settled(page);
+    const list = await drawn(), offset = await page.evaluate(`[window.__spEd.terrain.offsetX, window.__spEd.terrain.offsetY]`);
+    for (const [id, tx, ty] of [["YCl2", 3, 2], ["YCg1", 10, 12]]) {
+      const d = list.find((s) => s.id === id);
+      if (!d) { fail(`${id} isn't drawn: ${JSON.stringify(list)}`); continue; }
+      const x0 = offset[0] + tx * 128, y0 = offset[1] + ty * 128;
+      if (!(d.x > x0 && d.x < x0 + 1024 && d.y > y0 && d.y < y0 + 1024)) fail(`${id} is drawn at ${d.x}, ${d.y}, not on its tile (${x0}, ${y0})`);
+      if (!/\.mdx$/i.test(d.model)) fail(`${id} is drawn with the model "${d.model}"`);
+    }
+    if (list.some((s) => s.id === "ZZZZ")) fail("an id without a model is drawn");
+    if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt") || w3.editors.isDirty("map/war3map.doo.json")`)) fail("showing the specials marked the map as changed");
+    const before = hash(join(k.root, "map", "war3map.doo.json"));
+    await k.save();
+    if (hash(join(k.root, "map", "war3map.doo.json")) !== before) fail("saving after only looking changed the doodad file");
+  } finally {
+    await page.evaluate(`window.__spGroup?.dispose(); window.__spGroup = null; window.__spEd = null;`);
+  }
+  await k.save();
+  await page.evaluate(`w3.editors.closeAll()`);
+}
+
 /** Another graphics mode opens the terrain editor again with that mode's art, camera kept: the Ogre Mauler (nogm), whose
  *  HD model is OgreMauler and Classic one Ogre, is drawn with each in turn. In the 3.0 art (DE) the Ogre Lord (nogl),
  *  whose skin entry names only an HD and a Classic model, has one (it had none: LastRefuge, the user, 2026-11-10). An
@@ -5428,7 +5468,7 @@ async function paletteMouse(page, found) {
  *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. Two more
  *  textures since HD casts real shadows (branch hd-shadows): the sun's shadow map and the depth texture shaders read
  *  without one. */
-const GAME_READS_RECORDED = { reads: 105, asked: 132, textures: 140 };
+const GAME_READS_RECORDED = { reads: 105, asked: 138, textures: 140 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
@@ -6612,6 +6652,62 @@ async function placerAndCampaign(page, found) {
     }
   }
   await page.evaluate(`w3.editors.closeAll()`);
+}
+
+/** The Campaign Editor's Background and Ambient Sound are named presets from the game: picking one stores its number
+ *  (the file as the World Editor keeps it), saved and reopened it shows the same preset; -1 is "Custom file". */
+async function campaignPresets(page, found) {
+  const fail = (what) => found.push(`campaign presets: ${what}`);
+  const camp = join(work, "campaign-presets");
+  rmSync(camp, { recursive: true, force: true });
+  await page.evaluate(`w3.backend.invoke("project_create", { dir: ${JSON.stringify(camp)}, name: "Preset Campaign", flags: 0, maxPlayers: 0, campaign: true })`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(camp)}); })()`);
+  await until("the campaign", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(camp)}`), 20000);
+  const w3f = "map/war3campaign.w3f.json";
+  const stored = () => JSON.parse(readFileSync(join(camp, "map", "war3campaign.w3f.json"), "utf8"));
+  const campInfo = { format: "w3proj.campaign/1", version: 3, campaignVersion: 1, editorVersion: 6116, name: "Preset Campaign", difficulty: "Normal", author: "", description: "",
+    flags: 1, background: 2, backgroundPath: "", minimapPath: "", ambientSound: 3, ambientSoundPath: "", fogStyle: 0, fogStartZ: 0, fogEndZ: 0, fogDensity: 0, fogColor: [0, 0, 0, 0], race: 0,
+    unknown3: [0, 0, 0, 0, 0, 0, 1], chapters: [], mapOrder: [] };
+  const writeInfo = (info) => page.evaluate(`(async () => {
+    const root = w3.workspace.project().root, path = ${JSON.stringify(w3f)};
+    await w3.workspace.writeText(path, await w3.backend.invoke("codec_canonicalize", { root, path, text: ${JSON.stringify(JSON.stringify(info))} }));
+    await w3.workspace.refresh();
+  })()`);
+  const select = (label) => `[...document.querySelectorAll(".camp-editor label.form-row")].find((l) => l.querySelector(".form-label")?.textContent === ${JSON.stringify(label)})?.querySelector("select")`;
+  const open = async () => {
+    await page.evaluate(`w3.commands.execute("w3.campaign.open", "screen")`);
+    await until("the preset dropdowns", () => page.evaluate(`!!(${select("Background")}) && !!(${select("Sound")})`), 20000);
+  };
+  try {
+    await writeInfo(campInfo);
+    await open().catch(() => fail("the Background and Sound fields are not dropdowns"));
+    const texts = (label) => page.evaluate(`[...(${select(label)}?.options ?? [])].map((o) => o.textContent)`);
+    const shown = (label) => page.evaluate(`(() => { const s = ${select(label)}; return s?.options[s.selectedIndex]?.textContent; })()`);
+    const bg = await texts("Background");
+    if (bg[0] !== "Custom file" || bg.length < 3) fail(`Background offers ${JSON.stringify(bg)}`);
+    if (await shown("Background") !== bg[3]) fail(`background 2 shows ${await shown("Background")}, the third preset is ${bg[3]}`);
+    // Pick another preset in both, save, reopen.
+    const pick = (label, index) => page.evaluate(`(() => { const s = ${select(label)}; s.selectedIndex = ${index}; s.dispatchEvent(new Event("change", { bubbles: true })); return s.options[${index}].textContent; })()`);
+    const bgName = await pick("Background", 2);
+    const soundName = await pick("Sound", 0);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await settled(page);
+    const info = stored();
+    if (info.background !== 1) fail(`the second preset stored background ${info.background}, not 1`);
+    if (info.ambientSound !== -1) fail(`Custom file stored sound ${info.ambientSound}, not -1`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await open();
+    if (await shown("Background") !== bgName) fail(`reopened, the background shows ${await shown("Background")}, not ${bgName}`);
+    if (await shown("Sound") !== soundName) fail(`reopened, the sound shows ${await shown("Sound")}, not ${soundName}`);
+    if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(w3f)})`)) fail("the reopened campaign is unsaved");
+    // A number that is no preset stays and is shown as such.
+    await page.evaluate(`w3.editors.closeAll()`);
+    await writeInfo({ ...stored(), background: 77 });
+    await open();
+    if (await shown("Background") !== "Preset 77") fail(`background 77 shows ${await shown("Background")}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
 }
 
 /** A chapter map's campaign objects (war3campaign.w3u in the campaign project two folders up) outside the terrain view:
@@ -8567,6 +8663,7 @@ async function run() {
         artModeReload,
         byHand,
         cameraEditing,
+        campaignPresets,
         chapterObjects,
         configSafety,
         contextLoss,
@@ -8607,6 +8704,7 @@ async function run() {
         scriptGuard,
         scriptQuestionsOnSwitch,
         shouldHaves,
+        specialDoodads,
         staleEditors,
         syncSafety,
         terrainSelectCameras,
@@ -8777,6 +8875,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "mcpLimits", found);
   await flyingHeights(page, found).catch((e) => found.push(`flying heights: ${e.message}`));
   await leftOpen(page, "flyingHeights", found);
+  await specialDoodads(page, found).catch((e) => found.push(`special doodads: ${e.message}`));
+  await leftOpen(page, "specialDoodads", found);
   await artModeReload(page, found).catch((e) => found.push(`art mode reload: ${e.message}`));
   await leftOpen(page, "artModeReload", found);
   await wholeMapGround(page, found).catch((e) => found.push(`whole-map ground: ${e.message}`));
@@ -8825,6 +8925,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "shouldHaves", found);
   await placerAndCampaign(page, found).catch((e) => found.push(`placer and campaign: ${e.message}`));
   await leftOpen(page, "placerAndCampaign", found);
+  await campaignPresets(page, found).catch((e) => found.push(`campaign presets: ${e.message}`));
+  await leftOpen(page, "campaignPresets", found);
   await chapterObjects(page, found).catch((e) => found.push(`chapter objects: ${e.message}`));
   await leftOpen(page, "chapterObjects", found);
   await editorExtras(page, found).catch((e) => found.push(`editor extras: ${e.message}`));
