@@ -477,7 +477,7 @@ function destructableObjects(i: ScriptInput): string {
 
 function placedItems(i: ScriptInput): string {
   if (!i.kindOf || !i.units?.length) return "";
-  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
+  const body = itemsSection({ editorVersion: i.info.editorVersion as number | undefined, gameBuild: gameBuild(i), gameDataVersion: i.info.gameDataVersion as number | undefined, units: i.units as unknown as UnitJson[], kindOf: (id) => { const k = i.kindOf!(id); return k === "ability" ? undefined : k; }, referenced: referencedGlobals(i, true) });
   return body ? banner("Items") + body : "";
 }
 

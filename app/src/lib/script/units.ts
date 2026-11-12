@@ -31,6 +31,8 @@ export interface UnitsInput {
   editorVersion?: number;
   /** The game build of war3map.w3i's gameVersion (its last number): the item colour changed within editor 7003. */
   gameBuild?: number;
+  /** war3map.w3i gameDataVersion: 1 for the classic tables, whose items have no team colour. */
+  gameDataVersion?: number;
   /** Generated globals the triggers use (gg_unit_…). */
   referenced: Set<string>;
   /** Region global for a waygate target (region creation number). */
@@ -168,7 +170,10 @@ export function itemsSection(i: UnitsInput): string {
   // Random items get none from it, but are still created into the local.
   const ev = i.editorVersion ?? 0;
   const colorFn = ev >= 7003 ? "BlzSetItemColor" : ev >= 7000 ? "SetItemColor" : null;
-  const colorOf = (it: UnitJson) => (it.id === RANDOM_ITEM && colorFn ? -1 : !colorFn ? it.color : (i.gameBuild ?? 0) >= 24371 ? 24 : 0);
+  // The 24 is the item tables' teamColor: on game data version 1 the classic tables (_Balance's ItemData.slk) have no
+  // such column, and that editor writes 0 (NightElfX03 saved as Lua, round 3; Forsaken07x of build 24371).
+  const neutral = (i.gameBuild ?? 0) >= 24371 && i.gameDataVersion !== 1;
+  const colorOf = (it: UnitJson) => (it.id === RANDOM_ITEM && colorFn ? -1 : !colorFn ? it.color : neutral ? 24 : 0);
   const local = (it: UnitJson) => (colorFn || colorOf(it) !== -1 ? "i" : null);
   // An item needs a variable when a trigger refers to it or it gets a colour; else it's a plain call. Editors from
   // 7000 on declare the local even when every item has its global (OrcX01_05 of editor 7003).

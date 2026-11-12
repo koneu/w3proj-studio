@@ -512,6 +512,11 @@ test("newer editors colour every item, whatever its stored colour; World Editor 
     // The game's maps of builds up to 24356 have 0 (their items store -1).
     has(build(24356, color, player), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
   }
+  // On game data version 1 (the classic tables, whose ItemData has no teamColor column) the editor of 24371 writes 0:
+  // NightElfX03 saved as Lua (we-drive, round 3) and Forsaken07x (smoketest_maps), items stored -1, owner 27.
+  const classic = (gameDataVersion: number | undefined) => itemsSection({ units: [unit({ color: -1, player: 27 })], kindOf: () => "item", referenced: new Set(), editorVersion: 7003, gameBuild: 24371, gameDataVersion });
+  has(classic(1), "    call BlzSetItemColor( i, ConvertPlayerColor(0) )");
+  has(classic(2), "    call BlzSetItemColor( i, ConvertPlayerColor(24) )");
 });
 
 test("newer editors declare the item local even when every item has its global", () => {
