@@ -2692,23 +2692,26 @@ async function dataSafety(page, found) {
   const pathing = join(root, ".w3proj", "pathing.json");
   const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
   const editorUp = () => until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && !!document.querySelector(".model-stage canvas") && !!document.querySelector(".terrain-tab")`), 30000);
-  /** The terrain editor opened again: the Pathing Editor reads its file when the editor is made. */
+  /** The terrain editor opened again: the Pathing Editor reads its file when the editor is made. Both callers leave a
+   *  pathing.json it has to say something about: that word is waited for (the check after it says if it's missing). */
   const reopen = async () => {
+    const heard = await page.evaluate(`window.__warned.length`);
     await page.evaluate(`w3.editors.closeAll()`);
-    await sleep(300);
+    await settled(page);
     await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
     await editorUp();
-    await sleep(1000);
+    await settled(page);
     await k.tab("Pathing");
-    await sleep(500);
+    await soon(async () => (await page.evaluate(`window.__warned.length`)) > heard, 20000);
+    await settled(page);
   };
   const warned = () => page.evaluate(`window.__warned.splice(0)`);
   const answer = (a) => page.evaluate(`window.__answer = ${JSON.stringify(a)}`);
-  /** A drag across the middle of the map with the Pathing tab's brush, then a save. */
+  /** A drag across the middle of the map with the Pathing tab's brush, then a save (which waits for the app at rest
+   *  first: the stroke landed). */
   const stroke = async () => {
     const c = await hands.where(".model-stage canvas");
     await hands.drag({ x: c.x - 60, y: c.y }, { x: c.x + 60, y: c.y });
-    await sleep(400);
     await k.save();
   };
   const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`);
@@ -2800,7 +2803,8 @@ async function dataSafety(page, found) {
     const strays = () => readdirSync(parent).filter((f) => f.includes(BS)).sort();
     const openAgain = async () => {
       await page.evaluate(`w3.commands.execute("w3.project.close")`);
-      await sleep(300);
+      await until("the project closed", () => page.evaluate(`w3.workspace.project() == null`), 20000);
+      await settled(page);
       await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(root)})`);
       await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`), 20000);
     };
@@ -2813,12 +2817,15 @@ async function dataSafety(page, found) {
     if (!question) fail(`opening a project with stray files said ${JSON.stringify(said)}`);
     else if (!/3 files/.test(question) || !/1 file can be moved/.test(question) || !/1 file is a copy/.test(question) || !/1 file can't be moved/.test(question)) fail(`the question about stray files: ${question}`);
     else if (!/Checkpoints go to build\/checkpoints\/recovered, which doesn't count toward the number kept/.test(question)) fail(`the question doesn't say where checkpoints go: ${question}`);
+    // "Leave them" must not move anything: time for a move that must not happen, nothing to wait for.
     await sleep(500);
     if (strays().length !== 3) fail(`"Leave them" changed the stray files: ${strays().join(", ")}`);
     await answer("Move and delete copies");
     await openAgain();
     await until("the stray file moved", () => existsSync(join(recovered, oldCheckpoint)), 20000).catch(() => fail("the stray checkpoint wasn't moved into build/checkpoints/recovered"));
-    await sleep(500);
+    // The rest of the move done: only the stray that differs from what is there is left.
+    await soon(() => strays().length === 1, 20000);
+    await settled(page);
     if (read(join(recovered, oldCheckpoint)) !== "stray") fail("the moved checkpoint differs");
     if (existsSync(join(checkpoints, oldCheckpoint))) fail("the stray checkpoint went among the checkpoints that are pruned");
     if (read(join(recovered, "copy.w3x")) !== "same" || read(join(recovered, "clash.w3x")) !== "them") fail("a file where a stray belonged was changed");
@@ -2872,7 +2879,8 @@ async function workbenchState(page, found) {
     await page.evaluate(`(() => { const s = JSON.parse(localStorage.getItem(${storeKey})); s.tabs = s.tabs.map((t) => t.path === ${JSON.stringify(J)} ? { ...t, view: ${JSON.stringify(at)} } : t); s.active = ${JSON.stringify(J)}; localStorage.setItem(${storeKey}, JSON.stringify(s)); })()`);
     await page.evaluate(`w3.editors.restore()`);
     await until("the script back", () => page.evaluate(`!!${tabOf(J)}?.instance?.viewState`), 20000);
-    await sleep(300);
+    // The place set and scrolled to (the checks below say what's missing if it isn't).
+    await soon(() => page.evaluate(`(() => { const v = ${tabOf(J)}.instance.viewState(); return v.anchor === ${at.anchor} && v.head === ${at.head} && (document.querySelector(".editor-pane:not([hidden]) .cm-scroller")?.scrollTop ?? 0) > 0; })()`), 10000);
     const back = await page.evaluate(`${tabOf(J)}.instance.viewState()`);
     if (back.anchor !== at.anchor || back.head !== at.head) fail(`the selection came back as ${JSON.stringify(back)}, not ${JSON.stringify(at)}`);
     const scrolled = await page.evaluate(`document.querySelector(".editor-pane:not([hidden]) .cm-scroller")?.scrollTop ?? -1`);
@@ -2888,7 +2896,8 @@ async function workbenchState(page, found) {
       const openWtg = async () => {
         await page.evaluate(`w3.editors.open(${JSON.stringify(wtg)})`);
         await until("the Trigger Editor's sash", () => page.evaluate(`!!${sash}`), 20000);
-        await sleep(200);
+        await until("the Trigger Editor's tree laid out", async () => (await page.evaluate(width)) > 0, 10000);
+        await settled(page);
       };
       await openWtg();
       await page.evaluate(`${sash}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
@@ -2902,6 +2911,7 @@ async function workbenchState(page, found) {
       if (Math.abs(dragged - before - 150) > 2) fail(`dragging the sash 150px made the tree ${before} → ${dragged} wide`);
       await page.evaluate(`w3.editors.closeAll()`);
       await openWtg();
+      await soon(async () => Math.abs((await page.evaluate(width)) - dragged) <= 2, 5000);
       const again = await page.evaluate(width);
       if (Math.abs(again - dragged) > 2) fail(`the next Trigger Editor's tree is ${again} wide, not the ${dragged} it was dragged to`);
       await page.evaluate(`${sash}.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
@@ -2938,7 +2948,7 @@ async function syncSafety(page, found) {
   const { root } = await heightKit(page, "SyncSafety");
   const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(500);
+  await settled(page);
   const manifestPath = join(root, "w3proj.toml");
   const manifest = `# mine: kept by every sync\n${read(manifestPath)}\n# ours\n[ci]\nupload = true\n`;
   writeFileSync(manifestPath, manifest);
@@ -3015,7 +3025,7 @@ async function configSafety(page, found) {
   const openProject = async (p) => {
     await page.evaluate(`w3.commands.execute("w3.project.open", ${JSON.stringify(p)})`);
     await until(`the project ${p}`, () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(p)}`), 20000);
-    await sleep(500);
+    await settled(page);
   };
   try {
     // ---- 1a. The user's settings.json with a comment and a trailing comma ----
@@ -3043,6 +3053,7 @@ async function configSafety(page, found) {
     await page.evaluate(`w3.commands.execute("w3.project.close")`);
     await k.clearToasts();
     await openProject(root);
+    await soon(async () => /settings\.json .*is there, but it isn't valid JSON/.test(await k.toasts()), 10000);
     if (!/settings\.json .*is there, but it isn't valid JSON/.test(await k.toasts())) fail(`opening a project with a broken .w3proj/settings.json said ${JSON.stringify(await k.toasts())}`);
     await page.evaluate(`w3.settings.set("smoke.configSafety", "mine", "project")`);
     if (read(projectFile) !== theirs) fail(`a project setting wrote over the .w3proj/settings.json it couldn't read: ${JSON.stringify(read(projectFile))}`);
@@ -3455,7 +3466,7 @@ async function byHand(page, found) {
   await hands.click(".newmap-buttons button", "Create");
   if (!/where/.test(await errorText())) fail(`no folder gave "${await errorText()}"`);
   await hands.click(".newmap-dialog button", "Browse…");
-  await sleep(100);
+  await until("the folder chosen", () => page.evaluate(`document.querySelector(".newmap-folder")?.classList.contains("muted") === false`), 5000);
   // Deep water on cliff level 0 is allowed now, as in the World Editor (the ground stays, the water goes on top;
   // newmap.test.ts pins it), so it's no longer among the refusals.
   if ((await page.evaluate(`w3.workspace.project()?.root`)) !== before) fail("a refused map changed the project");
@@ -3490,38 +3501,32 @@ async function byHand(page, found) {
   const ground = join(root, "map", "war3map.w3e.txt");
   const untouched = hash(ground);
   await until("the terrain view", () => page.evaluate(`[...document.querySelectorAll("button, .tab")].some((b) => b.textContent.trim() === "Terrain")`), 20000);
-  await sleep(500);
+  await settled(page);
   await page.evaluate(`[...document.querySelectorAll("button, .tab, [role=tab]")].find((b) => b.textContent.trim() === "Terrain").click()`);
-  await sleep(300);
+  await until("the ground tiles", () => page.evaluate(`document.querySelectorAll(".terrain-tex-thumb").length > 1`), 10000);
   // A new map is the tileset's first tile (Dirt): paint the second, so the stroke changes the ground.
   await page.evaluate(`document.querySelectorAll(".terrain-tex-thumb")[1]?.click()`);
-  await sleep(100);
+  await until("the second tile chosen", () => page.evaluate(`!!document.querySelectorAll(".terrain-tex-thumb")[1]?.classList.contains("on")`), 5000);
   const canvas = await hands.where(".terrain-view canvas, canvas");
+  /** Saves once the app is at rest (the stroke or undo before it landed), and waits for the save's writes. */
+  const save = async () => { await settled(page); await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
   await hands.drag({ x: canvas.x - 60, y: canvas.y + 20 }, { x: canvas.x + 60, y: canvas.y + 20 });
-  await sleep(300);
-  await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await save();
   const painted = hash(ground);
   if (painted === untouched) fail("painting changed nothing on disk");
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
-  await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await save();
   if (hash(ground) !== untouched) fail(`undo didn't take the paint back (${hash(ground) === painted ? "nothing happened" : "the file differs"})`);
 
   // Noise: held on the ground it roughens it while the button is down, and the whole stroke is one undo step.
   await page.evaluate(`document.querySelector('button.tool-button[title^="Noise:"]').click()`);
   if (await page.evaluate(`[...document.querySelectorAll(".terrain-tool-opt")].find((l) => l.textContent.startsWith("Strength"))?.hidden !== false`)) fail("Noise has no Strength slider");
   await hands.drag({ x: canvas.x - 40, y: canvas.y + 20 }, { x: canvas.x + 40, y: canvas.y + 20 });
-  await sleep(300);
-  await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await save();
   const noisy = hash(ground);
   if (noisy === untouched) fail("a Noise stroke changed nothing on disk");
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
-  await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await save();
   if (hash(ground) !== untouched) fail(`one undo didn't take the whole Noise stroke back (${hash(ground) === noisy ? "nothing happened" : "the file differs"})`);
 
   await objectByHand(page, hands, root, fail);
@@ -3915,7 +3920,8 @@ async function testMapWithoutGame(page, found) {
     await go();
     const toast = await until(`the error toast (${way})`, () => page.evaluate(`document.querySelector(".toast.error")?.textContent ?? null`), 60000);
     if (!/not found/.test(toast)) found.push(`test map (${way}): the toast says "${toast.slice(0, 200)}"`);
-    await sleep(500);
+    // This way's pack and its writes over before the next way starts.
+    await settled(page);
   }
   // The Test Map options: a wrong one stops before packing, naming the setting; the backend takes only the game's
   // Test Map flags, and with good ones gets as far as starting the program (which isn't there).
@@ -5615,7 +5621,7 @@ async function shouldHaves(page, found) {
   const count = (list) => list.reduce((m, o) => ({ ...m, [o.id]: (m[o.id] ?? 0) + 1 }), {});
   /** Opens a Replace dialog by its command, picks old and new (and the boxes), presses Replace. */
   const replace = async (command, from, to, boxes = []) => {
-    await page.evaluate(`void w3.commands.execute(${JSON.stringify(command)})`);
+    await page.evaluate(`void (window.__replace = w3.commands.execute(${JSON.stringify(command)}))`);
     await until(`the ${command} dialog`, () => page.evaluate(`!!document.querySelector(".replace-dialog")`), 20000);
     const missing = await page.evaluate(`(() => {
       const d = document.querySelector(".replace-dialog"), set = (sel, v) => { const s = d.querySelector(sel); if (![...s.options].some((o) => o.value === v)) return sel + " has no " + v; s.value = v; return null; };
@@ -5626,10 +5632,13 @@ async function shouldHaves(page, found) {
       return null;
     })()`);
     if (missing) { fail(`${command}: ${missing}`); await page.evaluate(`document.querySelector(".replace-overlay")?.remove()`); return; }
-    await sleep(800);
+    // The command done: it replaced what the dialog asked for.
+    const err = await page.evaluate(`window.__replace.then(() => null, (e) => String(e))`);
+    if (err) fail(`${command}: ${err}`);
     await k.save();
   };
-  const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await sleep(500); await k.save(); };
+  /** One undo, then saved (k.save waits for the app at rest first). */
+  const undo = async () => { await page.evaluate(`w3.commands.execute("workbench.undo")`); await k.save(); };
 
   // Doodads, Swap Both: the trees trade types; one undo puts all of it back.
   const trees = JSON.stringify(count(k.doodads()));
@@ -5664,12 +5673,12 @@ async function shouldHaves(page, found) {
   // Regions: Left typed as a number; then two selected with Shift+click take one sound in one undo step.
   await k.tool("add_region", { name: "First", left: -1024, bottom: -1024, right: -512, top: -512 });
   await k.tool("add_region", { name: "Second", left: 512, bottom: 512, right: 1024, top: 1024 });
-  await sleep(500);
+  await settled(page);
   await k.tab("Regions");
   const regions = () => k.read("war3map.w3r.json").regions;
   const first = regions().find((r) => r.name === "First");
   await page.evaluate(`(() => { const s = document.querySelector('select[title="Go to a region"]'); s.value = ${JSON.stringify(String(first.index))}; s.dispatchEvent(new Event("change")); })()`);
-  await sleep(300);
+  await soon(() => page.evaluate(`!!document.querySelector(".terrain-region-left")`), 10000);
   const typed = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-left"); if (!i) return false; i.value = "-1088"; i.dispatchEvent(new Event("change")); return true; })()`);
   if (!typed) fail("a selected region shows no Left box");
   const refused = await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-right"); if (!i) return null; i.value = "-2000"; i.dispatchEvent(new Event("change")); return i.classList.contains("invalid"); })()`);
@@ -5678,11 +5687,10 @@ async function shouldHaves(page, found) {
   const moved = regions().find((r) => r.name === "First");
   if (moved?.left !== -1088 || moved?.right !== -512) fail(`after typing Left the region is ${JSON.stringify(moved && [moved.left, moved.right])}, not [-1088, -512]`);
   await k.look(768, 768);
-  await sleep(500);
   const c = await k.hands.where(".model-stage canvas");
   await k.hands.mouse("mouseMoved", c.x, c.y, 0, 8);
   await k.hands.click(".model-stage canvas", null, 8);
-  await sleep(300);
+  await soon(() => page.evaluate(`document.querySelector(".terrain-region-count")?.textContent === "2 regions"`), 5000);
   const both = await page.evaluate(`document.querySelector(".terrain-region-count")?.textContent ?? null`);
   if (both !== "2 regions") fail(`Shift+click on a second region shows "${both}", not "2 regions"`);
   else {
@@ -5724,7 +5732,7 @@ async function shouldHaves(page, found) {
   // The answer yes: the line becomes " }" and the whole text comes back.
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const saved = readFileSync(wtsPath, "utf8");
   if (!saved.includes("Line one\r\n }\r\nLine three\r\n}")) fail(`war3map.wts holds ${JSON.stringify(saved.slice(saved.indexOf("STRING 900"), saved.indexOf("STRING 900") + 60))}`);
   if (await page.evaluate(`w3.editors.isDirty(${JSON.stringify(W3I)})`)) fail("Map Properties is unsaved after its save");
@@ -5767,7 +5775,7 @@ async function shouldHaves(page, found) {
   if (!picked.ally) fail("Map Properties shows no ally priority for player 2 in player 1's row");
   if (picked.hasSkin && !picked.skin) fail("Map Properties shows no HUD Skin for a map that has them");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const after = k.read("war3map.w3i.json").players;
   if (after[0].allyHigh !== 2 || after[0].allyLow !== 0) fail(`player 1's ally priorities are low ${after[0].allyLow}, high ${after[0].allyHigh}, not high for player 2`);
   if (picked.hasSkin && after[0].hudSkin !== 2) fail(`player 1's HUD skin is ${after[0].hudSkin}, not 2 (Orc)`);
@@ -5786,15 +5794,15 @@ async function placerAndCampaign(page, found) {
   const doodads = () => k.doodads().filter((d) => d.id === "ARrk");
   const set = (sel, value) => page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(sel)}); if (!s || s.closest("[hidden]")) return false;
     if (s.type === "checkbox") s.checked = ${JSON.stringify(value)}; else s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event("change")); return true; })()`);
-  const click = async (x, y) => { await k.look(x, y); await sleep(400); await k.clickMiddle(); await sleep(600); };
+  /** A click in the middle of the view over (x, y) (k.look waits until it's drawn there), then the app at rest. */
+  const click = async (x, y) => { await k.look(x, y); await k.clickMiddle(); await settled(page); };
   try {
     // A rock (ten variations, scale 0.8–1.2, any facing), chosen in the Objects tab from one placed by a tool.
     await k.tool("place_objects", { objects: [{ id: "ARrk", x: -768, y: -768 }], ignoreRoom: true });
     await k.save();
     await k.look(-768, -768, { id: "ARrk", x: -768, y: -768 });
-    await sleep(400);
     await k.run("w3.terrain.selectInPalette");
-    await sleep(300);
+    await soon(() => page.evaluate(`/Placing .*ARrk/.test(document.querySelector(".terrain-place-hint")?.textContent ?? "")`), 5000);
     const hint = await page.evaluate(`document.querySelector(".terrain-place-hint")?.textContent`);
     if (!/Placing .*ARrk/.test(hint ?? "")) return fail(`the Objects tab says "${hint}" after Select In Tool Palette`);
     // Without anything random: the first variation, facing 270, unscaled (as before).
@@ -5806,7 +5814,9 @@ async function placerAndCampaign(page, found) {
     // Variation 4 (shown as 4, stored as 3), random rotation, asymmetric scale.
     const boxes = [await set(".terrain-place-variation", "3"), await set(".terrain-place-rotation input", true), await set(".terrain-place-scale", "asymmetric")];
     if (boxes.some((b) => !b)) return fail(`the placer's Variation, Random rotation and Random scale controls: ${JSON.stringify(boxes)}`);
-    await sleep(300);
+    // The choices taken (they're settings; the check below says if they aren't).
+    await soon(async () => (await k.setting("terrain.placement.randomRotation")) === true && (await k.setting("terrain.placement.randomScale")) === "asymmetric", 5000);
+    await settled(page);
     await click(512, 0);
     await k.save();
     const rolled = doodads().find((d) => Math.abs(d.position[0] - 512) < 64 && Math.abs(d.position[1]) < 64);
@@ -5821,7 +5831,6 @@ async function placerAndCampaign(page, found) {
     // One undo takes the last placement back, and only that.
     const before = doodads().length;
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await sleep(400);
     await k.save();
     if (doodads().length !== before - 1) fail(`one undo left ${doodads().length} of ${before} rocks`);
 
@@ -5835,7 +5844,7 @@ async function placerAndCampaign(page, found) {
       const why = await page.evaluate(`(() => { const d = document.querySelector(".random-dialog"), set = (sel, v) => { const s = d.querySelector(sel); if (s.type === "radio") s.checked = true; else s.value = v; s.dispatchEvent(new Event("change")); };
         ${choose}; d.querySelector(".newmap-buttons button.primary").click(); return document.querySelector(".random-dialog") ? "the dialog stayed open" : null; })()`);
       if (why) { await page.evaluate(`document.querySelector(".random-overlay")?.remove()`); throw new Error(why); }
-      await sleep(300);
+      await settled(page);
     };
     await random(`set(".random-what", "item"); set(".random-by-level"); set(".random-level", "3"); set(".random-class", "1")`);
     await click(-512, 512);
@@ -5853,8 +5862,8 @@ async function placerAndCampaign(page, found) {
     await k.clearToasts();
     for (const want of ["line 1", "line 2", "question mark"]) {
       const err = await k.run("w3.terrain.cycleRandomGroupsNext");
-      await sleep(300);
       if (err) { fail(`Cycle Random Groups: ${err}`); break; }
+      await soon(async () => (await k.toasts()).includes(want), 5000);
       if (!(await k.toasts()).includes(want)) { fail(`Cycle Random Groups says "${await k.toasts()}", not ${want}`); break; }
       await k.clearToasts();
     }
@@ -5867,7 +5876,9 @@ async function placerAndCampaign(page, found) {
     await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
     await until("the build", () => existsSync(map), 30000).catch(() => fail("no build"));
     if (existsSync(map)) {
-      await sleep(300);
+      // The pack done (the file is there before it is whole): the command says so once it is (and then waits on
+      // that word's Reveal button, so its promise isn't waited for).
+      await soon(async () => /Packed \d+ files/.test(await k.toasts()), 30000);
       const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
       for (const line of ["set itemID = ChooseRandomItemExWithFilter( ITEM_TYPE_PERMANENT, 3, EQUIPMENT_TYPE_ANY, ITEMTAG_TYPE_ANY )", "set unitID = gg_rg_007[0]", "BlzCreateItemWithSkin( itemID,"]) {
         if (!script.includes(line)) fail(`the packed script has no "${line}"`);
@@ -5909,7 +5920,7 @@ async function placerAndCampaign(page, found) {
   const typed = await page.evaluate(`(() => { const row = [...document.querySelectorAll(".gs-row")].find((r) => /MaxHeroLevel/.test(r.title)); const i = row?.querySelector("input"); if (!i) return false; i.value = "12"; i.dispatchEvent(new Event("change")); return true; })()`);
   if (!typed) fail("the campaign's Gameplay Constants have no Hero Maximum Level");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const misc = existsSync(join(camp, "map", "war3campaignMisc.txt")) ? readFileSync(join(camp, "map", "war3campaignMisc.txt"), "utf8") : "";
   if (!/MaxHeroLevel=12/.test(misc)) fail(`war3campaignMisc.txt holds ${JSON.stringify(misc)}`);
   if (existsSync(join(camp, "map", "war3mapMisc.txt"))) fail("the campaign got a war3mapMisc.txt");
@@ -5920,7 +5931,8 @@ async function placerAndCampaign(page, found) {
   const shown = await page.evaluate(`[...document.querySelectorAll(".gs-row.set input")].map((i) => i.value)`);
   if (!shown.includes("Campaign Gold Text")) fail(`the campaign's Game Interface shows ${JSON.stringify(shown)}, not the text in war3campaign.wts`);
   await page.evaluate(`w3.editors.closeAll()`);
-  await sleep(300);
+  // A write on closing would be a save or a workspace write, both of which settled() waits for.
+  await settled(page);
   if (!readFileSync(join(camp, "map", "war3campaignSkin.txt")).equals(skinBefore)) fail("opening the campaign's Game Interface changed war3campaignSkin.txt");
   // Packed, the campaign keeps both files byte for byte.
   const w3n = join(work, "campaign-settings.w3n");
@@ -6028,6 +6040,7 @@ async function chapterObjects(page, found) {
     if (view.colour !== "24") fail(`the campaign object's team colour shows ${JSON.stringify(view.colour)}`);
     // Delete with the campaign object shown: nothing is removed, nothing changes.
     await page.evaluate(`document.querySelector(".obj-list")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }))`);
+    // Delete must change nothing: time for a change that must not happen, nothing to wait for.
     await sleep(300);
     if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`)) fail("Delete on a campaign object changed the chapter's unit data");
     await page.evaluate(`w3.editors.saveAll()`);
@@ -6042,7 +6055,7 @@ async function chapterObjects(page, found) {
     const renamed = await run("w3.objectEditor.objectAction", "w3u", "c001", "rename", "Campaign Warrior");
     if (renamed) fail(`renaming in the campaign's Object Editor: ${renamed}`);
     await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(500);
+    await settled(page);
     const wts = readFileSync(join(camp, "map", "war3campaign.wts"), "utf8");
     if (!wts.includes("Campaign Warrior")) fail(`the rename isn't in war3campaign.wts: ${JSON.stringify(wts.slice(0, 120))}`);
     if (existsSync(join(camp, "map", "war3map.wts"))) fail("the campaign's Object Editor wrote a war3map.wts");
@@ -6450,7 +6463,7 @@ async function scriptGuard(page, found) {
     // Long, so the difference view has to wrap it to show it whole.
     const hand = `${made.slice(0, end)}\n    call BJDebugMsg("written by hand ${"and long ".repeat(40)}end")${made.slice(end)}`;
     writeFileSync(join(k.root, "map", "war3map.j"), hand);
-    await sleep(1500);
+    await settled(page);
     await saveRegion("Second Region");
     if (script() !== hand) fail(`saving a region overwrote the script changed by hand inside main${/gg_rct_Second_Region/.test(script()) ? " (it has the new region)" : ""}`);
     let w = await warnings();
@@ -6577,7 +6590,9 @@ async function staleEditors(page, found) {
     await until("the Trigger Editor read the files", () => page.evaluate(`window.__read`), 30000);
     await k.tool("create_script_trigger", { name: "Late Probe", script: "// late probe one\n" });
     await page.evaluate(`window.__open()`);
-    await sleep(1500);
+    // The editor there, opened again over the tool's save (the check below says if the trigger never shows).
+    await soon(async () => (await rows()).includes("Late Probe"), 20000);
+    await settled(page);
     if (!(await rows()).includes("Late Probe")) fail(`a trigger a tool created while the Trigger Editor loaded isn't in its tree: ${(await rows()).join(" | ")}`);
     const firstName = (await rows()).find((r) => r === "Melee Initialization") ?? null;
     if (!firstName) fail(`the new map has no Melee Initialization: ${(await rows()).join(" | ")}`);
@@ -6589,10 +6604,13 @@ async function staleEditors(page, found) {
     }
 
     // ---- 2. The texts saved by a tool while the editor is open and saved: it doesn't put back the old ones -------------
+    // After each tool's save the open editor opens again (the reload is part of settled()).
     await k.tool("create_script_trigger", { name: "Text Probe", script: "// text probe one\n" });
-    await sleep(1500);
+    await settled(page);
+    await soon(async () => (await rows()).includes("Text Probe"), 20000);
     await k.tool("set_trigger_script", { name: "Text Probe", script: "// text probe two\n" });
-    await sleep(1500);
+    await settled(page);
+    await soon(async () => (await rows()).includes("Melee Start"), 20000);
     const r2 = await rename("Melee Start", "Melee Begin");
     if (r2) fail(r2);
     await k.save();
@@ -7550,13 +7568,14 @@ async function run() {
   const triggerData = join(repo, "tests", "fixtures", "TriggerData.txt");
   // Windows: the app's WebView2 over the DevTools Protocol. Linux: WebKitGTK over WebDriver (webdriver.mjs),
   // which gives a page that takes the same calls.
-  let stop = async () => {}, exited = () => null;
+  let stop = async () => {}, exited = () => null, appStarted = false;
 
   try {
     let page;
     if (LINUX) {
       const launched = await launch(exe, { W3PROJ_TRIGGERDATA: triggerData, ...configEnv });
       ({ page, stop, exited } = launched);
+      appStarted = true;
     } else {
       const port = await freePort();
       const child = spawn(exe, [], {
@@ -7567,10 +7586,13 @@ async function run() {
       child.on("exit", (c) => { code = c; });
       exited = () => code;
       stop = async () => { child.kill(); };
+      appStarted = true;
       page = await connect(port);
     }
     await until("the app to start", () => page.evaluate(`!!window.w3 && document.querySelectorAll("button.activity").length > 0`));
-    await sleep(500);
+    // The start over (main.ts: extensions active, the explorer shown), then at rest.
+    await page.evaluate(`window.w3Started`);
+    await settled(page);
     // An app built before W3PROJ_CONFIG_DIR would share its settings with the other part's.
     const settingsAt = (await page.evaluate(`w3.backend.invoke("app_paths")`)).config_dir;
     if (resolve(settingsAt) !== resolve(configDir)) throw new Error(`the app keeps its settings in ${settingsAt}, not in ${configDir}: build it again (run without --no-build)`);
@@ -7609,7 +7631,7 @@ async function run() {
         newMaps,
         niceToHaves,
         objectCopy,
-        objectLayout,
+        objectLayout: (p, f) => objectLayout(p, f, project),
         objectManagerLive,
         objectsWhileOpening,
         paletteMouse,
@@ -7680,8 +7702,11 @@ async function run() {
     return found;
   } finally {
     await stop();
-    await sleep(300);
-    rmSync(configDir, { recursive: true, force: true });
+    // The app gone before its settings folder goes (it may still write there while it ends). On Linux stop() has
+    // killed its process group already (SIGKILL; exited() stays null for a process ended by a signal); on Windows
+    // child.kill() ends it and the exit is heard a moment later. The retries cover a write still landing.
+    if (appStarted && !LINUX) await until("the app to end", () => exited() !== null, 10000).catch(() => {});
+    rmSync(configDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 }
 
@@ -7719,7 +7744,7 @@ async function projectChecks(page, found, { project, before, wanted, packed }) {
   // Nothing was changed, so saving changes nothing.
   await page.evaluate(`w3.editors.saveAll()`);
   await page.evaluate(`w3.editors.closeAll()`);
-  await sleep(300);
+  await settled(page);
   const after = snapshot(project);
   for (const [f, h] of before) {
     if (after.get(f) === undefined) found.push(`${f} is gone`);
