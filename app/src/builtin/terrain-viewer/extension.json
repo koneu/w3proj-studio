@@ -306,12 +306,7 @@
         "terrain.minimap.regenerate": { "type": "string", "default": "afterEdits", "enum": ["afterEdits", "always", "never"], "enumDescriptions": ["After edits", "On every save", "Never"], "description": "When to redraw the minimap (war3mapMap.blp). \"After edits\" keeps the World Editor's image until something changes." },
         "terrain.minimap.groundBrightness": { "type": "number", "default": 1, "minimum": 0, "maximum": 3, "description": "Ground colour relative to its texture's smallest mip level (the colour the World Editor gives it)." },
         "terrain.minimap.groundNoise": { "type": "number", "default": 0.1, "minimum": 0, "maximum": 1, "description": "Grain: how far each pixel's brightness is scattered (0.1: ±10 %, as the World Editor's minimaps), 0 for flat colours." },
-        "terrain.minimap.waterShallowColor": { "type": "array", "default": [57, 55, 115], "description": "Water colour [r, g, b] at shallow depth (for Lordaeron water; other tilesets are shifted toward their own minimap water colour)." },
-        "terrain.minimap.waterDeepColor": { "type": "array", "default": [32, 38, 148], "description": "Water colour [r, g, b] at full depth." },
-        "terrain.minimap.waterOpacityShallow": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "description": "How much shallow water covers the ground (0–1)." },
-        "terrain.minimap.waterOpacityDeep": { "type": "number", "default": 0.62, "minimum": 0, "maximum": 1, "description": "How much deep water covers the ground (0–1)." },
-        "terrain.minimap.waterFullDepth": { "type": "number", "default": 96, "minimum": 1, "maximum": 2000, "description": "Depth (world units) at which water reaches its deep colour and opacity." },
-        "terrain.minimap.objectRadius": { "type": "number", "default": 0.6, "minimum": 0, "maximum": 8, "description": "Size of tree/doodad dots (in tiles) for objects with a minimap colour." },
+        "terrain.minimap.objectRadius": { "type": "number", "default": 0.6, "minimum": 0, "maximum": 8, "description": "Radius (in tiles) of the dot of a tree or doodad with a 4×4 pathing texture; bigger pathing textures make bigger dots." },
         "terrain.minimap.blurPasses": { "type": "integer", "default": 2, "minimum": 0, "maximum": 10, "description": "Softening passes (the World Editor's minimaps are soft)." },
         "terrain.minimap.jpegQuality": { "type": "integer", "default": 80, "minimum": 10, "maximum": 100, "description": "JPEG quality of the minimap file." }
       }

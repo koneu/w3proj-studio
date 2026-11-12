@@ -11,8 +11,17 @@
 //   them show lighter than grass;
 // - every pixel's brightness is scattered by up to ±10 % (the editor's grain,
 //   white noise, uniform, the same factor on all three channels).
-// Water and the doodads' dots are the older fit (61 sample maps).
+// Water and doodads, measured on HillsbradCreek's and SnowareBay's own
+// war3mapMap.blp (2026-11-12; the World Editor's SD save writes the same picture):
+// - water lays the tileset's minimap water colour (Water.slk mmRed/Green/Blue)
+//   over the ground at mmAlpha (64: a quarter), and deep water, too deep to walk
+//   (pathing's DEEP_WATER), a second time;
+// - a doodad or destructable shown on the minimap (showInMM) is a dot in its
+//   minimap colour (useMMColor), else in its model's texture's smallest mip
+//   colour (the Lordaeron rocks grey, the Ruins rocks green), as big as its
+//   pathing texture (a 4×4 one, trees: about a tile; rock spires 12×12: three).
 
+import { DEEP_WATER } from "../../lib/terrain/pathing";
 import type { Terrain } from "../../lib/terrain/w3e";
 
 export type Rgb = [number, number, number];
@@ -28,8 +37,11 @@ export interface MinimapInput {
   cliffColor?: (cliffId: string) => Rgb | null;
   /** The tileset's minimap water colour (Water.slk mmRed/Green/Blue). */
   waterColor: Rgb;
-  /** Doodads/destructables shown on the minimap, in their minimap colour. */
-  objects: { x: number; y: number; rgb: Rgb }[];
+  /** How much the water colour covers the ground, 0–1 (Water.slk mmAlpha / 255); a quarter when left out. */
+  waterAlpha?: number;
+  /** Doodads/destructables shown on the minimap, in their minimap colour; `size`: the side of their pathing texture
+   *  in tiles (1 when left out), which scales the dot. */
+  objects: MinimapObject[];
   /** Look of the render (settings "terrain.minimap.*"). */
   params?: Partial<MinimapParams>;
   // Export Minimap's options; left out, the picture is war3mapMap.blp's.
@@ -52,6 +64,8 @@ export interface MinimapInput {
   icons?: { x: number; y: number; image: { width: number; height: number; rgba: ArrayLike<number> }; tint?: Rgb }[];
 }
 
+export interface MinimapObject { x: number; y: number; rgb: Rgb; size?: number }
+
 /** How big a preview icon is on a 256 pixel minimap. */
 export const ICON_SIZE = 16;
 
@@ -60,36 +74,22 @@ export interface MinimapParams {
   groundBrightness: number;
   /** How far the grain scatters a pixel's brightness (0.1: ±10 %), 0 for flat colours. */
   groundNoise: number;
-  /** Water colour over the ground, shallow and at full depth (fitted for
-   *  Lordaeron water; other tilesets shift the hue toward their minimap colour). */
-  waterShallowColor: Rgb;
-  waterDeepColor: Rgb;
-  waterOpacityShallow: number;
-  waterOpacityDeep: number;
-  /** Depth (world units) at which water reaches the deep colour. */
-  waterFullDepth: number;
-  /** Radius of object dots in tiles. */
+  /** Radius of the dot of an object with a 4×4 pathing texture (a tile), in tiles. */
   objectRadius: number;
   blurPasses: number;
 }
 
-/** The ground as the World Editor draws it (see the top); water and objects fitted against 61 sample maps. */
+/** The World Editor's look (see the top). */
 export const DEFAULT_MINIMAP: MinimapParams = {
   groundBrightness: 1,
   groundNoise: 0.1,
-  waterShallowColor: [57, 55, 115],
-  waterDeepColor: [32, 38, 148],
-  waterOpacityShallow: 0.5,
-  waterOpacityDeep: 0.62,
-  waterFullDepth: 96,
   objectRadius: 0.6,
   blurPasses: 2,
 };
 
 export const MINIMAP_SIZE = 256;
-/** Minimap colour of the water the fit was made for (Lordaeron). */
-const LORDAERON_WATER: Rgb = [0, 0, 192];
-const HUE_OFFSET = 64;
+/** Water.slk's mmAlpha of every tileset's water (64 of 255). */
+const WATER_ALPHA = 64 / 255;
 
 /** Where world points are on a minimap picture of `size` pixels, and back (the terrain view's minimap panel: a click
  *  moves the camera there, the view's outline is drawn on it). The same mapping renderMinimap draws with. */
@@ -149,7 +149,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const ox = (N - pw * scale) / 2, oy = (N - ph * scale) / 2;
   const clampX = (x: number) => Math.min(t.width - 1, Math.max(0, x)), clampY = (y: number) => Math.min(t.height - 1, Math.max(0, y));
   const C = (x: number, y: number) => t.corners[clampY(y) * t.width + clampX(x)];
-  const hue = [0, 1, 2].map((k) => (waterColor[k] + HUE_OFFSET) / (LORDAERON_WATER[k] + HUE_OFFSET));
+  const waterAlpha = Math.min(1, Math.max(0, input.waterAlpha ?? WATER_ALPHA));
   const img = new Float32Array(N * N * 3);
   /** Where the ground is drawn (the grain goes there, not on the black around it or on dots and squares). */
   const grain = new Uint8Array(N * N);
@@ -179,13 +179,9 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
       grain[py * N + px] = 1;
       let depth = 0;
       q.forEach((c, i) => { depth += (c.hasWater ? c.water - c.height : -64) * w[i]; });
-      if (showWater && depth > 0) {
-        const f = Math.min(1, depth / P.waterFullDepth);
-        const a = P.waterOpacityShallow + (P.waterOpacityDeep - P.waterOpacityShallow) * f;
-        for (let k = 0; k < 3; k++) {
-          const wc = Math.min(255, (P.waterShallowColor[k] * (1 - f) + P.waterDeepColor[k] * f) * hue[k]);
-          col[k] = col[k] * (1 - a) + wc * a;
-        }
+      // The water colour over the ground, twice over water too deep to walk.
+      for (let layer = 0; showWater && layer < (depth > DEEP_WATER ? 2 : depth > 0 ? 1 : 0); layer++) {
+        for (let k = 0; k < 3; k++) col[k] = col[k] * (1 - waterAlpha) + waterColor[k] * waterAlpha;
       }
       if (overlay) {
         const cx = Math.floor(gx * 4), cy = Math.floor(gy * 4);
@@ -203,6 +199,7 @@ export function renderMinimap(input: MinimapInput): Uint8ClampedArray {
   const rad = P.objectRadius * scale;
   for (const o of input.objects) {
     const [cx, cy] = at(o.x, o.y);
+    const rad = P.objectRadius * scale * (o.size ?? 1);
     for (let y = Math.floor(cy - rad); y <= Math.ceil(cy + rad); y++) {
       for (let x = Math.floor(cx - rad); x <= Math.ceil(cx + rad); x++) {
         if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > rad || !drawn(x, y)) continue;
