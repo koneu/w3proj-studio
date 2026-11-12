@@ -7886,6 +7886,11 @@ async function editorExtras(page, found) {
       if (!regionNames().includes("Om Region") || regionNames().includes("Om Renamed")) fail(`one undo of Rename Object (region) left ${JSON.stringify(regionNames())}`);
       await page.evaluate(`w3.views.show("objectManager")`);
       await omRefresh();
+      // Edit Object Properties selects the region in the Regions tab (its name box shows it), not only centres the view.
+      await omFind("Om Region");
+      await step("Edit Object Properties (region)", () => menu(".om-row", "Om Region", "Edit Object Properties"));
+      await until("the region selected in the Regions tab", () => page.evaluate(`document.querySelector("input.terrain-region-name")?.value === "Om Region"`), 10000).catch(() => fail("Edit Object Properties on a region didn't select it in the Regions tab"));
+      await page.evaluate(`w3.views.show("objectManager")`);
       await omFind("Om Region");
       await step("Delete Object (region)", () => menu(".om-row", "Om Region", "Delete Object"));
       // The rows follow the terrain editor (the delete is unsaved there), also through undo and redo.

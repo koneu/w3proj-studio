@@ -16,7 +16,7 @@ import { StringTable } from "../../lib/formats/wts";
 import type { MenuItem } from "../../extensions/api";
 import { h } from "../../workbench/dom";
 import {
-  ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs,
+  ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, triggersUsing,
   type KindData, type MapContents, type Node as TreeNode, type Target,
 } from "./data";
 
@@ -201,7 +201,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       else items.push({ label: g.label, run: run(async () => { if (guard.owns(rowsRoot, rootNow())) await w3.commands.execute(g.opens.command, ...g.opens.args); }) });
     }
     if (items.length && (a.edit || a.rename || a.remove)) items.push("-");
-    if (a.edit) items.push({ label: "Edit Object Properties", run: run(async () => { if (n.target && guard.owns(rowsRoot, rootNow())) await go(n.target); }) });
+    if (a.edit) items.push({ label: "Edit Object Properties", run: run(async () => { if (!guard.owns(rowsRoot, rootNow())) return; const sel = editCommand(n); if (sel) await w3.commands.execute(sel.command, ...sel.args); else if (n.target) await go(n.target); }) });
     if (a.rename) items.push({ label: "Rename Object…", run: run(() => act(n, "rename", rowsRoot)) });
     if (a.remove) items.push({ label: "Delete Object", run: run(() => act(n, "delete", rowsRoot)) });
     if (a.play) items.push("-", { label: "Play Sound", run: run(() => act(n, "play", rowsRoot)) });
@@ -283,7 +283,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         /** The selected entry: what it is and the triggers that use it (click to open). */
         const showInfo = (n: TreeNode) => {
-          const inTriggers = n.ref ? [...(refs.get(n.ref) ?? [])].sort() : [];
+          const inTriggers = triggersUsing(refs, n);
           const inObjects = n.ref ? [...(users.get(n.ref) ?? [])].sort((a, b) => a[0].localeCompare(b[0])) : [];
           const parts = [h("div.om-info-title", {}, n.label),
             n.detail ? h("div.muted", {}, n.detail) : null,

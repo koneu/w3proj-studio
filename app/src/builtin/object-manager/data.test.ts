@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ProjectGuard, buildTree, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, type MapContents, type Node } from "./data";
+import { ProjectGuard, buildTree, editCommand, groupActions, idsInText, mapSummary, markUnused, nodeActions, objectKinds, objectRefs, triggersUsing, type MapContents, type Node } from "./data";
 
 const ids = new Set(["Xs01", "Y01q", "h000"]);
 
@@ -202,4 +202,20 @@ test("placed objects: thousands of one type are grouped without copying the list
   assert.equal(dest.children![0].children!.length, 40000);
   // Copying the list for each object took seconds here; grouping by pushing takes milliseconds.
   assert.ok(ms < 1000, `buildTree took ${ms.toFixed(0)} ms`);
+});
+
+test("Edit Object Properties selects a region or camera in its tab; the usage lookup covers regions, cameras and variables", () => {
+  const tree = buildTree(contents({ cameras: [{ name: "Intro", targetX: 1, targetY: 2 } as never] }));
+  const find = (label: RegExp): Node => {
+    const walk = (ns: Node[]): Node | undefined => { for (const n of ns) { if (label.test(n.label)) return n; const k = walk(n.children ?? []); if (k) return k; } return undefined; };
+    return walk(tree)!;
+  };
+  assert.deepEqual(editCommand(find(/^Gate$/)), { command: "w3.terrain.groupItemAction", args: ["regions", "Gate", "select"] });
+  assert.deepEqual(editCommand(find(/^Intro$/)), { command: "w3.terrain.groupItemAction", args: ["cameras", "Intro", "select"] });
+  assert.equal(editCommand(find(/^Init$/)), null);
+  const refs = new Map([["gg_rct_Gate", new Set(["B", "A"])], ["gg_cam_Intro", new Set(["C"])], ["udg:Count", new Set(["A"])]]);
+  assert.deepEqual(triggersUsing(refs, find(/^Gate$/)), ["A", "B"]);
+  assert.deepEqual(triggersUsing(refs, find(/^Intro$/)), ["C"]);
+  assert.deepEqual(triggersUsing(refs, find(/^Count$/)), ["A"]);
+  assert.deepEqual(triggersUsing(refs, find(/^Regions/)), []);
 });

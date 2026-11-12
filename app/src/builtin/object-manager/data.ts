@@ -49,6 +49,17 @@ export function nodeActions(n: Node): NodeActions {
   return { edit: !!t, rename: own, remove: own, play: t?.kind === "sounds" && !!t.file };
 }
 
+/** What Edit Object Properties runs for an entry: a region or camera is selected in its tab of the terrain editor (and
+ *  centred there); other entries go to their target (`go`). */
+export function editCommand(n: Node): { command: string; args: unknown[] } | null {
+  return n.item ? { command: "w3.terrain.groupItemAction", args: [n.item.group, n.item.name, "select"] } : null;
+}
+
+/** The triggers (sorted) that use an entry: a region (gg_rct_), camera (gg_cam_), variable (udg:), trigger, sound or object id. */
+export function triggersUsing(refs: ReadonlyMap<string, ReadonlySet<string>>, n: Node): string[] {
+  return n.ref ? [...(refs.get(n.ref) ?? [])].sort() : [];
+}
+
 /** A region or camera: the terrain editor's tab that holds it (w3.terrain.groupItemAction renames and deletes it there). */
 export interface ListItem { group: "regions" | "cameras"; name: string }
 
