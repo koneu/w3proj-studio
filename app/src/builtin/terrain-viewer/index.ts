@@ -44,7 +44,7 @@ import { Occupancy } from "./occupancy";
 import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, objectMods, specialsOf, type PathingData } from "./pathmap";
 import { specialFootprints, specialPlacements, type Footprint } from "./specials";
-import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
 import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
 import { meleeAfterSave, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
@@ -57,7 +57,7 @@ import { listCommandOf } from "../../lib/terrain/objectlist";
 import { resetVariations } from "../../lib/terrain/variation";
 import { adjustCliffLevels, cliffShiftRange, resetHeightField } from "../../lib/terrain/wholemap";
 import { adjustLevels, CornerUndo } from "../../lib/terrain/cliffs";
-import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, snapped, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
+import { areaBetween, changeArea, centreOf, fragmentOf, groundOf, tileOf, groundOrigin, restoreTiles, stampGround, tileSnapshot, turnAngle, turnFragment, turnOffset, type CornerArea, type Fragment, type FragmentObject, type Turn } from "../../lib/terrain/fragment";
 import { findSpots } from "./meleespots";
 import { resizedSize } from "../../lib/terrain/resize";
 import { replaceableBy, replaceableKinds, dress, followGround, groundSlot, heightColors, heightGrid, hiddenInPicture, lineSpots, paintCorners, paintPath, pathingColors, roughenCorners, replacePlaced, rowSpots, scatterSpots, seededRandom, swapTiles, sculptCorners, spotsAround, terrainSummary, viewOfArea, type Dressing, type ViewAngle, setCliffs, setCliffType, setRamp, setUnitChoices, setWater, twinOf, whyNoRoom, boundaryRefuses, withCliffTypes, type CliffKind, type UnitChoices } from "./aitools";
@@ -3002,7 +3002,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const copySelection = () => {
           const entries = copyable();
           if (!entries.length) return false;
-          clipboard = fragmentOf(entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry })), (x, y) => heightAt(terrain, x, y));
+          clipboard = fragmentOf(entries.map((entry) => ({ list: dooFile?.list.includes(entry) ? "doodads" as const : "units" as const, entry })), (x, y) => heightAt(terrain, x, y),
+            copyCentre(entries.map((p) => p.position)));
           takeTypes(clipboard);
           return true;
         };
@@ -3107,9 +3108,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           clipboard = { ...fragmentOf(items, (x, y) => heightAt(terrain, x, y), centre), ground: groundOf(terrain, a, centre) };
           takeTypes(clipboard);
         };
-        /** Where the fragment's centre lands for a pointer on the ground: ground goes on whole tiles. */
+        /** Where the fragment's centre lands for a pointer on the ground: objects alone on the World Editor's 64 grid,
+         *  ground on whole tiles. */
         const pasteCentre = (f: Fragment, g: Vec3): [number, number] => {
-          if (!f.ground) return [snapped(g[0]), snapped(g[1])];
+          if (!f.ground) return pasteCentreAt(g[0], g[1]);
           const [x, y] = groundOrigin(terrain, f.ground, g[0], g[1]);
           return [terrain.offsetX + x * 128 - f.ground.at[0], terrain.offsetY + y * 128 - f.ground.at[1]];
         };

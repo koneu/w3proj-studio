@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
+import { copyCentre, loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, pasteCentreAt, savePlacedFile, type PlacedFile } from "./placement";
+import { fragmentOf } from "../../lib/terrain/fragment";
 import type { Placed } from "./objects";
 
 const file = (key: "doodads" | "units", version: number, subversion: number, more: Record<string, unknown> = {}, list: Placed[] = []): PlacedFile =>
@@ -157,4 +158,37 @@ test("a doodad file's special doodads are read with it and saved back as they we
   assert.equal(saved.doodads.length, 1, "the doodad placed is saved");
   assert.deepEqual(saved.specials, specials);
   assert.equal(saved.specialVersion, 0);
+});
+
+// we-drive 2026-11-12 (branch paste-anchor-we): barrels (LTbs) on a flat map, copied (one, or a box of them) and
+// pasted with Ctrl+V and a click, the pointer read from the status bar, the result from the saved war3map.doo. The
+// first row is verify round 2's C7 (crates, barrels and rocks). The middle of the extent rounded to 32 (Studio's old
+// rule) gets eight of the nine wrong, the same on the 64 grid five, the mean with half-way values away from 0 three;
+// the mean on the 64 grid, half-way values up, gets them all. The editor also moves each doodad onto its own grid
+// when the map loads (a barrel to 64n + 32, a crate to 64n): the copied positions are those it saved.
+const WE_PASTES: { copied: [number, number][]; pointer: [number, number]; pasted: [number, number][] }[] = [
+  { copied: [[-640, -128], [-352, -96], [-640, 128], [-384, 128]], pointer: [354, -573.4], pasted: [[256, -704], [544, -672], [256, -448], [512, -448]] },
+  { copied: [[-992, 544]], pointer: [-570.7, -568.2], pasted: [[-608, -608]] },
+  { copied: [[-800, 544]], pointer: [-219.6, -694.4], pasted: [[-224, -736]] },
+  { copied: [[-608, 800], [-352, 864]], pointer: [232.2, -619.5], pasted: [[96, -672], [352, -608]] },
+  { copied: [[224, 800], [224, 800], [608, 800]], pointer: [550.2, -814.1], pasted: [[416, -864], [416, -864], [800, -864]] },
+  { copied: [[-992, 608], [-928, 608], [-608, 672]], pointer: [-492.7, -860.3], pasted: [[-672, -864], [-608, -864], [-288, -800]] },
+  { copied: [[-992, 608], [-928, 608], [-608, 672]], pointer: [-98.7, -1077.8], pasted: [[-288, -1120], [-224, -1120], [96, -1056]] },
+  { copied: [[160, 608], [224, 608], [288, 608], [608, 736]], pointer: [357.5, -462.2], pasted: [[224, -480], [288, -480], [352, -480], [672, -352]] },
+  { copied: [[160, 608], [224, 608], [288, 608], [608, 736]], pointer: [834.9, -1036], pasted: [[672, -1056], [736, -1056], [800, -1056], [1120, -928]] },
+];
+
+test("a pasted group lands where the World Editor puts it: its mean and the pointer on the 64 grid", () => {
+  for (const { copied, pointer, pasted } of WE_PASTES) {
+    const f = fragmentOf(copied.map(([x, y]) => ({ list: "doodads" as const, entry: { position: [x, y, 0], angle: 0 } })), () => 0, copyCentre(copied));
+    const [cx, cy] = pasteCentreAt(...pointer);
+    assert.deepEqual(f.objects.map((o) => [cx + o.at[0], cy + o.at[1]]), pasted, `${JSON.stringify(copied)} at ${pointer}`);
+  }
+});
+
+test("the paste grid takes half-way values up and never gives -0", () => {
+  assert.deepEqual(copyCentre([[-992, 544]]), [-960, 576], "-15.5 and 8.5 cells");
+  assert.deepEqual(copyCentre([[-608, 800], [-352, 864]]), [-448, 832], "-7.5 cells");
+  assert.ok(Object.is(pasteCentreAt(-10, -31)[0], 0) && Object.is(pasteCentreAt(-10, -31)[1], 0));
+  assert.deepEqual(pasteCentreAt(31.9, 32), [0, 64]);
 });
