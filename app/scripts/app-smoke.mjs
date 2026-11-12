@@ -8219,6 +8219,12 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
   })()`);
   const row = `[...document.querySelectorAll("tr.imp-row")].filter((r) => r.textContent.includes("PairHero"))`;
   const badges = () => page.evaluate(`${row}.map((r) => [...r.querySelectorAll(".imp-badge")].map((b) => b.textContent).join("+"))`);
+  /** The row's badges once they read `want`, or what was last seen after ~10 s. */
+  const badgesAre = async (want) => {
+    let last = [];
+    await soon(async () => { last = await badges(); return last.join() === want; }, 10000);
+    return { ok: last.join() === want, last };
+  };
   try {
     await page.evaluate(`w3.commands.execute("w3.imports.open")`);
     const use = await soon(() => page.evaluate(`(() => { const s = document.querySelector(".imp-use-in"); if (!s) return false;
@@ -8232,7 +8238,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (entry(HD).flags !== 13) fail(`the Reforged entry's flags: ${entry(HD).flags}`);
     if (listed().some((p) => p === SD) || onDisk("map/war3mapImported/PairHero.mdx")) fail("Reforged only also wrote the plain path");
     await settled(page);
-    if ((await badges()).join() !== "Reforged") fail(`a Reforged-only import's row shows ${JSON.stringify(await badges())}`);
+    { const b = await badgesAre("Reforged"); if (!b.ok) fail(`a Reforged-only import's row shows ${JSON.stringify(b.last)}`); }
 
     // Add Classic Version…: the selected row's plain path.
     await page.evaluate(`${row}[0]?.click()`);
@@ -8241,7 +8247,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (!(await soon(() => !!entry(SD) && onDisk("map/war3mapImported/PairHero.mdx"), 20000))) { fail(`Add Classic Version…: the list holds ${JSON.stringify(listed())}`); return; }
     if (entry(SD).flags !== 21) fail(`the Classic entry's flags: ${entry(SD).flags}`);
     await settled(page);
-    if ((await badges()).join() !== "Classic+Reforged") fail(`the pair is shown as ${JSON.stringify(await badges())} (one row with both badges wanted)`);
+    { const b = await badgesAre("Classic+Reforged"); if (!b.ok) fail(`the pair is shown as ${JSON.stringify(b.last)} (one row with both badges wanted)`); }
     // The note comes once the add has ended, which the list entry and file don't tell of.
     if (!(await soon(() => page.evaluate(`window.__impInfo.some((i) => i.m.includes("Added the Classic version"))`), 10000))) fail(`no note of the added version: ${JSON.stringify(await page.evaluate(`window.__impInfo`))}`);
 
@@ -8253,7 +8259,7 @@ async function graphicsModeVersions(page, k, fail, { onDisk, listed, remove }) {
     if (!(await soon(() => !!entry(DE) && onDisk("map/_DE.w3mod/war3mapImported/PairHero.mdx"), 20000))) { fail(`Add 3.0 Version…: the list holds ${JSON.stringify(listed())}`); return; }
     if (entry(DE).flags !== 13) fail(`the 3.0 entry's flags: ${entry(DE).flags}`);
     await settled(page);
-    if ((await badges()).join() !== "Classic+Reforged+3.0") fail(`the three versions are shown as ${JSON.stringify(await badges())} (one row with three badges wanted)`);
+    { const b = await badgesAre("Classic+Reforged+3.0"); if (!b.ok) fail(`the three versions are shown as ${JSON.stringify(b.last)} (one row with three badges wanted)`); }
 
     // Packed, the map holds the paths, each with its own bytes.
     await k.save();
