@@ -239,8 +239,8 @@ export function validateTriggers(file: TriggerFile, data: TriggerData, opts: Val
       });
     };
     walk(t.ecas, []);
-    // A disabled event isn't in the script either.
-    if (scripts && t.enabled && !t.runOnInit && !t.ecas.some((e) => e.kind === EVENT && e.enabled) && doesSomething(t) && !runsFromElsewhere(file, scripts, t, language)) {
+    // A disabled event isn't in the script either; an initially off trigger isn't run at map initialization.
+    if (scripts && t.enabled && !(t.runOnInit && !t.initiallyOff) &&!t.ecas.some((e) => e.kind === EVENT && e.enabled) && doesSomething(t) && !runsFromElsewhere(file, scripts, t, language)) {
       const off = t.ecas.some((e) => e.kind === EVENT);
       add({ kind: "noEvents", severity: "warning", message: `has no ${off ? "enabled " : ""}events, and no trigger or script runs it` });
     }

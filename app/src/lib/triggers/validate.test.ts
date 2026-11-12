@@ -142,6 +142,8 @@ test("a trigger without events is reported only when nothing runs it", () => {
   assert.deepEqual(kinds([lonely], ["call TriggerExecute(gg_trg_Lonely_Trigger)"]), [], "run by script text");
   assert.deepEqual(kinds([lonely], ["call TriggerExecute(gg_trg_Lonely_Trigger2)"]), ["Lonely Trigger"], "another name isn't this one");
   assert.deepEqual(kinds([{ ...lonely, runOnInit: true }]), [], "runs at map initialization");
+  // The map script leaves an initially off trigger out of RunInitializationTriggers (script/triggers.ts runsAtInit).
+  assert.deepEqual(kinds([{ ...lonely, runOnInit: true, initiallyOff: true }]), ["Lonely Trigger"], "initially off: not run at map initialization");
   assert.deepEqual(kinds([lonely], null), [], "the scripts couldn't be read: nobody is called unused");
   assert.equal(validateTriggers(fileOf([lonely]), DATA)[0].severity, "warning");
 });
