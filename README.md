@@ -26,27 +26,247 @@ What the World Editor doesn't have:
     | "can you familiarize yourself with warcraft mapping and use the war3-proj konnektor to build a nice forest in region 000, with a path from south to east." ~10min | "can you make the coner section more interesting" ~5min | "can you make a nice farm in region 001 and add a transition between it and the forest?" ~10min  |
     | ![](docs/images/forestpath-1.jpg) | ![](docs/images/forestpath-2.jpg) | ![](docs/images/forestpath-3.jpg) |
 
+    **Example new Hero & Ability:**
 
-- **Problems view.** Checks the project like a compiler would: JASS errors in the map script, files that object
-  data uses but nobody has, textures missing from imported models, placed objects of unknown types, imports
-  without their file, triggers nothing runs. Click a problem to jump there; Build runs the checks first.
+    <table>
+    <tr><td colspan="2"><b>Prompt:</b> "can you make a new hero with an custtom triggered ability, that shoots rocks in random directions and deal damage, and spawn a mud golem on impact."</td></tr>
+    <tr><th>Result</th><th>Trigger</th></tr>
+    <tr>
+    <td width="50%"><img src="docs/images/hero-1.gif" alt="A new hero and ability made through the AI integration"></td>
+    <td width="50%" valign="top">
+    <details>
+    <summary>Rock Barrage, JASS (~210 lines)</summary>
+
+    ```jass
+    //===========================================================================
+    // Rock Barrage (A000) - Earthbreaker hero ability
+    // Hurls 2+level boulders in random directions. Each lands after an arc,
+    // damages enemy ground units around the impact and raises a Mud Golem
+    // for the caster's owner. One timer per boulder, data in udg_RB_Hash
+    // under the timer's handle id, so any number of casts can run at once.
+    //
+    // Hashtable keys per boulder (child key = timer handle id):
+    //  0 effect  1 caster  2 owner  3 start x  4 start y  5 angle (radians)
+    //  6 total distance  7 distance done  8 level  9 distance per tick
+    //===========================================================================
+
+    function RB_AbilityId takes nothing returns integer
+        return 'A000'
+    endfunction
+
+    function RB_GolemId takes nothing returns integer
+        return 'ngrk'
+    endfunction
+
+    function RB_RockCount takes integer lvl returns integer
+        return 2 + lvl
+    endfunction
+
+    function RB_Damage takes integer lvl returns real
+        return 20.0 + 40.0 * lvl
+    endfunction
+
+    function RB_GolemLife takes integer lvl returns real
+        return 10.0 + 5.0 * lvl
+    endfunction
+
+    function RB_Radius takes nothing returns real
+        return 175.0
+    endfunction
+
+    function RB_Tick takes nothing returns real
+        return 0.03
+    endfunction
+
+    function RB_GroundZ takes real x, real y returns real
+        call MoveLocation(udg_RB_ZLoc, x, y)
+        return GetLocationZ(udg_RB_ZLoc)
+    endfunction
+
+    function RB_Impact takes integer id, real x, real y returns nothing
+        local unit caster = LoadUnitHandle(udg_RB_Hash, id, 1)
+        local player owner = LoadPlayerHandle(udg_RB_Hash, id, 2)
+        local integer lvl = LoadInteger(udg_RB_Hash, id, 8)
+        local real dmg = RB_Damage(lvl)
+        local group g = CreateGroup()
+        local unit u
+        local unit golem
+        local unit source
+        local effect fx
+
+        set fx = AddSpecialEffect("Abilities\\Spells\\Human\\Thunderclap\\ThunderClapCaster.mdl", x, y)
+        call BlzSetSpecialEffectScale(fx, 0.55)
+        call DestroyEffect(fx)
+        call DestroyEffect(AddSpecialEffect("Objects\\Spawnmodels\\Undead\\ImpaleTargetDust\\ImpaleTargetDust.mdl", x, y))
+
+        // The golem; SetUnitPosition moves it to the nearest walkable spot
+        // if the boulder came down in trees, deep water or on a cliff.
+        set golem = CreateUnit(owner, RB_GolemId(), x, y, GetRandomReal(0.0, 360.0))
+        call SetUnitPosition(golem, x, y)
+        call UnitApplyTimedLife(golem, 'BTLF', RB_GolemLife(lvl))
+
+        // Damage comes from the caster so kills give experience and bounty.
+        // If the caster has been removed meanwhile, the golem deals it.
+        if caster != null and GetUnitTypeId(caster) != 0 then
+            set source = caster
+        else
+            set source = golem
+        endif
+
+        call GroupEnumUnitsInRange(g, x, y, RB_Radius(), null)
+        loop
+            set u = FirstOfGroup(g)
+            exitwhen u == null
+            call GroupRemoveUnit(g, u)
+            if u != golem and GetWidgetLife(u) > 0.405 and not IsUnitType(u, UNIT_TYPE_DEAD) and IsUnitEnemy(u, owner) and not IsUnitType(u, UNIT_TYPE_STRUCTURE) and not IsUnitType(u, UNIT_TYPE_FLYING) and not IsUnitType(u, UNIT_TYPE_MAGIC_IMMUNE) then
+                call UnitDamageTarget(source, u, dmg, true, false, ATTACK_TYPE_NORMAL, DAMAGE_TYPE_MAGIC, WEAPON_TYPE_WHOKNOWS)
+            endif
+        endloop
+
+        call DestroyGroup(g)
+        set g = null
+        set u = null
+        set golem = null
+        set source = null
+        set caster = null
+        set owner = null
+        set fx = null
+    endfunction
+
+    function RB_Step takes nothing returns nothing
+        local timer t = GetExpiredTimer()
+        local integer id = GetHandleId(t)
+        local effect e = LoadEffectHandle(udg_RB_Hash, id, 0)
+        local real sx = LoadReal(udg_RB_Hash, id, 3)
+        local real sy = LoadReal(udg_RB_Hash, id, 4)
+        local real a = LoadReal(udg_RB_Hash, id, 5)
+        local real dist = LoadReal(udg_RB_Hash, id, 6)
+        local real done = LoadReal(udg_RB_Hash, id, 7) + LoadReal(udg_RB_Hash, id, 9)
+        local real f
+        local real x
+        local real y
+        local real z
+
+        if done > dist then
+            set done = dist
+        endif
+        set f = done / dist
+        set x = sx + done * Cos(a)
+        set y = sy + done * Sin(a)
+        // Leaves the hand at 80 above the ground and arcs up to 30% of
+        // the throw's length at the middle of its flight.
+        set z = RB_GroundZ(x, y) + 80.0 * (1.0 - f) + 4.0 * (dist * 0.3) * f * (1.0 - f)
+        call BlzSetSpecialEffectPosition(e, x, y, z)
+        call BlzSetSpecialEffectPitch(e, (0.5 - f) * 1.2)
+
+        if done >= dist then
+            call DestroyEffect(e)
+            call RB_Impact(id, x, y)
+            call FlushChildHashtable(udg_RB_Hash, id)
+            call PauseTimer(t)
+            call DestroyTimer(t)
+        else
+            call SaveReal(udg_RB_Hash, id, 7, done)
+        endif
+
+        set t = null
+        set e = null
+    endfunction
+
+    function RB_Conditions takes nothing returns boolean
+        return GetSpellAbilityId() == RB_AbilityId()
+    endfunction
+
+    function RB_Actions takes nothing returns nothing
+        local unit caster = GetTriggerUnit()
+        local player owner = GetOwningPlayer(caster)
+        local integer lvl = GetUnitAbilityLevel(caster, RB_AbilityId())
+        local integer n = RB_RockCount(lvl)
+        local real cx = GetUnitX(caster)
+        local real cy = GetUnitY(caster)
+        local real minX = GetRectMinX(bj_mapInitialPlayableArea) + 64.0
+        local real maxX = GetRectMaxX(bj_mapInitialPlayableArea) - 64.0
+        local real minY = GetRectMinY(bj_mapInitialPlayableArea) + 64.0
+        local real maxY = GetRectMaxY(bj_mapInitialPlayableArea) - 64.0
+        local integer i = 0
+        local real a
+        local real d
+        local real sx
+        local real sy
+        local real tx
+        local real ty
+        local timer t
+        local integer id
+        local effect e
+
+        loop
+            exitwhen i >= n
+            set a = GetRandomReal(0.0, 2.0 * bj_PI)
+            set d = GetRandomReal(300.0, 700.0)
+            // Start a little out from the caster, end inside the playable map.
+            set sx = RMinBJ(RMaxBJ(cx + 50.0 * Cos(a), minX), maxX)
+            set sy = RMinBJ(RMaxBJ(cy + 50.0 * Sin(a), minY), maxY)
+            set tx = RMinBJ(RMaxBJ(cx + d * Cos(a), minX), maxX)
+            set ty = RMinBJ(RMaxBJ(cy + d * Sin(a), minY), maxY)
+            set d = SquareRoot((tx - sx) * (tx - sx) + (ty - sy) * (ty - sy))
+            if d < 32.0 then
+                set d = 32.0
+            endif
+            set a = Atan2(ty - sy, tx - sx)
+
+            set e = AddSpecialEffect("Abilities\\Weapons\\AncientProtectorMissile\\AncientProtectorMissile.mdl", sx, sy)
+            call BlzSetSpecialEffectScale(e, GetRandomReal(0.8, 1.15))
+            call BlzSetSpecialEffectYaw(e, a)
+            call BlzSetSpecialEffectZ(e, RB_GroundZ(sx, sy) + 80.0)
+
+            set t = CreateTimer()
+            set id = GetHandleId(t)
+            call SaveEffectHandle(udg_RB_Hash, id, 0, e)
+            call SaveUnitHandle(udg_RB_Hash, id, 1, caster)
+            call SavePlayerHandle(udg_RB_Hash, id, 2, owner)
+            call SaveReal(udg_RB_Hash, id, 3, sx)
+            call SaveReal(udg_RB_Hash, id, 4, sy)
+            call SaveReal(udg_RB_Hash, id, 5, a)
+            call SaveReal(udg_RB_Hash, id, 6, d)
+            call SaveReal(udg_RB_Hash, id, 7, 0.0)
+            call SaveInteger(udg_RB_Hash, id, 8, lvl)
+            // Each boulder flies at its own speed, 520 to 680 per second.
+            call SaveReal(udg_RB_Hash, id, 9, GetRandomReal(520.0, 680.0) * RB_Tick())
+            call TimerStart(t, RB_Tick(), true, function RB_Step)
+
+            set i = i + 1
+        endloop
+
+        set caster = null
+        set owner = null
+        set t = null
+        set e = null
+    endfunction
+
+    //===========================================================================
+    function InitTrig_Rock_Barrage takes nothing returns nothing
+        set udg_RB_Hash = InitHashtable()
+        set udg_RB_ZLoc = Location(0.0, 0.0)
+        set gg_trg_Rock_Barrage = CreateTrigger()
+        call TriggerRegisterAnyUnitEventBJ(gg_trg_Rock_Barrage, EVENT_PLAYER_UNIT_SPELL_EFFECT)
+        call TriggerAddCondition(gg_trg_Rock_Barrage, Condition(function RB_Conditions))
+        call TriggerAddAction(gg_trg_Rock_Barrage, function RB_Actions)
+    endfunction
+    ```
+
+    </details>
+    </td>
+    </tr>
+    </table>
+
+- **Problems view.** Checks the project for errors, missing textures, and anything i we detect
 
   ![The Problems view next to the map script, opened at the error](docs/images/problems.png)
 
-- **A map is a folder you can keep in git.** Unpacked projects store object data, map properties, placed objects,
-  regions and the rest as JSON or text, so diffs and merges work; packing to `.w3x` is a release step. Every
-  file is checked to pack back byte for byte. A Source Control view commits, diffs, branches, pushes and pulls,
-  and automatic checkpoints keep packed copies to go back to.
-- **VS Code's way of working.** Activity bar, side views, tabs, a command palette (Ctrl+Shift+P) for every
-  command, quick file open (Ctrl+P), and settings per user or per project (`.w3proj/settings.json`, versioned with
-  the map). Inside the terrain view the World Editor's keys and mouse still apply, and every key (undo and redo,
-  the terrain view's and its mouse buttons and wheel included) can be changed in Keyboard Shortcuts (Ctrl+K Ctrl+S)
-  or `keybindings.json`.
+- **A map is a folder you can keep in git.**
 - **Extensions.** Nearly every editor is an extension on a public API; you can add commands, views, editors,
   settings, MCP tools and Problems checks, or turn a built-in off and replace it.
-- **Editable binary formats.** The map file layouts are [format definitions](#format-definitions) (JSON), not
-  code: a project can carry its own for a new patch or an unknown field.
-- **Linux.** Runs natively; the game and the World Editor start through Steam's Proton when you test a map.
+- **Linux.** Runs natively; the game and the World Editor start through Steam's Proton when you test a map. Only tested with  a warcraft installation via, steam.
 - **A command line.** `w3proj` unpacks, packs, verifies and inspects maps and the game's files, for scripts and
   CI ([CLI](#cli)).
 
