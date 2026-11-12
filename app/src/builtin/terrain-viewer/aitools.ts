@@ -5,6 +5,7 @@ import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
+import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
@@ -260,6 +261,9 @@ export function setWater(t: Terrain, place: Area | { points: readonly [number, n
   const layer = dry.length ? from.layer - (mode === "deep" ? 2 : 1) : from.layer;
   if (layer < 0) throw new Error(`The ground here is at cliff level ${from.layer}, too low for ${mode} water. Raise it with set_cliff_level first.`);
   const surface = dry.length ? waterLevelAt(from.height - WATER_OFFSET) : from.rawWater & 0x3fff;
+  const all = new Set(inside.map(({ i }) => i));
+  const wet = inside.map(({ i }) => i).filter((i) => { const c = t.corners[i]; return !(c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface); });
+  changed.push(...flattenWaterRim(t, wet, all, () => {}));
   for (const { i } of inside) {
     const c = t.corners[i];
     if (c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface) continue;

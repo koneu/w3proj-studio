@@ -1,6 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
+import { flattenWaterRim } from "../../lib/terrain/waterrim";
 import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
@@ -125,7 +126,16 @@ export function applyHeight(t: Terrain, b: Brush, tool: HeightTool, amount: numb
  *  only clears the flag. Returns whether anything changed. */
 export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerTarget, stroke: Stroke): boolean {
   let changed = false;
-  for (const { i } of cornersIn(t, b)) {
+  const inside = cornersIn(t, b);
+  if (tool === "shallow" || tool === "deep") {
+    // As the World Editor does, the ground two corners round the new water is levelled first.
+    const wet = inside.map(({ i }) => i).filter((i) => {
+      const c = t.corners[i];
+      return !(c.layer === target.layer && c.hasWater && (c.rawWater & 0x3fff) === target.waterLevel);
+    });
+    if (flattenWaterRim(t, wet, new Set(inside.map(({ i }) => i)), (i) => stroke.touch(t, i)).length) changed = true;
+  }
+  for (const { i } of inside) {
     const c = t.corners[i];
     if (tool === "dry") {
       if (!c.hasWater) continue;
