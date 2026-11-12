@@ -8,6 +8,7 @@ import {
   OBJECTS_SERVICE, SOUNDS_SERVICE, TERRAIN_SERVICE, TRIGGERS_SERVICE, type ObjectsService, type SoundsService, type TerrainService, type TriggersService,
 } from "../../extensions/services";
 import { loadKind } from "../../lib/objects/metadata";
+import { DueTimer, PendingWork, whileRunning } from "../../lib/settle";
 import { triggerRefs } from "../../lib/triggers/refs";
 import { parseTriggerData } from "../../lib/triggers/triggerdata";
 import { readWtgFile, wtgPath, type TriggerFile } from "../../lib/triggers/wtg";
@@ -100,10 +101,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     })();
     return loading;
   };
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const rebuild = () => { if (loading) again = true; else void load(); };
+  const rebuildTimer = new DueTimer(rebuild, REBUILD_DELAY);
   const reload = () => {
-    clearTimeout(timer);
+    rebuildTimer.cancel();
     if (guard.switched(rootNow())) {
       // Another project: drop the old rows at once, build the new tree without the delay.
       reset();
@@ -111,13 +112,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       return;
     }
     // Edits come in bursts (typing, dragging, undo held down): one build after the last.
-    timer = setTimeout(rebuild, REBUILD_DELAY);
+    rebuildTimer.schedule();
   };
 
   /** The editors' services, each once one of its editors was in front (asked for only then: getting one can start its
    *  extension). What they hold, unsaved changes included, is the rows'; their edits, undo, redo and closing rebuild them. */
   const live: LiveSources = { terrain: null, triggers: null, sounds: null, objects: null };
   const hooked = new Set<string>(), stops: Disposable[] = [];
+  /** The menu's commands still running (a rename waiting for its editor): what w3.objectManager.settle waits for. */
+  const actions = new PendingWork();
   let disposed = false;
   const hook = <T>(service: string, attach: (s: T) => Disposable) => {
     if (hooked.has(service)) return;
@@ -191,7 +194,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
    *  editor of its entries. `toggle` opens or closes the row; `filtering`: a filter opened the groups (no toggle then). */
   const menuFor = (n: TreeNode, rowsRoot: string | null, isOpen: boolean, filtering: boolean, toggle: () => void): MenuItem[] => {
     const a = nodeActions(n);
-    const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String((e as Error).message ?? e))); };
+    const run = (f: () => Promise<unknown>) => () => { actions.track(f()).catch((e) => w3.window.showError(String((e as Error).message ?? e))); };
     const items: MenuItem[] = [];
     for (const g of groupActions(n, isOpen, filtering)) {
       if ("toggle" in g) items.push({ label: g.label, run: toggle });
@@ -207,6 +210,13 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
 
   ctx.subscriptions.push(
     w3.commands.register("w3.objectManager.refresh", () => load(true)),
+    // Part of the workbench's settled(): the menu's commands ended, a rebuild still due after an edit done now, and the
+    // builds running (with the one a change during a build starts) ended.
+    w3.commands.register("w3.objectManager.settle", async () => {
+      await actions.idle();
+      rebuildTimer.runNow();
+      await whileRunning(() => loading);
+    }),
     // The Map Summary's rows (also shown by the view's button), after a build of the open project.
     w3.commands.register("w3.objectManager.summary", async () => {
       await load(true);
@@ -300,7 +310,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           error ? h("div.view-empty", {}, `Couldn't read the map: ${error}`) : null, rows, info));
       },
     }),
-    { dispose: () => { disposed = true; clearTimeout(timer); for (const s of stops.splice(0)) s.dispose(); } },
+    { dispose: () => { disposed = true; rebuildTimer.cancel(); for (const s of stops.splice(0)) s.dispose(); } },
   );
 }
 

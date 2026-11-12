@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PendingWork, settleRounds } from "./settle";
+import { DueTimer, PendingWork, settleRounds, whileRunning } from "./settle";
 
 /** A promise and the hands to end it. */
 function gate<T = void>() {
@@ -80,6 +80,47 @@ test("a step that throws doesn't stop the others", async () => {
   let ran = false;
   await settleRounds([() => { throw new Error("no terrain"); }, async () => { ran = true; }], work);
   assert.equal(ran, true);
+});
+
+test("DueTimer runs its job once after the last schedule, and runNow runs a waiting job at once", async () => {
+  let runs = 0;
+  const t = new DueTimer(() => { runs++; }, 20);
+  assert.equal(t.runNow(), false, "nothing waits: nothing runs");
+  assert.equal(runs, 0);
+  t.schedule();
+  t.schedule();
+  assert.equal(t.due, true);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(runs, 1, "two schedules in a row run the job once, after the delay");
+  assert.equal(t.due, false);
+  t.schedule();
+  assert.equal(t.runNow(), true);
+  assert.equal(runs, 2, "runNow runs the waiting job without its delay");
+  assert.equal(t.due, false);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(runs, 2, "and the delay's run doesn't come on top (control: a timer left running would run it again)");
+  t.schedule();
+  t.cancel();
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(runs, 2, "a cancelled job doesn't run");
+});
+
+test("whileRunning waits for the job that a job starts as it ends, and for nothing when none runs", async () => {
+  let current: Promise<void> | null = null;
+  await whileRunning(() => current);
+  const a = gate(), b = gate();
+  let done = false;
+  current = a.promise.then(() => { current = b.promise; });
+  const waiting = whileRunning(() => current).then(() => { done = true; });
+  a.resolve();
+  await tick();
+  assert.equal(done, false, "the second job still runs (control: one wait on the first job would end here)");
+  b.resolve();
+  await waiting;
+  assert.equal(done, true);
+  // A job that ended and stays named (a failed one nobody cleared) ends the wait instead of going round for ever.
+  current = Promise.reject(new Error("unreadable"));
+  await whileRunning(() => current);
 });
 
 test("settleRounds gives up on work that keeps starting more work", async () => {
