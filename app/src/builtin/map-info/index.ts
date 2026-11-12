@@ -9,6 +9,7 @@ import { jsonPathOf, mapStrings, readMapDoc, requireProject, terrainFacts } from
 import { playableArea } from "../../lib/terrain/area";
 import { MCP_EDITS_SERVICE, type McpEditsService } from "../../extensions/services";
 import { setMapText } from "./summary";
+import { moveTextsToStringTable } from "./movetexts";
 import { mapSummary, setW3iColorHex, w3iColorHex } from "./summary";
 import { addItemTable, ITEM_TABLES_ANCHOR, itemTableAnchor, itemTablesShown, renderTechtree, type TechInfo } from "./techtree";
 import {
@@ -249,6 +250,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       await w3.backend.writeBytes(path, new TextEncoder().encode(text));
       void w3.window.showInfo(`Exported ${[...new StringTable(text).entries()].length} strings.`);
     }),
+    // What the World Editor does to the texts when it saves (Studio's save keeps them): see movetexts.ts.
+    w3.commands.register("w3.strings.moveToTable", () => moveTextsToStringTable(w3)),
     w3.commands.register("w3.strings.import", async () => {
       const text = await w3.workspace.readText(STRINGS).catch(() => null);
       if (text === null) throw new Error("This map has no strings.");

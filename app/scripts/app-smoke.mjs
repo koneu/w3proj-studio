@@ -5572,6 +5572,128 @@ async function realMapSaveRound(page, found, map, name, prepare) {
   }
 }
 
+/** Move Texts to String Table on a copy of cliff.w3m given literal texts, as the World Editor test had it (we-drive,
+ *  2026-11-10): opened and saved without the command, the map packs as before; the command writes the World Editor's
+ *  war3map.wts, byte for byte, and the references; reopened, the texts are there; a second run changes nothing; undo
+ *  puts every file back. */
+async function moveTextsToTable(page, found) {
+  const fail = (what) => found.push(`move texts to string table: ${what}`);
+  const map = join(process.env.W3PROJ_CORPUS ?? join(mainCheckout(repo), "smoketest_maps"), "cliff.w3m");
+  if (!existsSync(map)) { console.log(`move texts to string table: skipped, ${map} isn't there`); return; }
+  const dir = join(work, "move-texts"), mapDir = join(dir, "map"), file = (f) => join(mapDir, f);
+  const run = (id, ...args) => page.evaluate(`w3.commands.execute(${JSON.stringify(id)}, ...${JSON.stringify(args)}).then((r) => ({ r }), (e) => ({ e: String(e) }))`);
+  const pack = async (name) => {
+    const out = join(work, `move-texts-${name}.w3x`);
+    rmSync(out, { force: true });
+    await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(dir)}, output: ${JSON.stringify(out)} })`);
+    return hash(out);
+  };
+  rmSync(dir, { recursive: true, force: true });
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.backend.invoke("project_unpack", { map: ${JSON.stringify(map)}, dir: ${JSON.stringify(dir)}, allowIncomplete: false, install: ${JSON.stringify(game ?? gamePath(repo))} }); })()`);
+  // The literal texts: the players' and forces' names, and object data with fields that move and fields that don't.
+  const info = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+  const wtsBefore = readFileSync(file("war3map.wts"), "utf8");
+  if (info.players[0].name !== "TRIGSTR_001" || !/STRING 2\r\n\{\r\nForce 1\r\n\}/.test(wtsBefore)) return fail(`cliff.w3m isn't as the test knows it (control): ${info.players[0].name}, ${JSON.stringify(wtsBefore.slice(0, 60))}`);
+  info.players[0].name = "Lit Player";
+  info.forces[0].name = "Lit Force";
+  writeFileSync(file("war3map.w3i.json"), JSON.stringify(info, null, 2));
+  const str = (field, value, level) => ({ field, type: "string", ...(level === undefined ? {} : { level, data: 0 }), value });
+  writeFileSync(file("war3map.w3u.json"), JSON.stringify({ format: "w3proj.objects/1", version: 2,
+    original: [{ base: "hpea", end: "hpea", mods: [str("unam", "Lit Peasant")] }],
+    custom: [{ base: "hfoo", id: "h000", end: "h000", mods: [str("unam", "Lit Unit"), str("utip", "Lit Tip"), str("utub", "Lit Ubertip"), str("upro", "Lit Proper1,Lit Proper2"), str("uhot", "F"), str("umdl", "units\\human\\Footman\\Footman"), str("ua1p", "ground,enemies")] }],
+  }, null, 2));
+  writeFileSync(file("war3map.w3a.json"), JSON.stringify({ format: "w3proj.objects/1", version: 2, original: [],
+    custom: [{ base: "AHhb", id: "A000", end: "A000", mods: [str("anam", "Lit Ability", 0), str("atp1", "Lit AbTip1", 1), str("aub1", "Lit AbUber1", 1), str("ansf", "Lit Suffix", 0), str("atar", "air,ground", 1)] }],
+  }, null, 2));
+  const packed0 = await pack("before");
+  await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+  try {
+    // Opened in its editors and saved, without the command: the map packs as it did.
+    for (const f of ["map/war3map.w3i.json", "map/war3map.w3u.json", "map/war3map.w3a.json", "map/war3map.wts"]) await page.evaluate(`w3.editors.open(${JSON.stringify(f)})`).catch((e) => fail(`${f} didn't open: ${e.message}`));
+    await settled(page);
+    await page.evaluate(`w3.editors.saveAll()`);
+    await page.evaluate(`w3.editors.closeAll()`);
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    if ((await pack("saved")) !== packed0) fail("opening and saving the map without the command changed what it packs to");
+    // The script made from the map's data, as the World Editor's save makes it (the World Editor's script, kept
+    // otherwise, still names string 2: "// Force: TRIGSTR_002", which would keep the string).
+    const logBefore = await page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).length`);
+    await page.evaluate(`(() => { const ask = w3.window.notify; window.__mttWarn = ask; w3.window.notify = (s, m, a, o) => (/isn't the script Studio wrote last/.test(m) ? Promise.resolve("Replace the script") : ask(s, m, a, o)); })()`);
+    await run("w3.script.generate", { quiet: true });
+    await until("the script replaced", async () => /replaced on request: war3map\.j written/.test(await page.evaluate(`(w3Workbench.output.channels.get("Map Script") ?? []).slice(${logBefore}).join("\\n")`)), 60000)
+      .catch(() => fail("the map script wasn't replaced on request"));
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    if (/TRIGSTR_002/.test(readFileSync(file("war3map.j"), "utf8"))) fail("the regenerated script still names string 2 (control)");
+    const files0 = snapshot(mapDir);
+
+    const moved = await run("w3.strings.moveToTable");
+    await settled(page);
+    if (moved.e || moved.r?.moved !== 12 || moved.r?.dropped !== 2) fail(`the command: ${moved.e ?? JSON.stringify(moved.r)}`);
+    // The World Editor's war3map.wts for this map (its save, then Export Strings), byte for byte.
+    const weWts = "﻿" + [
+      "STRING 3\r\n{\r\nLit Player\r\n}\r\n", "STRING 4\r\n{\r\nLit Force\r\n}\r\n",
+      "STRING 5\r\n// Units: hpea (Lit Peasant), Name (Name)\r\n{\r\nLit Peasant\r\n}\r\n",
+      "STRING 6\r\n// Units: h000 (Lit Unit), Name (Name)\r\n{\r\nLit Unit\r\n}\r\n",
+      "STRING 7\r\n// Units: h000 (Lit Unit), Tip (Tooltip - Basic)\r\n{\r\nLit Tip\r\n}\r\n",
+      "STRING 8\r\n// Units: h000 (Lit Unit), Ubertip (Tooltip - Extended)\r\n{\r\nLit Ubertip\r\n}\r\n",
+      "STRING 9\r\n// Units: h000 (Lit Unit), Propernames (Proper Names)\r\n{\r\nLit Proper1,Lit Proper2\r\n}\r\n",
+      "STRING 10\r\n// Units: h000 (Lit Unit), Hotkey (Hotkey)\r\n{\r\nF\r\n}\r\n",
+      "STRING 11\r\n// Abilities: A000 (Lit Ability), Name (Name)\r\n{\r\nLit Ability\r\n}\r\n",
+      "STRING 12\r\n// Abilities: A000 (Lit Ability), Tip (Tooltip - Normal)\r\n{\r\nLit AbTip1\r\n}\r\n",
+      "STRING 13\r\n// Abilities: A000 (Lit Ability), Ubertip (Tooltip - Normal - Extended)\r\n{\r\nLit AbUber1\r\n}\r\n",
+      "STRING 14\r\n// Abilities: A000 (Lit Ability), EditorSuffix (Editor Suffix)\r\n{\r\nLit Suffix\r\n}\r\n",
+    ].join("\r\n") + "\r\n";
+    const wts = readFileSync(file("war3map.wts"), "utf8");
+    if (wts !== weWts) fail(`war3map.wts isn't the World Editor's: ${JSON.stringify(wts.slice(0, 300))}`);
+    const values = (name) => Object.fromEntries(JSON.parse(readFileSync(file(name), "utf8")).custom[0].mods.map((m) => [m.field, m.value]));
+    const u = values("war3map.w3u.json"), a = values("war3map.w3a.json");
+    if (u.unam !== "TRIGSTR_006" || u.uhot !== "TRIGSTR_010" || u.umdl !== "units\\human\\Footman\\Footman" || u.ua1p !== "ground,enemies") fail(`war3map.w3u after the move: ${JSON.stringify(u)}`);
+    if (a.anam !== "TRIGSTR_011" || a.ansf !== "TRIGSTR_014" || a.atar !== "air,ground") fail(`war3map.w3a after the move: ${JSON.stringify(a)}`);
+    const infoAfter = JSON.parse(readFileSync(file("war3map.w3i.json"), "utf8"));
+    if (infoAfter.players[0].name !== "TRIGSTR_003" || infoAfter.forces[0].name !== "TRIGSTR_004" || infoAfter.name !== info.name || infoAfter.author !== info.author) fail(`war3map.w3i after the move: ${JSON.stringify([infoAfter.players[0].name, infoAfter.forces[0].name, infoAfter.name, infoAfter.author])}`);
+    const files1 = snapshot(mapDir);
+    if (files1.get("war3map.wts") === files0.get("war3map.wts")) fail("the move didn't change war3map.wts (control)");
+
+    // Undo puts every file back (before the project is opened again: that starts a new edit log); the command again
+    // writes the same.
+    await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    const files2 = snapshot(mapDir);
+    for (const [f, h] of files0) if (files2.get(f) !== h) fail(`the undo of the move left ${f} changed`);
+    const redo = await run("w3.strings.moveToTable");
+    await page.evaluate(`w3.commands.execute("w3.script.settle")`).catch(() => {});
+    await settled(page);
+    if (redo.e || redo.r?.moved !== 12) fail(`the command after its undo: ${redo.e ?? JSON.stringify(redo.r)}`);
+    for (const [f, h] of files1) if (snapshot(mapDir).get(f) !== h) fail(`the command after its undo wrote another ${f}`);
+
+    // Reopened, the texts come from the table.
+    await page.evaluate(`w3.workspace.close()`);
+    await page.evaluate(`w3.workspace.open(${JSON.stringify(dir)})`);
+    await until("the project again", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(dir)}`));
+    const summary = JSON.parse(await mcpTool(page)("map_info"));
+    if (summary.players?.[0]?.name !== "Lit Player" || summary.forces?.[0]?.name !== "Lit Force") fail(`reopened, map_info gives ${JSON.stringify([summary.players?.[0], summary.forces?.[0]])}`);
+    const unitName = await page.evaluate(`w3.services.get("w3.objects").then((o) => o.name("h000"))`).catch((e) => `(${e.message})`);
+    if (unitName !== "Lit Unit") fail(`reopened, the Object Editor names h000 ${JSON.stringify(unitName)}`);
+    // Packed, the map holds them.
+    await pack("moved");
+    const inMap = spawnSync(cli, ["cat", join(work, "move-texts-moved.w3x"), "war3map.wts"]);
+    if (inMap.status !== 0 || !inMap.stdout.equals(Buffer.from(weWts, "utf8"))) fail("the packed map's war3map.wts isn't the one written");
+
+    // A second run changes nothing.
+    const again = await run("w3.strings.moveToTable");
+    await settled(page);
+    if (again.e || again.r?.moved !== 0 || again.r?.dropped !== 0) fail(`the second run: ${again.e ?? JSON.stringify(again.r)}`);
+    for (const [f, h] of snapshot(mapDir)) if (files1.get(f) !== h) fail(`the second run changed ${f}`);
+  } finally {
+    await page.evaluate(`if (window.__mttWarn) { w3.window.notify = window.__mttWarn; delete window.__mttWarn; }`).catch(() => {});
+    await page.evaluate(`w3.editors.closeAll()`).catch(() => {});
+  }
+}
+
 async function playerStarts(page, found, root) {
   const fail = (what) => found.push(`player starts: ${what}`);
   await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
@@ -8226,6 +8348,7 @@ async function run() {
         mcpStartMove,
         meleeByHand,
         moduleFunctions,
+        moveTextsToTable,
         newMaps,
         niceToHaves,
         objectCopy,
@@ -8492,6 +8615,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "objectLayout");
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
   await leftOpen(page, "realMapSave");
+  await moveTextsToTable(page, found).catch((e) => found.push(`move texts to string table: ${e.message}`));
+  await leftOpen(page, "moveTextsToTable");
   await drawCalls(page, found).catch((e) => found.push(`draw calls: ${e.message}`));
   await leftOpen(page, "drawCalls");
   await contextLoss(page, found).catch((e) => found.push(`context loss: ${e.message}`));
