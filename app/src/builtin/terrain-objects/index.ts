@@ -228,7 +228,7 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
     variationWrap.hidden = n <= 1 || scatter;
   };
   const update = () => {
-    hint.textContent = !placing ? "Choose what to place."
+    hint.textContent = !placing ? "Choose what to place: Place…, Random… or Start location."
       : isStart() ? "Placing the start location: click the ground (moves it if the player has one) · Esc to stop"
       : `Placing ${placing.name} (${placing.id}): click the ground · Esc to stop`;
     ownerWrap.hidden = placing?.kind !== "w3u";
@@ -311,7 +311,8 @@ function placer(w3: W3Api, ed: TerrainEditorHandle): TerrainToolGroupInstance {
   return {
     toolbar,
     select,
-    activate() { if (!placing) void choose(); },
+    // No activate: opening the tab asks nothing (the object browser lay over the view and this toolbar); Place… and
+    // the hint are there.
     deactivate() { ed.setBrush(null); void showGhost(null); },
     pointerDown(p) {
       if (!ed.editable || !placing || !p.ground) return false;

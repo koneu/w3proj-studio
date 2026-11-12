@@ -5930,6 +5930,28 @@ async function placerAndCampaign(page, found) {
   /** A click in the middle of the view over (x, y) (k.look waits until it's drawn there), then the app at rest. */
   const click = async (x, y) => { await k.look(x, y); await k.clickMiddle(); await settled(page); };
   try {
+    // Opening the Objects tab with nothing chosen shows its toolbar: the object browser didn't open over it by itself.
+    // Control: Place… opens the browser (so the time waited would have shown one).
+    const browser = `!!document.querySelector(".picker-overlay")`;
+    const place = async (within) => {
+      await k.hands.click(".terrain-group-tools button", "Place…");
+      await until("the object browser from Place…", () => page.evaluate(browser), within)
+        .catch(() => fail(`Place… didn't open the object browser within ${within / 1000} s (control)`));
+      await page.evaluate(`document.querySelector("input.picker-search")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await until("the object browser closed", () => page.evaluate(`!(${browser})`), 5000);
+    };
+    // The first time, with the object data still loading; any browser the tab opened is put away first.
+    await k.tab("Objects");
+    await page.evaluate(`document.querySelectorAll(".picker-overlay").forEach((e) => e.remove())`);
+    await place(30000);
+    // Back to the tab, nothing chosen yet. Something that must not happen: a pause as long as Place… is given below.
+    const other = await page.evaluate(`[...document.querySelectorAll(".terrain-tab")].map((b) => b.textContent.trim()).find((t) => t !== "Objects")`);
+    await k.tab(other);
+    await k.tab("Objects");
+    await sleep(1500);
+    if (await page.evaluate(browser)) fail("opening the Objects tab opened the object browser over its toolbar");
+    await page.evaluate(`document.querySelectorAll(".picker-overlay").forEach((e) => e.remove())`);
+    await place(1500);
     // A rock (ten variations, scale 0.8–1.2, any facing), chosen in the Objects tab from one placed by a tool.
     await k.tool("place_objects", { objects: [{ id: "ARrk", x: -768, y: -768 }], ignoreRoom: true });
     await k.save();
