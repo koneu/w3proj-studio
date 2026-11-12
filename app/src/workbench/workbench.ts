@@ -216,11 +216,15 @@ export class Workbench {
     // from last time are opened again. The last project may already be open (reopened by an
     // extension during onStartup), so this also runs once now.
     let scannedRoot: string | null = null;
-    const projectChanged = async () => {
+    const projectChanged = () => {
       const root = this.workspace.project()?.root ?? null;
-      if (root === scannedRoot) return;
+      if (root === scannedRoot) return Promise.resolve();
       scannedRoot = root;
-      if (!root) return;
+      if (!root) return Promise.resolve();
+      // Counted as work, so settled() waits for the tabs to come back: until then nothing is remembered.
+      return this.workspace.pending.track(openedProject(root));
+    };
+    const openedProject = async (root: string) => {
       this.editors.projectOpened();
       // Tabs saved under another spelling of this folder (8.3 short name) move to the key it has now,
       // before anything (the extension scan) can open or close a tab. Storing is off until restore().

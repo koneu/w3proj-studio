@@ -3234,11 +3234,15 @@ async function workbenchState(page, found) {
   const storeKey = `(() => { const r = w3.workspace.project().root.replace(/[\\\\/]+$/, ""); return "w3.openEditors:" + (/^[A-Za-z]:/.test(r) ? r.toLowerCase() : r); })()`;
   try {
     // ---- 1. The text editor's place, through the storage ----
+    // The new project's tabs restored first: until then nothing is remembered (closing the tabs stores nothing).
+    await settled(page);
     await page.evaluate(`w3.editors.open(${JSON.stringify(J)})`);
     await until("the script's editor", () => page.evaluate(`!!${tabOf(J)}?.instance?.viewState`), 20000);
     const lines = await page.evaluate(`document.querySelectorAll(".editor-pane:not([hidden]) .cm-line").length`);
     if (lines < 5) return fail(`the script shows ${lines} lines`);
     await page.evaluate(`w3.editors.closeAll()`);
+    const storedJ = `JSON.parse(localStorage.getItem(${storeKey}) ?? "null")?.tabs?.some((t) => t.path === ${JSON.stringify(J)} && t.view && typeof t.view.anchor === "number")`;
+    await soon(() => page.evaluate(storedJ), 5000);
     const stored = await page.evaluate(`JSON.parse(localStorage.getItem(${storeKey}) ?? "null")`);
     if (!stored?.tabs?.some((t) => t.path === J && t.view && typeof t.view.anchor === "number")) fail(`closing the tabs didn't keep the script's place: ${JSON.stringify(stored)?.slice(0, 300)}`);
     // A place further down, as if the last session left it there.
@@ -3347,8 +3351,11 @@ async function syncSafety(page, found) {
     await page.evaluate(`window.__answer = "Remove and sync"`);
     // An open tab comes back after the sync rewrote the files (the sync closes them all first).
     await page.evaluate(`w3.editors.open("map/war3map.j")`);
+    await until("the script's tab before the sync", () => page.evaluate(`w3.editors.activePath() === "map/war3map.j"`), 20000);
+    await settled(page);
     err = await sync();
     if (err) fail(`the sync failed: ${err}`);
+    await soon(async () => (await page.evaluate(`w3.editors.activePath()`)) === "map/war3map.j", 20000);
     if ((await page.evaluate(`w3.editors.activePath()`)) !== "map/war3map.j") fail(`after the sync the active tab is ${await page.evaluate(`w3.editors.activePath()`)}, not the script open before it`);
     if (existsSync(added)) fail("the sync the user agreed to didn't remove the added file");
     if (read(manifestPath) !== manifest) fail(`the sync changed w3proj.toml: ${JSON.stringify(read(manifestPath))}`);
