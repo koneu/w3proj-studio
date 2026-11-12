@@ -258,11 +258,15 @@ export function waterRamp(look: WaterRamp, tint: number[] | null): WaterRamp & {
  * Northrend 22, 48–52, 39–41; Barrens 25–26, 41–46, 42–44), Lordaeron Summer bluer, the one tileset with its own
  * water environment map (Environment\EnvironmentMap\LordaeronSummer\Water_IBL). A map's water tint takes that blue
  * away (03b_Water_Tint, red: 23, 50, 40) rather than showing its colour. Cityscape's water is blue (OrcX02_03's city
- * pool in game view, 2026-11-09: 50, 61, 121).
+ * pool in game view, 2026-11-09: 50, 61, 121), and so is Sunken Ruins' (Z), which has the same HD Water.slk row
+ * (shallow to deep 117, 117, 200 to 96, 96, 192): fitted on Murgul Oasis' shallow water in game view (we-drive,
+ * 2026-11-12), with `shallow` as it is, over 2460 blocks of 16 × 16 pixels where the deep colour counts for up to 0.4.
+ * With the teal its water was olive grey (whole picture blue 59 against the editor's 86, mean difference 18.6), with
+ * Cityscape's colour 8.8 levels off per block, with this 6.4 (whole picture 9.9). Unproven in deep water.
  */
 export function hdWaterColor(tileset: string, tinted: boolean): [number, number, number] {
   if (tinted) return [23 / 255, 47 / 255, 41 / 255];
-  const own: Record<string, [number, number, number]> = { L: [22 / 255, 57 / 255, 73 / 255], Y: [50 / 255, 61 / 255, 121 / 255] };
+  const own: Record<string, [number, number, number]> = { L: [22 / 255, 57 / 255, 73 / 255], Y: [50 / 255, 61 / 255, 121 / 255], Z: [30 / 255, 94 / 255, 174 / 255] };
   return own[tileset.toUpperCase()] ?? [23 / 255, 47 / 255, 41 / 255];
 }
 
