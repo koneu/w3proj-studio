@@ -1,6 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { luaDeclarations, luaSpot } from "./symbols";
+import { emptyEnv } from "../jass/check";
+import { luaDeclarations, luaMemberBase, luaMembers, luaSpot, luaSymbols } from "./symbols";
+
+test("members after a table's name: math.fl offers floor, a text's tables their functions", () => {
+  assert.equal(luaMemberBase("local x = math.fl"), "math");
+  assert.equal(luaMemberBase("print(string."), "string");
+  assert.equal(luaMemberBase("  obj:ne"), "obj");
+  assert.equal(luaMemberBase("A.b.c"), "A.b");
+  assert.equal(luaMemberBase("local x = floor"), null);
+  assert.equal(luaMemberBase("x = 1.5"), null);
+  assert.equal(luaMemberBase("s = a..b."), null);
+  const text = "M = {}\nfunction M.run()\nend\nfunction M.sub.go()\nend\nfunction M:new()\nend\n";
+  const symbols = luaSymbols(emptyEnv(), text);
+  const math = luaMembers(symbols, "math").map((m) => m.name);
+  assert.ok(math.includes("floor"), math.join(" "));
+  assert.ok(math.includes("pi"));
+  assert.ok(!math.includes("math"));
+  for (const lib of ["string", "table", "os", "io", "coroutine", "utf8"]) assert.ok(luaMembers(symbols, lib).length > 0, lib);
+  assert.deepEqual(luaMembers(symbols, "M").map((m) => [m.name, m.table]), [["run", false], ["sub", true], ["new", false]]);
+  assert.deepEqual(luaMembers(symbols, "M.sub").map((m) => m.name), ["go"]);
+  assert.deepEqual(luaMembers(symbols, "Missing"), []);
+  // Not "mathx.abs" for "math".
+  assert.deepEqual(luaMembers([{ name: "mathx.abs" }], "math"), []);
+});
 
 /** Text with | where the cursor is. */
 const at = (s: string) => { const pos = s.indexOf("|"); return luaSpot(s.replace("|", ""), pos); };

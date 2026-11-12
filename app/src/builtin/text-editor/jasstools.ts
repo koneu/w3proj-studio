@@ -9,7 +9,7 @@ import { type Extension } from "@codemirror/state";
 import { EditorView, hoverTooltip, keymap, showPanel, type Panel } from "@codemirror/view";
 import type { CodeSymbol, CompletionItem, CompletionRequest } from "../../extensions/services";
 import { codeSpot, paramOf } from "../../lib/jass/callsite";
-import { luaSpot } from "../../lib/lua/symbols";
+import { luaMemberBase, luaMembers, luaSpot } from "../../lib/lua/symbols";
 import { h } from "../../workbench/dom";
 
 const COMPLETION_TYPE: Record<string, string> = {
@@ -121,15 +121,30 @@ export function symbolTools(symbols: (text: string) => Promise<CodeSymbol[]>, op
           };
         }
         const word = ctx.matchBefore(/\w+/);
-        if (!word && !ctx.explicit) return null;
         // Not inside comments.
         const line = ctx.state.doc.lineAt(ctx.pos);
         const before = line.text.slice(0, ctx.pos - line.from);
         if (language === "lua" ? /--/.test(before) : /\/\//.test(before)) return null;
+        // Lua: a table's members after its name and a dot (`math.fl`: math.floor); right after the dot too.
+        const base = language === "lua" ? luaMemberBase(before) : null;
+        if (base !== null) {
+          const members = luaMembers(visible(await symbols(text), ctx.pos), base);
+          if (!members.length) return null;
+          return {
+            from: word ? word.from : ctx.pos, validFor: /^\w*$/,
+            options: members.map(({ name, symbol: s, table }): Completion => table
+              ? { label: name, type: "namespace", detail: "table" }
+              : { label: name, type: COMPLETION_TYPE[s.kind] ?? "variable", detail: s.kind === "function" || s.kind === "native" ? "function" : s.kind, info: s.detail,
+                boost: s.scope ? 2 : s.at !== undefined ? 1 : 0 }),
+          };
+        }
+        if (!word && !ctx.explicit) return null;
         const list = visible(await symbols(text), ctx.pos);
         const seen = new Set<string>();
         const options: Completion[] = [];
         for (const s of list) {
+          // Lua members ("math.floor", "M.run") come after their table's name and a dot (above).
+          if (language === "lua" && /[.:]/.test(s.name)) continue;
           if (seen.has(s.name)) continue;
           seen.add(s.name);
           options.push({ label: s.name, type: COMPLETION_TYPE[s.kind] ?? "variable", detail: s.kind === "function" || s.kind === "native" ? "function" : s.kind, info: s.detail,

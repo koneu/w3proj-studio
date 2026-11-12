@@ -59,8 +59,22 @@ export function luaSpot(text: string, pos: number): CodeSpot & { quote?: string 
 
 const KEYWORDS = ["and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"];
 /** Lua's own globals that map scripts can use. */
-const STANDARD = ["FourCC", "assert", "error", "getmetatable", "ipairs", "math", "next", "pairs", "pcall", "print", "rawequal", "rawget", "rawlen", "rawset", "require", "select",
-  "setmetatable", "string", "table", "tonumber", "tostring", "type", "utf8", "xpcall"];
+const STANDARD = ["FourCC", "assert", "coroutine", "error", "getmetatable", "io", "ipairs", "math", "next", "os", "pairs", "pcall", "print", "rawequal", "rawget", "rawlen",
+  "rawset", "require", "select", "setmetatable", "string", "table", "tonumber", "tostring", "type", "utf8", "xpcall"];
+/** Lua 5.3's standard libraries: their members (offered after `math.`). */
+const LIBRARIES: Record<string, string[]> = {
+  math: ["abs", "ceil", "cos", "deg", "exp", "floor", "fmod", "huge", "log", "max", "maxinteger", "min", "mininteger", "modf", "pi", "rad", "random",
+    "randomseed", "sin", "sqrt", "tan", "tointeger", "type", "ult", "acos", "asin", "atan"],
+  string: ["byte", "char", "dump", "find", "format", "gmatch", "gsub", "len", "lower", "match", "pack", "packsize", "rep", "reverse", "sub", "unpack", "upper"],
+  table: ["concat", "insert", "move", "pack", "remove", "sort", "unpack"],
+  os: ["clock", "date", "difftime", "time"],
+  io: ["close", "flush", "input", "lines", "open", "output", "read", "stderr", "stdin", "stdout", "tmpfile", "type", "write"],
+  coroutine: ["create", "isyieldable", "resume", "running", "status", "wrap", "yield"],
+  utf8: ["char", "charpattern", "codepoint", "codes", "len", "offset"],
+};
+const VALUES = new Set(["math.huge", "math.maxinteger", "math.mininteger", "math.pi", "io.stderr", "io.stdin", "io.stdout", "utf8.charpattern"]);
+/** Warcraft III's Lua leaves io out (the game's sandbox): offered, but said so. */
+const NOT_IN_GAME = new Set(["io"]);
 
 /** What a text declares: functions, with their parameters inside them, locals and globals. */
 export function luaDeclarations(text: string): JassSymbol[] {
@@ -94,6 +108,32 @@ export function luaSymbols(env: JassEnv, text: string): JassSymbol[] {
   const game = jassSymbols(env, "").filter((s) => s.kind === "function" || s.kind === "native" || s.kind === "global" || s.kind === "constant");
   return [...luaDeclarations(text),
     ...KEYWORDS.map((name): JassSymbol => ({ name, kind: "keyword", detail: "Lua keyword" })),
-    ...STANDARD.map((name): JassSymbol => ({ name, kind: "function", detail: name === "FourCC" ? "FourCC(rawcode) → the id of 'hfoo' as a number" : `Lua: ${name}` })),
+    ...STANDARD.map((name): JassSymbol => ({ name, kind: "function", detail: name === "FourCC" ? "FourCC(rawcode) → the id of 'hfoo' as a number" : `Lua: ${name}${NOT_IN_GAME.has(name) ? " (not in Warcraft III's Lua)" : ""}` })),
+    ...Object.entries(LIBRARIES).flatMap(([lib, members]) => members.map((m): JassSymbol => {
+      const name = `${lib}.${m}`;
+      return { name, kind: VALUES.has(name) ? "constant" : "function", detail: `Lua: ${name}${NOT_IN_GAME.has(lib) ? " (not in Warcraft III's Lua)" : ""}` };
+    })),
     ...game];
+}
+
+/** The table a member is being typed of: "math" in `x = math.fl` (also `a.b.c`, and `obj:` for methods); null elsewhere. */
+export function luaMemberBase(before: string): string | null {
+  const m = /(?:^|[^\w.:])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)[.:]\w*$/.exec(before);
+  return m ? m[1] : null;
+}
+
+/** The members of `base` among `symbols` (dotted names: "math.floor", a text's "M.run" or "M:new"), by
+ *  their next part; a deeper name ("M.a.b") gives its table ("a") once. */
+export function luaMembers<S extends { name: string }>(symbols: S[], base: string): { name: string; symbol: S; table: boolean }[] {
+  const out = new Map<string, { name: string; symbol: S; table: boolean }>();
+  for (const s of symbols) {
+    if (s.name.length <= base.length + 1 || !s.name.startsWith(base) || (s.name[base.length] !== "." && s.name[base.length] !== ":")) continue;
+    const rest = s.name.slice(base.length + 1);
+    const part = /^\w+/.exec(rest)?.[0];
+    if (!part) continue;
+    const table = part.length < rest.length;
+    const had = out.get(part);
+    if (!had || (had.table && !table)) out.set(part, { name: part, symbol: s, table });
+  }
+  return [...out.values()];
 }
