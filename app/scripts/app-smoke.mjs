@@ -4326,7 +4326,18 @@ async function objectCopy(page, found) {
   await tool("set_object_fields", { kind: "units", id: barracks, changes: [{ field: "utra", value: trainee }] });
   await save();
   // Reforged maps keep names, art and tooltips of objects in war3mapSkin.*: the buff has a tooltip only there.
-  const skinFile = (root, entries) => page.evaluate(`(async () => { await w3.workspace.writeText("map/war3mapSkin.w3h.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.objects/1", version: readIn(root, "war3map.w3h.json").version ?? 3, original: [], custom: entries }))}); await w3.workspace.refresh(); })()`);
+  // Into the Skin file the map has: create_object put the names there (the World Editor keeps them there).
+  const skinFile = (root, entries) => {
+    const had = readIn(root, "war3mapSkin.w3h.json");
+    const custom = structuredClone(had.custom ?? []);
+    for (const e of entries) {
+      const o = custom.find((x) => x.id === e.id);
+      if (!o) { custom.push(e); continue; }
+      o.mods = [...(o.mods ?? []).filter((m) => !e.mods.some((n) => n.field === m.field)), ...e.mods];
+    }
+    const text = JSON.stringify({ format: "w3proj.objects/1", version: had.version ?? readIn(root, "war3map.w3h.json").version ?? 3, original: had.original ?? [], custom });
+    return page.evaluate(`(async () => { await w3.workspace.writeText("map/war3mapSkin.w3h.json", ${JSON.stringify(text)}); await w3.workspace.refresh(); })()`);
+  };
   await skinFile(a, [{ base: "Bslo", id: buff, mods: [{ field: "ftip", type: "string", value: "Skin Tip" }] }]);
 
   // Map B has none of it. The hero is pasted.
@@ -6964,7 +6975,10 @@ async function editorExtras(page, found) {
     // ---- Object Editor: Allow negative real values -------------------------------------------------------------------
     const unit = JSON.parse(await k.tool("create_object", { kind: "units", base: "hfoo", name: "Smoke Om" })).id;
     const w3u = () => k.read("war3map.w3u.json").custom.find((o) => o.id === unit);
-    const modOf = (field) => (w3u()?.mods ?? w3u()?.sets?.[0]?.mods ?? []).find((m) => m.field === field)?.value;
+    // The name is in war3mapSkin.w3u, where the World Editor keeps it; a value there wins over war3map.w3u's.
+    const skinU = () => { try { return k.read("war3mapSkin.w3u.json").custom.find((o) => o.id === unit); } catch { return undefined; } };
+    const modIn = (o, field) => (o?.mods ?? o?.sets?.[0]?.mods ?? []).find((m) => m.field === field)?.value;
+    const modOf = (field) => modIn(skinU(), field) ?? modIn(w3u(), field);
     const refused = await k.tool("set_object_fields", { kind: "units", id: unit, changes: [{ field: "ucol", value: -5 }] }).then(() => null, (e) => e.message);
     if (!/Allow negative real values/.test(refused ?? "")) fail(`set_object_fields with collision -5 gave ${JSON.stringify(refused)}`);
     await page.evaluate(`w3.settings.set("objectEditor.allowNegativeReals", true)`);
