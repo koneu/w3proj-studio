@@ -5428,7 +5428,7 @@ async function paletteMouse(page, found) {
  *  and textures of ReplaceableTextures\Shadows (the tree's and the footman's) and the ground's shadow map. Two more
  *  textures since HD casts real shadows (branch hd-shadows): the sun's shadow map and the depth texture shaders read
  *  without one. */
-const GAME_READS_RECORDED = { reads: 105, asked: 130, textures: 140 };
+const GAME_READS_RECORDED = { reads: 105, asked: 131, textures: 140 };
 
 async function gameReadsOnce(page, found) {
   const fail = (what) => found.push(`game reads: ${what}`);
