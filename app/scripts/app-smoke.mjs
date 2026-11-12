@@ -412,6 +412,47 @@ async function placeObjects(page, found) {
   }
 }
 
+/** The Melee flag follows edits that aren't place_objects, with script.generateOnSave off (lib/terrain/meleesave):
+ *  a neutral unit given to Player 1 by hand in the terrain view's selection, then saved, takes it off in the save
+ *  itself (its message says so); on a second map a tool moving the start location into a lake takes it off in the
+ *  same edit (the file says so before the map script's run after the save could). Both maps pack and verify. */
+async function meleeByHand(page, found) {
+  const fail = (what) => found.push(`melee by hand: ${what}`);
+  await page.evaluate(`w3.settings.set("script.generateOnSave", false)`);
+  try {
+    const k = await heightKit(page, "MeleeHand");
+    const flags = () => k.read("war3map.w3i.json").flags;
+    await k.tool("place_objects", { objects: [{ id: "hfoo", x: 512, y: 512, player: 25 }], ignoreRoom: true });
+    await k.save();
+    if (!(flags() & 4)) { fail(`a new map with a neutral footman isn't a melee map (control): flags ${flags()}`); return; }
+    await k.tab("Select");
+    await k.look(512, 512, { id: "hfoo", x: 512, y: 512 });
+    await k.clearToasts();
+    const owner = `[...document.querySelectorAll(".terrain-selection .terrain-sel-row")].find((r) => r.textContent.startsWith("Owner"))?.querySelector("select")`;
+    if (!(await page.evaluate(`!!${owner}`))) { fail("the selection has no Owner box"); return; }
+    await page.evaluate(`(() => { const s = ${owner}; s.value = "0"; s.dispatchEvent(new Event("change")); })()`);
+    await k.save();
+    const footman = k.units().find((u) => u.id === "hfoo");
+    if ((footman?.player & 0xffff) !== 0) fail(`the footman belongs to ${footman?.player} after the owner change (control)`);
+    if (flags() & 4) fail("a map whose unit was given to Player 1 by hand and saved is still a melee map");
+    if (!/no longer a melee map/.test(await k.toasts())) fail(`the save didn't say the map is no longer a melee map: ${await k.toasts()}`);
+    await k.verify(fail);
+
+    const w = await heightKit(page, "MeleeWater");
+    const wFlags = () => w.read("war3map.w3i.json").flags;
+    await w.tool("set_water", { mode: "lake", left: -2560, bottom: -2560, right: -1536, top: -1536 });
+    if (!(wFlags() & 4)) { fail(`a new map with a lake away from its start isn't a melee map (control): flags ${wFlags()}`); return; }
+    const i = w.units().findIndex((u) => u.id === "sloc");
+    await w.tool("move_object", { kind: "units", index: i, id: "sloc", x: -2048, y: -2048 });
+    // Read at once: the map script's run after the save comes a moment later.
+    if (wFlags() & 4) fail("a start location moved into a lake by a tool left a melee map");
+    await w.save();
+    await w.verify(fail);
+  } finally {
+    await page.evaluate(`w3.settings.set("script.generateOnSave", undefined)`);
+  }
+}
+
 /** The MCP panel's GUIDES list shows a guide another program put into the guides folder (outside the project: no file
  *  event tells) once the panel is shown again, and while it's showing, once the window gets the focus back. The guide
  *  files are written and removed here, in the smoke app's own settings folder. */
@@ -7931,6 +7972,7 @@ async function run() {
         keyChords,
         mcpGuides,
         mcpStartMove,
+        meleeByHand,
         moduleFunctions,
         newMaps,
         niceToHaves,
@@ -8093,6 +8135,8 @@ async function firstHalf(page, found) {
   await leftOpen(page, "placeObjects");
   await mcpStartMove(page, found).catch((e) => found.push(`start location moved by a tool: ${e.message}`));
   await leftOpen(page, "mcpStartMove");
+  await meleeByHand(page, found).catch((e) => found.push(`melee by hand: ${e.message}`));
+  await leftOpen(page, "meleeByHand");
   await mcpGuides(page, found).catch((e) => found.push(`MCP guides: ${e.message}`));
   await leftOpen(page, "mcpGuides");
   await waterPathing(page, found).catch((e) => found.push(`water pathing: ${e.message}`));

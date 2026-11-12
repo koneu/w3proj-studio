@@ -41,7 +41,8 @@ import { Occupancy } from "./occupancy";
 import { buildPathingMap, loadPathingData, objectMods, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
-import { isUprooted, meleeFlagsAfter, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { isUprooted, placedText, splitOwners, type MeleeInfo } from "../../lib/terrain/owner";
+import { meleeAfterSave, readMeleeFacts, savedMelee } from "../../lib/terrain/meleesave";
 import { jsonPathOf, mapStrings, readMapDoc, readMapDocStrict, requireProject, terrainFacts } from "../../lib/formats/mapdoc";
 import { beyondPlayable, borderShade, inArea, isBackdrop, isKeptClear, playableArea, readArea, type Area, type KeepClear } from "../../lib/terrain/area";
 import { checkPath, checkRoute, findPockets, nearestObject, type Grid, narrowStrips, widestFrom, widthOf } from "./pathcheck";
@@ -468,11 +469,11 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return key;
   };
 
-  /** One edit of a placement file. */
-  /** `isItem` (units only): the map stops being a melee map in the same edit once a player owns a placed
-   *  unit, as the map script's regeneration does after a save. Done here, it doesn't depend on that running:
-   *  it waits for saves to settle, is off with script.generateOnSave, and is lost when the project closes first. */
-  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>, isItem?: (id: string) => boolean) => {
+  /** One edit of a placement file. Units: the map stops being a melee map in the same edit (one undo step) when the
+   *  World Editor's save would take it off (lib/terrain/meleesave: a player's unit or item, custom gameplay constants,
+   *  a start location under water, …), whatever the tool (placing, moving, a new owner, replacing types). The map
+   *  script's run after the save would do it too, but a moment later and lost when the project closes first. */
+  const editPlaced = async (title: string, key: "doodads" | "units", change: (f: PlacedFile) => void | Promise<void>) => {
     const { root } = requireProject(w3);
     // Every object tool comes through here (remove_objects without liveEditor too).
     refuseLostView(projectTerrain(w3));
@@ -499,8 +500,9 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         // Placed, moved or removed start locations add, move or remove the map's players, as the terrain editor's
         // save does, in the same edit (one undo step).
         if (startsBefore && syncWithStarts(info as unknown as PlayerInfo & { flags: number }, startLocations(list), startsBefore)) changed = true;
-        // Placing can make a player own something: Melee goes off as the save would take it off.
-        const flags = info.flags as number, after = isItem ? meleeFlagsAfter(info as unknown as MeleeInfo, list) : flags;
+        // Placing can make a player own something: Melee goes off as the save would take it off. The ground is the
+        // saved terrain's (a start under water).
+        const flags = info.flags as number, after = (await savedMelee(w3.workspace, info as unknown as MeleeInfo, list)).flags;
         if (after !== flags) { info.flags = after; changed = true; }
         if (changed) files.push({ path: infoPath, text: await w3.backend.invoke<string>("codec_canonicalize", { root, path: infoPath, text: JSON.stringify(info) }) });
       }
@@ -1134,7 +1136,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           giveProps(entry, i);
         });
         if (!placed) throw new Error(`Nothing was placed: ${JSON.stringify(skipped.slice(0, 10))}`);
-      }, (id) => handle.objects.type(id)?.kind === "w3t");
+      });
       return { placed, shifted, skipped };
     }),
     w3.mcp.registerTool("scatter_objects", async (args) => {
@@ -5223,14 +5225,25 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
                 if (t.starts) {
                   const starts = t.starts;
                   let changes: string[] = [];
+                  // What the Melee rules need besides the info: the gameplay constants, and the ground as saved here.
+                  const facts = await readMeleeFacts(w3.workspace, parseW3e(t.w3e));
+                  let unmelee: string[] = [];
                   await editDoc("war3map.w3i", (info) => {
                     changes = syncPlayers(info as unknown as PlayerInfo, starts, savedStarts);
                     // The players' ally priorities follow their starts, as the World Editor's save works them out.
                     const priorities = applyAllyPriorities(info as unknown as PlayerInfo & { flags: number });
-                    return changes.length > 0 || priorities;
+                    // Placed units, new owners, pasted ones, moved starts: Melee goes off as the World Editor's save
+                    // takes it off, here in the save itself (not only when the map script is made afterwards).
+                    let melee = false;
+                    if (typeof info.flags === "number") {
+                      const after = meleeAfterSave(info as unknown as MeleeInfo, t.units ?? [], facts);
+                      if (after.flags !== info.flags) { info.flags = after.flags; unmelee = after.reasons; melee = true; }
+                    }
+                    return changes.length > 0 || priorities || melee;
                   });
                   savedStarts = starts;
                   if (changes.length) void w3.window.showInfo(`Map players: ${changes.join(", ")}.`);
+                  if (unmelee.length) void w3.window.showInfo(`This map is no longer a melee map (as the World Editor's save makes it): ${unmelee.join("; ")}.`);
                 }
               },
               saved: () => doc.setDirty(mark.isDirty(at)),

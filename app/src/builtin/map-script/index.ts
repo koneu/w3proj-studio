@@ -24,7 +24,8 @@ import { campaignOf, findCampaign, readCampaignObjects } from "../../lib/objects
 import { checkpointBefore } from "../../lib/checkpoint";
 import { joinPath } from "../../lib/paths";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
-import { hasCustomConstants, meleeBlockers, meleeFlagsAfter, type MeleeInfo } from "../../lib/terrain/owner";
+import type { MeleeInfo } from "../../lib/terrain/owner";
+import { savedMelee } from "../../lib/terrain/meleesave";
 import { readTerrainBytes, terrainPath } from "../../lib/terrain/w3etext";
 import { parseTriggerData, type TriggerData } from "../../lib/triggers/triggerdata";
 import { parseWtg, parseWtgJson, readWctFile, textTriggers, WTG_JSON, WTG_RAW } from "../../lib/triggers/wtg";
@@ -37,9 +38,10 @@ const STAMP = SCRIPT_STAMP;
 const DIFF = "w3:script-diff:";
 
 const INFO_JSON = "map/war3map.w3i.json";
-/** The map's gameplay constants: one of the save's Melee reasons (meleeBlockers). */
-const MISC_TXT = "map/war3mapMisc.txt";
-const MELEE_INPUT = /^map\/war3mapMisc\.txt$/i;
+/** Files whose save can take the Melee flag off (lib/terrain/meleesave): the placed units, the map's info, its gameplay
+ *  constants, and the ground (a start location under water). Looked at after every save, whatever
+ *  script.generateOnSave says and whatever the script's language. */
+const MELEE_INPUT = /^map\/(war3mapMisc\.txt|war3mapUnits\.doo(\.json)?|war3map\.w3i(\.json)?|war3map\.w3e(\.txt)?)$/i;
 const W3L_RAW = "map/war3map.w3l", W3L_JSON = "map/war3map.w3l.json";
 
 /** The map script: JASS, or Lua for maps set to Lua (war3map.w3i scriptType 1). */
@@ -107,20 +109,50 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return tables;
   };
 
+  // Read directly rather than from the file list, which lags behind fresh saves (New Map).
+  const json = async <T>(p: string): Promise<T | null> => {
+    // Projects made before a format got its JSON form keep the raw file until they're re-synced.
+    const text = await w3.workspace.readText(`${p}.json`).catch(() =>
+      w3.backend.invoke<string>("codec_decode", { root: w3.workspace.project()?.root, path: p }).catch(() => null));
+    return text === null ? null : JSON.parse(text) as T;
+  };
+
+  /** The Melee flag as the World Editor's save leaves it (lib/terrain/meleesave): set in `info`, the flags the script is
+   *  made with, and written into war3map.w3i.json unless `look`. Only ever off. Not written while Map Properties holds
+   *  unsaved changes (it gets its turn when that's saved), nor into a w3i kept raw (left as it is, as the placing tools
+   *  do), nor into another project than `root` (the reads take a while). */
+  const followMelee = async (info: { flags?: unknown }, look: boolean, root: string | undefined, reason?: string) => {
+    if (typeof info.flags !== "number" && typeof info.flags !== "string") return;
+    const flags = Number(info.flags);
+    if (!Number.isFinite(flags)) return;
+    const placed = (await json<{ units?: { id: string; player?: number; position?: number[] }[] }>("map/war3mapUnits.doo"))?.units ?? [];
+    const melee = await savedMelee(w3.workspace, { ...info, flags } as MeleeInfo, placed);
+    if (melee.flags === flags || w3.editors.isDirty(INFO_JSON)) return;
+    info.flags = melee.flags;
+    if (look) return;
+    const stored = await w3.workspace.readText(INFO_JSON).catch(() => null);
+    if (stored === null || w3.workspace.project()?.root !== root || w3.editors.isDirty(INFO_JSON)) return;
+    // The file as it is now, with only the flag changed: a save of Map Properties during the reads stays as it was saved.
+    const now = JSON.parse(stored) as { flags?: unknown };
+    if (Number(now.flags) !== flags) return;
+    now.flags = melee.flags;
+    const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root, path: INFO_JSON, text: JSON.stringify(now) });
+    if (w3.workspace.project()?.root !== root) return;
+    await w3.workspace.writeText(INFO_JSON, canonical);
+    out.append(`${reason ? `${reason}: ` : ""}war3map.w3i: not a melee map any more (as the World Editor's save makes it): ${melee.reasons.join("; ")}`);
+  };
+
   /** Builds the map script from the project's files. `look`: only to look at (the difference, whether a fresh import's
  *  script is what the data makes): nothing is written, not even the melee flag a save turns off. */
   const generate = async (look = false): Promise<{ path: string; text: string; vjass?: string; language?: string }> => {
-    // Read directly rather than from the file list, which lags behind fresh saves (New Map).
-    const json = async <T>(p: string): Promise<T | null> => {
-      // Projects made before a format got its JSON form keep the raw file until they're re-synced.
-      const text = await w3.workspace.readText(`${p}.json`).catch(() =>
-        w3.backend.invoke<string>("codec_decode", { root: w3.workspace.project()?.root, path: p }).catch(() => null));
-      return text === null ? null : JSON.parse(text) as T;
-    };
+    const root = w3.workspace.project()?.root;
     const bytes = (p: string) => w3.workspace.readBytes(p).catch(() => null);
     const info = await json<ScriptInput["info"]>("map/war3map.w3i");
     if (!info) throw new Error("map/war3map.w3i is missing or couldn't be read");
     const path = scriptPath(info.scriptType === 1);
+    // As the World Editor does when saving, before anything else: a script that isn't made (vJASS) still has a map
+    // whose flag follows.
+    await followMelee(info as { flags?: unknown }, look, root);
     const g = await gameTables();
 
     // Either form, read directly (the file list may lag behind a fresh save).
@@ -165,24 +197,6 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       if (g.items.has(id) || customItems.has(id)) return "item";
       return isBuilding(id) ? "building" : "unit";
     };
-
-    // As the World Editor does when saving. Only ever off (see meleeFlagsAfter). An open, changed Map Properties gets
-    // its turn when that's saved.
-    const placed = (await json<{ units?: { id: string; player?: number }[] }>("map/war3mapUnits.doo"))?.units ?? [];
-    // Gameplay constants: a missing war3mapMisc.txt sets none; one that can't be read is left out too (the flag only
-    // ever goes off here, so not knowing keeps it as it is).
-    const miscPath = w3.workspace.files().find((f) => f.path.toLowerCase() === MISC_TXT.toLowerCase())?.path;
-    const misc = miscPath ? await w3.workspace.readText(miscPath).catch(() => null) : null;
-    const meleeInfo = { ...info, flags: Number(info.flags), customConstants: misc !== null && hasCustomConstants(misc) } as MeleeInfo;
-    const flags = meleeInfo.flags, unmelee = meleeFlagsAfter(meleeInfo, placed);
-    if (unmelee !== flags && !w3.editors.isDirty(INFO_JSON)) {
-      info.flags = unmelee;
-      if (!look) {
-        const canonical = await w3.backend.invoke<string>("codec_canonicalize", { root: w3.workspace.project()?.root, path: INFO_JSON, text: JSON.stringify(info) });
-        await w3.workspace.writeText(INFO_JSON, canonical);
-        out.append(`war3map.w3i: not a melee map any more (as the World Editor's save makes it): ${meleeBlockers(meleeInfo, placed).join("; ")}`);
-      }
-    }
 
     const lightEnv = ((info.lightEnvironment as string) || (info.tileset as string)).toLowerCase();
     const light = (sec: string, kind: string) =>
@@ -347,6 +361,22 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     warned.add(key);
     void w3.window.showWarning(`The map script couldn't be regenerated, so saved changes don't reach it: ${e instanceof Error ? e.message : String(e)}`);
   });
+  /** With script.generateOnSave off: only the Melee flag follows the save, in the same queue as the script's runs. */
+  const meleeOnly = (path: string): Promise<boolean> => {
+    running = running.catch(() => true).then(async () => {
+      const root = w3.workspace.project()?.root;
+      try {
+        const info = root ? await json<{ flags?: unknown }>("map/war3map.w3i") : null;
+        if (info && w3.workspace.project()?.root === root) await followMelee(info, false, root, `saved ${path}`);
+      } catch (e) {
+        out.append(`saved ${path}: the Melee flag wasn't looked at: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return true;
+    });
+    return running;
+  };
+  /** What a save is due: the script (with the flag), or only the flag. */
+  const due = (path: string) => (w3.settings.get<boolean>("script.generateOnSave") ? afterSave(path) : meleeOnly(path));
 
   /** A project whose script isn't stamped as this app's (a fresh import, a sync from the World Editor, a project from
    *  before the stamp): if the script is what the map's data makes, but perhaps for the order of its placed objects,
@@ -471,19 +501,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     w3.workspace.onDidSave((path) => {
       // A chapter map's script is made from its campaign's object files too.
-      // Gameplay constants don't make the script, but saving them can take the Melee flag off, which generate does.
-      const input = isScriptInput(path, campaignOf(w3.workspace.project()?.root)) || MELEE_INPUT.test(path);
-      if (!input || !w3.settings.get<boolean>("script.generateOnSave") || !w3.workspace.project()) return;
+      // Gameplay constants don't make the script, but saving them can take the Melee flag off, which generate does;
+      // with generateOnSave off only the flag is looked at (meleeAfterSave).
+      const melee = MELEE_INPUT.test(path);
+      const input = isScriptInput(path, campaignOf(w3.workspace.project()?.root)) || melee;
+      if (!input || !w3.workspace.project() || (!melee && !w3.settings.get<boolean>("script.generateOnSave"))) return;
       clearTimeout(timer);
       pending = path;
-      timer = setTimeout(() => { pending = null; void afterSave(path); }, 800);
+      timer = setTimeout(() => { pending = null; void due(path); }, 800);
     }),
     // What packs the map first waits here: a script still due from the last save belongs in it.
     w3.commands.register("w3.script.settle", async () => {
       clearTimeout(timer);
       const path = pending;
       pending = null;
-      if (path) await afterSave(path);
+      if (path) await due(path);
       await running.catch(() => true);
     }),
     // `quiet` (other extensions, e.g. New Map): no message afterwards.
