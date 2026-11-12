@@ -72,9 +72,9 @@ tests in `app/scripts/gate-scheduler.test.mjs`). A step whose prerequisite
 failed fails without running.
 
 **The real-app smoke test runs as two apps at once** in the corpus tier: `app-smoke.mjs --part=1/2` builds the app,
-then runs the project checks and the first half of the full run's checks (`firstHalf`, newMaps to viewModes);
+then runs the project checks and the first half of the full run's checks (`firstHalf`, newMaps to unitProperties);
 `--part=2/2 --no-build` starts once that build is done (part 1's `Built application at`) and runs the second half
-(`secondHalf`, unitProperties to contextLoss) on the same build. Each part has its own folder
+(`secondHalf`, itemTablesAccess to contextLoss) on the same build. Each part has its own folder
 (`target/app-smoke-part<n>`, or `W3_SMOKE_DIR` with `-part<n>`), its settings in it (the app reads
 `W3PROJ_CONFIG_DIR`, since both have the build's identifier; app-smoke stops when the app doesn't say it listened),
 and its own Xvfb display and WebDriver ports (Linux; a driver that loses the race for a display starts again) or

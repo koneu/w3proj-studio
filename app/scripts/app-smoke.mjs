@@ -7858,14 +7858,16 @@ async function firstHalf(page, found) {
   await leftOpen(page, "terrainSelectCameras");
   await viewModes(page, found).catch((e) => found.push(`view modes: ${e.message}`));
   await leftOpen(page, "viewModes");
+  // Here rather than in part 2, which starts only after part 1's build: the two halves end about together (batch run
+  // 2026-11-12: part 1 327 s, part 2 271 s from ~136 s on; unitProperties ~37 s).
+  await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
+  await leftOpen(page, "unitProperties");
   return made;
 }
 
-/** The full run's checks, part 2 of 2: from unitProperties on, in a second app when the run is split. None of them
+/** The full run's checks, part 2 of 2: from itemTablesAccess on, in a second app when the run is split. None of them
  *  needs what part 1 left: each runs alone with --only too, and they keep their order. */
 async function secondHalf(page, found, project) {
-  await unitProperties(page, found).catch((e) => found.push(`unit properties: ${e.message}`));
-  await leftOpen(page, "unitProperties");
   await itemTablesAccess(page, found).catch((e) => found.push(`item tables: ${e.message}`));
   await leftOpen(page, "itemTablesAccess");
   await itemDrops(page, found).catch((e) => found.push(`item drops: ${e.message}`));
