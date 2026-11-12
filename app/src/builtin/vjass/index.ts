@@ -47,12 +47,24 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     await w3.workspace.writeText(joinPath(dir, "Blizzard.j"), blizzardJ);
     await w3.workspace.writeText(joinPath(dir, "input.j"), script);
     const flags = [...(w3.settings.get<boolean>("vjass.debug") ? ["--debug"] : []), ...(w3.settings.get<boolean>("vjass.optimize") === false ? ["--nooptimize"] : [])];
-    const r = await w3.backend.invoke<{ code: number; stdout: string; stderr: string }>("tool_run", {
+    // Ended when it goes this long without progress, or doesn't exit once its result is written (JassHelper in Wine
+    // has kept running after its work; toolrun.rs).
+    const seconds = w3.settings.get<number>("vjass.timeout");
+    const idleMs = Math.max(5, typeof seconds === "number" && Number.isFinite(seconds) ? seconds : 60) * 1000;
+    const r = await w3.backend.invoke<{ code: number; stdout: string; stderr: string; killed?: string }>("tool_run", {
       exe: path, args: ["--scriptonly", ...flags, "common.j", "Blizzard.j", "input.j", "output.j"], cwd: dir,
+      guard: { idleMs, resultFiles: ["output.j", "logs/compileerrors.txt"] },
     });
+    const errorsAt = joinPath(dir, "logs/compileerrors.txt");
+    if (r.killed) {
+      // Ended before it exited: its files say how it went. Errors written: those. Its output alone: the result.
+      if (await w3.backend.invoke<boolean>("fs_exists", { path: errorsAt })) r.code = 1;
+      else if (await w3.backend.invoke<boolean>("fs_exists", { path: joinPath(dir, "output.j") })) return w3.workspace.readText(joinPath(dir, "output.j"));
+      else throw new Error(`JassHelper didn't finish: ${r.killed}, and wrote no result (files in ${dir}). "vjass.timeout" sets the time.`);
+    }
     if (r.code !== 0) {
       // JassHelper writes its errors (its own, or pjass's) to logs\compileerrors.txt.
-      const log = await w3.workspace.readText(joinPath(dir, "logs/compileerrors.txt")).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
+      const log = await w3.workspace.readText(errorsAt).catch(() => r.stdout || r.stderr || `exit code ${r.code}`);
       // The log starts with the script's file name and ends with a count; the errors are between.
       const lines = log.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^logs[\\/]/i.test(l) && !/^\d+$/.test(l));
       throw new Error(`JassHelper: ${lines.slice(0, 8).join(" · ")} (files in ${dir})`);

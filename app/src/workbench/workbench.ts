@@ -316,6 +316,7 @@ export class Workbench {
         askDelete: async (m, yes) => (await wb.notifications.show("warning", m, [yes, "Cancel"], undefined, yes)) === yes,
         confirm: async (m, yes, expires) => (await wb.notifications.show("warning", m, [yes, "Cancel"], expires)) === yes,
         showError: (m, ...a) => wb.notifications.show("error", m, a),
+        notify: (severity, m, a, opts) => wb.notifications.show(severity, m, a, undefined, undefined, opts?.signal),
         quickPick: (items, opts) => wb.quickInput.pick(items, opts),
         inputBox: (opts) => wb.quickInput.ask(opts),
         pickFile: async (opts) => (await showCursor(), (await openDialog({ title: opts?.title, filters: opts?.filters, multiple: false, directory: false })) as string | null),
