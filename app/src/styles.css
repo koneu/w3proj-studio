@@ -200,7 +200,10 @@ code { font-family: var(--mono); font-size: 12px; }
 /* The fields and the model preview side by side (the preview first in the DOM, drawn on the right): every section's
    table has the same width, so their columns line up; a narrow pane puts the preview above the fields. */
 .obj-detail-body { display: flex; flex-direction: row-reverse; flex-wrap: wrap; align-items: flex-start; gap: 0 14px; }
-.obj-detail-body > .obj-preview { float: none; margin: 16px 0 10px; flex: none; position: sticky; top: 40px; }
+.obj-detail-body > .obj-preview-box { margin: 16px 0 10px; flex: none; position: sticky; top: 40px; width: 220px; }
+.obj-preview-box > .obj-preview { float: none; margin: 0 0 4px; }
+.obj-preview-controls { display: flex; flex-direction: column; gap: 4px; }
+.obj-preview-controls select { width: 100%; }
 .obj-fields { flex: 1 1 360px; min-width: 0; }
 .obj-preview-canvas { width: 100%; height: 100%; display: block; }
 .obj-preview-note { position: absolute; left: 8px; right: 8px; bottom: 6px; font-size: 11px; overflow-wrap: anywhere; pointer-events: none; }
@@ -228,7 +231,8 @@ code { font-family: var(--mono); font-size: 12px; }
 /* A narrow detail pane (a small window): the preview above the fields and not sticky (it would lie over them), and each
    field on two lines, its name with the level and the reset button, then the value across the whole width. */
 @container (max-width: 560px) {
-  .obj-detail-body > .obj-preview { position: static; width: 100%; max-width: 360px; height: 180px; margin: 4px 0 6px; }
+  .obj-detail-body > .obj-preview-box { position: static; width: 100%; max-width: 360px; margin: 4px 0 6px; }
+  .obj-preview-box > .obj-preview { width: 100%; height: 180px; }
 }
 @container (max-width: 480px) {
   .obj-table, .obj-table tbody { display: block; width: 100%; }

@@ -6132,6 +6132,77 @@ async function playerStarts(page, found, root) {
   }
 }
 
+/** The Object Editor's model preview takes a player colour, a replaceable texture (destructables) and an ability's art
+ *  field: read off the preview's data-state, which holds what it shows. */
+async function objectPreview(page, found, root) {
+  const fail = (what) => found.push(`object preview: ${what}`);
+  await page.evaluate(`(async () => { await w3.editors.closeAll(); await w3.workspace.open(${JSON.stringify(root)}); })()`);
+  await until("the project", () => page.evaluate(`w3.workspace.project()?.root === ${JSON.stringify(root)}`));
+  const state = () => page.evaluate(`(() => {
+    const detail = [...document.querySelectorAll(".obj-detail")].find((d) => d.offsetParent !== null);
+    const el = detail?.querySelector(".obj-preview");
+    return el?.dataset.state ? JSON.parse(el.dataset.state) : null;
+  })()`);
+  const choose = (title, value) => page.evaluate(`(() => {
+    const detail = [...document.querySelectorAll(".obj-detail")].find((d) => d.offsetParent !== null);
+    const sel = detail.querySelector('.obj-preview-controls select[title^="${title}"]');
+    if (!sel) return false;
+    sel.value = ${JSON.stringify(String(value))};
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    return sel.value === ${JSON.stringify(String(value))};
+  })()`);
+  try {
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3b", "BTtw")`);
+    await until("the tree wall's preview", async () => (await state())?.ready === true, 30000);
+    const first = await state();
+    const own = Object.values(first.replaceable);
+    if (first.team !== 0) fail(`the player colour starts at ${first.team}, not red (0)`);
+    if (own.length !== 1 || !/Tree/i.test(own[0])) fail(`the tree wall's own texture: ${JSON.stringify(first.replaceable)}`);
+    if (!first.textures.includes(own[0]) && !first.textures.some((t) => t && own[0] && t.startsWith(own[0].replace(/\.blp$/i, "")))) fail(`the model's textures ${JSON.stringify(first.textures)} don't include the tree's ${own[0]}`);
+    if (!(await choose("Player colour", 4))) fail("no player colour to choose");
+    await until("the yellow team", async () => (await state())?.team === 4, 5000).catch(() => fail(`the player colour stays ${first.team} after choosing Yellow`));
+    // Texture: the entry after the type's own ("Texture: the type's own" is value "").
+    const other = await page.evaluate(`(() => {
+      const sel = [...document.querySelectorAll(".obj-detail")].find((d) => d.offsetParent !== null).querySelector('.obj-preview-controls select[title^="Replaceable"]');
+      return sel ? [...sel.options].map((o) => o.value).filter((v) => v !== "") : [];
+    })()`);
+    if (other.length < 3) fail(`only ${other.length} replaceable textures to choose from (control)`);
+    else {
+      const idOf = Object.keys(first.replaceable)[0];
+      const pick = other.find((v) => v !== idOf) ?? other[0];
+      if (!(await choose("Replaceable", pick))) fail("no texture to choose");
+      await until("the chosen texture", async () => { const s = await state(); return s && Object.values(s.replaceable)[0] !== own[0]; }, 5000)
+        .catch(() => fail("the replaceable texture stays the type's own after choosing another"));
+      const after = await state();
+      if (after.team !== 4) fail(`choosing a texture put the player colour back to ${after.team}`);
+      if (Object.keys(after.replaceable).join() !== idOf) fail(`the texture was set for ids ${Object.keys(after.replaceable)}, the type's is ${idOf}`);
+      await choose("Replaceable", "");
+      await until("the type's own texture back", async () => (await state())?.replaceable[idOf] === own[0], 5000).catch(() => fail("the type's own texture doesn't come back"));
+    }
+
+    await page.evaluate(`void w3.commands.execute("w3.objectEditor.open", "w3a", "AHre")`);
+    await until("the ability's preview", async () => (await state())?.ready === true && (await state()).path !== null, 30000);
+    const art = await state();
+    const casterArt = art.path;
+    // An art field other than the shown one that has a model too (the options without "(none)").
+    const others = await page.evaluate(`(() => {
+      const sel = [...document.querySelectorAll(".obj-detail")].find((d) => d.offsetParent !== null).querySelector('.obj-preview-controls select[title^="Which of the ability"]');
+      return [...sel.options].filter((o) => !/\\(none\\)/.test(o.textContent) && o.value !== sel.value).map((o) => o.value);
+    })()`);
+    if (!others.length) { fail("the ability has no second art field with a model (control)"); return; }
+    // Two fields can name the same model: one of them must show another.
+    let changed = false;
+    for (const id of others) {
+      if (!(await choose("Which of the ability", id))) { fail("no art field to choose"); break; }
+      await until("the field's model", async () => (await state())?.ready === true, 20000);
+      if ((await state()).path !== casterArt) { changed = true; break; }
+    }
+    if (!changed) fail(`the model stays ${casterArt} after choosing ${others.join(", ")}`);
+  } finally {
+    await page.evaluate(`w3.editors.closeAll()`);
+  }
+}
+
 /** The Object Editor's field tables beside the model preview: the first table right under its heading (a floated
  *  preview pushed it below itself), every section's Value column in the same place, and the preview over no table. */
 async function objectLayout(page, found, root) {
@@ -8943,6 +9014,7 @@ async function run() {
         objectCopy,
         objectLayout: (p, f) => objectLayout(p, f, project),
         objectManagerLive,
+        objectPreview: (p, f) => objectPreview(p, f, project),
         objectsWhileOpening,
         paletteMouse,
         pathingImport,
@@ -9216,6 +9288,8 @@ async function secondHalf(page, found, project) {
   await leftOpen(page, "playerStarts", found);
   await objectLayout(page, found, project).catch((e) => found.push(`object editor layout: ${e.message}`));
   await leftOpen(page, "objectLayout", found);
+  await objectPreview(page, found, project).catch((e) => found.push(`object preview: ${e.message}`));
+  await leftOpen(page, "objectPreview", found);
   await realMapSave(page, found).catch((e) => found.push(`real map save: ${e.message}`));
   await leftOpen(page, "realMapSave", found);
   await moveTextsToTable(page, found).catch((e) => found.push(`move texts to string table: ${e.message}`));

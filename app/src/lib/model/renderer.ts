@@ -310,7 +310,7 @@ export const TEAM_COLORS: [string, Vec3][] = [
 ];
 
 /** Textures for replaceable ids other than team colour/glow. */
-const REPLACEABLE: Record<number, string> = {
+export const REPLACEABLE: Record<number, string> = {
   11: "ReplaceableTextures\\Cliff\\Cliff0.blp",
   31: "ReplaceableTextures\\LordaeronTree\\LordaeronSummerTree.blp",
   32: "ReplaceableTextures\\AshenvaleTree\\AshenTree.blp",
@@ -1019,13 +1019,15 @@ export class ModelRenderer {
   }
 
   /** Paths to load for the model's textures (replaceables resolved). */
-  texturePaths(): (string | null)[] {
-    return this.gpu.texturePaths();
+  texturePaths(replaceable: Record<number, string> = {}): (string | null)[] {
+    return this.gpu.texturePaths(replaceable);
   }
 
   setTexture(i: number, img: DecodedImage) {
     const { flags } = this.model.textures[i];
+    const old = this.gpu.textures[i];
     this.gpu.textures[i] = createTexture(this.gl, img, { repeat: [(flags & 1) !== 0, (flags & 2) !== 0] });
+    if (old) this.gl.deleteTexture(old);
   }
 
   private makeGrid() {
