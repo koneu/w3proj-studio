@@ -33,7 +33,7 @@ const bin = () => process.env.W3PROJ_BIN ?? join(mainCheckout(app), "target", "r
 
 /** One map, in a child process: its regenerated wpm is written to `out`, the objects it couldn't find are printed. */
 async function one(bundle, root, out, game, cli) {
-  const { buildPathingMap, parseW3e, w3eFromText } = await import(pathToFileURL(bundle).href);
+  const { buildPathingMap, specialsOf, parseW3e, w3eFromText } = await import(pathToFileURL(bundle).href);
   const gameCat = (p) => execFileSync(cli, ["game", "--install", game, "cat", p.replace(/\\/g, "/")], { maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
   const walk = (d, sub = "") => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(join(d, e.name), `${sub}${e.name}/`) : [`${sub}${e.name}`]);
   const files = walk(root).map((path) => ({ path }));
@@ -47,8 +47,8 @@ async function one(bundle, root, out, game, cli) {
     return existsSync(local) ? readFileSync(local) : gameCat(p);
   };
   const terrain = parseW3e(w3eFromText(readFileSync(join(root, "map", "war3map.w3e.txt"), "utf8")));
-  const doodads = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8")).doodads;
-  const { wpm, missing, fellBack } = await buildPathingMap(w3, terrain, doodads, read);
+  const doo = JSON.parse(readFileSync(join(root, "map", "war3map.doo.json"), "utf8"));
+  const { wpm, missing, fellBack } = await buildPathingMap(w3, terrain, doo.doodads, read, undefined, specialsOf(doo));
   writeFileSync(out, wpm);
   console.log(JSON.stringify({ missing, fellBack }));
 }
@@ -81,7 +81,7 @@ const { build } = await import("esbuild");
 const bundle = join(cache, `pathing-${process.pid}.mjs`);
 await build({
   stdin: {
-    contents: `export { buildPathingMap } from "./src/builtin/terrain-viewer/pathmap"; export { parseW3e } from "./src/lib/terrain/w3e"; export { w3eFromText } from "./src/lib/terrain/w3etext";`,
+    contents: `export { buildPathingMap, specialsOf } from "./src/builtin/terrain-viewer/pathmap"; export { parseW3e } from "./src/lib/terrain/w3e"; export { w3eFromText } from "./src/lib/terrain/w3etext";`,
     resolveDir: app, loader: "ts",
   },
   bundle: true, format: "esm", platform: "node", outfile: bundle, logLevel: "warning",
