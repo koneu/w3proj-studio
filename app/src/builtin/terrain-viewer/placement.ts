@@ -108,6 +108,13 @@ export function newEntry(f: PlacedFile, id: string, position: [number, number, n
       for (const k of ["strength", "agility", "intelligence"]) if (k in e) e[k] = 0;
       if ("gold" in e) e.gold = id === "ngol" ? 12500 : 0;
     }
+    // The World Editor's items have level 0 and target acquisition 0 (all 78 placed items on the
+    // campaign maps and builds in smoketest_maps), not a unit's 1 and -1 (Normal).
+    if (kind === "w3t") {
+      if ("level" in e) e.level = 0;
+      if ("targetAcquisition" in e) e.targetAcquisition = 0;
+      if ("gold" in e) e.gold = 0;
+    }
   }
   return e;
 }

@@ -46,6 +46,26 @@ test("an empty unit file takes a unit, with hero fields only where the layout ha
   assert.equal(sub11.level, 1);
 });
 
+test("a new item has the World Editor's level 0 and target acquisition 0, a unit 1 and Normal", () => {
+  const f = file("units", 8, 11);
+  const unit = newEntry(f, "hfoo", [0, 0, 0], 0, "w3u") as unknown as Record<string, unknown>;
+  assert.equal(unit.level, 1);
+  assert.equal(unit.targetAcquisition, -1);
+  f.list.push(unit as unknown as Placed);
+  // Same id as an existing item too: the template's values aren't kept.
+  for (const list of [[unit], [unit, { ...unit, id: "ratc", level: 3, targetAcquisition: -2 }]]) {
+    const g = file("units", 8, 11, {}, list as unknown as Placed[]);
+    const item = newEntry(g, "ratc", [64, 0, 0], 0, "w3t") as unknown as Record<string, unknown>;
+    assert.equal(item.level, 0);
+    assert.equal(item.targetAcquisition, 0);
+    assert.equal(item.gold, 0);
+    assert.equal(item.player, 27);
+  }
+  const blank = newEntry(file("units", 8, 11), "ratc", [0, 0, 0], undefined, "w3t") as unknown as Record<string, unknown>;
+  assert.equal(blank.level, 0);
+  assert.equal(blank.targetAcquisition, 0);
+});
+
 test("a new unit copied from an uprooted Ancient isn't uprooted", () => {
   const ancient = { id: "eaow", variation: 0, position: [0, 0, 0], angle: 0, scale: [1, 1, 1], player: 1, playerFlags: 0x10000 } as Placed;
   const e = newEntry(file("units", 8, 11, {}, [ancient]), "eaow", [64, 0, 0]) as unknown as Record<string, unknown>;
