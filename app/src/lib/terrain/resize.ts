@@ -5,7 +5,7 @@
 // 4 tiles inside the unplayable border horizontally and 2 vertically (also
 // all 116 maps).
 
-import { randomVariation, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
+import { randomVariation, WATER_OFFSET, waterOffsetOf, type Corner, type Terrain } from "./w3e";
 
 /** Tiles per side: left, right, bottom, top. */
 export type Sides = [number, number, number, number];
@@ -45,9 +45,9 @@ export function resizedCameraZoom(zoom: { default: number; max: number; min?: nu
  *  bottom: all 1104 new corners): the tileset's first ground tile (texture 0, not the neighbouring one), flat ground on
  *  level 2 (height word 0x2000), water word 0x2000, no flags, cliff type nibble 15, a ground and a cliff variation of
  *  its own. The map edge bit of the water word comes after, from the playable area (markMapEdge). */
-export function newCorner(random: () => number = Math.random): Corner {
+export function newCorner(random: () => number = Math.random, waterOffset = WATER_OFFSET): Corner {
   return {
-    height: 0, water: -WATER_OFFSET, texture: 0, variation: randomVariation(random), cliffVariation: newCliffVariation(random),
+    height: 0, water: -waterOffset, texture: 0, variation: randomVariation(random), cliffVariation: newCliffVariation(random),
     cliffTexture: 15, layer: 2, ramp: false, blight: false, hasWater: false, boundary: false, rawHeight: 0x2000, rawWater: 0x2000, texExtra: 0,
   };
 }
@@ -63,7 +63,7 @@ export function resizeTerrain(t: Terrain, change: Sides, random: () => number = 
     for (let x = 0; x <= w; x++) {
       const ox = x - l;
       const inside = ox >= 0 && oy >= 0 && ox < t.width && oy < t.height;
-      corners[y * (w + 1) + x] = inside ? { ...t.corners[oy * t.width + ox] } : newCorner(random);
+      corners[y * (w + 1) + x] = inside ? { ...t.corners[oy * t.width + ox] } : newCorner(random, waterOffsetOf(t));
     }
   }
   return { ...t, width: w + 1, height: h + 1, offsetX: t.offsetX - l * 128, offsetY: t.offsetY - b * 128, corners };

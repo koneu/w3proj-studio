@@ -5,7 +5,7 @@ import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { distanceToLine, inArea, type Area } from "../../lib/terrain/area";
 import { NO_BUILD as CELL_NO_BUILD, NO_WALK as CELL_NO_WALK } from "../../lib/terrain/pathing";
 import { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
-import { groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, heightAt, onBoundary, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterLevelAt, waterOffsetOf, WATER_OFFSET, type Terrain } from "../../lib/terrain/w3e";
 
 const TILE = 128;
 /** The longest side of a text map, in characters. */
@@ -227,7 +227,7 @@ function slopedWater(t: Terrain, inside: readonly { i: number; r: number }[], de
   const showing = inside.filter(({ i }) => t.corners[i].hasWater && t.corners[i].water > t.corners[i].height);
   const from = t.corners[middleOf(inside).i];
   const surface = showing.length ? t.corners[middleOf(showing).i].water : from.height - 8;
-  const level = waterLevelAt(surface), changed: number[] = [];
+  const level = waterLevelAt(surface, waterOffsetOf(t)), changed: number[] = [];
   for (const { i, r } of inside) {
     const c = t.corners[i];
     if (c.layer !== from.layer) continue;
@@ -236,7 +236,7 @@ function slopedWater(t: Terrain, inside: readonly { i: number; r: number }[], de
     const before = c.rawHeight, wet = c.hasWater;
     if (target < c.height) setGroundHeight(c, target - (c.layer - 2) * TILE);
     dropRamp(t, i, changed);
-    setWaterLevel(c, level);
+    setWaterLevel(c, level, waterOffsetOf(t));
     if (c.rawHeight !== before || !wet) changed.push(i);
   }
   return changed;
@@ -265,7 +265,7 @@ export function setWater(t: Terrain, place: Area | { points: readonly [number, n
     if (c.layer === layer && c.hasWater && (c.rawWater & 0x3fff) === surface) continue;
     setLayer(c, layer);
     dropRamp(t, i, changed);
-    setWaterLevel(c, surface);
+    setWaterLevel(c, surface, waterOffsetOf(t));
     changed.push(i);
   }
   return changed.length ? withCliffTypes(t, changed, kinds) : changed;

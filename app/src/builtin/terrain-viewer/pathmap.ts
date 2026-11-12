@@ -7,7 +7,7 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { parseSlk } from "../../lib/formats/text";
 import { generatePathing, type PathingStamp, type TileRule } from "../../lib/terrain/pathing";
 import type { Placed } from "./objects";
-import type { Terrain } from "../../lib/terrain/w3e";
+import { parseWaterOffsets, type Terrain } from "../../lib/terrain/w3e";
 
 /** A map file as the format engine's JSON: `map/<name>.json` if the project
  *  keeps it that way, else decoded from the raw file. */
@@ -91,11 +91,7 @@ export async function loadPathingData(w3: W3Api, readFile: (path: string) => Pro
     if (r.tileID) tileRules.set(r.tileID, { walkable: r.walkable !== "0", buildable: r.buildable !== "0", flyable: r.flyable !== "0" });
   }
   // A tileset's water is the row "<letter>Sha"; its height is in tiles (128), negative below the stored level.
-  const waterOffsets = new Map<string, number>();
-  for (const r of parseSlk(await w3.game.readText("TerrainArt\\Water.slk").catch(() => ""))) {
-    const height = Number(r.height);
-    if (r.waterID?.length === 4 && r.waterID.endsWith("Sha") && r.height !== undefined && r.height !== "" && Number.isFinite(height)) waterOffsets.set(r.waterID[0], -height * 128);
-  }
+  const waterOffsets = parseWaterOffsets(parseSlk(await w3.game.readText("TerrainArt\\Water.slk").catch(() => "")));
   const doodadRows = new Map(parseSlk(await w3.game.readText("Doodads\\Doodads.slk")).map((r) => [r.doodID, r]));
   const destRows = new Map(parseSlk(await w3.game.readText("Units\\DestructableData.slk")).map((r) => [r.DestructableID, r]));
   const unitRows = new Map(parseSlk(await w3.game.readText("Units\\UnitData.slk").catch(() => "")).map((r) => [r.unitID, r]));

@@ -40,6 +40,7 @@ import { buildMinimap, iconKinds, minimapBase, minimapIconImage, minimapSettings
 import { askNewMap, createMap, loadTilesets, mapChoices, playableOf, type NewMapPreset } from "./newmap";
 import { compileExpr, compileFilter, evalFor, type ObjVars } from "./massedit";
 import { Occupancy } from "./occupancy";
+import { applyTilesetWater } from "./wateroffset";
 import { buildPathingMap, loadPathingData, objectMods, type PathingData } from "./pathmap";
 import { loadPlacedFile, newEntry, onBuildingGrid, pastedEntry, savePlacedFile, type PlacedFile } from "./placement";
 import { SaveMark, Stale, saveSnapshot, serial } from "./savemark";
@@ -527,15 +528,15 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     const changed = await edits.edit(title, async (read) => {
       const text = await read(path);
       if (text === null) throw new Error("This project has no war3map.w3e.");
-      const bytes = w3eFromText(text), terrain = parseW3e(bytes);
+      const bytes = w3eFromText(text), terrain = await applyTilesetWater(w3, parseW3e(bytes));
       const touched = change(terrain);
       corners = touched.length;
       if (!touched.length) return [];
       // Enforce Water Height Limits refuses the whole edit, as in the terrain editor: nothing is written.
-      const refused = toolWaterRefusal(w3, parseW3e(bytes), terrain, touched);
+      const refused = toolWaterRefusal(w3, await applyTilesetWater(w3, parseW3e(bytes)), terrain, touched);
       if (refused) throw new Error(refused);
       const files = [{ path, text: w3eToText(writeW3e(terrain)) }];
-      states.before = { terrain: parseW3e(bytes), doodads: [] };
+      states.before = { terrain: await applyTilesetWater(w3, parseW3e(bytes)), doodads: [] };
       states.after = { terrain, doodads: [] };
       for (const [name, key] of [["war3map.doo", "doodads"], ["war3mapUnits.doo", "units"]] as const) {
         const json = `map/${name}.json`, doc = await read(json);
@@ -1529,7 +1530,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         let savedW3e: Uint8Array;
         try {
           savedW3e = await readTerrainBytes(doc.path, doc);
-          terrain = parseW3e(savedW3e);
+          terrain = await applyTilesetWater(w3, parseW3e(savedW3e));
         } catch (e) {
           el.append(errorView(`Can't read ${doc.path}: ${errorText(e)}`, h("button.link-inline", { onclick: () => w3.editors.open(doc.path, "w3.hexViewer") }, "Open in Binary Viewer")));
           return {};

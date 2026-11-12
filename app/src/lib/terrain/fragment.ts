@@ -4,7 +4,7 @@
 // map, or turned. Tile and cliff types are kept by name, as a map numbers them its own way.
 
 import type { Copied } from "../objects/copydeps";
-import { setGroundHeight, setLayer, setWaterLevel, groundHeight, type Corner, type Terrain } from "./w3e";
+import { setGroundHeight, setLayer, setWaterLevel, groundHeight, waterOffsetOf, type Corner, type Terrain } from "./w3e";
 
 export const FRAGMENT_FORMAT = "w3proj.fragment/1";
 
@@ -182,7 +182,7 @@ export function stampGround(t: Terrain, g: FragmentGround, origin: readonly [num
     before.set(i, { ...c });
     setLayer(c, from.layer);
     setGroundHeight(c, from.ground);
-    setWaterLevel(c, from.water);
+    setWaterLevel(c, from.water, waterOffsetOf(t));
     Object.assign(c, {
       hasWater: from.hasWater, texture: tiles[from.texture] ?? 0, texExtra: from.texExtra, variation: from.variation,
       cliffVariation: from.cliffVariation, cliffTexture: cliffs[from.cliffTexture] ?? from.cliffTexture, ramp: from.ramp, blight: from.blight, boundary: from.boundary,

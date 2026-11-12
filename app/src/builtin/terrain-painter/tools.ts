@@ -1,7 +1,7 @@
 // Terrain brushes: height (raise, lower, plateau, smooth, noise) and ground texture
 // painting, applied to the corners inside a round or square brush, with undo.
 
-import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, type Corner, type Terrain } from "../../lib/terrain/w3e";
+import { groundHeight, randomVariation, setGroundHeight, setLayer, setWaterLevel, waterOffsetOf, type Corner, type Terrain } from "../../lib/terrain/w3e";
 
 export { matchCliffTypes, toggleRamp } from "../../lib/terrain/cliffs";
 
@@ -138,7 +138,7 @@ export function applyLayer(t: Terrain, b: Brush, tool: LayerTool, target: LayerT
     if (c.layer === target.layer && (!water || (c.hasWater && (c.rawWater & 0x3fff) === target.waterLevel))) continue;
     stroke.touch(t, i);
     setLayer(c, target.layer);
-    if (water && target.waterLevel !== undefined) setWaterLevel(c, target.waterLevel);
+    if (water && target.waterLevel !== undefined) setWaterLevel(c, target.waterLevel, waterOffsetOf(t));
     changed = true;
   }
   return changed;

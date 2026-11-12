@@ -51,12 +51,38 @@ export interface Terrain {
   offsetX: number;
   offsetY: number;
   corners: Corner[];
+  /** How far below its stored level this tileset's water surface lies (default WATER_OFFSET): what each corner's
+   *  `water` was read with. Set by setWaterOffset once the tileset's TerrainArt/Water.slk is known. */
+  waterOffset?: number;
   /** Bytes after the tile points (normally none). */
   trailer: Uint8Array;
 }
 
 /** Water surfaces sit this far below their stored level. */
 export const WATER_OFFSET = 89.6;
+
+/** Every tileset's water offset from TerrainArt\Water.slk rows: the height of its "<letter>Sha" row is in tiles
+ *  (128), negative below the stored level, so Ashenvale's -0.6 is 76.8. A row without a readable height has none. */
+export function parseWaterOffsets(rows: Iterable<Record<string, string>>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    const height = Number(r.height);
+    if (r.waterID?.length === 4 && r.waterID.endsWith("Sha") && r.height !== undefined && r.height !== "" && Number.isFinite(height)) out.set(r.waterID[0], -height * 128);
+  }
+  return out;
+}
+
+/** The offset a terrain's corner waters were read with. */
+export const waterOffsetOf = (t: Pick<Terrain, "waterOffset">): number => t.waterOffset ?? WATER_OFFSET;
+
+/** Reads every corner's water at another offset (the stored words stay as they are, so the file is unchanged). */
+export function setWaterOffset(t: Terrain, offset: number | undefined) {
+  const off = offset !== undefined && Number.isFinite(offset) ? offset : WATER_OFFSET;
+  const was = waterOffsetOf(t);
+  if (off === was) return;
+  for (const c of t.corners) c.water += was - off;
+  t.waterOffset = off;
+}
 /** The stored water level is 14 bits: these are its lowest and highest values, and no surface lies beyond. */
 export const WATER_LEVEL_MIN = 0;
 export const WATER_LEVEL_MAX = 0x3fff;
@@ -155,8 +181,8 @@ export function setLayer(c: Corner, layer: number) {
 }
 
 /** The stored water level word that puts the surface at world height `z`. */
-export function waterLevelAt(z: number): number {
-  return Math.max(WATER_LEVEL_MIN, Math.min(WATER_LEVEL_MAX, Math.round((z + WATER_OFFSET) * 4) + 0x2000));
+export function waterLevelAt(z: number, offset = WATER_OFFSET): number {
+  return Math.max(WATER_LEVEL_MIN, Math.min(WATER_LEVEL_MAX, Math.round((z + offset) * 4) + 0x2000));
 }
 
 /** Marks a corner as water with a stored level (keeping the word's unknown high bits). */
@@ -195,10 +221,10 @@ export function markMapEdge(t: Terrain, complements: readonly number[]) {
   }
 }
 
-export function setWaterLevel(c: Corner, level: number) {
+export function setWaterLevel(c: Corner, level: number, offset = WATER_OFFSET) {
   c.hasWater = true;
   c.rawWater = (c.rawWater & 0xc000) | (level & 0x3fff);
-  c.water = (level - 0x2000) / 4 - WATER_OFFSET;
+  c.water = (level - 0x2000) / 4 - offset;
 }
 
 /** Ground height of a corner without its cliff layer. */

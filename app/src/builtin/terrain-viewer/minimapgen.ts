@@ -14,6 +14,7 @@ import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
 import { maxPlayers } from "../../lib/terrain/startlocations";
 import { ModeCache } from "../../lib/modecache";
 import type { Terrain } from "../../lib/terrain/w3e";
+import { applyTilesetWater } from "./wateroffset";
 
 /** Colour of a ground tile's or cliff's texture (smallestMipColor), by graphics mode and tile or cliff id (textures
  *  are shared; the modes have their own). */
@@ -118,6 +119,7 @@ export async function buildMinimap(w3: W3Api, terrain: Terrain, doodads: Placed[
  *  doodads and destructables shown on the minimap. */
 export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[],
   readFile: (path: string) => Promise<Uint8Array>): Promise<Omit<MinimapInput, "params">> {
+  await applyTilesetWater(w3, terrain);
   const w3i = await readMapJson<{ cameraComplements?: number[] }>(w3, "war3map.w3i").catch(() => null);
   const m = w3i?.cameraComplements ?? [0, 0, 0, 0];
 

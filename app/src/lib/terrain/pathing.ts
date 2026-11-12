@@ -7,7 +7,7 @@
 // The rules below were worked out by comparing generated maps with the ones
 // World Editor saved for the sample maps.
 
-import { rampLift, WATER_OFFSET, type Corner, type Terrain } from "./w3e";
+import { rampLift, waterOffsetOf, type Corner, type Terrain } from "./w3e";
 import { rampSides } from "./cliffs";
 
 export const NO_WALK = 0x02, NO_FLY = 0x04, NO_BUILD = 0x08, BLIGHT = 0x20, NO_WATER = 0x40, BLOCKED = 0x80;
@@ -130,8 +130,9 @@ export function generatePathing(input: PathingInput): Uint8Array {
     if (across.some((n) => n?.ramp && n.layer !== k.layer)) continue;
     lift.set(k, l);
   }
-  // A corner's water level is read with WATER_OFFSET; the tileset's own surface may lie elsewhere (waterOffset).
-  const raise = WATER_OFFSET - (input.waterOffset ?? WATER_OFFSET);
+  // A corner's water level is read with the terrain's own offset; the tileset's surface may lie elsewhere (waterOffset).
+  const read = waterOffsetOf(input.terrain);
+  const raise = read - (input.waterOffset ?? read);
   const depth = (k: Corner) => waterDepth(k) + raise - (lift.get(k) ?? 0);
 
   for (let cy = 0; cy < h; cy++) {
