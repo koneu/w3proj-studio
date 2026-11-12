@@ -8,6 +8,12 @@ import { requireProject } from "../../lib/formats/mapdoc";
 import { moveTexts, OBJECT_KINDS, refsIn, type MoveTextsResult, type TextMapInfo, type TextObjectFile } from "../../lib/formats/movetexts";
 import { loadKind, type KindData } from "../../lib/objects/metadata";
 
+/** What reading war3map.wts failing says: a file that isn't UTF-8 text gets a plain sentence, anything else stays. */
+export function wtsReadError(e: unknown): unknown {
+  return (e as Error)?.name === "NotUtf8Error" || /not valid UTF-8/.test(String(e))
+    ? new Error("war3map.wts isn't UTF-8 text, so no texts were moved. Nothing changed.") : e;
+}
+
 const WTS = "map/war3map.wts";
 const INFO = "map/war3map.w3i";
 /** Files that may refer to strings and are read as text (latin1 here: a reference is plain ASCII). */
@@ -50,10 +56,7 @@ export async function moveTextsToStringTable(w3: W3Api): Promise<MoveTextsOutcom
       if (text === null) return null;
       try { return JSON.parse(text) as T; } catch { throw new Error(`${path} is there but can't be read; nothing was changed.`); }
     };
-    const wts = await read(WTS).catch((e) => {
-      if ((e as Error)?.name === "NotUtf8Error" || /not valid UTF-8/.test(String(e))) throw new Error("war3map.wts isn't UTF-8 text, so no texts were moved. Nothing changed.");
-      throw e;
-    });
+    const wts = await read(WTS).catch((e) => { throw wtsReadError(e); });
     const info = await readJson<TextMapInfo>(`${INFO}.json`);
     const objects: { path: string; kind: string; skin: boolean; doc: TextObjectFile }[] = [];
     for (const f of objectFiles) {

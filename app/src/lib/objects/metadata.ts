@@ -60,6 +60,13 @@ export interface FacetDef {
   label: string;
 }
 
+/** A stored name as text: a WESTRING_ key the game knows becomes its text; a plain value or an unknown key stays as it is. */
+export function storedName(we: ReadonlyMap<string, string>, value: string): string {
+  if (!/^WESTRING_/i.test(value)) return value;
+  const text = westring(we, value);
+  return text.toUpperCase().startsWith("WESTRING_") ? value : text;
+}
+
 export interface KindData {
   kind: string;
   /** Attributes base objects can be filtered by (race, type, …). */
@@ -341,7 +348,7 @@ async function buildKind(w3: W3Api, kind: string, reads: Reads, background: bool
     fields,
     fieldById,
     names,
-    westring: (value) => westring(we, value),
+    westring: (value) => storedName(we, value),
     searchText: (id) => englishWords([...tables.values()].flatMap((t) => { const r = t.get(id); return r ? [r] : []; })),
     baseIds: [...main.keys()],
     levels(baseId) {
