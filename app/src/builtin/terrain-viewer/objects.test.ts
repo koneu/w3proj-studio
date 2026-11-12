@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { W3Api } from "../../extensions/api";
-import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, withObjectArt, type Placed, type Skin } from "./objects";
+import { addAnimProps, addClickHelpers, addMoveTypes, drawnTeam, loadSkins, objectsInRect, placeholderInstances, placement, skinParses, strayInstances, unitsEntryKind, withObjectArt, type Placed, type Skin } from "./objects";
 import { TerrainRenderer } from "./renderer";
 import { placeholderModel } from "../../lib/model/placeholder";
 import { bounds } from "../../lib/model/renderer";
@@ -83,6 +83,23 @@ test("an object without a model gets a stand-in that a selection box can pick, l
   assert.deepEqual(objectsInRect(strays, project, new Set(["units"]), kinds, 0, 0, 400, 400), [], "a hidden group");
   assert.deepEqual(objectsInRect(strays, project, hidden, new Set(["w3t"]), 0, 0, 400, 400), [], "kinds not wanted");
   assert.deepEqual(objectsInRect(strays, () => null, hidden, kinds, 0, 0, 400, 400), [], "behind the camera");
+});
+
+test("an unknown type in war3mapUnits.doo saved as an item is an item, so an items-only box finds it", () => {
+  // As the World Editor writes them: an item with level 0 and target acquisition 0, a unit with level 1 and -1 or -2.
+  const item = placed("I0zz", 100, 100, { player: 27, level: 0, targetAcquisition: 0 } as Partial<Placed>);
+  const unit = placed("h0zz", 300, 300, { player: 0, level: 1, targetAcquisition: -1 } as Partial<Placed>);
+  const camp = placed("n0zz", 500, 500, { player: 24, level: 1, targetAcquisition: -2 } as Partial<Placed>);
+  const strays = strayInstances("units", [item, unit, camp], [item, unit, camp], new Map(), () => 0);
+  assert.deepEqual(strays.map((s) => s.inst.pick!.kind), ["w3t", "w3u", "w3u"]);
+  const project = (p: [number, number, number]): [number, number] => [p[0], p[1]];
+  assert.deepEqual(objectsInRect(strays, project, new Set(), new Set(["w3t"]), 0, 0, 600, 600), [item]);
+  assert.deepEqual(objectsInRect(strays, project, new Set(), new Set(["w3u"]), 0, 0, 600, 600), [unit, camp]);
+  // The type's own kind wins; a start location stays one; a record without those fields stays a unit.
+  assert.equal(unitsEntryKind(item, "w3u"), "w3u");
+  assert.equal(unitsEntryKind(unit, "w3t"), "w3t");
+  assert.equal(unitsEntryKind(placed("sloc", 0, 0, { level: 0, targetAcquisition: 0 } as Partial<Placed>)), "w3u");
+  assert.equal(unitsEntryKind(placed("zzzz", 0, 0)), "w3u");
 });
 
 test("a click picks an object without a model through its stand-in, as a selection box does", () => {

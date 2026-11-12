@@ -29,7 +29,7 @@ import { loadKind } from "../../lib/objects/metadata";
 import { entryIds, renamedEntry } from "../../lib/terrain/entryids";
 import { cliffList, planCliffs, type CliffType } from "./cliffs";
 import { applyTileList, planRemoval, tileUse, unusedTiles } from "./tilecleanup";
-import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
+import { loadSkins, ObjectLoader, objectsInRect, placement, scaleRange, unitsEntryKind, withObjectArt, type ObjectArt, type Placed, type Skin, type Stray } from "./objects";
 import { cycledId, type RandomGroup } from "../../lib/terrain/randomplace";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, type ExportOptions, type ExportSource } from "./minimapexport";
 import { MINIMAP_SIZE, minimapFrame } from "./minimap";
@@ -701,9 +701,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     return { lists: { regions, groups: groups ?? [] }, ctx };
   };
   /** The object kind of a placed type in a placement file (units: w3u or w3t; doodads: w3b or w3d), as the panel has it. */
-  const placedKindOf = (handle: TerrainEditorHandle, key: "units" | "doodads") => (id: string) => {
-    const t = handle.objects.type(id)?.kind;
-    return key === "units" ? (t === "w3t" ? "w3t" : "w3u") : (t === "w3b" ? "w3b" : "w3d");
+  /** An entry of a type neither the game nor the map knows is typed by its record (unitsEntryKind). */
+  const placedKindOf = (handle: TerrainEditorHandle, key: "units" | "doodads") => (entry: Placed) => {
+    const t = handle.objects.type(entry.id)?.kind;
+    return key === "units" ? unitsEntryKind(entry, t) : (t === "w3b" ? "w3b" : "w3d");
   };
 
   /** Doodads past the playable map carry a flag: every one on ladder maps does, and no others. */
@@ -1066,7 +1067,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const giveProps = (entry: Placed, i: number) => {
         const changes = propChanges[i];
         if (!changes?.length || !factsData || !asked) return;
-        const one = [{ entry, facts: typeFacts(entry.id, kindOfPlaced(entry.id), factsData) }];
+        const one = [{ entry, facts: typeFacts(entry.id, kindOfPlaced(entry), factsData) }];
         const why = notOffered(one, changes);
         if (why) throw new Error(`Nothing was placed: objects[${i}]: ${why}`);
         const r = changeAllOf(one, changes, asked.ctx);
@@ -1254,7 +1255,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           if (!e || e.id !== it.id) throw new Error(`Number ${String(it.index)} isn't a ${String(it.id)} any more. list_placed gives the numbers.`);
           return e;
         }))];
-        const objects = entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOf(entry.id), data) }));
+        const objects = entries.map((entry) => ({ entry, facts: typeFacts(entry.id, kindOf(entry), data) }));
         const why = notOffered(objects, changes);
         if (why) throw new Error(`Nothing was changed: ${why}`);
         const r = changeAllOf(objects, changes, ctx);
@@ -2600,7 +2601,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         };
         const kindOfEntry = (p: Placed) => {
           const k = skinOf(p)?.kind;
-          return fileOf(p) === dooFile ? (k === "w3d" ? "w3d" : k ?? "w3d") : k === "w3t" ? "w3t" : "w3u";
+          return fileOf(p) === dooFile ? (k === "w3d" ? "w3d" : k ?? "w3d") : unitsEntryKind(p, k);
         };
         const factsOf = async (entries: Placed[]): Promise<{ entry: Placed; facts: TypeFacts }[]> => {
           const load = factsData ??= loadFactsData(w3);
@@ -3284,10 +3285,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const occupancy = () => {
           occupancyPromise ??= (async () => {
             pathingData ??= loadPathingData(w3, (p) => readFile(w3, doc, p), (id) => objCtx?.bases.get(id));
-            const kindOf = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind ?? "w3u";
+            const kindOf = (id: string) => (objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? ""))?.kind;
             const placed = [
               ...(dooFile?.list ?? []).map((entry) => ({ entry, kind: "w3d" })),
-              ...(unitsFile?.list ?? []).map((entry) => ({ entry, kind: kindOf(entry.id) === "w3t" ? "w3t" : "w3u" })),
+              ...(unitsFile?.list ?? []).map((entry) => ({ entry, kind: unitsEntryKind(entry, kindOf(entry.id)) })),
             ];
             return Occupancy.build(terrain, await pathingData, placed);
           })();
@@ -4293,7 +4294,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         /** The object's kind by the file it's placed in: units and items, or doodads and destructables. Models don't come into it. */
         const kindOfPlaced = (p: Placed) => {
           const skin = (id: string) => objCtx?.skins.get(id) ?? objCtx?.skins.get(objCtx.bases.get(id) ?? "");
-          if (unitsFile?.list.includes(p)) return skin(p.id)?.kind === "w3t" ? "w3t" : "w3u";
+          if (unitsFile?.list.includes(p)) return unitsEntryKind(p, skin(p.id)?.kind);
           if (dooFile?.list.includes(p)) return skin(p.id)?.kind === "w3b" ? "w3b" : "w3d";
           return undefined;
         };
