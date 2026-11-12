@@ -4172,6 +4172,23 @@ async function byHand(page, found) {
   await save();
   if (hash(ground) !== untouched) fail(`one undo didn't take the whole Noise stroke back (${hash(ground) === noisy ? "nothing happened" : "the file differs"})`);
 
+  // Shallow water, one click at the default size 2: the World Editor's brush, the nearest corner and the 4 next to it
+  // (terrain-painter/tools.ts waterBrush). Wet corners: the water bit (4) of the w3e's flags.
+  const wetCorners = () => {
+    const text = readFileSync(ground, "utf8"), all = /^\[flags\] all (\S)/m.exec(text);
+    if (all) return (parseInt(all[1], 36) & 4) ? -1 : 0;
+    const rows = text.split("\n[flags]\n")[1]?.split("\n[")[0].split("\n") ?? [];
+    return rows.reduce((n, r) => n + [...r].filter((ch) => parseInt(ch, 36) & 4).length, 0);
+  };
+  await page.evaluate(`document.querySelector('button.tool-button[title^="Shallow:"]').click()`);
+  if (await page.evaluate(`document.querySelector('.painter-options input[type=range]')?.value`) !== "2") fail("the brush size isn't 2 by default (control)");
+  await hands.drag({ x: canvas.x + 7, y: canvas.y - 5 }, { x: canvas.x + 7, y: canvas.y - 5 }, 1);
+  await save();
+  if (wetCorners() !== 5) fail(`a Shallow water click of size 2 made ${wetCorners()} corners wet, the World Editor's 5`);
+  await page.evaluate(`w3.commands.execute("workbench.undo")`);
+  await save();
+  if (hash(ground) !== untouched) fail("undo didn't take the water back");
+
   await objectByHand(page, hands, root, fail);
   await triggerByHand(page, hands, root, fail);
 }
