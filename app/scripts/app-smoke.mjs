@@ -4091,12 +4091,17 @@ async function moduleFunctions(page, found) {
       const size = png.readUInt32BE(16), raw = inflateSync(png.subarray(41, png.length - 12));
       return { size, height: png.readUInt32BE(20), at: (x, y) => raw.readUIntBE(y * (1 + size * 4) + 1 + x * 4, 3), raw };
     };
-    // The dialog, by its controls: 512 pixels, the pathing map too.
+    // The dialog, by its controls: 512 pixels, the pathing map too, the whole map (the mini map's playable area is a line,
+    // and the dialog starts with units and icons off, as the World Editor's).
     await page.evaluate(`(() => { window.__export = w3.commands.execute("w3.terrain.exportMinimap").then(() => null, (e) => String(e)); return null; })()`);
     await until("the Export Minimap dialog", () => page.evaluate(`!!document.querySelector(".minimap-export-dialog")`), 20000).catch(() => fail("Export Minimap shows no dialog"));
+    // It starts as the World Editor's: terrain, water, doodads and the playable area only.
+    const startsOn = await page.evaluate(`[...document.querySelectorAll(".minimap-export-dialog [data-option]")].filter((b) => b.checked).map((b) => b.dataset.option).join()`);
+    if (startsOn !== "terrain,water,doodads,playableOnly") fail(`Export Minimap starts with ${JSON.stringify(startsOn)} on`);
     await page.evaluate(`(() => { const d = document.querySelector(".minimap-export-dialog"); if (!d) return;
       const s = d.querySelector(".minimap-size"); s.value = "512"; s.dispatchEvent(new Event("change"));
-      d.querySelector("[data-option=pathing]").checked = true; d.querySelector(".newmap-buttons button.primary").click(); })()`);
+      d.querySelector("[data-option=pathing]").checked = true; d.querySelector("[data-option=playableOnly]").checked = false;
+      d.querySelector(".newmap-buttons button.primary").click(); })()`);
     const err = await page.evaluate(`window.__export`);
     if (err) fail(`Export Minimap: ${err}`);
     else if (!existsSync(out)) fail("Export Minimap wrote no file");
