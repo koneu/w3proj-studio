@@ -5,6 +5,7 @@
 
 import type { ExtensionContext, ProjectInfo, W3Api } from "../../extensions/api";
 import { joinPath } from "../../lib/paths";
+import { checkpointErrorText } from "./errortext";
 import { checkpointName, checkpointState, newestFirst, recoveredOf, toPrune } from "./checkpoints";
 
 const FOLDER = "build/checkpoints";
@@ -39,7 +40,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }
     last = `${project.root}|${name}`;
     const target = inFolder(project.root, name);
-    await w3.backend.invoke("project_pack", { root: project.root, output: target });
+    await w3.backend.invoke("project_pack", { root: project.root, output: target }).catch((e) => { throw new Error(checkpointErrorText(e, name)); });
     const keep = w3.settings.get<number>("checkpoints.keep") ?? 10;
     // A checkpoint being restored stays, however old: it's read after this one is made.
     const old = toPrune(await list(project.root), keep).filter((f) => !restoring.has(`${project.root}|${f}`));
@@ -51,7 +52,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         await w3.backend.invoke("fs_delete", { root: project.root, path: inFolder(project.root, f) });
         removed++;
       } catch (e) {
-        out.append(`checkpoint ${f} couldn't be removed: ${e instanceof Error ? e.message : String(e)}`);
+        out.append(`checkpoint ${f} couldn't be removed: ${checkpointErrorText(e, f)}`);
       }
     }
     out.append(`checkpoint ${name}${removed ? ` (${removed} old one${removed === 1 ? "" : "s"} removed)` : ""}`);
@@ -85,10 +86,10 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (w3.workspace.project()?.root !== project.root || running) return;
     if (checkpointState(w3.workspace.files(), newest, Date.now(), minutes * 60_000, megabytes * 1024 * 1024) !== "due") return;
     await create(project, false).catch((e) => {
-      out.append(`checkpoint failed: ${String(e)}`);
+      out.append(e instanceof Error ? e.message : String(e));
       if (warned.has(project.root)) return;
       warned.add(project.root);
-      void w3.window.showWarning(`Automatic checkpoints of this project fail: ${String(e)}`);
+      void w3.window.showWarning(`Automatic checkpoints of this project fail: ${e instanceof Error ? e.message : String(e)}`);
     });
   };
 
@@ -107,7 +108,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       still();
       if (!(await list(project.root)).includes(name)) throw new Error(`Not restored: the checkpoint ${name} is gone.`);
       // Asked already ("its files are replaced"), and what goes is in the checkpoint just made.
-      await w3.commands.execute("w3.project.syncFromMap", inFolder(project.root, name), { replace: true });
+      await w3.commands.execute("w3.project.syncFromMap", inFolder(project.root, name), { replace: true })
+        .catch((e) => { throw new Error(checkpointErrorText(e, name).replace("Checkpoint failed:", "Not restored:")); });
     } finally {
       const n = (restoring.get(key) ?? 1) - 1;
       if (n > 0) restoring.set(key, n); else restoring.delete(key);
