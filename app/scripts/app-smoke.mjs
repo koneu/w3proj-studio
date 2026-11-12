@@ -422,8 +422,8 @@ async function mcpGuides(page, found) {
   const before = await page.evaluate(`w3Workbench.views.active`);
   try {
     await page.evaluate(`w3.views.show("mcp")`);
+    // The section's title comes with all of its rows (the panel draws the listing in one go, the user's guides too).
     await until("the GUIDES section", () => page.evaluate(`[...document.querySelectorAll(".ext-section-title")].some((t) => t.textContent === "GUIDES")`), 10000);
-    await sleep(500);
     if ((await listed()).some((t) => t.startsWith("smoke dropped"))) fail(`listed before it was written (control): ${JSON.stringify(await listed())}`);
     // Written while another view is shown, then the MCP panel shown again.
     await page.evaluate(`w3.views.show("explorer")`);
@@ -1616,10 +1616,11 @@ async function itemTablesAccess(page, found) {
   const value = (prop) => page.evaluate(`document.querySelector(${JSON.stringify(at(prop))})?.value ?? null`);
   const options = (prop) => page.evaluate(`[...document.querySelectorAll(${JSON.stringify(`${at(prop)} option`)})].map((o) => o.value)`);
   const panel = () => until("the properties panel", () => page.evaluate(`!!document.querySelector(${JSON.stringify(at("drops-mode"))})`), 20000);
-  const settled = async () => { await sleep(700); await panel(); };
+  /** The app at rest (the objects drawn again, the panel made anew), then the panel. */
+  const redrawn = async () => { await settled(page); await panel(); };
   const choose = async (prop, v) => {
     await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(at(prop))}); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event("change")); })()`);
-    await sleep(300);
+    await settled(page);
   };
   const active = () => page.evaluate(`w3.editors.activePath()`);
   const dirty = (path) => page.evaluate(`w3.editors.isDirty(${JSON.stringify(path)})`);
@@ -1716,7 +1717,7 @@ async function itemTablesAccess(page, found) {
     // Map Properties shown at another section first: the button goes to the item tables all the same.
     await page.evaluate(`w3.commands.execute("w3.mapInfo.open", "description")`);
     await toTerrain();
-    await settled();
+    await redrawn();
     await k.hands.click(at("edit-tables"));
     // At the table the footman drops from.
     await atItemTables("Edit item tables…", "item-table-0");
@@ -1739,7 +1740,7 @@ async function itemTablesAccess(page, found) {
 
   // Own sets: the link to the map's tables.
   await toTerrain();
-  await settled();
+  await redrawn();
   await choose("drops-mode", "custom");
   await panel();
   if (!(await soon(() => shown("use-map-table")))) fail("own sets show no \"or use a map item table…\"");
@@ -1751,13 +1752,13 @@ async function itemTablesAccess(page, found) {
 
   // Undo in the terrain editor: the table again, then the drops as before Create.
   await toTerrain();
-  await settled();
+  await redrawn();
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await settled();
+  await redrawn();
   await k.save();
   if (footman().itemTable !== 0) fail(`one undo after own sets: the footman's table is ${footman().itemTable}`);
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await settled();
+  await redrawn();
   await k.save();
   if (footman().itemTable !== -1 || footman().itemSets.length) fail(`the undo of the table's choice: ${JSON.stringify([footman().itemTable, footman().itemSets])}`);
   await k.verify(fail);
@@ -1812,7 +1813,8 @@ async function itemDrops(page, found) {
   const T = (sel) => `.drops-tab ${sel}`;
   const text = (sel) => page.evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
   const has = (sel) => page.evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
-  const settled = () => sleep(600);
+  /** The app at rest after an edit: the objects drawn again, the tab and the panel made anew. */
+  const redrawn = () => settled(page);
   const unitsHash = () => hash(join(k.root, "map", "war3mapUnits.doo.json"));
 
   // ---- The Selection panel: the drops block near the top, in words -------------------------------------------------
@@ -1848,19 +1850,20 @@ async function itemDrops(page, found) {
   await until("the item browser", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 5`), 20000);
   await k.hands.click("input.picker-search");
   await k.hands.type("ankh");
-  await sleep(300);
+  // The list filtered with the Ankh on the row Enter picks.
+  await soon(() => page.evaluate(`document.querySelector(".picker-rows > .picker-row.active code")?.textContent === "ankh"`), 5000);
   await k.hands.key("Enter", "Enter", 13);
-  await settled();
+  await redrawn();
   if (!(await dirty())) fail("adding an item in the tab didn't mark the terrain changed");
   await retype(k.hands, T("[data-prop=\"chance-0-0\"]"), "70");
-  await settled();
+  await redrawn();
   await retype(k.hands, T("[data-prop=\"chance-0-1\"]"), "30");
-  await settled();
+  await redrawn();
   if (!/100%/.test(await text(T("[data-prop=\"total-0\"]")) ?? "")) fail(`the set's total after typing: ${await text(T("[data-prop=\"total-0\"]"))}`);
   // Ctrl+Z in the tab: the last chance only.
   await k.hands.click(T(".drops-pane h3"));
   await k.hands.chord("Ctrl+Z");
-  await settled();
+  await redrawn();
   // Ctrl+S in the tab saves the terrain editor the drops are in, as Ctrl+S there does; the tab stays in front.
   await k.hands.chord("Ctrl+S");
   await until("the terrain saved from the tab", async () => !(await dirty()), 20000).catch(() => fail("Ctrl+S in the Item Drops tab didn't save the terrain editor"));
@@ -1868,33 +1871,35 @@ async function itemDrops(page, found) {
   let sets = troll(0, 0)?.itemSets;
   if (JSON.stringify(sets) !== JSON.stringify([[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 0 }]])) fail(`after the item, two chances and one Ctrl+Z: ${JSON.stringify(sets)}`);
   await page.evaluate(`w3.commands.execute("workbench.redo")`);
-  await settled();
+  await redrawn();
 
   // Copy the troll's drops, paste them to its whole camp: one step.
   await k.hands.click(T("[data-prop=\"copy-drops\"]"));
-  await settled();
+  await redrawn();
   await k.hands.click(T(".drops-group:nth-child(2) [data-prop=\"edit-group\"]"));
-  await settled();
+  await redrawn();
+  await soon(async () => /3 objects/.test(await text(T("[data-prop=\"pane-title\"]")) ?? ""), 5000);
   if (!/3 objects/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`Edit together on the trolls' camp: ${await text(T("[data-prop=\"pane-title\"]"))}`);
   if (!(await has(T("[data-prop=\"drops-mixed\"]")))) fail("the camp's different drops aren't shown as such");
   await k.hands.click(T("[data-prop=\"paste-drops\"]"));
-  await settled();
+  await redrawn();
   await k.save();
   const pasted = [[{ id: "YjI2", chance: 70 }, { id: "ankh", chance: 30 }]];
   for (const [x, y] of [[0, 0], [192, 0], [0, 192]]) if (JSON.stringify(troll(x, y)?.itemSets) !== JSON.stringify(pasted)) fail(`the troll at ${x}, ${y} after the paste: ${JSON.stringify(troll(x, y)?.itemSets)}`);
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await settled();
+  await redrawn();
   await k.save();
   if (troll(192, 0)?.itemSets.length || troll(0, 192)?.itemSets.length || JSON.stringify(troll(0, 0)?.itemSets) !== JSON.stringify(pasted)) fail(`one undo after the paste: ${JSON.stringify([troll(0, 0)?.itemSets, troll(192, 0)?.itemSets, troll(0, 192)?.itemSets])}`);
 
   // The ogres' camp: one drops from the table, so a set added to each is refused whole; then all get the table.
   await k.hands.click(T(".drops-group:nth-child(1) [data-prop=\"edit-group\"]"));
-  await settled();
+  await redrawn();
   const before = unitsHash();
   await page.evaluate(`(() => { window.__picked = w3.services.get("w3.objects").then((s) => { const pick = s.pick; s.pick = async () => { s.pick = pick; return { kind: "w3t", id: "ratf", name: "Claws" }; }; }); })()`);
   await page.evaluate(`window.__picked`);
   await k.hands.click(T("[data-prop=\"add-set-each\"]"));
-  await settled();
+  await redrawn();
+  await soon(async () => /drop from a map item table/.test(await k.toasts()), 5000);
   if (!/drop from a map item table/.test(await k.toasts())) fail(`adding a set to a camp with a table wasn't refused with the reason: ${await k.toasts()}`);
   await k.clearToasts();
   await k.save();
@@ -1903,7 +1908,7 @@ async function itemDrops(page, found) {
   if (variant < 0) fail("the ogres' variants don't name the table");
   else {
     await k.hands.click(T(`[data-prop="use-variant-${variant}"]`));
-    await settled();
+    await redrawn();
     await k.save();
     if (ogre(1280)?.itemTable !== 3 || ogre(1472)?.itemTable !== 3 || ogre(1472)?.itemSets.length) fail(`the ogres after Give this to all: ${JSON.stringify([ogre(1280), ogre(1472)].map((o) => [o?.itemTable, o?.itemSets]))}`);
     if (!/used by 2/.test(await text(T("[data-table-card=\"3\"]")) ?? "")) fail(`the table's card after: ${await text(T("[data-table-card=\"3\"]"))}`);
@@ -1922,10 +1927,11 @@ async function itemDrops(page, found) {
   if (k.read("war3map.w3i.json").itemTables?.[0]?.name !== "Smoke Loot") fail("showing the renamed table saved war3map.w3i");
   // A drop changed in the tab while it shows those tables: Ctrl+S there saves the terrain editor and Map Properties together.
   await k.hands.click(T("[data-entry=\"nftt@192,0\"] .drops-obj-name"));
-  await settled();
+  await redrawn();
+  await soon(async () => /Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? ""), 5000);
   if (!/Forest Troll/.test(await text(T("[data-prop=\"pane-title\"]")) ?? "")) fail(`the click on the second troll edits ${await text(T("[data-prop=\"pane-title\"]"))}`);
   await page.evaluate(`(() => { const s = document.querySelector(${JSON.stringify(T(".drops-pane [data-prop=\"drops-mode\"]"))}); s.value = "table"; s.dispatchEvent(new Event("change")); })()`);
-  await settled();
+  await redrawn();
   if (!(await dirty())) fail("giving the troll the table in the tab didn't mark the terrain changed");
   await k.hands.click(T(".drops-pane h3"));
   await k.hands.chord("Ctrl+S");
@@ -3551,7 +3557,8 @@ async function objectByHand(page, hands, root, fail) {
   await until("the picker", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 20`), 20000);
   await hands.click("input.picker-search");
   await hands.type("hfoo");
-  await sleep(300);
+  // The list filtered with the Footman on the row Enter picks.
+  await soon(() => page.evaluate(`document.querySelector(".picker-rows > .picker-row.active code")?.textContent === "hfoo"`), 5000);
   await hands.key("Enter", "Enter", 13);
   await until("its fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 15000);
 
@@ -3562,7 +3569,7 @@ async function objectByHand(page, hands, root, fail) {
   await limits(page, hands, file, fail);
   if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3u.json")`))) fail("changing a field didn't mark the file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const objects = JSON.parse(readFileSync(file, "utf8"));
   const mod = objects.original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm");
   if (mod?.value !== 777) fail(`the Footman's hit points are ${JSON.stringify(mod)}`);
@@ -3640,12 +3647,12 @@ async function triggerByHand(page, hands, root, fail) {
   await until("the trigger", () => page.evaluate(`document.querySelector("input.trig-name")?.value === "Melee Initialization"`), 5000);
   await retype(hands, "input.trig-name", "Typed Trigger");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const output = await page.evaluate(`w3.workspace.project().default_output`);
   const map = resolve(root, output);
+  // The pack writes the map beside it and renames it into place (project.rs pack): there is a map once it is whole.
   await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
   await until("the build", () => existsSync(map), 20000);
-  await sleep(300);
   const script = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
   if (!script.includes("function InitTrig_Typed_Trigger takes")) fail("the renamed trigger isn't in the script");
   if (script.includes("InitTrig_Melee_Initialization")) fail("the old trigger name is still in the script");
@@ -3658,7 +3665,9 @@ async function triggerByHand(page, hands, root, fail) {
   const dirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
   await page.evaluate(`(() => { window.__asked = []; w3.window.confirm = async (m) => { window.__asked.push(m); return false; }; })()`);
   await hands.click("button.trig-convert");
-  await sleep(300);
+  // The question asked, and what the No brings ended.
+  await soon(() => page.evaluate(`window.__asked.length > 0`), 5000);
+  await settled(page);
   if (!/can't be turned back/.test(await page.evaluate(`window.__asked[0] ?? ""`))) fail(`Convert to Custom Text didn't ask first: ${await page.evaluate(`JSON.stringify(window.__asked)`)}`);
   if (await dirty()) fail("answering No to Convert to Custom Text changed the trigger file");
   await page.evaluate(`(() => { w3.window.confirm = async () => true; })()`);
@@ -3667,22 +3676,21 @@ async function triggerByHand(page, hands, root, fail) {
     .catch(() => fail("the trigger doesn't show as custom text after converting"));
   if (!(await dirty())) fail("converting didn't mark the trigger file as changed");
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   const t = typed();
   if (!t?.isCustom || t.ecas.length || !t.runOnInit) fail(`the converted trigger is ${JSON.stringify(t)?.slice(0, 300)}`);
   rmSync(map, { force: true });
   await page.evaluate(`void w3.commands.execute("w3.project.pack")`);
   await until("the build", () => existsSync(map), 20000);
-  await sleep(300);
   const after = spawnSync(cli, ["cat", map, "war3map.j"], { maxBuffer: 1 << 28 }).stdout.toString("latin1");
   if (after !== script) {
     const a = script.split("\r\n"), b = after.split("\r\n"), at = a.findIndex((l, k) => l !== b[k]);
     fail(`war3map.j changed with the conversion, from line ${at + 1}: "${a[at]}" became "${b[at]}"`);
   }
   await page.evaluate(`w3.commands.execute("workbench.undo")`);
-  await sleep(300);
+  await settled(page);
   await page.evaluate(`w3.editors.saveAll()`);
-  await sleep(300);
+  await settled(page);
   if (typed()?.isCustom !== false || !typed()?.ecas.length) fail("one undo didn't turn the converted trigger back into a GUI trigger");
 }
 
@@ -3710,9 +3718,13 @@ async function typedFieldSave(page, found) {
   /** Types over the text of the field `expr` finds (once the editor has stopped drawing it again), then Ctrl+S at once.
    *  `unsaved`: the tab of that file must count as unsaved before the save (what was typed is a change). */
   const typeAndSave = async (what, expr, text, unsaved) => {
-    await until(what, () => mark(expr), 20000);
-    await sleep(500);
-    await until(what, () => mark(expr), 5000);
+    // The field found, then the app at rest with no game file still being read (what an editor draws its fields again
+    // for), and the field found then the one marked before: the editor has stopped drawing it again.
+    await until(what, async () => {
+      if (!(await mark(expr))) return false;
+      await settled(page);
+      return page.evaluate(`w3Workbench.game.readsPending === 0 && (${expr})?.dataset.smoke === "typed"`);
+    }, 20000);
     await hands.click("[data-smoke=typed]");
     await hands.chord("Ctrl+A");
     await hands.type(text);
@@ -3738,6 +3750,7 @@ async function typedFieldSave(page, found) {
         [...document.querySelectorAll(".obj-toolbar-buttons button")].find((b) => b.textContent === "+ New").click();
         return loading;
       })()`);
+      // Time for a question that must not come while the data is held back: nothing to wait for.
       await sleep(800);
       const asked = await page.evaluate(`window.__typedBox.asked`);
       if (asked.length) fail(`"+ New" right after opening the Object Editor, with the game data still loading, asked ${JSON.stringify(asked)} instead of showing the object browser`);
@@ -3763,7 +3776,8 @@ async function typedFieldSave(page, found) {
     await until("the picker", () => page.evaluate(`document.querySelectorAll(".picker-rows > *").length > 20`), 20000);
     await hands.click("input.picker-search");
     await hands.type("hfoo");
-    await sleep(300);
+    // The list filtered with the Footman on the row Enter picks.
+    await soon(() => page.evaluate(`document.querySelector(".picker-rows > .picker-row.active code")?.textContent === "hfoo"`), 5000);
     await hands.key("Enter", "Enter", 13);
     await until("its fields", () => page.evaluate(`document.querySelectorAll(".obj-table .obj-value-cell").length > 20`), 15000);
     await hands.click("input.obj-field-search");
@@ -3772,7 +3786,7 @@ async function typedFieldSave(page, found) {
     await typeAndSave("the Footman's hit points", `document.querySelector(".obj-table .obj-value-cell input")`, "555");
     const hp = () => JSON.parse(readFileSync(join(root, w3u), "utf8")).original.find((o) => o.base === "hfoo")?.mods.find((m) => m.field === "uhpm")?.value;
     await until("the typed hit points saved", () => hp() === 555, 5000).catch(() => fail(`Ctrl+S right after typing 555 hit points saved ${JSON.stringify(hp())}`));
-    await sleep(300);
+    await settled(page);
     if (await dirty(w3u)) fail("Ctrl+S right after typing in the Object Editor left it unsaved");
 
     // ---- Map Properties: the fog's Start Z, a number field ----
@@ -3785,7 +3799,7 @@ async function typedFieldSave(page, found) {
     await typeAndSave("the fog's Start Z", startZ, "1234");
     const fog = () => JSON.parse(readFileSync(join(root, w3i), "utf8")).fog?.start;
     await until("the typed Start Z saved", () => fog() === 1234, 5000).catch(() => fail(`Ctrl+S right after typing 1234 as Start Z saved ${JSON.stringify(fog())}`));
-    await sleep(300);
+    await settled(page);
     if (await dirty(w3i)) fail("Ctrl+S right after typing in Map Properties left it unsaved");
     // Closing the tab right after typing asks to save what was typed (it closed without asking, dropping it).
     await until("the fog's Start Z again", () => mark(startZ), 5000);
@@ -3795,7 +3809,8 @@ async function typedFieldSave(page, found) {
     await page.evaluate(`(() => { const ed = w3Workbench.editors; window.__closeAsked = []; window.__closeConfirm = ed.confirm; ed.confirm = async (m) => { window.__closeAsked.push(m); return "Don't Save"; }; })()`);
     try {
       await page.evaluate(`w3Workbench.editors.closeActive()`);
-      await sleep(300);
+      // A write "Don't Save" must not make would be tracked work: the app at rest has it done.
+      await settled(page);
       const asked = await page.evaluate(`window.__closeAsked`);
       if (!asked.some((m) => /Save changes/.test(m))) fail(`closing Map Properties right after typing didn't ask to save: ${JSON.stringify(asked)}`);
       if (fog() !== 1234) fail(`"Don't Save" on closing still wrote Start Z ${JSON.stringify(fog())}`);
@@ -3812,7 +3827,7 @@ async function typedFieldSave(page, found) {
     await typeAndSave("Max Unit Speed", speed, "432");
     const misc = () => readFileSync(join(root, ...miscPath.split("/")), "utf8");
     await until("the typed speed saved", () => /^MaxUnitSpeed=432\r?$/m.test(misc()), 5000).catch(() => fail(`Ctrl+S right after typing 432 as Max Unit Speed saved ${JSON.stringify(misc().slice(0, 200))}`));
-    await sleep(300);
+    await settled(page);
     if (await dirty(miscPath)) fail("Ctrl+S right after typing in Gameplay Constants left it unsaved");
 
     // ---- The Sound Editor: a sound's volume ----
@@ -3831,7 +3846,7 @@ async function typedFieldSave(page, found) {
     await typeAndSave("the sound's volume", `document.querySelector(".snd-num")`, "77");
     const volume = () => JSON.parse(readFileSync(join(root, w3s), "utf8")).sounds[0]?.volume;
     await until("the typed volume saved", () => volume() === 77, 5000).catch(() => fail(`Ctrl+S right after typing 77 as the volume saved ${JSON.stringify(volume())}`));
-    await sleep(300);
+    await settled(page);
     if (await dirty(w3s)) fail("Ctrl+S right after typing in the Sound Editor left it unsaved");
 
     // ---- The Trigger Editor: a trigger's name and a variable's name ----
@@ -3857,7 +3872,7 @@ async function typedFieldSave(page, found) {
       await typeAndSave("the trigger's name", `(() => { const e = document.querySelector("input.trig-name"); return e?.value === "Typed Trigger" ? e : null; })()`, "Saved Trigger", wtgPath);
       await until("the typed trigger name saved", () => wtgFile().items.some((i) => i.name === "Saved Trigger"), 8000)
         .catch(() => fail(`Ctrl+S right after typing a trigger's name saved the names ${JSON.stringify(wtgFile().items.map((i) => i.name))}`));
-      await sleep(300);
+      await settled(page);
       const asked = await page.evaluate(`window.__typedWarn.asked`);
       if (!asked.some((m) => /gg_trg_Typed_Trigger.* in custom script/.test(m))) fail(`the save's rename didn't ask about the name in custom script: ${JSON.stringify(asked)}`);
       if (!wctText().includes("gg_trg_Saved_Trigger")) fail("the save's rename, answered \"Rename in script too\", didn't rename the trigger in the map script header");
@@ -3867,7 +3882,7 @@ async function typedFieldSave(page, found) {
       await typeAndSave("the variable's name", `[...document.querySelectorAll("input.trig-var-name")].find((e) => e.value === "TypedVar")`, "SavedVar", wtgPath);
       await until("the typed variable name saved", () => wtgFile().variables.some((v) => v.name === "SavedVar"), 8000)
         .catch(() => fail(`Ctrl+S right after typing a variable's name saved the variables ${JSON.stringify(wtgFile().variables.map((v) => v.name))}`));
-      await sleep(300);
+      await settled(page);
       if (await dirty(wtgPath)) fail("Ctrl+S right after typing a variable's name left the Trigger Editor unsaved");
     } finally {
       await page.evaluate(`(() => { if (window.__typedWarn) w3.window.showWarning = window.__typedWarn.kept; delete window.__typedWarn; })()`);
@@ -3889,7 +3904,8 @@ async function typedFieldSave(page, found) {
       await typeAndSave("an AI number field", `${aiNum}[${index}]`, typed);
       const aiPath = await page.evaluate(`w3.editors.activePath()`);
       await until("the AI saved", async () => !(await dirty(aiPath)), 5000).catch(() => fail("Ctrl+S right after typing an AI number left the AI Editor unsaved"));
-      await sleep(300);
+      // The fields drawn again after the save, where the focus goes back to.
+      await settled(page);
       const focus = await page.evaluate(`(() => { const a = document.activeElement; const list = ${aiNum}; return { at: list.indexOf(a), value: a?.value ?? null, tag: a?.tagName ?? null, cls: a?.className ?? null }; })()`);
       if (focus.at !== index || focus.value !== typed) fail(`after Ctrl+S in an AI number field the focus is on ${JSON.stringify(focus)}, not the field (number ${index}, ${typed})`);
     } finally {
@@ -4090,7 +4106,7 @@ async function moduleFunctions(page, found) {
       if (!readFileSync(join(b, "map", "war3map.w3e.txt")).equals(ground)) fail("exporting the minimap saved the terrain");
       if (!(await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`))) fail("the replaced tiles aren't unsaved");
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
-      await sleep(300);
+      await settled(page);
     }
     // Regions as the Region Editor has them: the mini map's one region deleted there and not saved leaves the picture.
     const withRegions = { ...given, terrain: false, water: false, regions: true };
@@ -4102,7 +4118,7 @@ async function moduleFunctions(page, found) {
       if (picture(r1).raw.equals(picture(r2).raw)) fail("the exported minimap still shows the region deleted (unsaved) in the Region Editor");
       if (!readFileSync(join(b, "map", "war3map.w3r.json")).equals(savedRegions)) fail("exporting the minimap saved the regions");
       await page.evaluate(`w3.commands.execute("workbench.undo")`);
-      await sleep(300);
+      await settled(page);
     }
     await page.evaluate(`w3.editors.closeAll()`);
     verify(b, "minimap");
@@ -4239,7 +4255,7 @@ async function objectCopy(page, found) {
   const readIn = (root, file) => { const p = join(root, "map", file); return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : { custom: [], original: [] }; };
   const customs = (root, ext) => readIn(root, `war3map.${ext}.json`).custom;
   const idOf = async (name, args) => JSON.parse(await tool(name, args)).id;
-  const save = async () => { await page.evaluate(`w3.editors.saveAll()`); await sleep(400); };
+  const save = async () => { await page.evaluate(`w3.editors.saveAll()`); await settled(page); };
   const verify = async (root, name) => {
     const map = join(folder, `${name}.w3x`);
     await page.evaluate(`w3.backend.invoke("project_pack", { root: ${JSON.stringify(root)}, output: ${JSON.stringify(map)} })`);
@@ -4437,7 +4453,8 @@ async function objectCopy(page, found) {
     return (await selectionText()).includes(`· ${hero}`);
   }, 30000).catch(async (e) => { throw new Error(`${e.message} (the selection says "${await selectionText()}")`); });
   await hands.key("c", "KeyC", 67, 2);
-  await sleep(1500);
+  // The copy whole before another map opens: the custom types it takes along read (settleViews waits for them).
+  await settled(page);
   const c = await newMap("CopyTerrain");
   // C has another unit under the hero's id, so the paste has to give the hero a new one.
   await page.evaluate(`w3.workspace.writeText("map/war3map.w3u.json", ${JSON.stringify(JSON.stringify({ format: "w3proj.objects/1", version: 3, original: [], custom: [{ base: "hfoo", id: hero, mods: [] }] }))}).then(() => w3.workspace.refresh())`);
@@ -4687,9 +4704,8 @@ async function keyChords(page, found) {
     for (const [chord, binding] of chords) {
       await page.evaluate(`(() => { window.__smokeChords = []; window.__smokeKey = null; document.activeElement?.blur?.(); })()`);
       await hands.chord(chord);
-      await sleep(200);
-      const ran = await page.evaluate(`window.__smokeChords`);
-      if (!ran.includes(binding)) fail(`${chord} didn't run the command bound to ${binding} (the webview gave ${JSON.stringify(await page.evaluate(`window.__smokeKey`))})`);
+      // The command runs a moment after the key (the workbench starts it without waiting for it).
+      if (!(await soon(async () => (await page.evaluate(`window.__smokeChords`)).includes(binding), 5000))) fail(`${chord} didn't run the command bound to ${binding} (the webview gave ${JSON.stringify(await page.evaluate(`window.__smokeKey`))})`);
     }
   } finally {
     await page.evaluate(`(() => { for (const off of window.__smokeChordOff ?? []) off(); window.__smokeChordOff = null; })()`);
@@ -4707,7 +4723,8 @@ async function keybindings(page, found) {
   const TXT = "map/war3map.w3e.txt";
   const state = () => page.evaluate(`(async () => (await w3.services.get("w3.terrain")).viewCommands.get(${JSON.stringify(TXT)})?.state() ?? null)()`);
   const grid = async () => (await state())?.grid;
-  const press = async (chord) => { await k.focusMap(); await k.hands.chord(chord); await sleep(300); };
+  /** A key in the map, then the app at rest (what the key does done, drawn). */
+  const press = async (chord) => { await k.focusMap(); await k.hands.chord(chord); await settled(page); };
   const file = await page.evaluate(`w3Workbench.keybindings.filePath()`);
   if (!file) return fail("the app doesn't know where keybindings.json goes");
   const original = existsSync(file) ? readFileSync(file, "utf8") : null;
@@ -4723,7 +4740,7 @@ async function keybindings(page, found) {
   const backToMap = async () => {
     await page.evaluate(`w3.editors.open(${JSON.stringify(TXT)})`);
     await until("the terrain editor in front", () => page.evaluate(`w3.editors.activePath() === ${JSON.stringify(TXT)}`), 10000);
-    await sleep(300);
+    await settled(page);
   };
   try {
     await writeFile("[]\n");
@@ -4850,10 +4867,10 @@ async function keybindings(page, found) {
     const view = await k.hands.where(".model-stage canvas");
     const before = await state();
     await k.hands.wheel(view.x, view.y, -120);
-    await sleep(300);
+    await settled(page);
     const up = await state();
     await k.hands.wheel(view.x, view.y, 120);
-    await sleep(300);
+    await settled(page);
     const down = await state();
     if (up.grid === before.grid || up.camera.distance !== before.camera.distance) fail(`Wheel Up bound to Grid Display: grid ${before.grid} → ${up.grid}, distance ${before.camera.distance} → ${up.camera.distance}`);
     if (!(down.camera.distance > up.camera.distance)) fail(`Wheel Down didn't zoom out: ${up.camera.distance} → ${down.camera.distance}`);
@@ -4873,15 +4890,13 @@ async function keybindings(page, found) {
     })()`);
     try {
       await page.evaluate(`void w3Workbench.notifications.show("info", "Smoke: a note over the button", ["Reveal"])`);
-      await sleep(200);
-      if (!(await underToast("Smoke: a note"))) fail("the note to click under didn't show");
+      if (!(await soon(() => underToast("Smoke: a note"), 5000))) fail("the note to click under didn't show");
       await k.hands.click("#smoke-under-toast").catch((e) => fail(`a click under a note: ${e.message}`));
       if ((await page.evaluate(`window.__smokeUnder ?? 0`)) !== 1) fail("the click under a note didn't reach the button");
       if (await page.evaluate(`[...document.querySelectorAll(".toast")].some((e) => e.textContent.includes("Smoke: a note"))`)) fail("the note over the button wasn't closed");
       // Straight to the toasts, so a check that stubs w3.window.showWarning and fails to put it back can't hide the question.
       await page.evaluate(`void w3Workbench.notifications.show("warning", "Smoke: a question over the button", ["Smoke yes", "Smoke no"])`);
-      await sleep(200);
-      if (!(await underToast("Smoke: a question"))) fail("the question to click under didn't show");
+      if (!(await soon(() => underToast("Smoke: a question"), 5000))) fail("the question to click under didn't show");
       const refused = await k.hands.click("#smoke-under-toast").then(() => null, (e) => e.message);
       if (!refused || !/covered/.test(refused) || !refused.includes("Smoke: a question")) fail(`a click under a question: ${refused ?? "it went through"}`);
       if ((await page.evaluate(`window.__smokeUnder ?? 0`)) !== 1) fail("the click under a question reached the button");
@@ -6131,16 +6146,36 @@ async function triggersAndAi(page, found) {
   const refsProblems = (list) => list.filter((p) => /doesn't exist in this map/.test(p.message));
   const wtgFile = () => k.read("war3map.wtg.json");
   const wct = () => readFileSync(join(k.root, "map", "war3map.wct.txt"), "utf8");
-  /** Clicks the Problems row whose text has `text`. */
-  const clickProblem = (text) => page.evaluate(`(async () => {
-    await w3.views.show("problems");
-    await new Promise((r) => setTimeout(r, 300));
-    const row = [...document.querySelectorAll(".problem-row.clickable")].find((r) => r.textContent.includes(${JSON.stringify(text)}));
-    if (!row) return false;
-    row.click();
-    await new Promise((r) => setTimeout(r, 800));
+  /** Clicks the Problems row whose text has `text`, then waits until `shown` (a page expression: where the row goes)
+   *  comes true and the app is at rest. False: no such row. */
+  const clickProblem = async (text, shown) => {
+    await page.evaluate(`w3.views.show("problems")`);
+    const row = `[...document.querySelectorAll(".problem-row.clickable")].find((r) => r.textContent.includes(${JSON.stringify(text)}))`;
+    if (!(await soon(() => page.evaluate(`!!${row}`), 5000))) return false;
+    await page.evaluate(`${row}.click()`);
+    await soon(() => page.evaluate(shown), 10000);
+    await settled(page);
     return true;
-  })()`);
+  };
+  /** Selects the tree's row of the trigger `name` (with `open`, closed categories opened first) and waits for it in
+   *  the name box. False: no such row. */
+  const selectTrigger = async (name, open = false) => {
+    const clicked = await page.evaluate(`(() => {
+      if (${open}) document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
+      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === ${JSON.stringify(name)});
+      row?.click();
+      return !!row;
+    })()`);
+    if (clicked) await soon(() => page.evaluate(`document.querySelector("input.trig-name")?.value === ${JSON.stringify(name)}`), 5000);
+    return clicked;
+  };
+  /** Types `to` as the selected trigger's name (its change event), then waits for the question about custom script
+   *  and for the app at rest. */
+  const renameTrigger = async (to) => {
+    await page.evaluate(`(() => { const input = document.querySelector(".trig-name"); input.value = ${JSON.stringify(to)}; input.dispatchEvent(new Event("change")); })()`);
+    await soon(() => page.evaluate(`window.__warned.length > 0`), 5000);
+    await settled(page);
+  };
   try {
     // ---- A region, triggers naming it, script naming both ---------------------------------------------------------
     await k.tool("add_region", { name: "Smoke Gate", left: -256, bottom: -256, right: 256, top: 256 });
@@ -6164,7 +6199,7 @@ async function triggersAndAi(page, found) {
     // Control: the map's own trigger, Gate Watch and the script triggers are valid, and their references exist.
     const others = flagged.filter((p) => p.location !== "Broken Kill");
     if (others.length) fail(`valid triggers are reported: ${others.map((p) => `${p.location}: ${p.message}`).join(" | ").slice(0, 400)}`);
-    if (!(await clickProblem("is Player, not Unit"))) fail("the Problems view has no row to click for Broken Kill");
+    if (!(await clickProblem("is Player, not Unit", `w3.editors.activePath() === "map/war3map.wtg.json" && !!document.querySelector(".trig-eca.active .trig-param.trig-flagged")`))) fail("the Problems view has no row to click for Broken Kill");
     else {
       const shown = await page.evaluate(`({ active: w3.editors.activePath(), tree: document.querySelector(".trig-row.active")?.textContent ?? null,
         marked: !!document.querySelector(".trig-eca.active .trig-param.trig-flagged"), text: document.querySelector(".trig-eca.active .trig-flagged")?.textContent ?? null })`);
@@ -6172,18 +6207,8 @@ async function triggersAndAi(page, found) {
     }
 
     // ---- Renaming a trigger: its references, its InitTrig_ after the question, one undo step ---------------------------
-    const renamed = await page.evaluate(`(async () => {
-      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === "Gate Script");
-      if (!row) return "no Gate Script in the tree";
-      row.click();
-      await new Promise((r) => setTimeout(r, 300));
-      const input = document.querySelector(".trig-name");
-      input.value = "Gate Runner";
-      input.dispatchEvent(new Event("change"));
-      await new Promise((r) => setTimeout(r, 500));
-      return null;
-    })()`);
-    if (renamed) fail(renamed);
+    if (!(await selectTrigger("Gate Script"))) fail("no Gate Script in the tree");
+    else await renameTrigger("Gate Runner");
     const askedTrigger = await warned();
     if (askedTrigger.length !== 1 || !/gg_trg_Gate_Script and InitTrig_Gate_Script appear 1 time in custom script/.test(askedTrigger[0] ?? "")) fail(`renaming the trigger asked ${JSON.stringify(askedTrigger)}`);
     await k.save();
@@ -6194,26 +6219,17 @@ async function triggersAndAi(page, found) {
     if (refsProblems(list).length) fail(`after renaming the trigger, References in triggers reports ${refsProblems(list).map((p) => p.message).join(" | ")}`);
     await page.evaluate(`w3.editors.open("map/war3map.wtg.json")`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await sleep(300);
     await k.save();
     const undone = JSON.stringify(wtgFile());
     if (!undone.includes("gg_trg_Gate_Script") || undone.includes("Gate Runner") || !/InitTrig_Gate_Script/.test(wct())) fail("one undo didn't take the rename and its references back");
     // A GUI trigger has only its gg_trg_ name in the script (the header): the question is about one name.
-    const renamedGui = await page.evaluate(`(async () => {
-      document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
-      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === "Gate Watch");
-      if (!row) return "no Gate Watch in the tree";
-      row.click();
-      await new Promise((r) => setTimeout(r, 300));
-      const input = document.querySelector(".trig-name");
-      input.value = "Gate Guard";
-      input.dispatchEvent(new Event("change"));
-      await new Promise((r) => setTimeout(r, 500));
-      await w3.commands.execute("workbench.undo");
-      await new Promise((r) => setTimeout(r, 300));
-      return w3.editors.isDirty("map/war3map.wtg.json") ? "undoing the rename of Gate Watch left unsaved changes" : null;
-    })()`);
-    if (renamedGui) fail(renamedGui);
+    if (!(await selectTrigger("Gate Watch", true))) fail("no Gate Watch in the tree");
+    else {
+      await renameTrigger("Gate Guard");
+      await page.evaluate(`w3.commands.execute("workbench.undo")`);
+      await settled(page);
+      if (await page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`)) fail("undoing the rename of Gate Watch left unsaved changes");
+    }
     const askedGui = await warned();
     if (askedGui.length !== 1 || askedGui[0] !== "gg_trg_Gate_Watch appears 1 time in custom script. Rename it there too?") fail(`renaming a GUI trigger asked ${JSON.stringify(askedGui)}`);
     // A parameter without a value (a variable of no name, as Validate reports "isn't set") shows its argument in red.
@@ -6221,41 +6237,36 @@ async function triggersAndAi(page, found) {
     const noValue = JSON.parse(keptWtg);
     noValue.items.find((i) => i.name === "Broken Kill").ecas[1].params[0] = { type: 1, value: "" };
     await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(JSON.stringify(noValue, null, 2))})`);
-    await sleep(1500);
-    const unsetShown = await page.evaluate(`(async () => {
-      document.querySelectorAll(".trig-row .trig-caret").forEach((c) => { if (c.textContent === "▸") c.click(); });
-      const row = [...document.querySelectorAll(".trig-row")].find((r) => r.textContent.trim() === "Broken Kill");
-      if (!row) return null;
-      row.click();
-      await new Promise((r) => setTimeout(r, 300));
-      return [...document.querySelectorAll(".trig-eca .trig-param.unset")].map((e) => e.textContent);
-    })()`);
+    // The open Trigger Editor read the file again (a reload after a write is part of settled()).
+    await settled(page);
+    const unsetShown = (await selectTrigger("Broken Kill", true)) ? await page.evaluate(`[...document.querySelectorAll(".trig-eca .trig-param.unset")].map((e) => e.textContent)`) : null;
     if (!unsetShown?.length || unsetShown.some((t) => !/^<.+>$/.test(t))) fail(`a parameter without a value shows as ${JSON.stringify(unsetShown)}, not its argument's name`);
     await page.evaluate(`w3.workspace.writeText("map/war3map.wtg.json", ${JSON.stringify(keptWtg)})`);
-    await sleep(1000);
+    await settled(page);
 
     // ---- Renaming a region with the Trigger Editor closed: the files follow ---------------------------------------------
     await page.evaluate(`w3.editors.close("map/war3map.wtg.json")`);
     /** Renames the region in the Regions tab's name box, then saves the terrain editor unless `save` is false. */
     const renameRegion = async (from, to, save = true) => {
       await page.evaluate(`w3.editors.open("map/war3map.w3e.txt")`);
-      await sleep(300);
+      await until("the terrain editor's tabs", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt" && [...document.querySelectorAll(".terrain-tab")].some((b) => b.textContent === "Regions")`), 20000);
       await k.tab("Regions");
       const index = k.read("war3map.w3r.json").regions.find((r) => r.name === from)?.index;
-      return page.evaluate(`(async () => {
+      const listed = await page.evaluate(`(() => {
         const s = document.querySelector('select[title="Go to a region"]');
-        if (!s) return "no region list";
+        if (!s) return false;
         s.value = ${JSON.stringify(String(index))}; s.dispatchEvent(new Event("change"));
-        await new Promise((r) => setTimeout(r, 300));
-        const i = document.querySelector(".terrain-region-name");
-        if (!i) return "no name box for ${from}";
-        i.value = ${JSON.stringify(to)}; i.dispatchEvent(new Event("change"));
-        if (${save}) {
-          await w3.commands.execute("workbench.save");
-          await new Promise((r) => setTimeout(r, 800));
-        }
-        return null;
+        return true;
       })()`);
+      if (!listed) return "no region list";
+      // The region selected: its name in the name box.
+      if (!(await soon(() => page.evaluate(`document.querySelector(".terrain-region-name")?.value === ${JSON.stringify(from)}`), 5000))) return `no name box for ${from}`;
+      await page.evaluate(`(() => { const i = document.querySelector(".terrain-region-name"); i.value = ${JSON.stringify(to)}; i.dispatchEvent(new Event("change")); })()`);
+      if (save) {
+        await page.evaluate(`w3.commands.execute("workbench.save")`);
+        await settled(page);
+      }
+      return null;
     };
     const r1 = await renameRegion("Smoke Gate", "Smoke Door");
     if (r1) fail(r1);
@@ -6270,29 +6281,36 @@ async function triggersAndAi(page, found) {
     // ---- The same with the Trigger Editor open and nothing unsaved in it: its GUI parameters follow at once, undo and
     // redo in the terrain editor take them along, and the save asks about the script and saves both ------------------------
     await page.evaluate(`w3.commands.execute("w3.triggers.open")`);
-    await sleep(500);
     const held = () => page.evaluate(`(async () => JSON.stringify((await w3.services.get("w3.triggers")).liveTriggers()))()`);
+    // The Trigger Editor open with the triggers it holds.
+    await until("the Trigger Editor's triggers", async () => (await held()) !== "null", 20000);
     const trigDirty = () => page.evaluate(`w3.editors.isDirty("map/war3map.wtg.json")`);
     const holds = async (name, when) => {
       const now = await held();
       const other = name === "Smoke_Arch" ? "Smoke_Door" : "Smoke_Arch";
       if ((now.match(new RegExp(`gg_rct_${name}`, "g")) ?? []).length !== 2 || now.includes(`gg_rct_${other}`)) fail(`${when}, the open Trigger Editor doesn't hold gg_rct_${name} in its two parameters`);
     };
+    /** The open Trigger Editor holding gg_rct_`name` (and no longer the other name), and the app at rest. */
+    const follows = async (name) => {
+      const other = name === "Smoke_Arch" ? "Smoke_Door" : "Smoke_Arch";
+      await soon(async () => { const now = await held(); return now.includes(`gg_rct_${name}`) && !now.includes(`gg_rct_${other}`); }, 5000);
+      await settled(page);
+    };
     const r2 = await renameRegion("Smoke Door", "Smoke Arch", false);
     if (r2) fail(r2);
-    await sleep(300);
+    await follows("Smoke_Arch");
     await holds("Smoke_Arch", "right after the region's rename");
     if (!(await trigDirty())) fail("the Trigger Editor's follow of the region's new name isn't an unsaved change");
     if ((await warned()).length) fail("renaming the region asked before the save");
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await sleep(300);
+    await follows("Smoke_Door");
     await holds("Smoke_Door", "after undoing the region's rename");
     if (await trigDirty()) fail("undoing the region's rename left the Trigger Editor unsaved (its follow wasn't taken back)");
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
-    await sleep(300);
+    await follows("Smoke_Arch");
     await holds("Smoke_Arch", "after redoing the region's rename");
     await page.evaluate(`(async () => { await w3.editors.open("map/war3map.w3e.txt"); await w3.commands.execute("workbench.save"); })()`);
-    await sleep(800);
+    await settled(page);
     const askedOpen = await warned();
     if (askedOpen.length !== 1 || !/gg_rct_Smoke_Door appears 2 times in custom script/.test(askedOpen[0] ?? "")) fail(`saving the renamed region with the Trigger Editor open asked ${JSON.stringify(askedOpen)}`);
     if (await trigDirty()) fail("the open Trigger Editor wasn't saved after taking the region's new name");
@@ -6317,10 +6335,11 @@ async function triggersAndAi(page, found) {
       if (done !== true) return "the Sound Editor didn't rename gg_snd_Smoke_Bell";
       if (w3.editors.activePath() !== "map/war3map.w3s.json") return "the Sound Editor isn't the active editor: " + w3.editors.activePath();
       await w3.commands.execute("workbench.save");
-      await new Promise((r) => setTimeout(r, 800));
       return null;
     })()`);
     if (soundRenamed) fail(soundRenamed);
+    // The save's question answered and the files it renames in written.
+    await settled(page);
     const askedSound = await warned();
     if (askedSound.length !== 1 || !/gg_snd_Smoke_Bell appears 1 time in custom script/.test(askedSound[0] ?? "")) fail(`renaming the sound asked ${JSON.stringify(askedSound)}`);
     const gongWtg = JSON.stringify(wtgFile());
@@ -6337,7 +6356,7 @@ async function triggersAndAi(page, found) {
     await page.evaluate(`w3.workspace.writeText("map/war3map.w3i.json", ${JSON.stringify(JSON.stringify(info, null, 2))})`);
     list = await listProblems();
     if (!list.some((p) => p.location === "Map Properties › Loading screen")) fail("the missing loading screen model isn't reported");
-    else if (!(await clickProblem("UI\\Smoke\\Missing.mdx"))) fail("no row to click for the loading screen model");
+    else if (!(await clickProblem("UI\\Smoke\\Missing.mdx", `document.querySelector(".form-nav-item.active")?.textContent === "Loading Screen"`))) fail("no row to click for the loading screen model");
     else {
       const section = await page.evaluate(`document.querySelector(".form-nav-item.active")?.textContent ?? null`);
       if (section !== "Loading Screen") fail(`the loading screen's problem opens Map Properties at ${JSON.stringify(section)}`);
@@ -6349,7 +6368,9 @@ async function triggersAndAi(page, found) {
     // ---- AI Editor: Add To Map -------------------------------------------------------------------------------------------
     const wai = join(dir, "Smoke Raider.wai");
     rmSync(wai, { force: true });
-    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); await new Promise((r) => setTimeout(r, 800)); })()`);
+    await page.evaluate(`(async () => { w3.window.pickSaveFile = async () => ${JSON.stringify(wai)}; await w3.commands.execute("w3.ai.new"); })()`);
+    await until("the AI Editor", () => page.evaluate(`!!document.querySelector(".ai-tabs")`), 20000).catch((e) => fail(e.message));
+    await settled(page);
     const addErr = await k.run("w3.ai.addToMap");
     if (addErr) fail(`Add To Map: ${addErr}`);
     const script = join(k.root, "map", "Scripts", "Smoke Raider.ai");
@@ -6378,11 +6399,11 @@ async function triggersAndAi(page, found) {
     const want = Buffer.concat([Buffer.from([1, 0, 0, 0, 1, 0, 0, 0]), unitFile, Buffer.alloc(24)]);
     if (!w3o.equals(want)) fail(`the exported .w3o is ${w3o.length} bytes, not the unit file in a .w3o (${want.length})`);
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await sleep(300);
+    await soon(async () => /^None/.test((await shows()) ?? ""), 5000);
     if (!/^None/.test((await shows()) ?? "")) fail(`one undo of Import Custom Data shows ${JSON.stringify(await shows())}`);
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
     await page.evaluate(`w3.editors.saveAll()`);
-    await sleep(300);
+    await settled(page);
     if (!readFileSync(wai).includes(Buffer.from("units.w3u"))) fail("the saved AI doesn't carry the custom data");
 
     // ---- war3map.wct.txt as text in a Lua map: Lua, its functions listed (it was always JASS) -----------------------------
@@ -6684,7 +6705,8 @@ async function contextMenuItem(page, selector, text, item) {
     return `the menu of "${text}" has no ${item} (${items.join(" | ")})`;
   }
   await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith(${JSON.stringify(item)})).click()`);
-  await sleep(500);
+  // What the item does ended (the Object Manager's menu commands are part of settled()), and its writes.
+  await settled(page);
   return null;
 }
 
@@ -6869,6 +6891,8 @@ async function editorExtras(page, found) {
   })()`);
   const answer = (name, value) => page.evaluate(`w3.window.${name} = async () => ${JSON.stringify(value)}`);
   const clip = () => page.evaluate(`window.__clip.splice(0)`);
+  /** What a menu item put on the clipboard: waited for (the menu runs it without waiting), then taken. */
+  const copied = async () => { await soon(() => page.evaluate(`window.__clip.length > 0`), 5000); return clip(); };
   try {
     // ---- Trigger Editor: Copy As Text / Copy As Script ------------------------------------------------------------------
     await k.tool("create_script_trigger", { name: "Copy Me", script: "" });
@@ -6883,18 +6907,18 @@ async function editorExtras(page, found) {
     const lines = await page.evaluate(`[...document.querySelectorAll(".trig-eca > span")].map((s) => s.textContent)`);
     const wanted = `Copy Me\n    Events\n        ${lines[0]}\n    Conditions\n    Actions\n        ${lines[1]}\n`;
     await step("Copy As Text of the trigger", () => menu(".trig-row", "Copy Me", "Copy As Text"));
-    const asText = await clip();
+    const asText = await copied();
     if (asText.length !== 1 || asText[0] !== wanted) fail(`Copy As Text put ${JSON.stringify(asText)} on the clipboard, not ${JSON.stringify(wanted)}`);
     await step("Copy As Script of the trigger", () => menu(".trig-row", "Copy Me", "Copy As Script"));
-    const [script] = await clip();
+    const [script] = await copied();
     if (!/function Trig_Copy_Me_Actions takes nothing returns nothing\n/.test(script ?? "") || !/function InitTrig_Copy_Me takes nothing returns nothing/.test(script ?? "")
       || !/TriggerRegisterTimerEventSingle\( gg_trg_Copy_Me, 2\.00 \)/.test(script ?? "") || /\r/.test(script ?? "")) fail(`Copy As Script put ${JSON.stringify((script ?? "").slice(0, 400))}`);
     // The action line alone, from its own menu.
     await step("Copy As Text of a line", () => menu(".trig-eca", lines[1], "Copy As Text"));
-    const [line] = await clip();
+    const [line] = await copied();
     if (line !== `${lines[1]}\n`) fail(`Copy As Text of the action line gave ${JSON.stringify(line)}, not ${JSON.stringify(`${lines[1]}\n`)}`);
     await step("Copy As Script of a line", () => menu(".trig-eca", lines[1], "Copy As Script"));
-    const [lineScript] = await clip();
+    const [lineScript] = await copied();
     // The action alone: no event registered.
     if (!lineScript || !/call DoNothing\(/.test(lineScript) || /TriggerRegisterTimerEventSingle/.test(lineScript)) fail(`Copy As Script of the action line gave ${JSON.stringify((lineScript ?? "").slice(0, 300))}`);
     // The palette's command: the trigger, and what the menu gave.
@@ -7015,7 +7039,7 @@ async function editorExtras(page, found) {
       await page.evaluate(`(() => { const s = document.querySelector(".om-search"); s.value = ${JSON.stringify(text)}; s.dispatchEvent(new Event("input")); })()`);
       return until(`the Object Manager row ${text}`, () => page.evaluate(`[...document.querySelectorAll(".om-row")].some((r) => r.textContent.includes(${JSON.stringify(text)}))`), 10000).then(() => true, () => false);
     };
-    const omRefresh = async () => { await run("w3.objectManager.refresh"); await sleep(300); };
+    const omRefresh = async () => { await run("w3.objectManager.refresh"); await settled(page); };
     // A custom object: renamed by the Object Editor, one undo step there.
     await answer("inputBox", "Smoke Renamed");
     if (!(await omFind(`${unit} ←`))) fail(`the Object Manager has no row for ${unit}`);
@@ -7110,7 +7134,7 @@ async function editorExtras(page, found) {
       await page.evaluate(`w3.views.show("objectManager")`);
       await omFind("Sounds and music (");
       await page.evaluate(`[...document.querySelectorAll(".om-row")].find((e) => e.textContent.includes("Sounds and music ("))?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 }))`);
-      await sleep(300);
+      await soon(() => page.evaluate(`document.querySelectorAll(".context-menu-item").length > 0`), 5000);
       const groupMenu = await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].map((e) => e.textContent)`);
       await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
       if (JSON.stringify(groupMenu) !== JSON.stringify(["Open Sound Editor"])) fail(`the filtered sounds group's menu: ${JSON.stringify(groupMenu)}`);
@@ -7207,7 +7231,7 @@ async function editorExtras(page, found) {
     // Remove Button, answered "and map": both go in one step; undo brings both back.
     await page.evaluate(`w3.window.showWarning = async (m) => (/Remove the map from the campaign too/.test(m) ? "Remove button and map" : undefined)`);
     await page.evaluate(`document.querySelector("tr.camp-row")?.click()`);
-    await sleep(200);
+    await soon(() => page.evaluate(`!!document.querySelector("tr.camp-row.active") && document.querySelector(".camp-remove-button")?.disabled === false`), 5000);
     await page.evaluate(`document.querySelector(".camp-remove-button")?.click()`);
     await until("the map to go", () => !existsSync(join(camp, "maps", "One.w3x")), 10000).catch(() => fail("Remove button, answered with the map, left maps/One.w3x"));
     if (!(await savedCampaign("no button and no map saved", (f) => !f.chapters.length && !f.mapOrder.length))) fail(`after Remove button and map the campaign has ${JSON.stringify([w3f().chapters, w3f().mapOrder])}`);
@@ -7318,12 +7342,12 @@ async function niceToHaves(page, found) {
         if (off?.checked !== "false" || /✓/.test(off?.mark ?? "") || !off.aligned) fail(`Category is Comment on an ordinary category shows ${JSON.stringify(off)}`);
         await page.evaluate(`[...document.querySelectorAll(".context-menu-item")].find((e) => e.textContent.startsWith("Category is Comment")).click()`);
       }, () => fail("the category's menu has no Category is Comment"));
-    await sleep(300);
+    await soon(() => page.evaluate(`!!document.querySelector(".trig-row.trig-cat-comment")`), 5000);
     if (!(await page.evaluate(`!!document.querySelector(".trig-row.trig-cat-comment")`))) fail("the comment category isn't shown as one");
     // Its menu again: the entry is checked now.
     await page.evaluate(`(() => { const r = [...document.querySelectorAll(".trig-row.trig-cat")].find((e) => e.textContent.includes("Initialization"));
       r?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 80, clientY: 80 })); })()`);
-    await sleep(300);
+    await soon(async () => (await commentEntry()) !== null, 5000);
     const on = await commentEntry();
     if (on?.checked !== "true" || !/✓/.test(on?.mark ?? "") || !on.aligned) fail(`Category is Comment on a comment category shows ${JSON.stringify(on)}`);
     await page.evaluate(`document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
@@ -7348,7 +7372,7 @@ async function niceToHaves(page, found) {
     if (await initCaret() !== "▾") fail(`a click on the caret left Initialization ${await initCaret()}`);
     if (!(await wtgDirty())) fail("opening a category left the Trigger Editor saved (it's kept in the file)");
     await page.evaluate(`w3.commands.execute("workbench.undo")`);
-    await sleep(200);
+    await soon(() => page.evaluate(`!document.querySelector(".trig-row.trig-cat-comment")`), 5000);
     if (await page.evaluate(`!!document.querySelector(".trig-row.trig-cat-comment")`)) fail("undo after opening a category took that instead of Category is Comment");
     if (await initCaret() !== "▾") fail(`undo of Category is Comment closed the category opened after it (${await initCaret()})`);
     await page.evaluate(`w3.commands.execute("workbench.redo")`);
@@ -7403,7 +7427,9 @@ async function niceToHaves(page, found) {
         await k.hands.chord("Ctrl+S");
         await until("the typed header saved", () => readFileSync(wctPath, "utf8").includes("// nice typed header"), 5000)
           .catch(() => fail("Ctrl+S right after typing in the map header saved without the typed text"));
-        await sleep(1000);
+        // The code editor's pause before it commits ended now (settled() flushes the editors): a late commit that
+        // marked the tab unsaved again would show.
+        await settled(page);
         if (await wtgDirty()) fail("Ctrl+S right after typing in the map header left the Trigger Editor unsaved");
       }, () => fail("the map header shows no code editor"));
     await k.hands.click(".trig-row.trig-gui", "Melee Initialization");
@@ -7415,7 +7441,7 @@ async function niceToHaves(page, found) {
         await k.hands.chord("Ctrl+S");
         await until("the typed comment saved", () => k.read("war3map.wtg.json").items.some((i) => i.name === "Melee Initialization" && i.description?.endsWith(" nice typed comment")), 5000)
           .catch(() => fail("Ctrl+S right after typing a trigger's comment saved without the typed text"));
-        await sleep(300);
+        await settled(page);
         if (await wtgDirty()) fail("Ctrl+S right after typing a trigger's comment left the Trigger Editor unsaved");
       }, () => fail("Melee Initialization shows no comment box"));
     await page.evaluate(`w3.editors.closeAll()`);
@@ -7429,7 +7455,7 @@ async function niceToHaves(page, found) {
     if (!/STRING 10\r?\n/.test(wts) || /STRING 1\r?\n/.test(wts)) fail(`after Adjust the string table is ${JSON.stringify(wts.slice(0, 120))}`);
     if (!w3iText.includes("TRIGSTR_010") || w3iText.includes("TRIGSTR_001")) fail("after Adjust war3map.w3i still names TRIGSTR_001");
     await page.evaluate(`w3.commands.execute("w3.mcp.undo")`);
-    await sleep(300);
+    await settled(page);
     const files1 = snapshot(mapDir);
     for (const [f, h] of files0) if (files1.get(f) !== h) fail(`the undo of Adjust Map String IDs left ${f} changed`);
 
@@ -7440,28 +7466,27 @@ async function niceToHaves(page, found) {
     await page.evaluate(`w3.workspace.writeText("map/war3map.w3r.json", ${JSON.stringify(JSON.stringify(regions))})`);
     await run("w3.terrain.open");
     await until("the terrain editor", () => page.evaluate(`w3.editors.activePath() === "map/war3map.w3e.txt"`), 20000);
+    // k.tab waits for the tab and the app at rest; each key below is followed by the app at rest (the key done, drawn).
     await k.tab("Regions");
-    await sleep(500);
     const CTRL = 2;
     const regionName = () => page.evaluate(`document.querySelector(".terrain-region-name")?.value ?? null`);
     await k.focusMap();
     await k.hands.key("Tab", "Tab", 9, CTRL);
-    await sleep(300);
+    await settled(page);
     if ((await regionName()) !== "First") fail(`Ctrl+Tab with nothing selected selected ${await regionName()}`);
     const next = await run("w3.terrain.selectNextInList");
     if (next.e || (await regionName()) !== "Second") fail(`Select Next in List: ${next.e ?? await regionName()}`);
     // Ctrl+Shift+Tab: WebKitGTK gives Shift+Tab as key "Unidentified", code "Tab".
     await k.focusMap();
     await k.hands.key("Tab", "Tab", 9, CTRL | 8);
-    await sleep(300);
+    await settled(page);
     if ((await regionName()) !== "First") fail(`Ctrl+Shift+Tab after Second selected ${await regionName()}`);
     await k.focusMap();
     await k.hands.key("Tab", "Tab", 9, CTRL);
-    await sleep(300);
+    await settled(page);
     if ((await regionName()) !== "Second") fail(`Ctrl+Tab after First selected ${await regionName()}`);
     await k.focusMap();
     await k.hands.key("PageDown", "PageDown", 34, CTRL);
-    await sleep(300);
     await k.save();
     const order = k.read("war3map.w3r.json").regions.map((r) => r.name).join(",");
     if (order !== "First,Third,Second") fail(`Move Down in List (Ctrl+Page Down) saved the order ${order}`);
@@ -7481,12 +7506,13 @@ async function niceToHaves(page, found) {
     await k.hands.mouse("mouseMoved", spot.x - spot.width * 0.3, spot.y - spot.height * 0.3);
     await k.hands.mouse("mousePressed", spot.x - spot.width * 0.3, spot.y - spot.height * 0.3, 1);
     await k.hands.mouse("mouseReleased", spot.x - spot.width * 0.3, spot.y - spot.height * 0.3, 0);
-    await sleep(500);
-    s = await state();
     // Up and to the left on the minimap: north-west of where the camera was.
-    if (!(s.camera.target[0] < target0[0] - 200 && s.camera.target[1] > target0[1] + 200)) fail(`a click on the minimap moved the camera from ${target0} to ${s.camera.target}`);
+    const northWest = (t) => t[0] < target0[0] - 200 && t[1] > target0[1] + 200;
+    await soon(async () => northWest((await state()).camera.target), 5000);
+    s = await state();
+    if (!northWest(s.camera.target)) fail(`a click on the minimap moved the camera from ${target0} to ${s.camera.target}`);
     await run("w3.terrain.toggleMinimap");
-    await sleep(300);
+    await soon(async () => !(await state()).minimap.shown, 5000);
     if ((await state()).minimap.shown) fail("Toggle Minimap Panel didn't hide it again");
     await page.evaluate(`w3.settings.set("terrain.minimap.panel", undefined, "user")`);
 
