@@ -36,6 +36,48 @@ export class PendingWork {
   }
 }
 
+/** A job that waits a moment before it runs (a rebuild after a burst of edits: each edit starts the wait again), which
+ *  a settle step can run at once instead of waiting for it. */
+export class DueTimer {
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  constructor(private readonly job: () => void, private readonly delay: number) {}
+
+  /** Whether the job waits to run. */
+  get due(): boolean { return this.timer !== undefined; }
+
+  /** The job runs `delay` ms from now (a wait already running starts again). */
+  schedule(): void {
+    this.cancel();
+    this.timer = setTimeout(() => { this.timer = undefined; this.job(); }, this.delay);
+  }
+
+  /** The job doesn't run (until scheduled again). */
+  cancel(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  /** Runs the job now if it waits to run (true); else nothing happens (false). */
+  runNow(): boolean {
+    if (!this.due) return false;
+    this.cancel();
+    this.job();
+    return true;
+  }
+}
+
+/** Waits until `current` names no work: one job after another when a job, ending, starts the next (a build that saw a
+ *  change come in while it ran and builds again). A job that fails counts as ended; one that ends and stays named (no
+ *  one cleared it) ends the wait too. */
+export async function whileRunning(current: () => Promise<unknown> | null): Promise<void> {
+  for (let p = current(); p; ) {
+    await p.then(() => {}, () => {});
+    const next = current();
+    if (next === p) return;
+    p = next;
+  }
+}
+
 /** A settle step: brings one kind of waiting work to its end (or waits for it). A step that throws counts as done. */
 export type SettleStep = () => unknown;
 

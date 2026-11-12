@@ -332,6 +332,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     }),
     // Part of the workbench's settled(): every open terrain editor's view at rest (objects, models, a frame drawn).
     w3.commands.register("w3.terrain.settleViews", async () => {
+      // The custom types a Ctrl+C gathers for a paste in another map, read from the object data as it goes on.
+      await clipboard?.typesReady;
       await Promise.all([...toolGroups.settleView.values()].map((settle) => settle()));
     }),
     // Calculate Shadows (the World Editor's Calculate Shadows and Save Map): everything unsaved is saved, then

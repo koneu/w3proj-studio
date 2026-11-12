@@ -246,7 +246,9 @@ export class Workbench {
    *  - the map script due after a save is written now (w3.script.settle), and so are pathing, shadows and the
    *    minimap due after a terrain edit (w3.terrain.settle): work on a timer is done at once, not waited for;
    *  - every open terrain view has placed its objects, loaded what it asked for and drawn a frame with nothing left
-   *    to draw (w3.terrain.settleViews).
+   *    to draw (w3.terrain.settleViews), and the custom types a Ctrl+C in a terrain view gathers for a paste are read;
+   *  - the Object Manager's menu commands have ended (Rename Object counts once its name is typed), and its rows are
+   *    built anew now if an edit made them due (w3.objectManager.settle).
    * Not waited for: a question on screen (a save asking about a file changed on disk counts once answered), and
    * reads of the game's files nobody waits on (`game.readsPending`). Resolves with the number of rounds; throws when
    * work keeps starting more work. A step whose extension is off is left out.
@@ -258,6 +260,7 @@ export class Workbench {
       command("w3.script.settle"),
       command("w3.terrain.settle"),
       command("w3.terrain.settleViews"),
+      command("w3.objectManager.settle"),
     ], this.workspace.pending);
   }
 
