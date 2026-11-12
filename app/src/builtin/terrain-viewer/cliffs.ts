@@ -10,6 +10,7 @@
 import type { Mat4 } from "../../lib/model/renderer";
 import type { ModelRequest } from "./objects";
 import type { Terrain } from "../../lib/terrain/w3e";
+import { rampSides } from "../../lib/terrain/cliffs";
 
 /** A Reforged cliff model's texture as drawn: its placeholders for the cliff type's HD set become that set
  *  (TerrainArt\CityScape\City_Cliff1_Diffuse.blp). The Cliffs models name Doodads\Terrain\#ignore_Cliffs\Cliff1_…,
@@ -72,44 +73,18 @@ export function planCliffs(t: Terrain, types: Map<string, CliffType>, exists: (p
   // cliffs, L/H/X for ramp corners 0/1/2 layers up. Pure ramp tiles (all
   // corners flagged) stay sloped ground.
   const covered = new Set<number>();
-  for (let y = 0; y < t.height - 1; y++) {
-    for (let x = 0; x < tw; x++) {
-      if (covered.has(y * tw + x)) continue;
-      const cs = [corner(x, y), corner(x, y + 1), corner(x + 1, y + 1), corner(x + 1, y)];
-      if (!cs.some((c) => c.ramp) || cs.every((c) => c.ramp) || cs.every((c) => c.layer === cs[0].layer)) continue;
-      // Blocks containing this tile: horizontal (2×1) or vertical (1×2).
-      const blocks: [number, number, number, number][] = [[x, y, 2, 1], [x - 1, y, 2, 1], [x, y, 1, 2], [x, y - 1, 1, 2]];
-      for (const [bx, by, bw, bh] of blocks) {
-        if (bx < 0 || by < 0 || bx + bw > tw || by + bh > t.height - 1) continue;
-        const tiles = bw === 2 ? [by * tw + bx, by * tw + bx + 1] : [by * tw + bx, (by + 1) * tw + bx];
-        if (tiles.some((i) => covered.has(i))) continue;
-        const outer = [corner(bx, by), corner(bx, by + bh), corner(bx + bw, by + bh), corner(bx + bw, by)];
-        const base = Math.min(...outer.map((c) => c.layer));
-        if (outer.some((c) => c.layer - base > 2)) continue;
-        const name = outer.map((c) => (c.ramp ? "LHX" : "ABC")[c.layer - base]).join("");
-        // The ramp corners run along the block's long side: a row (top 1,2 or
-        // bottom 0,3) for 2×1 pieces, a column (left 0,1 or right 2,3) for 1×2.
-        const ramps = outer.map((c, i) => (c.ramp ? i : -1)).filter((i) => i >= 0).join("");
-        if (!(bw === 2 ? ramps === "12" || ramps === "03" : ramps === "01" || ramps === "23")) continue;
-        // A side piece for a ramp running straight past it: the ramp's row flagged all along, the far side
-        // not, and level with the ramp's low end in the middle (it falls high, low, low). Others are where a
-        // ramp ends on a bent cliff, where the piece leaves a hole here: an ordinary cliff meets its
-        // neighbours. This only decides what the view draws, the map keeps its flags.
-        const middle = bw === 2 ? [corner(bx + 1, by), corner(bx + 1, by + 1)] : [corner(bx, by + 1), corner(bx + 1, by + 1)];
-        const [near, far] = ramps === "03" || ramps === "01" ? middle : [middle[1], middle[0]];
-        const low = Math.min(...outer.filter((c) => c.ramp).map((c) => c.layer));
-        if (!near.ramp || far.ramp || near.layer !== low) continue;
-        const type = list[outer[0].cliffTexture] ?? list[0];
-        if (!type?.rampModelDir) continue;
-        const path = `Doodads\\Terrain\\${type.rampModelDir}\\${type.rampModelDir}${name}0.mdx`;
-        if (!exists(path)) continue;
-        // Origin at the block's bottom-right corner, like cliff models.
-        add(path, type, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.offsetX + (bx + bw) * 128, t.offsetY + by * 128, (base - 2) * 128, 1]), tiles);
-        for (const i of tiles) covered.add(i);
-        break;
-      }
-    }
-  }
+  // The blocks (rampSides) a model of the cliff type's ramp folder exists for; the others are ordinary cliffs.
+  rampSides(t, ({ x: bx, y: by, w: bw, outer, base, tiles }) => {
+    const name = outer.map((c) => (c.ramp ? "LHX" : "ABC")[c.layer - base]).join("");
+    const type = list[outer[0].cliffTexture] ?? list[0];
+    if (!type?.rampModelDir) return false;
+    const path = `Doodads\\Terrain\\${type.rampModelDir}\\${type.rampModelDir}${name}0.mdx`;
+    if (!exists(path)) return false;
+    // Origin at the block's bottom-right corner, like cliff models.
+    add(path, type, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, t.offsetX + (bx + bw) * 128, t.offsetY + by * 128, (base - 2) * 128, 1]), tiles);
+    for (const i of tiles) covered.add(i);
+    return true;
+  });
 
   for (let y = 0; y < t.height - 1; y++) {
     for (let x = 0; x < t.width - 1; x++) {

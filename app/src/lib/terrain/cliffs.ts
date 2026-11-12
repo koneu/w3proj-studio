@@ -209,6 +209,61 @@ export function slopeBand(t: Terrain, cx: number, cy: number, reach: number): [n
   return out.length >= 4 ? out : [];
 }
 
+/** A ramp side: a 2×1 or 1×2 block of tiles where a ramp meets the cliff beside it, drawn with one model from the
+ *  cliff type's ramp folder. `x`, `y` is its bottom-left tile; `outer` its outer corners (bottom-left, top-left,
+ *  top-right, bottom-right) and `base` their lowest layer; `tiles` the tiles it covers (y × (width-1) + x). */
+export interface RampSide { x: number; y: number; w: number; h: number; outer: Corner[]; base: number; tiles: number[] }
+
+/** The ramp sides of a terrain: every tile with some ramp corners, not all, whose corners' layers differ, is the
+ *  first of the blocks around it that fits a ramp side (`accept`: the caller can also have it, e.g. a model for it;
+ *  if not, the next block is tried). The flat tile such a block takes in is part of it. The view draws them with
+ *  ramp models (planCliffs); the pathing map blocks them as cliffs. */
+export function rampSides(t: Terrain, accept: (side: RampSide) => boolean = () => true): RampSide[] {
+  const corner = (x: number, y: number) => t.corners[y * t.width + x];
+  const tw = t.width - 1;
+  const covered = new Set<number>();
+  const out: RampSide[] = [];
+  for (let y = 0; y < t.height - 1; y++) {
+    for (let x = 0; x < tw; x++) {
+      if (covered.has(y * tw + x)) continue;
+      const cs = [corner(x, y), corner(x, y + 1), corner(x + 1, y + 1), corner(x + 1, y)];
+      if (!cs.some((c) => c.ramp) || cs.every((c) => c.ramp) || cs.every((c) => c.layer === cs[0].layer)) continue;
+      // Blocks containing this tile: horizontal (2×1) or vertical (1×2).
+      const blocks: [number, number, number, number][] = [[x, y, 2, 1], [x - 1, y, 2, 1], [x, y, 1, 2], [x, y - 1, 1, 2]];
+      for (const [bx, by, bw, bh] of blocks) {
+        if (bx < 0 || by < 0 || bx + bw > tw || by + bh > t.height - 1) continue;
+        const tiles = bw === 2 ? [by * tw + bx, by * tw + bx + 1] : [by * tw + bx, (by + 1) * tw + bx];
+        if (tiles.some((i) => covered.has(i))) continue;
+        const outer = [corner(bx, by), corner(bx, by + bh), corner(bx + bw, by + bh), corner(bx + bw, by)];
+        const base = Math.min(...outer.map((c) => c.layer));
+        if (outer.some((c) => c.layer - base > 2)) continue;
+        // The ramp corners run along the block's long side: a row (top 1,2 or
+        // bottom 0,3) for 2×1 pieces, a column (left 0,1 or right 2,3) for 1×2.
+        const ramps = outer.map((c, i) => (c.ramp ? i : -1)).filter((i) => i >= 0).join("");
+        if (!(bw === 2 ? ramps === "12" || ramps === "03" : ramps === "01" || ramps === "23")) continue;
+        // And they rise one layer along it (L to H, H to X: the game's ramp pieces, CliffTransAAHL0 and so on); two
+        // on one layer are where a ramp's top runs along a cliff, an ordinary cliff (Last Refuge's tile 74,39).
+        const [r0, r1] = [...ramps].map((i) => outer[Number(i)].layer);
+        if (Math.abs(r0 - r1) !== 1) continue;
+        // A side piece for a ramp running straight past it: the ramp's row flagged all along, the far side
+        // not, and level with the ramp's low end in the middle (it falls high, low, low). Others are where a
+        // ramp ends on a bent cliff, where the piece leaves a hole here: an ordinary cliff meets its
+        // neighbours. This only decides what the view draws, the map keeps its flags.
+        const middle = bw === 2 ? [corner(bx + 1, by), corner(bx + 1, by + 1)] : [corner(bx, by + 1), corner(bx + 1, by + 1)];
+        const [near, far] = ramps === "03" || ramps === "01" ? middle : [middle[1], middle[0]];
+        const low = Math.min(...outer.filter((c) => c.ramp).map((c) => c.layer));
+        if (!near.ramp || far.ramp || near.layer !== low) continue;
+        const side = { x: bx, y: by, w: bw, h: bh, outer, base, tiles };
+        if (!accept(side)) continue;
+        out.push(side);
+        for (const i of tiles) covered.add(i);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 /** The longest unbroken stretch of rows that fit, of two at least (one tile wide), nearest the middle one
  *  (`middle` is its index) when there are several as long. Null if none. */
 export function widestRun(fits: readonly boolean[], middle: number): [number, number] | null {
