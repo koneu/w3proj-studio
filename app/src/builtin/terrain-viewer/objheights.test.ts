@@ -4,6 +4,7 @@ import { movedHeight, parseHeight, pastedFlags, pastedHeight, resetFixedHeight, 
 import { FIXED_HEIGHT } from "./selectionkeys";
 import { heightAt, parseW3e } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
+import { fragmentOf, turnFragment, type Turn } from "../../lib/terrain/fragment";
 
 test("ships float on the water surface, whatever height the placement file gives them", () => {
   // 03_Water_Ford_Lake_Boats: the transport (hbot), destroyer and battleship are stored at z 0, the sea bed;
@@ -126,5 +127,34 @@ test("a doodad that was not moved, or has no height of its own, is the same with
     assert.deepEqual(movedHeight(fixed, 256, false, on), { z: 300, flags: 6 }, `turned in place, switch ${on}`);
     assert.deepEqual(movedHeight({ position: [0, 0, 300], flags: 2 }, 256, true, on), { z: 256, flags: 2 }, `plain, switch ${on}`);
     assert.deepEqual(movedHeight({ position: [0, 0, 300] }, 256, true, on), { z: 256, flags: undefined }, `no flags, switch ${on}`);
+  }
+});
+
+// we-drive 2026-11-12 (verify round 2, C7): four doodads of a flat map copied and pasted plain, mirrored and turned,
+// with Preserve Copied Object Height off (its default) and Reset Fixed Object Heights off and on alike. Each copy was
+// saved with flags 2 and height 0 (the ground), and where it went, from the paste's centre, is the turn of where it
+// was from the group's; its facing went with it. (Where the group's centre lands for a pointer is left out: the World
+// Editor's centre was (-512, 0) and its paste centre (384, -576) for a pointer at (354, -573.4).)
+test("pasted copies, plain, mirrored and turned, as the World Editor's: same offsets turned, flags 2, on the ground", () => {
+  const deg = (r: number) => Math.round((r * 180) / Math.PI) % 360;
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const src = [["LTcr", -640, -128, 300, 30, 6], ["LTbs", -352, -96, 0, 90, 2], ["LRrk", -640, 128, 0, 60, 2], ["LRrk", -384, 128, 150, 120, 6]] as const;
+  const fragment = fragmentOf(src.map(([id, x, y, z, a, flags]) => ({ list: "doodads" as const, entry: { id, position: [x, y, z], angle: rad(a), flags } })), () => 0, [-512, 0]);
+  const at = [384, -576];
+  const we: Record<string, [number, number, number][]> = {
+    plain: [[256, -704, 30], [544, -672, 90], [256, -448, 60], [512, -448, 120]],
+    mirrorY: [[256, -448, 330], [544, -480, 270], [256, -704, 300], [512, -704, 240]],
+    mirrorX: [[512, -704, 150], [224, -672, 90], [512, -448, 120], [256, -448, 60]],
+    cw: [[256, -448, 300], [288, -736, 0], [512, -448, 330], [512, -704, 30]],
+    ccw: [[512, -704, 120], [480, -416, 180], [256, -704, 150], [256, -448, 210]],
+  };
+  for (const [turn, want] of Object.entries(we)) {
+    const f = turn === "plain" ? fragment : turnFragment(fragment, turn as Turn);
+    const got = f.objects.map((o) => [at[0] + o.at[0], at[1] + o.at[1], deg(o.angle)]);
+    assert.deepEqual(got, want, turn);
+    for (const o of f.objects) {
+      assert.equal(pastedFlags(Number(o.entry.flags), false), 2, `${turn}: flags`);
+      assert.equal(pastedHeight(0, o.z ?? o.at[2], false), 0, `${turn}: height`);
+    }
   }
 });
