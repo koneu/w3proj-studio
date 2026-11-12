@@ -9,6 +9,7 @@ import type { ExtensionContext, W3Api } from "../../extensions/api";
 import { PROBLEMS_SERVICE, type Problem, type ProblemCheck, type ProblemsService } from "../../extensions/services";
 import { copyButton, h } from "../../workbench/dom";
 import { builtinChecks } from "./checks";
+import { BONUS_QUEST_LIBRARY, aboutOf, emptyIgnore, IGNORE_FILE, isIgnored, parseIgnore, questLibraryOffered, serializeIgnore, withIgnored, withoutIgnored, type IgnoreFile } from "./ignore";
 import { deleteInvalid } from "./invalid";
 import { mapChecks } from "./mapchecks";
 import { resultsStale } from "./projectkey";
@@ -28,10 +29,28 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
   /** What the checks of the running run share; outside a run, nothing is shared. */
   let scope = new RunScope(w3, false);
   const folded = new Set<string>();
+  /** The project's ignore (.w3proj/problems-ignore.json) as the last run read it; `ignoreBad` says why a file that
+   *  is there can't be used (then nothing is hidden, and nothing is written over it). */
+  let ignore: IgnoreFile = emptyIgnore();
+  let ignoreBad: string | null = null;
+  let showIgnored = false;
+  /** Writes of the ignore file, one after the other. */
+  let ignoreWrites: Promise<unknown> = Promise.resolve();
   const status = w3.statusBar.add({ id: "w3.problems.status", text: "", command: "w3.problems.show", align: "right", priority: 60 });
   ctx.subscriptions.push(status);
 
-  const all = () => groups.flatMap((g) => g.problems);
+  const hidden = (g: Group, p: Problem) => !ignoreBad && isIgnored(ignore, g.check.id, aboutOf(p));
+  const visible = (g: Group) => g.problems.filter((p) => !hidden(g, p));
+  const all = () => groups.flatMap(visible);
+  const ignoredCount = () => groups.reduce((n, g) => n + g.problems.length - visible(g).length, 0);
+  /** Whether the file is there is asked of the disk (the file list can lag): absent is empty, unreadable is not. */
+  const readIgnore = async (): Promise<{ file: IgnoreFile; bad: string | null }> => {
+    try {
+      const there = await w3.backend.invoke<boolean>("fs_exists", { path: w3.workspace.resolve(IGNORE_FILE) });
+      if (!there) return { file: emptyIgnore(), bad: null };
+      return { file: parseIgnore(await w3.workspace.readText(IGNORE_FILE)), bad: null };
+    } catch (e) { return { file: emptyIgnore(), bad: `${IGNORE_FILE} is there but can't be used: ${String(e instanceof Error ? e.message : e)}` }; }
+  };
   const updateStatus = () => {
     if (!ran || !w3.workspace.project()) { status.text = ""; return; }
     const errors = all().filter((p) => p.severity === "error").length, warnings = all().length - errors;
@@ -57,6 +76,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       const result: Group[] = [];
       // What the built-in checks of this run share (each document read once); dropped when it ends.
       scope = new RunScope(w3);
+      const loaded = await readIgnore();
       // One failing check doesn't stop the others.
       for (const check of [...checks]) {
         // Each check's time, as a User Timing measure ("problems:<id>"): DevTools and the bench read it.
@@ -69,6 +89,8 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
       // The project was closed or changed while the checks ran: these results are not its own.
       if (resultsStale(root, w3.workspace.project()?.root ?? null)) return { root, adopted: false, problems: [] };
       groups = result;
+      ignore = loaded.file;
+      ignoreBad = loaded.bad;
       ranFor = root;
       ran = true;
       updateStatus();
@@ -112,13 +134,33 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     if (!r.adopted || r.root !== root || resultsStale(root, w3.workspace.project()?.root ?? null)) {
       throw new Error("The project changed while it was being checked; ask again once it stays open.");
     }
+    const nIgnored = ignoredCount();
     const found = r.problems.map(({ severity, message, location }) => ({ severity, message, location }));
     // A check that failed found nothing, which isn't "no problems": say so (groups are this run's).
     const failed = groups.filter((g) => g.error);
-    return [...failed.map((g) => ({ severity: "error" as const, message: `The check failed: ${g.error}`, location: g.check.title })), ...found];
+    // Ignored reports are counted, not listed: the project's owner put them aside on purpose.
+    const aside = nIgnored ? [{ severity: "warning" as const, message: `${nIgnored} report${nIgnored === 1 ? " is" : "s are"} ignored by the project (${IGNORE_FILE}) and not listed; there is nothing to fix in them.`, location: "Ignored reports", ignored: nIgnored }] : [];
+    return [...failed.map((g) => ({ severity: "error" as const, message: `The check failed: ${g.error}`, location: g.check.title })), ...found, ...aside];
   }));
   for (const c of [...builtinChecks(w3, () => scope), ...mapChecks(w3, () => scope)]) ctx.subscriptions.push(service.registerCheck(c));
 
+  /** Changes the ignore file: `change` gets the file as it is when its turn comes (writes go one after the other),
+   *  and the project must still be the one asked about. */
+  const changeIgnore = (change: (f: IgnoreFile) => IgnoreFile) => {
+    const root = w3.workspace.project()?.root ?? null;
+    const job = ignoreWrites.catch(() => undefined).then(async () => {
+      if (!root || resultsStale(root, w3.workspace.project()?.root ?? null) || resultsStale(ranFor, root)) return;
+      if (ignoreBad) throw new Error(ignoreBad);
+      const next = change(ignore);
+      await w3.workspace.writeText(IGNORE_FILE, serializeIgnore(next));
+      if (resultsStale(root, w3.workspace.project()?.root ?? null)) return;
+      ignore = next;
+      updateStatus();
+      w3.views.refresh("w3.problems.list");
+    });
+    ignoreWrites = job;
+    return job;
+  };
   const run = (f: () => Promise<unknown>) => () => { f().catch((e) => w3.window.showError(String(e instanceof Error ? e.message : e))); };
   ctx.subscriptions.push(
     w3.commands.register("w3.problems.run", async () => { await w3.views.show("problems"); await service.run(); }),
@@ -126,6 +168,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
     w3.commands.register("w3.problems.deleteInvalid", async () => {
       if (await deleteInvalid(w3)) await service.run();
     }),
+    w3.commands.register("w3.problems.toggleIgnored", () => { showIgnored = !showIgnored; w3.views.refresh("w3.problems.list"); }),
     w3.commands.register("w3.problems.open", async (path: string) => { await w3.editors.open(path); }),
     w3.workspace.onDidChange(() => {
       // Another map or project: the found problems of the previous one must not show.
@@ -143,20 +186,26 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
           h("button", { disabled: !!running, onclick: run(() => service.run()) }, running ? "Checking…" : ran ? "Check again" : "Check now"),
           groups.some((g) => g.check.id === "placements" && g.problems.some((p) => / unknown object type /.test(p.message)))
             ? h("button", { title: "Removes placed objects whose type neither the game nor the map has. Start locations stay.", onclick: run(() => w3.commands.execute("w3.problems.deleteInvalid")) }, "Delete Invalid Objects…") : null,
+          ran && !ignoreBad && questLibraryOffered(ignore, groups.flatMap((g) => visible(g).map((p) => ({ check: g.check.id, about: aboutOf(p) }))))
+            ? h("button.problems-ignore-library", { title: "The Orc bonus chapters carry a quest library whose triggers nothing runs. Ignores these reports (here and in later runs); other triggers are still reported. Undo it from Show ignored.", onclick: run(() => changeIgnore((f) => ({ ...f, rules: [...f.rules, BONUS_QUEST_LIBRARY] }))) }, "Ignore the bonus campaign quest library") : null,
+          ran && ignoredCount() ? h("button.problems-show-ignored", { title: "Lists the ignored reports too, each with an Un-ignore button", onclick: run(async () => { await w3.commands.execute("w3.problems.toggleIgnored"); }) }, `${showIgnored ? "Hide" : "Show"} ignored (${ignoredCount()})`) : null,
           h("span.muted.problems-summary", {}, ran ? (total.length ? ` ${errors} error${errors === 1 ? "" : "s"}, ${total.length - errors} warning${total.length - errors === 1 ? "" : "s"}` : " No problems found.") : "")));
+        if (ran && ignoreBad) el.append(h("div.view-empty.problems-failed", {}, `${ignoreBad}. Nothing is hidden, and ignoring is off until it is fixed.`));
         if (!ran) {
           el.append(h("div.view-empty", {}, "Checks the map script, files used by object data, imported models' textures, placed objects and imports. Build runs them too."));
           return;
         }
         for (const g of groups) {
-          const n = g.problems.length;
+          const shown = showIgnored ? g.problems : visible(g);
+          const n = visible(g).length;
           const fold = folded.has(g.check.id);
           el.append(h("div.camp-side-head.problems-head", { onclick: () => { if (fold) folded.delete(g.check.id); else folded.add(g.check.id); w3.views.refresh("w3.problems.list"); } },
             `${fold ? "▸" : "▾"} ${g.check.title}`, h("small", {}, g.error ? " (failed)" : ` ${n}`)));
           if (fold) continue;
           if (g.error) { el.append(h("div.view-empty.problems-failed", {}, `The check failed: ${g.error} `, copyButton(`${g.check.title}: the check failed: ${g.error}`))); continue; }
-          if (!n) { el.append(h("div.view-empty", {}, "OK")); continue; }
-          el.append(h("div.tree", {}, ...g.problems.map((p) => h(`div.problem-row.${p.severity}${p.reveal ? ".clickable" : ""}`, {
+          if (!shown.length) { el.append(h("div.view-empty", {}, "OK")); continue; }
+          const ignorable = (p: Problem) => !ignoreBad && !!(p.about || p.location);
+          el.append(h("div.tree", {}, ...shown.map((p) => h(`div.problem-row.${p.severity}${p.reveal ? ".clickable" : ""}${hidden(g, p) ? ".ignored" : ""}`, {
             title: [p.message, p.location].filter(Boolean).join("\n"),
             onclick: p.reveal ? run(() => w3.commands.execute(p.reveal!.command, ...(p.reveal!.args ?? []))) : undefined,
           }, h("span.problem-icon", {}, p.severity === "error" ? "✕" : "⚠"),
@@ -164,7 +213,21 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
               ...(p.fixes?.length ? [h("span.problem-fixes", {}, ...p.fixes.map((f) => h("button.problem-fix", {
                 title: f.title ?? "",
                 onclick: (e: MouseEvent) => { e.stopPropagation(); run(async () => { await f.run(); await service.run(); })(); },
-              }, f.label)))] : []))))));
+              }, f.label)))] : []),
+              hidden(g, p)
+                ? h("span.problem-fixes", {}, h("button.problem-fix.problem-unignore", {
+                  title: "Reports it again",
+                  onclick: (e: MouseEvent) => { e.stopPropagation(); run(() => changeIgnore((f) => withoutIgnored(f, g.check.id, aboutOf(p), g.problems.map(aboutOf))))(); },
+                }, "Un-ignore"))
+                : ignorable(p) ? h("span.problem-fixes", {},
+                  h("button.problem-fix.problem-ignore", {
+                    title: "Stops reporting this (it is kept in the project's .w3proj/problems-ignore.json)",
+                    onclick: (e: MouseEvent) => { e.stopPropagation(); run(() => changeIgnore((f) => withIgnored(f, g.check.id, [aboutOf(p)])))(); },
+                  }, "Ignore"),
+                  n > 1 ? h("button.problem-fix.problem-ignore-all", {
+                    title: `Ignores all ${n} reports of "${g.check.title}" now listed`,
+                    onclick: (e: MouseEvent) => { e.stopPropagation(); run(() => changeIgnore((f) => withIgnored(f, g.check.id, visible(g).filter(ignorable).map(aboutOf))))(); },
+                  }, "Ignore all like this") : null) : null)))));
         }
       },
     }),

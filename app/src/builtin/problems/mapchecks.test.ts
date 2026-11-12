@@ -79,6 +79,7 @@ test("triggers nothing runs are a check of their own", async () => {
   assert.deepEqual(await run(files, "triggerValidate"), []);
   const unused = await run(files, "triggerNoEvents");
   assert.deepEqual(unused.map((p) => [p.severity, p.message, p.location]), [["warning", "has no events, and no trigger or script runs it", "Doomed"]]);
+  assert.equal(unused[0].about, "Doomed", "the Problems ignore names the report by its trigger");
   // Run from the map's custom script: not unused.
   const wct = (code: string) => `//== war3map.wct: version 1, reforged, comment "" ==\n//== header ==\n${code}\n//== trigger 0 (no text): Doomed ==\n`;
   assert.deepEqual(await run({ ...files, "map/war3map.wct.txt": wct("call TriggerExecute(gg_trg_Doomed)") }, "triggerNoEvents"), []);

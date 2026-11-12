@@ -11,10 +11,11 @@
       { "id": "w3.problems.run", "when": "project", "menu": "Tools:1:1", "title": "Check Project for Problems", "category": "Project" },
       { "id": "w3.problems.deleteInvalid", "when": "project", "menu": "Tools:1:9", "title": "Delete Invalid Objects…", "category": "Project" },
       { "id": "w3.problems.show", "menu": "View:2:3", "title": "Show Problems", "category": "Project" },
+      { "id": "w3.problems.toggleIgnored", "when": "project", "title": "Show or Hide Ignored Problems", "category": "Project" },
       { "id": "w3.problems.open", "title": "Open File", "category": "Project", "hidden": true }
     ],
     "mcpTools": [
-      { "name": "list_problems", "description": "Checks the open project and lists what's wrong: script errors, missing files, broken references. A check that couldn't run is listed as an error with the check's name as its location.", "readOnly": true }
+      { "name": "list_problems", "description": "Checks the open project and lists what's wrong: script errors, missing files, broken references. A check that couldn't run is listed as an error with the check's name as its location. Reports the project ignores on purpose (.w3proj/problems-ignore.json) aren't listed, only counted in a last entry; there is nothing to fix in them.", "readOnly": true }
     ]
   }
 }

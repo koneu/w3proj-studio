@@ -1018,6 +1018,7 @@ textarea.newmap-input { resize: vertical; font: inherit; }
 .problem-icon { flex-shrink: 0; width: 12px; }
 .problem-row.error .problem-icon { color: var(--error); }
 .problem-row.warning .problem-icon { color: var(--warning); }
+.problem-row.ignored { opacity: 0.6; }
 
 /* Source Control */
 .scm-branch { display: flex; align-items: center; gap: 4px; padding: 4px 14px 0; flex-wrap: wrap; }

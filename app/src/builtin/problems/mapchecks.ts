@@ -34,14 +34,15 @@ async function mapGlobals(s: RunScope, triggers: string[]): Promise<Set<string>>
 }
 
 /** Problems of Validate Map Triggers; a click shows the trigger, the line and the parameter. */
-function triggerProblems(issues: TriggerIssue[], what: string): Problem[] {
-  const out = issues.slice(0, LIMIT).map((i): Problem => ({
+function triggerProblems(issues: TriggerIssue[], what: string, limit = LIMIT, about = false): Problem[] {
+  const out = issues.slice(0, limit).map((i): Problem => ({
     severity: i.severity,
     message: `${i.where ? `${i.where}: ` : ""}${i.message}${i.trigger.enabled ? "" : " (disabled trigger)"}`,
     location: i.trigger.name,
+    ...(about ? { about: i.trigger.name } : {}),
     reveal: { command: "w3.triggers.reveal", args: [i.trigger.name, { id: i.trigger.id, ...(i.path ? { path: i.path } : {}), ...(i.param ? { param: i.param } : {}) }] },
   }));
-  if (issues.length > LIMIT) out.push({ severity: "warning", message: `… and ${issues.length - LIMIT} more ${what}` });
+  if (issues.length > limit) out.push({ severity: "warning", message: `… and ${issues.length - LIMIT} more ${what}` });
   return out;
 }
 
@@ -91,7 +92,7 @@ export function mapChecks(w3: W3Api, scope: () => RunScope = () => new RunScope(
       async run() {
         // A trigger file that can't be read is the Trigger validation's to report.
         const issues = await scope().triggerIssues().catch(() => null);
-        return triggerProblems((issues ?? []).filter((i) => i.kind === "noEvents"), "triggers nothing runs");
+        return triggerProblems((issues ?? []).filter((i) => i.kind === "noEvents"), "triggers nothing runs", 5000, true);
       },
     },
     {

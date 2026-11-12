@@ -20,8 +20,8 @@ import { mapChecks } from "./mapchecks";
  *  for too before the load fails; twice, as a failed load is tried again. The real game has them all.
  *  127 → 130: Trigger validation reads TriggerData with the editor's strings, for the functions' names,
  *  and the custom script texts, which can run triggers; the triggers themselves are read once for both
- *  trigger checks.) */
-const BUDGET = 130;
+ *  trigger checks; 130 → 131: the run looks whether .w3proj/problems-ignore.json is there.) */
+const BUDGET = 131;
 
 /** The mini map, found from where the tests run (app/ or the repository). */
 function fixture(): string {
