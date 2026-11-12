@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { DecodedImage } from "../../lib/image/index.ts";
 import type { Terrain } from "../../lib/terrain/w3e";
 import { grainAt, groundColors, minimapFrame, renderMinimap, type MinimapInput, type Rgb } from "./minimap";
-import { smallestMipColor } from "./minimapgen";
+import { minimapObjects, modelTextureColor, smallestMipColor } from "./minimapgen";
 import { viewOutline } from "./minimappanel";
 
 /** A made-up 33×25 corner map: two ground tiles in stripes, a lake in the middle, hills. */
@@ -46,8 +46,9 @@ test("minimapFrame: a unit drawn at a world point is at its pixel, and the pixel
 
 test("war3mapMap.blp's picture: what the map's minimap was before the export options came", () => {
   // Taken from renderMinimap before Export Minimap had options; the saved minimap must not change with them. Taken
-  // again when the ground got the World Editor's colours, cliffs and grain (2026-11-11).
-  assert.equal(digest(renderMinimap(base())), "08855e9a893ec8e8");
+  // again when the ground got the World Editor's colours, cliffs and grain (2026-11-11), and when the water did
+  // (2026-11-12: its minimap colour at mmAlpha, twice where deep).
+  assert.equal(digest(renderMinimap(base())), "9625d8fa570b02e8");
 });
 
 test("groundColors: a tile point colours its tile, a point next to a cliff its cliff type, no cliff type its ground", () => {
@@ -92,6 +93,108 @@ test("smallestMipColor: the file's smallest mip level, averaged by alpha, not th
   assert.deepEqual(smallestMipColor(two), [10, 20, 30]);
   const clear = { mipCount: 1, mip: () => level(1, 1, [[10, 20, 30, 0]]) } as unknown as DecodedImage;
   assert.equal(smallestMipColor(clear), null);
+});
+
+test("water: its minimap colour a quarter (mmAlpha) over the ground, twice where too deep to walk", () => {
+  // 9 × 3 points of one ground colour: dry in the west, 30 deep in the middle, 100 deep in the east.
+  const width = 9, height = 3;
+  const corners = Array.from({ length: width * height }, (_, i) => {
+    const x = i % width;
+    return { texture: 0, layer: 2, height: -[0, 30, 100][Math.floor(x / 3)], water: 0, hasWater: x >= 3 };
+  });
+  const t = { width, height, offsetX: 0, offsetY: 0, corners, groundTiles: ["Ldrt"], cliffTiles: [] } as unknown as Terrain;
+  const rgba = renderMinimap({ terrain: t, margins: [0, 0, 0, 0], tileColor: () => [100, 120, 80], waterColor: [0, 0, 192], waterAlpha: 64 / 255,
+    objects: [], size: 16, params: { blurPasses: 0, groundNoise: 0 } });
+  // The middle row of the picture (8 × 2 tiles over 16 pixels: 2 per tile), one pixel inside each part.
+  const at = (x: number) => [...rgba.subarray((8 * 16 + x) * 4, (8 * 16 + x) * 4 + 3)];
+  const a = 64 / 255, once = [100, 120, 80].map((g, k) => g * (1 - a) + [0, 0, 192][k] * a);
+  const twice = once.map((g, k) => g * (1 - a) + [0, 0, 192][k] * a);
+  assert.deepEqual(at(1), [100, 120, 80]);
+  assert.deepEqual(at(7), once.map(Math.round));
+  assert.deepEqual(at(14), twice.map(Math.round));
+});
+
+test("minimapObjects: shown types in their minimap colour or their model's, as big as their pathing texture", async () => {
+  const row = (showInMM: string, useMMColor: string, rgb: number[], pathTex: string) =>
+    ({ showInMM, useMMColor, MMRed: String(rgb[0]), MMGreen: String(rgb[1]), MMBlue: String(rgb[2]), pathTex });
+  const rows = new Map([
+    ["tree", row("1", "1", [32, 90, 32], "PathTextures\\4x4Default.tga")],
+    ["rock", row("1", "0", [0, 0, 0], "PathTextures\\LargeRockSpire.tga")],
+    ["weed", row("0", "1", [9, 9, 9], "PathTextures\\4x4Default.tga")],
+    ["ruin", row("1", "0", [0, 0, 0], "PathTextures\\4x4Default.tga")],
+    ["pole", row("1", "1", [200, 0, 0], "none")],
+    ["wall", row("1", "1", [1, 2, 3], "_")],
+  ]);
+  const asked: string[] = [];
+  const objects = await minimapObjects(
+    ["tree", "rock", "weed", "ruin", "pole", "wall", "X000", "nope"].map((id, i) => ({ id, position: [i * 128, 64, 0] as [number, number, number] })),
+    {
+      rows,
+      // A custom rock with a pathing texture of its own (no extension: a .tga).
+      bases: new Map([["X000", { base: "rock", pathTex: "PathTextures\\Small" }]]),
+      // The ruin's model can't be read: it isn't drawn.
+      modelColor: async (type) => (type === "rock" ? [87, 88, 82] : null),
+      footprint: async (path) => { asked.push(path); return path.includes("Large") ? 3 : path.includes("Small") ? 0.5 : 1; },
+    });
+  assert.deepEqual(objects, [
+    { x: 0, y: 64, rgb: [32, 90, 32], size: 1 },
+    { x: 128, y: 64, rgb: [87, 88, 82], size: 3 },
+    { x: 512, y: 64, rgb: [200, 0, 0], size: 1 },
+    { x: 640, y: 64, rgb: [1, 2, 3], size: 1 },
+    { x: 768, y: 64, rgb: [87, 88, 82], size: 0.5 },
+  ]);
+  assert.deepEqual([...new Set(asked)].sort(), ["PathTextures\\4x4Default.tga", "PathTextures\\LargeRockSpire.tga", "PathTextures\\Small.tga"]);
+  // A bigger pathing texture draws a bigger dot.
+  const dots = (size: number) => {
+    const rgba = renderMinimap({ ...base(), objects: [{ x: 0, y: 0, rgb: [255, 0, 255], size }], params: { blurPasses: 0, groundNoise: 0 } });
+    let n = 0;
+    for (let i = 0; i < rgba.length; i += 4) if (rgba[i] === 255 && rgba[i + 1] === 0) n++;
+    return n;
+  };
+  assert.ok(dots(3) > 6 * dots(1) && dots(1) > 0, `${dots(3)} vs ${dots(1)}`);
+});
+
+/** An MDX model holding nothing but these textures (replaceable id, path). */
+function mdxOfTextures(textures: [number, string][]): Uint8Array {
+  const buf = new Uint8Array(4 + 12 + 8 + 268 * textures.length);
+  const dv = new DataView(buf.buffer);
+  const tag = (p: number, s: string) => { for (let i = 0; i < 4; i++) buf[p + i] = s.charCodeAt(i); };
+  tag(0, "MDLX");
+  tag(4, "VERS"); dv.setUint32(8, 4, true); dv.setUint32(12, 800, true);
+  tag(16, "TEXS"); dv.setUint32(20, 268 * textures.length, true);
+  textures.forEach(([id, path], i) => {
+    const p = 24 + 268 * i;
+    dv.setUint32(p, id, true);
+    for (let k = 0; k < path.length; k++) buf[p + 4 + k] = path.charCodeAt(k);
+  });
+  return buf;
+}
+
+/** A 1 × 1 uncompressed TGA of one colour. */
+function tgaOf([r, g, b]: number[]): Uint8Array {
+  const t = new Uint8Array(18 + 4);
+  t[2] = 2; t[12] = 1; t[14] = 1; t[16] = 32; t[17] = 0x28;
+  t.set([b, g, r, 255], 18);
+  return t;
+}
+
+test("modelTextureColor: the model's first texture, its replaceable one where it asks for the type's, null when unreadable", async () => {
+  const files = new Map<string, Uint8Array>([
+    ["Doodads\\Rock\\Rock0.mdx", mdxOfTextures([[1, ""], [0, "Textures\\RockWall.blp"], [0, "Textures\\Moss.blp"]])],
+    ["Textures\\RockWall.blp", tgaOf([87, 88, 82])],
+    ["Doodads\\Tree\\Tree.mdx", mdxOfTextures([[31, ""]])],
+    ["ReplaceableTextures\\Trees\\Bark.blp", tgaOf([110, 60, 10])],
+    ["Doodads\\Bad\\Bad.mdx", mdxOfTextures([[0, "Textures\\Missing.blp"]])],
+  ]);
+  const read = async (p: string) => files.get(p) ?? assert.fail(`no ${p}`);
+  const skin = (file: string, numVar: number, texId = -1, texFile = "") => ({ file, numVar, texId, texFile });
+  // Team colour (replaceable 1) isn't the type's: the first plain texture counts.
+  assert.deepEqual(await modelTextureColor(skin("Doodads\\Rock\\Rock", 10), read), [87, 88, 82]);
+  // Two variations, but only the file without a number is stored; the type's replaceable texture (doodad skins give no
+  // extension).
+  assert.deepEqual(await modelTextureColor(skin("Doodads\\Tree\\Tree", 2, 31, "ReplaceableTextures\\Trees\\Bark"), read), [110, 60, 10]);
+  assert.equal(await modelTextureColor(skin("Doodads\\Bad\\Bad", 1), read), null);
+  assert.equal(await modelTextureColor(skin("Doodads\\None\\None", 1), read), null);
 });
 
 test("viewOutline: the view's corners on the ground, and far along a ray over the horizon", () => {

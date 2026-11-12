@@ -301,7 +301,7 @@ function skinTextures(skin: Skin): Record<number, string> {
 }
 
 /** Model path of one placed object: variations are numbered files. */
-export function modelPath(skin: Skin, variation: number): string {
+export function modelPath(skin: Pick<Skin, "file" | "numVar">, variation: number): string {
   const base = skin.file.replace(/\.(mdl|mdx)$/i, "");
   return `${base}${skin.numVar > 1 ? variation : ""}.mdx`;
 }
@@ -316,7 +316,7 @@ export function drawsParticles(m: Pick<Model, "particleEmitters2" | "ribbons">):
 /** The model to read when a variation's file isn't stored: the type's file without a number. The classic game
  *  keeps some types of several variations in one file (the City wall endcap YSw5: numVar 2, but only
  *  CityWallEndcap.mdx in War3.w3mod; the numbered files are Reforged's), which the World Editor's SD view shows. */
-export function plainModelPath(skin: Skin): string | undefined {
+export function plainModelPath(skin: Pick<Skin, "file" | "numVar">): string | undefined {
   return skin.numVar > 1 ? `${skin.file.replace(/\.(mdl|mdx)$/i, "")}.mdx` : undefined;
 }
 

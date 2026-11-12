@@ -5,8 +5,9 @@ import type { W3Api } from "../../extensions/api";
 import { encodeBlp1Jpeg } from "../../lib/image/encode";
 import { decodeImage, type DecodedImage } from "../../lib/image/index.ts";
 import { parseIni, parseSlk } from "../../lib/formats/text";
-import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapParams, type Rgb } from "./minimap";
-import type { Placed } from "./objects";
+import { parseMdx } from "../../lib/model/mdx";
+import { MINIMAP_SIZE, renderMinimap, type MinimapInput, type MinimapObject, type MinimapParams, type Rgb } from "./minimap";
+import { loadSkins, modelPath, plainModelPath, type Placed, type Skin } from "./objects";
 import { objectMods, pathOverrides, readMapJson } from "./pathmap";
 import { loadKind } from "../../lib/objects/metadata";
 import { minimapIcons, type MinimapIcon } from "../../lib/terrain/minimapicons";
@@ -33,6 +34,66 @@ export function smallestMipColor(image: DecodedImage): Rgb | null {
   return weight > 0 ? sum.map((s) => s / weight) as Rgb : null;
 }
 
+/** Pathing cells along a tile's side (a pathing texture has one pixel per cell). */
+const CELLS_PER_TILE = 4;
+
+/** `make` once per key: the same promise for every later call. */
+function memo<T>(make: (key: string) => Promise<T>): (key: string) => Promise<T> {
+  const made = new Map<string, Promise<T>>();
+  return (key) => {
+    let p = made.get(key);
+    if (!p) made.set(key, p = make(key));
+    return p;
+  };
+}
+
+/** The minimap colour of a doodad or destructable without its own (useMMColor 0): the smallest mip colour of its
+ *  model's first texture (its replaceable texture, trees' for example, where the model asks for one), null when the
+ *  model or texture can't be read. The first variation's model stands for all. */
+export async function modelTextureColor(skin: Pick<Skin, "file" | "numVar" | "texId" | "texFile">,
+  readFile: (path: string) => Promise<Uint8Array>): Promise<Rgb | null> {
+  let model;
+  try {
+    model = parseMdx(await readFile(modelPath(skin, 0)));
+  } catch {
+    const plain = plainModelPath(skin);
+    if (!plain) return null;
+    try { model = parseMdx(await readFile(plain)); } catch { return null; }
+  }
+  for (const tex of model.textures) {
+    const path = tex.replaceableId === 0 ? tex.path
+      : tex.replaceableId === skin.texId && skin.texFile ? (/\.\w{3}$/.test(skin.texFile) ? skin.texFile : `${skin.texFile}.blp`) : "";
+    if (!path) continue;
+    try { return smallestMipColor(decodeImage(await readFile(path), path)); } catch { return null; }
+  }
+  return null;
+}
+
+/** The doodads and destructables the minimap shows, and how (see minimap.ts): those whose type's row (Doodads.slk,
+ *  DestructableData.slk; a custom type's base's) has showInMM, in their row's minimap colour (useMMColor) or else
+ *  `modelColor`'s of the type (left out when that is null), as big as `footprint` says their pathing texture (the
+ *  map's object data's first) is, in tiles; 1 without one. */
+export async function minimapObjects(doodads: readonly Pick<Placed, "id" | "position">[], tables: {
+  rows: ReadonlyMap<string, Record<string, string>>;
+  bases: ReadonlyMap<string, { base: string; pathTex?: string }>;
+  modelColor: (type: string) => Promise<Rgb | null>;
+  footprint: (pathTex: string) => Promise<number>;
+}): Promise<MinimapObject[]> {
+  const { rows, bases } = tables;
+  const objects: MinimapObject[] = [];
+  for (const d of doodads) {
+    const type = rows.has(d.id) ? d.id : bases.get(d.id)?.base ?? "";
+    const r = rows.get(type);
+    if (r?.showInMM !== "1") continue;
+    const rgb = r.useMMColor === "1" ? [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] as Rgb : await tables.modelColor(type);
+    if (!rgb) continue;
+    const pathTex = bases.get(d.id)?.pathTex ?? r.pathTex;
+    const size = pathTex && !/^(_|none)$/i.test(pathTex.trim()) ? await tables.footprint(/\.\w{3}$/i.test(pathTex) ? pathTex : `${pathTex}.tga`) : 1;
+    objects.push({ x: d.position[0], y: d.position[1], rgb, size });
+  }
+  return objects;
+}
+
 /** The graphics mode set (game.graphicsMode), which the game's files are read in. */
 export const graphicsMode = (w3: W3Api) => w3.settings.get<string>("game.graphicsMode") ?? "hd";
 
@@ -42,11 +103,6 @@ export function minimapSettings(w3: W3Api): Partial<MinimapParams> {
   return {
     groundBrightness: cfg<number>("groundBrightness"),
     groundNoise: cfg<number>("groundNoise"),
-    waterShallowColor: cfg<Rgb>("waterShallowColor"),
-    waterDeepColor: cfg<Rgb>("waterDeepColor"),
-    waterOpacityShallow: cfg<number>("waterOpacityShallow"),
-    waterOpacityDeep: cfg<number>("waterOpacityDeep"),
-    waterFullDepth: cfg<number>("waterFullDepth"),
     objectRadius: cfg<number>("objectRadius"),
     blurPasses: cfg<number>("blurPasses"),
   };
@@ -90,21 +146,29 @@ export async function minimapBase(w3: W3Api, terrain: Terrain, doodads: Placed[]
   const water = parseSlk(await w3.game.readText("TerrainArt\\Water.slk"));
   const wrow = water.find((r) => r.waterID === `${terrain.tileset}Sha`) ?? water.find((r) => r.waterID === "LSha");
   const waterColor: Rgb = wrow ? [Number(wrow.mmRed), Number(wrow.mmGreen), Number(wrow.mmBlue)] : [0, 0, 192];
+  const mmAlpha = Number(wrow?.mmAlpha);
+  const waterAlpha = wrow?.mmAlpha && Number.isFinite(mmAlpha) ? Math.min(255, Math.max(0, mmAlpha)) / 255 : undefined;
 
-  // Doodads and destructables with their own minimap colour.
+  // Doodads and destructables shown on the minimap (see minimap.ts).
   const rows = new Map([
     ...parseSlk(await w3.game.readText("Doodads\\Doodads.slk")).map((r) => [r.doodID, r] as const),
     ...parseSlk(await w3.game.readText("Units\\DestructableData.slk")).map((r) => [r.DestructableID, r] as const),
   ]);
   const bases = new Map([...await pathOverrides(w3, "war3map.w3d", "dptx"), ...await pathOverrides(w3, "war3map.w3b", "bptx")]);
-  const objects: { x: number; y: number; rgb: Rgb }[] = [];
-  for (const d of doodads) {
-    const r = rows.get(d.id) ?? rows.get(bases.get(d.id)?.base ?? "");
-    if (r?.showInMM === "1" && r.useMMColor === "1") objects.push({ x: d.position[0], y: d.position[1], rgb: [Number(r.MMRed), Number(r.MMGreen), Number(r.MMBlue)] });
-  }
+  let skins: Promise<Map<string, Skin>> | null = null;
+  const modelColor = memo((type: string) => (async () => {
+    skins ??= loadSkins(w3);
+    const skin = (await skins).get(type);
+    return skin ? modelTextureColor(skin, readFile) : null;
+  })().catch(() => null));
+  const footprint = memo((path: string) => (async () => {
+    const image = decodeImage(await readFile(path), path).mip(0);
+    return Math.sqrt(image.width * image.height) / CELLS_PER_TILE;
+  })().catch(() => 1));
+  const objects = await minimapObjects(doodads, { rows, bases, modelColor, footprint });
 
   return {
-    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, objects, blightColor,
+    terrain, margins: [m[0], m[1], m[2], m[3]], waterColor, waterAlpha, objects, blightColor,
     tileColor: (id) => colors.get(id) ?? [128, 128, 128],
     cliffColor: (id) => cliffColors.get(id) ?? null,
   };

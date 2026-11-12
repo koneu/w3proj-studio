@@ -8,8 +8,9 @@ import { decodeImage } from "../../lib/image/index.ts";
 import { NO_BUILD, NO_WALK, NO_WATER } from "../../lib/terrain/pathing";
 import { parseW3e, type Terrain } from "../../lib/terrain/w3e";
 import { w3eFromText } from "../../lib/terrain/w3etext";
-import type { MinimapInput, Rgb } from "./minimap";
+import { renderMinimap, type MinimapInput, type Rgb } from "./minimap";
 import { DEFAULT_EXPORT, exportMinimap, exportPicture, pathingOverlay, type ExportOptions, type ExportSource } from "./minimapexport";
+import { minimapObjects } from "./minimapgen";
 import type { Placed } from "./objects";
 
 /** 17×17 corners, all one tile, no water; the playable area is the inner 8×8 tiles (margins 4). */
@@ -271,4 +272,109 @@ test("cliff.w3m against the World Editor's Export Minimap: colours, the lighter 
   const ourGrain = grainOf(ours, 256, inOurs(grass));
   assert.ok(ourGrain > 0.045 && ourGrain < 0.07, `our grain ${ourGrain}`);
   assert.ok(grainOf(await cliffExport({ groundNoise: 0 }), 256, inOurs(grass)) < 0.01);
+});
+
+// HillsbradCreek (smoketest_maps): water, cliffs, and the Lordaeron and Ruins rocks, which have no minimap colour of
+// their own. The World Editor's SD save writes the map's own war3mapMap.blp again (we-drive 2026-11-11, mean
+// difference 0.08), so that picture is the editor's. hillsbrad-crop.tga: its part at 0, 192 of 64 × 64 pixels (the
+// south-west corner: sea, shore, rocky cliffs); hillsbrad.w3e.txt: the terrain there, corners 13–51 × 13–51 of the
+// map (its tiles and 3 more around); hillsbrad-doodads.json: the doodads placed on it (id, x, y). The colours are
+// the game's (2.0, SD files) as minimapBase reads them: ground and cliff textures' smallest mips, the models'
+// textures' (LordsRockwall, Ruins_Rock) for the types without a minimap colour; the rows are Doodads.slk's and
+// DestructableData.slk's showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex (LPrs, the most placed, isn't shown);
+// Water.slk's Lordaeron water is 0, 0, 192 at mmAlpha 64.
+const HB_TILES: Record<string, Rgb> = {
+  Bdrt: [85, 55, 36], Ldrt: [145, 104, 60], Ldro: [140, 100, 57], Ldrg: [120, 106, 44], Vgrs: [69, 81, 30], Fdrg: [110, 85, 36],
+  Bdrg: [77, 47, 19], Vcbp: [74, 68, 41], Lrok: [135, 114, 90], Lgrs: [44, 108, 27], Lgrd: [27, 89, 19], cFc1: [107, 74, 24],
+  Vrck: [99, 104, 71], Qrck: [104, 89, 69], Fgrd: [93, 65, 24],
+};
+const HB_CLIFFS: Record<string, Rgb> = { CLdi: [140, 104, 71], CLgr: [96, 124, 66] };
+const HB_ROWS: Record<string, string> = {
+  LPrs: "0,0,0,0,0,none", LTlt: "1,1,32,90,32,PathTextures\\4x4Default.tga", LRrk: "1,0,0,0,0,PathTextures\\4x4Default.tga",
+  ZRrk: "1,0,0,0,0,PathTextures\\4x4Default.tga", ZRrs: "1,0,0,0,0,PathTextures\\LargeRockSpire.tga", ZRsp: "1,0,0,0,0,PathTextures\\4x4Default.tga",
+};
+const HB_MODELS: Record<string, Rgb> = { LRrk: [87, 88, 82], ZRrk: [71, 96, 54], ZRrs: [71, 96, 54], ZRsp: [71, 96, 54] };
+/** The pathing textures' sides in tiles (4 cells each; LargeRockSpire is 12 × 12). */
+const HB_PATHS: Record<string, number> = { "PathTextures\\4x4Default.tga": 1, "PathTextures\\LargeRockSpire.tga": 3 };
+/** The window's picture: 2 pixels per tile as on the map's 256 pixel minimap (128 playable tiles); the crop starts 3
+ *  tiles in. */
+const HB = { size: 76, at: 6, crop: 64 };
+
+/** The window drawn as a save draws war3mapMap.blp (minimapBase's objects, renderMinimap); `models`: the colours of
+ *  the types without a minimap colour of their own. */
+async function hillsbrad(models: Record<string, Rgb> = HB_MODELS) {
+  const terrain = parseW3e(w3eFromText(new TextDecoder().decode(fixture("hillsbrad.w3e.txt"))));
+  const placed = (JSON.parse(new TextDecoder().decode(fixture("hillsbrad-doodads.json"))) as [string, number, number][])
+    .map(([id, x, y]) => ({ id, position: [x, y, 0] as [number, number, number] }));
+  const rows = new Map(Object.entries(HB_ROWS).map(([id, v]) => {
+    const [showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex] = v.split(",");
+    return [id, { showInMM, useMMColor, MMRed, MMGreen, MMBlue, pathTex }];
+  }));
+  const objects = await minimapObjects(placed, {
+    rows, bases: new Map(),
+    modelColor: async (id) => models[id] ?? null,
+    footprint: async (p) => HB_PATHS[p] ?? assert.fail(`pathing texture ${p}`),
+  });
+  const rgba = renderMinimap({
+    terrain, margins: [0, 0, 0, 0], wholeMap: true, size: HB.size, objects,
+    tileColor: (id) => HB_TILES[id] ?? [255, 0, 255], cliffColor: (id) => HB_CLIFFS[id] ?? [255, 0, 255],
+    waterColor: [0, 0, 192], waterAlpha: 64 / 255,
+  });
+  return { terrain, rgba };
+}
+
+test("HillsbradCreek against its own war3mapMap.blp: water, the rocks without a minimap colour, cliffs", async (t) => {
+  const editor = decodeImage(fixture("hillsbrad-crop.tga"), "hillsbrad-crop.tga").mip(0);
+  assert.deepEqual([editor.width, editor.height], [HB.crop, HB.crop]);
+  const { terrain, rgba } = await hillsbrad();
+  const theirs = (x: number, y: number, k: number) => editor.rgba[(y * HB.crop + x) * 4 + k];
+  /** Per channel, the mean of our picture and the editor's over the pixels `pick` takes; the mean absolute difference
+   *  of the pixels and of 4 × 4 squares' means (the grain is random in both: the pixels can't agree closer than it). */
+  const compareWhere = (pick: (x: number, y: number) => boolean, picture = rgba) => {
+    const ours = (x: number, y: number, k: number) => picture[((HB.at + y) * HB.size + HB.at + x) * 4 + k];
+    const mean = [[0, 0, 0], [0, 0, 0]];
+    let n = 0, mad = 0, blockMad = 0, blocks = 0;
+    for (let y = 0; y < HB.crop; y++) for (let x = 0; x < HB.crop; x++) {
+      if (!pick(x, y)) continue;
+      n++;
+      for (let k = 0; k < 3; k++) { mean[0][k] += ours(x, y, k); mean[1][k] += theirs(x, y, k); mad += Math.abs(ours(x, y, k) - theirs(x, y, k)); }
+    }
+    for (let by = 0; by < HB.crop; by += 4) for (let bx = 0; bx < HB.crop; bx += 4) {
+      if (!pick(bx, by)) continue;
+      for (let k = 0; k < 3; k++) {
+        let d = 0;
+        for (let y = by; y < by + 4; y++) for (let x = bx; x < bx + 4; x++) d += ours(x, y, k) - theirs(x, y, k);
+        blockMad += Math.abs(d) / 16;
+      }
+      blocks++;
+    }
+    const f = (v: number) => v.toFixed(1);
+    return { ours: mean[0].map((s) => s / n), editor: mean[1].map((s) => s / n), mad: mad / (n * 3), blockMad: blockMad / (blocks * 3),
+      text: `ours ${mean[0].map((s) => f(s / n))}, the editor's ${mean[1].map((s) => f(s / n))}, pixels ${(mad / (n * 3)).toFixed(2)} apart, 4 × 4 squares ${(blockMad / (blocks * 3)).toFixed(2)} (${n} px)` };
+  };
+  // The tile point that colours a pixel of the crop (its tile's south-west corner).
+  const point = (x: number, y: number) => {
+    const tx = Math.floor((HB.at + x + 0.5) / 2), ty = Math.floor((HB.size - (HB.at + y + 0.5)) / 2);
+    return terrain.corners[ty * terrain.width + tx];
+  };
+  const wet = (x: number, y: number) => { const c = point(x, y); return c.hasWater && c.water - c.height > 0; };
+  /** Whether a pixel's tile point is next to a cliff (the layers around it differ), on land. */
+  const cliff = (x: number, y: number) => {
+    const tx = Math.floor((HB.at + x + 0.5) / 2), ty = Math.floor((HB.size - (HB.at + y + 0.5)) / 2), c = point(x, y);
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (terrain.corners[(ty + j) * terrain.width + tx + i].layer !== c.layer) return !wet(x, y);
+    return false;
+  };
+  const whole = compareWhere(() => true), water = compareWhere(wet), cliffs = compareWhere(cliff);
+  t.diagnostic(`whole: ${whole.text}`);
+  t.diagnostic(`water: ${water.text}`);
+  t.diagnostic(`cliffs: ${cliffs.text}`);
+  // Water: the water colour a quarter over the ground, twice where deep (Studio's older fit was bluer: B +6).
+  for (let k = 0; k < 3; k++) assert.ok(Math.abs(water.ours[k] - water.editor[k]) < 3, `water, channel ${k}: ${water.text}`);
+  // Cliffs covered with rocks, in their models' grey and green.
+  for (let k = 0; k < 3; k++) assert.ok(Math.abs(cliffs.ours[k] - cliffs.editor[k]) < 3, `cliffs, channel ${k}: ${cliffs.text}`);
+  assert.ok(whole.blockMad < 5, whole.text);
+  // Control: the rocks left out (as before), the cliffs show their own colour, far lighter than the editor's.
+  const bare = compareWhere(cliff, (await hillsbrad({})).rgba);
+  t.diagnostic(`cliffs without the rocks: ${bare.text}`);
+  assert.ok(bare.ours[0] - bare.editor[0] > 6 && bare.ours[1] - bare.editor[1] > 6, `cliffs without the rocks: ${bare.text}`);
 });
