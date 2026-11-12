@@ -14,6 +14,8 @@ import { addKeyContext, UNDO_CONTEXT, undoStepOf } from "../../lib/keybindings";
 import { archivePath, CAMPAIGN_IMPORT_FOLDER, CUSTOM_PATH_FLAGS, entryCandidates, IMPORT_FOLDER, importPath, importTreePath, isJunkFile, kindOf, NEW_IMPORT_FLAGS, projectPath, samePath, unlistedFiles, type ImportEntry } from "../../lib/imports";
 import type { FileInfo } from "../../extensions/api";
 import { decodeImage } from "../../lib/image/index.ts";
+import { ModelPreview } from "../../lib/model/preview";
+import { previewKey } from "./previewkind";
 import { replaceFile, stepReplace, UNDO_LIMIT, type ReplaceFs, type ReplaceStep } from "./replace";
 
 /** The import list: the map's, or in a campaign project the campaign's. */
@@ -23,8 +25,6 @@ const lists = (campaign: boolean) => {
 };
 /** Files above this size aren't opened in a viewer (they're read whole into the window). */
 const MAX_OPEN = 256 * 1024 * 1024;
-/** Images above this size aren't previewed (they'd be read and decoded on every selection). */
-const MAX_PREVIEW = 32 * 1024 * 1024;
 /** Longest side the preview needs: the first mip level at least this large is drawn. */
 const PREVIEW_SIDE = 320;
 /** A folder with more files than this is confirmed first (it's easily the wrong folder). */
@@ -76,7 +76,7 @@ export function activate(w3: W3Api, ctx: ExtensionContext) {
         const stop = w3.workspace.onDidChange(() => view.render());
         if (!doc.readOnly) openView = view;
         // Replace File is the one change here with a way back (the others act on the files at once, as there).
-        return { undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; stop.dispose(); if (openView === view) openView = null; } };
+        return { undo: () => view.step(-1), redo: () => view.step(1), dispose: () => { view.disposed = true; view.dropModelPreview(); stop.dispose(); if (openView === view) openView = null; } };
       },
     }),
   );
@@ -132,6 +132,8 @@ class ImportView {
   private query = "";
   /** The image last previewed (the list redraws often; decoding it each time would be slow). */
   private preview_: { key: string; canvas: HTMLCanvasElement } | null = null;
+  /** The model previewed (one WebGL context at a time: a new one replaces it, none when a non-model is selected). */
+  private modelPreview: { key: string; view: ModelPreview; failed: boolean } | null = null;
   /** Replace File steps, for undo and redo; `at` of them are done. */
   private history: ReplaceStep[] = [];
   private at = 0;
@@ -528,8 +530,30 @@ class ImportView {
   }
 
   /** The image itself, for files that are images and can be decoded here. */
+  dropModelPreview() {
+    this.modelPreview?.view.dispose();
+    this.modelPreview = null;
+  }
   private preview(path: string, file: FileInfo): HTMLElement | null {
-    if (kindOf(path) !== "Image" || file.size > MAX_PREVIEW) return null;
+    const modelKey = kindOf(path) === "Model" ? previewKey(path, file, "model") : null;
+    if (modelKey === null) this.dropModelPreview();
+    if (modelKey !== null) {
+      if (this.modelPreview?.key !== modelKey) {
+        this.dropModelPreview();
+        try {
+          const entry = { key: modelKey, view: null as unknown as ModelPreview, failed: false };
+          // A model that can't be shown says so like an image does (the preview's own message names the file).
+          entry.view = new ModelPreview(this.w3, { onFail: () => { entry.failed = true; entry.view.el.replaceChildren(h("small.muted", {}, "No preview for this file.")); } });
+          this.modelPreview = entry;
+          entry.view.show(path);
+        } catch {
+          this.dropModelPreview();
+          return h("div.imp-preview", {}, h("small.muted", {}, "No preview for this file."));
+        }
+      }
+      return h("div.imp-preview", {}, this.modelPreview!.view.el);
+    }
+    if (kindOf(path) !== "Image" || previewKey(path, file, "image") === null) return null;
     const box = h("div.imp-preview");
     const key = `${file.path}|${file.modified}`;
     if (this.preview_?.key === key) { box.append(this.preview_.canvas); return box; }

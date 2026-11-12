@@ -7432,6 +7432,21 @@ async function importWarnings(page, found) {
       await settled(page);
       return null;
     };
+    // Selecting an imported model shows a rendered preview (one canvas, no message); another selection drops it.
+    await page.evaluate(`w3.commands.execute("w3.imports.open")`);
+    const entryRow = `[...document.querySelectorAll("tr.imp-row")].find((r) => /smokecase/i.test(r.textContent))`;
+    if (!(await soon(() => page.evaluate(`!!${entryRow}`), 20000))) fail("the Import Manager doesn't show the model before its preview step");
+    else {
+      await page.evaluate(`${entryRow}.click()`);
+      const box = `document.querySelector(".imp-detail .imp-preview .obj-preview")`;
+      if (!(await soon(() => page.evaluate(`!!${box}?.querySelector("canvas")`), 10000))) fail("selecting an imported model shows no preview canvas");
+      else if (!(await soon(() => page.evaluate(`${box}.querySelector(".obj-preview-note")?.textContent === ""`), 20000))) {
+        fail(`the model preview says: ${await page.evaluate(`${box}?.textContent`)}`);
+      }
+      await page.evaluate(`${entryRow}.click()`);
+      await page.evaluate(`${entryRow}.click()`);
+      if ((await page.evaluate(`document.querySelectorAll(".imp-detail canvas").length`)) > 1) fail("a second selection of the model left two canvases");
+    }
     let why = await remove("Remove from list");
     if (why) fail(why);
     else {
