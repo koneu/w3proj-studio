@@ -2776,6 +2776,13 @@ async function pathingImport(page, found) {
   } finally {
     await page.evaluate(`w3.window.showWarning = window.__pathWarn`);
   }
+  // Leave the map saved, as found: the undo above made the editor dirty again, and the later checks of a full run
+  // refuse to change a map with unsaved changes.
+  writeFileSync(wpmFile, edited);
+  await page.evaluate(`w3.commands.execute("workbench.redo")`);
+  await settled(page);
+  await k.save();
+  if (await page.evaluate(`w3.editors.isDirty("map/war3map.w3e.txt")`)) fail("the check left the terrain editor with unsaved changes");
 }
 
 /** Map Size and Camera Bounds can be taken back: a resize larger through the MCP tool, one smaller through the Map Size tab,
